@@ -1,0 +1,88 @@
+/* Approved baseline geometry. Themes change appearance, not these section bounds. */
+@media (min-width:801px) {
+  .workspace {
+    height:clamp(940px,calc(100dvh + 40px),1080px);
+    grid-template-rows:auto minmax(0,1fr);
+    align-items:stretch;
+  }
+  .entries-panel {
+    height:100%;
+    min-height:0;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    scrollbar-gutter:stable;
+  }
+  .journal-card { display:flex; flex-direction:column; min-height:0 }
+  .journal-tabs { flex-shrink:0 }
+  #journal-content { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain }
+  .journal-fields { min-height:100%; align-items:stretch }
+  .journal-fields>label { display:flex; flex-direction:column; min-height:0 }
+  .journal-fields textarea { flex:1; min-height:200px; height:auto }
+}
+.entries-title-row { display:flex; align-items:center; justify-content:space-between; gap:10px }
+.entries-heading .entries-title-row { margin-top:0 }
+.entries-title-row #expand-entry {
+  display:grid; place-items:center; width:28px; height:28px;
+  color:var(--accent); border:1px solid var(--line); background:var(--raised);
+  font-size:17px; text-decoration:none;
+}
+.entry-heading,.entry-collapsed { cursor:pointer }
+.entry-heading :is(input,label,.remove) { cursor:auto }
+#entry-dialog {
+  width:min(850px,calc(100vw - 40px)); height:min(850px,calc(100dvh - 40px));
+  max-width:none; max-height:none; margin:auto; padding:0; overflow:hidden;
+  color:var(--fg); background:var(--surface); border:1px solid var(--line);
+  border-radius:var(--panel-radius);
+}
+#entry-dialog[open] { display:flex; flex-direction:column }
+.expanded-entry-header {
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  padding:18px 22px; border-bottom:1px solid var(--line); flex-shrink:0;
+}
+.expanded-entry-header strong { font-size:16px; font-weight:600 }
+.expanded-entry-header span { display:block; color:var(--muted-fg); font-size:10px; margin-top:5px }
+.expanded-entry-toolbar {
+  padding:16px 22px; display:flex; align-items:center; gap:25px;
+  border-bottom:1px solid var(--line); flex-shrink:0;
+}
+.expanded-entry-toolbar label { font-size:10px; color:var(--muted-fg); flex-shrink:0 }
+.expanded-entry-toolbar select {
+  display:block; margin-top:7px; padding:9px 11px; min-width:180px;
+  border:1px solid var(--line); font-size:12px;
+}
+.expanded-entry-toolbar p { font-size:11px; color:var(--muted-fg); margin:0 }
+#expanded-entry-mount { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:18px 6px 12px }
+#expanded-entry-mount .entry-card:not(.selected) { display:none }
+#expanded-entry-mount .entry-card.selected .entry-body { display:block }
+#expanded-entry-mount .entry-heading { padding:12px 15px }
+#expanded-entry-mount .entry-body { padding:20px }
+#expanded-entry-mount .entry-body label { font-size:12px }
+#expanded-entry-mount .entry-body input { font-size:16px; padding:12px }
+#expanded-entry-mount .entry-actual { font-size:11px; gap:10px; margin-top:20px }
+#expanded-entry-mount .entry-select { font-size:13px }
+#expanded-entry-mount .entry-meta { margin-top:18px; padding-top:15px }
+#expanded-entry-mount .level-equivalent { font-size:10px }
+#expanded-entry-mount .entry-share-label input { padding:6px; font-size:14px }
+#expanded-entry-mount .target-row { grid-template-columns:1fr 100px 22px; margin-top:17px }
+#expanded-entry-mount .level-mode button { font-size:11px; padding:7px 12px }
+body:has(#entry-dialog[open]) { overflow:hidden }
+@media (max-width:800px) {
+  .workspace { height:auto; grid-template-rows:auto auto auto }
+  .entries-panel { max-height:1000px; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable }
+  .journal-fields textarea { min-height:180px; height:210px }
+}
+@media (max-width:550px) {
+  .entries-panel { max-height:1000px }
+  .journal-fields textarea { min-height:190px; height:220px }
+  #entry-dialog { width:calc(100vw - 12px); height:calc(100dvh - 12px); border-radius:var(--panel-radius) }
+  .expanded-entry-header { padding:13px; gap:8px }
+  .expanded-entry-header strong { font-size:13px }
+  .expanded-entry-header span { font-size:8px }
+  .expanded-entry-header .button { font-size:10px; padding:9px }
+  .expanded-entry-toolbar { padding:13px; flex-direction:column; align-items:stretch; gap:10px }
+  .expanded-entry-toolbar p { font-size:9px }
+  #expanded-entry-mount { padding:12px 0 }
+  #expanded-entry-mount .entry-body { padding:13px }
+  #expanded-entry-mount .target-row { grid-template-columns:minmax(0,1fr) 72px 14px; gap:7px }
+  #expanded-entry-mount .entry-actual { font-size:9px; gap:8px }
+}

@@ -1,0 +1,147 @@
+/* Skin only. Grid, ordering, spacing and responsive layout remain in style.css. */
+:root {
+  color-scheme: dark;
+  --canvas:#0f1114; --surface:#171a1f; --surface-alt:#1e2229; --raised:#242932; --field:#111419;
+  --fg:#e9edf2; --muted-fg:#abb3c0; --accent:#b9c9e4; --line:#394350;
+  --primary-fill:#c5cfdd; --primary-text:#11161d; --primary-line:#c5cfdd;
+  --positive:#a9d6b6; --negative:#f2b3ac; --warning:#edd49e;
+  --panel-radius:7px; --button-radius:5px; --input-radius:4px;
+  --ink:var(--fg); --muted:var(--muted-fg); --border:var(--line); --green:var(--accent); --paper:var(--surface); --chart:var(--canvas);
+  color:var(--fg); background:var(--canvas);
+}
+body { background:var(--canvas); color:var(--fg) }
+::selection { background:var(--raised); color:var(--fg) }
+html[data-theme] button { filter:none; border-radius:var(--button-radius); transition:none }
+html[data-theme] button:hover:not(:disabled) { filter:none; color:var(--accent) }
+html[data-theme] button:disabled { opacity:1; color:var(--muted-fg); background:var(--surface-alt); border-color:var(--line) }
+html[data-theme] :is(button,a,input,select,textarea,summary):focus-visible { outline:2px solid var(--accent); outline-offset:3px }
+html[data-theme] :is(input,textarea,select) { color:var(--fg); background:var(--field); border-color:var(--line); border-radius:var(--input-radius); box-shadow:none }
+html[data-theme] input::placeholder, html[data-theme] textarea::placeholder { color:var(--muted-fg); opacity:1 }
+html[data-theme] select option { background:var(--surface); color:var(--fg) }
+html[data-theme] .page-heading input { background:transparent; color:var(--fg) }
+html[data-theme] .context-bar select { background:transparent; color:var(--fg) }
+html[data-theme] :is(.topbar,.context-bar>label,.direction-field,.journal-tabs,.entry-meta,.your-size,.summary-intro,.capital-context>div,.assistant-budget,.suggestion-metrics,.position-size-summary) { border-color:var(--line) }
+html[data-theme] .rail { background:var(--surface); border-color:var(--line) }
+html[data-theme] .brand { color:var(--fg) }
+html[data-theme] .rail-rule { background:var(--line) }
+html[data-theme] .rail-current { color:var(--accent); background:var(--raised); border-radius:var(--button-radius) }
+html[data-theme] .avatar { color:var(--fg); background:var(--raised); border-color:var(--line) }
+html[data-theme] .help-button { color:var(--muted-fg); background:transparent; border-color:var(--line); border-radius:50% }
+html[data-theme] :is(.context-bar,.entries-panel,.journal-card,dialog) { background:var(--surface); border-color:var(--line); border-radius:var(--panel-radius) }
+html[data-theme] :is(.sizing-assistant,.position-builder,.leverage-box,.risk-box,.summary) { color:var(--fg); background:var(--surface-alt); border-color:var(--line); border-radius:var(--panel-radius) }
+html[data-theme] .entry-card { background:var(--surface); border-color:var(--line); border-left-color:var(--entry-color); border-radius:var(--panel-radius); box-shadow:none }
+html[data-theme] .entry-card.selected { border-color:var(--line); border-left-color:var(--entry-color); box-shadow:inset 0 0 0 1px var(--line) }
+html[data-theme] .entry-heading { background:var(--surface-alt); border-color:var(--line) }
+html[data-theme] .entry-card.selected .entry-heading { background:var(--raised) }
+html[data-theme] .entry-select { color:var(--fg) }
+html[data-theme] .entry-select i { background:var(--entry-color); border-color:var(--entry-color) }
+html[data-theme] .entry-rr { color:var(--fg); background:var(--raised); border-radius:var(--input-radius) }
+html[data-theme] :is(.sample,.prototype-label b,.panel-heading h2 span,.entries-heading h2 span,.journal-tabs button>span,.capital-context>div>span>small) { color:var(--muted-fg); background:var(--raised); border-color:var(--line); border-radius:var(--input-radius) }
+html[data-theme] .button { color:var(--fg); background:var(--surface); border-color:var(--line); box-shadow:none }
+html[data-theme] .button:hover:not(:disabled) { color:var(--fg); border-color:var(--accent); background:var(--raised) }
+html[data-theme] .button.primary { color:var(--primary-text); background:var(--primary-fill); border-color:var(--primary-line) }
+html[data-theme] .button.primary:hover:not(:disabled) { color:var(--primary-text); background:var(--primary-fill); border-color:var(--primary-line); box-shadow:inset 0 0 0 1px var(--primary-line) }
+html[data-theme] .button.primary:disabled { background:var(--raised); color:var(--muted-fg); border-color:var(--line); box-shadow:none }
+html[data-theme] :is(.text-button,.add-target,.add-entry,.available-budget button,.entries-heading>div>button,.evidence-item button) { color:var(--accent) }
+html[data-theme] .add-entry { background:var(--surface-alt); border-color:var(--line); border-radius:var(--button-radius) }
+html[data-theme] :is(.risk-presets button,.leverage-presets button,.level-mode button,.segmented button) { color:var(--muted-fg); background:var(--field); border-color:var(--line); border-radius:var(--button-radius) }
+html[data-theme] :is(.risk-presets button,.leverage-presets button,.level-mode button,.segmented button)[aria-pressed=true] { color:var(--accent); background:var(--raised); border-color:var(--accent) }
+html[data-theme] .segmented #short[aria-pressed=true] { color:var(--negative); background:var(--raised); border-color:var(--negative) }
+html[data-theme] .journal-tabs button { color:var(--muted-fg); background:transparent; border-radius:0; border-bottom-color:transparent }
+html[data-theme] .journal-tabs button[aria-selected=true] { color:var(--accent); background:transparent; border-bottom-color:var(--accent) }
+html[data-theme][data-tabs=filled] .journal-tabs button[aria-selected=true] { background:var(--raised); border-radius:var(--button-radius) var(--button-radius) 0 0 }
+html[data-theme][data-tabs=outline] .journal-tabs button[aria-selected=true] { background:var(--surface-alt); box-shadow:inset 0 0 0 1px var(--line); border-radius:var(--button-radius) var(--button-radius) 0 0 }
+html[data-theme][data-controls=recessed] :is(.entry-body input,.whole-size-input input,.journal-fields textarea,.review-fields textarea) { box-shadow:inset 0 1px 3px #0005 }
+html[data-theme][data-controls=soft] :is(.entry-body input,.whole-size-input input,.journal-fields textarea,.review-fields textarea) { background:var(--raised); border-color:transparent }
+html[data-theme][data-controls=underline] :is(.entry-body input,.whole-size-input input,.journal-fields textarea,.review-fields textarea) { background:var(--field); border-color:transparent; border-bottom-color:var(--accent); border-radius:var(--input-radius) var(--input-radius) 0 0 }
+html[data-theme][data-controls=framed] :is(.entry-body input,.whole-size-input input,.journal-fields textarea,.review-fields textarea) { border-color:var(--line); box-shadow:inset 0 0 0 1px var(--surface-alt) }
+html[data-theme][data-buttons=paper] .button.primary { box-shadow:inset 0 1px 0 #fff4,0 1px 0 #0008 }
+html[data-theme][data-buttons=outline] .button:not(.primary) { background:transparent }
+html[data-theme][data-buttons=tonal] .button:not(.primary) { background:var(--raised) }
+
+/* Every secondary label remains readable; semantic colors are applied below. */
+html[data-theme] :is(
+  .rail-bottom>span,.wordmark>span,.prototype-label,.eyebrow,.page-heading p,.heading-actions>span,
+  .context-bar>label,.direction-field,.workspace-toolbar>div>span,.layout-locked,
+  .capital-context>div>span,.capital-context>div>small,.panel-heading p,
+  .sizing-assistant summary small,.assistant-controls>label,.assistant-budget>span,.assistant-budget>small,
+  .assistant-bottom p,.suggestion-metrics span,.suggested-entries,.risk-heading>span,.risk-presets>span,
+  .entry-body label,.entry-share-label,.entry-collapsed,.entry-collapsed>span:nth-child(3),.entry-collapsed>small,
+  .entry-meta label,.entry-meta>span,.entry-meta>small,.entry-actual,.entry-actual>span:first-child,
+  .level-mode,.level-equivalent,.percent-explainer,.percent>span,.remove,.add-entry>span,.sizing-note,
+  .journal-fields label>span,.journal-note,.strategy-copy,.strategy-top label,.strategy-rules,
+  .evidence-empty,.evidence-empty p,.evidence-item>div,.evidence-item>label,
+  .summary>div>span,.summary>div>small,.summary small,.position-builder>p,
+  .available-budget label,.available-budget small,.whole-size-input label,
+  .leverage-controls>label,.leverage-controls>label>small,.leverage-controls>div>span,
+  .entries-heading>div,.entries-heading p,.position-size-summary span,
+  .leverage-box>div:first-child>span,.leverage-box p,.leverage-input>span,.leverage-input small,
+  .leverage-presets>span,footer,.footer-signoff,dialog p,.expanded-chart-header span
+) { color:var(--muted-fg) }
+html[data-theme] .leverage-presets>span { color:var(--muted-fg)!important }
+html[data-theme] :is(.journal-fields label,.review-fields label,.evidence-empty strong,.position-size-summary strong,.summary strong) { color:var(--fg) }
+html[data-theme] :is(.assistant-icon,.details-chevron,#suggestion-headline,.entry-body .add-target) { color:var(--accent) }
+html[data-theme] :is(.negative,.entry-body .negative,.entry-body .stop-label,.assistant-errors,.entries-heading .invalid) { color:var(--negative) }
+html[data-theme] :is(.positive,.summary .positive,.entry-body .positive,.target-row>label:first-child) { color:var(--positive) }
+html[data-theme] :is(.errors,.position-warnings) { color:var(--warning); background:var(--surface-alt); border-color:var(--line); border-left-color:var(--warning); border-radius:var(--input-radius) }
+html[data-theme] .errors { color:var(--negative); border-left-color:var(--negative) }
+html[data-theme] :is(.section-dot,.workspace-toolbar>div>i,.prototype-label i) { background:var(--accent) }
+html[data-theme] .leverage-controls input[type=range] { accent-color:var(--accent); background:transparent }
+html[data-theme] .leverage-controls input[type=number] { color:var(--fg); background:var(--field); border-color:var(--line) }
+html[data-theme] .leverage-controls input[aria-invalid=true] { border-color:var(--negative) }
+html[data-theme] .percent input { background:var(--field) }
+html[data-theme] .evidence-item { border-color:var(--line); border-radius:var(--panel-radius) }
+html[data-theme] .evidence-item img { background:var(--canvas) }
+html[data-theme] #toast { color:var(--fg); background:var(--raised); border:1px solid var(--line); border-radius:var(--button-radius); box-shadow:0 8px 28px #0006 }
+
+/* Chart chrome uses the same surface tokens. SVG colors are resolved in app.mjs. */
+html[data-theme] .chart-card { background:var(--canvas); color:var(--fg); border-radius:var(--panel-radius); box-shadow:inset 0 0 0 1px var(--line) }
+html[data-theme] :is(.chart-toolbar,.chart-view-bar,.chart-footer,.chart-entry-legend) { border-color:var(--line) }
+html[data-theme] .coin { color:var(--accent); background:var(--raised); border-color:var(--line) }
+html[data-theme] :is(.chart-instrument div>span,.chart-quote>span,.chart-footer,.chart-footer>span:last-child,.chart-toolbar button,.ema-key small,#average-label) { color:var(--muted-fg) }
+html[data-theme] .ema-key { color:var(--warning) }
+html[data-theme] .ema-key i { background:var(--warning) }
+html[data-theme] .divider { background:var(--line) }
+html[data-theme] .chart-toolbar button[aria-pressed=true] { background:var(--raised); color:var(--accent) }
+html[data-theme] .chart-entry-legend button { color:var(--muted-fg); border-color:transparent }
+html[data-theme] .chart-entry-legend button[aria-pressed=true] { background:var(--raised); color:var(--fg); border-color:var(--line) }
+html[data-theme] .chart-entry-legend button>span { color:var(--muted-fg) }
+html[data-theme] #chart-dialog { color:var(--fg); background:var(--canvas); border-color:var(--line); border-radius:var(--panel-radius) }
+html[data-theme] .expanded-chart-header { border-color:var(--line) }
+html[data-theme] .expanded-chart-header .button { color:var(--fg); background:var(--raised); border-color:var(--line) }
+html[data-theme] dialog::backdrop { background:#000b }
+.chart-level { cursor:pointer }
+.chart-level:focus-visible { outline:none }
+.chart-level:focus-visible .level-label { stroke:#fff; stroke-width:2 }
+
+/* Requested controls, placed within their existing rows. */
+.design-picker { display:flex; align-items:center; gap:9px; font-size:8px; letter-spacing:1.1px; color:var(--muted-fg) }
+.design-picker select { font-size:11px; padding:7px 8px; max-width:170px; letter-spacing:0; border:1px solid var(--line) }
+.layout-locked { font-size:9px; letter-spacing:0; font-weight:400 }
+.chart-view-picker { display:flex; align-items:center; gap:9px; font-size:9px; color:var(--muted-fg) }
+.chart-view-picker select { padding:6px 9px; font-size:10px; border:1px solid var(--line); max-width:235px }
+.budget-value-row { position:relative }
+html[data-theme] .budget-value-row input { padding-right:43px; box-shadow:none }
+html[data-theme] .budget-value-row input[readonly] { background:var(--surface); border-color:var(--line); cursor:default }
+.budget-value-row #edit-budget { position:absolute; right:5px; top:12px; display:grid; place-items:center; width:28px; height:28px; color:var(--accent); background:var(--raised); border:1px solid var(--line); text-decoration:none }
+.budget-value-row #edit-budget:hover { border-color:var(--accent) }
+.available-budget #add-optional-budget { display:block; font-size:10px; margin:7px 0 0; text-decoration:none }
+[hidden] { display:none!important }
+.available-budget>div:first-child { min-height:17px }
+html[data-theme] #summary-leverage { color:var(--accent) }
+@media(max-width:1050px) {
+  html[data-theme] .topbar-right>a.text-button { display:inline }
+  .topbar-right { gap:13px }
+  .design-picker { gap:6px }
+  .design-picker select { max-width:143px }
+}
+@media(max-width:550px) {
+  html[data-theme] .wordmark>span { display:none }
+  .topbar-right { gap:9px }
+  .design-picker { font-size:0; gap:0 }
+  .design-picker select { max-width:133px; font-size:10px; padding:6px }
+  html[data-theme] .topbar-right>a.text-button { font-size:8px; max-width:64px; line-height:1.5 }
+  .chart-view-picker { font-size:8px; gap:6px }
+  .chart-view-picker select { font-size:10px; max-width:215px }
+  .layout-locked { font-size:8px }
+}

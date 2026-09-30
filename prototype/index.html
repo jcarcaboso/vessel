@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en" data-theme="graphite">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f6f2">
+  <title>Vessel · Play workspace</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a5145'/%3E%3Cpath d='m8 8 8 17 8-17M12 8l4 9 4-9' fill='none' stroke='%23edf2dc' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="themes.css">
+  <link rel="stylesheet" href="baseline.css">
+</head>
+<body>
+  <aside class="rail" aria-label="Vessel">
+    <a href="#main" class="brand" aria-label="Vessel workspace">V<span>∨</span></a>
+    <div class="rail-rule"></div>
+    <a href="#main" class="rail-current" aria-label="Play workspace" title="Play workspace">▤</a>
+    <div class="rail-bottom"><span>THE TRADING JOURNAL</span><button id="help" class="help-button" aria-label="About this prototype">?</button><div class="avatar">V</div></div>
+  </aside>
+  <div class="app">
+    <header class="topbar">
+      <div class="wordmark">vessel<span>/ &nbsp; Play workspace</span></div>
+      <div class="topbar-right"><label class="design-picker">DESIGN <select id="design-variant" aria-label="Design variant"></select></label><a href="designs.html" class="text-button" target="_blank" rel="noopener">Compare 10 designs ↗</a><button class="text-button" id="reset">Reset sample ↺</button></div>
+    </header>
+    <main id="main">
+      <section class="page-heading">
+        <div class="page-heading-copy"><div class="eyebrow">A LITTLE INTENTION BEFORE THE TRADE</div><input id="title" aria-label="Play title" maxlength="100"><p>A place for the setup, the decisions, and what you learn.</p></div>
+        <div class="heading-actions"><span id="save-state">Unsaved sample</span><button class="button" id="save">Save draft</button><button class="button primary" id="plan">Mark planned <span>↗</span></button></div>
+      </section>
+
+      <section class="context-bar" aria-label="Play context">
+        <label>PORTFOLIO<select id="portfolio"><option value="swing">Swing trading</option><option value="intraday">Intraday</option><option value="manual">Manual journal</option></select></label>
+        <label>ACCOUNT <span class="sample">SAMPLE</span><select id="account"></select></label>
+        <label>INSTRUMENT<select id="instrument"><option value="BTC">BTC / USD</option><option value="ETH">ETH / USD</option><option value="SOL">SOL / USD</option></select></label>
+        <div class="direction-field"><span class="field-label">DIRECTION</span><div class="segmented"><button id="long" aria-pressed="true">↗ Long</button><button id="short" aria-pressed="false">↘ Short</button></div></div>
+        <label class="status-field">STATUS<select id="status"><option>Draft</option><option>Planned</option><option>Active</option><option>Closed</option><option>Cancelled</option></select></label>
+      </section>
+
+      <section class="capital-context" aria-label="Account and portfolio context">
+        <div><span>Portfolio value <small>SAMPLE</small></span><strong id="portfolio-value"></strong><small id="portfolio-detail"></small></div>
+        <div><span>Account value <small>SAMPLE</small></span><strong id="account-value"></strong><small id="account-detail">Budget override is optional</small></div>
+        <div><span>Margin / portfolio</span><strong id="portfolio-margin-share"></strong><small id="account-margin-share"></small></div>
+        <div><span>Exposure / portfolio</span><strong id="portfolio-exposure-share"></strong><small id="account-exposure-share"></small></div>
+      </section>
+      <details class="sizing-assistant" id="sizing-assistant">
+        <summary><span class="assistant-icon">↗</span><span><strong>Sizing assistant</strong><small>Define entry prices, shares and exits first. Apply a suggestion only when you choose.</small></span><span id="suggestion-headline">Risk-based size</span><span class="details-chevron">⌄</span></summary>
+        <div class="assistant-content">
+          <div class="assistant-controls">
+            <label>Target loss at stops · % of risk reference<input id="risk" type="number" min="0.01" max="100" step="0.1" aria-label="Target risk percentage"></label>
+            <div class="assistant-budget"><span>Available position budget</span><strong id="assistant-budget-value"></strong><small>Uses your editable account budget</small></div>
+            <div class="assistant-budget"><span id="equity-label"></span><strong id="budget"></strong><small>Target risk, not committed margin</small></div>
+          </div>
+          <div class="risk-presets"><button data-risk="0.5">0.5% risk</button><button data-risk="1">1% risk</button><button data-risk="2">2% risk</button></div>
+          <div id="suggestion-output" aria-live="polite"></div>
+          <div class="assistant-bottom"><p>Leverage is the lowest whole multiple that fits the suggested position into your margin budget. This is a mechanical estimate, not a safe-leverage recommendation. Venue limits and liquidation are not modeled.</p><button class="button primary" id="apply-suggestion">Use suggested position ↘</button></div>
+          <p id="assistant-errors" class="assistant-errors" role="status"></p>
+        </div>
+      </details>
+      <div class="workspace-toolbar"><div><i></i> THE PLAY <span>Your idea, before hindsight.</span></div><span class="layout-locked">Side-by-side · Layout locked</span></div>
+      <div id="workspace" class="workspace">
+        <section class="chart-card" id="chart-card" aria-label="Sample chart workspace">
+          <div class="chart-heading"><div class="chart-instrument"><span class="coin" id="coin">₿</span><div><strong id="chart-symbol">BTC / USD</strong><span id="chart-venue">Hyperliquid · Sample candles</span></div></div><div class="chart-quote"><strong id="chart-quote">64,480.00</strong><span>SYNTHETIC DATA · NOT LIVE</span></div></div>
+          <div class="chart-toolbar"><div class="timeframes"><button data-timeframe="1H" aria-pressed="false">1H</button><button data-timeframe="4H" aria-pressed="true">4H</button><button data-timeframe="1D" aria-pressed="false">1D</button><span class="divider"></span><span class="ema-key"><i></i> EMA 20 <small>illustrative</small></span></div><div><button id="draw" aria-pressed="false">╱ <span>Draw line</span></button><button id="undo" aria-label="Undo last drawing" title="Undo last drawing">↶</button><button id="capture">▧ <span>Capture</span></button><button id="fullscreen" aria-label="Expand chart" title="Expand chart">⛶</button></div></div>
+          <div class="chart-view-bar"><label class="chart-view-picker">Chart view <select id="chart-view" aria-label="Chart view"></select></label><span id="average-label">Average entry: enter your size first</span></div>
+          <div id="chart" class="chart"></div>
+          <div id="chart-entry-legend" class="chart-entry-legend" aria-label="Chart entries"></div>
+          <div class="chart-footer"><span id="chart-hint">Select an entry below; edit its prices in the panel.</span><span id="selected-label">ENTRY 01 SELECTED</span></div>
+        </section>
+
+        <section class="entries-panel" aria-label="Entry editor">
+          <div class="panel-heading"><h2>Size the whole position</h2><p>One size. Split across your entries.</p></div>
+          <div class="position-builder">
+            <div class="available-budget">
+              <div><label for="margin-budget">Available budget · USD</label><button id="use-account-budget" type="button">Use account value</button><button id="cancel-budget" type="button" hidden>Cancel edit</button></div>
+              <div class="budget-value-row"><input id="margin-budget" type="number" min="0" step="any" aria-label="Available position budget" readonly placeholder="Unavailable · optional"><button id="edit-budget" type="button" aria-label="Edit budget" title="Edit budget"><svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m4 13 9-9 3 3-9 9-4 1 1-4Z M11 6l3 3"/></svg></button></div>
+              <button id="add-optional-budget" type="button" hidden>＋ Add optional budget</button>
+              <small id="budget-source"></small>
+            </div>
+            <div class="whole-size-input"><label><span id="position-size-label">Your total margin · USD</span><input id="position-size" type="number" min="0" step="any" placeholder="Enter total size" aria-label="Total position size"></label><label>Size input<select id="position-unit" aria-label="Position size basis"><option value="margin">Margin · USD</option><option value="quantity">Quantity · BTC</option></select></label></div>
+            <div class="leverage-controls"><label for="leverage-slider">Leverage <small>1× = unlevered</small></label><div><input id="leverage-slider" type="range" min="1" max="100" step="1" aria-label="Leverage slider"><input id="leverage" type="number" min="1" max="100" step="1" aria-label="Your leverage"><span>×</span></div><div class="leverage-presets"><button data-leverage="1">1×</button><button data-leverage="5">5×</button><button data-leverage="10">10×</button><button data-leverage="25">25×</button><span>100× max · prototype</span></div></div>
+            <div class="position-size-summary" aria-live="polite"><div><span>Committed margin</span><strong id="position-margin"></strong></div><div><span>Total exposure</span><strong id="position-notional"></strong></div><div><span>Total quantity</span><strong id="position-quantity"></strong></div></div>
+            <p id="size-basis-help"></p>
+          </div>
+          <div class="entries-heading"><div class="entries-title-row"><h2>Distribute your entries <span id="entry-count">02</span></h2><button id="expand-entry" aria-label="Expand entry details" title="Expand the selected entry">⛶</button></div><div><span id="allocation-total">100% allocated</span><button id="equalize-entries">Split equally</button></div><p>Percentages split total quantity, not risk or margin.</p></div>
+          <div id="entry-list" class="entry-list"></div>
+          <button id="add-entry" class="add-entry">＋ Add entry <span>Rebalance shares equally</span></button>
+          <p class="sizing-note">The assistant never replaces your total size unless you apply it. Entries have independent stops and targets. No orders are placed.</p>
+        </section>
+
+        <section class="journal-card" aria-label="Play journal">
+          <div class="journal-tabs" role="tablist" aria-label="Journal sections">
+            <button id="tab-thesis" role="tab" aria-controls="journal-content" aria-selected="true" data-tab="thesis">Thesis & notes</button>
+            <button id="tab-strategy" role="tab" aria-controls="journal-content" aria-selected="false" data-tab="strategy">Strategy <span>v2</span></button>
+            <button id="tab-evidence" role="tab" aria-controls="journal-content" aria-selected="false" data-tab="evidence">Evidence <span id="capture-count">0</span></button>
+            <button id="tab-review" role="tab" aria-controls="journal-content" aria-selected="false" data-tab="review">Review</button>
+          </div>
+          <div id="journal-content" role="tabpanel" aria-labelledby="tab-thesis"></div>
+        </section>
+      </div>
+
+      <section class="summary" aria-label="Modeled play summary" aria-live="polite">
+        <div class="summary-intro"><span class="eyebrow">YOUR POSITION · MODELED</span><strong id="summary-description">2 entries · Long</strong><small id="summary-leverage">Leverage 1×</small></div>
+        <div><span>P&amp;L if all stops fill</span><strong id="total-risk" class="negative"></strong><small id="loss-equity"></small></div>
+        <div><span>P&amp;L if all targets fill</span><strong id="total-reward" class="positive"></strong><small id="profit-equity"></small></div>
+        <div><span>Reward / risk</span><strong id="total-rr"></strong></div>
+        <div><span>Your total size</span><strong id="total-size"></strong></div>
+        <div class="notional"><span>Position notional</span><strong id="total-notional"></strong></div>
+        <div><span>Required margin</span><strong id="total-margin"></strong></div>
+        <div><span>Planned weighted entry</span><strong id="total-average"></strong></div>
+      </section>
+      <div id="errors" class="errors" role="alert" hidden></div>
+      <div id="position-warnings" class="position-warnings" role="status"></div>
+      <footer><span>Hypothetical linear USD outcomes, not realized P&amp;L. Assumes entered sizes and each exit share fill at the stated prices. Fees, funding, slippage, maintenance margin and liquidation are not modeled.</span><button id="export" class="text-button">Export draft ↗</button></footer>
+      <div class="footer-signoff"><span>PLAN WITH INTENTION. REVIEW WITH HONESTY.</span><span id="design-name">Vessel / Graphite</span></div>
+    </main>
+  </div>
+  <dialog id="chart-dialog" aria-labelledby="chart-dialog-title"><div class="expanded-chart-header"><div><strong id="chart-dialog-title">Chart workspace</strong><span>Expanded view · Escape to close</span></div><button id="close-chart" class="button">Close chart ×</button></div><div id="expanded-chart-mount"></div></dialog>
+  <dialog id="entry-dialog" aria-labelledby="entry-dialog-title"><div class="expanded-entry-header"><div><strong id="entry-dialog-title">Entry details</strong><span>Same play · edits apply immediately</span></div><button id="close-entry" class="button">Close details ×</button></div><div class="expanded-entry-toolbar"><label>Entry to edit<select id="entry-dialog-select" aria-label="Expanded entry selection"></select></label><p>Each entry has its own stop and targets. Total size belongs to the whole position.</p></div><div id="expanded-entry-mount"></div></dialog>
+  <dialog id="about"><div class="dialog-top"><span class="eyebrow">VESSEL / DESIGN STUDY</span><button id="close-about" aria-label="Close">×</button></div><h2>A workspace to shape together.</h2><p>All accounts, portfolio values, balances, candles, and strategies are samples. No broker connection or orders. Account-derived budget is a starting value, not verified free collateral.</p><p>Enter one total margin or quantity and distribute it with entry percentages. The leverage slider and numeric input are linked. In margin mode, leverage changes quantity; in quantity mode, it changes required margin. Stop and target percentages are price moves from entry.</p><p>Portfolio percentages separately show committed margin and notional exposure. Exposure can exceed 100% with leverage. A manual budget override does not rewrite account or portfolio values.</p><p>Save draft keeps the play, captures, and notes in this browser only. PNG downloads include notes. The model excludes fees, funding, slippage, maintenance margin, and liquidation. This is not a trading recommendation or a durable journal.</p><button class="button primary" id="close-about-done">Back to the play</button></dialog>
+  <div id="toast" role="status"></div>
+  <script type="module" src="app.mjs?v=baseline-20260930-2"></script>
+</body>
+</html>
