@@ -24,7 +24,16 @@ public sealed record VenueSnapshot(
     decimal AccountValueUsd,
     decimal WithdrawableUsd,
     decimal MarginUsedUsd,
-    IReadOnlyList<VenuePosition> Positions);
+    IReadOnlyList<VenuePosition> Positions,
+    VenueStablecoinWallet? StablecoinWallet = null);
+
+public sealed record VenueStablecoinBalance(
+    string Symbol, int TokenIndex, string TokenId,
+    decimal Total, decimal Held, decimal Available);
+
+public sealed record VenueStablecoinWallet(
+    DateTimeOffset ObservedAtUtc, string AccountMode, string Scope,
+    IReadOnlyList<VenueStablecoinBalance> Balances);
 
 public sealed record VenueFill(
     string SourceFillId,

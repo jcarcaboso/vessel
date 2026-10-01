@@ -11,7 +11,7 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
     public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct) => db.Portfolios.OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
     public Task<List<Account>> AccountsAsync(CancellationToken ct) => db.Accounts.OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => db.Accounts.SingleOrDefaultAsync(x => x.Id == id, ct);
-    public Task<List<AccountSnapshot>> SnapshotsAsync(CancellationToken ct) => db.Snapshots.Where(s => db.Accounts.Any(a => a.Id == s.AccountId && a.IsEnabled)).Include(x => x.Positions).AsNoTracking().ToListAsync(ct);
+    public Task<List<AccountSnapshot>> SnapshotsAsync(CancellationToken ct) => db.Snapshots.Where(s => db.Accounts.Any(a => a.Id == s.AccountId && a.IsEnabled)).Include(x => x.Positions).Include(x => x.Stablecoins).AsSplitQuery().AsNoTracking().ToListAsync(ct);
     public Task<List<ImportedFill>> FillsAsync(Guid? accountId, int limit, CancellationToken ct) => db.Fills
         .Where(x => (accountId == null || x.AccountId == accountId) && db.Accounts.Any(a => a.Id == x.AccountId && a.IsEnabled)).OrderByDescending(x => x.OccurredAtUtc).ThenBy(x => x.Id)
         .Take(limit).AsNoTracking().ToListAsync(ct);
@@ -95,7 +95,7 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
     public async Task SaveRefreshAsync(Account account, PerpetualVenueReadResult result, CancellationToken ct)
     {
         var observation = result.Snapshot;
-        var snapshot = await db.Snapshots.Include(x => x.Positions).SingleOrDefaultAsync(x => x.AccountId == account.Id, ct);
+        var snapshot = await db.Snapshots.Include(x => x.Positions).Include(x => x.Stablecoins).AsSplitQuery().SingleOrDefaultAsync(x => x.AccountId == account.Id, ct);
         if (snapshot is null)
         {
             snapshot = new AccountSnapshot { OwnerId = account.OwnerId, AccountId = account.Id };
@@ -105,6 +105,8 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
         {
             db.Positions.RemoveRange(snapshot.Positions);
             snapshot.Positions.Clear();
+            db.Stablecoins.RemoveRange(snapshot.Stablecoins);
+            snapshot.Stablecoins.Clear();
             // Delete old composite keys before adding replacement positions with the same keys.
             await db.SaveChangesAsync(ct);
         }
@@ -124,6 +126,21 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
             MarginUsedUsd = p.MarginUsedUsd,
             Leverage = p.Leverage
         }).ToList();
+        var wallet = observation.StablecoinWallet;
+        snapshot.StablecoinsObservedAtUtc = wallet?.ObservedAtUtc.ToUniversalTime();
+        snapshot.AccountMode = wallet?.AccountMode;
+        snapshot.StablecoinScope = wallet?.Scope;
+        snapshot.Stablecoins = wallet?.Balances.Select(balance => new AccountStablecoin
+        {
+            OwnerId = account.OwnerId,
+            AccountId = account.Id,
+            TokenIndex = balance.TokenIndex,
+            TokenId = balance.TokenId,
+            Symbol = balance.Symbol,
+            Total = balance.Total,
+            Held = balance.Held,
+            Available = balance.Available
+        }).ToList() ?? [];
         var incomingSourceIds = result.Fills.Select(f => f.SourceFillId).Distinct().ToArray();
         var existing = (await db.Fills.Where(f => f.AccountId == account.Id && incomingSourceIds.Contains(f.SourceFillId))
             .Select(f => new { f.ContractId, f.SourceFillId }).ToListAsync(ct))

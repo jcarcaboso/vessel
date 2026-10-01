@@ -15,6 +15,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<Portfolio> Portfolios => Set<Portfolio>();
     public DbSet<AccountSnapshot> Snapshots => Set<AccountSnapshot>();
     public DbSet<AccountPosition> Positions => Set<AccountPosition>();
+    public DbSet<AccountStablecoin> Stablecoins => Set<AccountStablecoin>();
     public DbSet<ImportedFill> Fills => Set<ImportedFill>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -48,6 +49,16 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         snapshot.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         snapshot.Property(x => x.ValueScope).HasMaxLength(128);
+        snapshot.Property(x => x.AccountMode).HasMaxLength(64);
+        snapshot.Property(x => x.StablecoinScope).HasMaxLength(128);
+        var stablecoin = modelBuilder.Entity<AccountStablecoin>();
+        stablecoin.ToTable("account_stablecoins");
+        stablecoin.HasKey(x => new { x.OwnerId, x.AccountId, x.TokenId });
+        stablecoin.Property(x => x.TokenId).HasMaxLength(64);
+        stablecoin.Property(x => x.Symbol).HasMaxLength(32);
+        snapshot.HasMany(x => x.Stablecoins).WithOne().HasForeignKey(x => new { x.OwnerId, x.AccountId })
+            .OnDelete(DeleteBehavior.Cascade);
+        stablecoin.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         var position = modelBuilder.Entity<AccountPosition>();
         position.ToTable("account_positions");
         position.HasKey(x => new { x.OwnerId, x.AccountId, x.ContractId });
@@ -103,6 +114,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
                 Portfolio portfolio => portfolio.OwnerId,
                 AccountSnapshot snapshot => snapshot.OwnerId,
                 AccountPosition position => position.OwnerId,
+                AccountStablecoin stablecoin => stablecoin.OwnerId,
                 ImportedFill fill => fill.OwnerId,
                 _ => (Guid?)null
             };

@@ -101,4 +101,32 @@ describe('Core workspace API', () => {
     response([{ ...accountFixture, isEnabled: 'false' }])
     await expect(createWorkspaceApi('token').accounts()).rejects.toMatchObject({ kind: 'invalid-response' })
   })
+  it('accepts stablecoin wallet observations as decimal strings without merging perp equity', async () => {
+    const body = {
+      observedAtUtc: '2026-10-01T12:00:00Z', valueScope: 'primary-perpetual-dex',
+      accountValueUsd: '0', withdrawableUsd: '0', marginUsedUsd: '0', positions: [],
+      stablecoinWallet: {
+        observedAtUtc: '2026-10-01T12:00:02Z', accountMode: 'unifiedAccount', scope: 'hypercore-spot-stablecoins',
+        totalNominalUsd: '12.12345678901234567890123456', availableNominalUsd: '10.12345678901234567890123456',
+        balances: [{ symbol: 'USDC', tokenIndex: 0, tokenId: 'known-token',
+          total: '12.12345678901234567890123456', held: '2', available: '10.12345678901234567890123456' }],
+        notice: 'Wallet only, not free margin.',
+      },
+    }
+    response(body)
+    await expect(createWorkspaceApi('token').snapshot(accountFixture.id)).resolves.toEqual(body)
+  })
+  it('rejects stablecoin balance numbers that would lose exact string semantics', async () => {
+    response({
+      observedAtUtc: '2026-10-01T12:00:00Z', valueScope: 'primary-perpetual-dex',
+      accountValueUsd: '0', withdrawableUsd: '0', marginUsedUsd: '0', positions: [],
+      stablecoinWallet: {
+        observedAtUtc: '2026-10-01T12:00:02Z', accountMode: 'unifiedAccount', scope: 'hypercore-spot-stablecoins',
+        totalNominalUsd: '12', availableNominalUsd: '10',
+        balances: [{ symbol: 'USDC', tokenIndex: 0, tokenId: 'known-token', total: 12, held: '2', available: '10' }],
+        notice: 'Wallet only.',
+      },
+    })
+    await expect(createWorkspaceApi('token').snapshot(accountFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
 })

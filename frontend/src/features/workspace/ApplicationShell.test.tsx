@@ -169,4 +169,29 @@ describe('Main application shell', () => {
     await userEvent.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
+  it('shows available stablecoins rather than misleading zero perp equity for a unified wallet', async () => {
+    const wallet = { ...accountFixture, venueId: 'hyperliquid', accountValueUsd: '0',
+      availableStablecoinNominalUsd: '10.123456', accountMode: 'unifiedAccount', stablecoinScope: 'hypercore-spot-stablecoins' }
+    const client = api({
+      overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [wallet],
+        totals: { ...overviewFixture.totals, totalAccountValueUsd: '0', availableStablecoinNominalUsd: '10.123456', stablecoinAccountCount: 1 } }),
+      snapshot: vi.fn().mockResolvedValue({
+        observedAtUtc: '2026-10-01T12:00:00Z', valueScope: 'primary-perpetual-dex',
+        accountValueUsd: '0', withdrawableUsd: '0', marginUsedUsd: '0', positions: [],
+        stablecoinWallet: { observedAtUtc: '2026-10-01T12:00:01Z', accountMode: 'unifiedAccount',
+          scope: 'hypercore-spot-stablecoins', totalNominalUsd: '12.123456', availableNominalUsd: '10.123456',
+          balances: [{ symbol: 'USDC', tokenIndex: 0, tokenId: 'known-token', total: '12.123456', held: '2', available: '10.123456' }],
+          notice: 'Wallet funds, not guaranteed trading margin.' },
+      }),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    expect(await screen.findByText('Available wallet stablecoins')).toBeInTheDocument()
+    expect(screen.getByText('Primary perps equity $0.00')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'View Main account' }))
+    expect(await screen.findByRole('heading', { name: 'Stablecoin wallet' })).toBeInTheDocument()
+    expect(await screen.findByText('USDC')).toBeInTheDocument()
+    expect(screen.getByText('Available token units')).toBeInTheDocument()
+    expect(screen.getByText('10.123456')).toBeInTheDocument()
+    expect(screen.getByText('Wallet funds, not guaranteed trading margin.')).toBeInTheDocument()
+  })
 })

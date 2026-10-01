@@ -136,10 +136,12 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
                 values.Count == 0 ? "unavailable" : values.Count == enabledMembers.Count ? "complete" : "partial");
         }).ToList();
         var known = accounts.Where(a => a.IsEnabled).Select(Value).Where(v => v.HasValue).ToList();
+        var wallets = snapshots.Values.Where(s => s.StablecoinsObservedAtUtc.HasValue).ToList();
         return new(portfolios, dtos, new(portfolios.Count, accounts.Count, known.Count == 0 ? null : Money(known.Sum(v => v!.Value)),
-            known.Count, dtos.Sum(a => a.PositionCount), await store.FillCountAsync(ct)),
+            known.Count, dtos.Sum(a => a.PositionCount), await store.FillCountAsync(ct),
+            wallets.Count == 0 ? null : StablecoinTotals.Sum(wallets.SelectMany(s => s.Stablecoins).Select(b => b.Available)), wallets.Count),
             (await store.FillsAsync(null, 100, ct)).Select(ToDto).ToList(),
-            "Known enabled-account values only. Hyperliquid values cover the primary perpetual DEX margin snapshot in USDC; no FX adjustment or unified-account valuation is applied. Imported fills are recent, not complete lifetime history.");
+            "Known enabled-account values only. Primary perpetual margin and HyperCore stablecoin wallet are separate ledgers and are never summed as total equity. Stablecoin summaries are nominal at 1 per supported USD-pegged token; no FX, depeg, lending, EVM or risk adjustment is applied. Wallet available means total minus held, not guaranteed free perpetual margin or withdrawal. Imported fills are recent, not complete lifetime history.");
     }
 
     public async Task<SnapshotDto?> SnapshotAsync(Guid id, CancellationToken ct)
@@ -148,7 +150,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         var s = (await store.SnapshotsAsync(ct)).SingleOrDefault(s => s.AccountId == id);
         return s is null ? null : new(s.ObservedAtUtc, s.ValueScope, Money(s.AccountValueUsd), Money(s.WithdrawableUsd), Money(s.MarginUsedUsd),
             s.Positions.OrderBy(p => p.ContractId).Select(p => new PositionDto(p.ContractId, Money(p.SignedQuantity)!, Money(p.EntryPrice)!,
-                Money(p.UnrealizedPnlUsd)!, Money(p.MarginUsedUsd)!, p.Leverage)).ToList());
+                Money(p.UnrealizedPnlUsd)!, Money(p.MarginUsedUsd)!, p.Leverage)).ToList(), WalletDto(s));
     }
 
     public async Task<PortfolioDto> PortfolioAsync(Guid id, CancellationToken ct) =>
@@ -196,7 +198,17 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         await store.AccountAsync(id, ct) ?? throw new WorkspaceException(404, "Account not found.");
     private static AccountDto ToDto(Account a, AccountSnapshot? s) => new(a.Id, a.PortfolioId, a.Name, a.VenueId, a.Address,
         Money(a.VenueId == "manual" ? a.ManualAccountValueUsd : s?.AccountValueUsd), a.LastSyncedAtUtc,
-        a.SyncStatus, a.LastSyncError, a.IsEnabled ? s?.Positions.Count ?? 0 : 0, a.HistoryNotice, a.IsEnabled);
+        a.SyncStatus, a.LastSyncError, a.IsEnabled ? s?.Positions.Count ?? 0 : 0, a.HistoryNotice, a.IsEnabled,
+        s?.StablecoinsObservedAtUtc is null ? null : StablecoinTotals.Sum(s.Stablecoins.Select(balance => balance.Available)),
+        s?.StablecoinScope, s?.AccountMode);
+    private static StablecoinWalletDto? WalletDto(AccountSnapshot snapshot) =>
+        snapshot.StablecoinsObservedAtUtc is not { } observed ? null :
+        new(observed, snapshot.AccountMode!, snapshot.StablecoinScope!,
+            StablecoinTotals.Sum(snapshot.Stablecoins.Select(balance => balance.Total)),
+            StablecoinTotals.Sum(snapshot.Stablecoins.Select(balance => balance.Available)),
+            snapshot.Stablecoins.OrderBy(balance => balance.TokenIndex).Select(balance => new StablecoinBalanceDto(
+                balance.Symbol, balance.TokenIndex, balance.TokenId, Money(balance.Total)!, Money(balance.Held)!, Money(balance.Available)!)).ToList(),
+            "HyperCore spot/unified wallet only: supported stablecoin token identities, nominal USD-pegged units, no FX/depeg adjustment. Available is total minus held; it is not guaranteed withdrawal capacity or perpetual free margin. Other assets, EVM wallets and lending/borrow accounting are excluded. Primary perpetual margin is not added again.");
     private static FillDto ToDto(ImportedFill f) => new(f.Id, f.AccountId, f.ContractId, f.Side, f.Direction, Money(f.Price)!,
         Money(f.Quantity)!, Money(f.Fee)!, f.FeeToken, Money(f.ClosedPnlUsd)!, f.OccurredAtUtc, f.OrderId, f.SourceFillId, f.TransactionHash);
 }

@@ -86,6 +86,14 @@ _Avoid_: Risk budget, position notional
 An optional amount of capital the trader makes available for the play, separate from the amount they choose to commit.
 _Avoid_: Committed margin, account value, risk budget
 
+**Stablecoin wallet**:
+Supported stablecoin holdings from the venue's wallet ledger, separate from its perpetual-margin snapshot.
+_Avoid_: Complete account equity
+
+**Wallet available amount**:
+A token's total less its held amount. It is distinct from perpetual free margin and withdrawal capacity.
+_Avoid_: Guaranteed tradable collateral, guaranteed withdrawable balance
+
 **Leverage**:
 The exposure multiplier relating the full position's notional value to its committed margin. One-times leverage is unlevered exposure.
 

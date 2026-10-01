@@ -30,7 +30,7 @@ public sealed class AccountManagementPostgresTests
         var account = await db.Accounts.SingleAsync(); Assert.True(account.IsEnabled); Assert.Null(account.PortfolioId);
         Assert.Equal(1.000000000000000000000000001m, account.ManualAccountValueUsd);
         Assert.Null((await db.Snapshots.SingleAsync()).AccountValueUsd); Assert.False(db.Database.HasPendingModelChanges());
-        Assert.Equal(3, (await db.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.Equal(4, (await db.Database.GetAppliedMigrationsAsync()).Count());
     }
 
     [PostgresFact]

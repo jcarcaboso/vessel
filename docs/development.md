@@ -155,7 +155,7 @@ pnpm check
 
 That runs the existing prototype tests, locked NuGet restore, backend Release build/tests, frozen pnpm install, TypeScript checks, lint, frontend tests and production build.
 
-Set `Vessel_TEST_POSTGRES` to a real PostgreSQL test connection to execute database integration tests. Without it, 23 PostgreSQL tests explicitly skip; an invalid supplied connection fails. Tests migrate unique temporary schemas and drop only those schemas, not the shared database. The CI definition supplies a separate ephemeral PostgreSQL service.
+Set `Vessel_TEST_POSTGRES` to a real PostgreSQL test connection to execute database integration tests. Without it, 26 PostgreSQL tests explicitly skip; an invalid supplied connection fails. Tests migrate unique temporary schemas and drop only those schemas, not the shared database. The CI definition supplies a separate ephemeral PostgreSQL service.
 
 Useful focused commands:
 
@@ -168,6 +168,8 @@ dotnet test backend/Vessel.slnx --configuration Release
 ```
 
 CI is defined in `.github/workflows/checks.yml`. Local execution does not establish that a remote GitHub run succeeded; no push is implied.
+
+Hyperliquid account detail now has supported stablecoin total/held/available wallet rows, separate from its primary perpetual snapshot. Use Refresh account to populate old snapshots. See [stablecoin wallet limits](architecture/stablecoin-wallet.md).
 
 ## Later work
 

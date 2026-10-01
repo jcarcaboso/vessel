@@ -11,6 +11,22 @@ public sealed class AccountSnapshot
     public decimal? WithdrawableUsd { get; set; }
     public decimal? MarginUsedUsd { get; set; }
     public List<AccountPosition> Positions { get; set; } = [];
+    public DateTimeOffset? StablecoinsObservedAtUtc { get; set; }
+    public string? AccountMode { get; set; }
+    public string? StablecoinScope { get; set; }
+    public List<AccountStablecoin> Stablecoins { get; set; } = [];
+}
+
+public sealed class AccountStablecoin
+{
+    public Guid OwnerId { get; set; }
+    public Guid AccountId { get; set; }
+    public int TokenIndex { get; set; }
+    public string TokenId { get; set; } = null!;
+    public string Symbol { get; set; } = null!;
+    public decimal Total { get; set; }
+    public decimal Held { get; set; }
+    public decimal Available { get; set; }
 }
 
 public sealed class AccountPosition

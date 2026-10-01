@@ -30,7 +30,9 @@ function AccountRows({ accounts, portfolioNames, refreshing, onDetail, onSync, o
   return <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Account</th><th>Known value</th><th>Latest update</th><th>Connection</th><th><span className="sr-only">Actions</span></th></tr></thead>
     <tbody>{accounts.map(account => <tr key={account.id}>
       <td><button className="account-row-name" onClick={() => onDetail(account.id)}><span className={`venue-mark ${account.venueId}`}><Wallet size={17} /></span><span><strong>{account.name}</strong><small>{venueName(account.venueId)} · {account.portfolioId ? portfolioNames[account.portfolioId] ?? 'Portfolio' : 'Unassigned'}</small></span></button></td>
-      <td className="numeric"><strong>{money(account.accountValueUsd)}</strong><small>{account.accountValueUsd === null ? 'No value recorded' : 'USD · available record'}</small></td>
+      <td className="numeric">{account.venueId === 'hyperliquid' ?
+        <><strong>{money(account.availableStablecoinNominalUsd ?? null)}</strong><small>Wallet stablecoins available · nominal</small><small>Primary perps equity {money(account.accountValueUsd)}</small></> :
+        <><strong>{money(account.accountValueUsd)}</strong><small>{account.accountValueUsd === null ? 'No value recorded' : 'USD · manual value'}</small></>}</td>
       <td><strong>{time(account.lastSyncedAtUtc)}</strong><small>{account.positionCount} reported positions</small></td>
       <td><span className={`workspace-badge ${account.isEnabled === false || account.syncStatus === 'error' ? 'warning-badge' : ''}`}>{account.isEnabled === false ? 'Disabled' : account.syncStatus === 'manual' ? 'Manual' : account.syncStatus === 'synced' ? 'Read-only' : account.syncStatus === 'error' ? 'Refresh failed' : 'Not refreshed'}</span></td>
       <td><div className="row-actions"><Button variant="ghost" size="sm" onClick={() => onDetail(account.id)} aria-label={`View ${account.name}`}>View<ArrowUpRight size={14} /></Button>
@@ -161,7 +163,9 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
 
         {page === 'overview' && data && <>
           <section className="workspace-stat-grid">
-            <div className="shell-panel metric"><span>Known nominal value</span><strong>{money(data.totals.totalAccountValueUsd)}</strong><small>{data.totals.valuedAccountCount} of {enabledAccounts.length} enabled accounts have a value · no FX adjustment</small></div>
+            <div className="shell-panel metric">{enabledAccounts.some(a => a.venueId === 'hyperliquid') ?
+              <><span>Available wallet stablecoins</span><strong>{money(data.totals.availableStablecoinNominalUsd ?? null)}</strong><small>{data.totals.stablecoinAccountCount ?? 0} observed enabled accounts · nominal only</small></> :
+              <><span>Known nominal value</span><strong>{money(data.totals.totalAccountValueUsd)}</strong><small>{data.totals.valuedAccountCount} of {enabledAccounts.length} enabled accounts have a value · no FX adjustment</small></>}</div>
             <div className="shell-panel metric"><span>Enabled accounts</span><strong>{enabledAccounts.length}</strong><small>{accounts.length - enabledAccounts.length} disabled · {data.totals.portfolioCount} portfolios</small></div>
             <div className="shell-panel metric"><span>Perpetual positions</span><strong>{data.totals.openPositionCount}</strong><small>From latest retained snapshots</small></div>
             <div className="shell-panel metric"><span>Imported executions</span><strong>{data.totals.importedFillCount}</strong><small>Recorded facts, not inferred intent</small></div>

@@ -21,6 +21,9 @@ export interface BrokerAccount {
   historyNotice: string | null
   /** Missing only during rollout from the previous API; treated as enabled. */
   isEnabled?: boolean
+  availableStablecoinNominalUsd?: string | null
+  stablecoinScope?: string | null
+  accountMode?: string | null
 }
 export interface ImportedFill {
   id: string
@@ -53,6 +56,16 @@ export interface AccountSnapshot {
     marginUsedUsd: string
     leverage: number | null
   }>
+  stablecoinWallet?: StablecoinWallet | null
+}
+export interface StablecoinWallet {
+  observedAtUtc: string
+  accountMode: string
+  scope: string
+  totalNominalUsd: string
+  availableNominalUsd: string
+  balances: Array<{ symbol: string; tokenIndex: number; tokenId: string; total: string; held: string; available: string }>
+  notice: string
 }
 export interface Overview {
   portfolios: Portfolio[]
@@ -64,6 +77,8 @@ export interface Overview {
     valuedAccountCount: number
     openPositionCount: number
     importedFillCount: number
+    availableStablecoinNominalUsd?: string | null
+    stablecoinAccountCount?: number
   }
   recentActivity: ImportedFill[]
   scopeNote: string
@@ -107,19 +122,31 @@ const account = (v: unknown): v is BrokerAccount => object(v) && guid(v.id) &&
   (v.lastSyncedAtUtc === null || date(v.lastSyncedAtUtc)) &&
   ['manual', 'not-synced', 'synced', 'error'].includes(String(v.syncStatus)) &&
   nullableText(v.lastSyncError) && count(v.positionCount) && nullableText(v.historyNotice) &&
-  (v.isEnabled === undefined || typeof v.isEnabled === 'boolean')
+  (v.isEnabled === undefined || typeof v.isEnabled === 'boolean') &&
+  (v.availableStablecoinNominalUsd === undefined || nullableDecimal(v.availableStablecoinNominalUsd)) &&
+  (v.stablecoinScope === undefined || nullableText(v.stablecoinScope)) &&
+  (v.accountMode === undefined || nullableText(v.accountMode))
 const fill = (v: unknown): v is ImportedFill => object(v) && guid(v.id) && guid(v.accountId) &&
   ['contractId', 'side', 'direction', 'feeToken', 'orderId', 'sourceFillId', 'transactionHash'].every(k => text(v[k])) &&
   ['price', 'quantity', 'fee', 'closedPnlUsd'].every(k => decimal(v[k])) && date(v.occurredAtUtc) && v.playId === null
+const wallet = (v: unknown): v is StablecoinWallet | null => v === null || object(v) &&
+  date(v.observedAtUtc) && text(v.accountMode) && text(v.scope) && decimal(v.totalNominalUsd) &&
+  decimal(v.availableNominalUsd) && text(v.notice) && Array.isArray(v.balances) &&
+  v.balances.every(b => object(b) && text(b.symbol) && count(b.tokenIndex) && text(b.tokenId) &&
+    decimal(b.total) && decimal(b.held) && decimal(b.available))
 const snapshot = (v: unknown): v is AccountSnapshot | null => v === null || object(v) &&
   date(v.observedAtUtc) && text(v.valueScope) && ['accountValueUsd', 'withdrawableUsd', 'marginUsedUsd'].every(k => nullableDecimal(v[k])) &&
   Array.isArray(v.positions) && v.positions.every(p => object(p) && text(p.contractId) &&
     ['signedQuantity', 'entryPrice', 'unrealizedPnlUsd', 'marginUsedUsd'].every(k => decimal(p[k])) &&
-    (p.leverage === null || typeof p.leverage === 'number' && Number.isInteger(p.leverage) && p.leverage > 0))
+    (p.leverage === null || typeof p.leverage === 'number' && Number.isInteger(p.leverage) && p.leverage > 0)) &&
+  (v.stablecoinWallet === undefined || wallet(v.stablecoinWallet))
 const overview = (v: unknown): v is Overview => object(v) && Array.isArray(v.portfolios) && v.portfolios.every(portfolio) &&
   Array.isArray(v.accounts) && v.accounts.every(account) && object(v.totals) &&
   ['portfolioCount', 'accountCount', 'valuedAccountCount', 'openPositionCount', 'importedFillCount'].every(k => object(v.totals) && count(v.totals[k])) &&
-  nullableDecimal(v.totals.totalAccountValueUsd) && Array.isArray(v.recentActivity) && v.recentActivity.every(fill) && text(v.scopeNote)
+  nullableDecimal(v.totals.totalAccountValueUsd) &&
+  (v.totals.availableStablecoinNominalUsd === undefined || nullableDecimal(v.totals.availableStablecoinNominalUsd)) &&
+  (v.totals.stablecoinAccountCount === undefined || count(v.totals.stablecoinAccountCount)) &&
+  Array.isArray(v.recentActivity) && v.recentActivity.every(fill) && text(v.scopeNote)
 
 export function createWorkspaceApi(token: string): WorkspaceApi {
   const bearer = token.trim()

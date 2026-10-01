@@ -8,7 +8,7 @@ using Vessel.Infrastructure.Venues.Hyperliquid;
 
 namespace Vessel.Tests;
 
-public sealed class HyperliquidAdapterTests
+public sealed partial class HyperliquidAdapterTests
 {
     // Synthetic fixtures only. All HttpClients below use an intercepting handler.
     private const string Address = "0x0123456789abcdef0123456789ABCDEF01234567";
@@ -113,18 +113,25 @@ public sealed class HyperliquidAdapterTests
         Assert.Contains("before filtering", result.HistoryNotice);
         Assert.Contains("not total spot/unified", result.HistoryNotice);
 
-        Assert.Equal(3, handler.Requests.Count);
-        for (var i = 0; i < 3; i++)
+        Assert.NotNull(result.Snapshot.StablecoinWallet);
+        Assert.Equal("default", result.Snapshot.StablecoinWallet.AccountMode);
+        Assert.Equal(4, result.Snapshot.StablecoinWallet.Balances.Count);
+        Assert.Equal(6, handler.Requests.Count);
+        for (var i = 0; i < 6; i++)
         {
             Assert.Equal(HttpMethod.Post, handler.Requests[i].Method);
             Assert.Equal("https://api.hyperliquid.xyz/info", handler.Requests[i].Uri);
             using var payload = JsonDocument.Parse(handler.Requests[i].Body);
-            Assert.Equal(new[] { "meta", "clearinghouseState", "userFills" }[i],
+            Assert.Equal(new[] { "meta", "clearinghouseState", "userFills", "userAbstraction", "spotMeta", "spotClearinghouseState" }[i],
                 payload.RootElement.GetProperty("type").GetString());
             if (i < 2)
                 Assert.Equal("", payload.RootElement.GetProperty("dex").GetString());
-            if (i > 0)
+            else
+                Assert.False(payload.RootElement.TryGetProperty("dex", out _));
+            if (i is 1 or 2 or 3 or 5)
                 Assert.Equal(Address, payload.RootElement.GetProperty("user").GetString());
+            else
+                Assert.False(payload.RootElement.TryGetProperty("user", out _));
             if (i == 2)
             {
                 Assert.False(payload.RootElement.GetProperty("aggregateByTime").GetBoolean());
@@ -296,9 +303,12 @@ public sealed class HyperliquidAdapterTests
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
     public async Task Malformed_json_in_any_call_fails_without_raw_details(int stage)
     {
-        var responses = new[] { Meta, State, $"[{Fill}]" };
+        var responses = DefaultResponses();
         responses[stage] = "{\"private-secret\":";
         using var handler = Fixtures(responses);
         using var client = Client(handler);
@@ -352,11 +362,14 @@ public sealed class HyperliquidAdapterTests
     [InlineData(0, HttpStatusCode.TooManyRequests)]
     [InlineData(1, HttpStatusCode.BadGateway)]
     [InlineData(2, HttpStatusCode.Unauthorized)]
+    [InlineData(3, HttpStatusCode.ServiceUnavailable)]
+    [InlineData(4, HttpStatusCode.TooManyRequests)]
+    [InlineData(5, HttpStatusCode.BadGateway)]
     public async Task Non_success_status_is_safe_and_stops_refresh(int stage, HttpStatusCode status)
     {
         using var handler = new FixtureHandler((index, _) => Task.FromResult(
             index == stage ? new HttpResponseMessage(status) { Content = new StringContent("private-secret") }
-                : Json(new[] { Meta, State, $"[{Fill}]" }[index])));
+                : Json(DefaultResponses()[index])));
         using var client = Client(handler);
         var exception = await Assert.ThrowsAsync<VenueReadException>(() =>
             new HyperliquidPerpetualReader(client, new TestClock()).ReadAsync(Address, CancellationToken.None));
@@ -429,20 +442,20 @@ public sealed class HyperliquidAdapterTests
     }
 
     [Fact]
-    public async Task Single_20_second_deadline_covers_all_three_calls_not_per_call()
+    public async Task Single_20_second_deadline_covers_all_six_calls_not_per_call()
     {
         var clock = new TestClock();
         using var handler = new FixtureHandler((index, token) =>
         {
-            clock.Advance(TimeSpan.FromSeconds(7));
+            clock.Advance(TimeSpan.FromSeconds(3.5));
             token.ThrowIfCancellationRequested();
-            return Task.FromResult(Json(new[] { Meta, State, $"[{Fill}]" }[index]));
+            return Task.FromResult(Json(DefaultResponses()[index]));
         });
         using var client = Client(handler);
         var exception = await Assert.ThrowsAsync<VenueReadException>(() =>
             new HyperliquidPerpetualReader(client, clock).ReadAsync(Address, CancellationToken.None));
         Assert.Equal("Hyperliquid read timed out.", exception.Message);
-        Assert.Equal(3, handler.Requests.Count);
+        Assert.Equal(6, handler.Requests.Count);
         Assert.Equal(1, clock.TimerCount);
         Assert.Equal(TimeSpan.FromSeconds(20), clock.Deadline);
     }
@@ -530,7 +543,10 @@ public sealed class HyperliquidAdapterTests
         new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 
     private static FixtureHandler Fixtures(params string[] fixtures) =>
-        new((index, _) => Task.FromResult(Json(fixtures[index])));
+        new((index, _) => Task.FromResult(Json(
+            fixtures.Length == 3 && index >= 3 ? DefaultResponses()[index] : fixtures[index])));
+
+    private static string[] DefaultResponses() => [Meta, State, $"[{Fill}]", "\"default\"", SpotMeta, "{\"balances\":[]}"];
 
     private sealed class FixtureHandler(Func<int, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
     {

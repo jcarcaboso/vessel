@@ -14,6 +14,8 @@ October 1, 2026: the owner authorized the main application shell without mountin
 
 Account/portfolio management is specified in `docs/architecture/account-management-contract.md` and verified in `account-management-state.md`. Unassigned accounts use null portfolio and exist only in All accounts, not a seeded default tile. Disable preserves imports but hides their activity/positions and blocks sync. Portfolio deletion unlinks without data loss; account deletion removes retained facts only after explicit confirmation and is blocked by linked Plays. Preserve owner scope and account/sync locking. The owner requested a first-part PR before starting Play implementation.
 
+Stablecoin balance scope is in `docs/architecture/stablecoin-wallet.md`. Perps-first still applies to instruments/executions; spot/unified wallet reads are allowed for supported stablecoins only. Keep wallet total/held/available distinct from primary perps equity, withdrawal and collateral, and never double-count ledgers. Validate token identities against metadata and preserve exact values/nominal caveats. Do not implicitly add EVM, lending or non-stable valuation.
+
 ## Project tracking
 
 - Repository: https://github.com/jcarcaboso/vessel

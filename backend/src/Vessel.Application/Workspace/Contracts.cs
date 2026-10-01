@@ -15,16 +15,24 @@ public sealed record UpdateAccountRequest(
 public sealed record PortfolioDto(Guid Id, string Name, int AccountCount, string? TotalValueUsd, string ValueCoverage);
 public sealed record AccountDto(Guid Id, Guid? PortfolioId, string Name, string VenueId, string? Address,
     string? AccountValueUsd, DateTimeOffset? LastSyncedAtUtc, string SyncStatus, string? LastSyncError,
-    int PositionCount, string? HistoryNotice, bool IsEnabled);
+    int PositionCount, string? HistoryNotice, bool IsEnabled,
+    string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null);
 public sealed record PositionDto(string ContractId, string SignedQuantity, string EntryPrice,
     string UnrealizedPnlUsd, string MarginUsedUsd, int? Leverage);
 public sealed record SnapshotDto(DateTimeOffset ObservedAtUtc, string ValueScope, string? AccountValueUsd,
-    string? WithdrawableUsd, string? MarginUsedUsd, IReadOnlyList<PositionDto> Positions);
+    string? WithdrawableUsd, string? MarginUsedUsd, IReadOnlyList<PositionDto> Positions,
+    StablecoinWalletDto? StablecoinWallet = null);
+public sealed record StablecoinBalanceDto(string Symbol, int TokenIndex, string TokenId,
+    string Total, string Held, string Available);
+public sealed record StablecoinWalletDto(DateTimeOffset ObservedAtUtc, string AccountMode, string Scope,
+    string TotalNominalUsd, string AvailableNominalUsd,
+    IReadOnlyList<StablecoinBalanceDto> Balances, string Notice);
 public sealed record FillDto(Guid Id, Guid AccountId, string ContractId, string Side, string Direction,
     string Price, string Quantity, string Fee, string FeeToken, string ClosedPnlUsd, DateTimeOffset OccurredAtUtc,
     string OrderId, string SourceFillId, string TransactionHash, Guid? PlayId = null);
 public sealed record OverviewTotals(int PortfolioCount, int AccountCount, string? TotalAccountValueUsd,
-    int ValuedAccountCount, int OpenPositionCount, int ImportedFillCount);
+    int ValuedAccountCount, int OpenPositionCount, int ImportedFillCount,
+    string? AvailableStablecoinNominalUsd = null, int StablecoinAccountCount = 0);
 public sealed record OverviewDto(IReadOnlyList<PortfolioDto> Portfolios, IReadOnlyList<AccountDto> Accounts,
     OverviewTotals Totals, IReadOnlyList<FillDto> RecentActivity, string ScopeNote);
 

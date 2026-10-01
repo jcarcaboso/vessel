@@ -18,12 +18,15 @@ This repository contains the approved Graphite prototype and the React/Vite/Type
 - [Core workspace contract](docs/architecture/core-workspace-contract.md)
 - [Current core implementation and limits](docs/architecture/core-workspace-state.md)
 - [Account and portfolio management](docs/architecture/account-management-state.md)
+- [Hyperliquid stablecoin wallet](docs/architecture/stablecoin-wallet.md)
 
 The owner authorized foundation scaffolding after confirming perpetuals-first across venues and multiple active plays on the same account/instrument. Frontend and backend work were delegated to separate Sol agents. The confirmed MVP remains self-hosted and single-user with token access, Hyperliquid first and Lighter next, manual accounts, optional history import and in-page notifications.
 
 The app implements protected portfolio/account APIs, exact manual values, latest snapshots and retained fills, a primary Hyperliquid perp reader, explicit migrations and owner isolation. Navigation covers Overview, Portfolios, Accounts, Activity and Settings. Full Play editing, complete backfills, jobs, images, notifications and charts remain later work. The approved prototype is unchanged.
 
 Portfolios and accounts support rename/delete. Accounts can be moved, unlinked to the virtual unassigned group, or disabled without deleting imported data. Unassigned records appear only in All accounts, not a default tile. Portfolio deletion unlinks accounts; account deletion explicitly removes retained facts and is blocked when a Play references the account.
+
+Hyperliquid refresh also retrieves supported HyperCore wallet stablecoins with total/held/available amounts: USDC, USDE, USDT0 and USDH. Wallet availability is separate from primary perpetual equity; ledgers are not summed as full account equity. Non-stable/EVM/lending values and FX/depeg adjustment are excluded.
 
 ## Application quick start
 
@@ -51,7 +54,7 @@ The owner-requested actual-app LAN review is currently **http://10.1.0.219:5180/
 pnpm check
 ```
 
-Set `Vessel_TEST_POSTGRES` for real PostgreSQL test execution; otherwise 23 database tests explicitly skip. The local verification ran them with no skips.
+Set `Vessel_TEST_POSTGRES` for real PostgreSQL test execution; otherwise 26 database tests explicitly skip. The local verification ran them with no skips.
 
 ## View the prototype
 

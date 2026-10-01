@@ -136,3 +136,7 @@ Core-specific checks include API authentication/body validation/exact JSON shape
 
 
 Management tests cover nullable/omitted creation, required full-PUT properties, rename/move/unlink/source preservation, foreign targets/destinations, disabled-only/partial coverage, hidden history filtering before limits, retained data restoration, explicit core-to-management migration, portfolio unlink retaining active Plays and facts, hard delete cascading imported facts while preserving other owners/accounts, and active/closed Play protection. Concurrency checks observe actual PostgreSQL lock waits with gated fixture reads, covering sync versus disable/account-delete/portfolio-delete, stale tracked settings, and concurrent create/move versus portfolio deletion. These tests use only isolated random schemas; running the suite does not migrate the mounted development schema. Main owns explicit migration rollout and frontend/LAN integration.
+
+## Stablecoin wallet update
+
+`20261001125452_StablecoinWallet` persists a separate owner-scoped HyperCore stablecoin wallet for USDC/USDE/USDT0/USDH identified by exact token IDs. Refresh also queries account abstraction and spot metadata/state. This adds balance reads, not spot trades. Available is total minus held, not collateral/withdraw guarantee. Primary perps and wallet ledgers are never added as equity. Six calls share20s; nominal string sums preserve exact precision. Old observations remain unknown until refreshed. See `../docs/architecture/stablecoin-wallet.md`.
