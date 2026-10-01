@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
 import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
-import { AvailableBudget, CapitalContext, ChartPlaceholder, PlayJournal, PositionSummary } from './WorkspacePanels'
-import { createDraft, createEntry, type PlayDraft } from './draft'
+import { AvailableBudget, CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
+import { createDraft, type PlayDraft } from './draft'
 
 function BudgetHarness({ initial = createDraft(), accounts = [], portfolios = [], onChange = vi.fn() }: {
   initial?: PlayDraft
@@ -181,34 +181,8 @@ describe('Play journal', () => {
       expect(screen.getAllByRole('textbox')).toHaveLength(1)
     }
     await userEvent.click(screen.getByRole('tab', { name: 'Evidence' }))
-    expect(screen.getByText('Evidence notes only. Uploads and chart captures are not available.')).toBeInTheDocument()
+    expect(screen.getByText('Evidence notes only. Chart captures and uploads arrive with evidence storage.')).toBeInTheDocument()
     expect(screen.getByTestId('journal-panel').querySelector('input[type="file"]')).toBeNull()
-  })
-})
-
-describe('Chart placeholder', () => {
-  it('selects an editor through the planned-entry legend while keeping every entry visible', async () => {
-    const entries = [createEntry(0), createEntry(1)]
-    const onSelect = vi.fn()
-    const { rerender } = render(<ChartPlaceholder entries={entries} selectedId={entries[0]!.id} instrument="ETH-PERP" onSelect={onSelect} />)
-    const legend = screen.getByRole('group', { name: 'Planned entries' })
-    await userEvent.click(within(legend).getByRole('button', { name: /Entry 2/ }))
-    expect(onSelect).toHaveBeenCalledExactlyOnceWith(entries[1]!.id)
-    rerender(<ChartPlaceholder entries={entries} selectedId={entries[1]!.id} instrument="ETH-PERP" onSelect={onSelect} />)
-    expect(within(legend).getAllByRole('button')).toHaveLength(2)
-    expect(within(legend).getByRole('button', { name: /Entry 1/ })).toHaveAttribute('aria-pressed', 'false')
-    expect(within(legend).getByRole('button', { name: /Entry 2/ })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByText('ETH-PERP')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Expand chart' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Capture chart' })).toBeDisabled()
-    expect(screen.getByText(/No candles, live prices or execution observations/)).toBeInTheDocument()
-    expect(screen.getByTestId('chart-panel').querySelector('canvas')).toBeNull()
-  })
-
-  it('does not invent an instrument or entries for an empty draft', () => {
-    render(<ChartPlaceholder entries={[]} selectedId="" instrument="" onSelect={vi.fn()} />)
-    expect(screen.getByText('No perpetual instrument selected')).toBeInTheDocument()
-    expect(screen.getByText('No planned entries.')).toBeInTheDocument()
   })
 })
 

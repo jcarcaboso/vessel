@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
-import { accountFixture, emptyOverview, portfolioFixture } from '@/test/workspace-fixture'
+import { accountFixture, candleSeriesFixture, emptyOverview, marketContextFixture, portfolioFixture } from '@/test/workspace-fixture'
 
 function response(body: unknown, status = 200) {
   const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }))
@@ -188,5 +188,64 @@ describe('Instrument catalogue requests', () => {
   it('uses a catalogue-specific safe 502 error instead of account refresh wording', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('private provider details', { status: 502 })))
     await expect(createWorkspaceApi('token').instruments(accountFixture.id)).rejects.toThrow('venue instrument catalogue')
+  })
+})
+
+describe('Candle requests', () => {
+  it('uses the authenticated candles route with encoded query and keeps decimal strings', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(candleSeriesFixture))))
+    await expect(createWorkspaceApi('token').candles(accountFixture.id, { instrument: 'BTC', interval: '1h', endTime: 1_790_000_000_000 }))
+      .resolves.toEqual(candleSeriesFixture)
+    expect(fetch).toHaveBeenCalledWith(`/api/accounts/${accountFixture.id}/candles?instrument=BTC&interval=1h&endTime=1790000000000`,
+      expect.objectContaining({ credentials: 'omit', headers: { Authorization: 'Bearer token', Accept: 'application/json' } }))
+  })
+  it.each([
+    { instrument: 'xyz:BTC', interval: '1h' as const },
+    { instrument: 'BTC', interval: '2m' as unknown as '1h' },
+    { instrument: 'BTC', interval: '1h' as const, endTime: -1 },
+  ])('rejects invalid queries before sending them', async query => {
+    vi.stubGlobal('fetch', vi.fn())
+    await expect(createWorkspaceApi('token').candles(accountFixture.id, query)).rejects.toMatchObject({ kind: 'invalid-response' })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+  const [first, second] = candleSeriesFixture.candles
+  it.each([
+    { ...candleSeriesFixture, instrument: 'ETH' },
+    { ...candleSeriesFixture, interval: '4h' },
+    { ...candleSeriesFixture, candles: [{ ...first, open: 100.5 }] },
+    { ...candleSeriesFixture, candles: [{ ...first, low: '-1' }] },
+    { ...candleSeriesFixture, candles: [second, first] },
+    { ...candleSeriesFixture, candles: [first, first] },
+    { ...candleSeriesFixture, historyExhausted: 'no' },
+  ])('rejects malformed or mismatched candle data', async body => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))))
+    await expect(createWorkspaceApi('token').candles(accountFixture.id, { instrument: 'BTC', interval: '1h' })).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+  it('uses a candle-specific safe 502 error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('private provider details', { status: 502 })))
+    await expect(createWorkspaceApi('token').candles(accountFixture.id, { instrument: 'BTC', interval: '1h' })).rejects.toThrow('Venue candles are unavailable')
+  })
+})
+
+describe('Market context requests', () => {
+  it('reads exact statistics for one instrument', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(marketContextFixture))))
+    await expect(createWorkspaceApi('token').marketContext(accountFixture.id, 'BTC')).resolves.toEqual(marketContextFixture)
+    expect(fetch).toHaveBeenCalledWith(`/api/accounts/${accountFixture.id}/market-context?instrument=BTC`, expect.anything())
+  })
+  it.each([
+    { ...marketContextFixture, instrument: 'ETH' },
+    { ...marketContextFixture, markPrice: 103.5 },
+    { ...marketContextFixture, openInterest: '-1' },
+    { ...marketContextFixture, fundingRate: 'high' },
+    { ...marketContextFixture, observedAt: 'yesterday' },
+  ])('rejects malformed statistics', async body => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))))
+    await expect(createWorkspaceApi('token').marketContext(accountFixture.id, 'BTC')).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+  it('accepts negative funding and premium and null mid price', async () => {
+    const body = { ...marketContextFixture, fundingRate: '-0.00002', premium: '-0.0003', midPrice: null }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))))
+    await expect(createWorkspaceApi('token').marketContext(accountFixture.id, 'BTC')).resolves.toEqual(body)
   })
 })

@@ -1,4 +1,4 @@
-import type { BrokerAccount, InstrumentCatalog, Overview, Portfolio } from '@/api/workspace'
+import type { BrokerAccount, CandleSeries, InstrumentCatalog, MarketContext, Overview, Portfolio } from '@/api/workspace'
 
 export const portfolioFixture: Portfolio = {
   id: '11111111-2222-3333-4444-555555555555', name: 'Swing trading', accountCount: 1,
@@ -26,4 +26,22 @@ export const instrumentCatalogFixture: InstrumentCatalog = {
     { contractId: '1000PEPE', quantityDecimals: 0, maxLeverage: 10 },
   ],
   notice: 'Primary perpetual DEX metadata only. No orders, balances or execution refresh.',
+}
+
+/** Synthetic test candles only; never shown as market data. */
+export const candleSeriesFixture: CandleSeries = {
+  venueId: 'hyperliquid', instrument: 'BTC', interval: '1h', priceSource: 'trades',
+  candles: [
+    { openTime: 1_790_000_000_000, closeTime: 1_790_003_599_999, open: '100.5', high: '102', low: '99.25', close: '101', volume: '12.5', trades: 40 },
+    { openTime: 1_790_003_600_000, closeTime: 1_790_007_199_999, open: '101', high: '103.75', low: '100', close: '103', volume: '9', trades: 31 },
+  ],
+  requestedFrom: 1_788_200_000_000, requestedTo: 1_790_007_200_000, retrievedAt: '2026-10-01T12:00:00Z',
+  historyExhausted: false, notice: 'Hyperliquid exposes only the latest 5,000 candles per interval. Prices are trade candles, not fills.',
+}
+
+/** Synthetic test statistics only. */
+export const marketContextFixture: MarketContext = {
+  venueId: 'hyperliquid', instrument: 'BTC', markPrice: '103.5', oraclePrice: '103.4', midPrice: '103.45',
+  previousDayPrice: '100', dayNotionalVolume: '1234567.891', openInterest: '42.5', fundingRate: '0.0000125', premium: '-0.0001',
+  observedAt: '2026-10-01T12:00:00Z', notice: 'Venue market context for the primary perpetual DEX.',
 }

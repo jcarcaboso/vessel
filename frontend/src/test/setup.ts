@@ -6,3 +6,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 // jsdom has no layout or native scrolling; browser verification covers geometry.
 Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: vi.fn() })
 Object.defineProperty(window, 'scrollTo', { configurable: true, value: vi.fn() })
+// jsdom has no canvas. Feature tests inject a fake adapter; the real renderer is checked in a browser.
+vi.mock('@/components/chart/lightweight', () => ({
+  createLightweightAdapter: () => ({ setCandles: vi.fn(), setOverlays: vi.fn(), destroy: vi.fn() }),
+}))

@@ -19,6 +19,51 @@ export interface InstrumentCatalog {
   instruments: VenueInstrument[]
   notice: string
 }
+export const candleIntervals = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '1d', '3d', '1w', '1M'] as const
+export type CandleInterval = typeof candleIntervals[number]
+/** Venue trade candle. OHLCV stay exact decimal strings; times are UTC Unix milliseconds. */
+export interface VenueCandle {
+  openTime: number
+  closeTime: number
+  open: string
+  high: string
+  low: string
+  close: string
+  volume: string
+  trades: number
+}
+export interface CandleSeries {
+  venueId: string
+  instrument: string
+  interval: CandleInterval
+  priceSource: 'trades'
+  candles: VenueCandle[]
+  requestedFrom: number
+  requestedTo: number
+  retrievedAt: string
+  historyExhausted: boolean
+  notice: string
+}
+export interface CandleQuery {
+  instrument: string
+  interval: CandleInterval
+  endTime?: number
+}
+/** Venue header statistics for one perpetual. Decimal strings are kept exactly as reported. */
+export interface MarketContext {
+  venueId: string
+  instrument: string
+  markPrice: string
+  oraclePrice: string
+  midPrice: string | null
+  previousDayPrice: string
+  dayNotionalVolume: string
+  openInterest: string
+  fundingRate: string
+  premium: string | null
+  observedAt: string
+  notice: string
+}
 export interface BrokerAccount {
   id: string
   portfolioId: string | null
@@ -109,6 +154,8 @@ export interface WorkspaceApi {
   accounts(signal?: AbortSignal): Promise<BrokerAccount[]>
   account(id: string, signal?: AbortSignal): Promise<BrokerAccount>
   instruments(id: string, signal?: AbortSignal): Promise<InstrumentCatalog>
+  candles(id: string, query: CandleQuery, signal?: AbortSignal): Promise<CandleSeries>
+  marketContext(id: string, instrument: string, signal?: AbortSignal): Promise<MarketContext>
   createPortfolio(name: string): Promise<Portfolio>
   createAccount(account: CreateAccount): Promise<BrokerAccount>
   renamePortfolio(id: string, name: string): Promise<Portfolio>
@@ -137,6 +184,22 @@ const instrumentCatalog = (v: unknown): v is InstrumentCatalog => object(v) &&
     (i.quantityDecimals as number) <= 28 && count(i.maxLeverage) && (i.maxLeverage as number) > 0) &&
   new Set(v.instruments.map((i: VenueInstrument) => i.contractId)).size === v.instruments.length &&
   (v.scope !== 'manual' || v.instruments.length === 0) && text(v.notice) && v.notice.length <= 1000
+const epoch = (v: unknown): v is number => count(v) && (v as number) > 0
+const unsignedDecimal = (v: unknown): v is string => decimal(v) && !v.startsWith('-')
+const candle = (v: unknown): v is VenueCandle => object(v) && epoch(v.openTime) && epoch(v.closeTime) &&
+  v.closeTime >= v.openTime && ['open', 'high', 'low', 'close', 'volume'].every(k => unsignedDecimal(v[k])) && count(v.trades)
+const candleSeries = (query: CandleQuery) => (v: unknown): v is CandleSeries => object(v) &&
+  text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 &&
+  v.instrument === query.instrument && v.interval === query.interval && v.priceSource === 'trades' &&
+  Array.isArray(v.candles) && v.candles.length <= 5_000 && v.candles.every(candle) &&
+  v.candles.every((c: VenueCandle, i: number, all: VenueCandle[]) => i === 0 || c.openTime > all[i - 1]!.openTime) &&
+  count(v.requestedFrom) && epoch(v.requestedTo) && v.requestedTo >= (v.requestedFrom as number) && date(v.retrievedAt) &&
+  typeof v.historyExhausted === 'boolean' && text(v.notice) && v.notice.length <= 1000
+const marketContext = (instrument: string) => (v: unknown): v is MarketContext => object(v) &&
+  text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 && v.instrument === instrument &&
+  ['markPrice', 'oraclePrice', 'previousDayPrice', 'dayNotionalVolume', 'openInterest'].every(k => unsignedDecimal(v[k])) &&
+  (v.midPrice === null || unsignedDecimal(v.midPrice)) && decimal(v.fundingRate) && nullableDecimal(v.premium) &&
+  date(v.observedAt) && text(v.notice) && v.notice.length <= 1000
 const portfolio = (v: unknown): v is Portfolio => object(v) && guid(v.id) && text(v.name) &&
   count(v.accountCount) && nullableDecimal(v.totalValueUsd) &&
   ['complete', 'partial', 'unavailable'].includes(String(v.valueCoverage))
@@ -227,6 +290,21 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     account: (id, signal) => request(accountPath(id), account, signal ? { signal } : {}),
     instruments: (id, signal) => request(`${accountPath(id)}/instruments`, instrumentCatalog, signal ? { signal } : {},
       25_000, 'The venue instrument catalogue is unavailable. Try again or enter a manual label.'),
+    candles: (id, query, signal) => {
+      if (!/^[A-Za-z0-9_-]{1,32}$/.test(query.instrument) || !candleIntervals.includes(query.interval) ||
+        (query.endTime !== undefined && !epoch(query.endTime))) {
+        return Promise.reject(new ApiError('invalid-response', 'The chart request is invalid.'))
+      }
+      const params = new URLSearchParams({ instrument: query.instrument, interval: query.interval })
+      if (query.endTime !== undefined) params.set('endTime', String(query.endTime))
+      return request(`${accountPath(id)}/candles?${params}`, candleSeries(query), signal ? { signal } : {},
+        25_000, 'Venue candles are unavailable. Try refreshing the chart.')
+    },
+    marketContext: (id, instrument, signal) => {
+      if (!/^[A-Za-z0-9_-]{1,32}$/.test(instrument)) return Promise.reject(new ApiError('invalid-response', 'The market request is invalid.'))
+      return request(`${accountPath(id)}/market-context?${new URLSearchParams({ instrument })}`, marketContext(instrument),
+        signal ? { signal } : {}, 25_000, 'Venue market statistics are unavailable.')
+    },
     createPortfolio: name => request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name }) }),
     createAccount: body => request('/api/accounts', account, { method: 'POST', body: JSON.stringify(body) }),
     renamePortfolio: (id, name) => request(`/api/portfolios/${resourceId(id)}`, portfolio, { method: 'PATCH', body: JSON.stringify({ name }) }),

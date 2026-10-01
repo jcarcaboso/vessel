@@ -1,0 +1,124 @@
+# Plays chart: research and proposed plan
+
+October 1, 2026. Status: **owner decisions recorded; first pass (C2–C5, C7) authorized**. See [Owner decisions](#owner-decisions) and [First pass contract](#first-pass-contract).
+
+After PR #2 merged, the owner asked for research on the chart, planned entries on top of it, drawing tools and captures of drawings as Play evidence.
+
+## Findings
+
+### Renderer
+
+| | Lightweight Charts 5.2.1 | KLineCharts 10.0.3 | TradingView Advanced Charts | ECharts 6.1 |
+|---|---|---|---|---|
+| License | Apache-2.0 + required TradingView attribution/link | Apache-2.0 | Proprietary, application/approval | Apache-2.0 |
+| Size (ESM gzip) | ~60 KB | ~102 KB | Large hosted bundle | Much larger |
+| Drawing tools | None; custom series primitives | Built-in overlays, no position box | Full | None |
+| Level drag | Custom hit-test | Overlay move events | Built-in | Custom |
+| Capture with overlays | `takeScreenshot(true)` includes canvas primitives | `getConvertPictureUrl` | Built-in | `getDataURL` |
+| Activity | Very active | Active | n/a | Very active |
+
+Recommendation: Lightweight Charts v5 behind a Vessel `ChartAdapter`, with our own primitives for levels and drawings. It has public symmetric time/price ↔ pixel conversion, the smallest bundle and canvas capture that includes primitives. KLineCharts would save drawing work but imposes its overlay model on levels, theming and evidence. Advanced Charts is ruled out by licensing friction. The young `lightweight-charts-drawing` package (MIT, one npm release) is reference code only, not a dependency.
+
+Risks to settle in a spike: time coordinates beyond the last bar (future anchors) return null and need logical-index extrapolation; pointer hit-testing/drag is custom; HTML overlays are not captured, so all labels must be canvas-drawn; canvas is not testable in jsdom; attribution must be shown.
+
+### Market data (Hyperliquid)
+
+- `POST /info {"type":"candleSnapshot","req":{coin,interval,startTime,endTime}}`; intervals 1m–1M; only the latest 5,000 candles exist; prices/volume arrive as decimal strings.
+- Weight: 1,200/min per IP shared with other reads; candles add weight per 60 items. Requests must be bounded and cached.
+- Live: WebSocket `candle` subscription re-sends the forming candle; upsert by open time. HIP-3 coins are `dex:COIN`.
+- No candle or rate-limit code exists in the backend yet. The reader pattern (`IPerpetualVenueReader`, bounded `POST /info`, strict decimal parsing, `VenueReadException` → 502) fits a new market-data capability.
+
+### Drawings
+
+Store drawings as `{id, schemaVersion, tool, points: [{timeMs, price}], style, locked}` anchored to UTC time and exact price, never to bar index or pixels, so they survive zoom, resize and timeframe change. Scope them to the instrument. Migrate by `schemaVersion` on load. The prototype stored chart-relative 0–1 coordinates and cleared lines on instrument/timeframe change; that is not suitable for real data.
+
+### Captures and evidence
+
+`takeScreenshot(true)` → compose header (instrument, venue, timeframe, UTC time, "planned levels are not fills") onto a fixed-scale canvas, longest edge capped → `toBlob('image/png')`. No base64 persistence.
+
+Durable storage per [the proposal](proposal.md): PostgreSQL metadata (owner, key, type, size, SHA-256, note, Play association) plus a filesystem `IEvidenceStore` first, served through an authenticated streaming endpoint fetched as a blob. MinIO is no longer a sound choice (maintenance/archived); Garage or SeaweedFS are later S3 options. Because Plays are still in-memory drafts, durable evidence depends on Play persistence.
+
+## Proposed tasks
+
+| # | Task | Depends on | Notes |
+|---|---|---|---|
+| C1 | Spike: Lightweight Charts in Vite/React | — | Verify future-time anchors, primitive hit-test/drag, `takeScreenshot` with primitives, theming from CSS variables, attribution, jsdom strategy (fake adapter). Throwaway branch; go/no-go. |
+| C2 | Backend candles endpoint | — | `IMarketDataReader` in Application, Hyperliquid `candleSnapshot` in Infrastructure, `GET /api/accounts/{id}/candles?instrument&interval&before`, owner/enabled checks, bounded count, exact decimal strings, gap/coverage metadata, short in-memory cache, handler-mocked tests. |
+| C3 | Reusable chart component | C1 | `components/chart`: adapter interface + LWC implementation, timeframe selector, resize, older-history loading, loading/empty/error/stale states, Graphite theming, attribution. API client method and validator. Remove the unused `SampleChart`. |
+| C4 | Planned levels overlay and selection | C3 | Map draft entries to overlays (resolve percent stops/targets against entry price, skip invalid), entry colors, canvas axis labels, Aggregate/selected dropdown, click and keyboard selection through the existing `selectionRequest` path. Legend stays. |
+| C5 | Drag planned levels | C4 | Drag selected entry's entry/stop/targets; write back in the level's own unit (price or percent); price precision from metadata; keyboard nudge alternative. |
+| C6 | Drawing tools | C3 | Toolbar and manager: trend line, horizontal line/ray, rectangle zone, Fibonacci retracement, long/short box, text note. Select, move, delete, undo, lock, clear. Stored in the draft per instrument. |
+| C7 | Expanded chart dialog | C3 | In-page dialog sharing candles, levels, drawings and selection; Escape and focus restoration. |
+| C8 | Captures in the draft | C4, C6 | Capture button, composed PNG, Evidence tab grid with per-capture note, download with note, remove with confirmation, count limit. In memory, discarded on reload like the rest of the draft. |
+| C9 | Durable evidence storage | Play persistence | Filesystem store, upload validation (magic bytes, size, hash), metadata migration, authenticated streaming, orphan cleanup, backup notes. |
+| C10 | Live candle updates | C2, C3 | Backend-held WebSocket or polling relay; stale/degraded indicators. |
+| C11 | Contract, verification and PR | all chosen | Chart contract doc, `pnpm check`, browser checks at approved widths, Plane/Outline updates. |
+
+C1 and C2 can run in parallel; C4 → C5 and C6 can run in parallel after C3.
+
+## Owner decisions
+
+October 1, 2026:
+
+1. Lightweight Charts v5 with Vessel-built tools. Drawing tools (C6) move to the last step.
+2. Captures (C8) and durable evidence storage (C9) are built together in the last step.
+3. The six C6 tools are the starting set, later.
+4. Manual candle refresh now; automatic/live updates (C10) later.
+5. Manual instruments keep the chart placeholder until a market-data provider is added.
+6. Drawings are kept per instrument when the instrument changes.
+
+The owner authorized starting chart implementation: candles endpoint, reusable chart, planned levels, selection, level dragging and the expanded dialog.
+
+## First pass contract
+
+### Backend
+
+`GET /api/accounts/{id}/candles?instrument={contractId}&interval={interval}&endTime={ms?}` under the authorized API group.
+
+- Owner-scoped account lookup; disabled account → 409; manual account → 409 with "No market data provider for manual accounts."; venue reader mismatch or venue failure → generic 502.
+- `instrument` must be a primary-perpetual contract id (1–32 chars of letters, digits, `-`, `_`; no `dex:` prefix in this pass). `interval` ∈ 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 8h, 12h, 1d, 3d, 1w, 1M. Invalid → 400.
+- `endTime` defaults to now; window is at most 500 candles ending at `endTime` (1M uses 31 days). Paging older: pass the oldest `openTime - 1`.
+- Response: `{ venueId, instrument, interval, priceSource: "trades", candles: [{ openTime, closeTime, open, high, low, close, volume, trades }], requestedFrom, requestedTo, retrievedAt, historyExhausted, notice }`. Times are UTC ms (retrievedAt ISO). OHLCV are exact decimal strings as received and validated; candles are sorted ascending and deduplicated by open time.
+- `historyExhausted` is true when the venue returned no candles for the window; the notice states that Hyperliquid exposes only the latest 5,000 candles per interval.
+- A short in-memory cache (≈10 s, keyed by instrument/interval/window) limits repeated manual refreshes. No background job, WebSocket or persistence.
+
+### Frontend
+
+- `components/chart` owns a renderer-neutral `CandleChart` with an adapter boundary; it receives candles, price overlays, selection and theme, never the Play draft. Lightweight Charts is the only implementation; tests use a fake adapter.
+- Plays maps draft entries to overlays: percent stops/targets resolve against the entry price for display only; invalid or blank levels are omitted. Planned levels are not fills.
+- Aggregate/selected dropdown; clicking a level or legend item uses the existing selection request path.
+- Dragging a selected entry's level writes back in the level's own unit (price or percent of entry), rounded to five significant figures. Percent levels cannot cross the entry. The numeric editor fields remain the keyboard and screen-reader path; canvas keyboard nudging was not added.
+- Timeframe selector and manual Refresh; older history loads on scroll-left until exhausted. Loading, empty, error and stale states are explicit. TradingView attribution is shown.
+- Expanded chart is an in-page dialog sharing the same state, with Escape and focus restoration.
+- Manual instruments, no account or no instrument keep the placeholder.
+
+## First pass state
+
+October 1, 2026. Implemented on branch `t3code/3826a317`; not yet published.
+
+- Backend: `ICandleReader` and `CandleService` in Application (`MarketData/`), Hyperliquid `candleSnapshot` in the existing reader, `GET /api/accounts/{id}/candles`. Owner, enabled and manual checks precede the 10-second bounded cache. OHLC consistency and exact decimals are validated in the reader. `dex:` coins are rejected.
+- Frontend: `lightweight-charts@5.2.1` (adds `fancy-canvas@2.1.0`) behind `components/chart` (`CandleChart`, `ChartAdapter`, `createLightweightAdapter`), lazy-loaded as a separate ~54 kB gzip chunk. `features/market/useCandles` loads, refreshes manually and pages older windows. `features/plays/PlayChart` and `levels.ts` map draft entries to overlays and dragged prices back to the draft. jsdom tests use a fake adapter; `src/test/setup.ts` replaces the canvas renderer globally.
+- Placeholder remains for manual accounts, manual labels and no instrument. Capture stays disabled until evidence storage. TradingView attribution logo is shown.
+- Verified with a throwaway PostgreSQL and API against live Hyperliquid in headless Chromium 151 at 1402 × 877, 1001 and 390 px: real BTC candles, entry/stop/target tags and axis labels, stop drag updated the editor (83335 → 82681), timeframe switch, older-window paging on pan without a view jump, expanded dialog with Escape focus restoration, no page overflow and no console errors.
+- Known cosmetic issue: at narrow widths the TradingView attribution logo can overlap a level tag near the bottom-left.
+- Not verified: touch dragging, very low-priced instruments beyond kPEPE API output, long sessions near the 5,000-candle limit, screen-reader behavior of the canvas.
+
+## Owner refinements: Hyperliquid-style chart
+
+October 1, 2026. The owner asked for a chart closer to Hyperliquid's, using a screenshot as reference.
+
+- Candles are monochrome: white up, black down with a light edge (`--chart-candle-*` overridable). Red and green are reserved for stops (`--negative`) and targets (`--positive`). Entry lines and tags keep the entry's UI color; stop/target tags carry an entry-color marker.
+- A market strip shows Mark, Oracle, 24h change, 24h notional volume, open interest (base units) and hourly funding from `GET /api/accounts/{id}/market-context?instrument=`. The backend caches one `metaAndAssetCtxs` snapshot per venue for 10 seconds and keeps exact strings; the 24h change is display-only (mark vs previous-day price). Perpetuals have no market cap or contract address, so those Hyperliquid spot fields are omitted. A statistics failure does not block the chart; Refresh reloads both.
+- Timeframes use a compact bar (5m, 1h, 4h, D by default) plus a menu where any interval can be starred. Favorites and the last interval are stored in browser `localStorage` (`vessel.chart.preferences.v1`) as view preferences only.
+- The marked left drawing rail remains the later drawing-tools step (C6) and will follow this layout.
+- Verified against live Hyperliquid (HYPE, 4h, two entries) in headless Chromium at 1402, 1001 and 390 px: no overflow or console errors. `pnpm check` passes with 441 backend (40 skipped), 209 frontend and 76 prototype tests.
+
+## Owner refinements: average entry, chart chrome and tool rail
+
+October 1, 2026.
+
+- The Aggregate view plots `AVG`, the quantity-weighted planned entry price over entries that have both a price and a positive quantity share (shares normalized over those entries; at least two required). It is a dashed reference line, not draggable or selectable, and is also listed in the legend. The owner requested it explicitly; it is a plan average, not a fill or execution average.
+- Reusable chart chrome lives in `components/chart`: `ChartHeader` (symbol, caption, inline statistics), `ChartToolbar` with `ChartToolbarDivider`, `ChartIconButton` (tooltip and disabled reason), `ChartMenu` (single-choice popover with optional swatches), `TimeframeBar` and `ChartToolRail`. Plays composes them; analysis pages can reuse them without the Play model. Styles are in `components/chart/chart.css`.
+- The toolbar replaces sparse buttons: timeframes and the view menu on the left; update status, refresh, capture (disabled until evidence storage) and expand icons on the right.
+- The drawing rail is prepared with the agreed set (`drawingTools.tsx`): crosshair (active), trend line, horizontal line, rectangle zone, Fibonacci retracement, long/short position, text, snap and clear. All except the crosshair are visibly disabled with "Coming with drawing tools" until C6.
+- Verified against live Hyperliquid (HYPE, 4h, two entries, average 85.25) in headless Chromium at 1402, 1001 and 390 px with no overflow or console errors; Escape restores focus to the expand control. `pnpm check`: 441 backend (40 skipped), 213 frontend, 76 prototype.

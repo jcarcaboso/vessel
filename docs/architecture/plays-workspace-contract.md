@@ -1,5 +1,7 @@
 # Plays workspace first pass
 
+The chart placeholder is superseded for venue instruments by [the chart plan](chart-plan.md).
+
 October 1, 2026. The owner merged PR #1 and authorized the Plays page, delegated to Sol agents. This step builds the page and components from the approved prototype, with the chart deferred until its renderer and data requirements are researched.
 
 ## Scope

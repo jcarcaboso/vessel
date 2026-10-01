@@ -7,7 +7,8 @@ import type { PlayDraft } from './draft'
 import { DirectionToggle } from './DirectionToggle'
 import { InstrumentPicker } from './InstrumentPicker'
 import { PositionEditor } from './PositionEditor'
-import { CapitalContext, ChartPlaceholder, PlayJournal, PositionSummary } from './WorkspacePanels'
+import { ChartPanel } from './PlayChart'
+import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
 import './plays-workspace.css'
 
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false }: {
@@ -87,10 +88,12 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
     <div className="workspace-toolbar"><span><i />THE PLAY <small>Your idea, before hindsight.</small></span><span>Side-by-side · Layout locked</span></div>
     <div className="workspace" data-testid="workspace">
       <div className="left-column" data-testid="left-column">
-        <ChartPlaceholder entries={draft.entries} selectedId={selectedId} onSelect={id => {
+        <ChartPanel entries={draft.entries} selectedId={selectedId} onSelect={id => {
           setSelectedId(id)
           setSelectionRequest(current => current + 1)
-        }} instrument={draft.instrument} venue={account ? venueName(account.venueId) : null} />
+        }} instrument={draft.instrument} venue={account ? venueName(account.venueId) : null} direction={draft.direction}
+        source={account?.venueId === 'hyperliquid' && draft.instrumentSource === 'venue' ? { api, accountId: account.id } : null}
+        onEntriesChange={entries => onChange({ ...draft, entries })} />
         <PlayJournal notes={draft.notes} onChange={notes => onChange({ ...draft, notes })} />
       </div>
       <PositionEditor draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} />

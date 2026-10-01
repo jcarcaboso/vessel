@@ -56,7 +56,7 @@ Production requires HTTPS and a deliberate same-origin API/proxy. The dev proxy 
 - `src/components/ui/` holds editable Button/Input/Dialog/Tabs derived from the official shadcn registry, with MIT notice retained.
 - `public/fonts/` has the local Manrope font and OFL license. No remote font request is needed.
 
-This slice adds no router/global-state/form/chart library. Hash navigation and feature-owned React state cover the current pages.
+There is no router/global-state/form library. The Plays chart uses Lightweight Charts behind `src/components/chart`; see [the chart plan](../docs/architecture/chart-plan.md). Hash navigation and feature-owned React state cover the current pages.
 
 ## Verification and provenance
 
@@ -64,4 +64,4 @@ The root integration check runs TypeScript, lint, tests and production build. Te
 
 Native browser layout checks use clearly synthetic fixtures separately from actual API/PostgreSQL verification. These are not proof of a live user wallet session or full accessibility compliance.
 
-Direct versions remain pinned, and the root `pnpm-lock.yaml` owns dependency resolution. `package-provenance.json` records pnpm 12.8.1, Node 24.19.0, lock SHA-256 and npm-registry publication metadata as checked September 30, 2026. That original dependency audit remains applicable because this step added no packages. It covers 384 unique package/version pairs across package-manager and workspace lock documents; peer-qualified snapshots are not counted as extra registry versions. No npm/yarn lockfile is used.
+Direct versions remain pinned, and the root `pnpm-lock.yaml` owns dependency resolution. `package-provenance.json` records pnpm 12.8.1, Node 24.19.0, lock SHA-256 and npm-registry publication metadata as checked September 30, 2026. That original audit remains applicable; the chart addendum records `lightweight-charts` and `fancy-canvas`, read from the registry on October 1, 2026. It covers 384 unique package/version pairs across package-manager and workspace lock documents; peer-qualified snapshots are not counted as extra registry versions. No npm/yarn lockfile is used.

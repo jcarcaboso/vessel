@@ -17,7 +17,9 @@ function AccountWorkspace({ accounts, api }: { accounts: BrokerAccount[]; api: W
   return <PlayWorkspace accounts={accounts} portfolios={[portfolioFixture]} api={api} draft={draft} onChange={setDraft} />
 }
 
-const catalogueApi = { instruments: () => Promise.resolve(instrumentCatalogFixture) } as unknown as WorkspaceApi
+const catalogueApi = {
+  instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}), marketContext: () => new Promise(() => {}),
+} as unknown as WorkspaceApi
 
 function ReloadedWorkspace({ accounts, onDraft }: { accounts: BrokerAccount[]; onDraft: (draft: PlayDraft) => void }) {
   const [draft, setDraft] = useState(createDraft)
