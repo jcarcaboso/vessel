@@ -73,7 +73,7 @@ public sealed class AccountManagementApiTests
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var portfolio = new Portfolio(Guid.NewGuid(), owner, "Original"); store.Portfolios.Add(portfolio);
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Original"); account.Configure(portfolio.Id, "0x1111111111111111111111111111111111111111", null); store.Accounts.Add(account);
         await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
-        var response = await client.PutAsJsonAsync($"/api/accounts/{account.Id}", new { name = "Renamed", portfolioId = portfolio.Id, isEnabled = false, venueId = "manual", address = "attacker", manualAccountValueUsd = "999", ownerId = Guid.NewGuid() });
+        var response = await client.PutAsJsonAsync($"/api/accounts/{account.Id}", new { name = "Renamed", portfolioId = portfolio.Id, isEnabled = false, expectedRevision = 1, venueId = "manual", address = "attacker", manualAccountValueUsd = "999", ownerId = Guid.NewGuid() });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode); var dto = (await response.Content.ReadFromJsonAsync<AccountDto>())!;
         Assert.False(dto.IsEnabled); Assert.Equal("hyperliquid", dto.VenueId); Assert.Equal(account.Address, dto.Address); Assert.Null(dto.AccountValueUsd);
         Assert.Equal("null", await client.GetStringAsync($"/api/accounts/{account.Id}/snapshot")); Assert.Equal("[]", await client.GetStringAsync($"/api/accounts/{account.Id}/fills"));
@@ -98,7 +98,7 @@ public sealed class AccountManagementApiTests
         var responses = new[] {
             await client.PatchAsJsonAsync($"/api/portfolios/{portfolio.Id}", new { name = "New" }),
             await client.DeleteAsync($"/api/portfolios/{portfolio.Id}"),
-            await client.PutAsJsonAsync($"/api/accounts/{account.Id}", new UpdateAccountRequest("New", null, false)),
+            await client.PutAsJsonAsync($"/api/accounts/{account.Id}", new UpdateAccountRequest("New", null, false, 1)),
             await client.DeleteAsync($"/api/accounts/{account.Id}") };
         foreach (var response in responses)
         {
@@ -115,7 +115,7 @@ public sealed class AccountManagementApiTests
         var foreign = new Portfolio(Guid.NewGuid(), Guid.NewGuid(), "Foreign"); store.Portfolios.Add(foreign);
         var account = new Account(Guid.NewGuid(), owner, "manual", "Original"); store.Accounts.Add(account);
         await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
-        var response = await client.PutAsJsonAsync($"/api/accounts/{account.Id}", new UpdateAccountRequest("New", foreign.Id, false));
+        var response = await client.PutAsJsonAsync($"/api/accounts/{account.Id}", new UpdateAccountRequest("New", foreign.Id, false, 1));
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode); Assert.Null(account.PortfolioId); Assert.True(account.IsEnabled); Assert.Equal("Original", account.Name);
     }
 }

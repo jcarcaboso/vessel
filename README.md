@@ -19,6 +19,7 @@ This repository contains the approved Graphite prototype and the React/Vite/Type
 - [Current core implementation and limits](docs/architecture/core-workspace-state.md)
 - [Account and portfolio management](docs/architecture/account-management-state.md)
 - [Hyperliquid stablecoin wallet](docs/architecture/stablecoin-wallet.md)
+- [First-part PR review safeguards](docs/architecture/pr-review-fixes.md)
 
 The owner authorized foundation scaffolding after confirming perpetuals-first across venues and multiple active plays on the same account/instrument. Frontend and backend work were delegated to separate Sol agents. The confirmed MVP remains self-hosted and single-user with token access, Hyperliquid first and Lighter next, manual accounts, optional history import and in-page notifications.
 

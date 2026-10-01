@@ -19,15 +19,23 @@ app.Use(async (context, next) =>
     catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { }
     catch (Exception ex)
     {
-        if (context.Response.HasStarted) throw;
+        var expected = ex is WorkspaceException or BadHttpRequestException;
+        // Generate locally: neither a correlation header nor a raw URL is diagnostic input.
+        var traceId = System.Diagnostics.ActivityTraceId.CreateRandom().ToString();
         var (status, detail) = ex switch
         {
             WorkspaceException error => (error.StatusCode, error.Message),
             BadHttpRequestException => (400, "The request body or parameters are invalid."),
-            _ => (503, "The service is unavailable. Try again later.")
+            _ when SafeExceptionDiagnostics.IsDependencyOutage(ex) => (503, "The service is unavailable. Try again later."),
+            _ => (500, "An unexpected error occurred.")
         };
+        if (!expected)
+            SafeExceptionDiagnostics.Log(app.Logger, context, ex, traceId, status);
+        if (context.Response.HasStarted) throw;
         context.Response.Clear();
-        await Results.Problem(statusCode: status, detail: detail).ExecuteAsync(context);
+        context.Response.Headers["X-Correlation-ID"] = traceId;
+        await Results.Problem(statusCode: status, detail: detail,
+            extensions: new Dictionary<string, object?> { ["traceId"] = traceId }).ExecuteAsync(context);
     }
 });
 app.UseAuthentication();

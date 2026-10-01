@@ -14,13 +14,14 @@ public sealed class Account
     public string? LastSyncError { get; private set; }
     public string? HistoryNotice { get; private set; }
     public bool IsEnabled { get; private set; } = true;
+    public long SettingsRevision { get; private set; } = 1;
     private Account() { }
 
     public void Configure(Guid? portfolioId, string? address, decimal? manualAccountValueUsd)
     {
         if (portfolioId == Guid.Empty || manualAccountValueUsd < 0)
             throw new ArgumentException("Invalid account configuration.");
-        PortfolioId = portfolioId; Address = address; ManualAccountValueUsd = manualAccountValueUsd;
+        PortfolioId = portfolioId; Address = address?.ToLowerInvariant(); ManualAccountValueUsd = manualAccountValueUsd;
         SyncStatus = VenueId == "manual" ? "manual" : "not-synced";
     }
 
@@ -29,12 +30,16 @@ public sealed class Account
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         if (name.Length > 200 || portfolioId == Guid.Empty)
             throw new ArgumentException("Invalid account settings.");
+        var nextRevision = checked(SettingsRevision + 1);
         Name = name.Trim(); PortfolioId = portfolioId; IsEnabled = isEnabled;
+        SettingsRevision = nextRevision;
     }
 
     public void RecordSync(DateTimeOffset observedAtUtc, string historyNotice)
     {
-        LastSyncedAtUtc = observedAtUtc; HistoryNotice = historyNotice;
+        if (LastSyncedAtUtc is null || observedAtUtc > LastSyncedAtUtc)
+            LastSyncedAtUtc = observedAtUtc;
+        HistoryNotice = historyNotice;
         SyncStatus = "synced"; LastSyncError = null;
     }
 

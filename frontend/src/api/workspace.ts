@@ -24,6 +24,7 @@ export interface BrokerAccount {
   availableStablecoinNominalUsd?: string | null
   stablecoinScope?: string | null
   accountMode?: string | null
+  settingsRevision?: number
 }
 export interface ImportedFill {
   id: string
@@ -94,11 +95,12 @@ export interface WorkspaceApi {
   overview(signal?: AbortSignal): Promise<Overview>
   portfolios(signal?: AbortSignal): Promise<Portfolio[]>
   accounts(signal?: AbortSignal): Promise<BrokerAccount[]>
+  account(id: string, signal?: AbortSignal): Promise<BrokerAccount>
   createPortfolio(name: string): Promise<Portfolio>
   createAccount(account: CreateAccount): Promise<BrokerAccount>
   renamePortfolio(id: string, name: string): Promise<Portfolio>
   deletePortfolio(id: string): Promise<void>
-  updateAccount(id: string, settings: { name: string; portfolioId: string | null; isEnabled: boolean }): Promise<BrokerAccount>
+  updateAccount(id: string, settings: { name: string; portfolioId: string | null; isEnabled: boolean; expectedRevision: number }): Promise<BrokerAccount>
   deleteAccount(id: string): Promise<void>
   snapshot(id: string, signal?: AbortSignal): Promise<AccountSnapshot | null>
   fills(id: string, signal?: AbortSignal): Promise<ImportedFill[]>
@@ -125,7 +127,8 @@ const account = (v: unknown): v is BrokerAccount => object(v) && guid(v.id) &&
   (v.isEnabled === undefined || typeof v.isEnabled === 'boolean') &&
   (v.availableStablecoinNominalUsd === undefined || nullableDecimal(v.availableStablecoinNominalUsd)) &&
   (v.stablecoinScope === undefined || nullableText(v.stablecoinScope)) &&
-  (v.accountMode === undefined || nullableText(v.accountMode))
+  (v.accountMode === undefined || nullableText(v.accountMode)) &&
+  (v.settingsRevision === undefined || typeof v.settingsRevision === 'number' && count(v.settingsRevision) && v.settingsRevision > 0)
 const fill = (v: unknown): v is ImportedFill => object(v) && guid(v.id) && guid(v.accountId) &&
   ['contractId', 'side', 'direction', 'feeToken', 'orderId', 'sourceFillId', 'transactionHash'].every(k => text(v[k])) &&
   ['price', 'quantity', 'fee', 'closedPnlUsd'].every(k => decimal(v[k])) && date(v.occurredAtUtc) && v.playId === null
@@ -196,6 +199,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     overview: signal => request('/api/overview', overview, signal ? { signal } : {}),
     portfolios: signal => request('/api/portfolios', (v): v is Portfolio[] => Array.isArray(v) && v.every(portfolio), signal ? { signal } : {}),
     accounts: signal => request('/api/accounts', (v): v is BrokerAccount[] => Array.isArray(v) && v.every(account), signal ? { signal } : {}),
+    account: (id, signal) => request(accountPath(id), account, signal ? { signal } : {}),
     createPortfolio: name => request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name }) }),
     createAccount: body => request('/api/accounts', account, { method: 'POST', body: JSON.stringify(body) }),
     renamePortfolio: (id, name) => request(`/api/portfolios/${resourceId(id)}`, portfolio, { method: 'PATCH', body: JSON.stringify({ name }) }),

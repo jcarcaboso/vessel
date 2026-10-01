@@ -59,15 +59,31 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
   const [deleting, setDeleting] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [revision, setRevision] = useState(account.settingsRevision)
+  const [conflict, setConflict] = useState(account.settingsRevision === undefined)
+  async function reloadSettings() {
+    setPending(true); setError(null)
+    try {
+      const current = await api.account(account.id)
+      if (current.settingsRevision === undefined) throw new ApiError('invalid-response', 'Current settings version is unavailable. Reload after the API update.')
+      setName(current.name); setPortfolioId(current.portfolioId ?? '')
+      setEnabled(current.isEnabled !== false); setRevision(current.settingsRevision); setConflict(false)
+    } catch (cause) { setError(failure(cause)) }
+    finally { setPending(false) }
+  }
   async function save(event: FormEvent) {
     event.preventDefault(); setError(null)
     if (!name.trim()) { setError('Name the account.'); return }
+    if (conflict || revision === undefined) { setError('Reload current settings before saving.'); return }
     setPending(true)
     try {
-      await api.updateAccount(account.id, { name: name.trim(), portfolioId: portfolioId || null, isEnabled: enabled })
+      await api.updateAccount(account.id, { name: name.trim(), portfolioId: portfolioId || null, isEnabled: enabled, expectedRevision: revision })
       onChanged(enabled ? 'Account settings saved.' : 'Account disabled. Its retained imports are hidden until enabled again.')
       onClose()
-    } catch (cause) { setError(failure(cause)) }
+    } catch (cause) {
+      setError(failure(cause))
+      if (cause instanceof ApiError && (cause.status === 409 || cause.status === 412)) setConflict(true)
+    }
     finally { setPending(false) }
   }
   async function remove() {
@@ -93,8 +109,9 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
         <p className="field-help">Choosing No portfolio unlinks it without removing its history.</p>
         <label className="account-enabled-control"><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} disabled={pending} />Account enabled</label>
         <p className="field-help">Disabled accounts keep their records. Imported history and positions are hidden from normal views, excluded from totals, and refresh is blocked. Enable again to restore them.</p>
+        {conflict && <div className="workspace-form"><p className="field-help">These settings may be outdated. Reload to replace this form with the latest saved values, then review before saving. Your stale changes will not be replayed.</p><Button type="button" variant="outline" onClick={() => { void reloadSettings() }} disabled={pending}>Reload current settings</Button></div>}
         {error && <p className="error" role="alert">{error}</p>}
-        <div className="management-actions"><Button type="button" variant="ghost" className="danger-action" onClick={() => { setDeleting(true); setError(null) }} disabled={pending}><Trash2 size={14} />Delete</Button><Button type="submit" disabled={pending}>{pending ? 'Saving…' : 'Save settings'}</Button></div>
+        <div className="management-actions"><Button type="button" variant="ghost" className="danger-action" onClick={() => { setDeleting(true); setError(null) }} disabled={pending}><Trash2 size={14} />Delete</Button><Button type="submit" disabled={pending || conflict}>{pending ? 'Saving…' : 'Save settings'}</Button></div>
       </form>}
     </DialogContent>
   </Dialog>

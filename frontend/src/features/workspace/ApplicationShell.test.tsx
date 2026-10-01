@@ -11,6 +11,7 @@ function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
     overview: vi.fn().mockResolvedValue(emptyOverview),
     portfolios: vi.fn().mockResolvedValue([]), accounts: vi.fn().mockResolvedValue([]),
+    account: vi.fn().mockResolvedValue(accountFixture),
     createPortfolio: vi.fn().mockResolvedValue(portfolioFixture), createAccount: vi.fn().mockResolvedValue(accountFixture),
     renamePortfolio: vi.fn().mockResolvedValue(portfolioFixture), deletePortfolio: vi.fn().mockResolvedValue(undefined),
     updateAccount: vi.fn().mockResolvedValue(accountFixture), deleteAccount: vi.fn().mockResolvedValue(undefined),
@@ -193,5 +194,38 @@ describe('Main application shell', () => {
     expect(screen.getByText('Available token units')).toBeInTheDocument()
     expect(screen.getByText('10.123456')).toBeInTheDocument()
     expect(screen.getByText('Wallet funds, not guaranteed trading margin.')).toBeInTheDocument()
+  })
+  it('Reload retries failed detail reads when Overview metadata remains unchanged', async () => {
+    const client = api({
+      overview: vi.fn().mockImplementation(() => Promise.resolve(structuredClone(overviewFixture))),
+      snapshot: vi.fn().mockRejectedValueOnce(new ApiError('unavailable', 'Temporary detail outage.')).mockResolvedValue(null),
+      fills: vi.fn().mockResolvedValue([]),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'View Main account' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Temporary detail outage')
+    expect(client.snapshot).toHaveBeenCalledTimes(1)
+    await userEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    await waitFor(() => expect(client.snapshot).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(client.fills).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+    expect(await screen.findByText('No positions in the latest snapshot')).toBeInTheDocument()
+  })
+  it('Reload refreshes detail content even when account metadata is identical', async () => {
+    const observation = {
+      observedAtUtc: '2026-10-01T12:00:00Z', valueScope: 'primary-perpetual-dex',
+      accountValueUsd: '4', withdrawableUsd: '3', marginUsedUsd: '1',
+      positions: [{ contractId: 'Fresh-contract', signedQuantity: '1', entryPrice: '4', unrealizedPnlUsd: '0', marginUsedUsd: '1', leverage: 1 }],
+    }
+    const client = api({
+      overview: vi.fn().mockImplementation(() => Promise.resolve(structuredClone(overviewFixture))),
+      snapshot: vi.fn().mockResolvedValueOnce(null).mockResolvedValue(observation),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'View Main account' }))
+    await screen.findByText('No positions in the latest snapshot')
+    await userEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    expect(await screen.findByText('Fresh-contract')).toBeInTheDocument()
+    expect(client.snapshot).toHaveBeenCalledTimes(2)
   })
 })

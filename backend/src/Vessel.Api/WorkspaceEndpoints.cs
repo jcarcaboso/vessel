@@ -8,7 +8,7 @@ public static class WorkspaceEndpoints
     {
         var api = app.MapGroup("/api").RequireAuthorization();
         api.MapGet("/portfolios", async (WorkspaceService service, CancellationToken ct) =>
-            Results.Ok((await service.OverviewAsync(ct)).Portfolios));
+            Results.Ok(await service.PortfoliosAsync(ct)));
         api.MapGet("/portfolios/{id:guid}", async (Guid id, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.PortfolioAsync(id, ct)));
         api.MapPost("/portfolios", async (CreatePortfolioRequest request, WorkspaceService service, CancellationToken ct) =>
@@ -31,7 +31,7 @@ public static class WorkspaceEndpoints
             return Results.NoContent();
         });
         api.MapGet("/accounts", async (WorkspaceService service, CancellationToken ct) =>
-            Results.Ok((await service.OverviewAsync(ct)).Accounts));
+            Results.Ok(await service.AccountsAsync(ct)));
         api.MapGet("/accounts/{id:guid}", async (Guid id, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.AccountAsync(id, ct)));
         api.MapPost("/accounts", async (CreateAccountRequest request, WorkspaceService service, CancellationToken ct) =>

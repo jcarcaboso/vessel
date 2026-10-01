@@ -35,6 +35,8 @@ internal sealed class FixtureReader : IPerpetualVenueReader
 
 internal sealed class MemoryWorkspaceStore(Guid ownerId) : IWorkspaceStore
 {
+    public bool RejectOwnerWideReads { get; set; }
+    public bool RejectActivityReads { get; set; }
     public List<Portfolio> Portfolios { get; } = [];
     public List<Account> Accounts { get; } = [];
     public List<AccountSnapshot> Snapshots { get; } = [];
@@ -42,9 +44,16 @@ internal sealed class MemoryWorkspaceStore(Guid ownerId) : IWorkspaceStore
     public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct) => Task.FromResult(Portfolios.Where(p => p.OwnerId == ownerId).ToList());
     public Task<List<Account>> AccountsAsync(CancellationToken ct) => Task.FromResult(Accounts.Where(a => a.OwnerId == ownerId).ToList());
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => Task.FromResult(Accounts.SingleOrDefault(a => a.Id == id && a.OwnerId == ownerId));
-    public Task<List<AccountSnapshot>> SnapshotsAsync(CancellationToken ct) => Task.FromResult(Snapshots.Where(s => s.OwnerId == ownerId && Accounts.Any(a => a.Id == s.AccountId && a.IsEnabled)).ToList());
-    public Task<List<ImportedFill>> FillsAsync(Guid? accountId, int limit, CancellationToken ct) => Task.FromResult(Fills.Where(f => f.OwnerId == ownerId && Accounts.Any(a => a.Id == f.AccountId && a.IsEnabled) && (accountId == null || f.AccountId == accountId)).OrderByDescending(f => f.OccurredAtUtc).Take(limit).ToList());
-    public Task<int> FillCountAsync(CancellationToken ct) => Task.FromResult(Fills.Count(f => f.OwnerId == ownerId && Accounts.Any(a => a.Id == f.AccountId && a.IsEnabled)));
+    public Task<bool> SourceExistsAsync(string venueId, string address, CancellationToken ct) =>
+        Task.FromResult(Accounts.Any(a => a.OwnerId == ownerId && a.VenueId == venueId && a.Address == address));
+    public Task<AccountSnapshot?> SnapshotAsync(Guid id, CancellationToken ct) => Task.FromResult(Snapshots.SingleOrDefault(s =>
+        s.AccountId == id && s.OwnerId == ownerId && Accounts.Any(a => a.Id == s.AccountId && a.IsEnabled)));
+    public Task<List<AccountSnapshot>> SnapshotsAsync(CancellationToken ct) => RejectOwnerWideReads
+        ? throw new InvalidOperationException("Owner-wide snapshot read is not allowed in a detail operation.") : Task.FromResult(Snapshots.Where(s => s.OwnerId == ownerId && Accounts.Any(a => a.Id == s.AccountId && a.IsEnabled)).ToList());
+    public Task<List<ImportedFill>> FillsAsync(Guid? accountId, int limit, CancellationToken ct) => RejectActivityReads
+        ? throw new InvalidOperationException("Activity is not available for collection reads.") : Task.FromResult(Fills.Where(f => f.OwnerId == ownerId && Accounts.Any(a => a.Id == f.AccountId && a.IsEnabled) && (accountId == null || f.AccountId == accountId)).OrderByDescending(f => f.OccurredAtUtc).Take(limit).ToList());
+    public Task<int> FillCountAsync(CancellationToken ct) => RejectActivityReads
+        ? throw new InvalidOperationException("Activity is not available for collection reads.") : Task.FromResult(Fills.Count(f => f.OwnerId == ownerId && Accounts.Any(a => a.Id == f.AccountId && a.IsEnabled)));
     public Task AddPortfolioAsync(Portfolio portfolio, CancellationToken ct) { Portfolios.Add(portfolio); return Task.CompletedTask; }
     public Task AddAccountAsync(Account account, CancellationToken ct) { Accounts.Add(account); return Task.CompletedTask; }
     public async Task<T> WithAccountLockAsync<T>(Guid id, Func<Account, Task<T>> action, CancellationToken ct) =>

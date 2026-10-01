@@ -53,6 +53,8 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         await store.WithManagementLockAsync(async () =>
         {
             await ValidatePortfolio(request.PortfolioId, ct);
+            if (account.Address is { } address && await store.SourceExistsAsync(account.VenueId, address, ct))
+                throw new WorkspaceException(409, "An account for this venue and address already exists. Manage or re-enable that account.");
             await store.AddAccountAsync(account, ct);
             return true;
         }, ct);
@@ -91,10 +93,12 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         ValidateName(request.Name);
         return await store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
         {
+            if (request.ExpectedRevision != account.SettingsRevision)
+                throw new WorkspaceException(409, "Account settings changed. Reload the current settings before saving.");
             await ValidatePortfolio(request.PortfolioId, ct);
             account.UpdateSettings(request.Name, request.PortfolioId, request.IsEnabled);
             await store.SaveAsync(ct);
-            return ToDto(account, (await store.SnapshotsAsync(ct)).SingleOrDefault(s => s.AccountId == id));
+            return ToDto(account, await store.SnapshotAsync(id, ct));
         }, ct), ct);
     }
 
@@ -121,23 +125,41 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         return Normalize(text) == Normalize(value.ToString(CultureInfo.InvariantCulture));
     }
 
+    public async Task<IReadOnlyList<AccountDto>> AccountsAsync(CancellationToken ct)
+    {
+        var accounts = await store.AccountsAsync(ct);
+        var snapshots = (await store.SnapshotsAsync(ct)).ToDictionary(s => s.AccountId);
+        return accounts.Select(a => ToDto(a, snapshots.GetValueOrDefault(a.Id))).ToList();
+    }
+
+    public async Task<IReadOnlyList<PortfolioDto>> PortfoliosAsync(CancellationToken ct) =>
+        MapPortfolios(await store.PortfoliosAsync(ct), await store.AccountsAsync(ct),
+            (await store.SnapshotsAsync(ct)).ToDictionary(s => s.AccountId));
+
+    private static List<PortfolioDto> MapPortfolios(IReadOnlyList<Portfolio> portfolios, IReadOnlyList<Account> accounts,
+        IReadOnlyDictionary<Guid, AccountSnapshot> snapshots)
+    {
+        decimal? Value(Account a) => a.VenueId == "manual" ? a.ManualAccountValueUsd : snapshots.GetValueOrDefault(a.Id)?.AccountValueUsd;
+        return portfolios.Select(p =>
+        {
+            var members = accounts.Where(a => a.PortfolioId == p.Id).ToList();
+            var enabledMembers = members.Where(a => a.IsEnabled).ToList();
+            var values = enabledMembers.Select(Value).Where(v => v.HasValue).ToList();
+            return new PortfolioDto(p.Id, p.Name, members.Count, values.Count == 0 ? null : StablecoinTotals.Sum(values.Select(v => v!.Value)),
+                values.Count == 0 ? "unavailable" : values.Count == enabledMembers.Count ? "complete" : "partial");
+        }).ToList();
+    }
+
     public async Task<OverviewDto> OverviewAsync(CancellationToken ct)
     {
         var accounts = await store.AccountsAsync(ct);
         var snapshots = (await store.SnapshotsAsync(ct)).ToDictionary(s => s.AccountId);
         var dtos = accounts.Select(a => ToDto(a, snapshots.GetValueOrDefault(a.Id))).ToList();
         decimal? Value(Account a) => a.VenueId == "manual" ? a.ManualAccountValueUsd : snapshots.GetValueOrDefault(a.Id)?.AccountValueUsd;
-        var portfolios = (await store.PortfoliosAsync(ct)).Select(p =>
-        {
-            var members = accounts.Where(a => a.PortfolioId == p.Id).ToList();
-            var enabledMembers = members.Where(a => a.IsEnabled).ToList();
-            var values = enabledMembers.Select(Value).Where(v => v.HasValue).ToList();
-            return new PortfolioDto(p.Id, p.Name, members.Count, values.Count == 0 ? null : Money(values.Sum(v => v!.Value)),
-                values.Count == 0 ? "unavailable" : values.Count == enabledMembers.Count ? "complete" : "partial");
-        }).ToList();
+        var portfolios = MapPortfolios(await store.PortfoliosAsync(ct), accounts, snapshots);
         var known = accounts.Where(a => a.IsEnabled).Select(Value).Where(v => v.HasValue).ToList();
         var wallets = snapshots.Values.Where(s => s.StablecoinsObservedAtUtc.HasValue).ToList();
-        return new(portfolios, dtos, new(portfolios.Count, accounts.Count, known.Count == 0 ? null : Money(known.Sum(v => v!.Value)),
+        return new(portfolios, dtos, new(portfolios.Count, accounts.Count, known.Count == 0 ? null : StablecoinTotals.Sum(known.Select(v => v!.Value)),
             known.Count, dtos.Sum(a => a.PositionCount), await store.FillCountAsync(ct),
             wallets.Count == 0 ? null : StablecoinTotals.Sum(wallets.SelectMany(s => s.Stablecoins).Select(b => b.Available)), wallets.Count),
             (await store.FillsAsync(null, 100, ct)).Select(ToDto).ToList(),
@@ -147,20 +169,20 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     public async Task<SnapshotDto?> SnapshotAsync(Guid id, CancellationToken ct)
     {
         if (!(await RequireAccount(id, ct)).IsEnabled) return null;
-        var s = (await store.SnapshotsAsync(ct)).SingleOrDefault(s => s.AccountId == id);
+        var s = await store.SnapshotAsync(id, ct);
         return s is null ? null : new(s.ObservedAtUtc, s.ValueScope, Money(s.AccountValueUsd), Money(s.WithdrawableUsd), Money(s.MarginUsedUsd),
             s.Positions.OrderBy(p => p.ContractId).Select(p => new PositionDto(p.ContractId, Money(p.SignedQuantity)!, Money(p.EntryPrice)!,
                 Money(p.UnrealizedPnlUsd)!, Money(p.MarginUsedUsd)!, p.Leverage)).ToList(), WalletDto(s));
     }
 
     public async Task<PortfolioDto> PortfolioAsync(Guid id, CancellationToken ct) =>
-        (await OverviewAsync(ct)).Portfolios.SingleOrDefault(p => p.Id == id) ??
+        (await PortfoliosAsync(ct)).SingleOrDefault(p => p.Id == id) ??
         throw new WorkspaceException(404, "Portfolio not found.");
 
     public async Task<AccountDto> AccountAsync(Guid id, CancellationToken ct)
     {
         var account = await RequireAccount(id, ct);
-        var snapshot = (await store.SnapshotsAsync(ct)).SingleOrDefault(s => s.AccountId == id);
+        var snapshot = await store.SnapshotAsync(id, ct);
         return ToDto(account, snapshot);
     }
 
@@ -191,7 +213,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         }, ct);
         if (failed) throw new WorkspaceException(502, "The venue refresh failed. Try again later.");
         var updated = await RequireAccount(id, ct);
-        return ToDto(updated, (await store.SnapshotsAsync(ct)).SingleOrDefault(s => s.AccountId == id));
+        return ToDto(updated, await store.SnapshotAsync(id, ct));
     }
 
     private async Task<Account> RequireAccount(Guid id, CancellationToken ct) =>
@@ -200,7 +222,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         Money(a.VenueId == "manual" ? a.ManualAccountValueUsd : s?.AccountValueUsd), a.LastSyncedAtUtc,
         a.SyncStatus, a.LastSyncError, a.IsEnabled ? s?.Positions.Count ?? 0 : 0, a.HistoryNotice, a.IsEnabled,
         s?.StablecoinsObservedAtUtc is null ? null : StablecoinTotals.Sum(s.Stablecoins.Select(balance => balance.Available)),
-        s?.StablecoinScope, s?.AccountMode);
+        s?.StablecoinScope, s?.AccountMode, a.SettingsRevision);
     private static StablecoinWalletDto? WalletDto(AccountSnapshot snapshot) =>
         snapshot.StablecoinsObservedAtUtc is not { } observed ? null :
         new(observed, snapshot.AccountMode!, snapshot.StablecoinScope!,

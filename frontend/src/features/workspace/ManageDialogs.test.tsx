@@ -46,6 +46,7 @@ describe('Management dialogs', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save settings' }))
     await waitFor(() => expect(api.updateAccount).toHaveBeenCalledWith(accountFixture.id, {
       name: 'Hidden account', portfolioId: null, isEnabled: false,
+      expectedRevision: 1,
     }))
     expect(api.deleteAccount).not.toHaveBeenCalled()
     expect(close).toHaveBeenCalledOnce()
@@ -58,6 +59,7 @@ describe('Management dialogs', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save settings' }))
     await waitFor(() => expect(api.updateAccount).toHaveBeenCalledWith(accountFixture.id, {
       name: accountFixture.name, portfolioId: portfolioFixture.id, isEnabled: true,
+      expectedRevision: 1,
     }))
   })
   it('enables a disabled account without changing its source data', async () => {
@@ -68,6 +70,7 @@ describe('Management dialogs', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save settings' }))
     await waitFor(() => expect(api.updateAccount).toHaveBeenCalledWith(accountFixture.id, {
       name: accountFixture.name, portfolioId: portfolioFixture.id, isEnabled: true,
+      expectedRevision: 1,
     }))
   })
   it('requires permanent-delete confirmation and retains dialog on a linked-play conflict', async () => {
@@ -89,5 +92,29 @@ describe('Management dialogs', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save settings' }))
     expect(screen.getByRole('alert')).toHaveTextContent('Name the account')
     expect(api.updateAccount).not.toHaveBeenCalled()
+  })
+  it('does not replay a stale settings form after conflict and reloads current values explicitly', async () => {
+    const api = client({
+      updateAccount: vi.fn().mockRejectedValueOnce(new ApiError('http', 'Settings changed. Reload them.', 409)).mockResolvedValue(accountFixture),
+      account: vi.fn().mockResolvedValue({ ...accountFixture, name: 'Current saved name', isEnabled: false, portfolioId: null, settingsRevision: 2 }),
+    })
+    render(<ManageAccountDialog account={accountFixture} portfolios={[portfolioFixture]} api={api} onClose={vi.fn()} onChanged={vi.fn()} />)
+    await userEvent.clear(screen.getByLabelText('Account name'))
+    await userEvent.type(screen.getByLabelText('Account name'), 'Old form rename')
+    await userEvent.click(screen.getByRole('button', { name: 'Save settings' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Settings changed')
+    expect(screen.getByRole('button', { name: 'Save settings' })).toBeDisabled()
+    expect(api.updateAccount).toHaveBeenCalledTimes(1)
+    await userEvent.click(screen.getByRole('button', { name: 'Reload current settings' }))
+    await waitFor(() => expect(screen.getByLabelText('Account name')).toHaveValue('Current saved name'))
+    expect(screen.getByLabelText('Account enabled')).not.toBeChecked()
+    expect(screen.getByLabelText('Portfolio')).toHaveValue('')
+    expect(api.updateAccount).toHaveBeenCalledTimes(1)
+    await userEvent.clear(screen.getByLabelText('Account name'))
+    await userEvent.type(screen.getByLabelText('Account name'), 'Reviewed current rename')
+    await userEvent.click(screen.getByRole('button', { name: 'Save settings' }))
+    await waitFor(() => expect(api.updateAccount).toHaveBeenLastCalledWith(accountFixture.id, {
+      name: 'Reviewed current rename', portfolioId: null, isEnabled: false, expectedRevision: 2,
+    }))
   })
 })

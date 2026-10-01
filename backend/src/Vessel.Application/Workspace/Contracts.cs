@@ -11,12 +11,13 @@ public sealed record RenamePortfolioRequest(string Name);
 public sealed record UpdateAccountRequest(
     [property: JsonRequired] string Name,
     [property: JsonRequired] Guid? PortfolioId,
-    [property: JsonRequired] bool IsEnabled);
+    [property: JsonRequired] bool IsEnabled,
+    [property: JsonRequired] long ExpectedRevision);
 public sealed record PortfolioDto(Guid Id, string Name, int AccountCount, string? TotalValueUsd, string ValueCoverage);
 public sealed record AccountDto(Guid Id, Guid? PortfolioId, string Name, string VenueId, string? Address,
     string? AccountValueUsd, DateTimeOffset? LastSyncedAtUtc, string SyncStatus, string? LastSyncError,
     int PositionCount, string? HistoryNotice, bool IsEnabled,
-    string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null);
+    string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null, long SettingsRevision = 1);
 public sealed record PositionDto(string ContractId, string SignedQuantity, string EntryPrice,
     string UnrealizedPnlUsd, string MarginUsedUsd, int? Leverage);
 public sealed record SnapshotDto(DateTimeOffset ObservedAtUtc, string ValueScope, string? AccountValueUsd,
@@ -47,6 +48,8 @@ public interface IWorkspaceStore
     Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct);
     Task<List<Account>> AccountsAsync(CancellationToken ct);
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);
+    Task<AccountSnapshot?> SnapshotAsync(Guid id, CancellationToken ct);
+    Task<bool> SourceExistsAsync(string venueId, string address, CancellationToken ct);
     Task<List<AccountSnapshot>> SnapshotsAsync(CancellationToken ct);
     Task<List<ImportedFill>> FillsAsync(Guid? accountId, int limit, CancellationToken ct);
     Task<int> FillCountAsync(CancellationToken ct);

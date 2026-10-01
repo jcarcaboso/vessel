@@ -66,7 +66,7 @@ describe('Core workspace API', () => {
   })
   it('sends a complete account settings replacement including explicit unlink and enabled state', async () => {
     const fetch = response({ ...accountFixture, portfolioId: null, isEnabled: false })
-    const settings = { name: 'Renamed wallet', portfolioId: null, isEnabled: false }
+    const settings = { name: 'Renamed wallet', portfolioId: null, isEnabled: false, expectedRevision: 1 }
     await createWorkspaceApi('token').updateAccount(accountFixture.id, settings)
     expect(fetch).toHaveBeenCalledWith(`/api/accounts/${accountFixture.id}`, expect.objectContaining({
       method: 'PUT', body: JSON.stringify(settings),

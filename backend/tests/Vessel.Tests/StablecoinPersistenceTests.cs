@@ -47,11 +47,11 @@ public sealed class StablecoinPersistenceTests
         Assert.Equal(2, snapshot.StablecoinWallet.Balances.Count);
         Assert.Equal("14.00000000000000000000000001", (await service.OverviewAsync(default)).Totals.AvailableStablecoinNominalUsd);
         Assert.Equal(1, (await service.OverviewAsync(default)).Totals.StablecoinAccountCount);
-        await service.UpdateAccountAsync(account.Id, new("Wallet", null, false), default);
+        await service.UpdateAccountAsync(account.Id, new("Wallet", null, false, 1), default);
         Assert.Null(await service.SnapshotAsync(account.Id, default));
         Assert.Null((await service.OverviewAsync(default)).Totals.AvailableStablecoinNominalUsd);
         Assert.Equal(2, await db.Stablecoins.CountAsync());
-        await service.UpdateAccountAsync(account.Id, new("Wallet", null, true), default);
+        await service.UpdateAccountAsync(account.Id, new("Wallet", null, true, 2), default);
         Assert.Equal("14.00000000000000000000000001", (await service.AccountAsync(account.Id, default)).AvailableStablecoinNominalUsd);
         reader.Fail = true;
         await Assert.ThrowsAsync<WorkspaceException>(() => service.SyncAsync(account.Id, default));
@@ -67,11 +67,14 @@ public sealed class StablecoinPersistenceTests
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
         var reader = new FixtureReader();
-        reader.Result = reader.Result with { Snapshot = reader.Result.Snapshot with
+        reader.Result = reader.Result with
         {
-            StablecoinWallet = new(DateTimeOffset.UtcNow, "disabled", "hypercore-spot-stablecoins", [
+            Snapshot = reader.Result.Snapshot with
+            {
+                StablecoinWallet = new(DateTimeOffset.UtcNow, "disabled", "hypercore-spot-stablecoins", [
                 new("USDC", 0, "known-token", 10m, 1m, 9m)])
-        } };
+            }
+        };
         var service = new WorkspaceService(new Vessel.Persistence.WorkspaceStore(db), new CoreOwner(owner), reader);
         var account = await service.CreateAccountAsync(new(null, "Wallet", "hyperliquid", "0x" + new string('2', 40)), default);
         await service.SyncAsync(account.Id, default);
@@ -83,10 +86,13 @@ public sealed class StablecoinPersistenceTests
             var foreignService = new WorkspaceService(new Vessel.Persistence.WorkspaceStore(foreign), new CoreOwner(foreign.CurrentOwnerId), reader);
             Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => foreignService.SnapshotAsync(account.Id, default))).StatusCode);
         }
-        reader.Result = reader.Result with { Snapshot = reader.Result.Snapshot with
+        reader.Result = reader.Result with
         {
-            StablecoinWallet = new(DateTimeOffset.UtcNow, "unifiedAccount", "hypercore-spot-stablecoins", [])
-        } };
+            Snapshot = reader.Result.Snapshot with
+            {
+                StablecoinWallet = new(DateTimeOffset.UtcNow, "unifiedAccount", "hypercore-spot-stablecoins", [])
+            }
+        };
         await service.SyncAsync(account.Id, default);
         Assert.Equal("0", (await service.AccountAsync(account.Id, default)).AvailableStablecoinNominalUsd);
         Assert.Empty(await db.Stablecoins.ToListAsync());

@@ -6,23 +6,28 @@ import { ActivityTable } from './ActivityTable'
 import { amount, money, time, venueName } from './format'
 import { ArrowLeft, RefreshCw, Wallet } from 'lucide-react'
 
-export function AccountDetail({ account, api, refreshing, onSync, onBack, onManage }: {
-  account: BrokerAccount; api: WorkspaceApi; refreshing: boolean; onSync: (id: string) => void; onBack: () => void; onManage: () => void
+export function AccountDetail({ account, api, refreshing, onSync, onBack, onManage, reloadGeneration = 0 }: {
+  account: BrokerAccount; api: WorkspaceApi; refreshing: boolean; onSync: (id: string) => void; onBack: () => void; onManage: () => void; reloadGeneration?: number
 }) {
   const [snapshot, setSnapshot] = useState<AccountSnapshot | null>(null)
   const [fills, setFills] = useState<ImportedFill[]>([])
-  const [pending, setPending] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [completed, setCompleted] = useState<{ api: WorkspaceApi; key: string } | null>(null)
+  const [detailError, setDetailError] = useState<string | null>(null)
+  const requestKey = JSON.stringify([account.id, account.lastSyncedAtUtc, account.isEnabled, refreshing, reloadGeneration])
+  const pending = completed === null || completed.api !== api || completed.key !== requestKey
+  const error = pending ? null : detailError
   useEffect(() => {
     const controller = new AbortController()
     let active = true
+    // Loading/error visibility derives from the request generation, avoiding a
+    // synchronous effect render while keeping prior observations during retries.
     Promise.all([api.snapshot(account.id, controller.signal), api.fills(account.id, controller.signal)]).then(([nextSnapshot, nextFills]) => {
-      if (active) { setSnapshot(nextSnapshot); setFills(nextFills); setError(null); setPending(false) }
+      if (active) { setSnapshot(nextSnapshot); setFills(nextFills); setDetailError(null); setCompleted({ api, key: requestKey }) }
     }).catch(cause => {
-      if (active) { setError(cause instanceof ApiError ? cause.message : 'Unable to read the account.'); setPending(false) }
+      if (active) { setDetailError(cause instanceof ApiError ? cause.message : 'Unable to read the account.'); setCompleted({ api, key: requestKey }) }
     })
     return () => { active = false; controller.abort() }
-  }, [api, account.id, account.lastSyncedAtUtc, account.isEnabled, refreshing])
+  }, [api, account.id, requestKey])
   return <div className="workspace-page-content">
     <div className="detail-actions"><Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft size={15} />All accounts</Button><div className="detail-management"><Button variant="outline" onClick={onManage}>Manage account</Button>{account.venueId === 'hyperliquid' && <Button variant="outline" onClick={() => onSync(account.id)} disabled={refreshing || account.isEnabled === false}><RefreshCw size={15} className={refreshing ? 'is-spinning' : ''} />{refreshing ? 'Refreshing…' : 'Refresh account'}</Button>}</div></div>
     <section className="shell-panel account-detail-heading"><Wallet size={24} /><div><h2>{account.name}</h2><p>{venueName(account.venueId)} · {account.venueId === 'hyperliquid' ? 'read-only perpetuals' : account.venueId === 'manual' ? 'manual record' : 'reader not enabled'} · {time(account.lastSyncedAtUtc)}</p></div><span className="workspace-badge">{account.syncStatus}</span></section>

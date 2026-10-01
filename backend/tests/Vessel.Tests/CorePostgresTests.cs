@@ -17,7 +17,7 @@ public sealed class CorePostgresTests
     private static async Task<Guid> CreateVenueAccount(WorkspaceService service)
     {
         var portfolio = await service.CreatePortfolioAsync(new("Trading"), default);
-        return (await service.CreateAccountAsync(new(portfolio.Id, "Hyperliquid", "hyperliquid", "0x1111111111111111111111111111111111111111"), default)).Id;
+        return (await service.CreateAccountAsync(new(portfolio.Id, "Hyperliquid", "hyperliquid", "0x" + Guid.NewGuid().ToString("N") + "00000000"), default)).Id;
     }
 
     [PostgresFact]
@@ -52,7 +52,7 @@ public sealed class CorePostgresTests
             var fill = (await service.FillsAsync(id, default)).Single(); Assert.Null(fill.PlayId);
             Assert.Equal("0.0000000000000000000000000001", fill.Quantity); Assert.Equal("USDC", fill.FeeToken);
         }
-        reader.Result = reader.Result with { Snapshot = reader.Result.Snapshot with { AccountValueUsd = 7.000000000000000000000000001m, Positions = [] } };
+        reader.Result = reader.Result with { Snapshot = reader.Result.Snapshot with { ObservedAtUtc = reader.Result.Snapshot.ObservedAtUtc.AddHours(1), AccountValueUsd = 7.000000000000000000000000001m, Positions = [] } };
         await using (var db = database.Context(owner))
         {
             await Service(db, owner, reader).SyncAsync(id, default);
@@ -189,7 +189,7 @@ public sealed class CorePostgresTests
         }
         // Fault injection after the old positions are deleted in the transaction.
         // Actual adapter outputs satisfy schema bounds; persistence must still remain atomic.
-        reader.Result = reader.Result with { Snapshot = reader.Result.Snapshot with { AccountValueUsd = 999, Positions = [] }, HistoryNotice = new string('x', 1001) };
+        reader.Result = reader.Result with { Snapshot = reader.Result.Snapshot with { ObservedAtUtc = reader.Result.Snapshot.ObservedAtUtc.AddHours(1), AccountValueUsd = 999, Positions = [] }, HistoryNotice = new string('x', 1001) };
         await using (var db = database.Context(owner))
             await Assert.ThrowsAsync<DbUpdateException>(() => Service(db, owner, reader).SyncAsync(id, default));
         await using (var db = database.Context(owner))

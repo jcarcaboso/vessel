@@ -17,7 +17,7 @@ public sealed class AccountManagementPostgresTests
         new(new WorkspaceStore(db), new CoreOwner(owner), reader ?? new FixtureReader());
 
     private static async Task<AccountDto> VenueAccount(WorkspaceService service, Guid? portfolio = null) =>
-        await service.CreateAccountAsync(new(portfolio, "Venue", "hyperliquid", "0x1111111111111111111111111111111111111111"), default);
+        await service.CreateAccountAsync(new(portfolio, "Venue", "hyperliquid", "0x" + Guid.NewGuid().ToString("N") + "00000000"), default);
 
     [PostgresFact]
     public async Task Migration_defaults_existing_records_to_enabled_and_preserves_core_data()
@@ -30,7 +30,7 @@ public sealed class AccountManagementPostgresTests
         var account = await db.Accounts.SingleAsync(); Assert.True(account.IsEnabled); Assert.Null(account.PortfolioId);
         Assert.Equal(1.000000000000000000000000001m, account.ManualAccountValueUsd);
         Assert.Null((await db.Snapshots.SingleAsync()).AccountValueUsd); Assert.False(db.Database.HasPendingModelChanges());
-        Assert.Equal(4, (await db.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.Equal(db.Database.GetMigrations().Count(), (await db.Database.GetAppliedMigrationsAsync()).Count());
     }
 
     [PostgresFact]
@@ -50,7 +50,7 @@ public sealed class AccountManagementPostgresTests
         }
         await using (var db = database.Context(owner))
         {
-            var service = Service(db, owner, reader); var disabled = await service.UpdateAccountAsync(id, new("Disabled", portfolioId, false), default);
+            var service = Service(db, owner, reader); var disabled = await service.UpdateAccountAsync(id, new("Disabled", portfolioId, false, 1), default);
             Assert.False(disabled.IsEnabled); Assert.Equal(0, disabled.PositionCount);
             Assert.Null(await service.SnapshotAsync(id, default)); Assert.Empty(await service.FillsAsync(id, default));
             Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => service.SyncAsync(id, default))).StatusCode);
@@ -63,7 +63,7 @@ public sealed class AccountManagementPostgresTests
         }
         await using (var db = database.Context(owner))
         {
-            var service = Service(db, owner); var enabled = await service.UpdateAccountAsync(id, new("Enabled", portfolioId, true), default);
+            var service = Service(db, owner); var enabled = await service.UpdateAccountAsync(id, new("Enabled", portfolioId, true, 2), default);
             Assert.True(enabled.IsEnabled); Assert.Equal(1, enabled.PositionCount); Assert.NotNull(await service.SnapshotAsync(id, default)); Assert.Equal(100, (await service.FillsAsync(id, default)).Count);
             var overview = await service.OverviewAsync(default); Assert.Equal(126, overview.Totals.ImportedFillCount); Assert.Equal(2, overview.Totals.OpenPositionCount);
             Assert.Equal("2468.246913578024691357802469", overview.Totals.TotalAccountValueUsd);
@@ -81,7 +81,7 @@ public sealed class AccountManagementPostgresTests
             await service.SyncAsync(first, default); await service.SyncAsync(second, default);
             var account = await db.Accounts.SingleAsync(a => a.Id == first);
             db.Plays.AddRange(new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC")), new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC")));
-            await db.SaveChangesAsync(); await service.UpdateAccountAsync(second, new("Disabled", portfolioId, false), default);
+            await db.SaveChangesAsync(); await service.UpdateAccountAsync(second, new("Disabled", portfolioId, false, 1), default);
             await service.RenamePortfolioAsync(portfolioId, new("Renamed"), default); await service.DeletePortfolioAsync(portfolioId, default);
         }
         await using (var db = database.Context(owner))
@@ -89,7 +89,7 @@ public sealed class AccountManagementPostgresTests
             Assert.Empty(await db.Portfolios.ToListAsync()); Assert.Equal(2, await db.Accounts.CountAsync()); Assert.All(await db.Accounts.ToListAsync(), a => Assert.Null(a.PortfolioId));
             Assert.False((await db.Accounts.SingleAsync(a => a.Id == second)).IsEnabled); Assert.True((await db.Accounts.SingleAsync(a => a.Id == first)).IsEnabled);
             Assert.Equal(2, await db.Snapshots.CountAsync()); Assert.Equal(2, await db.Positions.CountAsync()); Assert.Equal(2, await db.Fills.CountAsync()); Assert.Equal(2, await db.Plays.CountAsync());
-            await Service(db, owner).UpdateAccountAsync(second, new("Reenabled", null, true), default);
+            await Service(db, owner).UpdateAccountAsync(second, new("Reenabled", null, true, 3), default);
             Assert.Equal(2, (await Service(db, owner).OverviewAsync(default)).Totals.ImportedFillCount);
         }
     }
@@ -107,11 +107,11 @@ public sealed class AccountManagementPostgresTests
         {
             var service = Service(db, owner); var first = await service.CreatePortfolioAsync(new("First"), default); var second = await service.CreatePortfolioAsync(new("Second"), default);
             id = (await VenueAccount(service, first.Id)).Id; other = (await VenueAccount(service)).Id; await service.SyncAsync(id, default); await service.SyncAsync(other, default);
-            var moved = await service.UpdateAccountAsync(id, new("Moved", second.Id, true), default); Assert.Equal(second.Id, moved.PortfolioId); Assert.Equal("hyperliquid", moved.VenueId);
-            Assert.Equal("0x1111111111111111111111111111111111111111", moved.Address); Assert.Equal(1, moved.PositionCount);
-            await service.UpdateAccountAsync(id, new("Unlinked", null, false), default);
-            Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateAccountAsync(other, new("Foreign", foreignPortfolio, false), default))).StatusCode);
-            Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateAccountAsync(foreignId, new("Foreign", null, false), default))).StatusCode);
+            var moved = await service.UpdateAccountAsync(id, new("Moved", second.Id, true, 1), default); Assert.Equal(second.Id, moved.PortfolioId); Assert.Equal("hyperliquid", moved.VenueId);
+            Assert.Equal((await db.Accounts.SingleAsync(a => a.Id == id)).Address, moved.Address); Assert.Equal(1, moved.PositionCount);
+            await service.UpdateAccountAsync(id, new("Unlinked", null, false, moved.SettingsRevision), default);
+            Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateAccountAsync(other, new("Foreign", foreignPortfolio, false, 1), default))).StatusCode);
+            Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateAccountAsync(foreignId, new("Foreign", null, false, 1), default))).StatusCode);
             Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.RenamePortfolioAsync(foreignPortfolio, new("Foreign"), default))).StatusCode);
             Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.DeletePortfolioAsync(foreignPortfolio, default))).StatusCode);
             Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.DeleteAccountAsync(foreignId, default))).StatusCode);
@@ -145,7 +145,7 @@ public sealed class AccountManagementPostgresTests
         await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString); using var client = factory.AuthorizedClient();
         var blocked = await client.DeleteAsync($"/api/accounts/{protectedId}"); Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
         Assert.Equal("application/problem+json", blocked.Content.Headers.ContentType?.MediaType); var error = await blocked.Content.ReadAsStringAsync(); Assert.DoesNotContain("Exception", error); Assert.DoesNotContain("FK_", error);
-        var disabled = await client.PutAsJsonAsync($"/api/accounts/{protectedId}", new UpdateAccountRequest("Disabled", null, false)); Assert.Equal(HttpStatusCode.OK, disabled.StatusCode);
+        var disabled = await client.PutAsJsonAsync($"/api/accounts/{protectedId}", new UpdateAccountRequest("Disabled", null, false, 1)); Assert.Equal(HttpStatusCode.OK, disabled.StatusCode);
         Assert.Equal("null", await client.GetStringAsync($"/api/accounts/{protectedId}/snapshot")); Assert.Equal("[]", await client.GetStringAsync($"/api/accounts/{protectedId}/fills"));
         Assert.Equal(HttpStatusCode.Conflict, (await client.DeleteAsync($"/api/accounts/{protectedId}")).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/accounts/{disposable}")).StatusCode);
@@ -153,7 +153,7 @@ public sealed class AccountManagementPostgresTests
         await using var verify = database.Context(owner);
         Assert.Equal(protectedId, (await verify.Accounts.SingleAsync()).Id); Assert.Single(await verify.Snapshots.ToListAsync()); Assert.Single(await verify.Positions.ToListAsync()); Assert.Single(await verify.Fills.ToListAsync());
         Assert.Equal(2, await verify.Plays.CountAsync()); Assert.Contains(await verify.Plays.ToListAsync(), p => p.Status == PlayStatus.Closed); Assert.Contains(await verify.Plays.ToListAsync(), p => p.Status == PlayStatus.Active);
-        var reenabled = await client.PutAsJsonAsync($"/api/accounts/{protectedId}", new UpdateAccountRequest("Enabled", null, true)); Assert.Equal(HttpStatusCode.OK, reenabled.StatusCode);
+        var reenabled = await client.PutAsJsonAsync($"/api/accounts/{protectedId}", new UpdateAccountRequest("Enabled", null, true, 2)); Assert.Equal(HttpStatusCode.OK, reenabled.StatusCode);
         Assert.NotNull(await client.GetFromJsonAsync<SnapshotDto>($"/api/accounts/{protectedId}/snapshot")); Assert.Single((await client.GetFromJsonAsync<FillDto[]>($"/api/accounts/{protectedId}/fills"))!);
     }
 
@@ -165,7 +165,7 @@ public sealed class AccountManagementPostgresTests
         var reader = new GatedReader(); await using var syncing = database.Context(owner); await using var changing = database.Context(owner);
         await changing.Database.OpenConnectionAsync(); var pid = ((NpgsqlConnection)changing.Database.GetDbConnection()).ProcessID;
         var sync = Service(syncing, owner, reader).SyncAsync(id, default); await reader.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        var disable = Service(changing, owner).UpdateAccountAsync(id, new("Disabled", null, false), default);
+        var disable = Service(changing, owner).UpdateAccountAsync(id, new("Disabled", null, false, 1), default);
         try { await WaitForLock(database, pid); Assert.False(disable.IsCompleted); }
         finally { reader.Release.TrySetResult(); }
         await sync; Assert.False((await disable).IsEnabled);
@@ -187,7 +187,7 @@ public sealed class AccountManagementPostgresTests
         try { await WaitForLock(database, pid); Assert.False(delete.IsCompleted); }
         finally { reader.Release.TrySetResult(); }
         // A concurrent delete can win immediately after sync commits, so its readback may be 404.
-        try { await sync; } catch (WorkspaceException error) { Assert.Equal(404, error.StatusCode); }
+        try { await sync; } catch (WorkspaceException error) { Assert.Contains(error.StatusCode, new[] { 404, 409 }); }
         await delete;
         await using var verify = database.Context(owner); Assert.Empty(await verify.Accounts.ToListAsync()); Assert.Empty(await verify.Snapshots.ToListAsync()); Assert.Empty(await verify.Positions.ToListAsync()); Assert.Empty(await verify.Fills.ToListAsync());
         Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => Service(verify, owner, reader).SyncAsync(id, default))).StatusCode); Assert.Equal(1, reader.Reads);
@@ -258,9 +258,9 @@ public sealed class AccountManagementPostgresTests
             try
             {
                 if (i % 2 == 0) await VenueAccount(service, target);
-                else await service.UpdateAccountAsync(existing, new("Moved", target, i % 3 == 0), default);
+                else await service.UpdateAccountAsync(existing, new("Moved", target, i % 3 == 0, (await service.AccountAsync(existing, default)).SettingsRevision), default);
             }
-            catch (WorkspaceException error) { Assert.Equal(404, error.StatusCode); }
+            catch (WorkspaceException error) { Assert.Contains(error.StatusCode, new[] { 404, 409 }); }
         }).ToList();
         operations.Add(Task.Run(async () => { await using var db = database.Context(owner); await Service(db, owner).DeletePortfolioAsync(target, default); }));
         await Task.WhenAll(operations).WaitAsync(TimeSpan.FromSeconds(20));

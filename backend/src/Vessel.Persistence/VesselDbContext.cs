@@ -21,7 +21,11 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var account = modelBuilder.Entity<Account>();
-        account.ToTable("accounts");
+        account.ToTable("accounts", table =>
+        {
+            table.HasCheckConstraint("CK_accounts_normalized_address", "\"Address\" IS NULL OR \"Address\" = lower(\"Address\")");
+            table.HasCheckConstraint("CK_accounts_settings_revision", "\"SettingsRevision\" >= 1");
+        });
         account.HasKey(x => x.Id);
         account.HasAlternateKey(x => new { x.OwnerId, x.Id });
         account.Property(x => x.VenueId).HasMaxLength(64);
@@ -36,6 +40,9 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         portfolio.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         account.HasOne<Portfolio>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PortfolioId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        account.HasIndex(x => new { x.OwnerId, x.VenueId, x.Address }).IsUnique()
+            .HasDatabaseName("UX_accounts_owner_venue_address").HasFilter("\"Address\" IS NOT NULL");
+        account.Property(x => x.SettingsRevision).HasDefaultValue(1L);
         account.Property(x => x.IsEnabled).HasDefaultValue(true);
         account.Property(x => x.Address).HasMaxLength(42);
         account.Property(x => x.SyncStatus).HasMaxLength(32);

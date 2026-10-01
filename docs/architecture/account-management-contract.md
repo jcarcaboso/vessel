@@ -18,11 +18,11 @@ All routes remain owner-scoped. Unknown/foreign IDs return 404 without revealing
 
 - `PATCH /api/portfolios/{id}`, `{ "name": "New name" }`, returns updated `PortfolioDto`.
 - `DELETE /api/portfolios/{id}`, returns 204 after unlinking accounts.
-- `PUT /api/accounts/{id}`, full settings body `{ "name": "New name", "portfolioId": null, "isEnabled": true }`, returns updated `AccountDto`.
+- `PUT /api/accounts/{id}`, full settings body `{ "name": "New name", "portfolioId": null, "isEnabled": true, "expectedRevision": 1 }`, returns updated `AccountDto`.
 - `DELETE /api/accounts/{id}`, returns 204 or 409 when Plays prevent deletion.
 - `CreateAccountRequest.portfolioId` becomes nullable and optional.
 - `AccountDto` adds `isEnabled: boolean`; the migration defaults existing accounts to enabled.
-- Full account PUT must require all three settings properties, including explicit portfolio null. Omitted properties must not silently disable or unlink accounts.
+- Full account PUT requires all settings properties and `expectedRevision`, including explicit portfolio null. Omitted properties must not silently disable or unlink accounts. `AccountDto.settingsRevision` changes with settings and portfolio-deletion unlinking, independently of sync time. A stale expected revision returns 409 rather than overwrite newer settings.
 
 Existing account DTOs may be accepted temporarily by the frontend during the dev-server rollout with missing `isEnabled` treated as enabled. New API output always includes it.
 

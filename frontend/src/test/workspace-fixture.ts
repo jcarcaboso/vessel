@@ -7,7 +7,7 @@ export const portfolioFixture: Portfolio = {
 export const accountFixture: BrokerAccount = {
   id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', portfolioId: portfolioFixture.id,
   name: 'Main account', venueId: 'manual', address: null, accountValueUsd: '1250.123456',
-  lastSyncedAtUtc: null, syncStatus: 'manual', lastSyncError: null, positionCount: 0, historyNotice: null, isEnabled: true,
+  lastSyncedAtUtc: null, syncStatus: 'manual', lastSyncError: null, positionCount: 0, historyNotice: null, isEnabled: true, settingsRevision: 1,
 }
 export const emptyOverview: Overview = {
   portfolios: [], accounts: [],
