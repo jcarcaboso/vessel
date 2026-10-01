@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Vessel.Api/Vessel.Api.csproj" />
+    <Project Path="src/Vessel.Application/Vessel.Application.csproj" />
+    <Project Path="src/Vessel.Domain/Vessel.Domain.csproj" />
+    <Project Path="src/Vessel.Infrastructure/Vessel.Infrastructure.csproj" />
+    <Project Path="src/Vessel.Persistence/Vessel.Persistence.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Vessel.Tests/Vessel.Tests.csproj" />
+  </Folder>
+</Solution>

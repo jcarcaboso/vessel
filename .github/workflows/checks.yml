@@ -1,0 +1,58 @@
+name: Foundation checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: vessel_tests
+          POSTGRES_USER: vessel
+          # Ephemeral CI service password, not an application credential.
+          POSTGRES_PASSWORD: vessel-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vessel -d vessel_tests"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      Vessel_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=vessel_tests;Username=vessel;Password=vessel-ci-only
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+      - name: Enable pinned pnpm
+        run: |
+          corepack enable
+          corepack install
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Prototype regressions
+        run: pnpm test:prototype
+      - name: Backend restore
+        run: dotnet restore backend/Vessel.slnx --locked-mode
+      - name: Backend build
+        run: dotnet build backend/Vessel.slnx --no-restore --configuration Release
+      - name: Backend and PostgreSQL tests
+        run: dotnet test backend/Vessel.slnx --no-build --configuration Release
+      - name: Frontend install
+        run: pnpm install --frozen-lockfile
+      - name: Frontend types, lint and tests
+        run: |
+          pnpm --filter vessel-frontend typecheck
+          pnpm --filter vessel-frontend lint
+          pnpm --filter vessel-frontend test
+      - name: Frontend production build
+        run: pnpm --filter vessel-frontend build
