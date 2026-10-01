@@ -163,6 +163,9 @@ describe('Play journal', () => {
       return <PlayJournal notes={notes} onChange={(next) => { setNotes(next); onChange(next) }} />
     }
     render(<JournalHarness />)
+    // Tabs share the heading row so the note field keeps most of the journal height.
+    expect(screen.getByRole('heading', { name: 'Play journal' }).closest('header'))
+      .toContainElement(screen.getByRole('tablist', { name: 'Journal sections' }))
     const sections = ['Thesis', 'Invalidation', 'Strategy', 'Evidence', 'Review']
     for (const label of sections) {
       await userEvent.click(screen.getByRole('tab', { name: label }))

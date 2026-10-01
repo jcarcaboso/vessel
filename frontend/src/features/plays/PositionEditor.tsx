@@ -5,6 +5,21 @@ import { Input } from '@/components/ui/input'
 import { createEntry, type DraftEntry, type PlayDraft } from './draft'
 import { EntryForm } from './EntryForm'
 import { Expand, Plus, Trash2 } from 'lucide-react'
+
+const leveragePresets = [1, 5, 10, 25]
+
+// Plain share bookkeeping, not a sizing calculation. Two decimals with the remainder on the last entry.
+function equalShares(count: number) {
+  const base = Math.floor(10000 / count) / 100
+  return Array.from({ length: count }, (_, index) =>
+    String(index === count - 1 ? Number((100 - base * (count - 1)).toFixed(2)) : base))
+}
+
+function allocatedShare(entries: DraftEntry[]) {
+  const shares = entries.map(entry => entry.share.trim()).filter(Boolean).map(Number)
+  if (!shares.length || shares.some(share => !Number.isFinite(share))) return null
+  return Number(shares.reduce((total, share) => total + share, 0).toFixed(2))
+}
 import { AvailableBudget } from './WorkspacePanels'
 
 export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect }: {
@@ -22,6 +37,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   const previousSelection = useRef({ id: selectedId, request: selectionRequest })
   const sidebarBeforeExpansion = useRef({ selectedId, scrollTop: 0 })
   const selected = draft.entries.find(entry => entry.id === selectedId) ?? draft.entries[0]
+  const allocated = allocatedShare(draft.entries)
 
   const revealEntry = useCallback((id: string, focus: boolean) => {
     const container = sidebar.current
@@ -50,6 +66,11 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   function updateLeverage(value: string) {
     const leverage = value === '' ? '' : String(Math.min(100, Math.max(1, Math.round(Number(value)))))
     onChange({ ...draft, leverage })
+  }
+
+  function splitEqually() {
+    const shares = equalShares(draft.entries.length)
+    onChange({ ...draft, entries: draft.entries.map((entry, index) => ({ ...entry, share: shares[index]! })) })
   }
 
   function addEntry() {
@@ -101,8 +122,20 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
             aria-label="Leverage (×)" onChange={event => updateLeverage(event.target.value)} />
           <span aria-hidden="true">×</span>
         </div>
+        <div className="leverage-presets" role="group" aria-label="Leverage presets">
+          {leveragePresets.map(preset => <button key={preset} type="button" aria-pressed={draft.leverage === String(preset)}
+            onClick={() => updateLeverage(String(preset))}>{preset}×</button>)}
+        </div>
       </div>
       <p className="muted">Sizing and payoff calculations are deferred. Changing sizing units clears size. The 1× to 100× control range is not venue-validated.</p>
+    </div>
+    <div className="entries-heading">
+      <div><h3>Distribute your entries <span className="entry-count">{String(draft.entries.length).padStart(2, '0')}</span></h3>
+        <p>Shares split total quantity, not risk or margin.</p></div>
+      <div className="entries-allocation">
+        <span data-complete={allocated === 100}>{allocated === null ? 'Shares not set' : `${allocated}% allocated`}</span>
+        <Button type="button" variant="ghost" size="sm" className="split-equally" onClick={splitEqually}>Split equally</Button>
+      </div>
     </div>
     <label className="entry-picker" htmlFor={`${prefix}-selected-entry`}>Selected entry
       <select id={`${prefix}-selected-entry`} value={selected?.id ?? ''} onChange={event => selectEntry(event.target.value)}>

@@ -190,6 +190,35 @@ describe('local-draft position editor', () => {
     expect(screen.getByRole('button', { name: 'Add target to Entry 1' })).toBeEnabled()
   })
 
+  it('applies leverage presets as whole multipliers and marks the active preset', async () => {
+    const { user, onChange } = renderEditor(1)
+    const presets = screen.getByRole('group', { name: 'Leverage presets' })
+    expect(within(presets).getByRole('button', { name: '1×' })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(within(presets).getByRole('button', { name: '25×' }))
+    expect(onChange.mock.lastCall?.[0]).toMatchObject({ leverage: '25', size: '' })
+    expect(field('Leverage (×)')).toHaveValue(25)
+    expect(within(presets).getByRole('button', { name: '25×' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(presets).getByRole('button', { name: '1×' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('shows allocated quantity shares and splits them equally only on request', async () => {
+    const { user, onChange } = renderEditor(1)
+    expect(screen.getByRole('heading', { name: 'Distribute your entries 01' })).toBeInTheDocument()
+    expect(screen.getByText('100% allocated')).toHaveAttribute('data-complete', 'true')
+    await user.click(screen.getByRole('button', { name: 'Add entry' }))
+    await user.click(screen.getByRole('button', { name: 'Add entry' }))
+    expect(onChange.mock.lastCall?.[0].entries.map(entry => entry.share)).toEqual(['100', '', ''])
+    expect(screen.getByText('100% allocated')).toBeInTheDocument()
+    await user.clear(field('Entry 1 quantity share (%)'))
+    expect(screen.getByText('Shares not set')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Split equally' }))
+    expect(onChange.mock.lastCall?.[0].entries.map(entry => entry.share)).toEqual(['33.33', '33.33', '33.34'])
+    expect(screen.getByRole('heading', { name: 'Distribute your entries 03' })).toBeInTheDocument()
+    expect(screen.getByText('100% allocated')).toHaveAttribute('data-complete', 'true')
+    await user.clear(field('Entry 3 quantity share (%)'))
+    expect(screen.getByText('66.66% allocated')).toHaveAttribute('data-complete', 'false')
+  })
+
   it('adds blank entries using distinct identities without changing existing shares or reusing names', async () => {
     vi.stubGlobal('crypto', {})
     const { user, initial, onChange } = renderEditor(1)

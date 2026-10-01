@@ -143,13 +143,16 @@ export function PlayJournal({ notes, onChange }: {
 }) {
   const id = useId()
   return <section className="panel journal-panel" aria-label="Play journal" data-testid="journal-panel">
-    <header className="panel-heading"><div className="journal-heading"><span className="journal-icon" aria-hidden="true"><NotebookPen size={17} /></span><div><h2>Play journal</h2><p>The reasoning behind the position.</p></div></div><span className="journal-draft-label">Draft notes</span></header>
     <Tabs defaultValue="thesis" className="journal-tabs">
-      <TabsList className="journal-tab-list" aria-label="Journal sections">
-        {journalSections.map(([key, label]) => <TabsTrigger key={key} value={key}>{label}</TabsTrigger>)}
-      </TabsList>
+      <header className="panel-heading journal-header">
+        <div className="journal-heading"><span className="journal-icon" aria-hidden="true"><NotebookPen size={15} /></span><h2>Play journal</h2></div>
+        <TabsList className="journal-tab-list" aria-label="Journal sections">
+          {journalSections.map(([key, label]) => <TabsTrigger key={key} value={key}>{label}</TabsTrigger>)}
+        </TabsList>
+        <span className="journal-draft-label">Draft notes</span>
+      </header>
       {journalSections.map(([key, label, help]) => <TabsContent key={key} value={key} className="journal-tab-content">
-        <label htmlFor={`${id}-${key}`}>{label}</label>
+        <label className="sr-only" htmlFor={`${id}-${key}`}>{label}</label>
         <p className="muted" id={`${id}-${key}-help`}>{help}</p>
         <textarea id={`${id}-${key}`} value={notes[key]} aria-describedby={`${id}-${key}-help`}
           placeholder={`Write your ${label.toLowerCase()} notes.`}

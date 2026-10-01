@@ -97,3 +97,16 @@ October 1, 2026. The owner requested icon-only desktop navigation and further pr
 - Native T3 checks verify 78-pixel desktop collapse, aligned 940-pixel columns, icon-link names/tooltips, and text contrast above 4.5:1. At 320 pixels, the drawer remains 236 pixels, desktop collapse is hidden, no page overflow occurs, and the bounded editor and expanded dialog remain usable. Native Escape restores focus for both drawer and dialog.
 
 T3 snapshot and viewport-resize calls timed out during this pass. Geometry/control checks used the native browser and a same-origin 320-pixel frame; a T3 recording was captured. No new screenshot, device emulation or full accessibility audit is claimed. No backend, dependency, user-record, private-environment, firewall or existing LAN-service changes in this styling pass.
+
+## PR review polish
+
+October 1, 2026. Review of PR #2 against the approved Graphite prototype, using a fixture API and headless Chromium screenshots at 1402, 1200, 1001, 900, 800, 390 and 320 CSS pixels.
+
+- Journal tabs share the heading row, as in the prototype, and the repeated per-tab label is screen-reader only. At 1402 pixels the note field grows from about 124 to 204 pixels without moving any locked section.
+- The position editor restores the prototype's "Distribute your entries" heading with entry count, the plain sum of entered quantity shares and an explicit Split equally action (two decimals, remainder on the last entry). Adding an entry still leaves its share blank. The share total is bookkeeping, not position validation.
+- Leverage gains the prototype's 1×, 5×, 10× and 25× presets. They set the same whole-number draft value as the slider and input.
+- "Expand selected entry" now uses the same 10-pixel button text as its siblings. `DialogTrigger asChild` replaces the button's `data-slot`, so the shared rule did not apply.
+- Number spinners are hidden in Plays fields so short values such as a 100% target share fit at 320 pixels. Direction spans two context columns between 851 and 1050 pixels instead of crossing the divider.
+- The application has an inline favicon, removing the only console error.
+
+`pnpm check` passes 171 frontend, 387 backend and 76 prototype cases; 40 PostgreSQL cases still skip without a test connection. No page-level horizontal overflow at the widths above; columns stay aligned at 940 pixels; Escape restores focus from the expanded editor. T3 preview automation timed out again, so screenshots used a local headless Chromium against a synthetic API.
