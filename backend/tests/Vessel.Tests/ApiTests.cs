@@ -1,0 +1,156 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+
+namespace Vessel.Tests;
+
+public sealed class ApiTests
+{
+    private const string TestToken = "test-only-bearer-secret";
+
+    [Fact]
+    public async Task Liveness_is_anonymous_without_auth_or_database_configuration()
+    {
+        await using var factory = new ApiFactory(null);
+        using var client = factory.CreateClient();
+        var response = await client.GetAsync("/health/live");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("{\"status\":\"healthy\"}", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Unannotated_routes_use_the_private_fallback_policy()
+    {
+        await using var factory = new ApiFactory(TestToken);
+        using var client = factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/future-route")).StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", TestToken);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/future-route")).StatusCode);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("wrong-token")]
+    [InlineData("Bearer")]
+    public async Task System_rejects_missing_wrong_or_malformed_credentials(string? token)
+    {
+        await using var factory = new ApiFactory(TestToken);
+        using var client = factory.CreateClient();
+        if (token is not null) client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"Bearer {token}");
+        var response = await client.GetAsync("/api/system");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("Bearer", response.Headers.WwwAuthenticate.Single().Scheme);
+        Assert.DoesNotContain(TestToken, await response.Content.ReadAsStringAsync());
+        Assert.DoesNotContain(TestToken, string.Join(Environment.NewLine, factory.Logs));
+        if (token is not null) Assert.DoesNotContain($"Bearer {token}", string.Join(Environment.NewLine, factory.Logs));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task Unconfigured_token_fails_closed_even_with_a_bearer(string? configuredToken)
+    {
+        await using var factory = new ApiFactory(configuredToken);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", TestToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/system")).StatusCode);
+        Assert.DoesNotContain(TestToken, string.Join(Environment.NewLine, factory.Logs));
+    }
+
+    [Fact]
+    public async Task Valid_bearer_returns_the_exact_shared_contract_without_a_database()
+    {
+        await using var factory = new ApiFactory(TestToken);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", TestToken);
+        var response = await client.GetAsync("/api/system");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        using var json = JsonDocument.Parse(body);
+        var root = json.RootElement;
+        Assert.Equal(new[] { "application", "stage", "owner", "marketScope", "allowsConcurrentPlays", "venues" },
+            root.EnumerateObject().Select(x => x.Name));
+        Assert.Equal("Vessel", root.GetProperty("application").GetString());
+        Assert.Equal("core", root.GetProperty("stage").GetString());
+        Assert.Equal("perpetuals", root.GetProperty("marketScope").GetString());
+        Assert.True(root.GetProperty("allowsConcurrentPlays").GetBoolean());
+        Assert.Equal("11111111-1111-1111-1111-111111111111", root.GetProperty("owner").GetProperty("id").GetString());
+        Assert.Equal("Owner", root.GetProperty("owner").GetProperty("displayName").GetString());
+        Assert.Equal(new[] { "hyperliquid:Hyperliquid:read-only", "lighter:Lighter:planned", "quantfury:Quantfury:candidate", "manual:Manual:manual" },
+            root.GetProperty("venues").EnumerateArray().Select(v =>
+                $"{v.GetProperty("id").GetString()}:{v.GetProperty("name").GetString()}:{v.GetProperty("status").GetString()}"));
+        Assert.DoesNotContain(TestToken, body);
+        Assert.DoesNotContain(TestToken, string.Join(Environment.NewLine, factory.Logs));
+    }
+
+    [Fact]
+    public async Task Configured_owner_is_seeded_by_server_not_client_claims()
+    {
+        var ownerId = Guid.NewGuid();
+        await using var factory = new ApiFactory(TestToken, ownerId.ToString(), "Configured owner");
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", TestToken);
+        using var json = JsonDocument.Parse(await client.GetStringAsync($"/api/system?ownerId={Guid.NewGuid()}"));
+        Assert.Equal(ownerId, json.RootElement.GetProperty("owner").GetProperty("id").GetGuid());
+        Assert.Equal("Configured owner", json.RootElement.GetProperty("owner").GetProperty("displayName").GetString());
+    }
+
+    [Fact]
+    public async Task Empty_owner_identity_fails_closed()
+    {
+        await using var factory = new ApiFactory(TestToken, Guid.Empty.ToString());
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", TestToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/system")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Development_openapi_is_bearer_protected_and_renders()
+    {
+        await using var factory = new ApiFactory(TestToken);
+        using var client = factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/openapi/v1.json")).StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", TestToken);
+        using var document = JsonDocument.Parse(await client.GetStringAsync("/openapi/v1.json"));
+        Assert.True(document.RootElement.GetProperty("paths").TryGetProperty("/api/system", out _));
+    }
+
+    private sealed class ApiFactory(string? token, string? ownerId = null, string? ownerName = null)
+        : WebApplicationFactory<Program>
+    {
+        public List<string> Logs { get; } = [];
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.UseEnvironment("Development");
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Vessel:Auth:Token"] = token,
+                ["Vessel:Auth:OwnerId"] = ownerId ?? "11111111-1111-1111-1111-111111111111",
+                ["Vessel:Auth:OwnerName"] = ownerName ?? "Owner",
+                ["ConnectionStrings:Vessel"] = null
+            }));
+            builder.ConfigureLogging(logging => logging.AddProvider(new CaptureLoggerProvider(Logs)));
+        }
+    }
+
+    private sealed class CaptureLoggerProvider(List<string> logs) : ILoggerProvider
+    {
+        public ILogger CreateLogger(string categoryName) => new CaptureLogger(logs);
+        public void Dispose() { }
+        private sealed class CaptureLogger(List<string> logs) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => true;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                lock (logs) logs.Add(formatter(state, exception));
+            }
+        }
+    }
+}

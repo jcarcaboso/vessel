@@ -8,8 +8,15 @@ Vessel is a trading diary for recording decisions, executions, and reflection so
 A collection of brokerage accounts grouped by trading purpose, such as swing trading or intraday trading.
 
 **Account**:
-A trader's account at a broker or trading venue, with manually recorded or imported activity.
+A trader's account at a broker or trading venue, with manually recorded or imported activity. Portfolio assignment is optional.
 _Avoid_: User account, portfolio
+
+**Unassigned accounts**:
+Account records without a portfolio, visible in the all-account view. This is a grouping state rather than another stored portfolio.
+_Avoid_: Default portfolio as a separate entity
+
+**Disabled account**:
+An account retained for management but excluded from normal imported activity and venue-position views. Enabling it restores retained observations rather than recreating the account.
 
 **Venue**:
 The broker or exchange where an account exists, such as Hyperliquid or Quantfury.
@@ -79,6 +86,14 @@ _Avoid_: Risk budget, position notional
 An optional amount of capital the trader makes available for the play, separate from the amount they choose to commit.
 _Avoid_: Committed margin, account value, risk budget
 
+**Stablecoin wallet**:
+Supported stablecoin holdings from the venue's wallet ledger, separate from its perpetual-margin snapshot.
+_Avoid_: Complete account equity
+
+**Wallet available amount**:
+A token's total less its held amount. It is distinct from perpetual free margin and withdrawal capacity.
+_Avoid_: Guaranteed tradable collateral, guaranteed withdrawable balance
+
 **Leverage**:
 The exposure multiplier relating the full position's notional value to its committed margin. One-times leverage is unlevered exposure.
 
@@ -104,3 +119,36 @@ _Avoid_: Notional exposure share
 **Exposure share of portfolio**:
 The position's notional exposure as a percentage of portfolio value. This is distinct from committed capital and can exceed 100%.
 _Avoid_: Margin share of portfolio
+
+**Journal owner**:
+The person whose private portfolios, accounts, plays, strategies, evidence and notifications belong together.
+_Avoid_: Broker account, venue credential
+
+**Instrument**:
+A specific tradable market or contract at a venue, with its own identifiers, units and trading constraints. Vessel starts with perpetual contracts for every integrated venue.
+_Avoid_: Asset symbol alone when distinguishing contracts or venues
+
+**Venue position**:
+The exposure reported by a broker account for an instrument at a particular time. It is distinct from a planned position and from the fills that produced it.
+_Avoid_: Play, planned entry, complete execution history
+
+**Concurrent plays**:
+Distinct active plays that can share the same broker account and instrument. Their intent and execution associations remain separate from a venue's net position.
+
+**Imported execution**:
+A venue-reported fill retained with its source identity and provenance, independently of any thesis or play association.
+_Avoid_: Original trading intent
+
+**Retrospective review**:
+A trader's analysis added after an execution, which does not claim to be the reasoning documented before the trade.
+_Avoid_: Original thesis, pre-trade plan
+
+**Price-level observation**:
+Evidence that a specified market-price source reached or crossed a planned entry or exit level. It is not confirmation that an order executed.
+_Avoid_: Fill, confirmed TP or SL execution
+
+**Play tracking**:
+The monitoring of a play's linked executions and relevant price levels, with the source and certainty of each observation kept distinct.
+
+**Notification**:
+A message to the journal owner about a relevant execution, price observation or operational condition. Its delivery is separate from the underlying fact.

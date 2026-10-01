@@ -2,7 +2,7 @@
 
 A trading diary for recording decisions, executions, and reflection.
 
-This repository preserves the approved Graphite play-workspace baseline and its disposable browser prototype. No production stack has been selected.
+This repository contains the approved Graphite prototype and the React/Vite/TypeScript plus modular ASP.NET Core 10/PostgreSQL application core. The default app is Overview with account/portfolio management and bounded read-only Hyperliquid refresh. The Play workspace stays separate for later integration.
 
 - [Project brief](docs/project-brief.md)
 - [Working glossary](CONTEXT.md)
@@ -10,6 +10,52 @@ This repository preserves the approved Graphite play-workspace baseline and its 
 - [First visual direction](docs/design/concept-01.md)
 - [Approved baseline and implementation handoff](docs/design/approved-baseline.md)
 - [Prototype scope and LAN operation](docs/prototype.md)
+- [Stack and architecture discussion draft](docs/architecture/proposal.md)
+- [Runtime and persistence research](docs/architecture/runtime-persistence-research.md)
+- [MVP alignment, monitoring and ownership](docs/architecture/mvp-alignment.md)
+- [Foundation implementation state](docs/architecture/foundation-state.md)
+- [Development setup and checks](docs/development.md)
+- [Core workspace contract](docs/architecture/core-workspace-contract.md)
+- [Current core implementation and limits](docs/architecture/core-workspace-state.md)
+- [Account and portfolio management](docs/architecture/account-management-state.md)
+- [Hyperliquid stablecoin wallet](docs/architecture/stablecoin-wallet.md)
+- [First-part PR review safeguards](docs/architecture/pr-review-fixes.md)
+
+The owner authorized foundation scaffolding after confirming perpetuals-first across venues and multiple active plays on the same account/instrument. Frontend and backend work were delegated to separate Sol agents. The confirmed MVP remains self-hosted and single-user with token access, Hyperliquid first and Lighter next, manual accounts, optional history import and in-page notifications.
+
+The app implements protected portfolio/account APIs, exact manual values, latest snapshots and retained fills, a primary Hyperliquid perp reader, explicit migrations and owner isolation. Navigation covers Overview, Portfolios, Accounts, Activity and Settings. Full Play editing, complete backfills, jobs, images, notifications and charts remain later work. The approved prototype is unchanged.
+
+Portfolios and accounts support rename/delete. Accounts can be moved, unlinked to the virtual unassigned group, or disabled without deleting imported data. Unassigned records appear only in All accounts, not a default tile. Portfolio deletion unlinks accounts; account deletion explicitly removes retained facts and is blocked when a Play references the account.
+
+Hyperliquid refresh also retrieves supported HyperCore wallet stablecoins with total/held/available amounts: USDC, USDE, USDT0 and USDH. Wallet availability is separate from primary perpetual equity; ledgers are not summed as full account equity. Non-stable/EVM/lending values and FX/depeg adjustment are excluded.
+
+## Application quick start
+
+Always use **pnpm**, pinned in root `package.json`. Install it with Corepack if needed, then:
+
+```sh
+corepack enable pnpm
+corepack install
+pnpm install --frozen-lockfile
+```
+
+Configure private values in the ignored root `.env` as described in [development setup](docs/development.md), then:
+
+```sh
+pnpm db:up
+pnpm db:migrate
+pnpm dev
+```
+
+The runner gives credentials to the API, not the frontend. API uses loopback 5080, frontend 5180 and PostgreSQL 55432. Core routes need the mounted/migrated database. Stop the runner with Ctrl+C; the database volume remains. These processes do not replace the existing LAN prototype.
+
+The owner-requested actual-app LAN review is currently **http://10.1.0.219:5180/**, backed by the real API and migrated local database. It uses a separate development token delivered to the owner, not a credential embedded here. See [LAN operation and stop/recreate instructions](docs/development.md#current-lan-review). This is a restricted HTTP development preview, not an internet/production deployment.
+
+```sh
+pnpm check
+```
+
+Set `Vessel_TEST_POSTGRES` for real PostgreSQL test execution; otherwise 26 database tests explicitly skip. The local verification ran them with no skips.
 
 ## View the prototype
 

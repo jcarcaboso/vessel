@@ -2,7 +2,13 @@
 
 Initial discovery, September 29, 2026. Based on the owner's description and the two sketches in [references](references).
 
-Approved baseline, September 30, 2026: the owner selected Graphite, accepted configurable palettes as a future capability, and confirmed the final side-by-side workspace with a larger journal, a bounded scrolling entry editor and expanded entry details. See [approved decisions and implementation handoff](design/approved-baseline.md). This baseline is ready for the backend/frontend stack discussion; no production stack has been chosen.
+Approved baseline, September 30, 2026: the owner selected Graphite, accepted configurable palettes as a future capability, and confirmed the final side-by-side workspace with a larger journal, a bounded scrolling entry editor and expanded entry details. See [approved decisions and implementation handoff](design/approved-baseline.md). That visual baseline does not itself select a production stack.
+
+MVP alignment, September 30, 2026: the owner confirmed a self-hosted single-user start with token access, TypeScript, feature/module boundaries, Hyperliquid first then Lighter, manual venues, optional historical imports and in-page notifications. They prefer shadcn/ui as the component base and reusable workflow-led charts. Specific packages, authentication transport, instrument scope, matching and monitoring rules remain to be specified in [the architecture alignment](architecture/mvp-alignment.md). No implementation is authorized by these scope notes.
+
+Foundation authorization, September 30, 2026: the owner confirmed perpetuals-first across venues and multiple active plays for the same account/instrument, then authorized scaffolding delegated to Sol agents. See [the bounded shared contract](architecture/scaffold-contract.md). The foundation does not authorize automatic fill assignment, spot integration or all later import/monitoring features.
+
+Core development, October 1, 2026: the owner requested the main application shell without the Play page and authorized backend core, Hyperliquid and mounted database/migration work. The default app now has owner-scoped Overview, Portfolios, Accounts, Activity and Settings; the approved Play workspace stays separate. Read [the current implementation and limits](architecture/core-workspace-state.md) before treating planned features as complete. The new main-shell design is an initial version, not a new approval of every navigation or screen detail.
 
 The owner initially clarified that a generated picture was enough. On September 29, 2026, they requested a browser-viewable prototype served on the LAN and authorized opening its port. The disposable implementation is described in [Prototype scope and LAN operation](prototype.md). This remains design discovery, not a production stack decision.
 
@@ -43,6 +49,9 @@ Vessel is a diary and planning tool. Order execution, investment recommendations
 - Selecting entries from the chart bar or the whole entry header must open the same corresponding details editor.
 - Entry details need a zoomed editing dialog, while the main editor is height-limited and scrollable.
 - The journal should fill the remaining left-column height so the workspace finishes evenly above the position summary.
+- Imported history may be reviewed after the fact without requiring or generating an original thesis. Retrospective notes must remain distinguishable from pre-trade intent.
+- Monitoring should observe linked entries/exits and relevant price levels, with execution confirmation kept separate from market-price observations.
+- MVP notifications are page popups; future delivery may include Telegram or Discord.
 - Discover the central page's layout, visual design, and contents before selecting the production stack or designing the rest of the product.
 
 ## Working terminology
@@ -194,10 +203,10 @@ It does not connect wallets or brokers, retrieve prices, place orders, implement
 
 1. Does the chart deserve most of the workspace, or should entry editing have equal weight?
 2. Is Play the right name for the record?
-3. Which markets and contract types matter first?
+3. Perpetuals are confirmed first for all venues; instrument-specific constraints and later spot scope still need specifications.
 4. The owner wants suggested and entered sizing separate. Should margin or quantity be the default full-position input? Margin remains the current default.
 5. Can the same account belong to multiple portfolios? If so, how should balances and results avoid double counting?
-6. Can one play span accounts or directions?
+6. Multiple active plays may share an account and instrument. Can one play itself span accounts or directions? That separate question remains open.
 7. Does each entry own its exits, or can exits apply to the combined position?
 8. Does “multiple stops” mean independently protected entries, partial stops for one entry, or a stop that changes over time?
 9. The suggestion preserves its risk target when a stop changes. The entered position preserves the chosen full-position input until changed or explicitly replaced. Does this distinction feel clear?
