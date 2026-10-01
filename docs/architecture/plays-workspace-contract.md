@@ -110,3 +110,10 @@ October 1, 2026. Review of PR #2 against the approved Graphite prototype, using 
 - The application has an inline favicon, removing the only console error.
 
 `pnpm check` passes 171 frontend, 387 backend and 76 prototype cases; 40 PostgreSQL cases still skip without a test connection. No page-level horizontal overflow at the widths above; columns stay aligned at 940 pixels; Escape restores focus from the expanded editor. T3 preview automation timed out again, so screenshots used a local headless Chromium against a synthetic API.
+
+### Code review and second polish pass
+
+- Backend review found no defects: authentication precedes venue reads; owner, disabled and manual guards hold; delisted contracts are excluded only from choices; provider failures map to a generic 502 without touching sync state; caller cancellation is not a provider failure.
+- Frontend fix: when a successful reload disables or deletes the draft's account, the draft clears account, instrument and budget like an explicit account change. Previously a venue contract stayed in the draft and was shown as a manual label. Loading and failed reloads keep the last known list, so a transient error does not clear the draft. A regression test covers both disable and removal.
+- The summary gains the prototype's intro column: entry count, Long/Short in direction colour, instrument and leverage. "Not calculated", "Not chosen" and "Unavailable" values are muted so real figures carry the weight. Entry headers show the planned entry price once entered. Context status reads "Draft" instead of repeating the heading's "Local draft". The shell footer uses singular/plural account wording.
+- `pnpm check` passes 172 frontend, 387 backend and 76 prototype cases; 40 PostgreSQL cases skip without a test connection. No page or element overflow at 1402–320 pixels; columns remain aligned at 940 pixels.

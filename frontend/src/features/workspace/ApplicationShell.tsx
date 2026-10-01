@@ -134,6 +134,7 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
   }
   const portfolios = data?.portfolios ?? [], accounts = data?.accounts ?? []
   const enabledAccounts = accounts.filter(account => account.isEnabled !== false)
+  const readOnlyAccountCount = enabledAccounts.filter(a => a.venueId === 'hyperliquid').length
   const portfolioNames = Object.fromEntries(portfolios.map(p => [p.id, p.name]))
   const filteredAccounts = portfolioFilter ? accounts.filter(a => a.portfolioId === portfolioFilter) : accounts
   const selectedAccount = accounts.find(a => a.id === selectedAccountId)
@@ -212,7 +213,7 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
           <section className="shell-panel settings-panel"><Database size={23} /><h2>Venue capabilities</h2><p>Only Hyperliquid and manual accounts can be added in this step. A refresh is explicitly requested, not a background job.</p><div className="venue-capability-list">{system.venues.map(v => <div key={v.id}><span>{v.name}</span><span className="workspace-badge">{v.status}</span></div>)}</div><p className="field-help">No venue credential, private key, full-history promise or automatic Play matching is involved.</p></section>
         </div>}
 
-        <footer className="shell-footer"><span>VESSEL / PRIVATE TRADING DIARY</span><span>{enabledAccounts.filter(a => a.venueId === 'hyperliquid').length} enabled read-only account records · <span className="address-note">{selectedAccount ? shortAddress(selectedAccount.address) : 'No order execution'}</span></span></footer>
+        <footer className="shell-footer"><span>VESSEL / PRIVATE TRADING DIARY</span><span>{readOnlyAccountCount} enabled read-only {readOnlyAccountCount === 1 ? 'account' : 'accounts'} · <span className="address-note">{selectedAccount ? shortAddress(selectedAccount.address) : 'No order execution'}</span></span></footer>
       </main>
     </div>
     <CreatePortfolioDialog open={portfolioDialog} onOpenChange={setPortfolioDialog} api={api} onCreated={created} />

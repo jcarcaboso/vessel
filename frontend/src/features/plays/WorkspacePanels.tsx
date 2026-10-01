@@ -9,6 +9,8 @@ import type { DraftEntry, PlayDraft } from './draft'
 import './plays-workspace.css'
 
 const displayMoney = (value: string | null | undefined) => value == null ? 'Unavailable' : money(value)
+// Placeholder values stay readable but recede, so real figures carry the visual weight.
+const isPlaceholder = (value: string) => ['Unavailable', 'Not calculated', 'Not chosen'].includes(value)
 
 export function AvailableBudget({ draft, onChange }: {
   draft: PlayDraft
@@ -45,7 +47,7 @@ export function AvailableBudget({ draft, onChange }: {
       </div>
     </form> : <>
       <div className="budget-value-row">
-        <Input id={`${id}-budget`} readOnly value={displayMoney(draft.budgetOverride)}
+        <Input id={`${id}-budget`} readOnly value={displayMoney(draft.budgetOverride)} data-placeholder={draft.budgetOverride === null}
           title={draft.budgetOverride ?? undefined} aria-describedby={`${id}-budget-help`} />
         <Button type="button" variant="outline" size="icon" aria-label="Edit available budget"
           onClick={() => { setBudget(draft.budgetOverride ?? ''); setError(''); setEditing(true) }}>
@@ -72,15 +74,15 @@ export function CapitalContext({ accounts, portfolios, draft }: {
       <h2 className="capital-title sr-only">Capital context</h2>
       <dl className="capital-metrics">
         <div><dt>Portfolio value · USD</dt>
-          <dd title={portfolio?.totalValueUsd ?? undefined}>{displayMoney(portfolio?.totalValueUsd)}</dd>
+          <dd title={portfolio?.totalValueUsd ?? undefined} data-placeholder={portfolio?.totalValueUsd == null}>{displayMoney(portfolio?.totalValueUsd)}</dd>
           <small>Coverage: {portfolio?.valueCoverage ?? 'unavailable'}. Known account values only.</small>
         </div>
         <div><dt>{hyperliquid ? 'Primary perps equity · USD' : 'Known account value · USD'}</dt>
-          <dd title={account?.accountValueUsd ?? undefined}>{displayMoney(account?.accountValueUsd)}</dd>
+          <dd title={account?.accountValueUsd ?? undefined} data-placeholder={account?.accountValueUsd == null}>{displayMoney(account?.accountValueUsd)}</dd>
           <small>{account ? `${account.name} · ${portfolio?.name ?? (account.portfolioId === null ? 'Unassigned account' : 'Portfolio unavailable')}` : 'Select an enabled account above to see its capital context.'}</small>
         </div>
-        <div><dt>Margin / portfolio</dt><dd>Not calculated</dd><small>Committed capital, not exposure</small></div>
-        <div><dt>Exposure / portfolio</dt><dd>Not calculated</dd><small>Notional exposure, not margin</small></div>
+        <div><dt>Margin / portfolio</dt><dd data-placeholder="true">Not calculated</dd><small>Committed capital, not exposure</small></div>
+        <div><dt>Exposure / portfolio</dt><dd data-placeholder="true">Not calculated</dd><small>Notional exposure, not margin</small></div>
       </dl>
     </div>
     {hyperliquid && <p className="capital-wallet-note"><span>Supported-wallet available · nominal USD</span>{' '}
@@ -164,16 +166,22 @@ export function PlayJournal({ notes, onChange }: {
 
 export function PositionSummary({ draft }: { draft: PlayDraft }) {
   const size = draft.size ? `${draft.size} ${draft.sizingMode === 'margin' ? 'currency units' : 'instrument units'}` : 'Not chosen'
+  const count = draft.entries.length
+  const values: Array<[string, string]> = [
+    [draft.sizingMode === 'margin' ? 'Chosen margin' : 'Chosen quantity', size],
+    ['Chosen leverage', draft.leverage ? `${draft.leverage}×` : 'Not chosen'],
+    ...['Committed margin', 'Notional exposure', 'Average entry', 'Reward / risk', 'All-stops loss', 'All-targets profit']
+      .map((label): [string, string] => [label, 'Not calculated']),
+  ]
   return <section className="panel summary" aria-label="Full-position summary" data-testid="summary-panel">
-    <div className="summary-heading">
+    <div className="summary-intro">
       <h2>Full-position summary</h2>
-      <p>Planned position only. Financial calculations are deferred, and no execution or realized return is implied.</p>
+      <strong>{count} {count === 1 ? 'entry' : 'entries'} · <span data-direction={draft.direction}>{draft.direction === 'long' ? 'Long' : 'Short'}</span></strong>
+      <small>{draft.instrument || 'No instrument'} · Leverage {draft.leverage || '–'}×</small>
     </div>
     <dl>
-      <div><dt>{draft.sizingMode === 'margin' ? 'Chosen margin' : 'Chosen quantity'}</dt><dd>{size}</dd></div>
-      <div><dt>Chosen leverage</dt><dd>{draft.leverage ? `${draft.leverage}×` : 'Not chosen'}</dd></div>
-      {['Committed margin', 'Notional exposure', 'Average entry', 'Reward / risk', 'All-stops loss', 'All-targets profit'].map((label) =>
-        <div key={label}><dt>{label}</dt><dd>Not calculated</dd></div>)}
+      {values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd data-placeholder={isPlaceholder(value)}>{value}</dd></div>)}
     </dl>
+    <p className="summary-note">Planned position only. Financial calculations are deferred, and no execution or realized return is implied.</p>
   </section>
 }

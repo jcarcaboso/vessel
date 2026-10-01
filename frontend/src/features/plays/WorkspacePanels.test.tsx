@@ -226,6 +226,10 @@ describe('Position summary', () => {
     expect(within(summary).getAllByText('Not calculated')).toHaveLength(6)
     expect(within(summary).queryByText(/\$|5000|2000|1900|2200/)).not.toBeInTheDocument()
     expect(within(summary).getByText(/no execution or realized return is implied/)).toBeInTheDocument()
+    expect(within(summary).getByText('Long')).toHaveAttribute('data-direction', 'long')
+    expect(within(summary).getByText('No instrument · Leverage 5×')).toBeInTheDocument()
+    expect(within(summary).getAllByText('Not calculated')[0]).toHaveAttribute('data-placeholder', 'true')
+    expect(within(summary).getByText('1000 currency units')).toHaveAttribute('data-placeholder', 'false')
   })
 
   it('echoes quantity with units without converting it to USD', () => {

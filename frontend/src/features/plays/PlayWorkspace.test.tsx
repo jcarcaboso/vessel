@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
 import { accountFixture, instrumentCatalogFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { PlayWorkspace } from './PlayWorkspace'
-import { createDraft } from './draft'
+import { createDraft, type PlayDraft } from './draft'
 
 function Workspace({ disabled = false }: { disabled?: boolean }) {
   const [draft, setDraft] = useState(createDraft)
@@ -17,7 +17,32 @@ function AccountWorkspace({ accounts, api }: { accounts: BrokerAccount[]; api: W
   return <PlayWorkspace accounts={accounts} portfolios={[portfolioFixture]} api={api} draft={draft} onChange={setDraft} />
 }
 
+const catalogueApi = { instruments: () => Promise.resolve(instrumentCatalogFixture) } as unknown as WorkspaceApi
+
+function ReloadedWorkspace({ accounts, onDraft }: { accounts: BrokerAccount[]; onDraft: (draft: PlayDraft) => void }) {
+  const [draft, setDraft] = useState(createDraft)
+  const api = catalogueApi
+  return <PlayWorkspace accounts={accounts} portfolios={[portfolioFixture]} api={api} draft={draft}
+    onChange={next => { onDraft(next); setDraft(next) }} />
+}
+
 describe('Play draft workspace', () => {
+  it('clears venue context when a reload disables or removes the chosen account', async () => {
+    const venue = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}` }
+    const onDraft = vi.fn<(draft: PlayDraft) => void>()
+    const view = render(<ReloadedWorkspace accounts={[venue]} onDraft={onDraft} />)
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
+    await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Perpetual instrument' }), 'BTC')
+    expect(onDraft.mock.lastCall?.[0]).toMatchObject({ accountId: venue.id, instrument: 'BTC', instrumentSource: 'venue' })
+    view.rerender(<ReloadedWorkspace accounts={[{ ...venue, isEnabled: false }]} onDraft={onDraft} />)
+    expect(onDraft.mock.lastCall?.[0]).toMatchObject({ accountId: '', instrument: '', instrumentSource: 'manual', budgetOverride: null })
+    expect(screen.getByRole('textbox', { name: 'Perpetual instrument' })).toHaveValue('')
+    expect(screen.queryByText('Manual label, not venue-validated.')).toBeInTheDocument()
+    view.rerender(<ReloadedWorkspace accounts={[]} onDraft={onDraft} />)
+    expect(screen.getByRole('combobox', { name: 'Account' })).toHaveValue('')
+  })
+
+
   it('preserves the approved section order without sample candles or fabricated results', () => {
     render(<Workspace />)
     const workspace = screen.getByTestId('workspace')

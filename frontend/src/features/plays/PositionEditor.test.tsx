@@ -204,6 +204,9 @@ describe('local-draft position editor', () => {
   it('shows allocated quantity shares and splits them equally only on request', async () => {
     const { user, onChange } = renderEditor(1)
     expect(screen.getByRole('heading', { name: 'Distribute your entries 01' })).toBeInTheDocument()
+    expect(within(entryHeader('Entry 1')).queryByText(/^@/)).not.toBeInTheDocument()
+    await user.type(field('Entry 1 planned entry price (quote units)'), '64200')
+    expect(within(entryHeader('Entry 1')).getByText('@ 64200')).toBeInTheDocument()
     expect(screen.getByText('100% allocated')).toHaveAttribute('data-complete', 'true')
     await user.click(screen.getByRole('button', { name: 'Add entry' }))
     await user.click(screen.getByRole('button', { name: 'Add entry' }))

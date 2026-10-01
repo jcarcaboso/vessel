@@ -148,7 +148,9 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
         <button type="button" className="entry-header" aria-pressed={selected?.id === entry.id}
           ref={node => { if (node) entryButtons.current.set(entry.id, node); else entryButtons.current.delete(entry.id) }}
           onClick={() => selectEntry(entry.id)}>
-          <strong><i aria-hidden="true" />{entry.name}</strong><span>{entry.share === '' ? 'Share not set' : `${entry.share}% of quantity`}</span>
+          <strong><i aria-hidden="true" />{entry.name}</strong>
+          {entry.price && <span className="entry-header-price">@ {entry.price}</span>}
+          <span>{entry.share === '' ? 'Share not set' : `${entry.share}% of quantity`}</span>
         </button>
         {expanded && selected?.id === entry.id
           ? <p className="muted expanded-placeholder">Editing in the expanded dialog.</p>

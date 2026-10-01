@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Info, PencilLine, RefreshCw } from 'lucide-react'
@@ -32,6 +32,13 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const effectiveFilter = filterExists && (!account || matchesFilter(account, portfolioFilter)) ? portfolioFilter : ''
   if (portfolioFilter !== effectiveFilter) setPortfolioFilter(effectiveFilter)
   const filteredAccounts = enabledAccounts.filter(account => matchesFilter(account, effectiveFilter))
+
+  // A reload can disable or delete the chosen account. Clear it like an account change so a
+  // venue contract is never shown as a manual label. Loading keeps the last known list.
+  const accountGone = draft.accountId !== '' && !loading && !account
+  useEffect(() => {
+    if (accountGone) onChange({ ...draft, accountId: '', instrument: '', instrumentSource: 'manual', budgetOverride: null })
+  }, [accountGone, draft, onChange])
 
   function chooseAccount(id: string) {
     const next = enabledAccounts.find(account => account.id === id)
@@ -73,7 +80,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       <div className="direction-field"><span className="field-label">Direction</span>
         <DirectionToggle value={draft.direction} onChange={direction => onChange({ ...draft, direction })} />
       </div>
-      <div className="plays-context-status"><span className="field-label">Status</span><span className="badge">Local draft</span></div>
+      <div className="plays-context-status"><span className="field-label">Status</span><span className="badge">Draft</span></div>
     </div>
     <p className="plays-context-note">{!loading && !enabledAccounts.length ? 'No enabled accounts are available. You can outline a draft before adding an account. ' : ''}Perpetuals only. Planned levels are not fills. Position validation and execution assignment are deferred.</p>
     <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} />

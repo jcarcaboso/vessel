@@ -200,6 +200,7 @@
 .plays-page .available-budget p { margin: 0; font-size: 10px; line-height: 1.6; }
 .plays-page .budget-value-row { position: relative; }
 .plays-page .budget-value-row input { width: 100%; padding-right: 43px; }
+.plays-page .budget-value-row input[data-placeholder="true"] { color: var(--muted-foreground); font-size: 14px; }
 .plays-page .budget-value-row button { position: absolute; right: 5px; top: 5px; width: 28px; height: 28px; border: 1px solid var(--border); color: var(--ring); background: var(--accent); }
 .plays-page .budget-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .plays-page .budget-actions button { height: 28px; padding: 5px 9px; }
@@ -262,11 +263,21 @@
 .plays-page .entry-targets > .add-target,
 .plays-entry-dialog .entry-targets > .add-target { justify-self: start; height: 24px; padding: 3px 0; color: var(--ring); font-size: 10px; }
 
-.plays-page .summary { margin-top: 20px; padding: 20px 22px; background: var(--secondary); }
-.plays-page .summary-heading p { margin-top: 5px; color: var(--muted-foreground); font-size: 10px; }
-.plays-page .summary dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 22px 17px; margin: 18px 0 0; padding: 0; }
+.plays-page .summary { display: grid; grid-template-columns: minmax(170px, .9fr) minmax(0, 3fr); gap: 18px 24px; margin-top: 20px; padding: 22px; background: var(--secondary); }
+.plays-page .summary-intro { display: flex; flex-direction: column; gap: 9px; padding-right: 22px; border-right: 1px solid var(--border); }
+.plays-page .summary-intro h2 { color: var(--muted-foreground); font-size: 9px; font-weight: 600; letter-spacing: 1.6px; text-transform: uppercase; }
+.plays-page .summary-intro strong { font-size: 16px; font-weight: 600; letter-spacing: -.3px; }
+.plays-page .summary-intro [data-direction="long"] { color: var(--positive); }
+.plays-page .summary-intro [data-direction="short"] { color: var(--negative); }
+.plays-page .summary-intro small { color: var(--ring); font-size: 10px; overflow-wrap: anywhere; }
+.plays-page .summary dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px 17px; margin: 0; padding: 0; }
 .plays-page .summary dt { color: var(--muted-foreground); font-size: 10px; }
-.plays-page .summary dd { margin: 6px 0 0; font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
+.plays-page .summary dd { margin: 6px 0 0; font-size: 15px; font-weight: 550; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.plays-page .summary-note { grid-column: 1 / -1; padding-top: 14px; border-top: 1px solid var(--border); color: var(--muted-foreground); font-size: 9px; line-height: 1.6; }
+.plays-page dd[data-placeholder="true"] { color: var(--muted-foreground); font-weight: 450; }
+.plays-page .capital-metrics dd[data-placeholder="true"] { font-size: 15px; letter-spacing: -.2px; line-height: 1.35; }
+.plays-page .summary dd[data-placeholder="true"] { font-size: 12px; }
+.plays-page .entry-header .entry-header-price { margin-left: auto; color: var(--foreground); font-size: 10px; font-variant-numeric: tabular-nums; }
 
 .plays-entry-dialog {
   width: min(850px, calc(100vw - 40px));
@@ -333,6 +344,8 @@
   .plays-page .position-panel { height: 940px; min-height: 0; max-height: 1000px; }
   .plays-page .capital-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; }
   .plays-page .capital-metrics > div:nth-child(2) { border-right: 0; }
+  .plays-page .summary { grid-template-columns: 1fr; }
+  .plays-page .summary-intro { padding: 0 0 14px; border-right: 0; border-bottom: 1px solid var(--border); }
   .plays-page .summary dl { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 12px; }
 }
 @media (max-width: 550px) {
