@@ -49,9 +49,9 @@ export function ManagePortfolioDialog({ portfolio, api, onClose, onChanged }: {
   </Dialog>
 }
 
-export function ManageAccountDialog({ account, portfolios, api, onClose, onChanged }: {
+export function ManageAccountDialog({ account, portfolios, api, onClose, onChanged, onStale }: {
   account: BrokerAccount; portfolios: Portfolio[]; api: WorkspaceApi
-  onClose: () => void; onChanged: (message: string) => void
+  onClose: () => void; onChanged: (message: string) => void; onStale?: () => void
 }) {
   const [name, setName] = useState(account.name)
   const [portfolioId, setPortfolioId] = useState(account.portfolioId ?? '')
@@ -61,11 +61,14 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
   const [error, setError] = useState<string | null>(null)
   const [revision, setRevision] = useState(account.settingsRevision)
   const [conflict, setConflict] = useState(account.settingsRevision === undefined)
+  const [portfolioOptions, setPortfolioOptions] = useState(portfolios)
   async function reloadSettings() {
     setPending(true); setError(null)
     try {
-      const current = await api.account(account.id)
+      // Another tab may also have created the portfolio the account now belongs to.
+      const [current, currentPortfolios] = await Promise.all([api.account(account.id), api.portfolios()])
       if (current.settingsRevision === undefined) throw new ApiError('invalid-response', 'Current settings version is unavailable. Reload after the API update.')
+      setPortfolioOptions(currentPortfolios)
       setName(current.name); setPortfolioId(current.portfolioId ?? '')
       setEnabled(current.isEnabled !== false); setRevision(current.settingsRevision); setConflict(false)
     } catch (cause) { setError(failure(cause)) }
@@ -82,7 +85,8 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
       onClose()
     } catch (cause) {
       setError(failure(cause))
-      if (cause instanceof ApiError && (cause.status === 409 || cause.status === 412)) setConflict(true)
+      // Refresh the shell too, so reopening this dialog does not reuse the stale revision.
+      if (cause instanceof ApiError && (cause.status === 409 || cause.status === 412)) { setConflict(true); onStale?.() }
     }
     finally { setPending(false) }
   }
@@ -104,7 +108,8 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
       </div> : <form className="workspace-form" onSubmit={event => { void save(event) }} aria-busy={pending}>
         <label htmlFor="rename-account">Account name</label><Input id="rename-account" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={pending} autoFocus />
         <label htmlFor="move-account">Portfolio</label><select id="move-account" value={portfolioId} onChange={event => setPortfolioId(event.target.value)} disabled={pending}>
-          <option value="">No portfolio · All accounts only</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          <option value="">No portfolio · All accounts only</option>{portfolioOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          {portfolioId && !portfolioOptions.some(p => p.id === portfolioId) && <option value={portfolioId}>Current portfolio</option>}
         </select>
         <p className="field-help">Choosing No portfolio unlinks it without removing its history.</p>
         <label className="account-enabled-control"><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} disabled={pending} />Account enabled</label>

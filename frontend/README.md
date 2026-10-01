@@ -31,9 +31,13 @@ pnpm --filter vessel-frontend build
 - Dollar-formatted record values are nominal. No FX/fair-value or unified-account valuation is provided.
 - Play navigation is disabled/later. The old sample editor is not mounted by the default route.
 
-Historical dates include the year. Decimal amounts remain strings in API data and form payloads. Formatting is display-only and preserves tiny/large values that otherwise round to zero or lose digits.
+Historical dates include the year. Decimal amounts remain strings in API data and form payloads. Formatting passes the original decimal string to `Intl.NumberFormat`, so grouping and rounding are exact for large/negative totals; `Number` only estimates magnitude so tiny values keep significant digits instead of rounding to zero.
 
 Portfolio/account management now includes rename/delete, optional portfolio assignment, move/unlink and disable/re-enable. Disable retains data but hides imported movements/positions. Unassigned accounts appear only in All accounts. Portfolio deletion keeps accounts; account deletion requires confirmation and is blocked by linked Plays.
+
+Account settings saves send the `settingsRevision` loaded with the form as `expectedRevision`. A 409 conflict disables Save, refreshes the shell in the background and offers an explicit reload of the current name/portfolio/enabled state and revision (including portfolios created elsewhere). Stale changes are never replayed. Creating an account for an already-recorded venue address returns 409 and the dialog stays open with the server's guidance.
+
+The shell Reload button reports progress and passes its generation to account detail, so snapshot/fill reads retry even when Overview metadata is unchanged. Server failures (5xx) show a generic message plus `Reference: <trace id>` only when the `X-Correlation-ID` header matches the server's 32-hex format; that ID matches the server's diagnostic log event. The venue-refresh 502 message is used only for account refresh.
 
 ## Authentication
 

@@ -45,6 +45,35 @@ describe('Core workspace API', () => {
     response({ detail: 'raw wallet and secret provider detail' }, 502)
     await expect(createWorkspaceApi('token').sync(accountFixture.id)).rejects.toThrow('Previous account data')
   })
+  it('keeps the venue refresh message specific to account refresh', async () => {
+    response({ detail: 'proxy detail' }, 502)
+    await expect(createWorkspaceApi('token').overview()).rejects.toThrow('The request could not be completed.')
+  })
+  it.each([500, 503])('shows only a server-generated trace reference for %s', async status => {
+    const trace = '0123456789abcdef0123456789abcdef'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'internal stack detail', traceId: trace }),
+      { status, headers: { 'X-Correlation-ID': trace } })))
+    const error = await createWorkspaceApi('token').overview().catch((cause: unknown) => cause)
+    expect(error).toMatchObject({ kind: 'http', status })
+    expect(String((error as Error).message)).toContain(`Reference: ${trace}`)
+    expect(String((error as Error).message)).not.toContain('internal')
+  })
+  it('ignores a malformed correlation header', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 500, headers: { 'X-Correlation-ID': 'call support <script>' } })))
+    await expect(createWorkspaceApi('token').overview()).rejects.toThrow(/^The request could not be completed\.$/)
+  })
+  it('reads one account, including its settings revision', async () => {
+    const fetch = response({ ...accountFixture, settingsRevision: 4 })
+    await expect(createWorkspaceApi('token').account(accountFixture.id)).resolves.toMatchObject({ settingsRevision: 4 })
+    expect(fetch).toHaveBeenCalledWith(`/api/accounts/${accountFixture.id}`, expect.anything())
+  })
+  it('accepts imported fills that a later Play links to', async () => {
+    const linked = { id: accountFixture.id, accountId: accountFixture.id, contractId: 'BTC', side: 'buy', direction: 'Open Long', price: '1',
+      quantity: '1', fee: '0', feeToken: 'USDC', closedPnlUsd: '0', occurredAtUtc: '2026-10-01T10:00:00Z', orderId: '1', sourceFillId: '1',
+      transactionHash: '0x1', playId: portfolioFixture.id }
+    response([linked])
+    await expect(createWorkspaceApi('token').fills(accountFixture.id)).resolves.toEqual([linked])
+  })
   it('accepts bounded safe validation detail for input correction', async () => {
     response({ detail: 'The public address is invalid.' }, 400)
     await expect(createWorkspaceApi('token').createAccount({ portfolioId: portfolioFixture.id, name: 'Wallet', venueId: 'hyperliquid', address: 'bad' })).rejects.toThrow('public address')

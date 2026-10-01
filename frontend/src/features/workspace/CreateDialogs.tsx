@@ -24,7 +24,7 @@ export function CreatePortfolioDialog({ open, onOpenChange, api, onCreated }: {
     <DialogContent className="workspace-dialog">
       <DialogHeader><DialogTitle>New portfolio</DialogTitle><DialogDescription>Group accounts by the way you trade. Portfolio values use available account records, not estimated performance.</DialogDescription></DialogHeader>
       <form onSubmit={event => { void submit(event) }} className="workspace-form" aria-busy={pending}>
-        <label htmlFor="portfolio-name">Portfolio name</label><Input id="portfolio-name" value={name} onChange={event => setName(event.target.value)} maxLength={100} placeholder="e.g. Swing trading" disabled={pending} autoFocus />
+        <label htmlFor="portfolio-name">Portfolio name</label><Input id="portfolio-name" value={name} onChange={event => setName(event.target.value)} maxLength={200} placeholder="e.g. Swing trading" disabled={pending} autoFocus />
         {error && <p className="error" role="alert">{error}</p>}
         <Button type="submit" disabled={pending}>{pending ? 'Creating…' : 'Create portfolio'}</Button>
       </form>
@@ -64,7 +64,7 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, onCre
       <DialogHeader><DialogTitle>Add an account</DialogTitle><DialogDescription>Hyperliquid uses a public address for read-only perpetual data. Manual accounts need no connection.</DialogDescription></DialogHeader>
       <form onSubmit={event => { void submit(event) }} className="workspace-form" aria-busy={pending}>
           <label htmlFor="account-portfolio">Portfolio <span className="optional">optional</span></label><select id="account-portfolio" value={chosenPortfolio} onChange={event => setPortfolioId(event.target.value)} disabled={pending}><option value="">No portfolio · All accounts only</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-          <label htmlFor="account-name">Account name</label><Input id="account-name" value={name} onChange={event => setName(event.target.value)} placeholder="e.g. Main account" maxLength={100} disabled={pending} />
+          <label htmlFor="account-name">Account name</label><Input id="account-name" value={name} onChange={event => setName(event.target.value)} placeholder="e.g. Main account" maxLength={200} disabled={pending} />
           <label htmlFor="account-venue">Venue</label><select id="account-venue" value={venue} onChange={event => { setVenue(event.target.value as 'manual' | 'hyperliquid'); setError(null) }} disabled={pending}>
             <option value="hyperliquid">Hyperliquid · read-only perps</option><option value="manual">Manual account</option>
           </select>

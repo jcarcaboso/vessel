@@ -59,7 +59,8 @@ namespace Vessel.Persistence.Migrations
                 defaultValue: "not-synced");
 
             // Foundation accounts remain unassigned with unknown balances.
-            migrationBuilder.Sql("UPDATE accounts SET \"SyncStatus\" = 'manual' WHERE \"VenueId\" = 'manual'");
+            // The terminator keeps generated/idempotent SQL scripts valid.
+            migrationBuilder.Sql("UPDATE accounts SET \"SyncStatus\" = 'manual' WHERE \"VenueId\" = 'manual';");
 
             migrationBuilder.CreateTable(
                 name: "account_snapshots",

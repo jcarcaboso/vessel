@@ -97,14 +97,17 @@ describe('Management dialogs', () => {
     const api = client({
       updateAccount: vi.fn().mockRejectedValueOnce(new ApiError('http', 'Settings changed. Reload them.', 409)).mockResolvedValue(accountFixture),
       account: vi.fn().mockResolvedValue({ ...accountFixture, name: 'Current saved name', isEnabled: false, portfolioId: null, settingsRevision: 2 }),
+      portfolios: vi.fn().mockResolvedValue([portfolioFixture]),
     })
-    render(<ManageAccountDialog account={accountFixture} portfolios={[portfolioFixture]} api={api} onClose={vi.fn()} onChanged={vi.fn()} />)
+    const onStale = vi.fn()
+    render(<ManageAccountDialog account={accountFixture} portfolios={[portfolioFixture]} api={api} onClose={vi.fn()} onChanged={vi.fn()} onStale={onStale} />)
     await userEvent.clear(screen.getByLabelText('Account name'))
     await userEvent.type(screen.getByLabelText('Account name'), 'Old form rename')
     await userEvent.click(screen.getByRole('button', { name: 'Save settings' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Settings changed')
     expect(screen.getByRole('button', { name: 'Save settings' })).toBeDisabled()
     expect(api.updateAccount).toHaveBeenCalledTimes(1)
+    expect(onStale).toHaveBeenCalledTimes(1)
     await userEvent.click(screen.getByRole('button', { name: 'Reload current settings' }))
     await waitFor(() => expect(screen.getByLabelText('Account name')).toHaveValue('Current saved name'))
     expect(screen.getByLabelText('Account enabled')).not.toBeChecked()
@@ -116,5 +119,32 @@ describe('Management dialogs', () => {
     await waitFor(() => expect(api.updateAccount).toHaveBeenLastCalledWith(accountFixture.id, {
       name: 'Reviewed current rename', portfolioId: null, isEnabled: false, expectedRevision: 2,
     }))
+  })
+  it('offers a portfolio created in another tab after reloading conflicting settings', async () => {
+    const elsewhere = { ...portfolioFixture, id: '7b3f6a2e-1c4d-4e5f-8a9b-0c1d2e3f4a5b', name: 'Created elsewhere' }
+    const api = client({
+      updateAccount: vi.fn().mockRejectedValue(new ApiError('http', 'Settings changed. Reload them.', 409)),
+      account: vi.fn().mockResolvedValue({ ...accountFixture, portfolioId: elsewhere.id, settingsRevision: 3 }),
+      portfolios: vi.fn().mockResolvedValue([portfolioFixture, elsewhere]),
+    })
+    render(<ManageAccountDialog account={accountFixture} portfolios={[portfolioFixture]} api={api} onClose={vi.fn()} onChanged={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Save settings' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Reload current settings' }))
+    await waitFor(() => expect(screen.getByLabelText('Portfolio')).toHaveValue(elsewhere.id))
+    expect(screen.getByRole('option', { name: 'Created elsewhere' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save settings' })).toBeEnabled()
+  })
+  it('keeps saving blocked when reloading conflicting settings fails', async () => {
+    const api = client({
+      updateAccount: vi.fn().mockRejectedValue(new ApiError('http', 'Settings changed. Reload them.', 409)),
+      account: vi.fn().mockRejectedValue(new ApiError('unavailable', 'The request did not complete. Check the API and try again.')),
+      portfolios: vi.fn().mockResolvedValue([portfolioFixture]),
+    })
+    render(<ManageAccountDialog account={accountFixture} portfolios={[portfolioFixture]} api={api} onClose={vi.fn()} onChanged={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Save settings' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Reload current settings' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('did not complete')
+    expect(screen.getByRole('button', { name: 'Save settings' })).toBeDisabled()
+    expect(api.updateAccount).toHaveBeenCalledTimes(1)
   })
 })

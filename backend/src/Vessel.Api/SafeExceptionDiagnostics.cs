@@ -1,24 +1,34 @@
 using System.Diagnostics;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
 namespace Vessel.Api;
 
 internal static class SafeExceptionDiagnostics
 {
-    public static bool IsDependencyOutage(Exception error) => error switch
+    public static bool IsDependencyOutage(Exception error)
     {
-        NpgsqlException database => database.IsTransient,
-        DbUpdateException { InnerException: NpgsqlException database } => database.IsTransient,
-        HttpRequestException { StatusCode: null } => true,
-        HttpRequestException { StatusCode: { } status } => (int)status >= 500,
         // Persistence deliberately resolves missing configuration lazily. Match its code
         // origin, not its message; unrelated InvalidOperationExceptions are still bugs.
-        InvalidOperationException when error.TargetSite?.DeclaringType?.DeclaringType ==
-            typeof(Vessel.Persistence.DependencyInjection) => true,
-        _ => false
-    };
+        if (error is InvalidOperationException &&
+            error.TargetSite?.DeclaringType?.DeclaringType == typeof(Vessel.Persistence.DependencyInjection))
+            return true;
+        // EF wraps transient Npgsql failures (refused connections, timeouts) in an
+        // InvalidOperationException or DbUpdateException, so inspect the whole chain.
+        for (var current = error; current is not null; current = current.InnerException)
+        {
+            switch (current)
+            {
+                case NpgsqlException database:
+                    return database.IsTransient;
+                case HttpRequestException { StatusCode: null }:
+                    return true;
+                case HttpRequestException { StatusCode: { } status }:
+                    return (int)status >= 500;
+            }
+        }
+        return false;
+    }
 
     public static void Log(ILogger logger, HttpContext context, Exception error, string traceId, int status)
     {

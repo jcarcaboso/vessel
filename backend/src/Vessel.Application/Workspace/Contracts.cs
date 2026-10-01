@@ -16,8 +16,8 @@ public sealed record UpdateAccountRequest(
 public sealed record PortfolioDto(Guid Id, string Name, int AccountCount, string? TotalValueUsd, string ValueCoverage);
 public sealed record AccountDto(Guid Id, Guid? PortfolioId, string Name, string VenueId, string? Address,
     string? AccountValueUsd, DateTimeOffset? LastSyncedAtUtc, string SyncStatus, string? LastSyncError,
-    int PositionCount, string? HistoryNotice, bool IsEnabled,
-    string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null, long SettingsRevision = 1);
+    int PositionCount, string? HistoryNotice, bool IsEnabled, long SettingsRevision,
+    string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null);
 public sealed record PositionDto(string ContractId, string SignedQuantity, string EntryPrice,
     string UnrealizedPnlUsd, string MarginUsedUsd, int? Leverage);
 public sealed record SnapshotDto(DateTimeOffset ObservedAtUtc, string ValueScope, string? AccountValueUsd,

@@ -42,7 +42,22 @@ The shell passes its Reload generation to AccountDetail. A changed generation st
 
 Unexpected failures emit a structured server event with a locally generated trace ID, matched route pattern, exception type, status and bounded method-only stack information. Never log arbitrary exception messages/objects, file paths, Authorization, body/query values, addresses, raw provider payloads or connection strings.
 
-Generic Problem Details returns the trace ID and matching correlation header. Expected validation/domain/bad-request/cancellation responses do not become noisy error events. Known transient dependency failures remain generic 503; internal bugs are generic 500 rather than pretending every failure is a retryable outage.
+Generic Problem Details returns the trace ID and matching correlation header. Expected validation/domain/bad-request/cancellation responses do not become noisy error events. Known transient dependency failures remain generic 503; internal bugs are generic 500 rather than pretending every failure is a retryable outage. Transient classification walks the whole exception chain, because EF wraps a refused or timed-out Npgsql connection in `InvalidOperationException`/`DbUpdateException`. EF Core's connection, command, transaction, query-iteration and save failure events are downgraded from Error to Debug: they embed exception text, the database name and host:port, and the request failure is already recorded by the safe event. A real-EF test against an unreachable database covers both.
+
+The browser shows `Reference: <trace id>` for 5xx responses only when the correlation header has the server's 32-hex format.
+
+## Completion checks
+
+The last implementation pass also fixed issues found while verifying these safeguards:
+
+- Display formatting passes exact decimal strings to `Intl.NumberFormat`; values between 1e15 and beyond 29 digits keep their digits and grouping.
+- A settings conflict refreshes the shell data, and the reload also refreshes portfolio options, so a reopened dialog cannot reuse a stale revision or hide a portfolio created elsewhere.
+- Reload reports progress, and an overview failure stays visible with its retry action alongside refresh errors.
+- The venue-refresh 502 message applies only to account refresh. Imported fills may carry a Play ID without breaking Overview validation.
+- A terminator in `CoreAccountPortfolio` keeps `dotnet ef migrations script --idempotent` valid; the script applies twice to an empty database.
+- The fee-token length matches its column; an explicitly disabled new account is not replaced by the column default.
+
+Deferred to follow-up work: reading the venue before taking the account lock (sync currently holds it for up to the 20s provider deadline), and skipping malformed unrelated spot tokens instead of failing the whole refresh.
 
 ## Verification and scope
 

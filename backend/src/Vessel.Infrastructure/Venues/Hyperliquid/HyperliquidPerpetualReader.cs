@@ -208,7 +208,7 @@ public sealed class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvid
             fills.Add(new(
                 Identity(Property(fill, "tid")), name, side,
                 Text(Property(fill, "dir")), Positive(Property(fill, "px")), Positive(Property(fill, "sz")),
-                Number(Property(fill, "fee")), Text(Property(fill, "feeToken")),
+                Number(Property(fill, "fee")), Text(Property(fill, "feeToken"), FeeTokenLength),
                 Number(Property(fill, "closedPnl")), Timestamp(Property(fill, "time"), latestTimestamp),
                 Identity(Property(fill, "oid")), Text(Property(fill, "hash")), fill.GetRawText()));
         }
@@ -316,12 +316,15 @@ public sealed class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvid
         return element;
     }
 
-    private static string Text(JsonElement element)
+    // Matches the persisted fee-token column, so an oversized value fails as a venue read.
+    private const int FeeTokenLength = 64;
+
+    private static string Text(JsonElement element, int maxLength = 128)
     {
         if (element.ValueKind != JsonValueKind.String)
             throw new VenueReadException(InvalidResponse);
         var value = element.GetString()!;
-        if (string.IsNullOrWhiteSpace(value) || value.Length > 128 || value.Any(char.IsControl))
+        if (string.IsNullOrWhiteSpace(value) || value.Length > maxLength || value.Any(char.IsControl))
             throw new VenueReadException(InvalidResponse);
         return value;
     }

@@ -132,7 +132,24 @@ public sealed class ServerDiagnosticTests
         Assert.DoesNotContain("ConnectionStrings", factory.Logs.Entries.Single().Text);
     }
 
-    private sealed class DiagnosticFactory(Exception? error, bool cancelCaller = false) : WebApplicationFactory<Program>
+    [Fact]
+    public async Task Unreachable_database_through_real_EF_is_a_503_without_framework_error_logs()
+    {
+        // Port 1 refuses immediately; EF wraps the transient NpgsqlException.
+        const string connection = "Host=127.0.0.1;Port=1;Database=private-db-name;Username=private-user;Password=private-password;Timeout=2";
+        await using var factory = new DiagnosticFactory(null, connection: connection);
+        using var client = factory.AuthorizedClient();
+        using var response = await client.GetAsync("/api/overview");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var diagnostic = Assert.Single(factory.Logs.Entries);
+        Assert.Equal("UnexpectedRequestFailure", diagnostic.EventId.Name);
+        Assert.Equal(503, diagnostic.Fields["StatusCode"]);
+        var output = await response.Content.ReadAsStringAsync() + diagnostic.Text + JsonSerializer.Serialize(diagnostic.Fields);
+        foreach (var forbidden in new[] { "private-db-name", "private-user", "private-password", "tcp://", "127.0.0.1:1" })
+            Assert.DoesNotContain(forbidden, output);
+    }
+
+    private sealed class DiagnosticFactory(Exception? error, bool cancelCaller = false, string? connection = null) : WebApplicationFactory<Program>
     {
         public CaptureLoggerProvider Logs { get; } = new();
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -142,7 +159,7 @@ public sealed class ServerDiagnosticTests
             {
                 ["Vessel:Auth:Token"] = CoreApiFactory.Token,
                 ["Vessel:Auth:OwnerId"] = Guid.NewGuid().ToString(),
-                ["ConnectionStrings:Vessel"] = null
+                ["ConnectionStrings:Vessel"] = connection
             }));
             builder.ConfigureLogging(logging => logging.ClearProviders().SetMinimumLevel(LogLevel.Error).AddProvider(Logs));
             builder.ConfigureServices(services =>

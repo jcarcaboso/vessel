@@ -43,7 +43,9 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         account.HasIndex(x => new { x.OwnerId, x.VenueId, x.Address }).IsUnique()
             .HasDatabaseName("UX_accounts_owner_venue_address").HasFilter("\"Address\" IS NOT NULL");
         account.Property(x => x.SettingsRevision).HasDefaultValue(1L);
-        account.Property(x => x.IsEnabled).HasDefaultValue(true);
+        // With a database default, EF omits a property equal to its sentinel. A true
+        // sentinel keeps an explicitly disabled new account from being stored as enabled.
+        account.Property(x => x.IsEnabled).HasDefaultValue(true).HasSentinel(true);
         account.Property(x => x.Address).HasMaxLength(42);
         account.Property(x => x.SyncStatus).HasMaxLength(32);
         account.Property(x => x.LastSyncError).HasMaxLength(200);

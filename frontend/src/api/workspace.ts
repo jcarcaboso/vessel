@@ -41,7 +41,7 @@ export interface ImportedFill {
   orderId: string
   sourceFillId: string
   transactionHash: string
-  playId: null
+  playId: string | null
 }
 export interface AccountSnapshot {
   observedAtUtc: string
@@ -131,7 +131,7 @@ const account = (v: unknown): v is BrokerAccount => object(v) && guid(v.id) &&
   (v.settingsRevision === undefined || typeof v.settingsRevision === 'number' && count(v.settingsRevision) && v.settingsRevision > 0)
 const fill = (v: unknown): v is ImportedFill => object(v) && guid(v.id) && guid(v.accountId) &&
   ['contractId', 'side', 'direction', 'feeToken', 'orderId', 'sourceFillId', 'transactionHash'].every(k => text(v[k])) &&
-  ['price', 'quantity', 'fee', 'closedPnlUsd'].every(k => decimal(v[k])) && date(v.occurredAtUtc) && v.playId === null
+  ['price', 'quantity', 'fee', 'closedPnlUsd'].every(k => decimal(v[k])) && date(v.occurredAtUtc) && (v.playId === null || guid(v.playId))
 const wallet = (v: unknown): v is StablecoinWallet | null => v === null || object(v) &&
   date(v.observedAtUtc) && text(v.accountMode) && text(v.scope) && decimal(v.totalNominalUsd) &&
   decimal(v.availableNominalUsd) && text(v.notice) && Array.isArray(v.balances) &&
@@ -159,7 +159,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     return id
   }
   const accountPath = (id: string) => `/api/accounts/${resourceId(id)}`
-  async function request<T>(path: string, validate: (v: unknown) => v is T, options: RequestInit = {}, timeout = 10_000): Promise<T> {
+  async function request<T>(path: string, validate: (v: unknown) => v is T, options: RequestInit = {}, timeout = 10_000, badGateway?: string): Promise<T> {
     let response: Response
     try {
       const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout)
@@ -174,7 +174,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       throw new ApiError('unauthorized', 'Your API token was rejected. Disconnect and connect again.', response.status)
     }
     if (!response.ok) {
-      let detail = response.status === 502 ? 'The venue refresh failed. Previous account data is still available.' : 'The request could not be completed.'
+      let detail = response.status === 502 && badGateway ? badGateway : 'The request could not be completed.'
       if (response.status === 400 || response.status === 409) {
         try {
           const problem: unknown = await response.json()
@@ -183,6 +183,9 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       }
       if (response.status === 404) detail = 'This account or portfolio is no longer available.'
       if (response.status === 503) detail = 'The service is unavailable. Check the database and server configuration.'
+      // Only the server-generated trace format is shown, so a proxy cannot inject text.
+      const reference = response.headers.get('X-Correlation-ID')
+      if (response.status >= 500 && reference && /^[\da-f]{32}$/.test(reference)) detail += ` Reference: ${reference}`
       throw new ApiError('http', detail, response.status)
     }
     if (response.status === 204) {
@@ -208,6 +211,6 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     deleteAccount: id => request(accountPath(id), (v): v is undefined => v === undefined, { method: 'DELETE' }),
     snapshot: (id, signal) => request(`${accountPath(id)}/snapshot`, snapshot, signal ? { signal } : {}),
     fills: (id, signal) => request(`${accountPath(id)}/fills`, (v): v is ImportedFill[] => Array.isArray(v) && v.every(fill), signal ? { signal } : {}),
-    sync: id => request(`${accountPath(id)}/sync`, account, { method: 'POST' }, 30_000),
+    sync: id => request(`${accountPath(id)}/sync`, account, { method: 'POST' }, 30_000, 'The venue refresh failed. Previous account data is still available.'),
   }
 }

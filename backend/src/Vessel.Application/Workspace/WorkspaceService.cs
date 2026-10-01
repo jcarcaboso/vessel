@@ -220,9 +220,9 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         await store.AccountAsync(id, ct) ?? throw new WorkspaceException(404, "Account not found.");
     private static AccountDto ToDto(Account a, AccountSnapshot? s) => new(a.Id, a.PortfolioId, a.Name, a.VenueId, a.Address,
         Money(a.VenueId == "manual" ? a.ManualAccountValueUsd : s?.AccountValueUsd), a.LastSyncedAtUtc,
-        a.SyncStatus, a.LastSyncError, a.IsEnabled ? s?.Positions.Count ?? 0 : 0, a.HistoryNotice, a.IsEnabled,
+        a.SyncStatus, a.LastSyncError, a.IsEnabled ? s?.Positions.Count ?? 0 : 0, a.HistoryNotice, a.IsEnabled, a.SettingsRevision,
         s?.StablecoinsObservedAtUtc is null ? null : StablecoinTotals.Sum(s.Stablecoins.Select(balance => balance.Available)),
-        s?.StablecoinScope, s?.AccountMode, a.SettingsRevision);
+        s?.StablecoinScope, s?.AccountMode);
     private static StablecoinWalletDto? WalletDto(AccountSnapshot snapshot) =>
         snapshot.StablecoinsObservedAtUtc is not { } observed ? null :
         new(observed, snapshot.AccountMode!, snapshot.StablecoinScope!,

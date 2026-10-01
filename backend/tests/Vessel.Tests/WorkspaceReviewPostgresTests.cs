@@ -19,6 +19,18 @@ public sealed class WorkspaceReviewPostgresTests
         new(new WorkspaceStore(db), new CoreOwner(owner), reader ?? new FixtureReader());
 
     [PostgresFact]
+    public async Task Account_inserted_disabled_is_not_stored_as_enabled_by_the_column_default()
+    {
+        await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Disabled before insert");
+        account.Configure(null, null, null);
+        account.UpdateSettings(account.Name, null, false);
+        await using (var db = database.Context(owner)) await new WorkspaceStore(db).AddAccountAsync(account, default);
+        await using var read = database.Context(owner);
+        Assert.False((await read.Accounts.SingleAsync()).IsEnabled);
+    }
+
+    [PostgresFact]
     public async Task Duplicate_normalized_source_is_rejected_including_disabled_record()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); Guid id;

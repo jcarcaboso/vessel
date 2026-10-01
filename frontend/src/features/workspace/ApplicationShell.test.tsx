@@ -74,6 +74,36 @@ describe('Main application shell', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('valid public wallet address')
     expect(client.createAccount).not.toHaveBeenCalled()
   })
+  it('keeps the create dialog open with guidance when the venue address already exists', async () => {
+    const duplicate = 'An account for this venue and address already exists. Manage or re-enable that account.'
+    const client = api({
+      overview: vi.fn().mockResolvedValue({ ...emptyOverview, portfolios: [portfolioFixture] }),
+      createAccount: vi.fn().mockRejectedValue(new ApiError('http', duplicate, 409)),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await screen.findByText('Start with your accounts.')
+    await userEvent.click(screen.getByRole('button', { name: 'Add account' }))
+    await userEvent.type(screen.getByLabelText('Account name'), 'Wallet copy')
+    await userEvent.type(screen.getByLabelText('Public wallet address'), `0x${'ab'.repeat(20)}`)
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add account' }))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('Manage or re-enable that account')
+    expect(client.overview).toHaveBeenCalledTimes(1)
+  })
+  it('shows Reload progress and returns a repeated overview failure with its retry action', async () => {
+    let fail: (cause: unknown) => void = () => {}
+    const client = api({
+      overview: vi.fn().mockRejectedValueOnce(new ApiError('unavailable', 'Overview is unavailable.'))
+        .mockImplementationOnce(() => new Promise((_, reject) => { fail = reject })),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Overview is unavailable.')
+    await userEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    expect(screen.getByRole('button', { name: 'Reload' })).toHaveAttribute('aria-busy', 'true')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    fail(new ApiError('unavailable', 'Overview is still unavailable.'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Overview is still unavailable.')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  })
   it('does not truncate a private-key-shaped value into a valid public address', async () => {
     const client = api({ overview: vi.fn().mockResolvedValue({ ...emptyOverview, portfolios: [portfolioFixture] }) })
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
@@ -208,8 +238,8 @@ describe('Main application shell', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Reload' }))
     await waitFor(() => expect(client.snapshot).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(client.fills).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
     expect(await screen.findByText('No positions in the latest snapshot')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
   it('Reload refreshes detail content even when account metadata is identical', async () => {
     const observation = {

@@ -45,8 +45,8 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
   const [page, setPage] = useState<Page>(pageFromHash)
   const [menuOpen, setMenuOpen] = useState(false)
   const [data, setData] = useState<Overview | null>(null)
-  const [pending, setPending] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState<{ api: WorkspaceApi; key: number } | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [mutationError, setMutationError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState<string | null>(null)
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
@@ -58,6 +58,11 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
   const [notice, setNotice] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const reload = useCallback(() => setReloadKey(key => key + 1), [])
+  // Derived from the request generation so Reload shows progress and a repeated
+  // failure visibly clears and returns, without a synchronous effect render.
+  const loading = loaded === null || loaded.api !== api || loaded.key !== reloadKey
+  const pending = loading && data === null
+  const error = loading ? null : loadError
   useEffect(() => {
     const handle = () => {
       const next = pageFromHash()
@@ -71,8 +76,8 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
   useEffect(() => {
     const controller = new AbortController()
     let active = true
-    api.overview(controller.signal).then(next => { if (active) { setData(next); setPending(false); setError(null) } })
-      .catch(cause => { if (active) { setError(cause instanceof ApiError ? cause.message : 'The workspace could not be loaded.'); setPending(false) } })
+    api.overview(controller.signal).then(next => { if (active) { setData(next); setLoadError(null); setLoaded({ api, key: reloadKey }) } })
+      .catch(cause => { if (active) { setLoadError(cause instanceof ApiError ? cause.message : 'The workspace could not be loaded.'); setLoaded({ api, key: reloadKey }) } })
     return () => { active = false; controller.abort() }
   }, [api, reloadKey])
   useEffect(() => {
@@ -154,10 +159,11 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
       <header className="shell-header"><div><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} /></button><span className="shell-breadcrumb">Workspace <span>/</span> <strong>{currentPage.label}</strong></span></div><div><span className="connection-indicator"><i />Private session</span><span className="workspace-badge">Perpetuals</span></div></header>
       <main className="shell-content">
         <section className="shell-page-heading"><div><div className="eyebrow">YOUR PRIVATE WORKSPACE</div><h1>{selectedAccount ? selectedAccount.name : currentPage.label}</h1><p>{currentPage.description}</p></div><div className="shell-heading-actions">
-          {page !== 'settings' && <Button variant="outline" onClick={reload} disabled={pending}><RefreshCw size={14} />Reload</Button>}
+          {page !== 'settings' && <Button variant="outline" onClick={reload} disabled={loading} aria-busy={loading}><RefreshCw size={14} className={loading ? 'is-spinning' : ''} />Reload</Button>}
           {page === 'portfolios' ? <Button onClick={() => setPortfolioDialog(true)}><Plus size={15} />New portfolio</Button> : page !== 'settings' && page !== 'activity' && <Button onClick={() => setAccountDialog(true)} disabled={pending || !data}><Plus size={15} />Add account</Button>}
         </div></section>
-        {(error || mutationError) && <div className="workspace-alert" role="alert"><CircleHelp size={17} /><span>{mutationError ?? error}</span><Button variant="ghost" size="sm" onClick={error ? reload : () => setMutationError(null)}>{error ? 'Try again' : 'Dismiss'}</Button></div>}
+        {error && <div className="workspace-alert" role="alert"><CircleHelp size={17} /><span>{error}</span><Button variant="ghost" size="sm" onClick={reload}>Try again</Button></div>}
+        {mutationError && <div className="workspace-alert" role="alert"><CircleHelp size={17} /><span>{mutationError}</span><Button variant="ghost" size="sm" onClick={() => setMutationError(null)}>Dismiss</Button></div>}
         {pending && <div className="workspace-loading" role="status">Loading your workspace…</div>}
         {!pending && !data && !error && <div className="workspace-alert">No workspace data is available.</div>}
 
@@ -203,7 +209,7 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
     <CreatePortfolioDialog open={portfolioDialog} onOpenChange={setPortfolioDialog} api={api} onCreated={created} />
     <CreateAccountDialog open={accountDialog} onOpenChange={setAccountDialog} api={api} portfolios={portfolios} onCreated={created} />
     {managedPortfolio && <ManagePortfolioDialog key={managedPortfolio.id} portfolio={managedPortfolio} api={api} onClose={() => setManagedPortfolio(null)} onChanged={managementChanged} />}
-    {managedAccount && <ManageAccountDialog key={managedAccount.id} account={managedAccount} portfolios={portfolios} api={api} onClose={() => setManagedAccount(null)} onChanged={managementChanged} />}
+    {managedAccount && <ManageAccountDialog key={managedAccount.id} account={managedAccount} portfolios={portfolios} api={api} onClose={() => setManagedAccount(null)} onChanged={managementChanged} onStale={reload} />}
     {notice && <div className="workspace-toast" role="status"><Check size={16} />{notice}<button aria-label="Dismiss message" onClick={() => setNotice(null)}><X size={14} /></button></div>}
   </div>
 }

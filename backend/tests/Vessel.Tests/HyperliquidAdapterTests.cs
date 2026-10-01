@@ -233,6 +233,7 @@ public sealed partial class HyperliquidAdapterTests
     [InlineData("tid", "\"1.5\"")]
     [InlineData("tid", "\"\"")]
     [InlineData("feeToken", "null")]
+    [InlineData("feeToken", "\"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\"")]
     [InlineData("dir", "\"\"")]
     [InlineData("hash", "\"private\\nvalue\"")]
     public async Task Invalid_fill_fields_are_safe_failures(string field, string json)

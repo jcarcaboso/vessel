@@ -13,7 +13,8 @@ export function AccountDetail({ account, api, refreshing, onSync, onBack, onMana
   const [fills, setFills] = useState<ImportedFill[]>([])
   const [completed, setCompleted] = useState<{ api: WorkspaceApi; key: string } | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
-  const requestKey = JSON.stringify([account.id, account.lastSyncedAtUtc, account.isEnabled, refreshing, reloadGeneration])
+  // A refresh ends with a shell reload, so an in-flight refresh does not start a racing read.
+  const requestKey = JSON.stringify([account.id, account.lastSyncedAtUtc, account.isEnabled, reloadGeneration])
   const pending = completed === null || completed.api !== api || completed.key !== requestKey
   const error = pending ? null : detailError
   useEffect(() => {
