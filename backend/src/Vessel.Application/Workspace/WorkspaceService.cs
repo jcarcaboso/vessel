@@ -192,6 +192,33 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         return (await store.FillsAsync(id, 100, ct)).Select(ToDto).ToList();
     }
 
+    public async Task<AccountInstrumentsDto> InstrumentsAsync(Guid id, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var account = await RequireAccount(id, ct);
+        if (!account.IsEnabled)
+            throw new WorkspaceException(409, "Enable the account before reading its instrument catalogue.");
+        if (account.VenueId == "manual")
+            return new(account.VenueId, "perpetuals", "manual", [],
+                "Manual catalogue: enter a perpetual contract manually. No venue metadata is available.");
+        if (reader.VenueId != account.VenueId)
+            throw new WorkspaceException(502, "The venue instrument read failed. Try again later.");
+
+        IReadOnlyList<VenueInstrument> instruments;
+        try
+        {
+            instruments = await reader.ReadInstrumentsAsync(ct);
+            ct.ThrowIfCancellationRequested();
+        }
+        catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
+            ex is OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            throw new WorkspaceException(502, "The venue instrument read failed. Try again later.");
+        }
+        return new(account.VenueId, "perpetuals", "primary-perpetual-dex", instruments,
+            "Primary perpetual DEX metadata only. No orders, balances or execution refresh.");
+    }
+
     public async Task<AccountDto> SyncAsync(Guid id, CancellationToken ct)
     {
         var failed = await store.WithAccountLockAsync(id, async account =>

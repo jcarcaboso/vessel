@@ -47,6 +47,8 @@ public static class WorkspaceEndpoints
         });
         api.MapGet("/accounts/{id:guid}/fills", async (Guid id, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.FillsAsync(id, ct)));
+        api.MapGet("/accounts/{id:guid}/instruments", async (Guid id, WorkspaceService service, CancellationToken ct) =>
+            Results.Ok(await service.InstrumentsAsync(id, ct)));
         api.MapPost("/accounts/{id:guid}/sync", async (Guid id, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.SyncAsync(id, ct)));
         api.MapGet("/overview", async (WorkspaceService service, CancellationToken ct) => Results.Ok(await service.OverviewAsync(ct)));

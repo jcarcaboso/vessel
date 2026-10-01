@@ -39,6 +39,13 @@ public sealed class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvid
 
     public string VenueId => "hyperliquid";
 
+    public Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken cancellationToken) =>
+        ReadBoundedAsync<IReadOnlyList<VenueInstrument>>(async token =>
+        {
+            using var meta = await ReadJsonAsync(new { type = "meta", dex = "" }, token);
+            return ReadInstruments(meta.RootElement, selectableOnly: true);
+        }, cancellationToken);
+
     public async Task<PerpetualVenueReadResult> ReadAsync(string publicAddress, CancellationToken cancellationToken)
     {
         if (publicAddress is null || publicAddress.Length != 42 ||
@@ -46,35 +53,44 @@ public sealed class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvid
             !publicAddress.Skip(2).All(char.IsAsciiHexDigit))
             throw new VenueReadException("A valid 42-character hexadecimal public address is required.");
 
-        cancellationToken.ThrowIfCancellationRequested();
-        // ResponseHeadersRead does not apply HttpClient.Timeout to reading the body.
-        // Bound the entire six-request operation, including streamed bodies.
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20), timeProvider);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
         var latestTimestamp = Math.Min(253402300799999L, timeProvider.GetUtcNow().ToUnixTimeMilliseconds() + 300000);
 
-        try
+        return await ReadBoundedAsync(async token =>
         {
-            using var meta = await ReadJsonAsync(new { type = "meta", dex = "" }, linked.Token);
+            using var meta = await ReadJsonAsync(new { type = "meta", dex = "" }, token);
             var instruments = ReadInstruments(meta.RootElement);
             var contracts = instruments.Select(instrument => instrument.ContractId).ToHashSet(StringComparer.Ordinal);
 
             using var state = await ReadJsonAsync(
-                new { type = "clearinghouseState", user = publicAddress, dex = "" }, linked.Token);
+                new { type = "clearinghouseState", user = publicAddress, dex = "" }, token);
             var snapshot = ReadSnapshot(state.RootElement, contracts, latestTimestamp);
 
             using var fills = await ReadJsonAsync(
-                new { type = "userFills", user = publicAddress, aggregateByTime = false }, linked.Token);
+                new { type = "userFills", user = publicAddress, aggregateByTime = false }, token);
             var executions = ReadFills(fills.RootElement, contracts, latestTimestamp);
 
-            using var abstraction = await ReadJsonAsync(new { type = "userAbstraction", user = publicAddress }, linked.Token);
+            using var abstraction = await ReadJsonAsync(new { type = "userAbstraction", user = publicAddress }, token);
             var accountMode = ReadAccountMode(abstraction.RootElement);
-            using var spotMeta = await ReadJsonAsync(new { type = "spotMeta" }, linked.Token);
+            using var spotMeta = await ReadJsonAsync(new { type = "spotMeta" }, token);
             var stablecoins = ReadStablecoinMetadata(spotMeta.RootElement);
-            using var spotState = await ReadJsonAsync(new { type = "spotClearinghouseState", user = publicAddress }, linked.Token);
+            using var spotState = await ReadJsonAsync(new { type = "spotClearinghouseState", user = publicAddress }, token);
             var wallet = ReadStablecoinWallet(spotState.RootElement, stablecoins, accountMode, timeProvider.GetUtcNow());
+            return new PerpetualVenueReadResult(snapshot with { StablecoinWallet = wallet }, instruments, executions, HistoryNotice);
+        }, cancellationToken);
+    }
+
+    private async Task<T> ReadBoundedAsync<T>(Func<CancellationToken, Task<T>> read, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        // ResponseHeadersRead does not apply HttpClient.Timeout to streamed bodies.
+        // Bound the entire operation, not each individual request.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20), timeProvider);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
+        try
+        {
+            var result = await read(linked.Token);
             linked.Token.ThrowIfCancellationRequested();
-            return new(snapshot with { StablecoinWallet = wallet }, instruments, executions, HistoryNotice);
+            return result;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -137,7 +153,7 @@ public sealed class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvid
         }
     }
 
-    private static List<VenueInstrument> ReadInstruments(JsonElement meta)
+    private static List<VenueInstrument> ReadInstruments(JsonElement meta, bool selectableOnly = false)
     {
         var result = new List<VenueInstrument>();
         var names = new HashSet<string>(StringComparer.Ordinal);
@@ -150,7 +166,12 @@ public sealed class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvid
             var leverage = Integer(Property(item, "maxLeverage"));
             if (decimals is < 0 or > 28 || leverage <= 0 || !names.Add(name))
                 throw new VenueReadException(InvalidResponse);
-            result.Add(new(name, decimals, leverage));
+            if (item.TryGetProperty("isDelisted", out var delisted) &&
+                delisted.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                throw new VenueReadException(InvalidResponse);
+            // Delisted contracts still identify historical positions and fills during refresh.
+            if (!selectableOnly || delisted.ValueKind != JsonValueKind.True)
+                result.Add(new(name, decimals, leverage));
         }
         return result;
     }

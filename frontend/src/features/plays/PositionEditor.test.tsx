@@ -1,0 +1,331 @@
+import { useState } from 'react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
+import { createDraft, createEntry, type PlayDraft } from './draft'
+import { PositionEditor } from './PositionEditor'
+
+function renderEditor(entryCount = 2) {
+  const initial = createDraft()
+  initial.entries = Array.from({ length: entryCount }, (_, index) => createEntry(index))
+  const onChange = vi.fn<(draft: PlayDraft) => void>()
+  function Harness({ externalSelection, selectionRequest = 0, externalAccount }: {
+    externalSelection?: string
+    selectionRequest?: number
+    externalAccount?: string
+  }) {
+    const [draft, setDraft] = useState(initial)
+    const [selectedId, setSelectedId] = useState(initial.entries[0]!.id)
+    return <PositionEditor draft={externalAccount === undefined ? draft : { ...draft, accountId: externalAccount }}
+      onChange={next => { onChange(next); setDraft(next) }}
+      selectedId={externalSelection ?? selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} />
+  }
+  const view = render(<Harness />)
+  return {
+    initial, onChange, user: userEvent.setup(),
+    selectExternally: (id: string, selectionRequest = 0) => view.rerender(<Harness externalSelection={id} selectionRequest={selectionRequest} />),
+    chooseAccount: (id: string) => view.rerender(<Harness externalAccount={id} />),
+  }
+}
+
+function field(name: string) {
+  return screen.getByRole('spinbutton', { name })
+}
+
+function entryHeader(name: string) {
+  return within(screen.getByRole('article', { name: `${name} editor` })).getByRole('button', { name: new RegExp(`^${name}`) })
+}
+
+function unitButton(group: string, unit: 'Price' | '% from entry') {
+  return within(screen.getByRole('group', { name: group })).getByRole('button', { name: unit })
+}
+
+describe('local-draft position editor', () => {
+  it('starts with blank planned levels, explicit units and at least one entry', () => {
+    const { initial } = renderEditor(1)
+    expect(screen.getByTestId('position-panel')).toHaveClass('plays-position', 'panel', 'position-panel')
+    expect(screen.getByTestId('entry-sidebar')).toHaveClass('entry-sidebar')
+    expect(entryHeader('Entry 1')).toHaveClass('entry-header')
+    expect(screen.getByRole('article', { name: 'Entry 1 editor' }).style.getPropertyValue('--entry-color')).toBe(initial.entries[0]!.color)
+    expect(field('Entry 1 planned entry price (quote units)')).toHaveValue(null)
+    expect(field('Entry 1 planned stop price (quote units)')).toHaveValue(null)
+    expect(field('Entry 1 planned target 1 price (quote units)')).toHaveValue(null)
+    expect(field('Entry 1 quantity share (%)')).toHaveValue(100)
+    expect(screen.getByRole('button', { name: 'Remove Entry 1' })).toBeDisabled()
+    expect(screen.getByText(/Planned levels, not fills/)).toHaveTextContent('Unsaved edits stay in memory')
+    expect(screen.queryByText(/sample/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^save/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Whole-position sizing' })).toHaveValue('margin')
+    expect(unitButton('Entry 1 stop units', 'Price')).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('edits whole-position sizing without deriving or reallocating entry values', async () => {
+    const { user, onChange, initial } = renderEditor()
+    const margin = screen.getByRole('spinbutton', { name: /Whole-position margin/ })
+    fireEvent.change(margin, { target: { value: '125.7500' } })
+    expect(onChange.mock.lastCall?.[0].size).toBe('125.7500')
+    expect(onChange.mock.lastCall?.[0].entries).toEqual(initial.entries)
+    const sizing = screen.getByRole('combobox', { name: 'Whole-position sizing' })
+    await user.selectOptions(sizing, 'margin')
+    expect(margin).toHaveValue(125.75)
+    await user.selectOptions(sizing, 'quantity')
+    const quantity = screen.getByRole('spinbutton', { name: /Whole-position quantity/ })
+    expect(quantity).toHaveValue(null)
+    await user.type(quantity, '0.125')
+    expect(onChange.mock.lastCall?.[0]).toMatchObject({ sizingMode: 'quantity', size: '0.125', leverage: '1' })
+    expect(onChange.mock.lastCall?.[0].entries).toEqual(initial.entries)
+    expect(sizing).toHaveValue('quantity')
+  })
+
+  it('links whole-number leverage controls, allows clearing and preserves size and planned levels', async () => {
+    const { user, onChange, initial } = renderEditor()
+    const slider = screen.getByRole('slider', { name: 'Leverage slider (×)' })
+    const leverage = screen.getByRole('spinbutton', { name: 'Leverage (×)' })
+    fireEvent.change(slider, { target: { value: '9' } })
+    expect(leverage).toHaveValue(9)
+    await user.clear(leverage)
+    expect(leverage).toHaveValue(null)
+    expect(onChange.mock.lastCall?.[0].leverage).toBe('')
+    expect(slider).toHaveValue('1')
+    expect(slider).toHaveAttribute('aria-valuetext', 'Not specified')
+    await user.type(leverage, '12')
+    expect(slider).toHaveValue('12')
+    expect(slider).toHaveAttribute('aria-valuetext', '12 times')
+    expect(onChange.mock.lastCall?.[0]).toMatchObject({ leverage: '12', size: '' })
+    expect(onChange.mock.lastCall?.[0].entries).toEqual(initial.entries)
+    expect(leverage).toHaveAttribute('step', '1')
+    expect(leverage).toHaveAttribute('min', '1')
+    expect(leverage).toHaveAttribute('max', '100')
+    expect(slider).toHaveAttribute('step', '1')
+    expect(slider).toHaveAttribute('min', '1')
+    expect(slider).toHaveAttribute('max', '100')
+  })
+
+  it.each([
+    ['12.25', '12'], ['12.75', '13'], ['0', '1'], ['-5', '1'], ['100.9', '100'], ['500', '100'],
+  ])('accepts numeric leverage %s only as a bounded whole multiplier %s', (value, expected) => {
+    const { onChange, initial } = renderEditor()
+    const leverage = screen.getByRole('spinbutton', { name: 'Leverage (×)' })
+    fireEvent.change(leverage, { target: { value } })
+    expect(leverage).toHaveValue(Number(expected))
+    expect(screen.getByRole('slider', { name: 'Leverage slider (×)' })).toHaveValue(expected)
+    expect(onChange.mock.lastCall?.[0]).toMatchObject({ leverage: expected, size: '' })
+    expect(onChange.mock.lastCall?.[0].entries).toEqual(initial.entries)
+  })
+
+  it('keeps the budget in the position builder and discards unfinished edits when the account changes', async () => {
+    const { user, chooseAccount } = renderEditor()
+    const position = screen.getByTestId('position-panel')
+    const budget = within(position).getByRole('textbox', { name: /Available budget/ })
+    expect(budget.closest('.position-context')).not.toBeNull()
+    expect(budget).toHaveAttribute('readonly')
+    await user.click(within(position).getByRole('button', { name: 'Edit available budget' }))
+    await user.type(within(position).getByRole('textbox', { name: /Available budget/ }), '275')
+    chooseAccount('another-account')
+    expect(within(position).getByRole('textbox', { name: /Available budget/ })).toHaveAttribute('readonly')
+    expect(within(position).getByRole('textbox', { name: /Available budget/ })).toHaveValue('Unavailable')
+    expect(within(position).queryByRole('button', { name: 'Save budget' })).not.toBeInTheDocument()
+  })
+
+  it('keeps entry prices and stops independent and clears only the switched level value', async () => {
+    const { user, onChange } = renderEditor()
+    await user.type(field('Entry 1 planned entry price (quote units)'), '123.45')
+    await user.type(field('Entry 1 planned stop price (quote units)'), '120')
+    await user.type(field('Entry 2 planned stop price (quote units)'), '85')
+    await user.click(unitButton('Entry 1 stop units', '% from entry'))
+    const stop = field('Entry 1 planned stop distance from entry (%)')
+    expect(stop).toHaveValue(null)
+    await user.type(stop, '2.5')
+    await user.clear(field('Entry 1 planned entry price (quote units)'))
+    await user.type(field('Entry 1 planned entry price (quote units)'), '140')
+    expect(stop).toHaveValue(2.5)
+    expect(field('Entry 2 planned stop price (quote units)')).toHaveValue(85)
+    expect(onChange.mock.lastCall?.[0].entries[0]!.stop).toMatchObject({ unit: 'percent', value: '2.5' })
+    await user.click(unitButton('Entry 1 stop units', 'Price'))
+    expect(field('Entry 1 planned stop price (quote units)')).toHaveValue(null)
+    expect(field('Entry 1 planned entry price (quote units)')).toHaveValue(140)
+  })
+
+  it('keeps a level value when its pressed chip is clicked and switches units with the keyboard', async () => {
+    const { user, onChange } = renderEditor()
+    await user.type(field('Entry 1 planned stop price (quote units)'), '120')
+    onChange.mockClear()
+    await user.click(unitButton('Entry 1 stop units', 'Price'))
+    expect(onChange).not.toHaveBeenCalled()
+    expect(field('Entry 1 planned stop price (quote units)')).toHaveValue(120)
+    await user.tab()
+    expect(unitButton('Entry 1 stop units', '% from entry')).toHaveFocus()
+    await user.keyboard('{Enter}')
+    expect(unitButton('Entry 1 stop units', '% from entry')).toHaveAttribute('aria-pressed', 'true')
+    expect(unitButton('Entry 1 stop units', 'Price')).toHaveAttribute('aria-pressed', 'false')
+    expect(field('Entry 1 planned stop distance from entry (%)')).toHaveValue(null)
+    expect(screen.getByRole('article', { name: 'Entry 1 editor' })).toHaveAttribute('data-selected', 'true')
+  })
+
+  it('adds and removes partial targets with independent units and shares, without rebalancing', async () => {
+    vi.stubGlobal('crypto', {})
+    const { user, onChange, initial } = renderEditor()
+    await user.type(field('Entry 1 planned target 1 price (quote units)'), '150')
+    await user.clear(field('Entry 1 target 1 share (%)'))
+    await user.type(field('Entry 1 target 1 share (%)'), '60')
+    await user.click(screen.getByRole('button', { name: 'Add target to Entry 1' }))
+    expect(field('Entry 1 planned target 2 price (quote units)')).toHaveValue(null)
+    expect(field('Entry 1 target 2 share (%)')).toHaveValue(null)
+    await user.type(field('Entry 1 planned target 2 price (quote units)'), '160')
+    await user.type(field('Entry 1 target 2 share (%)'), '40')
+    await user.click(unitButton('Entry 1 target 2 units', '% from entry'))
+    expect(field('Entry 1 planned target 2 distance from entry (%)')).toHaveValue(null)
+    expect(field('Entry 1 target 2 share (%)')).toHaveValue(40)
+    await user.type(field('Entry 1 planned target 2 distance from entry (%)'), '7.25')
+    expect(field('Entry 1 planned target 1 price (quote units)')).toHaveValue(150)
+    expect(onChange.mock.lastCall?.[0].entries[1]).toEqual(initial.entries[1])
+    await user.click(screen.getByRole('button', { name: 'Remove Entry 1 target 1' }))
+    expect(field('Entry 1 planned target 1 distance from entry (%)')).toHaveValue(7.25)
+    expect(field('Entry 1 target 1 share (%)')).toHaveValue(40)
+    await user.click(unitButton('Entry 1 target 1 units', 'Price'))
+    expect(field('Entry 1 planned target 1 price (quote units)')).toHaveValue(null)
+    expect(field('Entry 1 target 1 share (%)')).toHaveValue(40)
+    await user.click(screen.getByRole('button', { name: 'Remove Entry 1 target 1' }))
+    expect(onChange.mock.lastCall?.[0].entries[0]!.targets).toEqual([])
+    expect(screen.getByRole('button', { name: 'Add target to Entry 1' })).toBeEnabled()
+  })
+
+  it('adds blank entries using distinct identities without changing existing shares or reusing names', async () => {
+    vi.stubGlobal('crypto', {})
+    const { user, initial, onChange } = renderEditor(1)
+    await user.click(screen.getByRole('button', { name: 'Add entry' }))
+    const added = onChange.mock.lastCall?.[0].entries[1]
+    expect(added).toMatchObject({ name: 'Entry 2', share: '', price: '', stop: { unit: 'price', value: '' } })
+    expect(added?.id).not.toBe(initial.entries[0]!.id)
+    expect(onChange.mock.lastCall?.[0].entries[0]).toEqual(initial.entries[0])
+    expect(screen.getByLabelText('Selected entry')).toHaveValue(added!.id)
+    await user.click(screen.getByRole('button', { name: 'Remove Entry 1' }))
+    await user.click(screen.getByRole('button', { name: 'Add entry' }))
+    expect(onChange.mock.lastCall?.[0].entries.map(entry => entry.name)).toEqual(['Entry 2', 'Entry 3'])
+    expect(field('Entry 3 planned entry price (quote units)')).toHaveValue(null)
+  })
+
+  it('selects by the picker and the whole header, including its share text', async () => {
+    const { user, initial } = renderEditor()
+    await user.selectOptions(screen.getByLabelText('Selected entry'), initial.entries[1]!.id)
+    expect(entryHeader('Entry 2')).toHaveFocus()
+    expect(entryHeader('Entry 2')).toHaveAttribute('aria-pressed', 'true')
+    await user.click(within(entryHeader('Entry 1')).getByText('100% of quantity'))
+    expect(screen.getByLabelText('Selected entry')).toHaveValue(initial.entries[0]!.id)
+    expect(entryHeader('Entry 1')).toHaveFocus()
+    expect(entryHeader('Entry 1')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('article', { name: 'Entry 2 editor' })).toBeInTheDocument()
+  })
+
+  it('reveals external selection only inside the bounded sidebar and focuses with preventScroll', () => {
+    const { initial, selectExternally } = renderEditor()
+    const sidebar = screen.getByTestId('entry-sidebar')
+    const header = entryHeader('Entry 2')
+    sidebar.scrollTop = 25
+    vi.spyOn(sidebar, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 100, 300, 400))
+    vi.spyOn(header, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 300, 300, 40))
+    const focus = vi.spyOn(header, 'focus')
+    selectExternally(initial.entries[1]!.id)
+    expect(sidebar.scrollTo).toHaveBeenLastCalledWith({ top: 213, behavior: 'auto' })
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+    expect(header).toHaveFocus()
+    expect(window.scrollTo).not.toHaveBeenCalled()
+  })
+
+  it('does not select or steal focus while editing an unselected share or removing an unselected entry', async () => {
+    const { user, initial } = renderEditor()
+    const sidebar = screen.getByTestId('entry-sidebar')
+    const share = field('Entry 2 quantity share (%)')
+    await user.type(share, '35')
+    expect(share).toHaveFocus()
+    expect(screen.getByLabelText('Selected entry')).toHaveValue(initial.entries[0]!.id)
+    expect(sidebar.scrollTo).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Remove Entry 2' }))
+    expect(screen.getByLabelText('Selected entry')).toHaveValue(initial.entries[0]!.id)
+    expect(entryHeader('Entry 1')).not.toHaveFocus()
+    expect(sidebar.scrollTo).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Remove Entry 1' })).toBeDisabled()
+  })
+
+  it('reveals the same entry again when the parent increments selectionRequest', () => {
+    const { initial, selectExternally } = renderEditor()
+    const sidebar = screen.getByTestId('entry-sidebar')
+    const entry = initial.entries[1]!
+    selectExternally(entry.id, 1)
+    vi.mocked(sidebar.scrollTo).mockClear()
+    sidebar.scrollTop = 350
+    selectExternally(entry.id, 2)
+    expect(sidebar.scrollTo).toHaveBeenCalledOnce()
+    expect(entryHeader(entry.name)).toHaveFocus()
+    expect(screen.getByLabelText('Selected entry')).toHaveValue(entry.id)
+    expect(window.scrollTo).not.toHaveBeenCalled()
+  })
+
+  it('selects an existing entry when the selected entry is removed and never removes the last entry', async () => {
+    const { user, initial, onChange } = renderEditor()
+    await user.selectOptions(screen.getByLabelText('Selected entry'), initial.entries[1]!.id)
+    await user.click(screen.getByRole('button', { name: 'Remove Entry 2' }))
+    expect(onChange.mock.lastCall?.[0].entries).toEqual([initial.entries[0]])
+    expect(screen.getByLabelText('Selected entry')).toHaveValue(initial.entries[0]!.id)
+    expect(entryHeader('Entry 1')).toHaveFocus()
+    onChange.mockClear()
+    await user.click(screen.getByRole('button', { name: 'Remove Entry 1' }))
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.getAllByRole('article')).toHaveLength(1)
+    expect(window.scrollTo).not.toHaveBeenCalled()
+  })
+
+  it('reuses the live expanded form, switches entries, avoids duplicate IDs and restores trigger focus on Escape', async () => {
+    const { user, initial } = renderEditor()
+    const trigger = screen.getByRole('button', { name: 'Expand selected entry' })
+    await user.click(trigger)
+    const dialog = screen.getByRole('dialog', { name: 'Expanded entry editor' })
+    expect(dialog).toHaveClass('entry-dialog', 'plays-entry-dialog')
+    const price = within(dialog).getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' })
+    expect(document.querySelectorAll(`input[id="${price.id}"]`)).toHaveLength(1)
+    expect(screen.getByTestId('entry-sidebar').querySelectorAll('input[aria-label="Entry 1 planned entry price (quote units)"]')).toHaveLength(0)
+    await user.type(price, '145.125')
+    await user.selectOptions(within(dialog).getByLabelText('Entry'), initial.entries[1]!.id)
+    expect(within(dialog).getByRole('spinbutton', { name: 'Entry 2 planned entry price (quote units)' })).toHaveValue(null)
+    await user.type(within(dialog).getByRole('spinbutton', { name: 'Entry 2 quantity share (%)' }), '35')
+    const ids = Array.from(document.querySelectorAll('[id]'), node => node.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    const focus = vi.spyOn(trigger, 'focus')
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(trigger).toHaveFocus())
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(field('Entry 1 planned entry price (quote units)')).toHaveValue(145.125)
+    expect(field('Entry 2 quantity share (%)')).toHaveValue(35)
+    expect(screen.getByLabelText('Selected entry')).toHaveValue(initial.entries[1]!.id)
+    expect(window.scrollTo).not.toHaveBeenCalled()
+  })
+
+  it('restores the sidebar scroll offset when closing the same expanded entry', async () => {
+    const { user } = renderEditor()
+    const sidebar = screen.getByTestId('entry-sidebar')
+    sidebar.scrollTop = 175
+    const trigger = screen.getByRole('button', { name: 'Expand selected entry' })
+    await user.click(trigger)
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(trigger).toHaveFocus())
+    expect(sidebar.scrollTo).toHaveBeenLastCalledWith({ top: 175, behavior: 'auto' })
+    expect(field('Entry 1 planned entry price (quote units)')).toBeInTheDocument()
+    expect(window.scrollTo).not.toHaveBeenCalled()
+  })
+
+  it('does not focus the sidebar when external selection changes inside the expanded editor', async () => {
+    const { user, initial, selectExternally } = renderEditor()
+    await user.click(screen.getByRole('button', { name: 'Expand selected entry' }))
+    const dialog = screen.getByRole('dialog')
+    const picker = within(dialog).getByLabelText('Entry')
+    await user.click(picker)
+    selectExternally(initial.entries[1]!.id)
+    expect(picker).toHaveFocus()
+    expect(picker).toHaveValue(initial.entries[1]!.id)
+    const share = within(dialog).getByRole('spinbutton', { name: 'Entry 2 quantity share (%)' })
+    await user.type(share, '25')
+    expect(share).toHaveFocus()
+    expect(window.scrollTo).not.toHaveBeenCalled()
+  })
+})

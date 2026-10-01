@@ -22,14 +22,14 @@ pnpm --filter vessel-frontend build
 
 ## Current interface
 
-- Overview, Portfolios, Accounts, Activity and Settings, with Graphite desktop navigation and a keyboard-closeable mobile drawer.
+- Overview, Plays, Portfolios, Accounts, Activity and Settings, with collapsible Graphite desktop navigation and a keyboard-closeable mobile drawer. Desktop collapse uses a 78-pixel icon rail with accessible labels/tooltips and retains its state across shell navigation; mobile keeps the full drawer.
 - Real owner-scoped portfolio/account creation and lists, latest snapshots and recent execution rows.
 - Manual values can remain unavailable. Hyperliquid takes a public address only; the form must not truncate long key-shaped input into an address.
 - Manual account refresh, honest error states and retention of previous records if a provider call fails.
 - Imported fills are unassigned facts, not inferred plays, thesis or performance.
 - The account detail shows venue-reported positions. A missing snapshot is not proof of zero exposure.
 - Dollar-formatted record values are nominal. No FX/fair-value or unified-account valuation is provided.
-- Play navigation is disabled/later. The old sample editor is not mounted by the default route.
+- Plays opens a blank editable local draft using the approved layout, an explicit chart placeholder and existing account/portfolio context. Drafts survive shell navigation, but page reload or disconnect discards them. Play persistence and financial calculations are not implemented. Hyperliquid instrument choices use a metadata-only API read; manual labels are explicit fallback. Direction uses green/up Long and red/down Short, and leverage uses whole multipliers.
 
 Historical dates include the year. Decimal amounts remain strings in API data and form payloads. Formatting passes the original decimal string to `Intl.NumberFormat`, so grouping and rounding are exact for large/negative totals; `Number` only estimates magnitude so tiny values keep significant digits instead of rounding to zero.
 
@@ -51,7 +51,7 @@ Production requires HTTPS and a deliberate same-origin API/proxy. The dev proxy 
 - `src/features/workspace/` owns page navigation, overview, account/portfolio forms and account-detail/history views.
 - `src/api/` owns typed requests, response validation and safe errors.
 - `src/features/connection/` owns session connection and disconnection.
-- `src/features/plays/` retains the previous sample editor, currently unmounted.
+- `src/features/plays/` owns the prototype-aligned local draft workspace, venue/manual instrument picker, direction toggle, entry editor, journal and context panels. Previous sample data remains an unmounted reference.
 - `src/components/chart/` retains reusable instrument/candle/overlay types and sample renderer; no real candle API is enabled yet.
 - `src/components/ui/` holds editable Button/Input/Dialog/Tabs derived from the official shadcn registry, with MIT notice retained.
 - `public/fonts/` has the local Manrope font and OFL license. No remote font request is needed.
@@ -60,7 +60,7 @@ This slice adds no router/global-state/form/chart library. Hash navigation and f
 
 ## Verification and provenance
 
-The root integration check runs TypeScript, lint, tests and production build. Tests cover legacy sample editing, authentication, core contracts, owner-safe request bodies, decimal/null semantics, forms, navigation, failure recovery, mobile close/focus and format limits.
+The root integration check runs TypeScript, lint, tests and production build. Tests cover draft editing, authentication, core contracts, owner-safe request bodies, decimal/null semantics, forms, navigation, failure recovery, mobile close/focus and format limits.
 
 Native browser layout checks use clearly synthetic fixtures separately from actual API/PostgreSQL verification. These are not proof of a live user wallet session or full accessibility compliance.
 

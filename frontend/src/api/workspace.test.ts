@@ -159,3 +159,34 @@ describe('Core workspace API', () => {
     await expect(createWorkspaceApi('token').snapshot(accountFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
   })
 })
+
+describe('Instrument catalogue requests', () => {
+  const catalogue = {
+    venueId: 'hyperliquid', marketScope: 'perpetuals', scope: 'primary-perpetual-dex',
+    instruments: [{ contractId: '1000PEPE', quantityDecimals: 0, maxLeverage: 10 }], notice: 'Primary perpetual DEX only.',
+  }
+  it('uses the authenticated metadata route with cancellation and preserves exact contract IDs', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(catalogue))))
+    const controller = new AbortController()
+    await expect(createWorkspaceApi(' session-token ').instruments(accountFixture.id, controller.signal)).resolves.toEqual(catalogue)
+    expect(fetch).toHaveBeenCalledWith(`/api/accounts/${accountFixture.id}/instruments`, expect.objectContaining({
+      credentials: 'omit', redirect: 'error', cache: 'no-store',
+      headers: { Authorization: 'Bearer session-token', Accept: 'application/json' }, signal: expect.any(AbortSignal),
+    }))
+  })
+  it.each([
+    { ...catalogue, marketScope: 'spot' },
+    { ...catalogue, instruments: [{ contractId: 'BTC', quantityDecimals: -1, maxLeverage: 10 }] },
+    { ...catalogue, instruments: [{ contractId: 'BTC', quantityDecimals: 2, maxLeverage: 1.5 }] },
+    { ...catalogue, instruments: [catalogue.instruments[0], catalogue.instruments[0]] },
+    { ...catalogue, instruments: [{ contractId: ' BTC ', quantityDecimals: 2, maxLeverage: 10 }] },
+    { ...catalogue, scope: 'manual' },
+  ])('rejects malformed or unsupported catalogue data', async body => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))))
+    await expect(createWorkspaceApi('token').instruments(accountFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+  it('uses a catalogue-specific safe 502 error instead of account refresh wording', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('private provider details', { status: 502 })))
+    await expect(createWorkspaceApi('token').instruments(accountFixture.id)).rejects.toThrow('venue instrument catalogue')
+  })
+})

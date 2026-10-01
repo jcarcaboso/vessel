@@ -91,7 +91,7 @@ Owner query filters and the save guard apply to ordinary context use. The guard 
 dotnet test backend/Vessel.slnx
 ```
 
-Without `Vessel_TEST_POSTGRES`, the thirty-nine PostgreSQL tests are reported as skipped with the environment variable named in the reason. Domain, dependency and WebApplicationFactory tests still run. No in-memory provider substitutes for PostgreSQL.
+Without `Vessel_TEST_POSTGRES`, the forty PostgreSQL tests are reported as skipped with the environment variable named in the reason. Domain, dependency and WebApplicationFactory tests still run. No in-memory provider substitutes for PostgreSQL.
 
 With `Vessel_TEST_POSTGRES` set to a real PostgreSQL connection, the tests require CREATE/DROP SCHEMA permissions. Each test applies actual migrations (including a foundation-to-core upgrade case) in a random `vessel_test_<uuid>` schema, uses that schema as its search path, and drops only that schema on disposal. They never recreate or delete the shared database or dev tables. An invalid supplied connection fails the tests rather than skipping them. Use a test database in CI.
 
@@ -151,3 +151,9 @@ Review regressions cover both reported exact-total examples, mixed scales/negati
 Unexpected API failures log one structured `UnexpectedRequestFailure` event (trace ID, route pattern, exception type, status and a method-only stack) and return generic Problem Details with the same `traceId` and `X-Correlation-ID`. Exception messages, request data, addresses and connection strings are never logged. Transient database/network failures anywhere in the exception chain, including EF's wrapper around a refused connection, return 503; other failures are bugs and return 500. EF Core's connection/command/transaction/query/save failure events are downgraded from Error to Debug in persistence configuration because they embed exception text and the database host/name; configured log levels are otherwise unchanged. A real-EF test with an unreachable database checks the 503 and the absence of those details.
 
 Migration SQL statements are terminated so `dotnet ef migrations script --idempotent` output applies cleanly, including re-applying it to an up-to-date database.
+
+## Perpetual instrument catalogue
+
+Authenticated `GET /api/accounts/{id}/instruments` returns owner-scoped, enabled-account instrument metadata. Hyperliquid reads only primary perpetual `meta`, without supplying an address or refreshing balances/fills. Manual accounts return an empty manual catalogue. Missing/foreign accounts return 404, disabled accounts 409 and provider failures safe 502. Choices exclude delisted contracts, but the existing historical-fill reader still recognizes them.
+
+The metadata DTO preserves contract ID, quantity decimals and maximum leverage. It does not validate a complete order, margin tier, trading eligibility or quote/base units. The existing 20-second operation deadline, 4 MiB response cap and JSON depth bound apply. No catalogue persistence, account writes or migration. See `docs/architecture/plays-workspace-contract.md`.

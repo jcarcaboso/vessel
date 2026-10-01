@@ -18,6 +18,8 @@ public sealed record AccountDto(Guid Id, Guid? PortfolioId, string Name, string 
     string? AccountValueUsd, DateTimeOffset? LastSyncedAtUtc, string SyncStatus, string? LastSyncError,
     int PositionCount, string? HistoryNotice, bool IsEnabled, long SettingsRevision,
     string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null);
+public sealed record AccountInstrumentsDto(string VenueId, string MarketScope, string Scope,
+    IReadOnlyList<VenueInstrument> Instruments, string Notice);
 public sealed record PositionDto(string ContractId, string SignedQuantity, string EntryPrice,
     string UnrealizedPnlUsd, string MarginUsedUsd, int? Leverage);
 public sealed record SnapshotDto(DateTimeOffset ObservedAtUtc, string ValueScope, string? AccountValueUsd,

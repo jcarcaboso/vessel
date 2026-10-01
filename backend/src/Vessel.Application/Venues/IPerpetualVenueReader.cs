@@ -5,6 +5,7 @@ namespace Vessel.Application.Venues;
 public interface IPerpetualVenueReader
 {
     string VenueId { get; }
+    Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken cancellationToken);
     Task<PerpetualVenueReadResult> ReadAsync(string publicAddress, CancellationToken cancellationToken);
 }
 

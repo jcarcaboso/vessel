@@ -91,7 +91,7 @@ Open `http://127.0.0.1:5180`. The Vite development proxy forwards `/api` and `/h
 
 Enter the configured backend token at runtime. The field clears after connection; the API-client closure keeps the token only in session memory for protected reads/writes, until disconnect. Nothing stores it in browser storage, a URL or the build.
 
-The default page uses actual core API records, with honest loading/empty/error states. Manual values may be unavailable. Hyperliquid refresh covers primary-perpetual state and bounded recent executions. Imported fills remain unassigned; there is no invented thesis, FX adjustment or complete-lifetime claim. The Play page, charts, jobs, images and notification delivery remain later work.
+The default page uses actual core API records, with honest loading/empty/error states. Manual values may be unavailable. Hyperliquid refresh covers primary-perpetual state and bounded recent executions. Imported fills remain unassigned; there is no invented thesis, FX adjustment or complete-lifetime claim. The Plays page now supports unsaved in-memory drafts. Play persistence, financial calculations, chart rendering, jobs, images and notification delivery remain later work. See [the first-pass Plays contract](architecture/plays-workspace-contract.md).
 
 These HTTP addresses are loopback development endpoints. A real self-hosted deployment needs HTTPS and deliberate proxy/authentication policy. The existing LAN prototype at `10.1.0.219:5173` remains separate; the scaffold does not automatically open firewall ports.
 
@@ -155,7 +155,7 @@ pnpm check
 
 That runs the existing prototype tests, locked NuGet restore, backend Release build/tests, frozen pnpm install, TypeScript checks, lint, frontend tests and production build.
 
-Set `Vessel_TEST_POSTGRES` to a real PostgreSQL test connection to execute database integration tests. Without it, 26 PostgreSQL tests explicitly skip; an invalid supplied connection fails. Tests migrate unique temporary schemas and drop only those schemas, not the shared database. The CI definition supplies a separate ephemeral PostgreSQL service.
+Set `Vessel_TEST_POSTGRES` to a real PostgreSQL test connection to execute database integration tests. Without it, 40 PostgreSQL tests explicitly skip; an invalid supplied connection fails. Tests migrate unique temporary schemas and drop only those schemas, not the shared database. The CI definition supplies a separate ephemeral PostgreSQL service.
 
 Useful focused commands:
 

@@ -2,6 +2,8 @@
 
 October 1, 2026. The owner requested the main application layout without the Play workspace and authorized backend core, Hyperliquid integration, PostgreSQL mounting and migrations.
 
+The later [Plays first-pass contract](plays-workspace-contract.md) supersedes this record's original disabled-Play-navigation instruction. All backend/import limits below remain unchanged.
+
 This step delivers account/portfolio management and a bounded manual-trigger read-only refresh. It does not implement automated jobs, complete lifetime history, Play editing, order placement or inferred fill matching.
 
 ## Work ownership
