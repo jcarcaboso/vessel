@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Vessel.Application.MarketData;
 using Vessel.Application.Ownership;
 using Vessel.Infrastructure.Auth;
 using Vessel.Application.Venues;
@@ -20,6 +21,18 @@ public static class DependencyInjection
             client.BaseAddress = new Uri("https://api.hyperliquid.xyz/");
             client.Timeout = TimeSpan.FromSeconds(20);
         }).RemoveAllLoggers();
+        services.AddHttpClient<ICandleReader, HyperliquidPerpetualReader>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.hyperliquid.xyz/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        }).RemoveAllLoggers();
+        services.AddHttpClient<IMarketContextReader, HyperliquidPerpetualReader>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.hyperliquid.xyz/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        }).RemoveAllLoggers();
+        services.AddSingleton<CandleCache>();
+        services.AddSingleton<MarketContextCache>();
         services.AddHttpContextAccessor();
         services.AddScoped<IJournalOwnerContext, HttpJournalOwnerContext>();
         services.AddAuthentication(BearerTokenHandler.SchemeName)

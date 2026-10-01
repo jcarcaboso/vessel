@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net.Http.Json;
 using System.Numerics;
 using System.Text.Json;
+using Vessel.Application.MarketData;
 using Vessel.Application.Venues;
 
 namespace Vessel.Infrastructure.Venues.Hyperliquid;
@@ -10,8 +11,8 @@ namespace Vessel.Infrastructure.Venues.Hyperliquid;
 /// Bounded, read-only primary perpetual DEX adapter. Composition supplies an
 /// HttpClient with BaseAddress https://api.hyperliquid.xyz/ (and no signing credentials).
 /// </summary>
-public sealed class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvider timeProvider)
-    : IPerpetualVenueReader
+public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvider timeProvider)
+    : IPerpetualVenueReader, ICandleReader
 {
     // Official schemas and bounds, checked October 1, 2026:
     // https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint

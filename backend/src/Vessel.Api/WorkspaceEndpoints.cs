@@ -1,3 +1,4 @@
+using Vessel.Application.MarketData;
 using Vessel.Application.Workspace;
 
 namespace Vessel.Api;
@@ -49,6 +50,12 @@ public static class WorkspaceEndpoints
             Results.Ok(await service.FillsAsync(id, ct)));
         api.MapGet("/accounts/{id:guid}/instruments", async (Guid id, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.InstrumentsAsync(id, ct)));
+        api.MapGet("/accounts/{id:guid}/candles", async (Guid id, string? instrument, string? interval, long? endTime,
+            CandleService service, CancellationToken ct) =>
+            Results.Ok(await service.CandlesAsync(id, instrument, interval, endTime, ct)));
+        api.MapGet("/accounts/{id:guid}/market-context", async (Guid id, string? instrument,
+            MarketContextService service, CancellationToken ct) =>
+            Results.Ok(await service.ContextAsync(id, instrument, ct)));
         api.MapPost("/accounts/{id:guid}/sync", async (Guid id, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.SyncAsync(id, ct)));
         api.MapGet("/overview", async (WorkspaceService service, CancellationToken ct) => Results.Ok(await service.OverviewAsync(ct)));

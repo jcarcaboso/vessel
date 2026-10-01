@@ -11,7 +11,7 @@ using Vessel.Application.Workspace;
 
 namespace Vessel.Tests;
 
-internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, string? connection = null, IPerpetualVenueReader? reader = null) : WebApplicationFactory<Program>
+internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, string? connection = null, IPerpetualVenueReader? reader = null, Vessel.Application.MarketData.ICandleReader? candles = null, Vessel.Application.MarketData.IMarketContextReader? market = null) : WebApplicationFactory<Program>
 {
     public const string Token = "core-tests-only-token";
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -27,6 +27,8 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
         {
             if (store is not null) services.AddSingleton(store);
             if (reader is not null) services.AddSingleton<IPerpetualVenueReader>(reader);
+            if (candles is not null) services.AddSingleton<Vessel.Application.MarketData.ICandleReader>(candles);
+            if (market is not null) services.AddSingleton<Vessel.Application.MarketData.IMarketContextReader>(market);
         });
     }
     public HttpClient AuthorizedClient()
