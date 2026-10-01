@@ -17,6 +17,9 @@ internal sealed class FixtureReader : IPerpetualVenueReader
     public string VenueId => "hyperliquid";
     public bool Fail { get; set; }
     public int Reads;
+    public int InstrumentReads;
+    public CancellationToken InstrumentCancellationToken;
+    public Exception? InstrumentFailure { get; set; }
     public PerpetualVenueReadResult Result { get; set; } = new(
         new(DateTimeOffset.Parse("2026-10-01T10:00:00Z"), "primary-perpetual-dex", 1234.1234567890123456789012345m,
             1000.0000000000000000000000001m, 20.123456789012345678901234567m,
@@ -25,6 +28,14 @@ internal sealed class FixtureReader : IPerpetualVenueReader
         [new("source-1", "BTC", "B", "Open Long", 60000.123456789m, 0.0000000000000000000000000001m,
             0.00123456789m, "USDC", -0.01m, DateTimeOffset.Parse("2026-10-01T09:00:00Z"), "order-1", "hash-1", "secret raw provider payload")],
         "Recent primary perpetual DEX fills only; incomplete history.");
+    public Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken ct)
+    {
+        Interlocked.Increment(ref InstrumentReads);
+        InstrumentCancellationToken = ct;
+        ct.ThrowIfCancellationRequested();
+        var failure = InstrumentFailure ?? (Fail ? new VenueReadException("secret provider failure") : null);
+        return failure is not null ? Task.FromException<IReadOnlyList<VenueInstrument>>(failure) : Task.FromResult(Result.Instruments);
+    }
     public Task<PerpetualVenueReadResult> ReadAsync(string address, CancellationToken ct)
     {
         Interlocked.Increment(ref Reads);
@@ -37,6 +48,7 @@ internal sealed class MemoryWorkspaceStore(Guid ownerId) : IWorkspaceStore
 {
     public bool RejectOwnerWideReads { get; set; }
     public bool RejectActivityReads { get; set; }
+    public int Saves { get; private set; }
     public List<Portfolio> Portfolios { get; } = [];
     public List<Account> Accounts { get; } = [];
     public List<AccountSnapshot> Snapshots { get; } = [];
@@ -76,7 +88,7 @@ internal sealed class MemoryWorkspaceStore(Guid ownerId) : IWorkspaceStore
         Fills.RemoveAll(f => f.OwnerId == ownerId && f.AccountId == account.Id);
         return Task.CompletedTask;
     }
-    public Task SaveAsync(CancellationToken ct) => Task.CompletedTask;
+    public Task SaveAsync(CancellationToken ct) { Saves++; return Task.CompletedTask; }
 }
 
 internal sealed class CoreDatabase(string admin, string schema, string connectionString) : IAsyncDisposable

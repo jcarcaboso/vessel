@@ -1,4 +1,4 @@
-import type { BrokerAccount, Overview, Portfolio } from '@/api/workspace'
+import type { BrokerAccount, InstrumentCatalog, Overview, Portfolio } from '@/api/workspace'
 
 export const portfolioFixture: Portfolio = {
   id: '11111111-2222-3333-4444-555555555555', name: 'Swing trading', accountCount: 1,
@@ -17,4 +17,13 @@ export const emptyOverview: Overview = {
 export const overviewFixture: Overview = {
   ...emptyOverview, portfolios: [portfolioFixture], accounts: [accountFixture],
   totals: { ...emptyOverview.totals, portfolioCount: 1, accountCount: 1, totalAccountValueUsd: '1250.123456', valuedAccountCount: 1 },
+}
+
+export const instrumentCatalogFixture: InstrumentCatalog = {
+  venueId: 'hyperliquid', marketScope: 'perpetuals', scope: 'primary-perpetual-dex',
+  instruments: [
+    { contractId: 'BTC', quantityDecimals: 5, maxLeverage: 40 },
+    { contractId: '1000PEPE', quantityDecimals: 0, maxLeverage: 10 },
+  ],
+  notice: 'Primary perpetual DEX metadata only. No orders, balances or execution refresh.',
 }

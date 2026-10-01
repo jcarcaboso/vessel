@@ -4,7 +4,7 @@ October 1, 2026. The owner requested the main application layout without the Pla
 
 ## Interface
 
-The default frontend opens a Graphite application shell with Overview, Portfolios, Accounts, Activity and Settings. The approved Play workspace and prototype stay separate, with Play navigation marked for later.
+The default frontend opens a Graphite application shell with Overview, Portfolios, Accounts, Activity and Settings. The original core step kept Play navigation disabled. The subsequent [Plays first pass](plays-workspace-contract.md) enables a prototype-aligned in-memory draft workspace with a chart placeholder and metadata-only Hyperliquid instrument choices; the disposable prototype remains separate.
 
 - Overview uses known nominal values and persisted account/snapshot/execution counts. Empty states use setup guidance, not invented performance.
 - Portfolios and accounts can be created through the authenticated API. New accounts belong to one portfolio; legacy unassigned heads remain valid.
@@ -14,7 +14,7 @@ The default frontend opens a Graphite application shell with Overview, Portfolio
 - Mobile navigation supports keyboard close and background inertness. Tables scroll internally.
 - The token stays in a session client closure, not storage, URLs or build assets. Disconnect releases it; the password field clears after connection.
 
-The shell lives in `frontend/src/features/workspace/`. Existing Play components are retained but not mounted by the default page.
+The shell lives in `frontend/src/features/workspace/`. Plays now mounts the draft workspace from `frontend/src/features/plays/`. Overview remains the default page.
 
 ## Backend
 

@@ -7,6 +7,18 @@ export interface Portfolio {
   totalValueUsd: string | null
   valueCoverage: 'complete' | 'partial' | 'unavailable'
 }
+export interface VenueInstrument {
+  contractId: string
+  quantityDecimals: number
+  maxLeverage: number
+}
+export interface InstrumentCatalog {
+  venueId: string
+  marketScope: 'perpetuals'
+  scope: 'primary-perpetual-dex' | 'manual'
+  instruments: VenueInstrument[]
+  notice: string
+}
 export interface BrokerAccount {
   id: string
   portfolioId: string | null
@@ -96,6 +108,7 @@ export interface WorkspaceApi {
   portfolios(signal?: AbortSignal): Promise<Portfolio[]>
   accounts(signal?: AbortSignal): Promise<BrokerAccount[]>
   account(id: string, signal?: AbortSignal): Promise<BrokerAccount>
+  instruments(id: string, signal?: AbortSignal): Promise<InstrumentCatalog>
   createPortfolio(name: string): Promise<Portfolio>
   createAccount(account: CreateAccount): Promise<BrokerAccount>
   renamePortfolio(id: string, name: string): Promise<Portfolio>
@@ -115,6 +128,15 @@ const decimal = (v: unknown): v is string => text(v) && v.length <= 100 && /^-?\
 const nullableDecimal = (v: unknown) => v === null || decimal(v)
 const date = (v: unknown) => text(v) && Number.isFinite(Date.parse(v))
 const count = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
+const instrumentCatalog = (v: unknown): v is InstrumentCatalog => object(v) &&
+  text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 &&
+  v.marketScope === 'perpetuals' && ['primary-perpetual-dex', 'manual'].includes(String(v.scope)) &&
+  Array.isArray(v.instruments) && v.instruments.length <= 10_000 &&
+  v.instruments.every((i: unknown) => object(i) && text(i.contractId) && i.contractId.trim() === i.contractId &&
+    i.contractId.length > 0 && i.contractId.length <= 128 && count(i.quantityDecimals) &&
+    (i.quantityDecimals as number) <= 28 && count(i.maxLeverage) && (i.maxLeverage as number) > 0) &&
+  new Set(v.instruments.map((i: VenueInstrument) => i.contractId)).size === v.instruments.length &&
+  (v.scope !== 'manual' || v.instruments.length === 0) && text(v.notice) && v.notice.length <= 1000
 const portfolio = (v: unknown): v is Portfolio => object(v) && guid(v.id) && text(v.name) &&
   count(v.accountCount) && nullableDecimal(v.totalValueUsd) &&
   ['complete', 'partial', 'unavailable'].includes(String(v.valueCoverage))
@@ -203,6 +225,8 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     portfolios: signal => request('/api/portfolios', (v): v is Portfolio[] => Array.isArray(v) && v.every(portfolio), signal ? { signal } : {}),
     accounts: signal => request('/api/accounts', (v): v is BrokerAccount[] => Array.isArray(v) && v.every(account), signal ? { signal } : {}),
     account: (id, signal) => request(accountPath(id), account, signal ? { signal } : {}),
+    instruments: (id, signal) => request(`${accountPath(id)}/instruments`, instrumentCatalog, signal ? { signal } : {},
+      25_000, 'The venue instrument catalogue is unavailable. Try again or enter a manual label.'),
     createPortfolio: name => request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name }) }),
     createAccount: body => request('/api/accounts', account, { method: 'POST', body: JSON.stringify(body) }),
     renamePortfolio: (id, name) => request(`/api/portfolios/${resourceId(id)}`, portfolio, { method: 'PATCH', body: JSON.stringify({ name }) }),

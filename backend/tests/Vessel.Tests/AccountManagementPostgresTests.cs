@@ -306,6 +306,8 @@ public sealed class AccountManagementPostgresTests
     private sealed class GatedReader : IPerpetualVenueReader
     {
         public string VenueId => "hyperliquid";
+        public Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken ct) =>
+            throw new NotSupportedException("This fixture only supports refresh.");
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int Reads;

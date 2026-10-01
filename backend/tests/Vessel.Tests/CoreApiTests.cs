@@ -11,7 +11,7 @@ using Vessel.Application.Workspace;
 
 namespace Vessel.Tests;
 
-internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, string? connection = null, FixtureReader? reader = null) : WebApplicationFactory<Program>
+internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, string? connection = null, IPerpetualVenueReader? reader = null) : WebApplicationFactory<Program>
 {
     public const string Token = "core-tests-only-token";
     protected override void ConfigureWebHost(IWebHostBuilder builder)

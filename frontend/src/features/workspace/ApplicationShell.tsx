@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import type { BrokerAccount, Overview, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { ApiError, type SystemInfo } from '@/api/system'
 import { Button } from '@/components/ui/button'
+import { PlayWorkspace } from '@/features/plays/PlayWorkspace'
+import { createDraft } from '@/features/plays/draft'
 import { AccountDetail } from './AccountDetail'
 import { ActivityTable } from './ActivityTable'
 import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
@@ -9,12 +11,13 @@ import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
 import { money, shortAddress, time, venueName } from './format'
 import {
   Activity, ArrowRight, ArrowUpRight, Check, CircleHelp, Database, Folder, LayoutDashboard,
-  LogOut, Menu, Plus, RefreshCw, Settings2, ShieldCheck, Wallet, X, BookOpen, Pencil,
+  LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, ShieldCheck, Wallet, X, BookOpen, Pencil,
 } from 'lucide-react'
 import './application-shell.css'
 
 const pages = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, description: 'Your accounts and recent execution history, in one place.' },
+  { id: 'plays', label: 'Plays', icon: BookOpen, description: 'Document the idea, define the position and keep your reasoning separate from execution.' },
   { id: 'portfolios', label: 'Portfolios', icon: Folder, description: 'Group accounts around the way you trade.' },
   { id: 'accounts', label: 'Accounts', icon: Wallet, description: 'Read-only venue connections and manual account records.' },
   { id: 'activity', label: 'Activity', icon: Activity, description: 'Imported executions, separate from trading intent.' },
@@ -43,7 +46,9 @@ function AccountRows({ accounts, portfolioNames, refreshing, onDetail, onSync, o
 
 export function ApplicationShell({ system, disconnect, api }: { system: SystemInfo; disconnect: () => void; api: WorkspaceApi }) {
   const [page, setPage] = useState<Page>(pageFromHash)
+  const [playDraft, setPlayDraft] = useState(createDraft)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [navigationCollapsed, setNavigationCollapsed] = useState(false)
   const [data, setData] = useState<Overview | null>(null)
   const [loaded, setLoaded] = useState<{ api: WorkspaceApi; key: number } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -129,6 +134,7 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
   }
   const portfolios = data?.portfolios ?? [], accounts = data?.accounts ?? []
   const enabledAccounts = accounts.filter(account => account.isEnabled !== false)
+  const readOnlyAccountCount = enabledAccounts.filter(a => a.venueId === 'hyperliquid').length
   const portfolioNames = Object.fromEntries(portfolios.map(p => [p.id, p.name]))
   const filteredAccounts = portfolioFilter ? accounts.filter(a => a.portfolioId === portfolioFilter) : accounts
   const selectedAccount = accounts.find(a => a.id === selectedAccountId)
@@ -140,32 +146,36 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
     reload(); setNotice(message)
   }
 
-  return <div className="journal-shell">
-    {menuOpen && <button className="sidebar-backdrop" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
+  return <div className={`journal-shell ${navigationCollapsed ? 'navigation-collapsed' : ''}`}>
+    {menuOpen && <button className="sidebar-backdrop" aria-label="Close navigation" title="Close navigation" onClick={() => setMenuOpen(false)} />}
     <aside id="workspace-nav" className={`shell-sidebar ${menuOpen ? 'is-open' : ''}`} aria-label="Main navigation" role={menuOpen ? 'dialog' : undefined} aria-modal={menuOpen ? true : undefined}>
-      <a className="shell-brand" href="#overview" onClick={() => navigate('overview')}><span className="shell-monogram">V</span><span>vessel<small>THE TRADING JOURNAL</small></span></a>
+      <a className="shell-brand" href="#overview" aria-label="Vessel overview" title="Vessel overview" onClick={() => navigate('overview')}><span className="shell-monogram" aria-hidden="true">V</span><span className="sidebar-copy">vessel<small>THE TRADING JOURNAL</small></span></a>
+      <button type="button" className="icon-button sidebar-toggle" aria-label={navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'} title={navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'} aria-controls="workspace-nav" aria-expanded={!navigationCollapsed} onClick={() => setNavigationCollapsed(collapsed => !collapsed)}>
+        {navigationCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
+      </button>
       <div className="nav-section-label">WORKSPACE</div>
-      <nav>{pages.filter(p => p.id !== 'settings').map(({ id, label, icon: Icon }) => <a key={id} href={`#${id}`} className={`shell-nav-item ${page === id ? 'active' : ''}`} onClick={() => navigate(id)} aria-current={page === id ? 'page' : undefined}><Icon size={18} /><span>{label}</span>{id === 'accounts' && accounts.length > 0 && <small>{accounts.length}</small>}</a>)}</nav>
+      <nav>{pages.filter(p => p.id !== 'settings').map(({ id, label, icon: Icon }) => <a key={id} href={`#${id}`} className={`shell-nav-item ${page === id ? 'active' : ''}`} aria-label={label} title={label} onClick={() => navigate(id)} aria-current={page === id ? 'page' : undefined}><Icon size={18} aria-hidden="true" /><span className="sidebar-copy">{label}</span>{id === 'accounts' && accounts.length > 0 && <small>{accounts.length}</small>}</a>)}</nav>
       <div className="nav-section-label later-section">LATER</div>
-      <div className="shell-nav-later" aria-disabled="true"><BookOpen size={18} /><span>Plays</span><small>Next</small></div>
-      <div className="shell-nav-later" aria-disabled="true"><Folder size={18} /><span>Strategies</span></div>
+      <div className="shell-nav-later" role="link" aria-label="Strategies" aria-disabled="true" title="Strategies are not available yet"><Folder size={18} aria-hidden="true" /><span className="sidebar-copy">Strategies</span></div>
       <div className="shell-sidebar-bottom">
-        <div className="read-only-note"><ShieldCheck size={17} /><div><strong>Read-only by design</strong><span>Perpetuals first. No order placement.</span></div></div>
-        <a href="#settings" className={`shell-nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => navigate('settings')}><Settings2 size={18} />Settings</a>
-        <button className="owner-card" onClick={disconnect} title="Disconnect this browser session"><span className="owner-avatar">{system.owner.displayName.slice(0, 1).toUpperCase()}</span><span><strong>{system.owner.displayName}</strong><small>Private workspace</small></span><LogOut size={15} /></button>
+        <div className="read-only-note" title="Read-only by design. Perpetuals first. No order placement."><ShieldCheck size={17} aria-hidden="true" /><div className="sidebar-copy"><strong>Read-only by design</strong><span>Perpetuals first. No order placement.</span></div></div>
+        <a href="#settings" className={`shell-nav-item ${page === 'settings' ? 'active' : ''}`} aria-label="Settings" title="Settings" aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} aria-hidden="true" /><span className="sidebar-copy">Settings</span></a>
+        <button className="owner-card" onClick={disconnect} aria-label={`Disconnect ${system.owner.displayName}'s session`} title={`Disconnect ${system.owner.displayName}'s browser session`}><span className="owner-avatar" aria-hidden="true">{system.owner.displayName.slice(0, 1).toUpperCase()}</span><span className="sidebar-copy"><strong>{system.owner.displayName}</strong><small>Private workspace</small></span><LogOut size={15} aria-hidden="true" /></button>
       </div>
     </aside>
     <div className="shell-main" inert={menuOpen}>
-      <header className="shell-header"><div><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} /></button><span className="shell-breadcrumb">Workspace <span>/</span> <strong>{currentPage.label}</strong></span></div><div><span className="connection-indicator"><i />Private session</span><span className="workspace-badge">Perpetuals</span></div></header>
+      <header className="shell-header"><div><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" title="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} aria-hidden="true" /></button><span className="shell-breadcrumb">Workspace <span>/</span> <strong>{currentPage.label}</strong></span></div><div><span className="connection-indicator"><i />Private session</span><span className="workspace-badge">Perpetuals</span></div></header>
       <main className="shell-content">
-        <section className="shell-page-heading"><div><div className="eyebrow">YOUR PRIVATE WORKSPACE</div><h1>{selectedAccount ? selectedAccount.name : currentPage.label}</h1><p>{currentPage.description}</p></div><div className="shell-heading-actions">
+        {page !== 'plays' && <section className="shell-page-heading"><div><div className="eyebrow">YOUR PRIVATE WORKSPACE</div><h1>{selectedAccount ? selectedAccount.name : currentPage.label}</h1><p>{currentPage.description}</p></div><div className="shell-heading-actions">
           {page !== 'settings' && <Button variant="outline" onClick={reload} disabled={loading} aria-busy={loading}><RefreshCw size={14} className={loading ? 'is-spinning' : ''} />Reload</Button>}
           {page === 'portfolios' ? <Button onClick={() => setPortfolioDialog(true)}><Plus size={15} />New portfolio</Button> : page !== 'settings' && page !== 'activity' && <Button onClick={() => setAccountDialog(true)} disabled={pending || !data}><Plus size={15} />Add account</Button>}
-        </div></section>
+        </div></section>}
         {error && <div className="workspace-alert" role="alert"><CircleHelp size={17} /><span>{error}</span><Button variant="ghost" size="sm" onClick={reload}>Try again</Button></div>}
         {mutationError && <div className="workspace-alert" role="alert"><CircleHelp size={17} /><span>{mutationError}</span><Button variant="ghost" size="sm" onClick={() => setMutationError(null)}>Dismiss</Button></div>}
         {pending && <div className="workspace-loading" role="status">Loading your workspace…</div>}
         {!pending && !data && !error && <div className="workspace-alert">No workspace data is available.</div>}
+
+        {page === 'plays' && <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={playDraft} onChange={setPlayDraft} onReload={reload} loading={loading} />}
 
         {page === 'overview' && data && <>
           <section className="workspace-stat-grid">
@@ -203,7 +213,7 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
           <section className="shell-panel settings-panel"><Database size={23} /><h2>Venue capabilities</h2><p>Only Hyperliquid and manual accounts can be added in this step. A refresh is explicitly requested, not a background job.</p><div className="venue-capability-list">{system.venues.map(v => <div key={v.id}><span>{v.name}</span><span className="workspace-badge">{v.status}</span></div>)}</div><p className="field-help">No venue credential, private key, full-history promise or automatic Play matching is involved.</p></section>
         </div>}
 
-        <footer className="shell-footer"><span>VESSEL / PRIVATE TRADING DIARY</span><span>{enabledAccounts.filter(a => a.venueId === 'hyperliquid').length} enabled read-only account records · <span className="address-note">{selectedAccount ? shortAddress(selectedAccount.address) : 'No order execution'}</span></span></footer>
+        <footer className="shell-footer"><span>VESSEL / PRIVATE TRADING DIARY</span><span>{readOnlyAccountCount} enabled read-only {readOnlyAccountCount === 1 ? 'account' : 'accounts'} · <span className="address-note">{selectedAccount ? shortAddress(selectedAccount.address) : 'No order execution'}</span></span></footer>
       </main>
     </div>
     <CreatePortfolioDialog open={portfolioDialog} onOpenChange={setPortfolioDialog} api={api} onCreated={created} />

@@ -23,7 +23,7 @@ This repository contains the approved Graphite prototype and the React/Vite/Type
 
 The owner authorized foundation scaffolding after confirming perpetuals-first across venues and multiple active plays on the same account/instrument. Frontend and backend work were delegated to separate Sol agents. The confirmed MVP remains self-hosted and single-user with token access, Hyperliquid first and Lighter next, manual accounts, optional history import and in-page notifications.
 
-The app implements protected portfolio/account APIs, exact manual values, latest snapshots and retained fills, a primary Hyperliquid perp reader, explicit migrations and owner isolation. Navigation covers Overview, Portfolios, Accounts, Activity and Settings. Full Play editing, complete backfills, jobs, images, notifications and charts remain later work. The approved prototype is unchanged.
+The app implements protected portfolio/account APIs, exact manual values, latest snapshots and retained fills, a primary Hyperliquid perp reader, explicit migrations and owner isolation. Navigation covers Overview, Plays, Portfolios, Accounts, Activity and Settings. Plays now has an editable in-memory draft workspace with the approved layout and a chart placeholder. Saved Plays, financial calculations, complete backfills, jobs, images, notifications and chart rendering remain later work. The approved prototype is unchanged.
 
 Portfolios and accounts support rename/delete. Accounts can be moved, unlinked to the virtual unassigned group, or disabled without deleting imported data. Unassigned records appear only in All accounts, not a default tile. Portfolio deletion unlinks accounts; account deletion explicitly removes retained facts and is blocked when a Play references the account.
 
@@ -51,11 +51,13 @@ The runner gives credentials to the API, not the frontend. API uses loopback 508
 
 The owner-requested actual-app LAN review is currently **http://10.1.0.219:5180/**, backed by the real API and migrated local database. It uses a separate development token delivered to the owner, not a credential embedded here. See [LAN operation and stop/recreate instructions](docs/development.md#current-lan-review). This is a restricted HTTP development preview, not an internet/production deployment.
 
+The Plays first pass is implemented in the working branch, but this change does not update that existing LAN service.
+
 ```sh
 pnpm check
 ```
 
-Set `Vessel_TEST_POSTGRES` for real PostgreSQL test execution; otherwise 26 database tests explicitly skip. The local verification ran them with no skips.
+Set `Vessel_TEST_POSTGRES` for real PostgreSQL test execution; otherwise 40 database tests explicitly skip. The prior backend checkpoint ran database tests without skips. The frontend-only Plays verification reports these 40 skips explicitly; see [its verification record](docs/architecture/plays-workspace-contract.md).
 
 ## View the prototype
 
