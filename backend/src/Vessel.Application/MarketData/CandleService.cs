@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text.RegularExpressions;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 
@@ -35,7 +34,7 @@ public sealed class CandleCache(TimeProvider time)
     }
 }
 
-public sealed partial class CandleService(IWorkspaceStore store, ICandleReader reader, CandleCache cache, TimeProvider time)
+public sealed class CandleService(IWorkspaceStore store, ICandleReader reader, CandleCache cache, TimeProvider time)
 {
     public const int MaxCandles = 500;
     public const string Notice =
@@ -43,29 +42,11 @@ public sealed partial class CandleService(IWorkspaceStore store, ICandleReader r
     private static readonly TimeSpan MaxFuture = TimeSpan.FromDays(1);
     private const long CacheBucketMs = 10_000;
 
-    private static readonly Dictionary<string, long> IntervalMs = new(StringComparer.Ordinal)
-    {
-        ["1m"] = 60_000L, ["3m"] = 3 * 60_000L, ["5m"] = 5 * 60_000L, ["15m"] = 15 * 60_000L,
-        ["30m"] = 30 * 60_000L, ["1h"] = 3_600_000L, ["2h"] = 2 * 3_600_000L, ["4h"] = 4 * 3_600_000L,
-        ["8h"] = 8 * 3_600_000L, ["12h"] = 12 * 3_600_000L, ["1d"] = 86_400_000L, ["3d"] = 3 * 86_400_000L,
-        ["1w"] = 7 * 86_400_000L, ["1M"] = 31 * 86_400_000L
-    };
-
-    [GeneratedRegex("^[A-Za-z0-9_-]{1,32}$")]
-    private static partial Regex InstrumentPattern();
-
     public async Task<CandleResponseDto> CandlesAsync(Guid accountId, string? instrument, string? interval, long? endTime, CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
-        var account = await store.AccountAsync(accountId, ct) ?? throw new WorkspaceException(404, "Account not found.");
-        if (!account.IsEnabled)
-            throw new WorkspaceException(409, "Enable the account before reading market data.");
-        if (account.VenueId == "manual")
-            throw new WorkspaceException(409, "No market data provider for manual accounts.");
-        if (instrument is null || !InstrumentPattern().IsMatch(instrument))
-            throw new WorkspaceException(400, "Instrument must be 1 to 32 letters, digits, hyphens or underscores.");
-        if (interval is null || !IntervalMs.TryGetValue(interval, out var step))
-            throw new WorkspaceException(400, "Interval must be one of 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 8h, 12h, 1d, 3d, 1w, 1M.");
+        var account = await MarketDataGuard.AccountAsync(store, accountId, ct);
+        instrument = MarketDataGuard.Instrument(instrument);
+        (interval, var step) = MarketDataGuard.Interval(interval);
         var now = time.GetUtcNow();
         if (endTime is <= 0 || endTime > now.Add(MaxFuture).ToUnixTimeMilliseconds())
             throw new WorkspaceException(400, "endTime must be a positive UTC millisecond timestamp, at most one day ahead.");

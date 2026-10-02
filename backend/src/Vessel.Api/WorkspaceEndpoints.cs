@@ -56,6 +56,7 @@ public static class WorkspaceEndpoints
         api.MapGet("/accounts/{id:guid}/market-context", async (Guid id, string? instrument,
             MarketContextService service, CancellationToken ct) =>
             Results.Ok(await service.ContextAsync(id, instrument, ct)));
+        api.MapGet("/accounts/{id:guid}/market-stream", MarketStreamEndpoint.StreamAsync);
         api.MapPost("/accounts/{id:guid}/sync", async (Guid id, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.SyncAsync(id, ct)));
         api.MapGet("/overview", async (WorkspaceService service, CancellationToken ct) => Results.Ok(await service.OverviewAsync(ct)));

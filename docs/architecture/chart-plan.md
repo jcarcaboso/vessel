@@ -148,3 +148,50 @@ October 2, 2026. The owner asked to start the drawing tools after PR #3 was open
 - Clicking a level's tag or double-clicking its line opens an in-chart editor. The chart always edits a **price**; a level entered as a percentage keeps its unit and stores the equivalent distance, as dragging does. Targets also edit their share. The editor can add a target (2% steps beyond the entry in the trade direction), add a missing stop (2% on the risk side) and remove a target. All edits go into the same draft as the side editor.
 - `useChartHistory` provides one undo/redo history for chart edits: drawings and level drags or edits. Entry actions reapply only the fields they changed, so later side-editor edits survive undo. Ctrl/Cmd+Z undoes; Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes; the rail has Undo and Redo with the action name. Edits made in the side editor are not part of chart history.
 - Verified in headless Chromium against live HYPE: dragging an unselected entry's stop selected it and updated its field (84 → 82.897), tag click and double-click opened the editor, a saved target price updated the editor (94 → 95), add target, undo and redo. `pnpm check`: 441 backend (40 skipped), 241 frontend, 76 prototype.
+
+## Live updates (C10) contract
+
+October 2, 2026. The owner asked for automatic chart updates, as close to real-time data as possible, so planned entries are judged against current prices. Manual refresh stays. Live prices are observations: a candle or mark touching a level is not a fill.
+
+### Backend
+
+`GET /api/accounts/{id}/market-stream?instrument={contractId}&interval={interval}` under the authorized API group returns `text/event-stream` (`Cache-Control: no-store`, `X-Accel-Buffering: no`).
+
+- Same checks and error mapping as `/candles`, evaluated before the stream starts: owner-scoped account (404), disabled 409, manual 409, instrument/interval validation 400, venue reader mismatch 502. Errors are ProblemDetails, not stream events.
+- Events (UTF-8 JSON, one `data:` line each):
+  - `event: candle` → the candle shape of `/candles` (`openTime, closeTime, open, high, low, close, volume, trades`). The forming candle is re-sent as it changes; clients upsert by `openTime`.
+  - `event: context` → exactly the `/market-context` response shape (`venueId, instrument, markPrice, oraclePrice, midPrice, previousDayPrice, dayNotionalVolume, openInterest, fundingRate, premium, observedAt, notice`).
+  - `event: status` → `{ "state": "live" | "reconnecting" | "stale", "observedAt": ISO }`. `live` after the upstream subscriptions are acknowledged or data arrives, `reconnecting` while the upstream socket is down, `stale` when no upstream message arrived for 60 s.
+  - A `: keepalive` comment every 15 s.
+- Values keep the venue's exact decimal strings. Upstream numbers are converted from their raw JSON text, never through floating point. Validation matches the REST readers; malformed upstream messages are dropped and counted, not forwarded.
+- Upstream: one shared Hyperliquid WebSocket (`wss://api.hyperliquid.xyz/ws`) per process in Infrastructure, behind an Application port. Subscriptions are reference-counted (`candle` per coin+interval, `activeAssetCtx` per coin). It connects lazily, unsubscribes when the last listener leaves, closes after 60 s without listeners, sends `{"method":"ping"}` every 30 s, and reconnects with jittered exponential backoff (1 s to 30 s), resubscribing everything.
+- Bounds: at most 8 concurrent streams per process (beyond that, 429 ProblemDetails), at most 100 upstream subscriptions, bounded per-listener queues that coalesce candle updates by `openTime` and keep only the latest context, and a 1-hour maximum stream lifetime after which the server ends the response.
+- No persistence, polling job or order/fill matching.
+
+### Frontend
+
+- `WorkspaceApi.marketStream(accountId, query, signal, onEvent)` reads the stream with `fetch` (bearer header; no `EventSource`, no token in URLs), parses SSE incrementally and validates every event with the existing candle/context validators. Invalid events are ignored.
+- `useLiveMarket` starts after the first candle load. It upserts candles into the loaded series and replaces the header statistics. On stream end or error it reconnects with backoff (1, 2, 5, 10, 30 s) and refreshes candles over REST after a reconnect to fill gaps. After three consecutive stream failures it falls back to polling the REST endpoints every 15 s and keeps retrying the stream every 60 s. It pauses while the tab is hidden and refreshes when the tab becomes visible again.
+- A `Live` toggle in the chart toolbar (persisted with the chart preferences, default on) shows the state: live (green dot), connecting/reconnecting (amber), polling fallback, stale, or off. Manual Refresh remains. The expanded dialog shares the same live state.
+
+### Live updates state
+
+October 2, 2026. Implemented by delegated backend and frontend workers against the contract above; integrated and verified by the orchestrator.
+
+- Backend: `MarketDataGuard` now holds the shared account/instrument/interval checks for candles, market context and the stream. `IMarketStream`/`MarketStreamService` (Application) and `HyperliquidMarketStream` with a fakeable WebSocket transport (Infrastructure) implement the relay. `/market-stream` is in `MarketStreamEndpoint.cs`.
+  - Deviations from the contract: a socket silent for 90 s despite pings is replaced. New listeners immediately receive the last candle/context already held for a shared subscription. The port uses a synchronous `Subscribe` so capacity errors return ProblemDetails before headers are written.
+  - Observed live Hyperliquid shapes: `activeAssetCtx` values arrive as JSON strings; candle `data` is a single object.
+- Frontend: `api/sse.ts` (incremental parser, 1 MiB bound), `WorkspaceApi.marketStream`, `useLiveMarket`, `LiveIndicator`, `useCandles.upsert` and `useMarketContext.apply`.
+  - Deviation: streams that connect but drop within 60 s walk the full 1/2/5/10/30 s backoff; three streams in a row that fail without sending anything trigger 15 s polling with a 60 s stream retry.
+  - The toolbar keeps one row by showing only the update time and Live state; the source caption is a tooltip and screen-reader text.
+- Planned levels farther than ±50% from the latest close no longer widen the price scale, so a plan with another instrument's prices cannot flatten the candles.
+- Verified against live Hyperliquid through Kestrel and the Vite proxy:
+  - correct SSE headers;
+  - status/context/candle events within a second;
+  - mark and update time changing every 2 s in the browser;
+  - Live off freezes the stats and on resumes them;
+  - an instrument switch opens exactly one new stream;
+  - 400 ProblemDetails for invalid instruments;
+  - no console or API errors at 1402 and 390 px.
+- Not verified: behaviour behind a reverse proxy; multi-hour sessions.
+- `pnpm check`: 487 backend (40 skipped), 260 frontend, 76 prototype.

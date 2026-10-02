@@ -33,6 +33,9 @@ public static class DependencyInjection
         }).RemoveAllLoggers();
         services.AddSingleton<CandleCache>();
         services.AddSingleton<MarketContextCache>();
+        services.AddSingleton<MarketStreamLimiter>();
+        services.AddSingleton<IWebSocketTransportFactory, ClientWebSocketTransportFactory>();
+        services.AddSingleton<IMarketStream, HyperliquidMarketStream>();
         services.AddHttpContextAccessor();
         services.AddScoped<IJournalOwnerContext, HttpJournalOwnerContext>();
         services.AddAuthentication(BearerTokenHandler.SchemeName)

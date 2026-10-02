@@ -1,4 +1,4 @@
-import type { BrokerAccount, CandleSeries, InstrumentCatalog, MarketContext, Overview, Portfolio } from '@/api/workspace'
+import type { BrokerAccount, CandleSeries, InstrumentCatalog, MarketContext, Overview, Portfolio, WorkspaceApi } from '@/api/workspace'
 
 export const portfolioFixture: Portfolio = {
   id: '11111111-2222-3333-4444-555555555555', name: 'Swing trading', accountCount: 1,
@@ -45,3 +45,7 @@ export const marketContextFixture: MarketContext = {
   previousDayPrice: '100', dayNotionalVolume: '1234567.891', openInterest: '42.5', fundingRate: '0.0000125', premium: '-0.0001',
   observedAt: '2026-10-01T12:00:00Z', notice: 'Venue market context for the primary perpetual DEX.',
 }
+
+/** A market stream that stays open without events until the caller aborts it. */
+export const idleMarketStream: WorkspaceApi['marketStream'] = (_id, _query, signal) =>
+  new Promise(resolve => signal.aborted ? resolve() : signal.addEventListener('abort', () => resolve(), { once: true }))

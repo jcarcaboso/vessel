@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text.RegularExpressions;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 
@@ -38,25 +37,16 @@ public sealed class MarketContextCache(TimeProvider time)
     }
 }
 
-public sealed partial class MarketContextService(IWorkspaceStore store, IMarketContextReader reader, MarketContextCache cache, TimeProvider time)
+public sealed class MarketContextService(IWorkspaceStore store, IMarketContextReader reader, MarketContextCache cache, TimeProvider time)
 {
     public const string Notice =
         "Venue market context for the primary perpetual DEX. Funding is the current hourly rate; open interest is in base units. Not a fill or valuation.";
     private const string VenueFailure = "The venue market read failed. Try again later.";
 
-    [GeneratedRegex("^[A-Za-z0-9_-]{1,32}$")]
-    private static partial Regex InstrumentPattern();
-
     public async Task<MarketContextDto> ContextAsync(Guid accountId, string? instrument, CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
-        var account = await store.AccountAsync(accountId, ct) ?? throw new WorkspaceException(404, "Account not found.");
-        if (!account.IsEnabled)
-            throw new WorkspaceException(409, "Enable the account before reading market data.");
-        if (account.VenueId == "manual")
-            throw new WorkspaceException(409, "No market data provider for manual accounts.");
-        if (instrument is null || !InstrumentPattern().IsMatch(instrument))
-            throw new WorkspaceException(400, "Instrument must be 1 to 32 letters, digits, hyphens or underscores.");
+        var account = await MarketDataGuard.AccountAsync(store, accountId, ct);
+        instrument = MarketDataGuard.Instrument(instrument);
         if (reader.VenueId != account.VenueId)
             throw new WorkspaceException(502, VenueFailure);
 

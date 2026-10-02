@@ -238,7 +238,7 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         return fills.OrderByDescending(fill => fill.OccurredAtUtc).ToList();
     }
 
-    private static bool IsPrimaryContract(string name) =>
+    internal static bool IsPrimaryContract(string name) =>
         !name.StartsWith('@') && !name.Contains('/') && !name.Contains(':');
 
     private static string ReadAccountMode(JsonElement root)
@@ -397,9 +397,10 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         return value;
     }
 
-    private static decimal Number(JsonElement element)
+    private static decimal Number(JsonElement element) => ParseDecimal(Text(element));
+
+    private static decimal ParseDecimal(string text)
     {
-        var text = Text(element);
         var unsigned = text.StartsWith('-') ? text[1..] : text;
         var parts = unsigned.Split('.');
         if (parts.Length > 2 || parts.Any(part => part.Length == 0 || !part.All(char.IsAsciiDigit)))

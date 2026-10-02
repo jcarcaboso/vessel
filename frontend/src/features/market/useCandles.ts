@@ -40,9 +40,17 @@ export const toChartCandle = (candle: VenueCandle): ChartCandle => ({
   time: candle.openTime, open: Number(candle.open), high: Number(candle.high), low: Number(candle.low), close: Number(candle.close),
 })
 
+/** Upserts one candle by open time; the common live cases (same or next candle) avoid a full merge. */
+export function upsertCandle(current: readonly VenueCandle[], candle: VenueCandle) {
+  const last = current.at(-1)
+  if (!last || candle.openTime > last.openTime) return [...current, candle]
+  if (candle.openTime === last.openTime) return [...current.slice(0, -1), candle]
+  return mergeCandles(current, [candle])
+}
+
 /**
- * Loads a bounded window of venue candles, then older windows on demand. Refresh is manual;
- * there is no polling or live subscription.
+ * Loads a bounded window of venue candles, then older windows on demand. Refresh is manual or driven by
+ * the live market hook, which also upserts streamed candles without resetting the view.
  */
 export function useCandles(source: CandleSource) {
   const { api, accountId, instrument, interval } = source
@@ -95,12 +103,20 @@ export function useCandles(source: CandleSource) {
     return () => controller.current?.abort()
   }, [key, load])
 
+  /** Applies a streamed candle to the loaded series. Ignored until the first window has loaded. */
+  const upsert = useCallback((candle: VenueCandle, receivedAt: string) => {
+    if (current.current.key !== key || !current.current.candles.length) return
+    commit(upsertCandle(current.current.candles, candle), { retrievedAt: receivedAt })
+  }, [key, commit])
+  const refresh = useCallback(() => load('refresh'), [load])
+
   const candles = useMemo(() => venueCandles.key === key ? venueCandles.candles.map(toChartCandle) : [], [venueCandles, key])
   const visible = state.key === key ? state : { ...initial, key }
   return {
     ...visible,
     candles,
-    refresh: () => load('refresh'),
+    refresh,
+    upsert,
     loadOlder: () => {
       if (!visible.historyExhausted && !visible.loadingOlder && !visible.olderError && candles.length) load('older')
     },

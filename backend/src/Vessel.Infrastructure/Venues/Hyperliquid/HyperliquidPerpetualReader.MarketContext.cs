@@ -30,23 +30,29 @@ public sealed partial class HyperliquidPerpetualReader : IMarketContextReader
             var name = Text(Property(universe[i], "name"));
             if (!names.Add(name))
                 throw new VenueReadException(InvalidResponse);
-            var ctx = contexts[i];
-            var funding = Signed(Property(ctx, "funding"));
-            var premium = Property(ctx, "premium");
-            var mid = Property(ctx, "midPx");
-            result.Add(new(name, Price(Property(ctx, "markPx")).Text, Price(Property(ctx, "oraclePx")).Text,
-                mid.ValueKind == JsonValueKind.Null ? null : Price(mid).Text,
-                Price(Property(ctx, "prevDayPx")).Text, Price(Property(ctx, "dayNtlVlm")).Text,
-                Price(Property(ctx, "openInterest")).Text, funding,
-                premium.ValueKind == JsonValueKind.Null ? null : Signed(premium)));
+            result.Add(ReadMarketContext(name, contexts[i], numbers: false));
         }
         return result;
     }
 
-    // Keeps the exact string after proving it is a finite decimal that may be negative.
-    private static string Signed(JsonElement element)
+    // Shared by REST and streaming reads; midPx and premium may be null.
+    private static VenueMarketContext ReadMarketContext(string name, JsonElement ctx, bool numbers)
     {
-        Number(element);
-        return element.GetString()!;
+        var funding = Signed(Property(ctx, "funding"), numbers);
+        var premium = Property(ctx, "premium");
+        var mid = Property(ctx, "midPx");
+        return new(name, Price(Property(ctx, "markPx"), numbers).Text, Price(Property(ctx, "oraclePx"), numbers).Text,
+            mid.ValueKind == JsonValueKind.Null ? null : Price(mid, numbers).Text,
+            Price(Property(ctx, "prevDayPx"), numbers).Text, Price(Property(ctx, "dayNtlVlm"), numbers).Text,
+            Price(Property(ctx, "openInterest"), numbers).Text, funding,
+            premium.ValueKind == JsonValueKind.Null ? null : Signed(premium, numbers));
+    }
+
+    // Keeps the exact text after proving it is a finite decimal that may be negative.
+    private static string Signed(JsonElement element, bool numbers = false)
+    {
+        var text = DecimalText(element, numbers);
+        ParseDecimal(text);
+        return text;
     }
 }

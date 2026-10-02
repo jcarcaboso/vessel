@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import { act, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/system'
-import { createWorkspaceApi, type CandleSeries, type WorkspaceApi } from '@/api/workspace'
+import { createWorkspaceApi, type CandleSeries, type MarketStreamEvent, type WorkspaceApi } from '@/api/workspace'
 import type { ChartDrawing, DrawingKind } from '@/components/chart/drawings'
 import type { ChartAdapterFactory, ChartCallbacks, ChartCandle, PriceOverlay } from '@/components/chart/types'
-import { accountFixture, candleSeriesFixture, marketContextFixture } from '@/test/workspace-fixture'
+import { accountFixture, candleSeriesFixture, idleMarketStream, marketContextFixture } from '@/test/workspace-fixture'
 import { createEntry, createTarget, type DraftEntry } from './draft'
 import { ChartPanel } from './PlayChart'
 
@@ -29,8 +29,9 @@ function fakeAdapter() {
   return { state, factory }
 }
 
-function chartApi(candles: WorkspaceApi['candles'], marketContext: WorkspaceApi['marketContext'] = vi.fn().mockResolvedValue(marketContextFixture)) {
-  return { ...createWorkspaceApi('test-only'), candles, marketContext }
+function chartApi(candles: WorkspaceApi['candles'], marketContext: WorkspaceApi['marketContext'] = vi.fn().mockResolvedValue(marketContextFixture),
+  marketStream: WorkspaceApi['marketStream'] = idleMarketStream) {
+  return { ...createWorkspaceApi('test-only'), candles, marketContext, marketStream }
 }
 
 beforeEach(() => localStorage.clear())
@@ -77,7 +78,7 @@ describe('Chart panel', () => {
     ])
     expect(state.resets.at(-1)).toBe(true)
     expect(state.overlays.map(o => [o.label, o.draggable, o.emphasis])).toEqual([['E1', true, 'selected'], ['E1 SL', true, 'selected'], ['E2', true, 'normal']])
-    expect(screen.getByText('BTC · Hyperliquid trade candles')).toBeInTheDocument()
+    expect(screen.getByText(/BTC · Hyperliquid trade candles/)).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'BTC' })).toBeNull()
 
     act(() => state.callbacks!.onLevelSelect(state.overlays[2]!.id))
@@ -494,5 +495,174 @@ describe('Chart panel level editing', () => {
     expect(shown()[0]!.price).toBe('100')
     await userEvent.keyboard('{Escape}')
     expect(screen.queryByRole('form')).toBeNull()
+  })
+})
+
+describe('Chart panel live updates', () => {
+  interface Stream { signal: AbortSignal; emit: (event: MarketStreamEvent) => void; end: () => void; fail: () => void }
+  function streams() {
+    const opened: Stream[] = []
+    const marketStream = vi.fn<WorkspaceApi['marketStream']>((_id, _query, signal, onEvent) => new Promise<void>((resolve, reject) => {
+      opened.push({ signal, emit: event => act(() => onEvent(event)), end: resolve, fail: () => reject(new ApiError('unavailable', 'Interrupted.')) })
+      signal.addEventListener('abort', () => resolve(), { once: true })
+    }))
+    return { opened, marketStream, last: () => opened.at(-1)! }
+  }
+  const flush = () => act(() => vi.advanceTimersByTimeAsync(0))
+  const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms))
+  const toggle = () => screen.getByRole('button', { name: 'Live updates' })
+  const live = { type: 'status', status: { state: 'live', observedAt: '2026-10-02T08:00:00Z' } } as const
+  let visibility: DocumentVisibilityState = 'visible'
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-02T08:00:00Z'))
+    visibility = 'visible'
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    Reflect.deleteProperty(document, 'visibilityState')
+  })
+
+  async function setup(stored?: object) {
+    if (stored) localStorage.setItem('vessel.chart.preferences.v1', JSON.stringify(stored))
+    const driver = streams()
+    const candles = vi.fn().mockResolvedValue(candleSeriesFixture)
+    const marketContext = vi.fn().mockResolvedValue(marketContextFixture)
+    const { state, factory } = fakeAdapter()
+    const view = render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
+      source={{ api: chartApi(candles, marketContext, driver.marketStream), accountId: accountFixture.id }} createAdapter={factory} />)
+    await flush()
+    return { ...driver, candles, marketContext, state, view }
+  }
+
+  it('starts after the first candle load and shows the live state', async () => {
+    const { marketStream, last } = await setup()
+    expect(marketStream).toHaveBeenCalledExactlyOnceWith(accountFixture.id, { instrument: 'BTC', interval: '1h' }, expect.any(AbortSignal), expect.any(Function))
+    expect(toggle()).toHaveAttribute('aria-pressed', 'true')
+    expect(toggle()).toHaveAttribute('data-state', 'connecting')
+    last().emit(live)
+    expect(toggle()).toHaveAttribute('data-state', 'live')
+    expect(toggle()).toHaveTextContent('Live')
+    last().emit({ type: 'status', status: { state: 'stale', observedAt: '2026-10-02T08:01:00Z' } })
+    expect(toggle()).toHaveTextContent('Stale')
+  })
+
+  it('upserts streamed candles without resetting the view and replaces the statistics', async () => {
+    const { state, last, candles } = await setup()
+    const [, forming] = candleSeriesFixture.candles
+    vi.setSystemTime(new Date('2026-10-02T08:00:07Z'))
+    last().emit({ type: 'candle', candle: { ...forming!, high: '104.5', close: '104.5' } })
+    expect(state.candles).toHaveLength(2)
+    expect(state.candles.at(-1)).toMatchObject({ high: 104.5, close: 104.5 })
+    expect(state.resets.at(-1)).toBe(false)
+    last().emit({ type: 'candle', candle: { ...forming!, openTime: 1_790_007_200_000, closeTime: 1_790_010_799_999, open: '104.5', close: '105' } })
+    expect(state.candles.map(c => c.close)).toEqual([101, 104.5, 105])
+    expect(state.resets.at(-1)).toBe(false)
+    expect(screen.getByText('Updated 08:00:07 UTC')).toBeInTheDocument()
+    last().emit({ type: 'context', context: { ...marketContextFixture, markPrice: '105.25', observedAt: '2026-10-02T08:00:08Z' } })
+    expect(screen.getByLabelText('BTC market statistics')).toHaveTextContent('Mark105.25')
+    expect(toggle()).toHaveAttribute('data-state', 'live')
+    expect(candles).toHaveBeenCalledOnce()
+  })
+
+  it('reconnects with backoff and refreshes candles over REST to fill the gap', async () => {
+    const { marketStream, last, candles } = await setup()
+    last().emit(live)
+    last().fail()
+    await flush()
+    expect(toggle()).toHaveAttribute('data-state', 'reconnecting')
+    await advance(999)
+    expect(marketStream).toHaveBeenCalledOnce()
+    await advance(1)
+    expect(marketStream).toHaveBeenCalledTimes(2)
+    expect(candles).toHaveBeenCalledOnce()
+    last().emit(live)
+    await flush()
+    expect(candles).toHaveBeenCalledTimes(2)
+    expect(toggle()).toHaveAttribute('data-state', 'live')
+  })
+
+  it('falls back to polling after three failed streams and keeps retrying the stream', async () => {
+    const { marketStream, last, candles, marketContext } = await setup()
+    last().end()
+    await advance(1_000)
+    last().fail()
+    await advance(2_000)
+    expect(marketStream).toHaveBeenCalledTimes(3)
+    last().end()
+    await flush()
+    expect(toggle()).toHaveAttribute('data-state', 'polling')
+    expect(toggle()).toHaveTextContent('Polling')
+    expect(candles).toHaveBeenCalledTimes(2)
+    expect(marketContext).toHaveBeenCalledTimes(2)
+    await advance(15_000)
+    expect(candles).toHaveBeenCalledTimes(3)
+    expect(marketContext).toHaveBeenCalledTimes(3)
+    await advance(45_000)
+    expect(marketStream).toHaveBeenCalledTimes(4)
+    expect(candles).toHaveBeenCalledTimes(6)
+    last().emit(live)
+    await flush()
+    expect(toggle()).toHaveAttribute('data-state', 'live')
+    const afterRecovery = candles.mock.calls.length
+    await advance(30_000)
+    expect(candles).toHaveBeenCalledTimes(afterRecovery)
+  })
+
+  it('turns off, aborts the stream and remembers the choice', async () => {
+    const { marketStream, last, view } = await setup()
+    const first = last()
+    fireEvent.click(toggle())
+    expect(first.signal.aborted).toBe(true)
+    expect(toggle()).toHaveAttribute('aria-pressed', 'false')
+    expect(toggle()).toHaveTextContent('Off')
+    expect(JSON.parse(localStorage.getItem('vessel.chart.preferences.v1')!)).toMatchObject({ live: false })
+    await advance(120_000)
+    expect(marketStream).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled()
+    fireEvent.click(toggle())
+    expect(marketStream).toHaveBeenCalledTimes(2)
+    view.unmount()
+    expect(last().signal.aborted).toBe(true)
+  })
+
+  it('stays off when the stored preference is off', async () => {
+    const { marketStream } = await setup({ live: false })
+    expect(marketStream).not.toHaveBeenCalled()
+    expect(toggle()).toHaveTextContent('Off')
+  })
+
+  it('pauses while the tab is hidden and refreshes when it is visible again', async () => {
+    const { marketStream, last, candles, marketContext } = await setup()
+    const first = last()
+    first.emit(live)
+    visibility = 'hidden'
+    fireEvent(document, new Event('visibilitychange'))
+    expect(first.signal.aborted).toBe(true)
+    await advance(120_000)
+    expect(marketStream).toHaveBeenCalledOnce()
+    visibility = 'visible'
+    fireEvent(document, new Event('visibilitychange'))
+    await flush()
+    expect(candles).toHaveBeenCalledTimes(2)
+    expect(marketContext).toHaveBeenCalledTimes(2)
+    expect(marketStream).toHaveBeenCalledTimes(2)
+  })
+
+  it('restarts the stream for a new timeframe and shares state with the expanded chart', async () => {
+    const { marketStream, last } = await setup()
+    const first = last()
+    first.emit(live)
+    fireEvent.click(within(screen.getByRole('group', { name: 'Timeframe' })).getByRole('button', { name: '4 hours' }))
+    expect(first.signal.aborted).toBe(true)
+    await flush()
+    expect(marketStream).toHaveBeenLastCalledWith(accountFixture.id, { instrument: 'BTC', interval: '4h' }, expect.any(AbortSignal), expect.any(Function))
+    last().emit(live)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand chart' }))
+    const dialog = screen.getByRole('dialog', { name: 'BTC chart' })
+    expect(within(dialog).getByRole('button', { name: 'Live updates' })).toHaveAttribute('data-state', 'live')
+    expect(marketStream).toHaveBeenCalledTimes(2)
   })
 })

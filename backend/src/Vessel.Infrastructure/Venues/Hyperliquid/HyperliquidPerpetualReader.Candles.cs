@@ -37,26 +37,39 @@ public sealed partial class HyperliquidPerpetualReader
         {
             if (Text(Property(item, "s")) != contractId || Text(Property(item, "i")) != interval)
                 throw new VenueReadException(InvalidResponse);
-            var open = Price(Property(item, "o")); var high = Price(Property(item, "h"));
-            var low = Price(Property(item, "l")); var close = Price(Property(item, "c"));
-            var volume = Price(Property(item, "v"));
-            var trades = Property(item, "n");
-            var openTime = Property(item, "t"); var closeTime = Property(item, "T");
-            if (trades.ValueKind != JsonValueKind.Number || !trades.TryGetInt32(out var count) || count < 0 ||
-                openTime.ValueKind != JsonValueKind.Number || !openTime.TryGetInt64(out var t) || t < 0 ||
-                closeTime.ValueKind != JsonValueKind.Number || !closeTime.TryGetInt64(out var closedAt) || closedAt < t ||
-                high.Value < Math.Max(Math.Max(open.Value, close.Value), low.Value) ||
-                low.Value > Math.Min(open.Value, close.Value))
-                throw new VenueReadException(InvalidResponse);
-            candles.Add(new(t, closedAt, open.Text, high.Text, low.Text, close.Text, volume.Text, count));
+            candles.Add(ReadCandle(item, numbers: false));
         }
         return candles;
     }
 
-    // Keeps the venue's exact string after proving it is a finite non-negative decimal.
-    private static (string Text, decimal Value) Price(JsonElement element)
+    // Shared by REST and streaming reads. Streams may send decimals as JSON numbers (numbers: true);
+    // their raw token text is kept, never a binary floating-point conversion.
+    private static VenueCandle ReadCandle(JsonElement item, bool numbers)
     {
-        var value = Nonnegative(element);
-        return (element.GetString()!, value);
+        var open = Price(Property(item, "o"), numbers); var high = Price(Property(item, "h"), numbers);
+        var low = Price(Property(item, "l"), numbers); var close = Price(Property(item, "c"), numbers);
+        var volume = Price(Property(item, "v"), numbers);
+        var trades = Property(item, "n");
+        var openTime = Property(item, "t"); var closeTime = Property(item, "T");
+        if (trades.ValueKind != JsonValueKind.Number || !trades.TryGetInt32(out var count) || count < 0 ||
+            openTime.ValueKind != JsonValueKind.Number || !openTime.TryGetInt64(out var t) || t < 0 ||
+            closeTime.ValueKind != JsonValueKind.Number || !closeTime.TryGetInt64(out var closedAt) || closedAt < t ||
+            high.Value < Math.Max(Math.Max(open.Value, close.Value), low.Value) ||
+            low.Value > Math.Min(open.Value, close.Value))
+            throw new VenueReadException(InvalidResponse);
+        return new(t, closedAt, open.Text, high.Text, low.Text, close.Text, volume.Text, count);
     }
+
+    // Keeps the venue's exact text after proving it is a finite non-negative decimal.
+    private static (string Text, decimal Value) Price(JsonElement element, bool numbers = false)
+    {
+        var text = DecimalText(element, numbers);
+        var value = ParseDecimal(text);
+        if (value < 0)
+            throw new VenueReadException(InvalidResponse);
+        return (text, value);
+    }
+
+    private static string DecimalText(JsonElement element, bool numbers) =>
+        numbers && element.ValueKind == JsonValueKind.Number ? element.GetRawText() : Text(element);
 }

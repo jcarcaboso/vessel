@@ -28,6 +28,8 @@ interface ChartTheme {
 }
 
 const hitTolerance = 6
+/** Levels within ±50% of the latest close widen the price scale; farther ones stay off-scale. */
+const autoscaleReach = 0.5
 
 function readTheme(element: HTMLElement): ChartTheme {
   const style = getComputedStyle(element)
@@ -140,9 +142,14 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
   priceAxisViews() { return this.axisViews }
   updateAllViews() { /* Coordinates are resolved while drawing. */ }
 
+  /** Latest close; levels far from it are left out of autoscaling so a mismatched plan cannot flatten the candles. */
+  reference: number | null = null
+
   autoscaleInfo(): AutoscaleInfo | null {
-    if (!this.overlays.length) return null
+    const reference = this.reference
     const prices = this.overlays.map(overlay => overlay.price)
+      .filter(price => reference === null || Math.abs(price / reference - 1) <= autoscaleReach)
+    if (!prices.length) return null
     return { priceRange: { minValue: Math.min(...prices), maxValue: Math.max(...prices) } }
   }
 
@@ -389,6 +396,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       candleCount = candles.length
       loaded = candles
       index = new TimeIndex(candles)
+      levels.reference = candles.at(-1)?.close ?? null
       const precision = pricePrecision(candles)
       series.applyOptions({ priceFormat: { type: 'price', precision, minMove: 10 ** -precision } })
       series.setData(candles.map(candle => ({

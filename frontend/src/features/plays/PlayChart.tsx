@@ -9,6 +9,7 @@ import { drawingColors, type ChartDrawing } from '@/components/chart/drawings'
 import { DrawingEditBar } from '@/components/chart/DrawingEditBar'
 import { drawingToolLabels, drawingTools, drawingUtilityIcons, isDrawingKind } from '@/components/chart/drawingTools'
 import { intervalName } from '@/components/chart/intervals'
+import { LiveIndicator } from '@/components/chart/LiveIndicator'
 import { TimeframeBar } from '@/components/chart/TimeframeBar'
 import type { ChartAdapterFactory, PriceOverlay } from '@/components/chart/types'
 import { useChartHistory } from '@/components/chart/useChartHistory'
@@ -17,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { useChartPreferences } from '@/features/market/chartPreferences'
 import { useCandles } from '@/features/market/useCandles'
+import { useLiveMarket } from '@/features/market/useLiveMarket'
 import { describeMarket, useMarketContext } from '@/features/market/useMarketContext'
 import type { DraftEntry, PlayDraft } from './draft'
 import { LevelEditor } from './LevelEditor'
@@ -154,6 +156,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = 
       caption={`${instrument} · ${venue ? `${venue} ` : ''}trade candles`}
       timeframes={<TimeframeBar value={interval} favorites={preferences.favorites}
         onChange={next => setPreferences({ interval: next })} onFavoritesChange={favorites => setPreferences({ favorites })} />}
+      liveUpdates={preferences.live} onLiveUpdatesChange={on => setPreferences({ live: on })}
       viewMenu={viewMenu} rail={rail} drawingBar={<>{drawingBar}{levelEditor}</>} drawingProps={drawingProps} overlays={overlays} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}
       onExpandedChange={setExpanded} onDialogClosed={() => expandButton.current?.focus({ preventScroll: true })} />
       : <>
@@ -182,11 +185,13 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = 
   </section>
 }
 
-function LiveChart({ source, instrument, interval, caption, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
+function LiveChart({ source, instrument, interval, caption, liveUpdates, onLiveUpdatesChange, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
   source: ChartSource
   instrument: string
   interval: CandleInterval
   caption: string
+  liveUpdates: boolean
+  onLiveUpdatesChange: (on: boolean) => void
   timeframes: ReactNode
   viewMenu: ReactNode
   rail: ReactNode
@@ -202,6 +207,13 @@ function LiveChart({ source, instrument, interval, caption, timeframes, viewMenu
   const data = useCandles({ ...source, instrument, interval })
   const market = useMarketContext(source.api, source.accountId, instrument)
   const refresh = () => { data.refresh(); market.refresh() }
+  // One stream per chart; the expanded dialog renders from the same state.
+  const live = useLiveMarket({
+    api: source.api, accountId: source.accountId, instrument, interval, enabled: liveUpdates, ready: data.status === 'ready',
+    onCandle: data.upsert, onContext: market.apply, refreshCandles: data.refresh, refreshContext: market.refresh,
+  })
+  const updatedAt = [data.retrievedAt, live.lastEventAt].filter((value): value is string => value !== null)
+    .reduce<string | null>((latest, value) => latest === null || Date.parse(value) > Date.parse(latest) ? value : latest, null)
   const described = market.context ? describeMarket(market.context) : null
   const stats: ChartStat[] = [
     { label: 'Mark', value: market.context?.markPrice ?? '—' },
@@ -217,9 +229,13 @@ function LiveChart({ source, instrument, interval, caption, timeframes, viewMenu
   const status = data.status === 'loading' ? 'Loading candles…'
     : data.refreshing ? 'Refreshing…'
       : data.loadingOlder ? 'Loading older candles…'
-        : data.retrievedAt ? `Updated ${timeFormat.format(new Date(data.retrievedAt))} UTC` : ''
+        : updatedAt ? `Updated ${timeFormat.format(new Date(updatedAt))} UTC` : ''
   const toolbar = (inDialog: boolean) => <ChartToolbar label="Chart controls" end={<>
-    <span className="chart-status" role="status"><span className="chart-source">{caption}</span>{status && <span>{status}</span>}</span>
+    {/* Streamed updates change the time every few seconds; only announce it when updates are manual. */}
+    <span className="chart-status" role="status" aria-live={live.state === 'off' ? 'polite' : 'off'} title={`${caption}${status ? ` · ${status}` : ''}`}>
+      {/* The instrument is shown in the play fields; the source stays available as a tooltip and to screen readers. */}
+      <span className="chart-source sr-only">{caption} · </span>{status && <span>{status}</span>}</span>
+    <LiveIndicator state={live.state} onToggle={onLiveUpdatesChange} />
     <ChartIconButton label="Refresh" icon={<RefreshCw size={15} aria-hidden="true" className={data.refreshing ? 'is-spinning' : ''} />}
       onClick={refresh} disabled={data.status === 'loading' || data.refreshing} aria-busy={data.refreshing} />
     <ChartToolbarDivider />

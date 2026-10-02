@@ -3,7 +3,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
-import { accountFixture, instrumentCatalogFixture, portfolioFixture } from '@/test/workspace-fixture'
+import { accountFixture, idleMarketStream, instrumentCatalogFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { PlayWorkspace } from './PlayWorkspace'
 import { createDraft, type PlayDraft } from './draft'
 
@@ -19,6 +19,7 @@ function AccountWorkspace({ accounts, api }: { accounts: BrokerAccount[]; api: W
 
 const catalogueApi = {
   instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}), marketContext: () => new Promise(() => {}),
+  marketStream: idleMarketStream,
 } as unknown as WorkspaceApi
 
 function ReloadedWorkspace({ accounts, onDraft }: { accounts: BrokerAccount[]; onDraft: (draft: PlayDraft) => void }) {
