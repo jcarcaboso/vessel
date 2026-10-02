@@ -1,5 +1,5 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
-import type { ChartDrawing, DrawingKind } from './drawings'
+import type { ChartDrawing, DrawingKind, DrawingStyle } from './drawings'
 
 const historyLimit = 50
 
@@ -41,16 +41,23 @@ export function useDrawingEditor(drawings: readonly ChartDrawing[], onChange: (n
     /** Call when a text field gains focus so the whole edit undoes in one step. */
     beginTextEdit: () => remember(drawings),
     setText: (id: string, text: string) => onChange(drawings.map(drawing => drawing.id === id ? { ...drawing, text } : drawing)),
+    /** Appearance changes are single undo steps and allowed while locked. */
+    setStyle: (id: string, style: DrawingStyle) => commit(drawings.map(drawing =>
+      drawing.id === id ? { ...drawing, style: { ...drawing.style, ...style } } : drawing)),
+    setLocked: (id: string, locked: boolean) => commit(drawings.map(drawing => drawing.id === id ? { ...drawing, locked } : drawing)),
     remove: () => {
-      if (!selected) return
+      if (!selected || selected.locked) return
       commit(drawings.filter(drawing => drawing.id !== selected.id))
       setState(value => ({ ...value, selectedId: null }))
     },
+    /** Removes unlocked drawings; locked ones stay until unlocked. */
     clear: () => {
-      if (!drawings.length) return
-      commit([])
-      setState(value => ({ ...value, selectedId: null }))
+      const kept = drawings.filter(drawing => drawing.locked)
+      if (kept.length === drawings.length) return
+      commit(kept)
+      setState(value => ({ ...value, selectedId: kept.some(drawing => drawing.id === value.selectedId) ? value.selectedId : null }))
     },
+    clearable: drawings.some(drawing => !drawing.locked),
     undo: () => {
       const previous = current.history.at(-1)
       if (!previous) return
@@ -60,7 +67,7 @@ export function useDrawingEditor(drawings: readonly ChartDrawing[], onChange: (n
     },
     onKeyDown: (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); editor.undo() }
-      else if ((event.key === 'Delete' || event.key === 'Backspace') && selected) { event.preventDefault(); editor.remove() }
+      else if ((event.key === 'Delete' || event.key === 'Backspace') && selected && !selected.locked) { event.preventDefault(); editor.remove() }
       else if (event.key === 'Escape' && (current.tool || selected)) {
         event.preventDefault()
         event.stopPropagation()

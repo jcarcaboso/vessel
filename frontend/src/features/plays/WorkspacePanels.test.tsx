@@ -187,7 +187,7 @@ describe('Play journal', () => {
 })
 
 describe('Position summary', () => {
-  it('echoes chosen margin and leverage but never calculates exposure, prices or payoff', () => {
+  it('echoes chosen margin and leverage, shows the planned average entry, and never calculates exposure or payoff', () => {
     const draft = { ...createDraft(), size: '1000', leverage: '5' }
     draft.entries[0]!.price = '2000'
     draft.entries[0]!.stop.value = '1900'
@@ -197,8 +197,9 @@ describe('Position summary', () => {
     expect(within(summary).getByText('Chosen margin')).toBeInTheDocument()
     expect(within(summary).getByText('1000 currency units')).toBeInTheDocument()
     expect(within(summary).getByText('5×')).toBeInTheDocument()
-    expect(within(summary).getAllByText('Not calculated')).toHaveLength(6)
-    expect(within(summary).queryByText(/\$|5000|2000|1900|2200/)).not.toBeInTheDocument()
+    expect(within(summary).getAllByText('Not calculated')).toHaveLength(5)
+    expect(within(summary).getByText('Planned average entry').nextElementSibling).toHaveTextContent('2000')
+    expect(within(summary).queryByText(/\$|5000|1900|2200/)).not.toBeInTheDocument()
     expect(within(summary).getByText(/no execution or realized return is implied/)).toBeInTheDocument()
     expect(within(summary).getByText('Long')).toHaveAttribute('data-direction', 'long')
     expect(within(summary).getByText('No instrument · Leverage 5×')).toBeInTheDocument()
@@ -210,13 +211,14 @@ describe('Position summary', () => {
     render(<PositionSummary draft={{ ...createDraft(), sizingMode: 'quantity', size: '0.125', leverage: '3' }} />)
     expect(screen.getByText('Chosen quantity')).toBeInTheDocument()
     expect(screen.getByText('0.125 instrument units')).toBeInTheDocument()
-    expect(screen.getAllByText('Not calculated')).toHaveLength(6)
+    expect(screen.getAllByText('Not calculated')).toHaveLength(5)
   })
 
   it('does not insert a sample size for an empty draft', () => {
     render(<PositionSummary draft={createDraft()} />)
     expect(screen.getByText('Not chosen')).toBeInTheDocument()
+    expect(screen.getByText('Not set')).toHaveAttribute('data-placeholder', 'true')
     expect(screen.getByText('1×')).toBeInTheDocument()
-    expect(screen.getAllByText('Not calculated')).toHaveLength(6)
+    expect(screen.getAllByText('Not calculated')).toHaveLength(5)
   })
 })

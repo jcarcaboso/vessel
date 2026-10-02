@@ -8,19 +8,20 @@ export interface ChartStat {
   tone?: 'up' | 'down'
 }
 
-/** Terminal-style chart header: instrument identity followed by inline market statistics. */
+/** Terminal-style chart header: optional instrument identity followed by inline market statistics. */
 export function ChartHeader({ symbol, caption, stats, statsLabel, notice }: {
-  symbol: string
-  caption: string
+  /** Omit when the page already identifies the instrument elsewhere. */
+  symbol?: string | undefined
+  caption?: string | undefined
   stats?: readonly ChartStat[] | undefined
   statsLabel?: string | undefined
   notice?: ReactNode
 }) {
   return <header className="chart-header">
-    <div className="chart-header-symbol">
+    {symbol !== undefined && <div className="chart-header-symbol">
       <span className="chart-symbol-mark" aria-hidden="true">{symbol ? symbol.slice(0, 3) : '·'}</span>
-      <div><h2>{symbol || 'Chart'}</h2><p>{caption}</p></div>
-    </div>
+      <div><h2>{symbol || 'Chart'}</h2>{caption && <p>{caption}</p>}</div>
+    </div>}
     {stats && stats.length > 0 && <dl className="chart-header-stats" aria-label={statsLabel}>
       {stats.map(stat => <div key={stat.label}>
         <dt>{stat.label}{stat.hint && <small>{stat.hint}</small>}</dt>

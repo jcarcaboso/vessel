@@ -16,7 +16,7 @@
 .chart-header-stats dd[data-tone="down"] { color: var(--negative); }
 .chart-header-error { flex-basis: 100%; color: var(--warning); font-size: 10px; }
 
-.chart-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 40px; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.chart-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 40px; padding: 4px 7px; border-bottom: 1px solid var(--border); }
 .chart-toolbar-end { display: flex; align-items: center; gap: 2px; margin-left: auto; }
 .chart-toolbar-divider { width: 1px; height: 20px; margin: 0 6px; background: var(--border); }
 .chart-status { margin-right: 6px; color: var(--muted-foreground); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -68,3 +68,26 @@
 .chart-drawing-bar span { white-space: nowrap; }
 .chart-drawing-bar input { width: 180px; min-width: 0; height: 26px; padding: 3px 7px; border: 1px solid var(--border); border-radius: 4px; color: var(--foreground); background: var(--field); font: inherit; }
 .candle-chart:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.chart-drawing-name { padding-right: 2px; color: var(--muted-foreground); font-size: 11px; white-space: nowrap; }
+.chart-drawing-bar .chart-toolbar-divider { height: 18px; margin: 0 2px; }
+.chart-drawing-bar .chart-menu-trigger { height: 28px; padding: 0 6px; font-size: 11px; }
+.chart-drawing-bar .chart-icon-button { width: 28px; height: 28px; }
+.chart-color-trigger { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 5px; background: transparent; cursor: pointer; }
+.chart-color-trigger:hover { background: var(--accent); }
+.chart-color-trigger i { width: 14px; height: 14px; border: 1px solid #0006; border-radius: 50%; background: var(--swatch); }
+.chart-color-grid { display: grid; grid-template-columns: repeat(4, 26px); gap: 6px; min-width: 0; padding: 8px; }
+.chart-color-grid button { width: 26px; height: 26px; border: 2px solid transparent; border-radius: 50%; background: var(--swatch); cursor: pointer; }
+.chart-color-grid button[aria-pressed="true"] { border-color: var(--foreground); box-shadow: 0 0 0 2px var(--card) inset; }
+.chart-source { color: var(--muted-foreground); }
+.chart-status > span + span::before { content: '·'; margin: 0 6px; }
+@media (max-width: 640px) {
+  .chart-stage > .chart-body { min-height: 320px; }
+  .chart-drawing-bar { top: 6px; left: 6px; max-width: calc(100% - 12px); transform: none; flex-wrap: wrap; }
+}
+@media (max-width: 640px) {
+  .chart-toolbar-end { flex-wrap: wrap; justify-content: flex-end; }
+  .chart-source, .chart-status > span + span::before { display: none; }
+  .chart-drawing-bar { flex-wrap: nowrap; gap: 4px; padding-left: 6px; }
+  .chart-drawing-name, .chart-drawing-bar .chart-toolbar-divider { display: none; }
+  .chart-drawing-bar input { width: 120px; }
+}

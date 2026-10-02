@@ -77,7 +77,8 @@ describe('Chart panel', () => {
     ])
     expect(state.resets.at(-1)).toBe(true)
     expect(state.overlays.map(o => [o.label, o.draggable])).toEqual([['E1', true], ['E1 SL', true], ['E2', false]])
-    expect(screen.getByText('Hyperliquid · 1 hour trade candles · UTC')).toBeInTheDocument()
+    expect(screen.getByText('BTC · Hyperliquid trade candles')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'BTC' })).toBeNull()
 
     act(() => state.callbacks!.onLevelSelect(state.overlays[2]!.id))
     expect(onSelect).toHaveBeenCalledWith(list[1]!.id)
@@ -122,7 +123,8 @@ describe('Chart panel', () => {
     await screen.findByText(/Updated/)
     await userEvent.click(within(screen.getByRole('group', { name: 'Timeframe' })).getByRole('button', { name: '4 hours' }))
     expect(candles).toHaveBeenLastCalledWith(accountFixture.id, { instrument: 'BTC', interval: '4h' }, expect.any(AbortSignal))
-    await screen.findByText('4 hours trade candles · UTC')
+    expect(screen.getByRole('button', { name: '4 hours' })).toHaveAttribute('aria-pressed', 'true')
+    await screen.findByText(/Updated/)
     await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     await vi.waitFor(() => expect(state.candles.at(-1)!.close).toBe(104))
     expect(state.candles).toHaveLength(2)
@@ -328,7 +330,7 @@ describe('Chart panel drawing tools', () => {
     await userEvent.clear(input)
     await userEvent.type(input, 'Breakout retest')
     expect(state.drawings[0]).toMatchObject({ text: 'Breakout retest' })
-    await userEvent.click(screen.getByRole('button', { name: 'Clear BTC drawings' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear unlocked BTC drawings' }))
     expect(state.drawings).toEqual([])
     await userEvent.click(screen.getByRole('button', { name: 'Undo drawing change' }))
     expect(state.drawings).toHaveLength(2)
@@ -347,5 +349,51 @@ describe('Chart panel drawing tools', () => {
     screen.getByRole('application').focus()
     await userEvent.keyboard('{Escape}')
     expect(state.tool).toBeNull()
+  })
+})
+
+describe('Chart panel drawing editing', () => {
+  const line = (id: string, patch: Partial<ChartDrawing> = {}): ChartDrawing => ({ id, schemaVersion: 1, kind: 'trend-line', points: [{ time: 1, price: 100 }, { time: 2, price: 101 }], ...patch })
+
+  function Harness({ factory, initial }: { factory: ChartAdapterFactory; initial: ChartDrawing[] }) {
+    const [drawings, setDrawings] = useState<ChartDrawing[]>(initial)
+    return <ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()} drawings={drawings} onDrawingsChange={setDrawings}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />
+  }
+
+  it('changes color, line style and width as undoable steps', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<Harness factory={factory} initial={[line('a')]} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onDrawingSelect('a'))
+    const bar = screen.getByRole('group', { name: 'Selected drawing' })
+    await userEvent.click(within(bar).getByRole('button', { name: /Drawing color/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Color #f5a97f' }))
+    await userEvent.click(within(bar).getByRole('button', { name: 'Line style: Solid' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Dashed' }))
+    await userEvent.click(within(bar).getByRole('button', { name: 'Line width: 1 px' }))
+    await userEvent.click(screen.getByRole('button', { name: '3 px' }))
+    expect(state.drawings[0]!.style).toEqual({ color: '#f5a97f', line: 'dashed', width: 3 })
+    await userEvent.click(screen.getByRole('button', { name: 'Undo drawing change' }))
+    expect(state.drawings[0]!.style).toEqual({ color: '#f5a97f', line: 'dashed' })
+  })
+
+  it('locks a drawing against deletion and clearing until unlocked', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<Harness factory={factory} initial={[line('a'), line('b')]} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onDrawingSelect('a'))
+    await userEvent.click(screen.getByRole('button', { name: 'Lock drawing' }))
+    expect(state.drawings[0]!.locked).toBe(true)
+    expect(screen.getByRole('button', { name: 'Delete drawing' })).toBeDisabled()
+    screen.getByRole('application').focus()
+    await userEvent.keyboard('{Delete}')
+    expect(state.drawings).toHaveLength(2)
+    await userEvent.click(screen.getByRole('button', { name: 'Clear unlocked BTC drawings' }))
+    expect(state.drawings.map(d => d.id)).toEqual(['a'])
+    expect(screen.getByRole('button', { name: 'Clear unlocked BTC drawings' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: 'Unlock drawing' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Delete drawing' }))
+    expect(state.drawings).toEqual([])
   })
 })

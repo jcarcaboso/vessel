@@ -6,11 +6,12 @@ import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { money } from '../workspace/format'
 import type { PlayDraft } from './draft'
+import { averageEntryPrice, formatDraggedPrice } from './levels'
 import './plays-workspace.css'
 
 const displayMoney = (value: string | null | undefined) => value == null ? 'Unavailable' : money(value)
 // Placeholder values stay readable but recede, so real figures carry the visual weight.
-const isPlaceholder = (value: string) => ['Unavailable', 'Not calculated', 'Not chosen'].includes(value)
+const isPlaceholder = (value: string) => ['Unavailable', 'Not calculated', 'Not chosen', 'Not set'].includes(value)
 
 export function AvailableBudget({ draft, onChange }: {
   draft: PlayDraft
@@ -134,11 +135,14 @@ export function PlayJournal({ notes, onChange }: {
 export function PositionSummary({ draft }: { draft: PlayDraft }) {
   const size = draft.size ? `${draft.size} ${draft.sizingMode === 'margin' ? 'currency units' : 'instrument units'}` : 'Not chosen'
   const count = draft.entries.length
+  // Same quantity-weighted planned average as the chart's AVG line, for one or more priced entries.
+  const average = averageEntryPrice(draft.entries, 1)
   const values: Array<[string, string]> = [
     [draft.sizingMode === 'margin' ? 'Chosen margin' : 'Chosen quantity', size],
     ['Chosen leverage', draft.leverage ? `${draft.leverage}×` : 'Not chosen'],
-    ...['Committed margin', 'Notional exposure', 'Average entry', 'Reward / risk', 'All-stops loss', 'All-targets profit']
-      .map((label): [string, string] => [label, 'Not calculated']),
+    ...['Committed margin', 'Notional exposure'].map((label): [string, string] => [label, 'Not calculated']),
+    ['Planned average entry', average === null ? 'Not set' : formatDraggedPrice(average)],
+    ...['Reward / risk', 'All-stops loss', 'All-targets profit'].map((label): [string, string] => [label, 'Not calculated']),
   ]
   return <section className="panel summary" aria-label="Full-position summary" data-testid="summary-panel">
     <div className="summary-intro">

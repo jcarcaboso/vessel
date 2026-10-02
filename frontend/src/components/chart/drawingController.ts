@@ -95,7 +95,7 @@ export class DrawingController {
       return true
     }
     const selected = this.drawings.find(drawing => drawing.id === this.selectedId)
-    const handle = selected ? this.handleAt(selected, x, y) : null
+    const handle = selected && !selected.locked ? this.handleAt(selected, x, y) : null
     if (selected && handle !== null) {
       this.gesture = { type: 'handle', drawing: selected, index: handle, moved: false }
       return true
@@ -103,7 +103,8 @@ export class DrawingController {
     const hit = this.drawingAt(x, y)
     if (hit) {
       if (hit.id !== this.selectedId) this.callbacks.onDrawingSelect(hit.id)
-      this.gesture = { type: 'move', drawing: hit, x, y, moved: false }
+      // Locked drawings select but never move, so a stray drag cannot shift them.
+      if (!hit.locked) this.gesture = { type: 'move', drawing: hit, x, y, moved: false }
       return true
     }
     if (this.selectedId) this.callbacks.onDrawingSelect(null)
@@ -155,8 +156,9 @@ export class DrawingController {
   cursor(x: number, y: number) {
     if (this.tool || this.gesture?.type === 'create') return 'crosshair'
     const selected = this.drawings.find(drawing => drawing.id === this.selectedId)
-    if (selected && this.handleAt(selected, x, y) !== null) return 'grab'
-    return this.drawingAt(x, y) ? 'move' : null
+    if (selected && !selected.locked && this.handleAt(selected, x, y) !== null) return 'grab'
+    const hit = this.drawingAt(x, y)
+    return hit ? hit.locked ? 'pointer' : 'move' : null
   }
 
   private finishCreate(x: number, y: number) {
@@ -278,10 +280,13 @@ export class DrawingController {
     const [x0, x1 = x0] = xs as number[]
     const [y0, y1 = y0] = ys as number[]
     const width = this.space.width()
-    context.strokeStyle = theme.line
-    context.fillStyle = theme.line
-    context.lineWidth = selected ? 2 : 1.5
-    context.setLineDash([])
+    const color = drawing.style?.color ?? theme.line
+    const baseWidth = drawing.style?.width ?? 1
+    const dash = drawing.style?.line === 'dashed' ? [7, 4] : drawing.style?.line === 'dotted' ? [1.5, 3.5] : []
+    context.strokeStyle = color
+    context.fillStyle = color
+    context.lineWidth = baseWidth + (selected ? 0.75 : 0.25)
+    context.setLineDash(dash)
     switch (drawing.kind) {
       case 'trend-line':
         line(context, x0!, y0!, x1!, y1!)
@@ -302,16 +307,19 @@ export class DrawingController {
         const right = Math.max(x0!, x1!)
         context.setLineDash([4, 3])
         line(context, x0!, y0!, x1!, y1!)
-        context.setLineDash([])
+        context.setLineDash(dash)
         for (const level of fibonacciLevels) {
           const price = fibonacciPrice(start, end, level)
           const y = this.space.y(price)
           if (y === null) continue
-          context.strokeStyle = level === 0 || level === 1 ? theme.line : theme.muted
-          context.lineWidth = 1
+          context.strokeStyle = color
+          context.globalAlpha = level === 0 || level === 1 ? 1 : 0.6
+          context.lineWidth = baseWidth
           line(context, left, y, right, y)
+          context.globalAlpha = 1
           label(context, theme, `${level} · ${this.space.formatPrice(price)}`, left + 4, y - 8, 'left', true)
         }
+        context.setLineDash(dash)
         break
       }
       case 'position': {
@@ -324,8 +332,7 @@ export class DrawingController {
         context.fillStyle = theme.negative
         context.fillRect(left, Math.min(y0!, y2), boxWidth, Math.abs(y2 - y0!))
         context.globalAlpha = 1
-        context.strokeStyle = theme.text
-        context.lineWidth = 1
+        context.strokeStyle = drawing.style?.color ?? theme.text
         line(context, left, y0!, left + boxWidth, y0!)
         const stats = positionStats(drawing.points)
         if (stats) {
@@ -347,13 +354,14 @@ export class DrawingController {
         break
       }
     }
-    if (selected) for (const handle of this.handles(drawing)) {
+    context.setLineDash([])
+    if (selected && !drawing.locked) for (const handle of this.handles(drawing)) {
       if (handle.x === null || handle.y === null) continue
       context.beginPath()
       context.arc(handle.x, handle.y, handleRadius, 0, Math.PI * 2)
       context.fillStyle = theme.background
       context.fill()
-      context.strokeStyle = theme.line
+      context.strokeStyle = color
       context.lineWidth = 2
       context.stroke()
     }

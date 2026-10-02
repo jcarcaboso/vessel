@@ -134,3 +134,10 @@ October 2, 2026. The owner asked to start the drawing tools after PR #3 was open
 - Storage: drawings live in the in-memory Play draft under `venueId:contractId`, so switching instruments and back keeps them. Reload discards them like the rest of the draft; durable storage comes with captures/evidence (C8–C9). The magnet preference is stored with the other chart view preferences.
 - Limits: up to 200 drawings per instrument. Canvas drawing is pointer-only; keyboard users can select tools, delete, undo and edit note text but cannot place anchors.
 - Verified in headless Chromium against live Hyperliquid HYPE: every tool created by mouse, nearest-stroke selection, move, delete, undo, per-instrument retention across BTC and back, and anchors kept after switching 4h → 1h. No console errors. `pnpm check`: 441 backend (40 skipped), 230 frontend, 76 prototype.
+
+### Owner refinements, October 2
+
+- The chart header no longer repeats the instrument; it is already chosen and shown in the play fields. The header carries market statistics only, and the toolbar status names the instrument, venue and last update.
+- Drawings have optional `style` (`color` from a curated palette, `line` solid/dashed/dotted, `width` 1–3) and `locked`. A floating edit bar changes color, line style, width and note text, locks/unlocks and deletes. Appearance changes are single undo steps and stay available while locked; locked drawings select but cannot be moved, resized, deleted or cleared (clear removes unlocked drawings only).
+- The full-position summary shows the same quantity-weighted **planned average entry** as the chart's `AVG` line (one or more priced entries), keeping the chart and summary consistent. Other financial figures remain not calculated.
+- Alignment pass: header statistics and toolbar content share a 15 px inset, toolbar controls share one center line, column bottoms align at 1402 × 877, and phones get a 320 px chart with a compact single-row edit bar. `pnpm check`: 441 backend (40 skipped), 234 frontend, 76 prototype.

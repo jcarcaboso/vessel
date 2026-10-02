@@ -43,15 +43,16 @@ export const averageOverlayId = 'aggregate:average-entry'
 
 /**
  * Quantity-weighted planned entry price over entries that have both a price and a positive
- * quantity share. Shares are normalized over those entries. Null unless two or more contribute.
+ * quantity share. Shares are normalized over those entries. Null unless `minimum` entries contribute
+ * (two for the chart line, where a single entry's own line already shows its price).
  */
-export function averageEntryPrice(entries: readonly DraftEntry[]) {
+export function averageEntryPrice(entries: readonly DraftEntry[], minimum = 2) {
   const weighted = entries.flatMap(entry => {
     const price = positive(entry.price)
     const share = positive(entry.share)
     return price !== null && share !== null ? [{ price, share }] : []
   })
-  if (weighted.length < 2) return null
+  if (weighted.length < Math.max(1, minimum)) return null
   const total = weighted.reduce((sum, item) => sum + item.share, 0)
   return weighted.reduce((sum, item) => sum + item.price * item.share, 0) / total
 }

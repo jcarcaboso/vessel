@@ -163,3 +163,24 @@ describe('drawing hit areas', () => {
     expect(callbacks.onDrawingSelect).toHaveBeenLastCalledWith('t')
   })
 })
+
+describe('locked drawings', () => {
+  it('select without moving or exposing handles', () => {
+    const { callbacks, drawings } = controller()
+    const line: ChartDrawing = { id: 't', schemaVersion: 1, kind: 'trend-line', locked: true, points: [{ time: 6_000_000, price: 500 }, { time: 12_000_000, price: 600 }] }
+    drawings.drawings = [line]
+    drawings.selectedId = 't'
+    expect(drawings.pointerDown(200, 400)).toBe(true)
+    expect(drawings.busy).toBe(false)
+    drawings.pointerMove(260, 380)
+    drawings.pointerUp(260, 380)
+    expect(callbacks.onDrawingChange).not.toHaveBeenCalled()
+    expect(drawings.cursor(150, 450)).toBe('pointer')
+  })
+  it('accepts optional style and lock fields in stored drawings', () => {
+    const base: ChartDrawing = { id: 'a', schemaVersion: 1, kind: 'zone', points: [{ time: 1, price: 2 }, { time: 3, price: 4 }] }
+    expect(isChartDrawing({ ...base, locked: true, style: { color: '#8fb8ff', line: 'dotted', width: 2 } })).toBe(true)
+    expect(isChartDrawing({ ...base, style: { color: 'red' } })).toBe(false)
+    expect(isChartDrawing({ ...base, style: { width: 5 } })).toBe(false)
+  })
+})

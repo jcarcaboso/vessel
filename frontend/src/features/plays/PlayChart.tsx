@@ -1,11 +1,12 @@
 import { useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode, type RefObject } from 'react'
-import { Camera, ChartNoAxesCombined, Maximize2, RefreshCw, Trash2 } from 'lucide-react'
+import { Camera, ChartNoAxesCombined, Maximize2, RefreshCw } from 'lucide-react'
 import type { CandleInterval, WorkspaceApi } from '@/api/workspace'
 import { CandleChart } from '@/components/chart/CandleChart'
 import { ChartHeader, type ChartStat } from '@/components/chart/ChartHeader'
 import { ChartIconButton, ChartMenu, ChartToolbar, ChartToolbarDivider } from '@/components/chart/ChartToolbar'
 import { ChartToolRail } from '@/components/chart/ChartToolRail'
-import type { ChartDrawing } from '@/components/chart/drawings'
+import { drawingColors, type ChartDrawing } from '@/components/chart/drawings'
+import { DrawingEditBar } from '@/components/chart/DrawingEditBar'
 import { drawingToolLabels, drawingTools, drawingUtilityIcons, isDrawingKind } from '@/components/chart/drawingTools'
 import { intervalName } from '@/components/chart/intervals'
 import { TimeframeBar } from '@/components/chart/TimeframeBar'
@@ -77,32 +78,28 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = 
   }} footer={[
     { id: 'magnet', label: 'Snap to candles', icon: drawingUtilityIcons.magnet, available: true, pressed: preferences.magnet },
     { id: 'undo', label: 'Undo drawing change', icon: drawingUtilityIcons.undo, available: editor.canUndo, pressed: false },
-    { id: 'clear', label: `Clear ${instrument} drawings`, icon: drawingUtilityIcons.clear, available: drawings.length > 0, pressed: false },
+    { id: 'clear', label: `Clear unlocked ${instrument} drawings`, icon: drawingUtilityIcons.clear, available: editor.clearable, pressed: false },
   ]} unavailableReason="Nothing to change" />
   const drawingBar = editor.tool ? <div className="chart-drawing-bar" role="status">{creationHints[editor.tool]} Esc cancels.</div>
-    : editor.selected ? <div className="chart-drawing-bar" role="group" aria-label="Selected drawing">
-      <span>{drawingToolLabels[editor.selected.kind]}</span>
-      {editor.selected.kind === 'text' && <input aria-label="Note text" value={editor.selected.text ?? ''} maxLength={200}
-        onFocus={editor.beginTextEdit} onChange={event => editor.setText(editor.selected!.id, event.target.value)} />}
-      <ChartIconButton label="Delete drawing" icon={<Trash2 size={14} aria-hidden="true" />} onClick={editor.remove} />
-    </div> : null
+    : editor.selected ? <DrawingEditBar drawing={editor.selected} label={drawingToolLabels[editor.selected.kind]} defaultColor={drawingColors[0]}
+      onStyle={style => editor.setStyle(editor.selected!.id, style)} onLocked={locked => editor.setLocked(editor.selected!.id, locked)}
+      onDelete={editor.remove} onText={text => editor.setText(editor.selected!.id, text)} onTextFocus={editor.beginTextEdit} /> : null
   const drawingProps = {
     drawings, selectedDrawingId: editor.selectedId, tool: editor.tool, magnet: preferences.magnet,
     onDrawingCreate: editor.create, onDrawingChange: editor.change, onDrawingSelect: editor.select, onKeyDown: editor.onKeyDown,
   }
-  const venuePrefix = venue ? `${venue} · ` : ''
 
   return <section className="panel chart-panel" aria-label="Chart" data-testid="chart-panel">
     {live ? <LiveChart key={`${source.accountId}|${instrument}`} source={source} instrument={instrument} interval={interval}
-      caption={`${venuePrefix}${intervalName(interval)} trade candles · UTC`}
+      caption={`${instrument} · ${venue ? `${venue} ` : ''}trade candles`}
       timeframes={<TimeframeBar value={interval} favorites={preferences.favorites}
         onChange={next => setPreferences({ interval: next })} onFavoritesChange={favorites => setPreferences({ favorites })} />}
       viewMenu={viewMenu} rail={rail} drawingBar={drawingBar} drawingProps={drawingProps} overlays={overlays} entries={entries} direction={direction} onSelect={onSelect}
       onEntriesChange={onEntriesChange} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}
       onExpandedChange={setExpanded} onDialogClosed={() => expandButton.current?.focus({ preventScroll: true })} />
       : <>
-        <ChartHeader symbol={instrument} caption={instrument ? `${venuePrefix}No market data provider` : 'No perpetual instrument selected'} />
         <ChartToolbar label="Chart controls" end={<>
+          <span className="chart-status"><span className="chart-source">{instrument ? `${instrument} · ${venue ? `${venue} · ` : ''}no market data provider` : 'No perpetual instrument selected'}</span></span>
           <ChartIconButton label="Capture chart" icon={<Camera size={15} aria-hidden="true" />} disabled disabledReason={captureReason} />
           <ChartIconButton label="Expand chart" icon={<Maximize2 size={15} aria-hidden="true" />} disabled disabledReason="Needs market data" />
         </>} />
@@ -159,14 +156,15 @@ function LiveChart({ source, instrument, interval, caption, timeframes, viewMenu
     { label: 'Open interest', value: described ? `${described.openInterest} ${instrument}` : '—' },
     { label: 'Funding', hint: '1h', value: described?.funding ?? '—' },
   ]
-  const header = <ChartHeader symbol={instrument} caption={caption} stats={stats} statsLabel={`${instrument} market statistics`}
+  // The instrument is already chosen and shown in the play fields, so the header carries statistics only.
+  const header = <ChartHeader stats={stats} statsLabel={`${instrument} market statistics`}
     notice={market.error && <p className="chart-header-error" role="alert">{market.error}</p>} />
   const status = data.status === 'loading' ? 'Loading candles…'
     : data.refreshing ? 'Refreshing…'
       : data.loadingOlder ? 'Loading older candles…'
         : data.retrievedAt ? `Updated ${timeFormat.format(new Date(data.retrievedAt))} UTC` : ''
   const toolbar = (inDialog: boolean) => <ChartToolbar label="Chart controls" end={<>
-    <span className="chart-status" role="status">{status}</span>
+    <span className="chart-status" role="status"><span className="chart-source">{caption}</span>{status && <span>{status}</span>}</span>
     <ChartIconButton label="Refresh" icon={<RefreshCw size={15} aria-hidden="true" className={data.refreshing ? 'is-spinning' : ''} />}
       onClick={refresh} disabled={data.status === 'loading' || data.refreshing} aria-busy={data.refreshing} />
     <ChartToolbarDivider />

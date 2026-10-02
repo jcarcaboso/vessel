@@ -11,6 +11,19 @@ export interface DrawingPoint {
   price: number
 }
 
+export type DrawingLineStyle = 'solid' | 'dashed' | 'dotted'
+export type DrawingLineWidth = 1 | 2 | 3
+
+/** Optional appearance; absent fields use the theme drawing color, a solid line and width 1. */
+export interface DrawingStyle {
+  color?: string
+  line?: DrawingLineStyle
+  width?: DrawingLineWidth
+}
+
+/** Curated colors that stay readable on the dark chart background. */
+export const drawingColors = ['#8fb8ff', '#e9edf2', '#edd49e', '#f5a97f', '#f2b3ac', '#d4b9e4', '#a9d6b6', '#7fd1d1'] as const
+
 export interface ChartDrawing {
   id: string
   schemaVersion: typeof drawingSchemaVersion
@@ -21,6 +34,9 @@ export interface ChartDrawing {
    */
   points: DrawingPoint[]
   text?: string
+  style?: DrawingStyle
+  /** Locked drawings can be selected and unlocked but not moved, resized or deleted. */
+  locked?: boolean
 }
 
 export const pointCount: Record<DrawingKind, 1 | 2> = {
@@ -124,5 +140,15 @@ export function isChartDrawing(value: unknown): value is ChartDrawing {
   return typeof drawing.id === 'string' && drawing.schemaVersion === drawingSchemaVersion && expected > 0 &&
     Array.isArray(drawing.points) && drawing.points.length === expected &&
     drawing.points.every(point => Number.isFinite(point?.time) && Number.isFinite(point?.price) && point.price > 0) &&
-    (drawing.text === undefined || typeof drawing.text === 'string' && drawing.text.length <= 500)
+    (drawing.text === undefined || typeof drawing.text === 'string' && drawing.text.length <= 500) &&
+    (drawing.locked === undefined || typeof drawing.locked === 'boolean') &&
+    (drawing.style === undefined || isStyle(drawing.style))
+}
+
+const isStyle = (style: unknown) => {
+  if (typeof style !== 'object' || style === null) return false
+  const { color, line, width } = style as DrawingStyle
+  return (color === undefined || typeof color === 'string' && /^#[\da-f]{6}$/i.test(color)) &&
+    (line === undefined || ['solid', 'dashed', 'dotted'].includes(line)) &&
+    (width === undefined || [1, 2, 3].includes(width))
 }
