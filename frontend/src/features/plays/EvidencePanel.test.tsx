@@ -46,7 +46,10 @@ describe('Evidence panel', () => {
     expect(cards[0]).toHaveTextContent('Upload')
     expect(cards[0]).toHaveTextContent('setup.png')
     expect(screen.getByText('2 of 50 · Kept in this browser until the play is saved')).toBeInTheDocument()
-    expect(within(cards[1]!).getByRole('link', { name: 'Download image 2' })).toHaveAttribute('download', 'daily.jpg')
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    await userEvent.click(within(cards[1]!).getByRole('button', { name: 'Download image 2' }))
+    expect(click.mock.contexts[0]).toHaveAttribute('download', 'daily.jpg')
+    click.mockRestore()
 
     await userEvent.type(screen.getByRole('textbox', { name: 'Note for image 1' }), 'Range high')
     expect(onList.mock.lastCall![0][0].note).toBe('Range high')

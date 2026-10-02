@@ -62,7 +62,7 @@ The seeded owner is configuration-backed, not a persisted login or broker accoun
 
 ### Evidence storage
 
-Saved Plays can hold images (`GET/POST /api/plays/{playId}/evidence`, `GET /api/evidence/{id}/content`, `PATCH`/`DELETE /api/evidence/{id}`); see the captures section of `docs/architecture/chart-plan.md`. Non-secret defaults are in `src/Vessel.Api/appsettings.json`:
+Saved Plays can hold images (`GET/POST /api/plays/{playId}/evidence`, `GET /api/evidence/{id}/content`, `PATCH`/`DELETE /api/evidence/{id}`) with optional vector markup (`PUT`/`DELETE /api/evidence/{id}/markup`; the image bytes stay original); see the captures section of `docs/architecture/chart-plan.md`. Non-secret defaults are in `src/Vessel.Api/appsettings.json`:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |

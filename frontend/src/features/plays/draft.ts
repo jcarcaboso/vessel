@@ -1,4 +1,5 @@
 import type { ChartDrawing } from '@/components/chart/drawings'
+import type { ImageMarkup } from './markup'
 
 export interface DraftLevel {
   id: string
@@ -47,6 +48,8 @@ export interface DraftEvidence {
   /** What a capture shows, e.g. "BTC · Hyperliquid · 1 hour"; empty for uploads. */
   context: string
   note: string
+  /** Marks drawn over the image; the original `image` is never changed. */
+  markup: ImageMarkup | null
   addedAt: string
 }
 

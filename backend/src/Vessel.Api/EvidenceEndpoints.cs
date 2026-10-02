@@ -27,6 +27,10 @@ public static class EvidenceEndpoints
         });
         api.MapPatch("/evidence/{id:guid}", async (Guid id, UpdateEvidenceNoteRequest request, EvidenceService service, CancellationToken ct) =>
             Results.Ok(await service.UpdateNoteAsync(id, request, ct)));
+        api.MapPut("/evidence/{id:guid}/markup", async (Guid id, ImageMarkup markup, EvidenceService service, CancellationToken ct) =>
+            Results.Ok(await service.UpdateMarkupAsync(id, markup, ct)));
+        api.MapDelete("/evidence/{id:guid}/markup", async (Guid id, EvidenceService service, CancellationToken ct) =>
+            Results.Ok(await service.UpdateMarkupAsync(id, null, ct)));
         api.MapDelete("/evidence/{id:guid}", async (Guid id, EvidenceService service, CancellationToken ct) =>
         {
             await service.DeleteAsync(id, ct);
@@ -34,7 +38,7 @@ public static class EvidenceEndpoints
         });
     }
 
-    /// <summary>multipart/form-data with one <c>file</c>, an optional <c>note</c> and <c>source</c> (capture or upload).</summary>
+    /// <summary>multipart/form-data with one <c>file</c>, optional <c>note</c>, <c>source</c> (capture or upload) and <c>markup</c> JSON.</summary>
     private static async Task<IResult> UploadAsync(Guid playId, HttpRequest request, EvidenceService service, EvidenceLimits limits, CancellationToken ct)
     {
         var maxBody = limits.MaxUploadBytes + FormOverheadBytes;
@@ -49,10 +53,10 @@ public static class EvidenceEndpoints
         catch (InvalidDataException) { throw new WorkspaceException(400, "The upload form is invalid."); }
         if (form.Files.Count != 1 || form.Files.GetFile("file") is not { } file)
             throw new WorkspaceException(400, "Attach exactly one image in the file field.");
-        if (form["note"].Count > 1 || form["source"].Count > 1)
-            throw new WorkspaceException(400, "Send at most one note and one source.");
+        if (form["note"].Count > 1 || form["source"].Count > 1 || form["markup"].Count > 1)
+            throw new WorkspaceException(400, "Send at most one note, source and markup.");
         await using var content = file.OpenReadStream();
-        var result = await service.UploadAsync(playId, content, form["note"].SingleOrDefault(), form["source"].SingleOrDefault(), ct);
+        var result = await service.UploadAsync(playId, content, form["note"].SingleOrDefault(), form["source"].SingleOrDefault(), form["markup"].SingleOrDefault(), ct);
         return Results.Created($"/api/evidence/{result.Id}", result);
     }
 }

@@ -228,3 +228,14 @@ Backend (saved Plays):
 Not included: Play save (no Play API yet, so nothing uploads draft images today), orphan-object cleanup, backup procedure for the evidence directory, and S3-compatible storage. Back up the evidence directory together with the database.
 
 Verified: backend 553 tests including real PostgreSQL (migration, owner filter, write guard, restrict, hash check); frontend 273 tests; live API upload/read/edit/delete with real files on disk, 413/415/401 paths; headless Chromium capture with levels, a drawing and the footer, uploads with a rejected file, viewer note editing, removal confirmation, and no horizontal overflow at 390 px.
+
+### Image markup, October 2
+
+The owner asked to draw over evidence images and keep the marked version, with a switch between original and marked (marked by default).
+
+- Tools: pen (freehand), marker (translucent highlighter), arrow, box and text; six colours; three sizes; select to move, recolour or resize; double-click text to edit; Delete removes; undo/redo; clear all. Sizes scale with the image, so marks look alike on small captures and large uploads.
+- Marks are vector shapes in natural image pixels (`ImageMarkup` in `frontend/src/features/plays/markup.ts`). The original image is never modified. On screen the marks are an SVG layered over the image with the same fit; download flattens them into `<name>-marked.png`.
+- The viewer shows the marked version by default with a Marked/Original toggle, plus Mark up/Edit marks and a download of the version shown. Cards show the marked thumbnail with a Marked badge and download the marked version. Each finished mark is applied to the draft at once.
+- Server: `play_evidence.Markup` (`jsonb`, migration `EvidenceMarkup`). `PUT /api/evidence/{id}/markup` replaces and `DELETE /api/evidence/{id}/markup` clears; upload accepts an optional `markup` JSON field. `EvidenceMarkup.Normalize` validates dimensions (≤ 20000 px), shape count (≤ 200), unique IDs, `#rrggbb` colours, points inside the image (≤ 2000 per stroke), stroke width, text size and text (1–280 characters, no control characters), and stores only the fields each kind uses. Evidence DTOs include `markup`.
+
+Verified: backend 557 tests with real PostgreSQL (including the `jsonb` round trip); frontend 279 tests; headless Chromium drawing every tool on a real capture, moving and recolouring, Marked/Original toggle, flattened download, and the editor at 390 px without overflow. Found and fixed in the browser: the text box closed immediately because mouse-down moved focus.

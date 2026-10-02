@@ -19,6 +19,8 @@ public sealed class PlayEvidence
     public string Sha256 { get; private set; } = null!;
     public EvidenceSource Source { get; private set; }
     public string Note { get; private set; } = "";
+    /// <summary>Normalized markup JSON drawn over the image, or null. The image bytes stay original.</summary>
+    public string? Markup { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
     private PlayEvidence() { }
@@ -48,6 +50,12 @@ public sealed class PlayEvidence
     public void UpdateNote(string note, DateTimeOffset now)
     {
         Note = ValidNote(note);
+        UpdatedAtUtc = now;
+    }
+
+    public void UpdateMarkup(string? markup, DateTimeOffset now)
+    {
+        Markup = markup;
         UpdatedAtUtc = now;
     }
 

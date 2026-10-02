@@ -5,7 +5,7 @@ using Vessel.Domain.Plays;
 namespace Vessel.Application.Evidence;
 
 public sealed record EvidenceDto(Guid Id, Guid PlayId, string Source, string ContentType, long SizeBytes, string Sha256,
-    string Note, DateTimeOffset CreatedAtUtc, DateTimeOffset UpdatedAtUtc);
+    string Note, DateTimeOffset CreatedAtUtc, DateTimeOffset UpdatedAtUtc, ImageMarkup? Markup);
 public sealed record UpdateEvidenceNoteRequest([property: JsonRequired] string Note);
 public sealed record EvidenceContent(Stream Content, string ContentType, long SizeBytes, string Sha256);
 

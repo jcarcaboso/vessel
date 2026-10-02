@@ -131,6 +131,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         evidence.Property(x => x.Sha256).HasMaxLength(64).IsFixedLength();
         evidence.Property(x => x.Source).HasConversion<string>().HasMaxLength(16);
         evidence.Property(x => x.Note).HasMaxLength(PlayEvidence.MaxNoteLength);
+        evidence.Property(x => x.Markup).HasColumnType("jsonb");
     }
 
     private void ValidateOwnership()

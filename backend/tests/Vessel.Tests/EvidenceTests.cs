@@ -108,13 +108,13 @@ public sealed class EvidenceTests : IDisposable
     [Fact]
     public async Task Upload_stores_bytes_then_metadata_with_hash_and_generated_key()
     {
-        var result = await Service().UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "Breakout retest", "capture", default);
+        var result = await Service().UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "Breakout retest", "capture", null, default);
         var saved = Assert.Single(store.Items);
         Assert.Equal(("capture", "image/png", 12L, "Breakout retest"), (result.Source, result.ContentType, result.SizeBytes, result.Note));
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(EvidenceFixtures.Png)), result.Sha256);
         Assert.Equal($"{owner:N}/{play.Id:N}/{result.Id:N}.png", saved.ObjectKey);
         Assert.Equal(EvidenceFixtures.Png, objects.Objects[saved.ObjectKey]);
-        var upload = await Service().UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Jpeg), null, null, default);
+        var upload = await Service().UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Jpeg), null, null, null, default);
         Assert.Equal(("upload", "image/jpeg", ""), (upload.Source, upload.ContentType, upload.Note));
     }
 
@@ -122,15 +122,15 @@ public sealed class EvidenceTests : IDisposable
     public async Task Upload_rejects_invalid_input_before_storing_anything()
     {
         var service = Service(new EvidenceLimits(16, 50));
-        Assert.Equal(404, (await Rejects(() => service.UploadAsync(Guid.NewGuid(), new MemoryStream(EvidenceFixtures.Png), "", null, default))).StatusCode);
+        Assert.Equal(404, (await Rejects(() => service.UploadAsync(Guid.NewGuid(), new MemoryStream(EvidenceFixtures.Png), "", null, null, default))).StatusCode);
         var foreign = EvidenceFixtures.PlayFor(Guid.NewGuid());
         store.Plays.Add(foreign);
-        Assert.Equal(404, (await Rejects(() => service.UploadAsync(foreign.Id, new MemoryStream(EvidenceFixtures.Png), "", null, default))).StatusCode);
-        Assert.Equal(400, (await Rejects(() => service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", "screenshot", default))).StatusCode);
-        Assert.Equal(400, (await Rejects(() => service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), new string('x', 4001), null, default))).StatusCode);
-        Assert.Equal(400, (await Rejects(() => service.UploadAsync(play.Id, new MemoryStream(), "", null, default))).StatusCode);
-        Assert.Equal(413, (await Rejects(() => service.UploadAsync(play.Id, new MemoryStream(new byte[17]), "", null, default))).StatusCode);
-        Assert.Equal(415, (await Rejects(() => service.UploadAsync(play.Id, new MemoryStream("not an image"u8.ToArray()), "", null, default))).StatusCode);
+        Assert.Equal(404, (await Rejects(() => service.UploadAsync(foreign.Id, new MemoryStream(EvidenceFixtures.Png), "", null, null, default))).StatusCode);
+        Assert.Equal(400, (await Rejects(() => service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", "screenshot", null, default))).StatusCode);
+        Assert.Equal(400, (await Rejects(() => service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), new string('x', 4001), null, null, default))).StatusCode);
+        Assert.Equal(400, (await Rejects(() => service.UploadAsync(play.Id, new MemoryStream(), "", null, null, default))).StatusCode);
+        Assert.Equal(413, (await Rejects(() => service.UploadAsync(play.Id, new MemoryStream(new byte[17]), "", null, null, default))).StatusCode);
+        Assert.Equal(415, (await Rejects(() => service.UploadAsync(play.Id, new MemoryStream("not an image"u8.ToArray()), "", null, null, default))).StatusCode);
         Assert.Empty(store.Items);
         Assert.Empty(objects.Objects);
     }
@@ -139,9 +139,9 @@ public sealed class EvidenceTests : IDisposable
     public async Task Upload_enforces_the_per_play_limit()
     {
         var service = Service(new EvidenceLimits(1024, 2));
-        await service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", null, default);
-        await service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", null, default);
-        Assert.Equal(409, (await Rejects(() => service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", null, default))).StatusCode);
+        await service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", null, null, default);
+        await service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", null, null, default);
+        Assert.Equal(409, (await Rejects(() => service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", null, null, default))).StatusCode);
         Assert.Equal(2, objects.Objects.Count);
     }
 
@@ -149,7 +149,7 @@ public sealed class EvidenceTests : IDisposable
     public async Task Failed_metadata_write_removes_the_stored_object()
     {
         store.AddFailure = new InvalidOperationException("database down");
-        await Assert.ThrowsAsync<InvalidOperationException>(() => Service().UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", null, default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Service().UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", null, null, default));
         Assert.Empty(objects.Objects);
     }
 
@@ -157,7 +157,7 @@ public sealed class EvidenceTests : IDisposable
     public async Task Notes_update_content_streams_and_delete_removes_record_then_object()
     {
         var service = Service();
-        var created = await service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.WebP), "first", null, default);
+        var created = await service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.WebP), "first", null, null, default);
         var updated = await service.UpdateNoteAsync(created.Id, new("Second thoughts"), default);
         Assert.Equal("Second thoughts", updated.Note);
         Assert.True(updated.UpdatedAtUtc >= created.UpdatedAtUtc);
@@ -180,7 +180,7 @@ public sealed class EvidenceTests : IDisposable
     [Fact]
     public async Task Missing_object_reads_as_not_found()
     {
-        var created = await Service().UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", null, default);
+        var created = await Service().UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", null, null, default);
         objects.Objects.Clear();
         Assert.Equal(404, (await Rejects(() => Service().ContentAsync(created.Id, default))).StatusCode);
     }
@@ -284,7 +284,7 @@ public sealed class EvidenceApiTests : IDisposable
         var body = created.RootElement;
         var id = body.GetProperty("id").GetGuid();
         Assert.Equal($"/api/evidence/{id}", upload.Headers.Location?.OriginalString);
-        Assert.Equal(new[] { "id", "playId", "source", "contentType", "sizeBytes", "sha256", "note", "createdAtUtc", "updatedAtUtc" },
+        Assert.Equal(new[] { "id", "playId", "source", "contentType", "sizeBytes", "sha256", "note", "createdAtUtc", "updatedAtUtc", "markup" },
             body.EnumerateObject().Select(p => p.Name));
         // The declared type is ignored; the signature decides.
         Assert.Equal("image/png", body.GetProperty("contentType").GetString());
@@ -379,6 +379,13 @@ public sealed class EvidencePostgresTests
         }
         await using (var db = database.Context(owner))
         {
+            var tracked = await db.Evidence.SingleAsync();
+            tracked.UpdateMarkup(EvidenceMarkup.Serialize(new ImageMarkup(10, 10, [new("a", "box", "#ffffff", 2, From: new(1, 1), To: new(5, 5))])), DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+            Assert.Equal("box", (await db.Database.SqlQueryRaw<string>("SELECT \"Markup\"->'shapes'->0->>'kind' AS \"Value\" FROM play_evidence").SingleAsync()));
+        }
+        await using (var db = database.Context(owner))
+        {
             var stored = await new Vessel.Persistence.EvidenceStore(db).ListAsync(play.Id, default);
             Assert.Equal(("Note", EvidenceSource.Capture, 12L), (Assert.Single(stored).Note, stored[0].Source, stored[0].SizeBytes));
             db.Plays.Remove(await db.Plays.SingleAsync());
@@ -401,5 +408,111 @@ public sealed class EvidencePostgresTests
             var check = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
             Assert.Equal(PostgresErrorCodes.CheckViolation, Assert.IsType<PostgresException>(check.InnerException).SqlState);
         }
+    }
+}
+
+public sealed class EvidenceMarkupTests
+{
+    private static MarkupShape Pen(string id = "a") => new(id, "pen", "#ff5c5c", 4, [new(1, 2), new(3.5, 4)]);
+    private static ImageMarkup With(params MarkupShape[] shapes) => new(800, 600, shapes);
+    private static string Rejects(ImageMarkup? markup) => Assert.Throws<WorkspaceException>(() => EvidenceMarkup.Normalize(markup)).Message;
+
+    [Fact]
+    public void Keeps_only_the_fields_each_kind_uses()
+    {
+        var normalized = EvidenceMarkup.Normalize(With(
+            Pen() with { From = new(0, 0), Text = "dropped" },
+            new("b", "marker", "#ffd23f", 16, [new(10, 10)]),
+            new("c", "arrow", "#4ade80", 3, Points: [new(1, 1)], From: new(0, 0), To: new(800, 600)),
+            new("d", "box", "#60a5fa", 3, From: new(5, 5), To: new(50, 40), Size: 9),
+            new("e", "text", "#ffffff", Width: 3, At: new(10, 20), Size: 24, Text: "Retest here")));
+        Assert.Equal(
+            """{"width":800,"height":600,"shapes":[{"id":"a","kind":"pen","color":"#ff5c5c","width":4,"points":[{"x":1,"y":2},{"x":3.5,"y":4}]},{"id":"b","kind":"marker","color":"#ffd23f","width":16,"points":[{"x":10,"y":10}]},{"id":"c","kind":"arrow","color":"#4ade80","width":3,"from":{"x":0,"y":0},"to":{"x":800,"y":600}},{"id":"d","kind":"box","color":"#60a5fa","width":3,"from":{"x":5,"y":5},"to":{"x":50,"y":40}},{"id":"e","kind":"text","color":"#ffffff","at":{"x":10,"y":20},"size":24,"text":"Retest here"}]}""",
+            EvidenceMarkup.Serialize(normalized));
+        Assert.Equal(normalized.Shapes.Count, EvidenceMarkup.Read(EvidenceMarkup.Serialize(normalized))!.Shapes.Count);
+    }
+
+    [Fact]
+    public void Rejects_invalid_markup()
+    {
+        Assert.Contains("required", Rejects(null));
+        Assert.Contains("width and height", Rejects(new ImageMarkup(0, 600, [])));
+        Assert.Contains("width and height", Rejects(new ImageMarkup(800, 20001, [])));
+        Assert.Contains("200 shapes", Rejects(With([.. Enumerable.Range(0, 201).Select(i => Pen($"s{i}"))])));
+        Assert.Contains("unique ID", Rejects(With(Pen(), Pen())));
+        Assert.Contains("unique ID", Rejects(With(Pen("bad id"))));
+        Assert.Contains("#rrggbb", Rejects(With(Pen() with { Color = "#FF5C5C" })));
+        Assert.Contains("#rrggbb", Rejects(With(Pen() with { Color = "red" })));
+        Assert.Contains("inside the image", Rejects(With(Pen() with { Points = [new(801, 0)] })));
+        Assert.Contains("inside the image", Rejects(With(new MarkupShape("a", "box", "#ffffff", 3, From: new(-1, 0), To: new(5, 5)))));
+        Assert.Contains("inside the image", Rejects(With(new MarkupShape("a", "arrow", "#ffffff", 3, From: new(1, 1)))));
+        Assert.Contains("Stroke width", Rejects(With(Pen() with { Width = 0 })));
+        Assert.Contains("Stroke width", Rejects(With(Pen() with { Width = null })));
+        Assert.Contains("1 to 2000 points", Rejects(With(Pen() with { Points = [] })));
+        Assert.Contains("1 to 2000 points", Rejects(With(Pen() with { Points = [.. Enumerable.Repeat(new MarkupPoint(1, 1), 2001)] })));
+        Assert.Contains("Text size", Rejects(With(new MarkupShape("a", "text", "#ffffff", At: new(1, 1), Text: "x"))));
+        Assert.Contains("control characters", Rejects(With(new MarkupShape("a", "text", "#ffffff", At: new(1, 1), Size: 20, Text: "line\nbreak"))));
+        Assert.Contains("control characters", Rejects(With(new MarkupShape("a", "text", "#ffffff", At: new(1, 1), Size: 20, Text: "   "))));
+        Assert.Contains("control characters", Rejects(With(new MarkupShape("a", "text", "#ffffff", At: new(1, 1), Size: 20, Text: new string('x', 281)))));
+        Assert.Contains("kinds are", Rejects(With(Pen() with { Kind = "circle" })));
+        Assert.Equal("Markup must be valid JSON.", Assert.Throws<WorkspaceException>(() => EvidenceMarkup.Parse("{")).Message);
+    }
+
+    [Fact]
+    public async Task Service_replaces_and_clears_marks_without_touching_the_image()
+    {
+        var owner = Guid.NewGuid();
+        var store = new MemoryEvidenceStore(owner);
+        var objects = new MemoryObjectStore();
+        var play = EvidenceFixtures.PlayFor(owner);
+        store.Plays.Add(play);
+        var service = new EvidenceService(store, objects, EvidenceLimits.Default, new CoreOwner(owner), TimeProvider.System);
+        var created = await service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", "capture",
+            """{"width":800,"height":600,"shapes":[{"id":"a","kind":"box","color":"#ff5c5c","width":3,"from":{"x":1,"y":1},"to":{"x":9,"y":9},"text":"x"}]}""", default);
+        Assert.Equal("box", Assert.Single(created.Markup!.Shapes).Kind);
+        Assert.Null(created.Markup.Shapes[0].Text);
+        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+            service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", null, """{"width":1}""", default))).StatusCode);
+
+        var updated = await service.UpdateMarkupAsync(created.Id, With(Pen()), default);
+        Assert.Equal("pen", Assert.Single(updated.Markup!.Shapes).Kind);
+        Assert.Null((await service.UpdateMarkupAsync(created.Id, null, default)).Markup);
+        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateMarkupAsync(created.Id, With(Pen() with { Color = "red" }), default))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateMarkupAsync(Guid.NewGuid(), null, default))).StatusCode);
+        Assert.Equal(EvidenceFixtures.Png, Assert.Single(objects.Objects).Value);
+    }
+
+    [Fact]
+    public async Task Api_puts_and_deletes_marks()
+    {
+        var owner = Guid.NewGuid();
+        var store = new MemoryEvidenceStore(owner);
+        var play = EvidenceFixtures.PlayFor(owner);
+        store.Plays.Add(play);
+        var objects = new MemoryObjectStore();
+        await using var factory = new CoreApiFactory(owner, configure: services =>
+        {
+            services.AddSingleton<IEvidenceMetadataStore>(store);
+            services.AddSingleton<IEvidenceObjectStore>(objects);
+        });
+        using var client = factory.AuthorizedClient();
+        var form = new MultipartFormDataContent { { new ByteArrayContent(EvidenceFixtures.Png), "file", "a.png" },
+            { new StringContent("""{"width":10,"height":10,"shapes":[{"id":"t","kind":"text","color":"#ffffff","at":{"x":1,"y":1},"size":4,"text":"Hi"}]}"""), "markup" } };
+        var created = await (await client.PostAsync($"/api/plays/{play.Id}/evidence", form)).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Hi", created.GetProperty("markup").GetProperty("shapes")[0].GetProperty("text").GetString());
+        var id = created.GetProperty("id").GetGuid();
+
+        var put = await client.PutAsJsonAsync($"/api/evidence/{id}/markup", new { width = 10, height = 10, shapes = new[] { new { id = "p", kind = "pen", color = "#4ade80", width = 1, points = new[] { new { x = 2, y = 3 } } } } });
+        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+        Assert.Equal("pen", (await put.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("markup").GetProperty("shapes")[0].GetProperty("kind").GetString());
+        var bad = await client.PutAsJsonAsync($"/api/evidence/{id}/markup", new { width = 10, height = 10, shapes = new[] { new { id = "p", kind = "pen", color = "#4ade80", width = 1, points = new[] { new { x = 20, y = 3 } } } } });
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        Assert.Equal("Mark points must lie inside the image.", (await bad.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("detail").GetString());
+
+        var cleared = await client.DeleteAsync($"/api/evidence/{id}/markup");
+        Assert.Equal(JsonValueKind.Null, (await cleared.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("markup").ValueKind);
+        using var anonymous = factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.DeleteAsync($"/api/evidence/{id}/markup")).StatusCode);
+        Assert.Equal(EvidenceFixtures.Png, await client.GetByteArrayAsync($"/api/evidence/{id}/content"));
     }
 }

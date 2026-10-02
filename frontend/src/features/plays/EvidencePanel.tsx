@@ -1,25 +1,32 @@
 import { useId, useRef, useState, type ChangeEvent } from 'react'
-import { Download, ImagePlus, Trash2, Upload } from 'lucide-react'
+import { Download, ImagePlus, PenLine, Trash2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import type { DraftEvidence } from './draft'
-import { createEvidence, evidenceAccept, evidenceLimits, evidenceProblem, formatBytes } from './evidence'
-
-// Object URLs live as long as their image is in the draft; removing an image revokes its URL.
-const urls = new WeakMap<Blob, string>()
-function imageUrl(image: Blob) {
-  let url = urls.get(image)
-  if (!url) { url = URL.createObjectURL(image); urls.set(image, url) }
-  return url
-}
-function releaseImageUrl(image: Blob) {
-  const url = urls.get(image)
-  if (url) { URL.revokeObjectURL(url); urls.delete(image) }
-}
+import { createEvidence, evidenceAccept, evidenceLimits, evidenceProblem, formatBytes, imageUrl, releaseImageUrl } from './evidence'
+import { flattenMarkup, hasMarks, markedFileName, markupDataUrl, type ImageMarkup } from './markup'
+import { MarkupEditor } from './MarkupEditor'
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC', hour12: false })
 const describe = (item: DraftEvidence) => item.source === 'capture' ? `Chart capture${item.context ? ` · ${item.context}` : ''}` : item.name
 const itemLabel = (item: DraftEvidence, index: number) => `Image ${index + 1}: ${describe(item)}`
+
+/** The image with its marks layered on top; both share the same fit, so the marks stay aligned. */
+function MarkedImage({ item, marked, alt, fit }: { item: DraftEvidence; marked: boolean; alt: string; fit: 'cover' | 'contain' }) {
+  return <span className="marked-image" data-fit={fit}>
+    <img src={imageUrl(item.image)} alt={alt} />
+    {marked && hasMarks(item.markup) && <img className="marked-image-overlay" src={markupDataUrl(item.markup)} alt="" data-testid="marks-overlay" />}
+  </span>
+}
+
+function save(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
 
 /** Chart captures and uploaded images with a note each. They stay in this browser until the Play is saved. */
 export function EvidencePanel({ evidence, onChange }: {
@@ -31,11 +38,21 @@ export function EvidencePanel({ evidence, onChange }: {
   const [error, setError] = useState('')
   const [viewing, setViewing] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
+  const [view, setView] = useState<'marked' | 'original'>('marked')
+  const [editing, setEditing] = useState(false)
   const id = useId()
   const viewed = evidence.find(item => item.id === viewing) ?? null
   const full = evidence.length >= evidenceLimits.maxItems
 
   const setNote = (itemId: string, note: string) => onChange(current => current.map(item => item.id === itemId ? { ...item, note } : item))
+  const setMarkup = (itemId: string, markup: ImageMarkup | null) => onChange(current => current.map(item => item.id === itemId ? { ...item, markup } : item))
+  const open = (itemId: string) => { setViewing(itemId); setView('marked'); setEditing(false) }
+  async function download(item: DraftEvidence, marked: boolean) {
+    if (!marked || !hasMarks(item.markup)) { save(item.image, item.name); return }
+    const flattened = await flattenMarkup(item.image, item.markup).catch(() => null)
+    if (flattened) save(flattened, markedFileName(item.name))
+    else setError('The marked image could not be created. The original is unchanged.')
+  }
   const remove = (item: DraftEvidence) => {
     releaseImageUrl(item.image)
     onChange(current => current.filter(other => other.id !== item.id))
@@ -81,9 +98,10 @@ export function EvidencePanel({ evidence, onChange }: {
       : <ul className="evidence-list" aria-label="Evidence images">
         {evidence.map((item, index) => <li key={item.id} className="evidence-card">
           <div className="evidence-frame">
-            <button type="button" className="evidence-thumb" aria-label={`Open ${itemLabel(item, index)}`} onClick={() => setViewing(item.id)}>
-              <img src={imageUrl(item.image)} alt="" />
+            <button type="button" className="evidence-thumb" aria-label={`Open ${itemLabel(item, index)}`} onClick={() => open(item.id)}>
+              <MarkedImage item={item} marked alt="" fit="cover" />
             </button>
+            {hasMarks(item.markup) && <span className="evidence-marked">Marked</span>}
             {confirming === item.id
               ? <div className="evidence-confirm" role="group" aria-label={`Remove image ${index + 1}?`}>
                 <span>Remove this image?</span>
@@ -93,7 +111,8 @@ export function EvidencePanel({ evidence, onChange }: {
                 </div>
               </div>
               : <div className="evidence-actions">
-                <a className="evidence-action" href={imageUrl(item.image)} download={item.name} aria-label={`Download image ${index + 1}`} title="Download"><Download size={13} aria-hidden="true" /></a>
+                <button type="button" className="evidence-action" aria-label={`Download image ${index + 1}`} title={hasMarks(item.markup) ? 'Download with marks' : 'Download'}
+                  onClick={() => void download(item, true)}><Download size={13} aria-hidden="true" /></button>
                 <button type="button" className="evidence-action" aria-label={`Remove image ${index + 1}`} title="Remove" onClick={() => setConfirming(item.id)}><Trash2 size={13} aria-hidden="true" /></button>
               </div>}
           </div>
@@ -105,12 +124,29 @@ export function EvidencePanel({ evidence, onChange }: {
           {noteField(item, index, 2)}
         </li>)}
       </ul>}
-    <Dialog open={viewed !== null} onOpenChange={open => { if (!open) setViewing(null) }}>
-      {viewed && <DialogContent className="plays-entry-dialog evidence-dialog">
+    <Dialog open={viewed !== null} onOpenChange={next => { if (!next) { setViewing(null); setEditing(false) } }}>
+      {viewed && <DialogContent className="plays-entry-dialog evidence-dialog"
+        onEscapeKeyDown={event => { if (editing) event.preventDefault() }}>
         <DialogTitle>{describe(viewed)}</DialogTitle>
         <DialogDescription>{viewed.source === 'capture' ? 'Captured' : 'Added'} {timeFormat.format(new Date(viewed.addedAt))} UTC · {formatBytes(viewed.image.size)}. Kept in this browser until the play is saved.</DialogDescription>
-        <div className="evidence-dialog-image"><img src={imageUrl(viewed.image)} alt={describe(viewed)} /></div>
-        {noteField(viewed, evidence.indexOf(viewed), 4)}
+        {editing
+          ? <MarkupEditor imageUrl={imageUrl(viewed.image)} alt={describe(viewed)} markup={viewed.markup}
+            onChange={markup => setMarkup(viewed.id, markup)} onDone={() => { setEditing(false); setView('marked') }} />
+          : <>
+            <div className="evidence-view-bar">
+              {hasMarks(viewed.markup)
+                ? <div className="evidence-view-toggle" role="group" aria-label="Image version">
+                  <button type="button" aria-pressed={view === 'marked'} onClick={() => setView('marked')}>Marked</button>
+                  <button type="button" aria-pressed={view === 'original'} onClick={() => setView('original')}>Original</button>
+                </div>
+                : <span className="evidence-view-note">No marks yet</span>}
+              <Button type="button" size="sm" variant="outline" onClick={() => setEditing(true)}><PenLine size={13} aria-hidden="true" />{hasMarks(viewed.markup) ? 'Edit marks' : 'Mark up'}</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => void download(viewed, view === 'marked')}>
+                <Download size={13} aria-hidden="true" />{view === 'marked' && hasMarks(viewed.markup) ? 'Download marked' : 'Download original'}</Button>
+            </div>
+            <div className="evidence-dialog-image"><MarkedImage item={viewed} marked={view === 'marked'} alt={`${describe(viewed)}${view === 'marked' && hasMarks(viewed.markup) ? ', with marks' : ''}`} fit="contain" /></div>
+          </>}
+        {noteField(viewed, evidence.indexOf(viewed), 3)}
       </DialogContent>}
     </Dialog>
   </div>

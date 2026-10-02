@@ -18,7 +18,7 @@ public sealed class EvidenceService(IEvidenceMetadataStore store, IEvidenceObjec
         return (await store.ListAsync(playId, ct)).Select(ToDto).ToList();
     }
 
-    public async Task<EvidenceDto> UploadAsync(Guid playId, Stream content, string? note, string? source, CancellationToken ct)
+    public async Task<EvidenceDto> UploadAsync(Guid playId, Stream content, string? note, string? source, string? markup, CancellationToken ct)
     {
         var play = await store.PlayAsync(playId, ct) ?? throw new WorkspaceException(404, "Play not found.");
         var kind = source switch
@@ -28,6 +28,7 @@ public sealed class EvidenceService(IEvidenceMetadataStore store, IEvidenceObjec
             _ => throw new WorkspaceException(400, "Source must be capture or upload.")
         };
         note = ValidNote(note ?? "");
+        var marks = string.IsNullOrEmpty(markup) ? null : EvidenceMarkup.Parse(markup);
         if (await store.CountAsync(playId, ct) >= limits.MaxPerPlay)
             throw new WorkspaceException(409, $"A Play can hold at most {limits.MaxPerPlay} evidence images.");
 
@@ -38,6 +39,7 @@ public sealed class EvidenceService(IEvidenceMetadataStore store, IEvidenceObjec
         var key = $"{owner.OwnerId:N}/{playId:N}/{id:N}.{format.Extension}";
         var evidence = new PlayEvidence(id, play, key, format.ContentType, bytes.Length,
             Convert.ToHexStringLower(SHA256.HashData(bytes)), kind, note, time.GetUtcNow());
+        if (marks is not null) evidence.UpdateMarkup(EvidenceMarkup.Serialize(marks), evidence.CreatedAtUtc);
         await objects.PutAsync(key, new MemoryStream(bytes, writable: false), ct);
         try { await store.AddAsync(evidence, ct); }
         catch
@@ -60,6 +62,15 @@ public sealed class EvidenceService(IEvidenceMetadataStore store, IEvidenceObjec
     {
         var evidence = await store.FindAsync(id, ct) ?? throw new WorkspaceException(404, "Evidence not found.");
         evidence.UpdateNote(ValidNote(request.Note), time.GetUtcNow());
+        await store.SaveAsync(ct);
+        return ToDto(evidence);
+    }
+
+    /// <summary>Replaces the marks, or clears them with null. The image is unchanged.</summary>
+    public async Task<EvidenceDto> UpdateMarkupAsync(Guid id, ImageMarkup? markup, CancellationToken ct)
+    {
+        var evidence = await store.FindAsync(id, ct) ?? throw new WorkspaceException(404, "Evidence not found.");
+        evidence.UpdateMarkup(markup is null ? null : EvidenceMarkup.Serialize(EvidenceMarkup.Normalize(markup)), time.GetUtcNow());
         await store.SaveAsync(ct);
         return ToDto(evidence);
     }
@@ -98,5 +109,5 @@ public sealed class EvidenceService(IEvidenceMetadataStore store, IEvidenceObjec
 
     private static EvidenceDto ToDto(PlayEvidence evidence) => new(evidence.Id, evidence.PlayId,
         evidence.Source == EvidenceSource.Capture ? "capture" : "upload", evidence.ContentType, evidence.SizeBytes,
-        evidence.Sha256, evidence.Note, evidence.CreatedAtUtc, evidence.UpdatedAtUtc);
+        evidence.Sha256, evidence.Note, evidence.CreatedAtUtc, evidence.UpdatedAtUtc, EvidenceMarkup.Read(evidence.Markup));
 }
