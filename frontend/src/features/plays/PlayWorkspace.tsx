@@ -41,6 +41,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
     if (accountGone) onChange({ ...draft, accountId: '', instrument: '', instrumentSource: 'manual', budgetOverride: null })
   }, [accountGone, draft, onChange])
 
+  // Drawings follow the venue instrument, so switching away and back keeps them.
+  const drawingKey = account && draft.instrument && draft.instrumentSource === 'venue' ? `${account.venueId}:${draft.instrument}` : ''
+
   function chooseAccount(id: string) {
     const next = enabledAccounts.find(account => account.id === id)
     onChange({ ...draft, accountId: id, instrument: '',
@@ -93,7 +96,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           setSelectionRequest(current => current + 1)
         }} instrument={draft.instrument} venue={account ? venueName(account.venueId) : null} direction={draft.direction}
         source={account?.venueId === 'hyperliquid' && draft.instrumentSource === 'venue' ? { api, accountId: account.id } : null}
-        onEntriesChange={entries => onChange({ ...draft, entries })} />
+        onEntriesChange={entries => onChange({ ...draft, entries })}
+        drawings={drawingKey ? draft.drawings[drawingKey] : undefined}
+        onDrawingsChange={drawings => { if (drawingKey) onChange({ ...draft, drawings: { ...draft.drawings, [drawingKey]: drawings } }) }} />
         <PlayJournal notes={draft.notes} onChange={notes => onChange({ ...draft, notes })} />
       </div>
       <PositionEditor draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} />

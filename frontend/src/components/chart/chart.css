@@ -60,3 +60,11 @@
   .chart-tool-rail { width: 34px; }
   .chart-tool-rail .chart-icon-button { width: 28px; height: 28px; }
 }
+
+.chart-drawing-bar { position: absolute; top: 8px; left: 50%; z-index: 3; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 24px);
+  padding: 4px 6px 4px 10px; border: 1px solid var(--border); border-radius: 7px; color: var(--foreground); background: color-mix(in srgb, var(--card) 94%, transparent);
+  box-shadow: 0 6px 20px #0006; font-size: 11px; transform: translateX(-50%); }
+.chart-drawing-bar[role="status"] { padding: 6px 10px; color: var(--muted-foreground); }
+.chart-drawing-bar span { white-space: nowrap; }
+.chart-drawing-bar input { width: 180px; min-width: 0; height: 26px; padding: 3px 7px; border: 1px solid var(--border); border-radius: 4px; color: var(--foreground); background: var(--field); font: inherit; }
+.candle-chart:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }

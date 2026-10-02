@@ -1,21 +1,28 @@
+import { useState } from 'react'
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/system'
 import { createWorkspaceApi, type CandleSeries, type WorkspaceApi } from '@/api/workspace'
+import type { ChartDrawing, DrawingKind } from '@/components/chart/drawings'
 import type { ChartAdapterFactory, ChartCallbacks, ChartCandle, PriceOverlay } from '@/components/chart/types'
 import { accountFixture, candleSeriesFixture, marketContextFixture } from '@/test/workspace-fixture'
 import { createEntry, type DraftEntry } from './draft'
 import { ChartPanel } from './PlayChart'
 
 function fakeAdapter() {
-  const state = { candles: [] as readonly ChartCandle[], resets: [] as boolean[], overlays: [] as readonly PriceOverlay[], callbacks: null as ChartCallbacks | null, created: 0, destroyed: 0 }
+  const state = {
+    candles: [] as readonly ChartCandle[], resets: [] as boolean[], overlays: [] as readonly PriceOverlay[], callbacks: null as ChartCallbacks | null,
+    created: 0, destroyed: 0, drawings: [] as readonly ChartDrawing[], selectedDrawingId: null as string | null, tool: null as DrawingKind | null, magnet: false,
+  }
   const factory: ChartAdapterFactory = (_container, callbacks) => {
     state.created++
     state.callbacks = callbacks
     return {
       setCandles(candles, reset) { state.candles = candles; state.resets.push(reset) },
       setOverlays(overlays) { state.overlays = overlays },
+      setDrawings(drawings, selectedId) { state.drawings = drawings; state.selectedDrawingId = selectedId },
+      setDrawingTool(tool, magnet) { state.tool = tool; state.magnet = magnet },
       destroy() { state.destroyed++ },
     }
   }
@@ -240,18 +247,6 @@ describe('Chart panel market header and timeframes', () => {
 })
 
 describe('Chart panel tools and average entry', () => {
-  it('prepares the drawing rail with only the crosshair active', async () => {
-    const { factory } = fakeAdapter()
-    render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
-      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
-    const rail = await screen.findByRole('group', { name: 'Chart tools' })
-    expect(within(rail).getByRole('button', { name: 'Crosshair' })).toHaveAttribute('aria-pressed', 'true')
-    for (const name of ['Trend line', 'Horizontal line', 'Rectangle zone', 'Fibonacci retracement', 'Long/short position', 'Text note', 'Clear drawings']) {
-      expect(within(rail).getByRole('button', { name })).toBeDisabled()
-    }
-    expect(within(rail).getByRole('button', { name: 'Trend line' })).toHaveAttribute('title', 'Trend line · Coming with drawing tools')
-  })
-
   it('plots and lists the quantity-weighted average entry in the aggregate view', async () => {
     const list = [{ ...createEntry(0), price: '100', share: '60' }, { ...createEntry(1), price: '90', share: '40' }]
     const { state, factory } = fakeAdapter()
@@ -264,5 +259,93 @@ describe('Chart panel tools and average entry', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Entry 1' }))
     expect(state.overlays.some(o => o.label === 'AVG')).toBe(false)
     expect(screen.queryByText('Average entry')).toBeNull()
+  })
+})
+
+describe('Chart panel drawing tools', () => {
+  const line = (id: string): ChartDrawing => ({ id, schemaVersion: 1, kind: 'trend-line', points: [{ time: 1, price: 100 }, { time: 2, price: 101 }] })
+
+  function DrawingHarness({ factory, initial = [] }: { factory: ChartAdapterFactory; initial?: ChartDrawing[] }) {
+    const [drawings, setDrawings] = useState<ChartDrawing[]>(initial)
+    return <ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()} drawings={drawings} onDrawingsChange={setDrawings}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />
+  }
+
+  it('creates a drawing with the chosen tool, then returns to the crosshair with it selected', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<DrawingHarness factory={factory} />)
+    const rail = await screen.findByRole('group', { name: 'Chart tools' })
+    await userEvent.click(within(rail).getByRole('button', { name: 'Trend line' }))
+    expect(state.tool).toBe('trend-line')
+    expect(screen.getByText(/Drag, or click twice, to draw a trend line/)).toBeInTheDocument()
+    act(() => state.callbacks!.onDrawingCreate(line('a')))
+    expect(state.drawings).toEqual([line('a')])
+    expect(state.selectedDrawingId).toBe('a')
+    expect(state.tool).toBeNull()
+    expect(within(rail).getByRole('button', { name: 'Crosshair' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('group', { name: 'Selected drawing' })).toHaveTextContent('Trend line')
+  })
+
+  it('deletes with the bar or keyboard and undoes each step', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<DrawingHarness factory={factory} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onDrawingCreate(line('a')))
+    act(() => state.callbacks!.onDrawingCreate(line('b')))
+    await userEvent.click(screen.getByRole('button', { name: 'Delete drawing' }))
+    expect(state.drawings.map(d => d.id)).toEqual(['a'])
+    act(() => state.callbacks!.onDrawingSelect('a'))
+    const chart = screen.getByRole('application')
+    chart.focus()
+    await userEvent.keyboard('{Delete}')
+    expect(state.drawings).toEqual([])
+    await userEvent.keyboard('{Control>}z{/Control}')
+    expect(state.drawings.map(d => d.id)).toEqual(['a'])
+    await userEvent.click(screen.getByRole('button', { name: 'Undo drawing change' }))
+    expect(state.drawings.map(d => d.id)).toEqual(['a', 'b'])
+  })
+
+  it('records a whole move as one undo step', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<DrawingHarness factory={factory} initial={[line('a')]} />)
+    await screen.findByText(/Updated/)
+    const moved = (price: number) => ({ ...line('a'), points: [{ time: 1, price }, { time: 2, price: price + 1 }] })
+    act(() => state.callbacks!.onDrawingChange(moved(110), 'move'))
+    act(() => state.callbacks!.onDrawingChange(moved(120), 'move'))
+    act(() => state.callbacks!.onDrawingChange(moved(130), 'end'))
+    expect(state.drawings).toEqual([moved(130)])
+    await userEvent.click(screen.getByRole('button', { name: 'Undo drawing change' }))
+    expect(state.drawings).toEqual([line('a')])
+  })
+
+  it('edits note text, clears all drawings undoably and remembers the magnet', async () => {
+    const { state, factory } = fakeAdapter()
+    const note: ChartDrawing = { id: 'n', schemaVersion: 1, kind: 'text', points: [{ time: 1, price: 100 }], text: 'Note' }
+    render(<DrawingHarness factory={factory} initial={[note, line('a')]} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onDrawingSelect('n'))
+    const input = screen.getByRole('textbox', { name: 'Note text' })
+    await userEvent.clear(input)
+    await userEvent.type(input, 'Breakout retest')
+    expect(state.drawings[0]).toMatchObject({ text: 'Breakout retest' })
+    await userEvent.click(screen.getByRole('button', { name: 'Clear BTC drawings' }))
+    expect(state.drawings).toEqual([])
+    await userEvent.click(screen.getByRole('button', { name: 'Undo drawing change' }))
+    expect(state.drawings).toHaveLength(2)
+    await userEvent.click(screen.getByRole('button', { name: 'Undo drawing change' }))
+    expect(state.drawings[0]).toMatchObject({ text: 'Note' })
+    await userEvent.click(screen.getByRole('button', { name: 'Snap to candles' }))
+    expect(state.magnet).toBe(true)
+    expect(JSON.parse(localStorage.getItem('vessel.chart.preferences.v1')!)).toMatchObject({ magnet: true })
+  })
+
+  it('cancels a tool with Escape', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<DrawingHarness factory={factory} />)
+    await userEvent.click(within(await screen.findByRole('group', { name: 'Chart tools' })).getByRole('button', { name: 'Fibonacci retracement' }))
+    expect(state.tool).toBe('fibonacci')
+    screen.getByRole('application').focus()
+    await userEvent.keyboard('{Escape}')
+    expect(state.tool).toBeNull()
   })
 })

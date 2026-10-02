@@ -1,3 +1,5 @@
+import type { ChartDrawing } from '@/components/chart/drawings'
+
 export interface DraftLevel {
   id: string
   unit: 'price' | 'percent'
@@ -30,6 +32,8 @@ export interface PlayDraft {
   budgetOverride: string | null
   entries: DraftEntry[]
   notes: Record<'thesis' | 'invalidation' | 'strategy' | 'evidence' | 'review', string>
+  /** Chart drawings per venue instrument key (`venueId:contractId`), kept when the instrument changes. */
+  drawings: Record<string, ChartDrawing[]>
 }
 
 const entryColors = ['#b9c9e4', '#edd49e', '#a9d6b6', '#d4b9e4', '#f2b3ac']
@@ -56,5 +60,6 @@ export function createDraft(): PlayDraft {
     sizingMode: 'margin', size: '', leverage: '1', budgetOverride: null,
     entries: [createEntry(0)],
     notes: { thesis: '', invalidation: '', strategy: '', evidence: '', review: '' },
+    drawings: {},
   }
 }

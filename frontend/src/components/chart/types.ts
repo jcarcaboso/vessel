@@ -1,3 +1,5 @@
+import type { ChartDrawing, DrawingKind } from './drawings'
+
 /** Renderer inputs are independent of plays, journals and execution matching. */
 
 /** Display candle. Times are UTC Unix milliseconds; prices are parsed for plotting only. */
@@ -31,6 +33,10 @@ export interface ChartCallbacks {
   onLevelDrag(id: string, price: number, phase: 'move' | 'end'): void
   /** The visible range is close to the oldest loaded candle. */
   onNeedOlder(): void
+  onDrawingCreate(drawing: ChartDrawing): void
+  /** Called continuously while moving or resizing, then once with phase "end". */
+  onDrawingChange(drawing: ChartDrawing, phase: 'move' | 'end'): void
+  onDrawingSelect(id: string | null): void
 }
 
 /** Boundary that keeps the charting library out of feature code. */
@@ -38,6 +44,9 @@ export interface ChartAdapter {
   /** `reset` re-anchors the view at the latest candle, e.g. after an instrument or interval change. */
   setCandles(candles: readonly ChartCandle[], reset: boolean): void
   setOverlays(overlays: readonly PriceOverlay[]): void
+  setDrawings(drawings: readonly ChartDrawing[], selectedId: string | null): void
+  /** `null` is the crosshair: select, move and resize instead of creating. */
+  setDrawingTool(tool: DrawingKind | null, magnet: boolean): void
   destroy(): void
 }
 

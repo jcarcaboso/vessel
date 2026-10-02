@@ -8,5 +8,5 @@ Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, v
 Object.defineProperty(window, 'scrollTo', { configurable: true, value: vi.fn() })
 // jsdom has no canvas. Feature tests inject a fake adapter; the real renderer is checked in a browser.
 vi.mock('@/components/chart/lightweight', () => ({
-  createLightweightAdapter: () => ({ setCandles: vi.fn(), setOverlays: vi.fn(), destroy: vi.fn() }),
+  createLightweightAdapter: () => ({ setCandles: vi.fn(), setOverlays: vi.fn(), setDrawings: vi.fn(), setDrawingTool: vi.fn(), destroy: vi.fn() }),
 }))

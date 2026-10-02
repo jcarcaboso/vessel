@@ -122,3 +122,15 @@ October 1, 2026.
 - The toolbar replaces sparse buttons: timeframes and the view menu on the left; update status, refresh, capture (disabled until evidence storage) and expand icons on the right.
 - The drawing rail is prepared with the agreed set (`drawingTools.tsx`): crosshair (active), trend line, horizontal line, rectangle zone, Fibonacci retracement, long/short position, text, snap and clear. All except the crosshair are visibly disabled with "Coming with drawing tools" until C6.
 - Verified against live Hyperliquid (HYPE, 4h, two entries, average 85.25) in headless Chromium at 1402, 1001 and 390 px with no overflow or console errors; Escape restores focus to the expand control. `pnpm check`: 441 backend (40 skipped), 213 frontend, 76 prototype.
+
+## Drawing tools (C6) state
+
+October 2, 2026. The owner asked to start the drawing tools after PR #3 was opened. This work is stacked on that branch.
+
+- Tools: trend line, horizontal line, rectangle zone, Fibonacci retracement (level 1 at the start, 0 at the end), long/short position (stop mirrors the target at 1R initially; display distances and R only, not plan levels or orders) and text note. The crosshair selects, moves and resizes; the magnet snaps anchors to the nearest candle open, high, low or close.
+- Model: `components/chart/drawings.ts` stores `{ id, schemaVersion: 1, kind, points: [{ time, price }], text? }` with UTC-millisecond anchors. `TimeIndex` maps times to fractional bars and extrapolates by the bar interval, so anchors before or after loaded candles keep their time across zoom, timeframe changes and future space.
+- Interaction and rendering: `DrawingController` works in pane coordinates through a `DrawingSpace` interface and draws on the chart canvas, so later captures include drawings. It picks the nearest stroke on click; filled areas rank behind strokes. The Lightweight Charts adapter routes pointer events to drawings before level drags and panning.
+- Editing: `useDrawingEditor` owns tool, selection and a 50-step undo history (a whole move or a text edit is one step). Delete/Backspace removes, Escape cancels or deselects, Ctrl/Cmd+Z undoes. A floating bar shows the creation hint or the selected drawing with note text and delete. Clear is undoable rather than confirmed.
+- Storage: drawings live in the in-memory Play draft under `venueId:contractId`, so switching instruments and back keeps them. Reload discards them like the rest of the draft; durable storage comes with captures/evidence (C8–C9). The magnet preference is stored with the other chart view preferences.
+- Limits: up to 200 drawings per instrument. Canvas drawing is pointer-only; keyboard users can select tools, delete, undo and edit note text but cannot place anchors.
+- Verified in headless Chromium against live Hyperliquid HYPE: every tool created by mouse, nearest-stroke selection, move, delete, undo, per-instrument retention across BTC and back, and anchors kept after switching 4h → 1h. No console errors. `pnpm check`: 441 backend (40 skipped), 230 frontend, 76 prototype.

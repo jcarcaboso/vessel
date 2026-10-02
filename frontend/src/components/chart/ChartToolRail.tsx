@@ -7,6 +7,8 @@ export interface ChartTool {
   icon: ReactNode
   /** Unavailable tools stay visible but cannot be selected. */
   available: boolean
+  /** Toggle state for utilities such as a magnet; defaults to being the active tool. */
+  pressed?: boolean
 }
 
 /** Vertical tool rail beside the chart canvas. */
@@ -18,7 +20,7 @@ export function ChartToolRail({ tools, active, onSelect, footer, unavailableReas
   unavailableReason?: string
 }) {
   const button = (tool: ChartTool) => <ChartIconButton key={tool.id} label={tool.label} icon={tool.icon}
-    pressed={tool.id === active} disabled={!tool.available} disabledReason={unavailableReason} onClick={() => onSelect(tool.id)} />
+    pressed={tool.pressed ?? tool.id === active} disabled={!tool.available} disabledReason={unavailableReason} onClick={() => onSelect(tool.id)} />
   return <div className="chart-tool-rail" role="group" aria-label="Chart tools">
     {tools.map(button)}
     {footer && footer.length > 0 && <><span className="chart-rail-divider" aria-hidden="true" />{footer.map(button)}</>}

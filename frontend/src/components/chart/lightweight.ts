@@ -1,9 +1,11 @@
 import {
   CandlestickSeries, ColorType, CrosshairMode, createChart,
   type AutoscaleInfo, type IChartApi, type IPrimitivePaneRenderer, type IPrimitivePaneView, type ISeriesApi,
-  type ISeriesPrimitive, type ISeriesPrimitiveAxisView, type LogicalRange, type PrimitiveHoveredItem,
+  type ISeriesPrimitive, type ISeriesPrimitiveAxisView, type Logical, type LogicalRange, type PrimitiveHoveredItem,
   type SeriesAttachedParameter, type Time, type UTCTimestamp,
 } from 'lightweight-charts'
+import { DrawingController, type DrawingSpace, type DrawingTheme } from './drawingController'
+import { TimeIndex, snapPrice } from './drawings'
 import type { ChartAdapter, ChartAdapterFactory, ChartCandle, PriceOverlay } from './types'
 
 type DrawTarget = Parameters<IPrimitivePaneRenderer['draw']>[0]
@@ -19,6 +21,10 @@ interface ChartTheme {
   candleUp: string
   candleDown: string
   candleDownEdge: string
+  drawing: string
+  positive: string
+  negative: string
+  card: string
 }
 
 const hitTolerance = 6
@@ -38,6 +44,10 @@ function readTheme(element: HTMLElement): ChartTheme {
     candleUp: token('--chart-candle-up', '#e9edf2'),
     candleDown: token('--chart-candle-down', '#050607'),
     candleDownEdge: token('--chart-candle-down-edge', '#9aa3b0'),
+    drawing: token('--chart-drawing', '#8fb8ff'),
+    positive: token('--positive', '#a9d6b6'),
+    negative: token('--negative', '#f2b3ac'),
+    card: token('--card', '#171a1f'),
   }
 }
 
@@ -193,6 +203,27 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
   }
 }
 
+/** Paints user drawings on the chart canvas (so captures include them) and reports hover cursors. */
+class DrawingsPrimitive implements ISeriesPrimitive<Time> {
+  controller: DrawingController | null = null
+  requestUpdate: () => void = () => {}
+  private readonly views: readonly IPrimitivePaneView[]
+
+  constructor(private readonly theme: DrawingTheme) {
+    this.views = [{ renderer: () => ({ draw: target => target.useMediaCoordinateSpace(({ context }) => this.controller?.render(context, this.theme)) }) }]
+  }
+
+  attached({ requestUpdate }: SeriesAttachedParameter<Time>) { this.requestUpdate = requestUpdate }
+  detached() { this.requestUpdate = () => {} }
+  paneViews() { return this.views }
+  updateAllViews() { /* Coordinates are resolved while drawing. */ }
+
+  hitTest(x: number, y: number): PrimitiveHoveredItem | null {
+    const cursor = this.controller?.cursor(x, y)
+    return cursor ? { externalId: 'drawing', zOrder: 'normal', cursorStyle: cursor, hitTestPriority: 2 } : null
+  }
+}
+
 export const createLightweightAdapter: ChartAdapterFactory = (container, callbacks) => {
   const theme = readTheme(container)
   const chart: IChartApi = createChart(container, {
@@ -215,6 +246,38 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   const levels = new LevelsPrimitive(theme, colorResolver(container))
   series.attachPrimitive(levels)
   let candleCount = 0
+  let loaded: readonly ChartCandle[] = []
+  let index = new TimeIndex([])
+
+  const space: DrawingSpace = {
+    x: time => {
+      const logical = index.logical(time)
+      return logical === null ? null : chart.timeScale().logicalToCoordinate(logical as Logical)
+    },
+    y: price => series.priceToCoordinate(price),
+    point: (x, y, snap) => {
+      const logical = chart.timeScale().coordinateToLogical(x)
+      const price = series.coordinateToPrice(y)
+      if (logical === null || price === null || !Number.isFinite(price) || price <= 0) return null
+      const candle = snap ? loaded[index.candleIndex(logical) ?? -1] : undefined
+      if (candle) return { time: candle.time, price: snapPrice(candle, price) }
+      const time = index.time(logical)
+      return time === null ? null : { time, price }
+    },
+    width: () => chart.timeScale().width(),
+    formatPrice: price => series.priceFormatter().format(price),
+  }
+  const drawingsLayer = new DrawingsPrimitive({
+    line: theme.drawing, text: theme.foreground, muted: theme.muted, background: theme.card,
+    positive: theme.positive, negative: theme.negative, font: theme.font,
+  })
+  series.attachPrimitive(drawingsLayer)
+  const drawings = new DrawingController(space, {
+    onDrawingCreate: drawing => callbacks.onDrawingCreate(drawing),
+    onDrawingChange: (drawing, phase) => callbacks.onDrawingChange(drawing, phase),
+    onDrawingSelect: id => callbacks.onDrawingSelect(id),
+  }, () => drawingsLayer.requestUpdate())
+  drawingsLayer.controller = drawings
 
   chart.subscribeClick(event => {
     if (typeof event.hoveredObjectId === 'string' && levels.find(event.hoveredObjectId)) callbacks.onLevelSelect(event.hoveredObjectId)
@@ -224,38 +287,66 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   }
   chart.timeScale().subscribeVisibleLogicalRangeChange(onRange)
 
-  // Dragging is handled before the chart sees the pointer, so panning stays off while a level moves.
+  // Drawings and level drags are handled before the chart sees the pointer, so panning stays off while they move.
   let drag: { id: string; pointerId: number; price: number; moved: boolean } | null = null
-  const paneY = (event: PointerEvent) => event.clientY - container.getBoundingClientRect().top
+  let drawingPointer: number | null = null
+  const pane = (event: PointerEvent) => {
+    const rect = container.getBoundingClientRect()
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top }
+  }
+  const lockChart = (locked: boolean) => chart.applyOptions({ handleScroll: !locked, handleScale: !locked })
+  const consume = (event: PointerEvent) => { event.preventDefault(); event.stopPropagation() }
   const onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0 || drag) return
-    const x = event.clientX - container.getBoundingClientRect().left
+    const { x, y } = pane(event)
     if (x > chart.timeScale().width()) return
-    const hit = levels.levelAt(paneY(event))
+    container.focus({ preventScroll: true })
+    if (!index.empty && drawings.pointerDown(x, y)) {
+      consume(event)
+      drawingPointer = event.pointerId
+      container.setPointerCapture?.(event.pointerId)
+      lockChart(true)
+      return
+    }
+    const hit = levels.levelAt(y)
     if (!hit?.overlay.draggable) return
-    event.preventDefault()
-    event.stopPropagation()
+    consume(event)
     drag = { id: hit.overlay.id, pointerId: event.pointerId, price: hit.overlay.price, moved: false }
     container.setPointerCapture?.(event.pointerId)
-    chart.applyOptions({ handleScroll: false, handleScale: false })
+    lockChart(true)
   }
   const onPointerMove = (event: PointerEvent) => {
+    if (drawings.busy) {
+      const { x, y } = pane(event)
+      if (drawings.pointerMove(x, y)) consume(event)
+      return
+    }
     if (!drag || event.pointerId !== drag.pointerId) return
-    event.preventDefault()
-    event.stopPropagation()
-    const price = series.coordinateToPrice(paneY(event))
+    consume(event)
+    const price = series.coordinateToPrice(pane(event).y)
     if (price === null || !Number.isFinite(price) || price <= 0) return
     drag.price = price
     drag.moved = true
     callbacks.onLevelDrag(drag.id, price, 'move')
   }
   const endDrag = (event: PointerEvent) => {
+    if (drawingPointer === event.pointerId) {
+      event.stopPropagation()
+      drawingPointer = null
+      container.releasePointerCapture?.(event.pointerId)
+      const { x, y } = pane(event)
+      if (event.type === 'pointercancel') drawings.cancel()
+      else drawings.pointerUp(x, y)
+      // A two-click creation keeps panning off until the second click.
+      lockChart(drawings.busy)
+      return
+    }
     if (!drag || event.pointerId !== drag.pointerId) return
     event.stopPropagation()
     const finished = drag
     drag = null
     container.releasePointerCapture?.(event.pointerId)
-    chart.applyOptions({ handleScroll: true, handleScale: true })
+    lockChart(false)
     if (finished.moved) callbacks.onLevelDrag(finished.id, finished.price, 'end')
     else callbacks.onLevelSelect(finished.id)
   }
@@ -267,6 +358,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   const adapter: ChartAdapter = {
     setCandles(candles, reset) {
       candleCount = candles.length
+      loaded = candles
+      index = new TimeIndex(candles)
       const precision = pricePrecision(candles)
       series.applyOptions({ priceFormat: { type: 'price', precision, minMove: 10 ** -precision } })
       series.setData(candles.map(candle => ({
@@ -280,6 +373,18 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     },
     setOverlays(overlays) {
       levels.set(overlays)
+    },
+    setDrawings(next, selectedId) {
+      drawings.drawings = next
+      drawings.selectedId = selectedId
+      drawingsLayer.requestUpdate()
+    },
+    setDrawingTool(tool, magnet) {
+      drawings.magnet = magnet
+      if (tool !== drawings.tool) {
+        drawings.setTool(tool)
+        lockChart(false)
+      }
     },
     destroy() {
       container.removeEventListener('pointerdown', onPointerDown, true)
