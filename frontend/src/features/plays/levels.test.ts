@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { createEntry, createTarget, type DraftEntry } from './draft'
-import { applyLevelDrag, averageEntryPrice, averageOverlayId, formatDraggedPrice, levelPrice, parseOverlayId, planOverlays } from './levels'
+import {
+  addChartStop, addChartTarget, applyEntryEdit, applyLevelDrag, averageEntryPrice, averageOverlayId, formatDraggedPrice, levelPrice,
+  overlayPrice, parseOverlayId, planOverlays, removeTarget, setTargetShare,
+} from './levels'
 
 function entry(index: number, patch: Partial<DraftEntry> = {}): DraftEntry {
   return { ...createEntry(index), ...patch }
@@ -33,7 +36,7 @@ describe('planned level overlays', () => {
     const first = entry(0, { price: '100' })
     const second = entry(1, { price: '90' })
     const aggregate = planOverlays([first, second], second.id, 'aggregate', 'long')
-    expect(aggregate.map(o => [o.label, o.emphasis, o.draggable])).toEqual([['E1', 'normal', false], ['E2', 'selected', true]])
+    expect(aggregate.map(o => [o.label, o.emphasis, o.draggable])).toEqual([['E1', 'normal', true], ['E2', 'selected', true]])
     expect(planOverlays([first, second], second.id, 'selected', 'long').map(o => o.label)).toEqual(['E2'])
   })
 })
@@ -102,5 +105,33 @@ describe('average planned entry', () => {
     expect(averageEntryPrice([priced, other, unpriced, unshared])).toBeCloseTo(95)
     expect(averageEntryPrice([priced, unpriced])).toBeNull()
     expect(averageEntryPrice([priced, entry(1, { price: '90', share: '0' })])).toBeNull()
+  })
+})
+
+describe('chart level editing helpers', () => {
+  it('adds targets beyond the entry and a stop on the risk side, as prices', () => {
+    const base = entry(0, { price: '100', stop: { id: 's', unit: 'percent', value: '' }, targets: [] })
+    expect(addChartTarget(base, 'long')!.targets[0]).toMatchObject({ unit: 'price', value: '102', share: '' })
+    expect(addChartTarget(base, 'short')!.targets[0]!.value).toBe('98')
+    expect(addChartStop(base, 'long')!.stop).toEqual({ id: 's', unit: 'price', value: '98' })
+    expect(addChartStop(base, 'short')!.stop.value).toBe('102')
+    expect(addChartTarget({ ...base, price: '' }, 'long')).toBeNull()
+  })
+
+  it('removes and re-shares targets and reports plotted prices', () => {
+    const first = entry(0, { price: '100', targets: [{ ...createTarget('50'), id: 'a', value: '110' }, { ...createTarget('50'), id: 'b', unit: 'percent', value: '5' }] })
+    expect(removeTarget(first, 'a').targets.map(t => t.id)).toEqual(['b'])
+    expect(setTargetShare(first, 'b', '70').targets[1]!.share).toBe('70')
+    expect(overlayPrice(first, `${first.id}|target|b`, 'long')).toBeCloseTo(105)
+    expect(overlayPrice(first, `${first.id}|entry`, 'long')).toBe(100)
+    expect(overlayPrice(first, 'other|entry', 'long')).toBeNull()
+  })
+
+  it('reapplies only the fields an edit changed', () => {
+    const before = entry(0, { price: '100', share: '50' })
+    const after = { ...before, price: '101' }
+    const sideEdited = { ...after, share: '70' }
+    expect(applyEntryEdit(sideEdited, after, before)).toEqual({ ...sideEdited, price: '100' })
+    expect(applyEntryEdit({ ...before, share: '70' }, before, after)).toEqual({ ...before, share: '70', price: '101' })
   })
 })

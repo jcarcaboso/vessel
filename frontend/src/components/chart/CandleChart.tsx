@@ -40,6 +40,7 @@ export function CandleChart({
       onDrawingCreate: drawing => callbacks.current.onDrawingCreate?.(drawing),
       onDrawingChange: (drawing, phase) => callbacks.current.onDrawingChange?.(drawing, phase),
       onDrawingSelect: id => callbacks.current.onDrawingSelect?.(id),
+      onLevelEdit: (id, anchor) => callbacks.current.onLevelEdit?.(id, anchor),
     })
     adapter.current = created
     shownKey.current = null

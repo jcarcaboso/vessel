@@ -1,5 +1,5 @@
 import type { PriceOverlay } from '@/components/chart/types'
-import type { DraftEntry, DraftLevel, PlayDraft } from './draft'
+import { createTarget, type DraftEntry, type DraftLevel, type PlayDraft } from './draft'
 
 export type ChartView = 'aggregate' | 'selected'
 type LevelRef = { entryId: string; kind: 'entry' } | { entryId: string; kind: 'stop' } | { entryId: string; kind: 'target'; targetId: string }
@@ -62,7 +62,8 @@ export function planOverlays(entries: readonly DraftEntry[], selectedId: string,
   entries.forEach((entry, index) => {
     const selected = entry.id === selectedId
     if (view === 'selected' && !selected) return
-    const base = { color: entry.color, accent: entry.color, emphasis: selected ? 'selected' as const : 'normal' as const, draggable: selected }
+    // Every planned level can be dragged; dragging another entry's level selects that entry.
+    const base = { color: entry.color, accent: entry.color, emphasis: selected ? 'selected' as const : 'normal' as const, draggable: true }
     const tag = `E${index + 1}`
     const entryPrice = positive(entry.price)
     if (entryPrice !== null) overlays.push({ ...base, id: overlayId({ entryId: entry.id, kind: 'entry' }), label: tag, price: entryPrice, kind: 'entry' })
@@ -111,4 +112,56 @@ export function applyLevelDrag(entries: readonly DraftEntry[], id: string, price
     if (ref.kind === 'stop') return { ...entry, stop: move(entry.stop, 'stop') }
     return { ...entry, targets: entry.targets.map(target => target.id === ref.targetId ? move(target, 'target') : target) }
   })
+}
+
+/** Default distance for levels added from the chart, as a fraction of the entry price. */
+const addedLevelDistance = 0.02
+
+/** Plotted price of one level, or null when it is blank or invalid. */
+export function overlayPrice(entry: DraftEntry, id: string, direction: PlayDraft['direction']) {
+  const ref = parseOverlayId(id)
+  if (!ref || ref.entryId !== entry.id) return null
+  const entryPrice = positive(entry.price)
+  if (ref.kind === 'entry') return entryPrice
+  if (ref.kind === 'stop') return levelPrice(entryPrice, entry.stop, 'stop', direction)
+  const target = entry.targets.find(current => current.id === ref.targetId)
+  return target ? levelPrice(entryPrice, target, 'target', direction) : null
+}
+
+/** Adds a price target beyond the entry in the trade's direction, or null without an entry price. */
+export function addChartTarget(entry: DraftEntry, direction: PlayDraft['direction']): DraftEntry | null {
+  const entryPrice = positive(entry.price)
+  if (entryPrice === null) return null
+  const price = entryPrice * (1 + (direction === 'long' ? 1 : -1) * addedLevelDistance * (entry.targets.length + 1))
+  return { ...entry, targets: [...entry.targets, { ...createTarget(), value: formatDraggedPrice(price) }] }
+}
+
+/** Sets a price stop on the risk side of the entry when the entry has none plotted. */
+export function addChartStop(entry: DraftEntry, direction: PlayDraft['direction']): DraftEntry | null {
+  const entryPrice = positive(entry.price)
+  if (entryPrice === null) return null
+  const price = entryPrice * (1 - (direction === 'long' ? 1 : -1) * addedLevelDistance)
+  return { ...entry, stop: { ...entry.stop, unit: 'price', value: formatDraggedPrice(price) } }
+}
+
+export function removeTarget(entry: DraftEntry, targetId: string): DraftEntry {
+  return { ...entry, targets: entry.targets.filter(target => target.id !== targetId) }
+}
+
+export function setTargetShare(entry: DraftEntry, targetId: string, share: string): DraftEntry {
+  return { ...entry, targets: entry.targets.map(target => target.id === targetId ? { ...target, share } : target) }
+}
+
+const editableFields = ['name', 'price', 'share', 'stop', 'targets'] as const
+
+/**
+ * Applies one recorded edit (`from` → `to`) to the current entry, touching only the fields that the
+ * edit changed, so unrelated edits made in the side editor afterwards are kept.
+ */
+export function applyEntryEdit(current: DraftEntry, from: DraftEntry, to: DraftEntry): DraftEntry {
+  const next = { ...current }
+  for (const field of editableFields) {
+    if (JSON.stringify(from[field]) !== JSON.stringify(to[field])) Object.assign(next, { [field]: to[field] })
+  }
+  return next
 }

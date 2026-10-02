@@ -1,4 +1,4 @@
-import { ArrowUpDown, Crosshair, Eraser, Magnet, Minus, RectangleHorizontal, Rows4, Slash, Type, Undo2 } from 'lucide-react'
+import { ArrowUpDown, Crosshair, Eraser, Magnet, Minus, RectangleHorizontal, Rows4, Redo2, Slash, Type, Undo2 } from 'lucide-react'
 import type { ChartTool } from './ChartToolRail'
 import type { DrawingKind } from './drawings'
 
@@ -23,6 +23,7 @@ export const drawingTools: readonly ChartTool[] = [
 export const drawingUtilityIcons = {
   magnet: <Magnet {...icon} />,
   undo: <Undo2 {...icon} />,
+  redo: <Redo2 {...icon} />,
   clear: <Eraser {...icon} />,
 }
 

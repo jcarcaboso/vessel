@@ -386,3 +386,22 @@
 .plays-page .chart-legend-average { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; padding: 8px 11px; color: var(--muted-foreground); font-size: 11px; }
 .plays-page .chart-legend-average i { width: 14px; height: 0; border-top: 2px dashed var(--foreground); }
 .plays-page .chart-legend-average strong { color: var(--foreground); font-weight: 600; font-variant-numeric: tabular-nums; }
+.level-editor { position: absolute; z-index: 4; display: grid; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--foreground); background: var(--card); box-shadow: 0 12px 34px #0008; font-size: 11px; }
+.level-editor header { display: flex; align-items: center; gap: 8px; }
+.level-editor header i { width: 12px; height: 3px; border-radius: 1px; }
+.level-editor header strong { flex: 1; font-size: 12px; font-weight: 600; }
+.level-editor-close { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 4px; color: var(--muted-foreground); background: transparent; cursor: pointer; }
+.level-editor-close:hover { color: var(--foreground); background: var(--accent); }
+.level-editor-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; }
+.level-editor label { display: grid; gap: 4px; color: var(--muted-foreground); font-size: 10px; }
+.level-editor label small { font-size: 9px; }
+.level-editor input { height: 30px; min-width: 0; padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; color: var(--foreground); background: var(--field); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; }
+.level-editor input[aria-invalid="true"] { border-color: var(--negative); }
+.level-editor-note { color: var(--muted-foreground); font-size: 10px; line-height: 1.5; }
+.level-editor-error { color: var(--negative); font-size: 10px; }
+.level-editor-actions { display: flex; gap: 6px; }
+.level-editor-actions button { height: 28px; font-size: 11px; }
+.level-editor-more { display: flex; flex-wrap: wrap; gap: 4px 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.level-editor-more button { display: inline-flex; align-items: center; gap: 4px; padding: 2px 0; border: 0; color: var(--ring); background: transparent; font-size: 11px; cursor: pointer; }
+.level-editor-more button:disabled { color: var(--muted-foreground); cursor: not-allowed; }
+.plays-page .level-editor-more button:disabled { background: transparent; }

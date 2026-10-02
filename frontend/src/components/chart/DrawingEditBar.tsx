@@ -12,7 +12,7 @@ const lineWidths: { value: `${DrawingLineWidth}`; label: string }[] = [
 ]
 
 /** Floating editor for one selected drawing. Appearance stays editable while locked; geometry does not. */
-export function DrawingEditBar({ drawing, label, defaultColor, onStyle, onLocked, onDelete, onText, onTextFocus }: {
+export function DrawingEditBar({ drawing, label, defaultColor, onStyle, onLocked, onDelete, onText, onTextFocus, onTextBlur }: {
   drawing: ChartDrawing
   label: string
   defaultColor: string
@@ -21,6 +21,7 @@ export function DrawingEditBar({ drawing, label, defaultColor, onStyle, onLocked
   onDelete: () => void
   onText: (text: string) => void
   onTextFocus: () => void
+  onTextBlur: () => void
 }) {
   const [colorsOpen, setColorsOpen] = useState(false)
   const color = drawing.style?.color ?? defaultColor
@@ -45,7 +46,7 @@ export function DrawingEditBar({ drawing, label, defaultColor, onStyle, onLocked
     {drawing.kind !== 'text' && <ChartMenu label="Line width" value={`${drawing.style?.width ?? 1}`} options={lineWidths}
       onChange={width => onStyle({ width: Number(width) as DrawingLineWidth })} />}
     {drawing.kind === 'text' && <input aria-label="Note text" value={drawing.text ?? ''} maxLength={200} disabled={drawing.locked}
-      onFocus={onTextFocus} onChange={event => onText(event.target.value)} />}
+      onFocus={onTextFocus} onBlur={onTextBlur} onChange={event => onText(event.target.value)} />}
     <ChartToolbarDivider />
     <ChartIconButton label={drawing.locked ? 'Unlock drawing' : 'Lock drawing'} pressed={drawing.locked === true}
       icon={drawing.locked ? <Lock size={14} aria-hidden="true" /> : <LockOpen size={14} aria-hidden="true" />} onClick={() => onLocked(!drawing.locked)} />

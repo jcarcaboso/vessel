@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { Camera, ChartNoAxesCombined, Maximize2, RefreshCw } from 'lucide-react'
 import type { CandleInterval, WorkspaceApi } from '@/api/workspace'
 import { CandleChart } from '@/components/chart/CandleChart'
@@ -11,6 +11,7 @@ import { drawingToolLabels, drawingTools, drawingUtilityIcons, isDrawingKind } f
 import { intervalName } from '@/components/chart/intervals'
 import { TimeframeBar } from '@/components/chart/TimeframeBar'
 import type { ChartAdapterFactory, PriceOverlay } from '@/components/chart/types'
+import { useChartHistory } from '@/components/chart/useChartHistory'
 import { useDrawingEditor } from '@/components/chart/useDrawingEditor'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
@@ -18,7 +19,8 @@ import { useChartPreferences } from '@/features/market/chartPreferences'
 import { useCandles } from '@/features/market/useCandles'
 import { describeMarket, useMarketContext } from '@/features/market/useMarketContext'
 import type { DraftEntry, PlayDraft } from './draft'
-import { applyLevelDrag, averageEntryPrice, formatDraggedPrice, parseOverlayId, planOverlays, type ChartView } from './levels'
+import { LevelEditor } from './LevelEditor'
+import { applyEntryEdit, applyLevelDrag, averageEntryPrice, formatDraggedPrice, parseOverlayId, planOverlays, type ChartView } from './levels'
 
 export interface ChartSource {
   api: WorkspaceApi
@@ -57,7 +59,57 @@ const captureReason = 'Captures arrive with evidence storage'
 export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = null, direction = 'long', source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, createAdapter }: ChartPanelProps) {
   const [view, setView] = useState<ChartView>('aggregate')
   const [preferences, setPreferences] = useChartPreferences()
-  const editor = useDrawingEditor(drawings, next => onDrawingsChange?.(next), `${source?.accountId ?? ''}|${instrument}`)
+  const scopeKey = `${source?.accountId ?? ''}|${instrument}`
+  const history = useChartHistory(scopeKey)
+  const editor = useDrawingEditor(drawings, next => onDrawingsChange?.(next), scopeKey, history)
+  const [levelEdit, setLevelEdit] = useState<{ id: string; anchor: { x: number; y: number } } | null>(null)
+  // History actions and drag gestures read the latest entries, not the ones captured when they started.
+  const latest = useRef({ entries, onEntriesChange })
+  useEffect(() => { latest.current = { entries, onEntriesChange } })
+  const dragStart = useRef<DraftEntry | null>(null)
+
+  /** Records an entry edit made on the chart so undo/redo reverts only the fields it changed. */
+  const recordEntryEdit = (label: string, before: DraftEntry, after: DraftEntry) => {
+    const apply = (from: DraftEntry, to: DraftEntry) => latest.current.onEntriesChange?.(latest.current.entries.map(entry =>
+      entry.id === before.id ? applyEntryEdit(entry, from, to) : entry))
+    history.push({ label, undo: () => apply(after, before), redo: () => apply(before, after) })
+  }
+  const applyEntry = (next: DraftEntry, label: string) => {
+    const before = entries.find(entry => entry.id === next.id)
+    if (!before) return
+    recordEntryEdit(label, before, next)
+    onEntriesChange?.(entries.map(entry => entry.id === next.id ? next : entry))
+  }
+  const levelProps = {
+    onLevelSelect: (id: string) => { const ref = parseOverlayId(id); if (ref) onSelect(ref.entryId) },
+    onLevelDrag: (id: string, price: number, phase: 'move' | 'end') => {
+      const ref = parseOverlayId(id)
+      const current = latest.current.entries
+      const entry = ref && current.find(item => item.id === ref.entryId)
+      if (!ref || !entry) return
+      dragStart.current ??= entry
+      const next = applyLevelDrag(current, id, price, direction)
+      onEntriesChange?.(next)
+      if (phase === 'end') {
+        const after = next.find(item => item.id === ref.entryId)!
+        recordEntryEdit(`Move ${entry.name} level`, dragStart.current, after)
+        dragStart.current = null
+        if (ref.entryId !== selectedId) onSelect(ref.entryId)
+      }
+    },
+    onLevelEdit: (id: string, anchor: { x: number; y: number }) => {
+      const ref = parseOverlayId(id)
+      if (!ref) return
+      setLevelEdit({ id, anchor })
+      if (ref.entryId !== selectedId) onSelect(ref.entryId)
+    },
+  }
+  const onChartKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const key = event.key.toLowerCase()
+    if ((event.metaKey || event.ctrlKey) && (key === 'y' || key === 'z' && event.shiftKey)) { event.preventDefault(); history.redo() }
+    else if ((event.metaKey || event.ctrlKey) && key === 'z') { event.preventDefault(); history.undo() }
+    else editor.onKeyDown(event)
+  }
   const interval = preferences.interval
   const [expanded, setExpanded] = useState(false)
   const expandButton = useRef<HTMLButtonElement>(null)
@@ -72,21 +124,29 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = 
     ...entries.map(entry => ({ value: entry.id, label: entry.name, swatch: entry.color }))]} />
   const rail = <ChartToolRail tools={drawingTools} active={editor.tool ?? 'crosshair'} onSelect={id => {
     if (id === 'magnet') setPreferences({ magnet: !preferences.magnet })
-    else if (id === 'undo') editor.undo()
+    else if (id === 'undo') history.undo()
+    else if (id === 'redo') history.redo()
     else if (id === 'clear') editor.clear()
     else editor.setTool(isDrawingKind(id) ? id : null)
   }} footer={[
     { id: 'magnet', label: 'Snap to candles', icon: drawingUtilityIcons.magnet, available: true, pressed: preferences.magnet },
-    { id: 'undo', label: 'Undo drawing change', icon: drawingUtilityIcons.undo, available: editor.canUndo, pressed: false },
+    { id: 'undo', label: history.undoLabel ? `Undo: ${history.undoLabel}` : 'Undo', icon: drawingUtilityIcons.undo, available: history.canUndo, pressed: false },
+    { id: 'redo', label: history.redoLabel ? `Redo: ${history.redoLabel}` : 'Redo', icon: drawingUtilityIcons.redo, available: history.canRedo, pressed: false },
     { id: 'clear', label: `Clear unlocked ${instrument} drawings`, icon: drawingUtilityIcons.clear, available: editor.clearable, pressed: false },
   ]} unavailableReason="Nothing to change" />
   const drawingBar = editor.tool ? <div className="chart-drawing-bar" role="status">{creationHints[editor.tool]} Esc cancels.</div>
     : editor.selected ? <DrawingEditBar drawing={editor.selected} label={drawingToolLabels[editor.selected.kind]} defaultColor={drawingColors[0]}
       onStyle={style => editor.setStyle(editor.selected!.id, style)} onLocked={locked => editor.setLocked(editor.selected!.id, locked)}
-      onDelete={editor.remove} onText={text => editor.setText(editor.selected!.id, text)} onTextFocus={editor.beginTextEdit} /> : null
+      onDelete={editor.remove} onText={text => editor.setText(editor.selected!.id, text)} onTextFocus={editor.beginTextEdit} onTextBlur={editor.endTextEdit} /> : null
+  const editedRef = levelEdit ? parseOverlayId(levelEdit.id) : null
+  const editedIndex = editedRef ? entries.findIndex(entry => entry.id === editedRef.entryId) : -1
+  const levelEditor = levelEdit && editedIndex >= 0 ? <LevelEditor key={levelEdit.id} entry={entries[editedIndex]!} entryIndex={editedIndex}
+    overlayId={levelEdit.id} anchor={levelEdit.anchor} direction={direction} onApply={applyEntry}
+    onClose={() => setLevelEdit(null)} /> : null
   const drawingProps = {
     drawings, selectedDrawingId: editor.selectedId, tool: editor.tool, magnet: preferences.magnet,
-    onDrawingCreate: editor.create, onDrawingChange: editor.change, onDrawingSelect: editor.select, onKeyDown: editor.onKeyDown,
+    onDrawingCreate: editor.create, onDrawingChange: editor.change, onDrawingSelect: editor.select, onKeyDown: onChartKeyDown,
+    ...levelProps,
   }
 
   return <section className="panel chart-panel" aria-label="Chart" data-testid="chart-panel">
@@ -94,8 +154,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = 
       caption={`${instrument} · ${venue ? `${venue} ` : ''}trade candles`}
       timeframes={<TimeframeBar value={interval} favorites={preferences.favorites}
         onChange={next => setPreferences({ interval: next })} onFavoritesChange={favorites => setPreferences({ favorites })} />}
-      viewMenu={viewMenu} rail={rail} drawingBar={drawingBar} drawingProps={drawingProps} overlays={overlays} entries={entries} direction={direction} onSelect={onSelect}
-      onEntriesChange={onEntriesChange} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}
+      viewMenu={viewMenu} rail={rail} drawingBar={<>{drawingBar}{levelEditor}</>} drawingProps={drawingProps} overlays={overlays} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}
       onExpandedChange={setExpanded} onDialogClosed={() => expandButton.current?.focus({ preventScroll: true })} />
       : <>
         <ChartToolbar label="Chart controls" end={<>
@@ -123,7 +182,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = 
   </section>
 }
 
-function LiveChart({ source, instrument, interval, caption, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, entries, direction, onSelect, onEntriesChange, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
+function LiveChart({ source, instrument, interval, caption, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
   source: ChartSource
   instrument: string
   interval: CandleInterval
@@ -134,10 +193,6 @@ function LiveChart({ source, instrument, interval, caption, timeframes, viewMenu
   drawingBar: ReactNode
   drawingProps: Partial<ComponentProps<typeof CandleChart>>
   overlays: PriceOverlay[]
-  entries: DraftEntry[]
-  direction: PlayDraft['direction']
-  onSelect: (id: string) => void
-  onEntriesChange?: ((entries: DraftEntry[]) => void) | undefined
   createAdapter?: ChartAdapterFactory | undefined
   expanded: boolean
   expandButton: RefObject<HTMLButtonElement | null>
@@ -178,8 +233,6 @@ function LiveChart({ source, instrument, interval, caption, timeframes, viewMenu
   const chartProps = {
     candles: data.candles, overlays, viewKey: `${instrument}|${interval}`,
     label: `${instrument} ${intervalName(interval)} trade candles with planned levels. Edit levels in the entry editor.`,
-    onLevelSelect: (id: string) => { const ref = parseOverlayId(id); if (ref) onSelect(ref.entryId) },
-    onLevelDrag: (id: string, price: number) => onEntriesChange?.(applyLevelDrag(entries, id, price, direction)),
     onNeedOlder: data.loadOlder,
     ...drawingProps,
     ...(createAdapter ? { createAdapter } : {}),

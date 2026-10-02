@@ -82,6 +82,8 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
   private series: ISeriesApi<'Candlestick'> | null = null
   private requestUpdate: (() => void) | null = null
   private readonly views: readonly IPrimitivePaneView[]
+  /** Last drawn label tags in pane pixels, for click-to-edit. */
+  private tags: { id: string; left: number; right: number; top: number; bottom: number }[] = []
 
   constructor(private readonly theme: ChartTheme, private readonly resolve: (color: string) => string) {
     this.views = [{ zOrder: () => 'top', renderer: () => ({ draw: target => this.draw(target) }) }]
@@ -128,6 +130,12 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
     return best
   }
 
+  /** Level whose tag contains the point, if any. */
+  tagAt(x: number, y: number) {
+    const tag = [...this.tags].reverse().find(item => x >= item.left && x <= item.right && y >= item.top && y <= item.bottom)
+    return tag ? { overlay: this.find(tag.id)!, x: tag.right, y: (tag.top + tag.bottom) / 2 } : null
+  }
+
   paneViews() { return this.views }
   priceAxisViews() { return this.axisViews }
   updateAllViews() { /* Coordinates are resolved while drawing. */ }
@@ -155,6 +163,7 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
       context.save()
       context.font = `600 ${Math.round(10 * v)}px ${this.theme.font}`
       context.textBaseline = 'middle'
+      const tags: typeof this.tags = []
       for (const overlay of this.overlays) {
         const y = this.y(overlay.price)
         if (y === null) continue
@@ -186,8 +195,10 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
         }
         context.fillStyle = this.theme.labelInk
         context.fillText(overlay.label, tagX + marker + padding, lineY)
+        if (overlay.kind !== 'reference') tags.push({ id: overlay.id, left: tagX / h, right: (tagX + tagWidth) / h, top: tagY / v, bottom: (tagY + tagHeight) / v })
 
-        if (overlay.draggable) {
+        // Handles mark the selected entry; other entries' levels still drag from the line.
+        if (overlay.draggable && selected) {
           context.globalAlpha = 1
           context.beginPath()
           context.arc(bitmapSize.width - 22 * h, lineY, 4.5 * h, 0, Math.PI * 2)
@@ -198,6 +209,7 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
           context.stroke()
         }
       }
+      this.tags = tags
       context.restore()
     })
   }
@@ -308,6 +320,12 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       lockChart(true)
       return
     }
+    const tag = levels.tagAt(x, y)
+    if (tag) {
+      consume(event)
+      callbacks.onLevelEdit(tag.overlay.id, { x: tag.x, y: tag.y })
+      return
+    }
     const hit = levels.levelAt(y)
     if (!hit?.overlay.draggable) return
     consume(event)
@@ -350,6 +368,17 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     if (finished.moved) callbacks.onLevelDrag(finished.id, finished.price, 'end')
     else callbacks.onLevelSelect(finished.id)
   }
+  const onDoubleClick = (event: MouseEvent) => {
+    const rect = container.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    const y = event.clientY - rect.top
+    if (x > chart.timeScale().width() || drawings.tool || drawings.drawingAt(x, y)) return
+    const hit = levels.levelAt(y)
+    if (!hit || hit.overlay.kind === 'reference') return
+    event.preventDefault()
+    callbacks.onLevelEdit(hit.overlay.id, { x, y: series.priceToCoordinate(hit.overlay.price) ?? y })
+  }
+  container.addEventListener('dblclick', onDoubleClick)
   container.addEventListener('pointerdown', onPointerDown, true)
   container.addEventListener('pointermove', onPointerMove, true)
   container.addEventListener('pointerup', endDrag, true)
@@ -387,6 +416,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       }
     },
     destroy() {
+      container.removeEventListener('dblclick', onDoubleClick)
       container.removeEventListener('pointerdown', onPointerDown, true)
       container.removeEventListener('pointermove', onPointerMove, true)
       container.removeEventListener('pointerup', endDrag, true)

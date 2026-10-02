@@ -37,6 +37,8 @@ export interface ChartCallbacks {
   /** Called continuously while moving or resizing, then once with phase "end". */
   onDrawingChange(drawing: ChartDrawing, phase: 'move' | 'end'): void
   onDrawingSelect(id: string | null): void
+  /** Asks to edit a level in place, e.g. after a double-click or a click on its tag. `anchor` is in pane pixels. */
+  onLevelEdit(id: string, anchor: { x: number; y: number }): void
 }
 
 /** Boundary that keeps the charting library out of feature code. */
