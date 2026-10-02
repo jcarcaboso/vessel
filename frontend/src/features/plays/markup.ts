@@ -28,8 +28,10 @@ const textScale: Record<MarkupSize, number> = { s: 0.022, m: 0.032, l: 0.048 }
 const markerFactor = 4
 
 const round = (value: number) => Math.round(value * 10) / 10
+// Time plus randomness rather than a bare counter, so marks added later never collide with IDs in markup saved by
+// an earlier session. Not crypto.randomUUID, which plain-HTTP LAN previews lack.
 let nextId = 0
-export const markupId = () => `mk-${++nextId}`
+export const markupId = () => `mk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}-${++nextId}`
 
 export function strokeWidth(markup: Pick<ImageMarkup, 'width' | 'height'>, size: MarkupSize, kind: 'pen' | 'marker' | 'arrow' | 'box') {
   const width = Math.max(1.5, Math.max(markup.width, markup.height) * strokeScale[size])

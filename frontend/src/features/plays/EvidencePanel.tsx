@@ -107,7 +107,7 @@ export function EvidencePanel({ evidence, onChange }: {
                 <span>Remove this image?</span>
                 <div>
                   <Button type="button" size="sm" variant="destructive" onClick={() => remove(item)}>Remove</Button>
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setConfirming(null)}>Cancel</Button>
+                  <Button type="button" size="sm" variant="ghost" autoFocus onClick={() => setConfirming(null)}>Cancel</Button>
                 </div>
               </div>
               : <div className="evidence-actions">

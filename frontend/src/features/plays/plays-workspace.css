@@ -211,14 +211,13 @@
 .plays-page .journal-tab-content .evidence-panel ~ textarea { flex: 1 0 96px; }
 .plays-entry-dialog.evidence-dialog { display: flex; flex-direction: column; gap: 10px; width: min(1100px, 94vw); max-width: 94vw; max-height: 92dvh; }
 .evidence-dialog-image { display: grid; place-items: center; min-height: 0; flex: 1; overflow: auto; border: 1px solid var(--border); border-radius: 7px; background: var(--background); }
-/* The marks image is stacked on the photo in one grid cell with the same fit, so both scale together. */
-.marked-image { display: grid; }
-.marked-image > img { grid-area: 1 / 1; display: block; }
+/* The photo sizes the wrapper; the marks image is laid over it without adding size, so both scale together. */
+.marked-image { position: relative; display: block; }
+.marked-image > img { display: block; }
+.marked-image > .marked-image-overlay { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; pointer-events: none; }
 .marked-image[data-fit="cover"] { width: 100%; height: 100%; }
 .marked-image[data-fit="cover"] > img { width: 100%; height: 100%; object-fit: cover; }
-.marked-image[data-fit="contain"] > img { max-width: 100%; max-height: 62dvh; object-fit: contain; }
-.marked-image[data-fit="contain"] > .marked-image-overlay { width: 100%; height: 100%; max-height: none; }
-.marked-image-overlay { pointer-events: none; }
+.marked-image[data-fit="contain"] > img:first-child { max-width: 100%; max-height: 62dvh; }
 .evidence-marked { position: absolute; left: 5px; bottom: 5px; padding: 1px 6px; border-radius: 4px; color: #151c20; background: #ffd23f; font-size: 9px; font-weight: 700; letter-spacing: 0.02em; pointer-events: none; }
 .evidence-view-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .evidence-view-bar > :first-child { margin-right: auto; }
@@ -230,6 +229,8 @@
 .markup-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 5px; border: 1px solid var(--border); border-radius: 7px; background: var(--card); }
 .markup-group { display: flex; align-items: center; gap: 2px; padding-right: 6px; border-right: 1px solid var(--border); }
 .markup-group:nth-last-child(2) { border-right: 0; }
+/* Wrapped rows would end on a dangling divider, so narrow screens rely on the row gap instead. */
+@media (max-width: 640px) { .markup-toolbar { row-gap: 8px; } .markup-group { padding-right: 0; border-right: 0; } }
 .markup-button { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid transparent; border-radius: 5px; color: var(--muted-foreground); background: transparent; cursor: pointer; }
 .markup-button:hover:not(:disabled) { color: var(--foreground); background: var(--secondary); }
 .markup-button[aria-pressed="true"] { border-color: var(--ring); color: var(--ring); background: var(--accent); }
