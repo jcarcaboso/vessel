@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
 import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
-import { AvailableBudget, CapitalContext, ChartPlaceholder, PlayJournal, PositionSummary } from './WorkspacePanels'
-import { createDraft, createEntry, type PlayDraft } from './draft'
+import { AvailableBudget, CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
+import { createDraft, type PlayDraft } from './draft'
 
 function BudgetHarness({ initial = createDraft(), accounts = [], portfolios = [], onChange = vi.fn() }: {
   initial?: PlayDraft
@@ -181,39 +181,13 @@ describe('Play journal', () => {
       expect(screen.getAllByRole('textbox')).toHaveLength(1)
     }
     await userEvent.click(screen.getByRole('tab', { name: 'Evidence' }))
-    expect(screen.getByText('Evidence notes only. Uploads and chart captures are not available.')).toBeInTheDocument()
+    expect(screen.getByText('Evidence notes only. Chart captures and uploads arrive with evidence storage.')).toBeInTheDocument()
     expect(screen.getByTestId('journal-panel').querySelector('input[type="file"]')).toBeNull()
   })
 })
 
-describe('Chart placeholder', () => {
-  it('selects an editor through the planned-entry legend while keeping every entry visible', async () => {
-    const entries = [createEntry(0), createEntry(1)]
-    const onSelect = vi.fn()
-    const { rerender } = render(<ChartPlaceholder entries={entries} selectedId={entries[0]!.id} instrument="ETH-PERP" onSelect={onSelect} />)
-    const legend = screen.getByRole('group', { name: 'Planned entries' })
-    await userEvent.click(within(legend).getByRole('button', { name: /Entry 2/ }))
-    expect(onSelect).toHaveBeenCalledExactlyOnceWith(entries[1]!.id)
-    rerender(<ChartPlaceholder entries={entries} selectedId={entries[1]!.id} instrument="ETH-PERP" onSelect={onSelect} />)
-    expect(within(legend).getAllByRole('button')).toHaveLength(2)
-    expect(within(legend).getByRole('button', { name: /Entry 1/ })).toHaveAttribute('aria-pressed', 'false')
-    expect(within(legend).getByRole('button', { name: /Entry 2/ })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByText('ETH-PERP')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Expand chart' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Capture chart' })).toBeDisabled()
-    expect(screen.getByText(/No candles, live prices or execution observations/)).toBeInTheDocument()
-    expect(screen.getByTestId('chart-panel').querySelector('canvas')).toBeNull()
-  })
-
-  it('does not invent an instrument or entries for an empty draft', () => {
-    render(<ChartPlaceholder entries={[]} selectedId="" instrument="" onSelect={vi.fn()} />)
-    expect(screen.getByText('No perpetual instrument selected')).toBeInTheDocument()
-    expect(screen.getByText('No planned entries.')).toBeInTheDocument()
-  })
-})
-
 describe('Position summary', () => {
-  it('echoes chosen margin and leverage but never calculates exposure, prices or payoff', () => {
+  it('echoes chosen margin and leverage, shows the planned average entry, and never calculates exposure or payoff', () => {
     const draft = { ...createDraft(), size: '1000', leverage: '5' }
     draft.entries[0]!.price = '2000'
     draft.entries[0]!.stop.value = '1900'
@@ -223,8 +197,9 @@ describe('Position summary', () => {
     expect(within(summary).getByText('Chosen margin')).toBeInTheDocument()
     expect(within(summary).getByText('1000 currency units')).toBeInTheDocument()
     expect(within(summary).getByText('5×')).toBeInTheDocument()
-    expect(within(summary).getAllByText('Not calculated')).toHaveLength(6)
-    expect(within(summary).queryByText(/\$|5000|2000|1900|2200/)).not.toBeInTheDocument()
+    expect(within(summary).getAllByText('Not calculated')).toHaveLength(5)
+    expect(within(summary).getByText('Planned average entry').nextElementSibling).toHaveTextContent('2000')
+    expect(within(summary).queryByText(/\$|5000|1900|2200/)).not.toBeInTheDocument()
     expect(within(summary).getByText(/no execution or realized return is implied/)).toBeInTheDocument()
     expect(within(summary).getByText('Long')).toHaveAttribute('data-direction', 'long')
     expect(within(summary).getByText('No instrument · Leverage 5×')).toBeInTheDocument()
@@ -236,13 +211,14 @@ describe('Position summary', () => {
     render(<PositionSummary draft={{ ...createDraft(), sizingMode: 'quantity', size: '0.125', leverage: '3' }} />)
     expect(screen.getByText('Chosen quantity')).toBeInTheDocument()
     expect(screen.getByText('0.125 instrument units')).toBeInTheDocument()
-    expect(screen.getAllByText('Not calculated')).toHaveLength(6)
+    expect(screen.getAllByText('Not calculated')).toHaveLength(5)
   })
 
   it('does not insert a sample size for an empty draft', () => {
     render(<PositionSummary draft={createDraft()} />)
     expect(screen.getByText('Not chosen')).toBeInTheDocument()
+    expect(screen.getByText('Not set')).toHaveAttribute('data-placeholder', 'true')
     expect(screen.getByText('1×')).toBeInTheDocument()
-    expect(screen.getAllByText('Not calculated')).toHaveLength(6)
+    expect(screen.getAllByText('Not calculated')).toHaveLength(5)
   })
 })

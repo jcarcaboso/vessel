@@ -1,0 +1,720 @@
+import { useState } from 'react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ApiError } from '@/api/system'
+import { createWorkspaceApi, type CandleSeries, type MarketStreamEvent, type WorkspaceApi } from '@/api/workspace'
+import type { ChartDrawing, DrawingKind } from '@/components/chart/drawings'
+import type { ChartAdapterFactory, ChartCallbacks, ChartCandle, PriceOverlay } from '@/components/chart/types'
+import { accountFixture, candleSeriesFixture, idleMarketStream, marketContextFixture } from '@/test/workspace-fixture'
+import { createEntry, createTarget, type DraftEntry } from './draft'
+import { ChartPanel } from './PlayChart'
+
+function fakeAdapter() {
+  const state = {
+    candles: [] as readonly ChartCandle[], resets: [] as boolean[], overlays: [] as readonly PriceOverlay[], callbacks: null as ChartCallbacks | null,
+    created: 0, destroyed: 0, drawings: [] as readonly ChartDrawing[], selectedDrawingId: null as string | null, tool: null as DrawingKind | null, magnet: false,
+  }
+  const factory: ChartAdapterFactory = (_container, callbacks) => {
+    state.created++
+    state.callbacks = callbacks
+    return {
+      setCandles(candles, reset) { state.candles = candles; state.resets.push(reset) },
+      setOverlays(overlays) { state.overlays = overlays },
+      setDrawings(drawings, selectedId) { state.drawings = drawings; state.selectedDrawingId = selectedId },
+      setDrawingTool(tool, magnet) { state.tool = tool; state.magnet = magnet },
+      destroy() { state.destroyed++ },
+    }
+  }
+  return { state, factory }
+}
+
+function chartApi(candles: WorkspaceApi['candles'], marketContext: WorkspaceApi['marketContext'] = vi.fn().mockResolvedValue(marketContextFixture),
+  marketStream: WorkspaceApi['marketStream'] = idleMarketStream) {
+  return { ...createWorkspaceApi('test-only'), candles, marketContext, marketStream }
+}
+
+beforeEach(() => localStorage.clear())
+
+const entries = (): DraftEntry[] => [
+  { ...createEntry(0), price: '101', stop: { id: 'stop-1', unit: 'price', value: '99' } },
+  { ...createEntry(1), price: '100' },
+]
+
+describe('Chart panel', () => {
+  it('keeps the placeholder without a market-data source and selects through the legend', async () => {
+    const list = entries()
+    const onSelect = vi.fn()
+    const { rerender } = render(<ChartPanel entries={list} selectedId={list[0]!.id} instrument="ETH-PERP" onSelect={onSelect} />)
+    const legend = screen.getByRole('group', { name: 'Planned entries' })
+    await userEvent.click(within(legend).getByRole('button', { name: /Entry 2/ }))
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(list[1]!.id)
+    rerender(<ChartPanel entries={list} selectedId={list[1]!.id} instrument="ETH-PERP" onSelect={onSelect} />)
+    expect(within(legend).getByRole('button', { name: /Entry 2/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('No market data for this instrument')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Expand chart' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Capture chart' })).toBeDisabled()
+    expect(screen.getByTestId('chart-panel').querySelector('canvas')).toBeNull()
+  })
+
+  it('does not invent an instrument or entries for an empty draft', () => {
+    render(<ChartPanel entries={[]} selectedId="" instrument="" onSelect={vi.fn()} />)
+    expect(screen.getByText('No perpetual instrument selected')).toBeInTheDocument()
+    expect(screen.getByText('No planned entries.')).toBeInTheDocument()
+  })
+
+  it('loads venue candles, plots planned levels and maps level selection to the entry', async () => {
+    const list = entries()
+    const candles = vi.fn().mockResolvedValue(candleSeriesFixture)
+    const { state, factory } = fakeAdapter()
+    const onSelect = vi.fn()
+    render(<ChartPanel entries={list} selectedId={list[0]!.id} instrument="BTC" venue="Hyperliquid" onSelect={onSelect}
+      source={{ api: chartApi(candles), accountId: accountFixture.id }} createAdapter={factory} />)
+    expect(await screen.findByText(/Updated .* UTC/)).toBeInTheDocument()
+    expect(candles).toHaveBeenCalledWith(accountFixture.id, { instrument: 'BTC', interval: '1h' }, expect.any(AbortSignal))
+    expect(state.candles).toEqual([
+      { time: 1_790_000_000_000, open: 100.5, high: 102, low: 99.25, close: 101 },
+      { time: 1_790_003_600_000, open: 101, high: 103.75, low: 100, close: 103 },
+    ])
+    expect(state.resets.at(-1)).toBe(true)
+    expect(state.overlays.map(o => [o.label, o.draggable, o.emphasis])).toEqual([['E1', true, 'selected'], ['E1 SL', true, 'selected'], ['E2', true, 'normal']])
+    expect(screen.getByText(/BTC · Hyperliquid trade candles/)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'BTC' })).toBeNull()
+
+    act(() => state.callbacks!.onLevelSelect(state.overlays[2]!.id))
+    expect(onSelect).toHaveBeenCalledWith(list[1]!.id)
+  })
+
+  it('writes dragged levels back to the draft entries', async () => {
+    const list = entries()
+    const onEntriesChange = vi.fn()
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={list} selectedId={list[0]!.id} instrument="BTC" onSelect={vi.fn()} onEntriesChange={onEntriesChange}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onLevelDrag(state.overlays[1]!.id, 97.123456, 'move'))
+    expect(onEntriesChange).toHaveBeenLastCalledWith([{ ...list[0], stop: { id: 'stop-1', unit: 'price', value: '97.123' } }, list[1]])
+  })
+
+  it('switches between aggregate and selected views from the dropdown', async () => {
+    const list = entries()
+    const onSelect = vi.fn()
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={list} selectedId={list[0]!.id} instrument="BTC" onSelect={onSelect}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    await userEvent.click(screen.getByRole('button', { name: 'Chart view: Aggregate · All entries' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Entry 1' }))
+    expect(onSelect).toHaveBeenCalledWith(list[0]!.id)
+    expect(state.overlays.map(o => o.label)).toEqual(['E1', 'E1 SL'])
+    await userEvent.click(screen.getByRole('button', { name: 'Chart view: Entry 1' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Aggregate · All entries' }))
+    expect(state.overlays.map(o => o.label)).toEqual(['E1', 'E1 SL', 'E2'])
+  })
+
+  it('reloads on timeframe change and refreshes manually without dropping loaded candles', async () => {
+    const newer: CandleSeries = { ...candleSeriesFixture, interval: '4h', candles: [{ ...candleSeriesFixture.candles[1]!, close: '104' }], retrievedAt: '2026-10-01T12:05:00Z' }
+    const candles = vi.fn()
+      .mockResolvedValueOnce(candleSeriesFixture)
+      .mockResolvedValueOnce({ ...candleSeriesFixture, interval: '4h' })
+      .mockResolvedValueOnce(newer)
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
+      source={{ api: chartApi(candles), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    await userEvent.click(within(screen.getByRole('group', { name: 'Timeframe' })).getByRole('button', { name: '4 hours' }))
+    expect(candles).toHaveBeenLastCalledWith(accountFixture.id, { instrument: 'BTC', interval: '4h' }, expect.any(AbortSignal))
+    expect(screen.getByRole('button', { name: '4 hours' })).toHaveAttribute('aria-pressed', 'true')
+    await screen.findByText(/Updated/)
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await vi.waitFor(() => expect(state.candles.at(-1)!.close).toBe(104))
+    expect(state.candles).toHaveLength(2)
+    expect(state.resets.at(-1)).toBe(false)
+  })
+
+  it('loads older candles until the venue history is exhausted', async () => {
+    const older: CandleSeries = { ...candleSeriesFixture, candles: [{ ...candleSeriesFixture.candles[0]!, openTime: 1_789_996_400_000, closeTime: 1_789_999_999_999 }] }
+    const candles = vi.fn()
+      .mockResolvedValueOnce(candleSeriesFixture)
+      .mockResolvedValueOnce(older)
+      .mockResolvedValueOnce({ ...candleSeriesFixture, candles: [], historyExhausted: true })
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
+      source={{ api: chartApi(candles), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onNeedOlder())
+    await vi.waitFor(() => expect(state.candles).toHaveLength(3))
+    // Other refreshes may interleave on slow runners; the older window request is what matters.
+    expect(candles).toHaveBeenCalledWith(accountFixture.id, { instrument: 'BTC', interval: '1h', endTime: 1_789_999_999_999 }, expect.any(AbortSignal))
+    act(() => state.callbacks!.onNeedOlder())
+    expect(await screen.findByText(/Start of available venue history/)).toBeInTheDocument()
+    act(() => state.callbacks!.onNeedOlder())
+    expect(candles).toHaveBeenCalledTimes(3)
+  })
+
+  it('shows load failures with a retry and keeps previous candles when a refresh fails', async () => {
+    const candles = vi.fn()
+      .mockRejectedValueOnce(new ApiError('http', 'Venue candles are unavailable. Try refreshing the chart.', 502))
+      .mockResolvedValueOnce(candleSeriesFixture)
+      .mockRejectedValueOnce(new ApiError('unavailable', 'The request did not complete. Check the API and try again.'))
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
+      source={{ api: chartApi(candles), accountId: accountFixture.id }} createAdapter={factory} />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Venue candles are unavailable.')
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await screen.findByText(/Updated/)
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Refresh failed: The request did not complete.')
+    expect(state.candles).toHaveLength(2)
+  })
+
+  it('opens the same chart in an expanded dialog and restores focus on Escape', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    const expand = screen.getByRole('button', { name: 'Expand chart' })
+    await userEvent.click(expand)
+    const dialog = screen.getByRole('dialog', { name: 'BTC chart' })
+    expect(within(dialog).getByTestId('chart-dialog-body')).toBeInTheDocument()
+    expect(screen.queryByTestId('chart-body')).toBeNull()
+    expect(state.created).toBe(2)
+    expect(state.candles).toHaveLength(2)
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Expand chart' })).toHaveFocus()
+    expect(screen.getByTestId('chart-body')).toBeInTheDocument()
+  })
+})
+
+describe('Chart panel refresh during older loading', () => {
+  it('lets a manual refresh replace a pending older read without blocking later paging', async () => {
+    let resolveOlder!: (value: CandleSeries) => void
+    const candles = vi.fn()
+      .mockResolvedValueOnce(candleSeriesFixture)
+      .mockImplementationOnce(() => new Promise<CandleSeries>(resolve => { resolveOlder = resolve }))
+      .mockResolvedValueOnce(candleSeriesFixture)
+      .mockResolvedValueOnce({ ...candleSeriesFixture, candles: [], historyExhausted: true })
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
+      source={{ api: chartApi(candles), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onNeedOlder())
+    expect(await screen.findByText('Loading older candles…')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await screen.findByText(/Updated/)
+    resolveOlder(candleSeriesFixture)
+    act(() => state.callbacks!.onNeedOlder())
+    await vi.waitFor(() => expect(candles).toHaveBeenCalledTimes(4))
+  })
+})
+
+describe('Chart panel market header and timeframes', () => {
+  const render4 = (marketContext?: WorkspaceApi['marketContext']) => {
+    const { factory } = fakeAdapter()
+    return render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture), marketContext), accountId: accountFixture.id }} createAdapter={factory} />)
+  }
+
+  it('shows exact venue statistics with a derived 24h change', async () => {
+    render4()
+    const stats = screen.getByLabelText('BTC market statistics')
+    await vi.waitFor(() => expect(stats).toHaveTextContent('Mark103.5'))
+    expect(stats).toHaveTextContent('Oracle103.4')
+    expect(stats).toHaveTextContent('+3.5 / +3.50%')
+    expect(stats).toHaveTextContent('42.5 BTC')
+    expect(stats).toHaveTextContent('0.0013%')
+  })
+
+  it('keeps the chart usable when statistics fail', async () => {
+    render4(vi.fn().mockRejectedValue(new ApiError('http', 'Venue market statistics are unavailable.', 502)))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Venue market statistics are unavailable.')
+    expect(await screen.findByText(/Updated/)).toBeInTheDocument()
+  })
+
+  it('pins favorite timeframes to the bar and remembers them', async () => {
+    const view = render4()
+    const bar = screen.getByRole('group', { name: 'Timeframe' })
+    expect(within(bar).getAllByRole('button').map(button => button.textContent)).toEqual(['5m', '1h', '4h', 'D', ''])
+    await userEvent.click(within(bar).getByRole('button', { name: 'All timeframes' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Favorite 15 minutes' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Favorite 5 minutes' }))
+    await userEvent.click(screen.getByRole('button', { name: '1 week' }))
+    expect(within(bar).getAllByRole('button').map(button => button.textContent)).toEqual(['15m', '1h', '4h', 'D', 'W', ''])
+    expect(within(bar).getByRole('button', { name: '1 week' })).toHaveAttribute('aria-pressed', 'true')
+    view.unmount()
+    render4()
+    const restored = screen.getByRole('group', { name: 'Timeframe' })
+    expect(within(restored).getAllByRole('button').map(button => button.textContent)).toEqual(['15m', '1h', '4h', 'D', 'W', ''])
+    expect(within(restored).getByRole('button', { name: '1 week' })).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('Chart panel tools and average entry', () => {
+  it('plots and lists the quantity-weighted average entry in the aggregate view', async () => {
+    const list = [{ ...createEntry(0), price: '100', share: '60' }, { ...createEntry(1), price: '90', share: '40' }]
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={list} selectedId={list[0]!.id} instrument="BTC" onSelect={vi.fn()}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    expect(state.overlays.find(o => o.label === 'AVG')?.price).toBeCloseTo(96)
+    expect(screen.getByText('Average entry')).toHaveTextContent('Average entry 96')
+    await userEvent.click(screen.getByRole('button', { name: 'Chart view: Aggregate · All entries' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Entry 1' }))
+    expect(state.overlays.some(o => o.label === 'AVG')).toBe(false)
+    expect(screen.queryByText('Average entry')).toBeNull()
+  })
+})
+
+describe('Chart panel drawing tools', () => {
+  const line = (id: string): ChartDrawing => ({ id, schemaVersion: 1, kind: 'trend-line', points: [{ time: 1, price: 100 }, { time: 2, price: 101 }] })
+
+  function DrawingHarness({ factory, initial = [] }: { factory: ChartAdapterFactory; initial?: ChartDrawing[] }) {
+    const [drawings, setDrawings] = useState<ChartDrawing[]>(initial)
+    return <ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()} drawings={drawings} onDrawingsChange={setDrawings}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />
+  }
+
+  it('creates a drawing with the chosen tool, then returns to the crosshair with it selected', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<DrawingHarness factory={factory} />)
+    const rail = await screen.findByRole('group', { name: 'Chart tools' })
+    await userEvent.click(within(rail).getByRole('button', { name: 'Trend line' }))
+    expect(state.tool).toBe('trend-line')
+    expect(screen.getByText(/Drag, or click twice, to draw a trend line/)).toBeInTheDocument()
+    act(() => state.callbacks!.onDrawingCreate(line('a')))
+    expect(state.drawings).toEqual([line('a')])
+    expect(state.selectedDrawingId).toBe('a')
+    expect(state.tool).toBeNull()
+    expect(within(rail).getByRole('button', { name: 'Crosshair' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('group', { name: 'Selected drawing' })).toHaveTextContent('Trend line')
+  })
+
+  it('deletes with the bar or keyboard and undoes each step', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<DrawingHarness factory={factory} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onDrawingCreate(line('a')))
+    act(() => state.callbacks!.onDrawingCreate(line('b')))
+    await userEvent.click(screen.getByRole('button', { name: 'Delete drawing' }))
+    expect(state.drawings.map(d => d.id)).toEqual(['a'])
+    act(() => state.callbacks!.onDrawingSelect('a'))
+    const chart = screen.getByRole('application')
+    chart.focus()
+    await userEvent.keyboard('{Delete}')
+    expect(state.drawings).toEqual([])
+    await userEvent.keyboard('{Control>}z{/Control}')
+    expect(state.drawings.map(d => d.id)).toEqual(['a'])
+    await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    expect(state.drawings.map(d => d.id)).toEqual(['a', 'b'])
+  })
+
+  it('records a whole move as one undo step', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<DrawingHarness factory={factory} initial={[line('a')]} />)
+    await screen.findByText(/Updated/)
+    const moved = (price: number) => ({ ...line('a'), points: [{ time: 1, price }, { time: 2, price: price + 1 }] })
+    act(() => state.callbacks!.onDrawingChange(moved(110), 'move'))
+    act(() => state.callbacks!.onDrawingChange(moved(120), 'move'))
+    act(() => state.callbacks!.onDrawingChange(moved(130), 'end'))
+    expect(state.drawings).toEqual([moved(130)])
+    await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    expect(state.drawings).toEqual([line('a')])
+  })
+
+  it('edits note text, clears all drawings undoably and remembers the magnet', async () => {
+    const { state, factory } = fakeAdapter()
+    const note: ChartDrawing = { id: 'n', schemaVersion: 1, kind: 'text', points: [{ time: 1, price: 100 }], text: 'Note' }
+    render(<DrawingHarness factory={factory} initial={[note, line('a')]} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onDrawingSelect('n'))
+    const input = screen.getByRole('textbox', { name: 'Note text' })
+    await userEvent.clear(input)
+    await userEvent.type(input, 'Breakout retest')
+    expect(state.drawings[0]).toMatchObject({ text: 'Breakout retest' })
+    await userEvent.click(screen.getByRole('button', { name: 'Clear unlocked BTC drawings' }))
+    expect(state.drawings).toEqual([])
+    await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    expect(state.drawings).toHaveLength(2)
+    await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    expect(state.drawings[0]).toMatchObject({ text: 'Note' })
+    await userEvent.click(screen.getByRole('button', { name: 'Snap to candles' }))
+    expect(state.magnet).toBe(true)
+    expect(JSON.parse(localStorage.getItem('vessel.chart.preferences.v1')!)).toMatchObject({ magnet: true })
+  })
+
+  it('cancels a tool with Escape', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<DrawingHarness factory={factory} />)
+    await userEvent.click(within(await screen.findByRole('group', { name: 'Chart tools' })).getByRole('button', { name: 'Fibonacci retracement' }))
+    expect(state.tool).toBe('fibonacci')
+    screen.getByRole('application').focus()
+    await userEvent.keyboard('{Escape}')
+    expect(state.tool).toBeNull()
+  })
+})
+
+describe('Chart panel drawing editing', () => {
+  const line = (id: string, patch: Partial<ChartDrawing> = {}): ChartDrawing => ({ id, schemaVersion: 1, kind: 'trend-line', points: [{ time: 1, price: 100 }, { time: 2, price: 101 }], ...patch })
+
+  function Harness({ factory, initial }: { factory: ChartAdapterFactory; initial: ChartDrawing[] }) {
+    const [drawings, setDrawings] = useState<ChartDrawing[]>(initial)
+    return <ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()} drawings={drawings} onDrawingsChange={setDrawings}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />
+  }
+
+  it('changes color, line style and width as undoable steps', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<Harness factory={factory} initial={[line('a')]} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onDrawingSelect('a'))
+    const bar = screen.getByRole('group', { name: 'Selected drawing' })
+    await userEvent.click(within(bar).getByRole('button', { name: /Drawing color/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Color #f5a97f' }))
+    await userEvent.click(within(bar).getByRole('button', { name: 'Line style: Solid' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Dashed' }))
+    await userEvent.click(within(bar).getByRole('button', { name: 'Line width: 1 px' }))
+    await userEvent.click(screen.getByRole('button', { name: '3 px' }))
+    expect(state.drawings[0]!.style).toEqual({ color: '#f5a97f', line: 'dashed', width: 3 })
+    await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    expect(state.drawings[0]!.style).toEqual({ color: '#f5a97f', line: 'dashed' })
+  })
+
+  it('locks a drawing against deletion and clearing until unlocked', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<Harness factory={factory} initial={[line('a'), line('b')]} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onDrawingSelect('a'))
+    await userEvent.click(screen.getByRole('button', { name: 'Lock drawing' }))
+    expect(state.drawings[0]!.locked).toBe(true)
+    expect(screen.getByRole('button', { name: 'Delete drawing' })).toBeDisabled()
+    screen.getByRole('application').focus()
+    await userEvent.keyboard('{Delete}')
+    expect(state.drawings).toHaveLength(2)
+    await userEvent.click(screen.getByRole('button', { name: 'Clear unlocked BTC drawings' }))
+    expect(state.drawings.map(d => d.id)).toEqual(['a'])
+    expect(screen.getByRole('button', { name: 'Clear unlocked BTC drawings' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: 'Unlock drawing' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Delete drawing' }))
+    expect(state.drawings).toEqual([])
+  })
+})
+
+describe('Chart panel level editing', () => {
+  function LevelHarness({ factory, onSelect = vi.fn(), initial }: { factory: ChartAdapterFactory; onSelect?: (id: string) => void; initial: DraftEntry[] }) {
+    const [list, setList] = useState(initial)
+    const [selected, setSelected] = useState(initial[0]!.id)
+    return <>
+      <ChartPanel entries={list} selectedId={selected} onSelect={id => { setSelected(id); onSelect(id) }} instrument="BTC" onEntriesChange={setList}
+        source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />
+      <output data-testid="entries">{JSON.stringify(list.map(e => ({ price: e.price, stop: e.stop, targets: e.targets.map(t => [t.unit, t.value, t.share]), share: e.share })))}</output>
+      <button type="button" onClick={() => setList(current => current.map((e, i) => i === 1 ? { ...e, share: '25' } : e))}>side edit</button>
+    </>
+  }
+  const two = (): DraftEntry[] => [
+    { ...createEntry(0), price: '100', share: '50', stop: { id: 's1', unit: 'percent', value: '5' }, targets: [{ ...createTarget('100'), id: 't1', value: '110' }] },
+    { ...createEntry(1), price: '90', share: '50', stop: { id: 's2', unit: 'price', value: '85' }, targets: [] },
+  ]
+  const shown = () => JSON.parse(screen.getByTestId('entries').textContent!) as { price: string; share: string; stop: { unit: string; value: string }; targets: string[][] }[]
+
+  it('drags any entry level, selects that entry, and undoes and redoes the whole move', async () => {
+    const { state, factory } = fakeAdapter()
+    const onSelect = vi.fn()
+    render(<LevelHarness factory={factory} onSelect={onSelect} initial={two()} />)
+    await screen.findByText(/Updated/)
+    const second = state.overlays.find(o => o.label === 'E2 SL')!
+    expect(second.draggable).toBe(true)
+    act(() => state.callbacks!.onLevelDrag(second.id, 84, 'move'))
+    act(() => state.callbacks!.onLevelDrag(second.id, 83.5, 'end'))
+    expect(shown()[1]!.stop.value).toBe('83.5')
+    expect(onSelect).toHaveBeenLastCalledWith(second.id.split('|')[0])
+    await userEvent.click(screen.getByRole('button', { name: 'side edit' }))
+    await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    expect(shown()[1]).toMatchObject({ share: '25', stop: { value: '85' } })
+    await userEvent.click(screen.getByRole('button', { name: /^Redo/ }))
+    expect(shown()[1]).toMatchObject({ share: '25', stop: { value: '83.5' } })
+    screen.getByRole('application').focus()
+    await userEvent.keyboard('{Control>}z{/Control}')
+    expect(shown()[1]!.stop.value).toBe('85')
+    await userEvent.keyboard('{Control>}{Shift>}z{/Shift}{/Control}')
+    expect(shown()[1]!.stop.value).toBe('83.5')
+    await userEvent.keyboard('{Control>}z{/Control}{Control>}y{/Control}')
+    expect(shown()[1]!.stop.value).toBe('83.5')
+  })
+
+  it('edits a level price on the chart and keeps a percentage level in its unit', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<LevelHarness factory={factory} initial={two()} />)
+    await screen.findByText(/Updated/)
+    const stop = state.overlays.find(o => o.label === 'E1 SL')!
+    act(() => state.callbacks!.onLevelEdit(stop.id, { x: 40, y: 120 }))
+    const form = screen.getByRole('form', { name: 'Edit E1 Stop' })
+    const price = within(form).getByRole('textbox', { name: 'Price' })
+    expect(price).toHaveValue('95')
+    expect(within(form).getByText(/Stored as a % from entry/)).toBeInTheDocument()
+    await userEvent.clear(price)
+    await userEvent.type(price, '92{Enter}')
+    expect(shown()[0]!.stop).toMatchObject({ unit: 'percent', value: '8' })
+    expect(screen.queryByRole('form')).toBeNull()
+  })
+
+  it('edits target share, adds and removes targets and adds a missing stop from the chart', async () => {
+    const { state, factory } = fakeAdapter()
+    const initial = two()
+    initial[1] = { ...initial[1]!, stop: { id: 's2', unit: 'price', value: '' } }
+    render(<LevelHarness factory={factory} initial={initial} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'E1 TP1')!.id, { x: 10, y: 10 }))
+    let form = screen.getByRole('form', { name: 'Edit E1 Target 1' })
+    await userEvent.clear(within(form).getByRole('textbox', { name: /Share/ }))
+    await userEvent.type(within(form).getByRole('textbox', { name: /Share/ }), '60')
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    expect(shown()[0]!.targets).toEqual([['price', '110', '60']])
+    act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'E1 TP1')!.id, { x: 10, y: 10 }))
+    await userEvent.click(screen.getByRole('button', { name: 'Add target' }))
+    expect(shown()[0]!.targets).toEqual([['price', '110', '60'], ['price', '104', '']])
+    act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'E1 TP1')!.id, { x: 10, y: 10 }))
+    await userEvent.click(screen.getByRole('button', { name: 'Remove target' }))
+    expect(shown()[0]!.targets).toEqual([['price', '104', '']])
+    act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'E2')!.id, { x: 10, y: 10 }))
+    form = screen.getByRole('form', { name: 'Edit E2 Entry' })
+    await userEvent.click(within(form).getByRole('button', { name: 'Add stop' }))
+    expect(shown()[1]!.stop).toMatchObject({ unit: 'price', value: '88.2' })
+    await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    expect(shown()[1]!.stop.value).toBe('')
+  })
+
+  it('rejects invalid prices and closes with Escape', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<LevelHarness factory={factory} initial={two()} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'E1')!.id, { x: 10, y: 10 }))
+    const price = screen.getByRole('textbox', { name: 'Price' })
+    await userEvent.clear(price)
+    await userEvent.type(price, '-5{Enter}')
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter a price above zero.')
+    expect(shown()[0]!.price).toBe('100')
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('form')).toBeNull()
+  })
+})
+
+describe('Chart panel live updates', () => {
+  interface Stream { signal: AbortSignal; emit: (event: MarketStreamEvent) => void; end: () => void; fail: () => void }
+  function streams() {
+    const opened: Stream[] = []
+    const marketStream = vi.fn<WorkspaceApi['marketStream']>((_id, _query, signal, onEvent) => new Promise<void>((resolve, reject) => {
+      opened.push({ signal, emit: event => act(() => onEvent(event)), end: resolve, fail: () => reject(new ApiError('unavailable', 'Interrupted.')) })
+      signal.addEventListener('abort', () => resolve(), { once: true })
+    }))
+    return { opened, marketStream, last: () => opened.at(-1)! }
+  }
+  const flush = () => act(() => vi.advanceTimersByTimeAsync(0))
+  const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms))
+  const toggle = () => screen.getByRole('button', { name: 'Live updates' })
+  const live = { type: 'status', status: { state: 'live', observedAt: '2026-10-02T08:00:00Z' } } as const
+  let visibility: DocumentVisibilityState = 'visible'
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-02T08:00:00Z'))
+    visibility = 'visible'
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    Reflect.deleteProperty(document, 'visibilityState')
+  })
+
+  async function setup(stored?: object) {
+    if (stored) localStorage.setItem('vessel.chart.preferences.v1', JSON.stringify(stored))
+    const driver = streams()
+    const candles = vi.fn().mockResolvedValue(candleSeriesFixture)
+    const marketContext = vi.fn().mockResolvedValue(marketContextFixture)
+    const { state, factory } = fakeAdapter()
+    const view = render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
+      source={{ api: chartApi(candles, marketContext, driver.marketStream), accountId: accountFixture.id }} createAdapter={factory} />)
+    await flush()
+    return { ...driver, candles, marketContext, state, view }
+  }
+
+  it('starts after the first candle load and shows the live state', async () => {
+    const { marketStream, last } = await setup()
+    expect(marketStream).toHaveBeenCalledExactlyOnceWith(accountFixture.id, { instrument: 'BTC', interval: '1h' }, expect.any(AbortSignal), expect.any(Function))
+    expect(toggle()).toHaveAttribute('aria-pressed', 'true')
+    expect(toggle()).toHaveAttribute('data-state', 'connecting')
+    last().emit(live)
+    expect(toggle()).toHaveAttribute('data-state', 'live')
+    expect(toggle()).toHaveTextContent('Live')
+    last().emit({ type: 'status', status: { state: 'stale', observedAt: '2026-10-02T08:01:00Z' } })
+    expect(toggle()).toHaveTextContent('Stale')
+  })
+
+  it('upserts streamed candles without resetting the view and replaces the statistics', async () => {
+    const { state, last, candles } = await setup()
+    const [, forming] = candleSeriesFixture.candles
+    vi.setSystemTime(new Date('2026-10-02T08:00:07Z'))
+    last().emit({ type: 'candle', candle: { ...forming!, high: '104.5', close: '104.5' } })
+    expect(state.candles).toHaveLength(2)
+    expect(state.candles.at(-1)).toMatchObject({ high: 104.5, close: 104.5 })
+    expect(state.resets.at(-1)).toBe(false)
+    last().emit({ type: 'candle', candle: { ...forming!, openTime: 1_790_007_200_000, closeTime: 1_790_010_799_999, open: '104.5', close: '105' } })
+    expect(state.candles.map(c => c.close)).toEqual([101, 104.5, 105])
+    expect(state.resets.at(-1)).toBe(false)
+    expect(screen.getByText('Updated 08:00:07 UTC')).toBeInTheDocument()
+    last().emit({ type: 'context', context: { ...marketContextFixture, markPrice: '105.25', observedAt: '2026-10-02T08:00:08Z' } })
+    expect(screen.getByLabelText('BTC market statistics')).toHaveTextContent('Mark105.25')
+    expect(toggle()).toHaveAttribute('data-state', 'live')
+    expect(candles).toHaveBeenCalledOnce()
+  })
+
+  it('reconnects with backoff and refreshes candles over REST to fill the gap', async () => {
+    const { marketStream, last, candles } = await setup()
+    last().emit(live)
+    last().fail()
+    await flush()
+    expect(toggle()).toHaveAttribute('data-state', 'reconnecting')
+    await advance(999)
+    expect(marketStream).toHaveBeenCalledOnce()
+    await advance(1)
+    expect(marketStream).toHaveBeenCalledTimes(2)
+    expect(candles).toHaveBeenCalledOnce()
+    last().emit(live)
+    await flush()
+    expect(candles).toHaveBeenCalledTimes(2)
+    expect(toggle()).toHaveAttribute('data-state', 'live')
+  })
+
+  it('falls back to polling after three failed streams and keeps retrying the stream', async () => {
+    const { marketStream, last, candles, marketContext } = await setup()
+    last().end()
+    await advance(1_000)
+    last().fail()
+    await advance(2_000)
+    expect(marketStream).toHaveBeenCalledTimes(3)
+    last().end()
+    await flush()
+    expect(toggle()).toHaveAttribute('data-state', 'polling')
+    expect(toggle()).toHaveTextContent('Polling')
+    expect(candles).toHaveBeenCalledTimes(2)
+    expect(marketContext).toHaveBeenCalledTimes(2)
+    await advance(15_000)
+    expect(candles).toHaveBeenCalledTimes(3)
+    expect(marketContext).toHaveBeenCalledTimes(3)
+    await advance(45_000)
+    expect(marketStream).toHaveBeenCalledTimes(4)
+    expect(candles).toHaveBeenCalledTimes(6)
+    last().emit(live)
+    await flush()
+    expect(toggle()).toHaveAttribute('data-state', 'live')
+    const afterRecovery = candles.mock.calls.length
+    await advance(30_000)
+    expect(candles).toHaveBeenCalledTimes(afterRecovery)
+  })
+
+  it('turns off, aborts the stream and remembers the choice', async () => {
+    const { marketStream, last, view } = await setup()
+    const first = last()
+    fireEvent.click(toggle())
+    expect(first.signal.aborted).toBe(true)
+    expect(toggle()).toHaveAttribute('aria-pressed', 'false')
+    expect(toggle()).toHaveTextContent('Off')
+    expect(JSON.parse(localStorage.getItem('vessel.chart.preferences.v1')!)).toMatchObject({ live: false })
+    await advance(120_000)
+    expect(marketStream).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled()
+    fireEvent.click(toggle())
+    expect(marketStream).toHaveBeenCalledTimes(2)
+    view.unmount()
+    expect(last().signal.aborted).toBe(true)
+  })
+
+  it('stays off when the stored preference is off', async () => {
+    const { marketStream } = await setup({ live: false })
+    expect(marketStream).not.toHaveBeenCalled()
+    expect(toggle()).toHaveTextContent('Off')
+  })
+
+  it('pauses while the tab is hidden and refreshes when it is visible again', async () => {
+    const { marketStream, last, candles, marketContext } = await setup()
+    const first = last()
+    first.emit(live)
+    visibility = 'hidden'
+    fireEvent(document, new Event('visibilitychange'))
+    expect(first.signal.aborted).toBe(true)
+    await advance(120_000)
+    expect(marketStream).toHaveBeenCalledOnce()
+    visibility = 'visible'
+    fireEvent(document, new Event('visibilitychange'))
+    await flush()
+    expect(candles).toHaveBeenCalledTimes(2)
+    expect(marketContext).toHaveBeenCalledTimes(2)
+    expect(marketStream).toHaveBeenCalledTimes(2)
+  })
+
+  it('restarts the stream for a new timeframe and shares state with the expanded chart', async () => {
+    const { marketStream, last } = await setup()
+    const first = last()
+    first.emit(live)
+    fireEvent.click(within(screen.getByRole('group', { name: 'Timeframe' })).getByRole('button', { name: '4 hours' }))
+    expect(first.signal.aborted).toBe(true)
+    await flush()
+    expect(marketStream).toHaveBeenLastCalledWith(accountFixture.id, { instrument: 'BTC', interval: '4h' }, expect.any(AbortSignal), expect.any(Function))
+    last().emit(live)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand chart' }))
+    const dialog = screen.getByRole('dialog', { name: 'BTC chart' })
+    expect(within(dialog).getByRole('button', { name: 'Live updates' })).toHaveAttribute('data-state', 'live')
+    expect(marketStream).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('Chart panel review regressions', () => {
+  function Harness({ factory, initial }: { factory: ChartAdapterFactory; initial: DraftEntry[] }) {
+    const [list, setList] = useState(initial)
+    return <>
+      <ChartPanel entries={list} selectedId={initial[0]!.id} onSelect={vi.fn()} instrument="BTC" onEntriesChange={setList}
+        source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />
+      <output data-testid="targets">{list[0]!.targets.map(t => t.value).join(',')}</output>
+      <button type="button" onClick={() => setList(current => current.map((e, i) => i === 0
+        ? { ...e, targets: e.targets.map((t, j) => j === 1 ? { ...t, value: '93000' } : t) } : e))}>sidebar tp2</button>
+    </>
+  }
+
+  it('undoes a chart TP1 edit without reverting a later sidebar TP2 edit, and redoes it', async () => {
+    const { state, factory } = fakeAdapter()
+    const initial: DraftEntry[] = [{ ...createEntry(0), price: '85000', share: '100',
+      targets: [{ ...createTarget('50'), id: 'tp1', value: '90000' }, { ...createTarget('50'), id: 'tp2', value: '92000' }] }]
+    render(<Harness factory={factory} initial={initial} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'E1 TP1')!.id, { x: 10, y: 10 }))
+    const price = screen.getByRole('textbox', { name: 'Price' })
+    await userEvent.clear(price)
+    await userEvent.type(price, '91000{Enter}')
+    await userEvent.click(screen.getByRole('button', { name: 'sidebar tp2' }))
+    expect(screen.getByTestId('targets')).toHaveTextContent('91000,93000')
+    await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    expect(screen.getByTestId('targets')).toHaveTextContent('90000,93000')
+    await userEvent.click(screen.getByRole('button', { name: /^Redo/ }))
+    expect(screen.getByTestId('targets')).toHaveTextContent('91000,93000')
+  })
+
+  it('keeps an open level editor inside the chart when the chart narrows', async () => {
+    const { state, factory } = fakeAdapter()
+    const initial: DraftEntry[] = [{ ...createEntry(0), price: '100', share: '100', targets: [{ ...createTarget('100'), id: 'tp1', value: '110' }] }]
+    render(<Harness factory={factory} initial={initial} />)
+    await screen.findByText(/Updated/)
+    const body = screen.getByTestId('chart-body')
+    const size = (width: number, height: number) => {
+      Object.defineProperty(body, 'clientWidth', { configurable: true, value: width })
+      Object.defineProperty(body, 'clientHeight', { configurable: true, value: height })
+    }
+    size(735, 360)
+    act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'E1 TP1')!.id, { x: 700, y: 100 }))
+    const form = screen.getByRole('form', { name: 'Edit E1 Target 1' })
+    expect(parseFloat(form.style.left) + parseFloat(form.style.width)).toBeLessThanOrEqual(735)
+    size(322, 320)
+    act(() => { window.dispatchEvent(new Event('resize')) })
+    expect(parseFloat(form.style.left)).toBeGreaterThanOrEqual(8)
+    expect(parseFloat(form.style.left) + parseFloat(form.style.width)).toBeLessThanOrEqual(322 - 8)
+  })
+})

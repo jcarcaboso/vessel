@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
 import { systemFixture } from '@/test/system-fixture'
-import { accountFixture, emptyOverview, instrumentCatalogFixture, overviewFixture, portfolioFixture } from '@/test/workspace-fixture'
+import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { ApplicationShell } from './ApplicationShell'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
@@ -16,7 +16,9 @@ function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     renamePortfolio: vi.fn().mockResolvedValue(portfolioFixture), deletePortfolio: vi.fn().mockResolvedValue(undefined),
     updateAccount: vi.fn().mockResolvedValue(accountFixture), deleteAccount: vi.fn().mockResolvedValue(undefined),
     snapshot: vi.fn().mockResolvedValue(null), fills: vi.fn().mockResolvedValue([]),
-    sync: vi.fn().mockResolvedValue(accountFixture), instruments: vi.fn().mockResolvedValue(instrumentCatalogFixture), ...overrides,
+    sync: vi.fn().mockResolvedValue(accountFixture), instruments: vi.fn().mockResolvedValue(instrumentCatalogFixture),
+    candles: vi.fn().mockResolvedValue(candleSeriesFixture), marketContext: vi.fn().mockResolvedValue(marketContextFixture),
+    marketStream: vi.fn(idleMarketStream), ...overrides,
   }
 }
 beforeEach(() => { window.history.replaceState(null, '', '/') })

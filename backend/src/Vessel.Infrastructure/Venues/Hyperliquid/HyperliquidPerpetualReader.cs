@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net.Http.Json;
 using System.Numerics;
 using System.Text.Json;
+using Vessel.Application.MarketData;
 using Vessel.Application.Venues;
 
 namespace Vessel.Infrastructure.Venues.Hyperliquid;
@@ -10,8 +11,8 @@ namespace Vessel.Infrastructure.Venues.Hyperliquid;
 /// Bounded, read-only primary perpetual DEX adapter. Composition supplies an
 /// HttpClient with BaseAddress https://api.hyperliquid.xyz/ (and no signing credentials).
 /// </summary>
-public sealed class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvider timeProvider)
-    : IPerpetualVenueReader
+public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvider timeProvider)
+    : IPerpetualVenueReader, ICandleReader
 {
     // Official schemas and bounds, checked October 1, 2026:
     // https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint
@@ -237,7 +238,7 @@ public sealed class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvid
         return fills.OrderByDescending(fill => fill.OccurredAtUtc).ToList();
     }
 
-    private static bool IsPrimaryContract(string name) =>
+    internal static bool IsPrimaryContract(string name) =>
         !name.StartsWith('@') && !name.Contains('/') && !name.Contains(':');
 
     private static string ReadAccountMode(JsonElement root)
@@ -396,9 +397,10 @@ public sealed class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvid
         return value;
     }
 
-    private static decimal Number(JsonElement element)
+    private static decimal Number(JsonElement element) => ParseDecimal(Text(element));
+
+    private static decimal ParseDecimal(string text)
     {
-        var text = Text(element);
         var unsigned = text.StartsWith('-') ? text[1..] : text;
         var parts = unsigned.Split('.');
         if (parts.Length > 2 || parts.Any(part => part.Length == 0 || !part.All(char.IsAsciiDigit)))

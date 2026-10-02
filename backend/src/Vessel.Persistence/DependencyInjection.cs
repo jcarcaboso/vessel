@@ -27,6 +27,9 @@ public static class DependencyInjection
         });
         services.AddScoped<Vessel.Application.Workspace.IWorkspaceStore, WorkspaceStore>();
         services.AddScoped<Vessel.Application.Workspace.WorkspaceService>();
+        services.AddScoped<Vessel.Application.MarketData.CandleService>();
+        services.AddScoped<Vessel.Application.MarketData.MarketContextService>();
+        services.AddScoped<Vessel.Application.MarketData.MarketStreamService>();
         return services;
     }
 }

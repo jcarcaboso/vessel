@@ -19,6 +19,7 @@
   --muted: #1e2229;
   --muted-foreground: #abb3c0;
   --accent: #242932;
+  --chart-drawing: #8fb8ff;
   --accent-foreground: #e9edf2;
   --destructive: #f2b3ac;
   --destructive-foreground: #11161d;
@@ -95,11 +96,6 @@
   .workspace { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(320px, 1fr); gap: 16px; height: 780px; }
   .left-column { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 16px; min-height: 0; }
   .chart-panel { overflow: hidden; }
-  .chart-panel svg { width: 100%; display: block; max-height: 290px; }
-  .chart-grid { stroke: var(--secondary); stroke-width: 1; }
-  .candle-up { fill: var(--positive); stroke: var(--positive); }
-  .candle-down { fill: var(--negative); stroke: var(--negative); }
-  .chart-panel text { font-size: 12px; }
   .chart-legend { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px 0; }
   .chart-legend button { border: 1px solid; border-radius: 4px; background: var(--field); padding: 5px 9px; font-size: 12px; }
   .chart-legend button[aria-pressed="true"] { background: var(--accent); }

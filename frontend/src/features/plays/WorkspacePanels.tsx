@@ -1,16 +1,17 @@
-import { useId, useState, type CSSProperties, type FormEvent } from 'react'
-import { ChartNoAxesCombined, Expand, NotebookPen, Pencil, Camera } from 'lucide-react'
+import { useId, useState, type FormEvent } from 'react'
+import { NotebookPen, Pencil } from 'lucide-react'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { money } from '../workspace/format'
-import type { DraftEntry, PlayDraft } from './draft'
+import type { PlayDraft } from './draft'
+import { averageEntryPrice, formatDraggedPrice } from './levels'
 import './plays-workspace.css'
 
 const displayMoney = (value: string | null | undefined) => value == null ? 'Unavailable' : money(value)
 // Placeholder values stay readable but recede, so real figures carry the visual weight.
-const isPlaceholder = (value: string) => ['Unavailable', 'Not calculated', 'Not chosen'].includes(value)
+const isPlaceholder = (value: string) => ['Unavailable', 'Not calculated', 'Not chosen', 'Not set'].includes(value)
 
 export function AvailableBudget({ draft, onChange }: {
   draft: PlayDraft
@@ -98,44 +99,11 @@ export function CapitalContext({ accounts, portfolios, draft }: {
   </section>
 }
 
-export function ChartPlaceholder({ entries, selectedId, onSelect, instrument, venue = null }: {
-  entries: DraftEntry[]
-  selectedId: string
-  onSelect: (id: string) => void
-  instrument: string
-  venue?: string | null
-}) {
-  return <section className="panel chart-panel" aria-label="Chart" data-testid="chart-panel">
-    <header className="panel-heading">
-      <div className="chart-instrument"><span className="instrument-mark" aria-hidden="true">{instrument ? instrument.slice(0, 3) : '·'}</span><div><h2>{instrument || 'Chart'}</h2><p>{instrument ? `${venue ? `${venue} · ` : ''}Chart renderer deferred` : 'No perpetual instrument selected'}</p></div></div>
-      <div className="chart-actions">
-        <Button type="button" variant="outline" size="sm" disabled><Expand size={13} aria-hidden="true" />Expand chart</Button>
-        <Button type="button" variant="outline" size="sm" disabled><Camera size={13} aria-hidden="true" />Capture chart</Button>
-      </div>
-    </header>
-    <div className="chart-placeholder">
-      <span className="chart-placeholder-icon" aria-hidden="true"><ChartNoAxesCombined size={27} /></span>
-      <strong>Chart placeholder</strong>
-      <p>The chart renderer and market data are deferred.</p>
-      <p>No candles, live prices or execution observations are shown.</p>
-    </div>
-    <div className="chart-legend" role="group" aria-label="Planned entries">
-      {entries.map((entry) => <button key={entry.id} type="button" aria-pressed={entry.id === selectedId}
-        style={{ '--entry-color': entry.color } as CSSProperties} onClick={() => onSelect(entry.id)}>
-        <i aria-hidden="true" /><span>{entry.name}</span>
-        <small>{entry.share ? `${entry.share}% of quantity` : 'Share not set'}</small>
-      </button>)}
-      {entries.length === 0 && <p className="muted">No planned entries.</p>}
-    </div>
-    <p className="chart-caption">Aggregate planned entries. Selecting an entry focuses its editor and keeps the other entries visible. Planned levels are not fills.</p>
-  </section>
-}
-
 const journalSections = [
   ['thesis', 'Thesis', 'Record the reasoning behind this play.'],
   ['invalidation', 'Invalidation', 'Describe what would invalidate the thesis.'],
   ['strategy', 'Strategy', 'Record strategy notes. Strategy versions are not linked in this draft.'],
-  ['evidence', 'Evidence', 'Evidence notes only. Uploads and chart captures are not available.'],
+  ['evidence', 'Evidence', 'Evidence notes only. Chart captures and uploads arrive with evidence storage.'],
   ['review', 'Review', 'Reflect on what happened, separately from the original thesis.'],
 ] as const
 
@@ -167,11 +135,14 @@ export function PlayJournal({ notes, onChange }: {
 export function PositionSummary({ draft }: { draft: PlayDraft }) {
   const size = draft.size ? `${draft.size} ${draft.sizingMode === 'margin' ? 'currency units' : 'instrument units'}` : 'Not chosen'
   const count = draft.entries.length
+  // Same quantity-weighted planned average as the chart's AVG line, for one or more priced entries.
+  const average = averageEntryPrice(draft.entries, 1)
   const values: Array<[string, string]> = [
     [draft.sizingMode === 'margin' ? 'Chosen margin' : 'Chosen quantity', size],
     ['Chosen leverage', draft.leverage ? `${draft.leverage}×` : 'Not chosen'],
-    ...['Committed margin', 'Notional exposure', 'Average entry', 'Reward / risk', 'All-stops loss', 'All-targets profit']
-      .map((label): [string, string] => [label, 'Not calculated']),
+    ...['Committed margin', 'Notional exposure'].map((label): [string, string] => [label, 'Not calculated']),
+    ['Planned average entry', average === null ? 'Not set' : formatDraggedPrice(average)],
+    ...['Reward / risk', 'All-stops loss', 'All-targets profit'].map((label): [string, string] => [label, 'Not calculated']),
   ]
   return <section className="panel summary" aria-label="Full-position summary" data-testid="summary-panel">
     <div className="summary-intro">

@@ -1,3 +1,4 @@
+import { SseOverflowError, SseParser } from './sse'
 import { ApiError } from './system'
 
 export interface Portfolio {
@@ -18,6 +19,66 @@ export interface InstrumentCatalog {
   scope: 'primary-perpetual-dex' | 'manual'
   instruments: VenueInstrument[]
   notice: string
+}
+export const candleIntervals = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '1d', '3d', '1w', '1M'] as const
+export type CandleInterval = typeof candleIntervals[number]
+/** Venue trade candle. OHLCV stay exact decimal strings; times are UTC Unix milliseconds. */
+export interface VenueCandle {
+  openTime: number
+  closeTime: number
+  open: string
+  high: string
+  low: string
+  close: string
+  volume: string
+  trades: number
+}
+export interface CandleSeries {
+  venueId: string
+  instrument: string
+  interval: CandleInterval
+  priceSource: 'trades'
+  candles: VenueCandle[]
+  requestedFrom: number
+  requestedTo: number
+  retrievedAt: string
+  historyExhausted: boolean
+  notice: string
+}
+export interface CandleQuery {
+  instrument: string
+  interval: CandleInterval
+  endTime?: number
+}
+/** Venue header statistics for one perpetual. Decimal strings are kept exactly as reported. */
+export interface MarketContext {
+  venueId: string
+  instrument: string
+  markPrice: string
+  oraclePrice: string
+  midPrice: string | null
+  previousDayPrice: string
+  dayNotionalVolume: string
+  openInterest: string
+  fundingRate: string
+  premium: string | null
+  observedAt: string
+  notice: string
+}
+export type LiveStreamState = 'live' | 'reconnecting' | 'stale'
+/** Server-side state of the upstream venue feed behind one market stream. */
+export interface MarketStreamStatus {
+  state: LiveStreamState
+  observedAt: string
+}
+/** One validated market-stream event. Prices are observations, never fills. */
+export type MarketStreamEvent =
+  | { type: 'candle'; candle: VenueCandle }
+  | { type: 'context'; context: MarketContext }
+  | { type: 'status'; status: MarketStreamStatus }
+export interface MarketStreamQuery {
+  instrument: string
+  interval: CandleInterval
 }
 export interface BrokerAccount {
   id: string
@@ -109,6 +170,13 @@ export interface WorkspaceApi {
   accounts(signal?: AbortSignal): Promise<BrokerAccount[]>
   account(id: string, signal?: AbortSignal): Promise<BrokerAccount>
   instruments(id: string, signal?: AbortSignal): Promise<InstrumentCatalog>
+  candles(id: string, query: CandleQuery, signal?: AbortSignal): Promise<CandleSeries>
+  marketContext(id: string, instrument: string, signal?: AbortSignal): Promise<MarketContext>
+  /**
+   * Reads live candles, statistics and feed status until the server ends the stream (resolves), the signal
+   * aborts (resolves) or the connection fails (rejects with ApiError). Invalid events are ignored.
+   */
+  marketStream(id: string, query: MarketStreamQuery, signal: AbortSignal, onEvent: (event: MarketStreamEvent) => void): Promise<void>
   createPortfolio(name: string): Promise<Portfolio>
   createAccount(account: CreateAccount): Promise<BrokerAccount>
   renamePortfolio(id: string, name: string): Promise<Portfolio>
@@ -137,6 +205,26 @@ const instrumentCatalog = (v: unknown): v is InstrumentCatalog => object(v) &&
     (i.quantityDecimals as number) <= 28 && count(i.maxLeverage) && (i.maxLeverage as number) > 0) &&
   new Set(v.instruments.map((i: VenueInstrument) => i.contractId)).size === v.instruments.length &&
   (v.scope !== 'manual' || v.instruments.length === 0) && text(v.notice) && v.notice.length <= 1000
+const epoch = (v: unknown): v is number => count(v) && (v as number) > 0
+const unsignedDecimal = (v: unknown): v is string => decimal(v) && !v.startsWith('-')
+const candle = (v: unknown): v is VenueCandle => object(v) && epoch(v.openTime) && epoch(v.closeTime) &&
+  v.closeTime >= v.openTime && ['open', 'high', 'low', 'close', 'volume'].every(k => unsignedDecimal(v[k])) && count(v.trades)
+const candleSeries = (query: CandleQuery) => (v: unknown): v is CandleSeries => object(v) &&
+  text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 &&
+  v.instrument === query.instrument && v.interval === query.interval && v.priceSource === 'trades' &&
+  Array.isArray(v.candles) && v.candles.length <= 5_000 && v.candles.every(candle) &&
+  v.candles.every((c: VenueCandle, i: number, all: VenueCandle[]) => i === 0 || c.openTime > all[i - 1]!.openTime) &&
+  count(v.requestedFrom) && epoch(v.requestedTo) && v.requestedTo >= (v.requestedFrom as number) && date(v.retrievedAt) &&
+  typeof v.historyExhausted === 'boolean' && text(v.notice) && v.notice.length <= 1000
+const marketContext = (instrument: string) => (v: unknown): v is MarketContext => object(v) &&
+  text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 && v.instrument === instrument &&
+  ['markPrice', 'oraclePrice', 'previousDayPrice', 'dayNotionalVolume', 'openInterest'].every(k => unsignedDecimal(v[k])) &&
+  (v.midPrice === null || unsignedDecimal(v.midPrice)) && decimal(v.fundingRate) && nullableDecimal(v.premium) &&
+  date(v.observedAt) && text(v.notice) && v.notice.length <= 1000
+const streamStatus = (v: unknown): v is MarketStreamStatus => object(v) &&
+  ['live', 'reconnecting', 'stale'].includes(String(v.state)) && text(v.observedAt) && v.observedAt.length <= 40 && date(v.observedAt)
+const streamLimit = 1024 * 1024
+const instrumentPattern = /^[A-Za-z0-9_-]{1,32}$/
 const portfolio = (v: unknown): v is Portfolio => object(v) && guid(v.id) && text(v.name) &&
   count(v.accountCount) && nullableDecimal(v.totalValueUsd) &&
   ['complete', 'partial', 'unavailable'].includes(String(v.valueCoverage))
@@ -181,6 +269,91 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     return id
   }
   const accountPath = (id: string) => `/api/accounts/${resourceId(id)}`
+  async function httpError(response: Response, badGateway?: string, tooMany?: string): Promise<ApiError> {
+    if (response.status === 401 || response.status === 403) {
+      return new ApiError('unauthorized', 'Your API token was rejected. Disconnect and connect again.', response.status)
+    }
+    let detail = response.status === 502 && badGateway ? badGateway : response.status === 429 && tooMany ? tooMany : 'The request could not be completed.'
+    if (response.status === 400 || response.status === 409) {
+      try {
+        const problem: unknown = await response.json()
+        if (object(problem) && text(problem.detail) && problem.detail.length <= 500) detail = problem.detail
+      } catch { /* The safe default remains when a proxy returns non-JSON. */ }
+    }
+    if (response.status === 404) detail = 'This account or portfolio is no longer available.'
+    if (response.status === 503) detail = 'The service is unavailable. Check the database and server configuration.'
+    // Only the server-generated trace format is shown, so a proxy cannot inject text.
+    const reference = response.headers.get('X-Correlation-ID')
+    if (response.status >= 500 && reference && /^[\da-f]{32}$/.test(reference)) detail += ` Reference: ${reference}`
+    return new ApiError('http', detail, response.status)
+  }
+  async function marketStream(id: string, query: MarketStreamQuery, signal: AbortSignal, onEvent: (event: MarketStreamEvent) => void) {
+    if (!instrumentPattern.test(query.instrument) || !candleIntervals.includes(query.interval)) {
+      throw new ApiError('invalid-response', 'The live chart request is invalid.')
+    }
+    const path = `${accountPath(id)}/market-stream?${new URLSearchParams({ instrument: query.instrument, interval: query.interval })}`
+    const interrupted = () => new ApiError('unavailable', 'The live market stream was interrupted.')
+    // Only the wait for response headers is bounded; an open stream is long-lived by design.
+    const connect = new AbortController()
+    const timer = setTimeout(() => connect.abort(), 25_000)
+    let response: Response
+    try {
+      response = await fetch(path, {
+        headers: { Authorization: `Bearer ${bearer}`, Accept: 'text/event-stream' },
+        credentials: 'omit', redirect: 'error', cache: 'no-store', signal: AbortSignal.any([signal, connect.signal]),
+      })
+    } catch {
+      if (signal.aborted) return
+      throw new ApiError('unavailable', 'The live market stream did not connect. Check the API and try again.')
+    } finally {
+      clearTimeout(timer)
+    }
+    if (!response.ok) {
+      throw await httpError(response, 'Venue market data is unavailable. Try refreshing the chart.',
+        'Too many live chart streams. Close another chart and try again.')
+    }
+    if (!response.body || !/^text\/event-stream\b/i.test(response.headers.get('Content-Type') ?? '')) {
+      await response.body?.cancel().catch(() => undefined)
+      throw new ApiError('invalid-response', 'The API returned an invalid live market stream.')
+    }
+    const isContext = marketContext(query.instrument)
+    const parser = new SseParser(({ event, data }) => {
+      if (signal.aborted || data.length > streamLimit) return
+      let body: unknown
+      try { body = JSON.parse(data) } catch { return }
+      if (event === 'candle' && candle(body)) onEvent({ type: 'candle', candle: body })
+      else if (event === 'context' && isContext(body)) onEvent({ type: 'context', context: body })
+      else if (event === 'status' && streamStatus(body)) onEvent({ type: 'status', status: body })
+    }, streamLimit)
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    const stop = () => { void reader.cancel().catch(() => undefined) }
+    signal.addEventListener('abort', stop, { once: true })
+    try {
+      for (;;) {
+        let chunk: ReadableStreamReadResult<Uint8Array>
+        try { chunk = await reader.read() } catch {
+          if (signal.aborted) return
+          throw interrupted()
+        }
+        if (signal.aborted) return
+        if (chunk.done) {
+          parser.push(decoder.decode())
+          parser.end()
+          return
+        }
+        try { parser.push(decoder.decode(chunk.value, { stream: true })) } catch (error) {
+          if (error instanceof SseOverflowError) {
+            stop()
+            throw new ApiError('invalid-response', 'The live market stream sent an oversized message.')
+          }
+          throw error
+        }
+      }
+    } finally {
+      signal.removeEventListener('abort', stop)
+    }
+  }
   async function request<T>(path: string, validate: (v: unknown) => v is T, options: RequestInit = {}, timeout = 10_000, badGateway?: string): Promise<T> {
     let response: Response
     try {
@@ -192,24 +365,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     } catch {
       throw new ApiError('unavailable', 'The request did not complete. Check the API and try again.')
     }
-    if (response.status === 401 || response.status === 403) {
-      throw new ApiError('unauthorized', 'Your API token was rejected. Disconnect and connect again.', response.status)
-    }
-    if (!response.ok) {
-      let detail = response.status === 502 && badGateway ? badGateway : 'The request could not be completed.'
-      if (response.status === 400 || response.status === 409) {
-        try {
-          const problem: unknown = await response.json()
-          if (object(problem) && text(problem.detail) && problem.detail.length <= 500) detail = problem.detail
-        } catch { /* The safe default remains when a proxy returns non-JSON. */ }
-      }
-      if (response.status === 404) detail = 'This account or portfolio is no longer available.'
-      if (response.status === 503) detail = 'The service is unavailable. Check the database and server configuration.'
-      // Only the server-generated trace format is shown, so a proxy cannot inject text.
-      const reference = response.headers.get('X-Correlation-ID')
-      if (response.status >= 500 && reference && /^[\da-f]{32}$/.test(reference)) detail += ` Reference: ${reference}`
-      throw new ApiError('http', detail, response.status)
-    }
+    if (!response.ok) throw await httpError(response, badGateway)
     if (response.status === 204) {
       const noContent: unknown = undefined
       if (validate(noContent)) return noContent
@@ -227,6 +383,22 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     account: (id, signal) => request(accountPath(id), account, signal ? { signal } : {}),
     instruments: (id, signal) => request(`${accountPath(id)}/instruments`, instrumentCatalog, signal ? { signal } : {},
       25_000, 'The venue instrument catalogue is unavailable. Try again or enter a manual label.'),
+    candles: (id, query, signal) => {
+      if (!instrumentPattern.test(query.instrument) || !candleIntervals.includes(query.interval) ||
+        (query.endTime !== undefined && !epoch(query.endTime))) {
+        return Promise.reject(new ApiError('invalid-response', 'The chart request is invalid.'))
+      }
+      const params = new URLSearchParams({ instrument: query.instrument, interval: query.interval })
+      if (query.endTime !== undefined) params.set('endTime', String(query.endTime))
+      return request(`${accountPath(id)}/candles?${params}`, candleSeries(query), signal ? { signal } : {},
+        25_000, 'Venue candles are unavailable. Try refreshing the chart.')
+    },
+    marketContext: (id, instrument, signal) => {
+      if (!instrumentPattern.test(instrument)) return Promise.reject(new ApiError('invalid-response', 'The market request is invalid.'))
+      return request(`${accountPath(id)}/market-context?${new URLSearchParams({ instrument })}`, marketContext(instrument),
+        signal ? { signal } : {}, 25_000, 'Venue market statistics are unavailable.')
+    },
+    marketStream,
     createPortfolio: name => request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name }) }),
     createAccount: body => request('/api/accounts', account, { method: 'POST', body: JSON.stringify(body) }),
     renamePortfolio: (id, name) => request(`/api/portfolios/${resourceId(id)}`, portfolio, { method: 'PATCH', body: JSON.stringify({ name }) }),
