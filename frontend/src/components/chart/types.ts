@@ -49,6 +49,11 @@ export interface ChartAdapter {
   setDrawings(drawings: readonly ChartDrawing[], selectedId: string | null): void
   /** `null` is the crosshair: select, move and resize instead of creating. */
   setDrawingTool(tool: DrawingKind | null, magnet: boolean): void
+  /**
+   * PNG of the chart as shown, including planned levels and drawings but not the crosshair, with
+   * `caption` in a footer. Null until the renderer is ready.
+   */
+  capture(caption: string): Promise<Blob | null>
   destroy(): void
 }
 

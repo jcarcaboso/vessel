@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from 'react'
+import { useEffect, useImperativeHandle, useRef, type KeyboardEvent, type Ref } from 'react'
 import type { ChartDrawing, DrawingKind } from './drawings'
 import { createLazyLightweightAdapter } from './lazy'
 import type { ChartAdapter, ChartAdapterFactory, ChartCallbacks, ChartCandle, PriceOverlay } from './types'
@@ -6,13 +6,18 @@ import './chart.css'
 
 const noDrawings: readonly ChartDrawing[] = []
 
+/** Imperative actions for the feature that owns the chart. */
+export interface CandleChartControl {
+  capture(caption: string): Promise<Blob | null>
+}
+
 /**
  * Reusable candle chart. Features supply candles, price overlays and drawings; the renderer stays
  * behind the adapter so it never sees plays, journals or execution data.
  */
 export function CandleChart({
   candles, overlays, viewKey, label, drawings = noDrawings, selectedDrawingId = null, tool = null, magnet = false,
-  onKeyDown, createAdapter = createLazyLightweightAdapter, ...handlers
+  onKeyDown, createAdapter = createLazyLightweightAdapter, controlRef, ...handlers
 }: {
   candles: readonly ChartCandle[]
   overlays: readonly PriceOverlay[]
@@ -25,12 +30,16 @@ export function CandleChart({
   magnet?: boolean
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void
   createAdapter?: ChartAdapterFactory
+  controlRef?: Ref<CandleChartControl>
 } & { [K in keyof ChartCallbacks]?: ChartCallbacks[K] | undefined }) {
   const container = useRef<HTMLDivElement>(null)
   const adapter = useRef<ChartAdapter | null>(null)
   const shownKey = useRef<string | null>(null)
   const callbacks = useRef(handlers)
   useEffect(() => { callbacks.current = handlers })
+  useImperativeHandle(controlRef, () => ({
+    capture: caption => adapter.current?.capture(caption) ?? Promise.resolve(null),
+  }), [])
 
   useEffect(() => {
     const created = createAdapter(container.current!, {

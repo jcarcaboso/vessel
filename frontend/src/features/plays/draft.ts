@@ -34,12 +34,28 @@ export interface PlayDraft {
   notes: Record<'thesis' | 'invalidation' | 'strategy' | 'evidence' | 'review', string>
   /** Chart drawings per venue instrument key (`venueId:contractId`), kept when the instrument changes. */
   drawings: Record<string, ChartDrawing[]>
+  /** Chart captures and uploaded images. They stay in the browser until the Play is saved. */
+  evidence: DraftEvidence[]
+}
+
+export interface DraftEvidence {
+  id: string
+  source: 'capture' | 'upload'
+  image: Blob
+  /** Upload file name, or a generated name for captures; used when downloading. */
+  name: string
+  /** What a capture shows, e.g. "BTC · Hyperliquid · 1 hour"; empty for uploads. */
+  context: string
+  note: string
+  addedAt: string
 }
 
 const entryColors = ['#b9c9e4', '#edd49e', '#a9d6b6', '#d4b9e4', '#f2b3ac']
 // ponytail: session-local IDs also work on HTTP LAN previews; use server IDs when drafts persist.
 let nextId = 0
 const localId = () => `draft-${++nextId}`
+
+export const createEvidenceId = localId
 
 export function createTarget(share = ''): DraftTarget {
   return { id: localId(), unit: 'price', value: '', share }
@@ -61,5 +77,6 @@ export function createDraft(): PlayDraft {
     entries: [createEntry(0)],
     notes: { thesis: '', invalidation: '', strategy: '', evidence: '', review: '' },
     drawings: {},
+    evidence: [],
   }
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { Camera, ChartNoAxesCombined, Maximize2, RefreshCw } from 'lucide-react'
 import type { CandleInterval, WorkspaceApi } from '@/api/workspace'
-import { CandleChart } from '@/components/chart/CandleChart'
+import { CandleChart, type CandleChartControl } from '@/components/chart/CandleChart'
 import { ChartHeader, type ChartStat } from '@/components/chart/ChartHeader'
 import { ChartIconButton, ChartMenu, ChartToolbar, ChartToolbarDivider } from '@/components/chart/ChartToolbar'
 import { ChartToolRail } from '@/components/chart/ChartToolRail'
@@ -42,6 +42,8 @@ interface ChartPanelProps {
   /** Drawings for the current instrument; the caller keeps them per instrument. */
   drawings?: readonly ChartDrawing[] | undefined
   onDrawingsChange?: (drawings: ChartDrawing[]) => void
+  /** Adds a chart capture to the draft evidence; returns why it was not added, or null. */
+  onCapture?: (image: Blob, context: string) => string | null
   createAdapter?: ChartAdapterFactory
 }
 
@@ -56,9 +58,8 @@ const creationHints: Record<string, string> = {
 }
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'UTC', hour12: false })
-const captureReason = 'Captures arrive with evidence storage'
 
-export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = null, direction = 'long', source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, createAdapter }: ChartPanelProps) {
+export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = null, direction = 'long', source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, onCapture, createAdapter }: ChartPanelProps) {
   const [view, setView] = useState<ChartView>('aggregate')
   const [preferences, setPreferences] = useChartPreferences()
   const scopeKey = `${source?.accountId ?? ''}|${instrument}`
@@ -153,7 +154,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = 
 
   return <section className="panel chart-panel" aria-label="Chart" data-testid="chart-panel">
     {live ? <LiveChart key={`${source.accountId}|${instrument}`} source={source} instrument={instrument} interval={interval}
-      caption={`${instrument} · ${venue ? `${venue} ` : ''}trade candles`}
+      caption={`${instrument} · ${venue ? `${venue} ` : ''}trade candles`} venue={venue} onCapture={onCapture}
       timeframes={<TimeframeBar value={interval} favorites={preferences.favorites}
         onChange={next => setPreferences({ interval: next })} onFavoritesChange={favorites => setPreferences({ favorites })} />}
       liveUpdates={preferences.live} onLiveUpdatesChange={on => setPreferences({ live: on })}
@@ -162,7 +163,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = 
       : <>
         <ChartToolbar label="Chart controls" end={<>
           <span className="chart-status"><span className="chart-source">{instrument ? `${instrument} · ${venue ? `${venue} · ` : ''}no market data provider` : 'No perpetual instrument selected'}</span></span>
-          <ChartIconButton label="Capture chart" icon={<Camera size={15} aria-hidden="true" />} disabled disabledReason={captureReason} />
+          <ChartIconButton label="Capture chart" icon={<Camera size={15} aria-hidden="true" />} disabled disabledReason="Needs market data" />
           <ChartIconButton label="Expand chart" icon={<Maximize2 size={15} aria-hidden="true" />} disabled disabledReason="Needs market data" />
         </>} />
         <div className="chart-placeholder">
@@ -185,11 +186,13 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = 
   </section>
 }
 
-function LiveChart({ source, instrument, interval, caption, liveUpdates, onLiveUpdatesChange, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
+function LiveChart({ source, instrument, interval, caption, venue, onCapture, liveUpdates, onLiveUpdatesChange, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
   source: ChartSource
   instrument: string
   interval: CandleInterval
   caption: string
+  venue: string | null
+  onCapture?: ((image: Blob, context: string) => string | null) | undefined
   liveUpdates: boolean
   onLiveUpdatesChange: (on: boolean) => void
   timeframes: ReactNode
@@ -212,6 +215,24 @@ function LiveChart({ source, instrument, interval, caption, liveUpdates, onLiveU
     api: source.api, accountId: source.accountId, instrument, interval, enabled: liveUpdates, ready: data.status === 'ready',
     onCandle: data.upsert, onContext: market.apply, refreshCandles: data.refresh, refreshContext: market.refresh,
   })
+  const chart = useRef<CandleChartControl>(null)
+  const [capture, setCapture] = useState<{ busy: boolean; message: string; failed: boolean }>({ busy: false, message: '', failed: false })
+  useEffect(() => {
+    if (!capture.message) return
+    const timer = setTimeout(() => setCapture(current => ({ ...current, message: '' })), 4000)
+    return () => clearTimeout(timer)
+  }, [capture.message])
+  const latestCapture = useRef(onCapture)
+  useEffect(() => { latestCapture.current = onCapture })
+  const captureChart = async () => {
+    if (!onCapture || capture.busy) return
+    const now = new Date()
+    const context = [instrument, venue, intervalName(interval)].filter(Boolean).join(' · ')
+    setCapture({ busy: true, message: '', failed: false })
+    const image = await chart.current?.capture(`${context} · ${now.toISOString().slice(0, 16).replace('T', ' ')} UTC · Planned levels are not fills`) ?? null
+    const problem = !image ? 'The chart could not be captured.' : latestCapture.current?.(image, context) ?? null
+    setCapture({ busy: false, message: problem ?? 'Capture added to Evidence', failed: problem !== null })
+  }
   const updatedAt = [data.retrievedAt, live.lastEventAt].filter((value): value is string => value !== null)
     .reduce<string | null>((latest, value) => latest === null || Date.parse(value) > Date.parse(latest) ? value : latest, null)
   const described = market.context ? describeMarket(market.context) : null
@@ -239,7 +260,8 @@ function LiveChart({ source, instrument, interval, caption, liveUpdates, onLiveU
     <ChartIconButton label="Refresh" icon={<RefreshCw size={15} aria-hidden="true" className={data.refreshing ? 'is-spinning' : ''} />}
       onClick={refresh} disabled={data.status === 'loading' || data.refreshing} aria-busy={data.refreshing} />
     <ChartToolbarDivider />
-    <ChartIconButton label="Capture chart" icon={<Camera size={15} aria-hidden="true" />} disabled disabledReason={captureReason} />
+    <ChartIconButton label="Capture chart" icon={<Camera size={15} aria-hidden="true" />} onClick={() => void captureChart()}
+      disabled={!onCapture || data.status !== 'ready' || !data.candles.length || capture.busy} disabledReason={capture.busy ? 'Capturing' : 'Needs loaded candles'} aria-busy={capture.busy} />
     {!inDialog && <ChartIconButton ref={expandButton} label="Expand chart" icon={<Maximize2 size={15} aria-hidden="true" />} onClick={() => onExpandedChange(true)} />}
   </>}>
     {timeframes}
@@ -247,7 +269,7 @@ function LiveChart({ source, instrument, interval, caption, liveUpdates, onLiveU
     {viewMenu}
   </ChartToolbar>
   const chartProps = {
-    candles: data.candles, overlays, viewKey: `${instrument}|${interval}`,
+    candles: data.candles, overlays, viewKey: `${instrument}|${interval}`, controlRef: chart,
     label: `${instrument} ${intervalName(interval)} trade candles with planned levels. Edit levels in the entry editor.`,
     onNeedOlder: data.loadOlder,
     ...drawingProps,
@@ -264,6 +286,7 @@ function LiveChart({ source, instrument, interval, caption, liveUpdates, onLiveU
     </div>
   </div>
   const notices = <>
+    {capture.message && <p className={capture.failed ? 'chart-notice' : 'chart-notice chart-notice-success'} role={capture.failed ? 'alert' : 'status'}>{capture.message}</p>}
     {data.status === 'ready' && data.error && <p className="chart-notice" role="alert">Refresh failed: {data.error} Showing the previous candles.</p>}
     {data.olderError && <p className="chart-notice" role="alert">Older candles failed to load. <button type="button" onClick={data.retryOlder}>Retry</button></p>}
     {data.historyExhausted && data.candles.length > 0 && <p className="chart-notice">Start of available venue history. {data.notice}</p>}

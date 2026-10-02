@@ -46,6 +46,7 @@ app.MapGet("/api/system", (ClaimsPrincipal user) => SystemMetadata.ForOwner(new 
     Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!), user.FindFirstValue(ClaimTypes.Name)!)))
     .RequireAuthorization();
 app.MapWorkspace();
+app.MapEvidence();
 if (app.Environment.IsDevelopment()) app.MapOpenApi().RequireAuthorization();
 
 app.Run();

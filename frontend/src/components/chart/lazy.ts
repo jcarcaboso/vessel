@@ -34,6 +34,9 @@ export const createLazyLightweightAdapter: ChartAdapterFactory = (container, cal
       if (adapter) adapter.setDrawingTool(next, magnet)
       else tool = [next, magnet]
     },
+    capture(caption) {
+      return adapter ? adapter.capture(caption) : Promise.resolve(null)
+    },
     destroy() {
       destroyed = true
       adapter?.destroy()

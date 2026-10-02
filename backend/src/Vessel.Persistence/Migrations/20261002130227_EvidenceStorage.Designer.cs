@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Vessel.Persistence;
@@ -11,9 +12,11 @@ using Vessel.Persistence;
 namespace Vessel.Persistence.Migrations
 {
     [DbContext(typeof(VesselDbContext))]
-    partial class VesselDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261002130227_EvidenceStorage")]
+    partial class EvidenceStorage
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
