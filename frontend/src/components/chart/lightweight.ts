@@ -427,6 +427,27 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
         lockChart(false)
       }
     },
+    capture(caption) {
+      // Levels and drawings are series primitives, so they are on the screenshot canvas.
+      const shot = chart.takeScreenshot(true, false)
+      const ratio = shot.width / Math.max(1, container.clientWidth)
+      const footer = Math.round(26 * ratio)
+      const canvas = document.createElement('canvas')
+      canvas.width = shot.width
+      canvas.height = shot.height + footer
+      const context = canvas.getContext('2d')
+      if (!context) return Promise.resolve(null)
+      context.drawImage(shot, 0, 0)
+      context.fillStyle = theme.card
+      context.fillRect(0, shot.height, canvas.width, footer)
+      context.fillStyle = theme.border
+      context.fillRect(0, shot.height, canvas.width, Math.max(1, Math.round(ratio)))
+      context.font = `500 ${Math.round(11 * ratio)}px ${theme.font}`
+      context.fillStyle = theme.muted
+      context.textBaseline = 'middle'
+      context.fillText(caption, Math.round(10 * ratio), shot.height + footer / 2)
+      return new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+    },
     destroy() {
       container.removeEventListener('dblclick', onDoubleClick)
       container.removeEventListener('pointerdown', onPointerDown, true)

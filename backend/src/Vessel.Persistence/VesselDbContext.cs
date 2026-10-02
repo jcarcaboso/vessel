@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Ownership;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Evidence;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 
@@ -17,6 +18,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<AccountPosition> Positions => Set<AccountPosition>();
     public DbSet<AccountStablecoin> Stablecoins => Set<AccountStablecoin>();
     public DbSet<ImportedFill> Fills => Set<ImportedFill>();
+    public DbSet<PlayEvidence> Evidence => Set<PlayEvidence>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -109,6 +111,27 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         play.Property(x => x.ContractId).HasMaxLength(128);
         // Deliberately non-unique. Distinct active ideas can share a venue position.
         play.HasIndex(x => new { x.OwnerId, x.AccountId, x.VenueId, x.ContractId });
+        play.HasAlternateKey(x => new { x.OwnerId, x.Id });
+
+        var evidence = modelBuilder.Entity<PlayEvidence>();
+        evidence.ToTable("play_evidence", table =>
+        {
+            table.HasCheckConstraint("CK_play_evidence_size", "\"SizeBytes\" > 0");
+            table.HasCheckConstraint("CK_play_evidence_sha256", "\"Sha256\" ~ '^[0-9a-f]{64}$'");
+        });
+        evidence.HasKey(x => x.Id);
+        // Deleting a Play must deal with its stored images explicitly, so it never cascades.
+        evidence.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
+            .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        evidence.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
+        evidence.HasIndex(x => new { x.OwnerId, x.PlayId, x.CreatedAtUtc });
+        evidence.HasIndex(x => x.ObjectKey).IsUnique();
+        evidence.Property(x => x.ObjectKey).HasMaxLength(256);
+        evidence.Property(x => x.ContentType).HasMaxLength(64);
+        evidence.Property(x => x.Sha256).HasMaxLength(64).IsFixedLength();
+        evidence.Property(x => x.Source).HasConversion<string>().HasMaxLength(16);
+        evidence.Property(x => x.Note).HasMaxLength(PlayEvidence.MaxNoteLength);
+        evidence.Property(x => x.Markup).HasColumnType("jsonb");
     }
 
     private void ValidateOwnership()
@@ -125,6 +148,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
                 AccountPosition position => position.OwnerId,
                 AccountStablecoin stablecoin => stablecoin.OwnerId,
                 ImportedFill fill => fill.OwnerId,
+                PlayEvidence evidence => evidence.OwnerId,
                 _ => (Guid?)null
             };
             if (ownerId.HasValue && (ownerId != CurrentOwnerId ||

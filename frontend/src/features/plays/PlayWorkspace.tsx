@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Info, PencilLine, RefreshCw } from 'lucide-react'
 import { venueName } from '@/features/workspace/format'
-import type { PlayDraft } from './draft'
+import type { DraftEvidence, PlayDraft } from './draft'
+import { captureFileName, createEvidence, evidenceLimits } from './evidence'
 import { DirectionToggle } from './DirectionToggle'
 import { InstrumentPicker } from './InstrumentPicker'
 import { PositionEditor } from './PositionEditor'
@@ -23,6 +24,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const [selectedId, setSelectedId] = useState(draft.entries[0]!.id)
   const [selectionRequest, setSelectionRequest] = useState(0)
   const [portfolioFilter, setPortfolioFilter] = useState('')
+  const [evidenceRequest, setEvidenceRequest] = useState(0)
   const enabledAccounts = accounts.filter(account => account.isEnabled !== false)
   const account = enabledAccounts.find(account => account.id === draft.accountId)
   const accountId = account?.id ?? ''
@@ -44,6 +46,22 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   // Drawings follow the venue instrument, so switching away and back keeps them.
   const drawingKey = account && draft.instrument && draft.instrumentSource === 'venue' ? `${account.venueId}:${draft.instrument}` : ''
 
+  // Captures and uploads finish asynchronously, so they apply to the latest draft, not the one from the click.
+  const latest = useRef({ draft, onChange })
+  useEffect(() => { latest.current = { draft, onChange } })
+  const updateEvidence = (update: (evidence: DraftEvidence[]) => DraftEvidence[]) => {
+    const { draft: current, onChange: change } = latest.current
+    change({ ...current, evidence: update(current.evidence) })
+  }
+  function addCapture(image: Blob, context: string) {
+    if (latest.current.draft.evidence.length >= evidenceLimits.maxItems) return `A play can hold at most ${evidenceLimits.maxItems} images.`
+    if (image.size > evidenceLimits.maxBytes) return `The capture is larger than ${evidenceLimits.maxBytes / 1024 / 1024} MB.`
+    const now = new Date()
+    updateEvidence(evidence => [...evidence, createEvidence('capture', image, captureFileName(now), context, now)])
+    setEvidenceRequest(current => current + 1)
+    return null
+  }
+
   function chooseAccount(id: string) {
     const next = enabledAccounts.find(account => account.id === id)
     onChange({ ...draft, accountId: id, instrument: '',
@@ -64,7 +82,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         </Button>}
       </div>
     </div>
-    <p className="plays-draft-notice" role="status"><Info size={14} aria-hidden="true" /><span>Unsaved draft. Edits stay in this session while you navigate. Reloading the page or disconnecting discards them. Draft edits are not sent to a venue.</span></p>
+    <p className="plays-draft-notice" role="status"><Info size={14} aria-hidden="true" /><span>Unsaved draft. Edits, captures and images stay in this browser session while you navigate. Reloading the page or disconnecting discards them. Draft edits are not sent to a venue.</span></p>
     <div className="plays-draft-fields">
       <label className="plays-portfolio-field">Portfolio<select value={effectiveFilter} onChange={event => {
         const next = event.target.value
@@ -98,8 +116,10 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         source={account?.venueId === 'hyperliquid' && draft.instrumentSource === 'venue' ? { api, accountId: account.id } : null}
         onEntriesChange={entries => onChange({ ...draft, entries })}
         drawings={drawingKey ? draft.drawings[drawingKey] : undefined}
-        onDrawingsChange={drawings => { if (drawingKey) onChange({ ...draft, drawings: { ...draft.drawings, [drawingKey]: drawings } }) }} />
-        <PlayJournal notes={draft.notes} onChange={notes => onChange({ ...draft, notes })} />
+        onDrawingsChange={drawings => { if (drawingKey) onChange({ ...draft, drawings: { ...draft.drawings, [drawingKey]: drawings } }) }}
+        onCapture={addCapture} />
+        <PlayJournal notes={draft.notes} onChange={notes => onChange({ ...draft, notes })}
+          evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} />
       </div>
       <PositionEditor draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} />
     </div>

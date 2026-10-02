@@ -180,6 +180,78 @@
 .plays-page .journal-tab-content[data-state="inactive"] { display: none; }
 .plays-page .journal-tab-content > label { font-size: 11px; font-weight: 600; }
 .plays-page .journal-tab-content textarea { width: 100%; flex: 1; min-height: 0; margin: 0; padding: 12px 14px; resize: none; font-size: 13px; line-height: 1.8; border-radius: 7px; }
+.plays-page .journal-tab-count { min-width: 16px; margin-left: 5px; padding: 0 4px; border-radius: 8px; color: var(--foreground); background: var(--secondary); font-size: 10px; line-height: 16px; text-align: center; }
+/* Evidence: images with their own notes above the general evidence notes. */
+.evidence-panel { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.evidence-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.evidence-toolbar > div { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.evidence-toolbar strong { font-size: 12px; font-weight: 600; }
+.evidence-toolbar small { color: var(--muted-foreground); font-size: 10px; }
+.evidence-error { margin: 0; color: var(--negative); font-size: 11px; }
+.evidence-empty { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 7px; color: var(--muted-foreground); font-size: 11px; line-height: 1.5; }
+.evidence-empty p { margin: 0; }
+.evidence-list { display: flex; gap: 10px; margin: 0; padding: 0 0 4px; overflow-x: auto; list-style: none; }
+.evidence-card { display: flex; flex: 0 0 208px; flex-direction: column; gap: 6px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.evidence-thumb { display: block; width: 100%; aspect-ratio: 16 / 9; padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 5px; background: var(--background); cursor: zoom-in; }
+.evidence-thumb:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.evidence-meta { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted-foreground); font-size: 10px; }
+.evidence-kind { flex-shrink: 0; padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; color: var(--foreground); font-weight: 600; }
+.evidence-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evidence-meta time { flex-shrink: 0; }
+.plays-page .journal-tab-content textarea.evidence-note, .evidence-dialog textarea.evidence-note { flex: none; width: 100%; padding: 6px 8px; font-size: 12px; line-height: 1.5; border-radius: 5px; resize: vertical; }
+.evidence-frame { position: relative; }
+.evidence-actions { position: absolute; top: 5px; right: 5px; display: flex; gap: 3px; }
+.evidence-action { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 5px; color: var(--foreground); background: color-mix(in srgb, var(--card) 88%, transparent); }
+.evidence-action:hover { background: var(--secondary); }
+.evidence-action:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.evidence-confirm { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border-radius: 5px; background: color-mix(in srgb, var(--card) 94%, transparent); font-size: 11px; }
+.evidence-confirm > div { display: flex; gap: 6px; }
+.evidence-panel + label + p { margin-top: 4px; }
+.plays-page .journal-tab-content:has(.evidence-panel) { overflow-y: auto; }
+.plays-page .journal-tab-content .evidence-panel ~ textarea { flex: 1 0 96px; }
+.plays-entry-dialog.evidence-dialog { display: flex; flex-direction: column; gap: 10px; width: min(1100px, 94vw); max-width: 94vw; max-height: 92dvh; }
+.evidence-dialog-image { display: grid; place-items: center; min-height: 0; flex: 1; overflow: auto; border: 1px solid var(--border); border-radius: 7px; background: var(--background); }
+/* The photo sizes the wrapper; the marks image is laid over it without adding size, so both scale together. */
+.marked-image { position: relative; display: block; }
+.marked-image > img { display: block; }
+.marked-image > .marked-image-overlay { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; pointer-events: none; }
+.marked-image[data-fit="cover"] { width: 100%; height: 100%; }
+.marked-image[data-fit="cover"] > img { width: 100%; height: 100%; object-fit: cover; }
+.marked-image[data-fit="contain"] > img:first-child { max-width: 100%; max-height: 62dvh; }
+.evidence-marked { position: absolute; left: 5px; bottom: 5px; padding: 1px 6px; border-radius: 4px; color: #151c20; background: #ffd23f; font-size: 9px; font-weight: 700; letter-spacing: 0.02em; pointer-events: none; }
+.evidence-view-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.evidence-view-bar > :first-child { margin-right: auto; }
+.evidence-view-note { color: var(--muted-foreground); font-size: 11px; }
+.evidence-view-toggle { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); }
+.evidence-view-toggle button { padding: 4px 12px; border: 0; border-radius: 4px; color: var(--muted-foreground); background: transparent; font-size: 11px; font-weight: 600; cursor: pointer; }
+.evidence-view-toggle button[aria-pressed="true"] { color: var(--foreground); background: var(--secondary); }
+.markup-editor { display: flex; flex-direction: column; gap: 8px; min-height: 0; outline: none; }
+.markup-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 5px; border: 1px solid var(--border); border-radius: 7px; background: var(--card); }
+.markup-group { display: flex; align-items: center; gap: 2px; padding-right: 6px; border-right: 1px solid var(--border); }
+.markup-group:nth-last-child(2) { border-right: 0; }
+/* Wrapped rows would end on a dangling divider, so narrow screens rely on the row gap instead. */
+@media (max-width: 640px) { .markup-toolbar { row-gap: 8px; } .markup-group { padding-right: 0; border-right: 0; } }
+.markup-button { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid transparent; border-radius: 5px; color: var(--muted-foreground); background: transparent; cursor: pointer; }
+.markup-button:hover:not(:disabled) { color: var(--foreground); background: var(--secondary); }
+.markup-button[aria-pressed="true"] { border-color: var(--ring); color: var(--ring); background: var(--accent); }
+.markup-button:disabled { opacity: 0.4; cursor: default; }
+.markup-size i { display: block; width: 14px; border-radius: 2px; background: currentColor; }
+.markup-size i[data-size="s"] { height: 2px; }
+.markup-size i[data-size="m"] { height: 4px; }
+.markup-size i[data-size="l"] { height: 7px; }
+.markup-swatch { width: 20px; height: 20px; margin: 0 2px; padding: 0; border: 2px solid var(--border); border-radius: 50%; cursor: pointer; }
+.markup-swatch[aria-pressed="true"] { outline: 2px solid var(--ring); outline-offset: 1px; }
+.markup-done { margin-left: auto; }
+.markup-frame { display: grid; place-items: center; min-height: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--background); }
+.markup-stage { position: relative; width: min(100%, calc(60dvh * var(--markup-ratio, 1.6))); touch-action: none; user-select: none; cursor: crosshair; }
+.markup-stage[data-tool="select"] { cursor: default; }
+.markup-stage[data-tool="text"] { cursor: text; }
+.markup-stage:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.markup-stage > img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; pointer-events: none; }
+.markup-stage > img:first-child { position: static; height: auto; }
+.markup-text-input.markup-text-input { position: absolute; min-width: 140px; margin: 0; padding: 0 4px; border: 1px dashed var(--ring); border-radius: 3px; background: rgba(0, 0, 0, 0.35); font-weight: 600; line-height: 1.25; }
+.markup-hint { margin: 0; color: var(--muted-foreground); font-size: 11px; }
+.chart-notice-success { color: var(--positive); }
 
 .plays-page .position-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
 .plays-page .position-panel > .panel-heading { border-bottom: 0; }

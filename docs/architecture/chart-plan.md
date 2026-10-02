@@ -205,3 +205,37 @@ October 2, 2026. The owner's review of `80876e1` raised three findings and a kno
 - Candle responses keep at most the newest 500 candles; an interval-aligned `endTime` previously returned 501 because both window ends are inclusive.
 - Level tags near the bottom shift right of the required TradingView attribution instead of overlapping it.
 - CI: the failed `pull_request` run on `80876e1` timed out 44 interaction-heavy frontend tests at the 5 s default on a slow runner, and one older-paging assertion assumed no later refresh. The frontend test timeout is now 15 s, and that assertion checks that the older request happened.
+
+## Captures and evidence storage (C8–C9), October 2
+
+After PR #3 merged, the owner asked for chart screenshots and uploaded images with editable notes on Plays, with storage local for now but replaceable by S3-compatible or remote storage through configuration. The owner chose to keep images **in the browser while the Play is unsaved** and to store them on the server only once a Play is saved.
+
+Frontend (draft side):
+
+- The chart toolbar's camera button captures the chart (`ChartAdapter.capture`, Lightweight Charts `takeScreenshot(true, false)`). Planned levels and drawings are series primitives, so they are in the image; the crosshair is not. A footer adds `instrument · venue · interval · UTC time · Planned levels are not fills`. It is enabled once candles have loaded, also in the expanded view.
+- A capture is added to `PlayDraft.evidence` (Blob, name, context, note, time) and brings the journal's Evidence tab forward. Uploads accept PNG, JPEG or WebP detected by file signature, up to 10 MB and 50 images per play, mirroring the server defaults.
+- The Evidence tab lists images with an inline note each, a larger viewer with the same note, download, and removal after confirmation. The general evidence notes field stays below. Object URLs are revoked when an image is removed. Like the rest of the draft, images are discarded on reload or disconnect.
+- Capture and upload finish asynchronously, so they apply to the latest draft rather than the one from the click.
+
+Backend (saved Plays):
+
+- `PlayEvidence` (domain) belongs to a persisted Play (`OwnerId`, `PlayId`, generated object key, detected content type, size, SHA-256, source capture/upload, note ≤ 4000, timestamps). Table `play_evidence` (migration `EvidenceStorage`) has an owner-scoped composite FK to `plays` with `ON DELETE RESTRICT`, so deleting a Play must deal with its images explicitly. The owner query filter and write guard cover it.
+- `EvidenceService` (application) validates the play, source, note, per-play count, size (bounded read) and signature, hashes the bytes, writes the object, then the metadata; a failed metadata write deletes the object. Deletion removes the record first, so a failed object delete only leaves an unreferenced file.
+- `IEvidenceObjectStore` (application port) knows only keys and bytes. `LocalEvidenceObjectStore` (infrastructure) writes to a temporary file and moves it into place, never overwrites, and rejects keys it did not generate. Keys are `owner/play/id.ext`, built from IDs only.
+- Configuration lives in `backend/src/Vessel.Api/appsettings.json` under `Vessel:Evidence`: `MaxUploadBytes` (10 MiB), `MaxPerPlay` (50), `Storage:Provider` (`Local`), `Storage:Local:RootPath` (`data/evidence`, relative to the API content root and git-ignored). Settings are validated at startup; any provider other than `Local` fails startup until its adapter exists. An S3-compatible adapter will implement `IEvidenceObjectStore` and register under its own provider name.
+- Routes (bearer-protected): `GET/POST /api/plays/{playId}/evidence` (multipart `file`, optional `note`, `source`), `GET /api/evidence/{id}/content` (`nosniff`, `private, no-store`, sandbox CSP, SHA-256 ETag), `PATCH /api/evidence/{id}` `{ note }`, `DELETE /api/evidence/{id}`. Errors are safe Problem Details: 404 missing/foreign, 400 invalid form/note/source, 413 too large, 415 not PNG/JPEG/WebP, 409 count limit.
+
+Not included: Play save (no Play API yet, so nothing uploads draft images today), orphan-object cleanup, backup procedure for the evidence directory, and S3-compatible storage. Back up the evidence directory together with the database.
+
+Verified: backend 553 tests including real PostgreSQL (migration, owner filter, write guard, restrict, hash check); frontend 273 tests; live API upload/read/edit/delete with real files on disk, 413/415/401 paths; headless Chromium capture with levels, a drawing and the footer, uploads with a rejected file, viewer note editing, removal confirmation, and no horizontal overflow at 390 px.
+
+### Image markup, October 2
+
+The owner asked to draw over evidence images and keep the marked version, with a switch between original and marked (marked by default).
+
+- Tools: pen (freehand), marker (translucent highlighter), arrow, box and text; six colours; three sizes; select to move, recolour or resize; double-click text to edit; Delete removes; undo/redo; clear all. Sizes scale with the image, so marks look alike on small captures and large uploads.
+- Marks are vector shapes in natural image pixels (`ImageMarkup` in `frontend/src/features/plays/markup.ts`). The original image is never modified. On screen the marks are an SVG layered over the image with the same fit; download flattens them into `<name>-marked.png`.
+- The viewer shows the marked version by default with a Marked/Original toggle, plus Mark up/Edit marks and a download of the version shown. Cards show the marked thumbnail with a Marked badge and download the marked version. Each finished mark is applied to the draft at once.
+- Server: `play_evidence.Markup` (`jsonb`, migration `EvidenceMarkup`). `PUT /api/evidence/{id}/markup` replaces and `DELETE /api/evidence/{id}/markup` clears; upload accepts an optional `markup` JSON field. `EvidenceMarkup.Normalize` validates dimensions (≤ 20000 px), shape count (≤ 200), unique IDs, `#rrggbb` colours, points inside the image (≤ 2000 per stroke), stroke width, text size and text (1–280 characters, no control characters), and stores only the fields each kind uses. Evidence DTOs include `markup`.
+
+Verified: backend 557 tests with real PostgreSQL (including the `jsonb` round trip); frontend 279 tests; headless Chromium drawing every tool on a real capture, moving and recolouring, Marked/Original toggle, flattened download, and the editor at 390 px without overflow. Found and fixed in the browser: the text box closed immediately because mouse-down moved focus. PR review, October 2: the viewer's marks layer was sized from the SVG's natural size rather than the shown image, so marks drifted in the Marked view; it is now laid over the image without adding size (verified equal rects in Chromium). Mark IDs combine time and randomness so marks added later cannot collide with saved markup, the markup toolbar drops its dividers when it wraps on narrow screens, and removal confirmation focuses Cancel.

@@ -3,7 +3,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
-import { accountFixture, idleMarketStream, instrumentCatalogFixture, portfolioFixture } from '@/test/workspace-fixture'
+import { accountFixture, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { PlayWorkspace } from './PlayWorkspace'
 import { createDraft, type PlayDraft } from './draft'
 
@@ -167,4 +167,24 @@ describe('Play draft workspace', () => {
     expect(screen.getByRole('combobox', { name: 'Account' })).toHaveValue(accountFixture.id)
     expect(screen.getByRole('textbox', { name: 'Perpetual instrument' })).toHaveValue('Manual contract')
   })
+
+  it('adds a chart capture to the draft evidence and opens the Evidence tab', async () => {
+    const venue = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}` }
+    const api = { ...catalogueApi, candles: () => Promise.resolve(candleSeriesFixture), marketContext: () => Promise.resolve(marketContextFixture) } as WorkspaceApi
+    const onDraft = vi.fn<(draft: PlayDraft) => void>()
+    function CaptureWorkspace() {
+      const [draft, setDraft] = useState(createDraft)
+      return <PlayWorkspace accounts={[venue]} portfolios={[portfolioFixture]} api={api} draft={draft}
+        onChange={next => { onDraft(next); setDraft(next) }} />
+    }
+    render(<CaptureWorkspace />)
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
+    await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Perpetual instrument' }), 'BTC')
+    await screen.findByText(/Updated/)
+    // The jsdom renderer stub cannot draw, so the capture reports a failure without touching the draft.
+    await userEvent.click(screen.getByRole('button', { name: 'Capture chart' }))
+    expect(await screen.findByText('The chart could not be captured.')).toBeInTheDocument()
+    expect(onDraft.mock.lastCall?.[0].evidence).toEqual([])
+  })
 })
+

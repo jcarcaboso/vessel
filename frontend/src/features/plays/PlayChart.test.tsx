@@ -14,6 +14,7 @@ function fakeAdapter() {
   const state = {
     candles: [] as readonly ChartCandle[], resets: [] as boolean[], overlays: [] as readonly PriceOverlay[], callbacks: null as ChartCallbacks | null,
     created: 0, destroyed: 0, drawings: [] as readonly ChartDrawing[], selectedDrawingId: null as string | null, tool: null as DrawingKind | null, magnet: false,
+    captions: [] as string[],
   }
   const factory: ChartAdapterFactory = (_container, callbacks) => {
     state.created++
@@ -23,6 +24,7 @@ function fakeAdapter() {
       setOverlays(overlays) { state.overlays = overlays },
       setDrawings(drawings, selectedId) { state.drawings = drawings; state.selectedDrawingId = selectedId },
       setDrawingTool(tool, magnet) { state.tool = tool; state.magnet = magnet },
+      capture(caption) { state.captions.push(caption); return Promise.resolve(new Blob(['png'], { type: 'image/png' })) },
       destroy() { state.destroyed++ },
     }
   }
@@ -716,5 +718,32 @@ describe('Chart panel review regressions', () => {
     act(() => { window.dispatchEvent(new Event('resize')) })
     expect(parseFloat(form.style.left)).toBeGreaterThanOrEqual(8)
     expect(parseFloat(form.style.left) + parseFloat(form.style.width)).toBeLessThanOrEqual(322 - 8)
+  })
+})
+
+describe('Chart captures', () => {
+  it('captures the chart with a caption once candles load and reports the result', async () => {
+    const list = entries()
+    const { state, factory } = fakeAdapter()
+    const onCapture = vi.fn<(image: Blob, context: string) => string | null>().mockReturnValueOnce(null).mockReturnValueOnce('A play can hold at most 50 images.')
+    render(<ChartPanel entries={list} selectedId={list[0]!.id} instrument="BTC" venue="Hyperliquid" onSelect={vi.fn()} onCapture={onCapture}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    const button = screen.getByRole('button', { name: 'Capture chart' })
+    expect(button).toBeDisabled()
+    await screen.findByText(/Updated/)
+    expect(button).toBeEnabled()
+
+    await userEvent.click(button)
+    expect(onCapture).toHaveBeenCalledWith(expect.any(Blob), 'BTC · Hyperliquid · 1 hour')
+    expect(state.captions[0]).toMatch(/^BTC · Hyperliquid · 1 hour · \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · Planned levels are not fills$/)
+    expect(await screen.findByText('Capture added to Evidence')).toHaveAttribute('role', 'status')
+
+    await userEvent.click(button)
+    expect(await screen.findByRole('alert')).toHaveTextContent('A play can hold at most 50 images.')
+  })
+
+  it('keeps capture unavailable without market data', () => {
+    render(<ChartPanel entries={entries()} selectedId="" instrument="ETH-PERP" onSelect={vi.fn()} onCapture={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Capture chart' })).toHaveAttribute('title', 'Capture chart · Needs market data')
   })
 })

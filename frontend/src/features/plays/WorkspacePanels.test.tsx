@@ -181,7 +181,7 @@ describe('Play journal', () => {
       expect(screen.getAllByRole('textbox')).toHaveLength(1)
     }
     await userEvent.click(screen.getByRole('tab', { name: 'Evidence' }))
-    expect(screen.getByText('Evidence notes only. Chart captures and uploads arrive with evidence storage.')).toBeInTheDocument()
+    expect(screen.getByText('General evidence notes. Each image above keeps its own note.')).toBeInTheDocument()
     expect(screen.getByTestId('journal-panel').querySelector('input[type="file"]')).toBeNull()
   })
 })

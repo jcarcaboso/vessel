@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { money } from '../workspace/format'
-import type { PlayDraft } from './draft'
+import type { DraftEvidence, PlayDraft } from './draft'
+import { EvidencePanel } from './EvidencePanel'
 import { averageEntryPrice, formatDraggedPrice } from './levels'
 import './plays-workspace.css'
 
@@ -103,25 +104,38 @@ const journalSections = [
   ['thesis', 'Thesis', 'Record the reasoning behind this play.'],
   ['invalidation', 'Invalidation', 'Describe what would invalidate the thesis.'],
   ['strategy', 'Strategy', 'Record strategy notes. Strategy versions are not linked in this draft.'],
-  ['evidence', 'Evidence', 'Evidence notes only. Chart captures and uploads arrive with evidence storage.'],
+  ['evidence', 'Evidence', 'General evidence notes. Each image above keeps its own note.'],
   ['review', 'Review', 'Reflect on what happened, separately from the original thesis.'],
 ] as const
 
-export function PlayJournal({ notes, onChange }: {
+export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceRequest = 0 }: {
   notes: PlayDraft['notes']
   onChange: (notes: PlayDraft['notes']) => void
+  evidence?: DraftEvidence[]
+  onEvidenceChange?: (update: (evidence: DraftEvidence[]) => DraftEvidence[]) => void
+  /** Incremented to bring the Evidence tab forward, e.g. after a chart capture. */
+  evidenceRequest?: number
 }) {
   const id = useId()
+  const [tab, setTab] = useState('thesis')
+  const [shownRequest, setShownRequest] = useState(evidenceRequest)
+  if (shownRequest !== evidenceRequest) {
+    setShownRequest(evidenceRequest)
+    setTab('evidence')
+  }
   return <section className="panel journal-panel" aria-label="Play journal" data-testid="journal-panel">
-    <Tabs defaultValue="thesis" className="journal-tabs">
+    <Tabs value={tab} onValueChange={setTab} className="journal-tabs">
       <header className="panel-heading journal-header">
         <div className="journal-heading"><span className="journal-icon" aria-hidden="true"><NotebookPen size={15} /></span><h2>Play journal</h2></div>
         <TabsList className="journal-tab-list" aria-label="Journal sections">
-          {journalSections.map(([key, label]) => <TabsTrigger key={key} value={key}>{label}</TabsTrigger>)}
+          {journalSections.map(([key, label]) => <TabsTrigger key={key} value={key}>{label}
+            {key === 'evidence' && evidence.length > 0 && <span className="journal-tab-count" aria-hidden="true">{evidence.length}</span>}
+          </TabsTrigger>)}
         </TabsList>
         <span className="journal-draft-label">Draft notes</span>
       </header>
       {journalSections.map(([key, label, help]) => <TabsContent key={key} value={key} className="journal-tab-content">
+        {key === 'evidence' && onEvidenceChange && <EvidencePanel evidence={evidence} onChange={onEvidenceChange} />}
         <label className="sr-only" htmlFor={`${id}-${key}`}>{label}</label>
         <p className="muted" id={`${id}-${key}-help`}>{help}</p>
         <textarea id={`${id}-${key}`} value={notes[key]} aria-describedby={`${id}-${key}-help`}

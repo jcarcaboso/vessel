@@ -60,6 +60,19 @@ Set secrets in the process environment or an ignored local configuration, never 
 
 The seeded owner is configuration-backed, not a persisted login or broker account. Client request fields cannot change it. Token failures are generic and the application does not log bearer values. New unannotated routes have an authenticated fallback policy; anonymous liveness is an explicit exception. Do not enable middleware or proxy logging that records Authorization headers.
 
+### Evidence storage
+
+Saved Plays can hold images (`GET/POST /api/plays/{playId}/evidence`, `GET /api/evidence/{id}/content`, `PATCH`/`DELETE /api/evidence/{id}`) with optional vector markup (`PUT`/`DELETE /api/evidence/{id}/markup`; the image bytes stay original); see the captures section of `docs/architecture/chart-plan.md`. Non-secret defaults are in `src/Vessel.Api/appsettings.json`:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `Vessel__Evidence__Storage__Provider` | `Local` | Storage adapter. Other values fail startup until their adapter exists. |
+| `Vessel__Evidence__Storage__Local__RootPath` | `data/evidence` | Absolute, or relative to the API content root (git-ignored). |
+| `Vessel__Evidence__MaxUploadBytes` | `10485760` | Largest accepted image. |
+| `Vessel__Evidence__MaxPerPlay` | `50` | Images per Play. |
+
+Back up the evidence directory with the database; a database backup alone does not preserve images.
+
 ## Explicit migrations
 
 The API does not create or migrate tables at startup. Set `ConnectionStrings__Vessel`, then run from `backend/`:
