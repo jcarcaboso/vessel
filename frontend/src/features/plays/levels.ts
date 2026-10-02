@@ -152,16 +152,40 @@ export function setTargetShare(entry: DraftEntry, targetId: string, share: strin
   return { ...entry, targets: entry.targets.map(target => target.id === targetId ? { ...target, share } : target) }
 }
 
-const editableFields = ['name', 'price', 'share', 'stop', 'targets'] as const
+const scalarFields = ['name', 'price', 'share'] as const
+const levelFields = ['unit', 'value'] as const
+const targetFields = ['unit', 'value', 'share'] as const
+
+/** Copies only the sub-fields that changed between `from` and `to` onto `current`. */
+function patchFields<T extends object, K extends keyof T>(current: T, from: T, to: T, fields: readonly K[]): T {
+  let next = current
+  for (const field of fields) if (from[field] !== to[field]) next = { ...next, [field]: to[field] }
+  return next
+}
 
 /**
- * Applies one recorded edit (`from` → `to`) to the current entry, touching only the fields that the
- * edit changed, so unrelated edits made in the side editor afterwards are kept.
+ * Applies one recorded edit (`from` → `to`) to the current entry, touching only what the edit
+ * changed: scalar fields, stop sub-fields, and targets by ID (changed sub-fields, additions and
+ * removals). Later edits to other fields or other targets, e.g. in the side editor, are preserved.
  */
 export function applyEntryEdit(current: DraftEntry, from: DraftEntry, to: DraftEntry): DraftEntry {
-  const next = { ...current }
-  for (const field of editableFields) {
-    if (JSON.stringify(from[field]) !== JSON.stringify(to[field])) Object.assign(next, { [field]: to[field] })
-  }
-  return next
+  let next = patchFields(current, from, to, scalarFields)
+  const stop = patchFields(current.stop, from.stop, to.stop, levelFields)
+  if (stop !== current.stop) next = { ...next, stop }
+
+  const before = new Map(from.targets.map(target => [target.id, target]))
+  const after = new Map(to.targets.map(target => [target.id, target]))
+  let targets = current.targets
+    .filter(target => !(before.has(target.id) && !after.has(target.id)))
+    .map(target => {
+      const was = before.get(target.id)
+      const now = after.get(target.id)
+      return was && now ? patchFields(target, was, now, targetFields) : target
+    })
+  to.targets.forEach((target, index) => {
+    if (before.has(target.id) || targets.some(existing => existing.id === target.id)) return
+    targets = [...targets.slice(0, index), target, ...targets.slice(index)]
+  })
+  const unchanged = targets.length === current.targets.length && targets.every((target, index) => target === current.targets[index])
+  return unchanged ? next : { ...next, targets }
 }

@@ -195,3 +195,13 @@ October 2, 2026. Implemented by delegated backend and frontend workers against t
   - no console or API errors at 1402 and 390 px.
 - Not verified: behaviour behind a reverse proxy; multi-hour sessions.
 - `pnpm check`: 487 backend (40 skipped), 260 frontend, 76 prototype.
+
+### PR #3 review fixes
+
+October 2, 2026. The owner's review of `80876e1` raised three findings and a known visual issue. All are fixed:
+
+- Chart undo/redo reapplies an entry edit at sub-field level: stop `unit`/`value`, and targets by ID (changed `unit`/`value`/`share`, additions and removals). A chart TP1 edit followed by a sidebar TP2 edit now undoes TP1 only.
+- The in-chart level editor re-measures on chart or editor resize (ResizeObserver plus window resize) and fits its width to narrow charts, so it stays visible after a desktop-to-phone change and when a validation message grows it.
+- Candle responses keep at most the newest 500 candles; an interval-aligned `endTime` previously returned 501 because both window ends are inclusive.
+- Level tags near the bottom shift right of the required TradingView attribution instead of overlapping it.
+- CI: the failed `pull_request` run on `80876e1` timed out 44 interaction-heavy frontend tests at the 5 s default on a slow runner, and one older-paging assertion assumed no later refresh. The frontend test timeout is now 15 s, and that assertion checks that the older request happened.

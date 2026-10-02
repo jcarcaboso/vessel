@@ -31,10 +31,28 @@ export function LevelEditor({ entry, entryIndex, overlayId, anchor, direction, o
   const form = useRef<HTMLFormElement>(null)
   const [bounds, setBounds] = useState({ width: 600, height: 400, own: 190 })
   useEffect(() => { input.current?.select() }, [])
-  // Keep the editor inside the chart area next to the level it edits.
+  // Keep the editor inside the chart area next to its level, re-measuring whenever the chart or
+  // the editor itself changes size (responsive resize, sidebar collapse, a validation message).
   useLayoutEffect(() => {
-    const parent = form.current?.parentElement
-    if (parent?.clientWidth) setBounds({ width: parent.clientWidth, height: parent.clientHeight, own: form.current!.offsetHeight || 190 })
+    const element = form.current
+    const parent = element?.parentElement
+    if (!element || !parent) return
+    const measure = () => {
+      if (!parent.clientWidth) return
+      setBounds(current => {
+        const next = { width: parent.clientWidth, height: parent.clientHeight, own: element.offsetHeight || 190 }
+        return next.width === current.width && next.height === current.height && next.own === current.own ? current : next
+      })
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(parent)
+    observer?.observe(element)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
   }, [])
   if (!ref) return null
 
@@ -57,9 +75,10 @@ export function LevelEditor({ entry, entryIndex, overlayId, anchor, direction, o
   const act = (next: DraftEntry | null, label: string) => { if (next) { onApply(next, label); onClose() } }
 
   const width = 236
-  const left = Math.max(8, Math.min(anchor.x + 10, bounds.width - width - 8))
+  const fitted = Math.min(width, bounds.width - 16)
+  const left = Math.max(8, Math.min(anchor.x + 10, bounds.width - fitted - 8))
   const top = Math.max(8, Math.min(anchor.y - 24, bounds.height - bounds.own - 8))
-  return <form ref={form} className="level-editor" style={{ left, top, width }} aria-label={`Edit ${tag} ${name}`} onSubmit={save}
+  return <form ref={form} className="level-editor" style={{ left, top, width: fitted }} aria-label={`Edit ${tag} ${name}`} onSubmit={save}
     onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose() } }}>
     <header>
       <i style={{ background: entry.color }} aria-hidden="true" />

@@ -134,4 +134,34 @@ describe('chart level editing helpers', () => {
     expect(applyEntryEdit(sideEdited, after, before)).toEqual({ ...sideEdited, price: '100' })
     expect(applyEntryEdit({ ...before, share: '70' }, before, after)).toEqual({ ...before, share: '70', price: '101' })
   })
+
+  it('reverts one chart target edit without touching sibling targets edited later', () => {
+    const tp1 = { ...createTarget('50'), id: 'tp1', value: '90000' }
+    const tp2 = { ...createTarget('50'), id: 'tp2', value: '92000' }
+    const before = entry(0, { price: '85000', targets: [tp1, tp2] })
+    const chartEdit = { ...before, targets: [{ ...tp1, value: '91000' }, tp2] }
+    const sidebar = { ...chartEdit, targets: [chartEdit.targets[0]!, { ...tp2, value: '93000' }] }
+    const undone = applyEntryEdit(sidebar, chartEdit, before)
+    expect(undone.targets.map(t => t.value)).toEqual(['90000', '93000'])
+    const redone = applyEntryEdit(undone, before, chartEdit)
+    expect(redone.targets.map(t => t.value)).toEqual(['91000', '93000'])
+  })
+
+  it('undoes target additions and removals by ID and keeps targets added elsewhere', () => {
+    const tp1 = { ...createTarget('100'), id: 'tp1', value: '110' }
+    const before = entry(0, { price: '100', targets: [tp1] })
+    const added = { ...before, targets: [tp1, { ...createTarget(), id: 'tp2', value: '104' }] }
+    const sideAdded = { ...added, targets: [...added.targets, { ...createTarget(), id: 'tp3', value: '120' }] }
+    expect(applyEntryEdit(sideAdded, added, before).targets.map(t => t.id)).toEqual(['tp1', 'tp3'])
+    const removed = { ...before, targets: [] }
+    const sideAfterRemove = { ...removed, targets: [{ ...createTarget(), id: 'tp9', value: '130' }] }
+    expect(applyEntryEdit(sideAfterRemove, removed, before).targets.map(t => t.id)).toEqual(['tp1', 'tp9'])
+  })
+
+  it('reverts only the changed stop sub-field', () => {
+    const before = entry(0, { price: '100', stop: { id: 's', unit: 'price', value: '95' } })
+    const chartEdit = { ...before, stop: { ...before.stop, value: '94' } }
+    const sideUnit = { ...chartEdit, share: '40' }
+    expect(applyEntryEdit(sideUnit, chartEdit, before)).toEqual({ ...sideUnit, stop: { id: 's', unit: 'price', value: '95' } })
+  })
 })

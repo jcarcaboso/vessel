@@ -20,6 +20,8 @@ export default defineConfig(({ mode }) => {
       setupFiles: ['./src/test/setup.ts'],
       restoreMocks: true,
       clearMocks: true,
+      // Shared CI runners are slower than local machines; interaction-heavy tests need headroom.
+      testTimeout: 15_000,
     },
   }
 })

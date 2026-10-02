@@ -72,6 +72,8 @@ public sealed class CandleService(IWorkspaceStore store, ICandleReader reader, C
 
         var candles = raw.Where(c => c.OpenTime >= from && c.OpenTime <= to)
             .GroupBy(c => c.OpenTime).Select(g => g.Last()).OrderBy(c => c.OpenTime)
+            // Both window ends are inclusive, so an interval-aligned endTime can yield 501 opens; keep the newest 500.
+            .TakeLast(MaxCandles)
             .Select(c => new CandleDto(c.OpenTime, c.CloseTime, c.Open, c.High, c.Low, c.Close, c.Volume, c.Trades))
             .ToList();
         var result = new CandleResponseDto(account.VenueId, instrument, interval, "trades", candles, from, to,

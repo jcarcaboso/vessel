@@ -30,6 +30,8 @@ interface ChartTheme {
 const hitTolerance = 6
 /** Levels within ±50% of the latest close widen the price scale; farther ones stay off-scale. */
 const autoscaleReach = 0.5
+/** Media-pixel area that Lightweight Charts uses for its attribution logo. */
+const logoZone = { width: 60, height: 46 }
 
 function readTheme(element: HTMLElement): ChartTheme {
   const style = getComputedStyle(element)
@@ -192,8 +194,10 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
         const tagHeight = Math.round(16 * v)
         const marker = overlay.accent && overlay.accent !== overlay.color ? Math.round(4 * h) : 0
         const tagWidth = Math.ceil(context.measureText(overlay.label).width + padding * 2 + marker)
-        const tagX = Math.round(8 * h)
         const tagY = Math.round(lineY - tagHeight / 2)
+        // Keep tags clear of the required TradingView attribution in the bottom-left corner.
+        const inLogoZone = tagY + tagHeight > bitmapSize.height - logoZone.height * v
+        const tagX = Math.round((inLogoZone ? logoZone.width : 8) * h)
         context.fillStyle = overlay.color
         context.fillRect(tagX, tagY, tagWidth, tagHeight)
         if (marker) {

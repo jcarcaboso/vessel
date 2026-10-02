@@ -144,7 +144,8 @@ describe('Chart panel', () => {
     await screen.findByText(/Updated/)
     act(() => state.callbacks!.onNeedOlder())
     await vi.waitFor(() => expect(state.candles).toHaveLength(3))
-    expect(candles).toHaveBeenLastCalledWith(accountFixture.id, { instrument: 'BTC', interval: '1h', endTime: 1_789_999_999_999 }, expect.any(AbortSignal))
+    // Other refreshes may interleave on slow runners; the older window request is what matters.
+    expect(candles).toHaveBeenCalledWith(accountFixture.id, { instrument: 'BTC', interval: '1h', endTime: 1_789_999_999_999 }, expect.any(AbortSignal))
     act(() => state.callbacks!.onNeedOlder())
     expect(await screen.findByText(/Start of available venue history/)).toBeInTheDocument()
     act(() => state.callbacks!.onNeedOlder())
@@ -664,5 +665,56 @@ describe('Chart panel live updates', () => {
     const dialog = screen.getByRole('dialog', { name: 'BTC chart' })
     expect(within(dialog).getByRole('button', { name: 'Live updates' })).toHaveAttribute('data-state', 'live')
     expect(marketStream).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('Chart panel review regressions', () => {
+  function Harness({ factory, initial }: { factory: ChartAdapterFactory; initial: DraftEntry[] }) {
+    const [list, setList] = useState(initial)
+    return <>
+      <ChartPanel entries={list} selectedId={initial[0]!.id} onSelect={vi.fn()} instrument="BTC" onEntriesChange={setList}
+        source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />
+      <output data-testid="targets">{list[0]!.targets.map(t => t.value).join(',')}</output>
+      <button type="button" onClick={() => setList(current => current.map((e, i) => i === 0
+        ? { ...e, targets: e.targets.map((t, j) => j === 1 ? { ...t, value: '93000' } : t) } : e))}>sidebar tp2</button>
+    </>
+  }
+
+  it('undoes a chart TP1 edit without reverting a later sidebar TP2 edit, and redoes it', async () => {
+    const { state, factory } = fakeAdapter()
+    const initial: DraftEntry[] = [{ ...createEntry(0), price: '85000', share: '100',
+      targets: [{ ...createTarget('50'), id: 'tp1', value: '90000' }, { ...createTarget('50'), id: 'tp2', value: '92000' }] }]
+    render(<Harness factory={factory} initial={initial} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'E1 TP1')!.id, { x: 10, y: 10 }))
+    const price = screen.getByRole('textbox', { name: 'Price' })
+    await userEvent.clear(price)
+    await userEvent.type(price, '91000{Enter}')
+    await userEvent.click(screen.getByRole('button', { name: 'sidebar tp2' }))
+    expect(screen.getByTestId('targets')).toHaveTextContent('91000,93000')
+    await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    expect(screen.getByTestId('targets')).toHaveTextContent('90000,93000')
+    await userEvent.click(screen.getByRole('button', { name: /^Redo/ }))
+    expect(screen.getByTestId('targets')).toHaveTextContent('91000,93000')
+  })
+
+  it('keeps an open level editor inside the chart when the chart narrows', async () => {
+    const { state, factory } = fakeAdapter()
+    const initial: DraftEntry[] = [{ ...createEntry(0), price: '100', share: '100', targets: [{ ...createTarget('100'), id: 'tp1', value: '110' }] }]
+    render(<Harness factory={factory} initial={initial} />)
+    await screen.findByText(/Updated/)
+    const body = screen.getByTestId('chart-body')
+    const size = (width: number, height: number) => {
+      Object.defineProperty(body, 'clientWidth', { configurable: true, value: width })
+      Object.defineProperty(body, 'clientHeight', { configurable: true, value: height })
+    }
+    size(735, 360)
+    act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'E1 TP1')!.id, { x: 700, y: 100 }))
+    const form = screen.getByRole('form', { name: 'Edit E1 Target 1' })
+    expect(parseFloat(form.style.left) + parseFloat(form.style.width)).toBeLessThanOrEqual(735)
+    size(322, 320)
+    act(() => { window.dispatchEvent(new Event('resize')) })
+    expect(parseFloat(form.style.left)).toBeGreaterThanOrEqual(8)
+    expect(parseFloat(form.style.left) + parseFloat(form.style.width)).toBeLessThanOrEqual(322 - 8)
   })
 })

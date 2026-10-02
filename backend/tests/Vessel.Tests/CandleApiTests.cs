@@ -106,6 +106,29 @@ public sealed class CandleApiTests
     }
 
     [Fact]
+    public async Task Interval_aligned_end_time_returns_at_most_500_newest_candles()
+    {
+        var (owner, store, account) = Setup();
+        const long hour = 3_600_000L;
+        var aligned = End / hour * hour;
+        // Both inclusive window ends exist upstream: 501 opens from aligned - 500h through aligned.
+        var reader = new Candles
+        {
+            Result = Enumerable.Range(0, 501).Select(i => aligned - (500 - i) * hour)
+                .Select(t => new VenueCandle(t, t + hour - 1, "1", "2", "0.5", "1.5", "3", 4)).ToList(),
+        };
+        await using var factory = new CoreApiFactory(owner, store, candles: reader);
+        using var client = factory.AuthorizedClient();
+        var response = await client.GetAsync(Url(account.Id, $"instrument=BTC&interval=1h&endTime={aligned}"));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var opens = json.RootElement.GetProperty("candles").EnumerateArray().Select(c => c.GetProperty("openTime").GetInt64()).ToList();
+        Assert.Equal(CandleService.MaxCandles, opens.Count);
+        Assert.Equal(aligned - 499 * hour, opens[0]);
+        Assert.Equal(aligned, opens[^1]);
+    }
+
+    [Fact]
     public async Task Empty_venue_array_marks_history_exhausted_and_monthly_window_uses_31_days()
     {
         var (owner, store, account) = Setup();
