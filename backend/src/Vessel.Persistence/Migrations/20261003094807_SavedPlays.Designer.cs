@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Vessel.Persistence;
@@ -11,9 +12,11 @@ using Vessel.Persistence;
 namespace Vessel.Persistence.Migrations
 {
     [DbContext(typeof(VesselDbContext))]
-    partial class VesselDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261003094807_SavedPlays")]
+    partial class SavedPlays
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -240,67 +243,6 @@ namespace Vessel.Persistence.Migrations
                     b.ToTable("plays", (string)null);
                 });
 
-            modelBuilder.Entity("Vessel.Domain.Plays.PlayOrderLink", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("EntryId")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("OrderId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<Guid>("OwnerId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("PlayId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Role")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<string>("TargetId")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<DateTimeOffset>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OwnerId", "PlayId");
-
-                    b.HasIndex("OwnerId", "AccountId", "OrderId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_play_order_links_linked_order")
-                        .HasFilter("\"State\" = 'Linked'");
-
-                    b.ToTable("play_order_links", (string)null);
-                });
-
             modelBuilder.Entity("Vessel.Domain.Plays.PlayPlanRevision", b =>
                 {
                     b.Property<Guid>("Id")
@@ -371,13 +313,6 @@ namespace Vessel.Persistence.Migrations
                     b.Property<string>("Reason")
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasDefaultValue("Owner");
 
                     b.Property<string>("To")
                         .IsRequired()
@@ -570,83 +505,6 @@ namespace Vessel.Persistence.Migrations
                     b.ToTable("imported_fills", (string)null);
                 });
 
-            modelBuilder.Entity("Vessel.Domain.Workspace.ImportedOrder", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ContractId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<bool>("IsPositionTpsl")
-                        .HasColumnType("boolean");
-
-                    b.Property<decimal>("LimitPrice")
-                        .HasColumnType("numeric");
-
-                    b.Property<DateTimeOffset>("ObservedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("OrderId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("OrderType")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<decimal>("OriginalSize")
-                        .HasColumnType("numeric");
-
-                    b.Property<Guid>("OwnerId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("PlacedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("ReduceOnly")
-                        .HasColumnType("boolean");
-
-                    b.Property<decimal>("RemainingSize")
-                        .HasColumnType("numeric");
-
-                    b.Property<string>("Side")
-                        .IsRequired()
-                        .HasMaxLength(8)
-                        .HasColumnType("character varying(8)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<DateTimeOffset>("StatusAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<decimal?>("TriggerPrice")
-                        .HasColumnType("numeric");
-
-                    b.Property<string>("VenueStatus")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OwnerId", "AccountId", "OrderId")
-                        .IsUnique();
-
-                    b.ToTable("imported_orders", (string)null);
-                });
-
             modelBuilder.Entity("Vessel.Domain.Workspace.Portfolio", b =>
                 {
                     b.Property<Guid>("Id")
@@ -690,16 +548,6 @@ namespace Vessel.Persistence.Migrations
                     b.HasOne("Vessel.Domain.Accounts.Account", null)
                         .WithMany()
                         .HasForeignKey("OwnerId", "AccountId")
-                        .HasPrincipalKey("OwnerId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Vessel.Domain.Plays.PlayOrderLink", b =>
-                {
-                    b.HasOne("Vessel.Domain.Plays.Play", null)
-                        .WithMany()
-                        .HasForeignKey("OwnerId", "PlayId")
                         .HasPrincipalKey("OwnerId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
@@ -754,16 +602,6 @@ namespace Vessel.Persistence.Migrations
                 });
 
             modelBuilder.Entity("Vessel.Domain.Workspace.ImportedFill", b =>
-                {
-                    b.HasOne("Vessel.Domain.Accounts.Account", null)
-                        .WithMany()
-                        .HasForeignKey("OwnerId", "AccountId")
-                        .HasPrincipalKey("OwnerId", "Id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Vessel.Domain.Workspace.ImportedOrder", b =>
                 {
                     b.HasOne("Vessel.Domain.Accounts.Account", null)
                         .WithMany()

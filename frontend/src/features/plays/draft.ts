@@ -41,6 +41,10 @@ export interface PlayDraft {
 
 export interface DraftEvidence {
   id: string
+  /** Server evidence ID once the image is stored with a saved Play. */
+  serverId?: string
+  /** Note and marks as last saved, to detect edits that still need saving. */
+  savedState?: { note: string; markup: ImageMarkup | null }
   source: 'capture' | 'upload'
   image: Blob
   /** Upload file name, or a generated name for captures; used when downloading. */
@@ -54,9 +58,10 @@ export interface DraftEvidence {
 }
 
 const entryColors = ['#b9c9e4', '#edd49e', '#a9d6b6', '#d4b9e4', '#f2b3ac']
-// ponytail: session-local IDs also work on HTTP LAN previews; use server IDs when drafts persist.
+// Saved plans keep these IDs, so they must not repeat across page loads. randomUUID needs a secure
+// context, which HTTP LAN previews lack, so time and randomness stand in for it.
 let nextId = 0
-const localId = () => `draft-${++nextId}`
+const localId = () => `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}${(++nextId).toString(36)}`
 
 export const createEvidenceId = localId
 

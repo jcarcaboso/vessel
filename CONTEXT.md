@@ -30,6 +30,21 @@ _Avoid_: Entry as a name for the whole idea; plan as a synonym once terminology 
 The intended actions and risk for a play, before or during execution.
 _Avoid_: Actual execution
 
+**Play status**:
+Where a play stands: Draft, Planned, Paused, Open, Closed or Cancelled. Partial entries and exits are execution progress within Open, not statuses. Review is a separate record.
+_Avoid_: Partially in, Executed as a status
+
+**Plan revision**:
+An append-only snapshot of a planned play's plan, with the reason it changed. Planning records revision 1.
+_Avoid_: Overwriting the original plan
+
+**Order link**:
+The association of one venue order with one level of a play: an entry, its stop, one of its targets, or an unplanned exit. Fills reach a play only through linked orders. Links are automatic when unambiguous, suggested otherwise, and remembered when the owner declines them.
+_Avoid_: Assigning fills by account and instrument alone
+
+**Execution progress**:
+How much of a play's planned entries and exits linked fills have covered. Derived from venue facts, never from price touches.
+
 **Entry**:
 One planned tranche of the play's full position, with a share of its total quantity, its own entry price, stop loss, and take-profit targets. An entry is not evidence that a trade occurred.
 _Avoid_: Play, fill

@@ -35,6 +35,11 @@ public static class DependencyInjection
             client.BaseAddress = new Uri("https://api.hyperliquid.xyz/");
             client.Timeout = TimeSpan.FromSeconds(20);
         }).RemoveAllLoggers();
+        services.AddHttpClient<IVenueOrderReader, HyperliquidPerpetualReader>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.hyperliquid.xyz/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        }).RemoveAllLoggers();
         services.AddSingleton<CandleCache>();
         services.AddSingleton<MarketContextCache>();
         services.AddSingleton<MarketStreamLimiter>();

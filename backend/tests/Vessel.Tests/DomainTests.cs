@@ -11,16 +11,16 @@ public sealed class DomainTests
     {
         var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Trading");
         var instrument = new PerpetualInstrument("hyperliquid", "BTC-PERP");
-        var first = new Play(Guid.NewGuid(), account, instrument);
-        var second = new Play(Guid.NewGuid(), account, instrument);
+        var first = TestPlays.Create(account, instrument);
+        var second = TestPlays.Create(account, instrument);
         Assert.NotEqual(first.Id, second.Id);
         Assert.Equal(first.Instrument, second.Instrument);
         Assert.Equal(account.OwnerId, first.OwnerId);
-        Assert.Equal(PlayStatus.Active, first.Status);
-        Assert.Equal(PlayStatus.Active, second.Status);
-        first.Close();
-        Assert.Equal(PlayStatus.Closed, first.Status);
-        Assert.Equal(PlayStatus.Active, second.Status);
+        Assert.Equal(PlayStatus.Draft, first.Status);
+        first.MarkPlanned(DateTimeOffset.UnixEpoch);
+        second.MarkPlanned(DateTimeOffset.UnixEpoch);
+        Assert.Equal(PlayStatus.Planned, first.Status);
+        Assert.Equal(PlayStatus.Planned, second.Status);
     }
 
     [Fact]
@@ -33,7 +33,7 @@ public sealed class DomainTests
     public void Play_rejects_a_contract_from_another_venue()
     {
         var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Trading");
-        Assert.Throws<ArgumentException>(() => new Play(Guid.NewGuid(), account,
+        Assert.Throws<ArgumentException>(() => TestPlays.Create(account,
             new PerpetualInstrument("hyperliquid", "BTC")));
     }
 
@@ -55,6 +55,6 @@ public sealed class DomainTests
     public void Play_requires_distinct_identity()
     {
         var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Trading");
-        Assert.Throws<ArgumentException>(() => new Play(Guid.Empty, account, new PerpetualInstrument("manual", "BTC")));
+        Assert.Throws<ArgumentException>(() => new Play(Guid.Empty, account, new PerpetualInstrument("manual", "BTC"), InstrumentSource.Manual, "{}", DateTimeOffset.UnixEpoch));
     }
 }

@@ -32,7 +32,7 @@ public sealed class CorePostgresTests
         await db.Database.MigrateAsync();
         var account = await db.Accounts.SingleAsync();
         Assert.Null(account.PortfolioId); Assert.Null(account.ManualAccountValueUsd); Assert.Equal("manual", account.SyncStatus);
-        Assert.Equal(2, await db.Plays.CountAsync()); Assert.All(await db.Plays.ToListAsync(), p => Assert.Equal(PlayStatus.Active, p.Status));
+        Assert.Equal(2, await db.Plays.CountAsync()); Assert.All(await db.Plays.ToListAsync(), p => Assert.Equal(PlayStatus.Planned, p.Status));
         Assert.Empty(await db.Snapshots.ToListAsync()); Assert.False(db.Database.HasPendingModelChanges());
         var overview = await Service(db, owner, new FixtureReader()).OverviewAsync(default);
         Assert.Null(overview.Totals.TotalAccountValueUsd); Assert.Empty(overview.Portfolios); Assert.Single(overview.Accounts);
@@ -83,7 +83,7 @@ public sealed class CorePostgresTests
         {
             var service = Service(db, owner, reader); id = await CreateVenueAccount(service); second = await CreateVenueAccount(service);
             var account = (await db.Accounts.SingleAsync(a => a.Id == id));
-            db.Plays.AddRange(new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC")), new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC")));
+            db.Plays.AddRange(TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC")), TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC")));
             await db.SaveChangesAsync();
         }
         await Task.WhenAll(Enumerable.Range(0, 4).Select(async _ =>
@@ -95,7 +95,7 @@ public sealed class CorePostgresTests
             await Service(db, owner, reader).SyncAsync(second, default);
             Assert.Equal(4, await db.Fills.CountAsync()); Assert.Equal(2, await db.Snapshots.CountAsync()); Assert.Equal(2, await db.Plays.CountAsync());
             Assert.Equal(2, await db.Fills.CountAsync(f => f.AccountId == id));
-            Assert.All(await db.Plays.ToListAsync(), p => Assert.Equal(PlayStatus.Active, p.Status));
+            Assert.All(await db.Plays.ToListAsync(), p => Assert.Equal(PlayStatus.Draft, p.Status));
         }
     }
 

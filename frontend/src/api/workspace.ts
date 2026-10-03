@@ -1,5 +1,10 @@
 import { SseOverflowError, SseParser } from './sse'
 import { ApiError } from './system'
+import {
+  isPlayExecution, isPlayHistory, isPlaySummary, isSavedEvidence, isSavedPlay,
+  type LinkOrder, type PlayExecution, type PlayFields, type PlayHistory, type PlaySummary, type SavedEvidence, type SavedPlay, type StatusRequest,
+} from './plays'
+import type { ImageMarkup } from '@/features/plays/markup'
 
 export interface Portfolio {
   id: string
@@ -186,6 +191,25 @@ export interface WorkspaceApi {
   snapshot(id: string, signal?: AbortSignal): Promise<AccountSnapshot | null>
   fills(id: string, signal?: AbortSignal): Promise<ImportedFill[]>
   sync(id: string): Promise<BrokerAccount>
+  plays(signal?: AbortSignal): Promise<PlaySummary[]>
+  play(id: string, signal?: AbortSignal): Promise<SavedPlay>
+  createPlay(fields: PlayFields): Promise<SavedPlay>
+  /** A plan change after planning needs `revisionReason`. A stale `expectedVersion` is a 409. */
+  updatePlay(id: string, fields: PlayFields & { expectedVersion: number; revisionReason?: string }): Promise<SavedPlay>
+  changePlayStatus(id: string, expectedVersion: number, request: StatusRequest): Promise<SavedPlay>
+  playHistory(id: string, signal?: AbortSignal): Promise<PlayHistory>
+  deletePlay(id: string): Promise<void>
+  playExecution(id: string, signal?: AbortSignal): Promise<PlayExecution>
+  /** Refreshes the account's fills and orders at the venue, links what matches and applies status changes. */
+  checkPlayExecution(id: string, signal?: AbortSignal): Promise<PlayExecution>
+  linkOrder(id: string, link: LinkOrder): Promise<PlayExecution>
+  unlinkOrder(id: string, linkId: string): Promise<PlayExecution>
+  evidence(playId: string, signal?: AbortSignal): Promise<SavedEvidence[]>
+  evidenceImage(id: string, signal?: AbortSignal): Promise<Blob>
+  uploadEvidence(playId: string, image: Blob, fields: { source: 'capture' | 'upload'; note: string; markup: ImageMarkup | null; name: string }): Promise<SavedEvidence>
+  updateEvidenceNote(id: string, note: string): Promise<SavedEvidence>
+  updateEvidenceMarkup(id: string, markup: ImageMarkup | null): Promise<SavedEvidence>
+  deleteEvidence(id: string): Promise<void>
 }
 
 const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
@@ -269,18 +293,19 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     return id
   }
   const accountPath = (id: string) => `/api/accounts/${resourceId(id)}`
-  async function httpError(response: Response, badGateway?: string, tooMany?: string): Promise<ApiError> {
+  async function httpError(response: Response, badGateway?: string, tooMany?: string,
+    notFound = 'This account or portfolio is no longer available.'): Promise<ApiError> {
     if (response.status === 401 || response.status === 403) {
       return new ApiError('unauthorized', 'Your API token was rejected. Disconnect and connect again.', response.status)
     }
     let detail = response.status === 502 && badGateway ? badGateway : response.status === 429 && tooMany ? tooMany : 'The request could not be completed.'
-    if (response.status === 400 || response.status === 409) {
+    if ([400, 409, 413, 415].includes(response.status)) {
       try {
         const problem: unknown = await response.json()
         if (object(problem) && text(problem.detail) && problem.detail.length <= 500) detail = problem.detail
       } catch { /* The safe default remains when a proxy returns non-JSON. */ }
     }
-    if (response.status === 404) detail = 'This account or portfolio is no longer available.'
+    if (response.status === 404) detail = notFound
     if (response.status === 503) detail = 'The service is unavailable. Check the database and server configuration.'
     // Only the server-generated trace format is shown, so a proxy cannot inject text.
     const reference = response.headers.get('X-Correlation-ID')
@@ -376,7 +401,77 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     if (!validate(body)) throw new ApiError('invalid-response', 'The API returned incompatible workspace data.')
     return body
   }
+  // Plays and evidence: JSON bodies, multipart uploads and image downloads share auth and error handling.
+  async function send(path: string, options: RequestInit & { accept?: string } = {}, timeout = 15_000) {
+    let response: Response
+    const { accept = 'application/json', ...init } = options
+    try {
+      const signal = init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout)
+      response = await fetch(path, {
+        ...init, headers: { Authorization: `Bearer ${bearer}`, Accept: accept, ...(typeof init.body === 'string' ? { 'Content-Type': 'application/json' } : {}) },
+        credentials: 'omit', redirect: 'error', cache: 'no-store', signal,
+      })
+    } catch {
+      throw new ApiError('unavailable', 'The request did not complete. Check the API and try again.')
+    }
+    if (!response.ok) throw await httpError(response, undefined, undefined, 'This play or image is no longer available.')
+    return response
+  }
+  async function json<T>(path: string, validate: (v: unknown) => v is T, options: RequestInit = {}, timeout?: number): Promise<T> {
+    const response = await send(path, options, timeout)
+    if (response.status === 204) {
+      const noContent: unknown = undefined
+      if (validate(noContent)) return noContent
+      throw new ApiError('invalid-response', 'The API returned no play data.')
+    }
+    let body: unknown
+    try { body = await response.json() } catch { throw new ApiError('invalid-response', 'The API returned invalid data.') }
+    if (!validate(body)) throw new ApiError('invalid-response', 'The API returned incompatible play data.')
+    return body
+  }
+  const playPath = (id: string) => {
+    if (!guid(id)) throw new ApiError('invalid-response', 'The play identifier is invalid.')
+    return `/api/plays/${id}`
+  }
+  const evidencePath = (id: string) => {
+    if (!guid(id)) throw new ApiError('invalid-response', 'The image identifier is invalid.')
+    return `/api/evidence/${id}`
+  }
+  const none = (v: unknown): v is undefined => v === undefined
+  const withSignal = (signal?: AbortSignal) => signal ? { signal } : {}
   return {
+    plays: signal => json('/api/plays', (v): v is PlaySummary[] => Array.isArray(v) && v.every(isPlaySummary), withSignal(signal)),
+    play: (id, signal) => json(playPath(id), isSavedPlay, withSignal(signal)),
+    createPlay: fields => json('/api/plays', isSavedPlay, { method: 'POST', body: JSON.stringify(fields) }),
+    updatePlay: (id, fields) => json(playPath(id), isSavedPlay, { method: 'PUT', body: JSON.stringify(fields) }),
+    changePlayStatus: (id, expectedVersion, request) =>
+      json(`${playPath(id)}/status`, isSavedPlay, { method: 'POST', body: JSON.stringify({ expectedVersion, ...request }) }),
+    playHistory: (id, signal) => json(`${playPath(id)}/history`, isPlayHistory, withSignal(signal)),
+    deletePlay: id => json(playPath(id), none, { method: 'DELETE' }),
+    playExecution: (id, signal) => json(`${playPath(id)}/execution`, isPlayExecution, withSignal(signal)),
+    checkPlayExecution: (id, signal) => json(`${playPath(id)}/execution/check`, isPlayExecution, { method: 'POST', ...withSignal(signal) }, 45_000),
+    linkOrder: (id, link) => json(`${playPath(id)}/execution/links`, isPlayExecution, { method: 'POST', body: JSON.stringify(link) }),
+    unlinkOrder: (id, linkId) => {
+      if (!guid(linkId)) return Promise.reject(new ApiError('invalid-response', 'The link identifier is invalid.'))
+      return json(`${playPath(id)}/execution/links/${linkId}`, isPlayExecution, { method: 'DELETE' })
+    },
+    evidence: (playId, signal) => json(`${playPath(playId)}/evidence`, (v): v is SavedEvidence[] => Array.isArray(v) && v.every(isSavedEvidence), withSignal(signal)),
+    evidenceImage: async (id, signal) => {
+      const response = await send(`${evidencePath(id)}/content`, { ...withSignal(signal), accept: 'image/*' }, 60_000)
+      return response.blob()
+    },
+    uploadEvidence: (playId, image, fields) => {
+      const form = new FormData()
+      form.append('file', image, fields.name)
+      form.append('source', fields.source)
+      form.append('note', fields.note)
+      if (fields.markup) form.append('markup', JSON.stringify(fields.markup))
+      return json(`${playPath(playId)}/evidence`, isSavedEvidence, { method: 'POST', body: form }, 60_000)
+    },
+    updateEvidenceNote: (id, note) => json(evidencePath(id), isSavedEvidence, { method: 'PATCH', body: JSON.stringify({ note }) }),
+    updateEvidenceMarkup: (id, markup) => json(`${evidencePath(id)}/markup`, isSavedEvidence,
+      markup ? { method: 'PUT', body: JSON.stringify(markup) } : { method: 'DELETE' }),
+    deleteEvidence: id => json(evidencePath(id), none, { method: 'DELETE' }),
     overview: signal => request('/api/overview', overview, signal ? { signal } : {}),
     portfolios: signal => request('/api/portfolios', (v): v is Portfolio[] => Array.isArray(v) && v.every(portfolio), signal ? { signal } : {}),
     accounts: signal => request('/api/accounts', (v): v is BrokerAccount[] => Array.isArray(v) && v.every(account), signal ? { signal } : {}),

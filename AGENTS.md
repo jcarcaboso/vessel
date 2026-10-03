@@ -20,6 +20,8 @@ October 1, 2026, after PR #2 merged: the owner chose Lightweight Charts with Ves
 
 Stablecoin balance scope is in `docs/architecture/stablecoin-wallet.md`. Perps-first still applies to instruments/executions; spot/unified wallet reads are allowed for supported stablecoins only. Keep wallet total/held/available distinct from primary perps equity, withdrawal and collateral, and never double-count ledgers. Validate token identities against metadata and preserve exact values/nominal caveats. Do not implicitly add EVM, lending or non-stable valuation.
 
+October 3, 2026, after PR #4 merged: the owner agreed the Play lifecycle in `docs/architecture/play-lifecycle.md`: status (Draft, Planned, Paused, Open, Closed, Cancelled), derived execution progress and a separate review are independent tracks. Plan changes after planning are revisions with reasons. Order/fill linking is automatic when unambiguous and asks only otherwise. Saved Plays (step 1) and order/fill linking (step 2) are implemented: orders link by price and side within the fifth-significant-figure step, ambiguous ones wait for the owner, and linked fills drive Planned→Open→Closed. The browser polls while a play is open until the step 4 monitor exists. The owner asked to skip Plane and Outline updates for this work and build directly in the repository.
+
 ## Project tracking
 
 - Repository: https://github.com/jcarcaboso/vessel
