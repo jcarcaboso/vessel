@@ -534,3 +534,21 @@
   .plays-list-item { grid-template-columns: minmax(0, 1fr) auto; }
   .plays-list-meta { grid-column: 1 / -1; text-align: left; }
 }
+
+/* Execution tab: linked venue orders and fills. */
+.plays-page .execution-panel { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; font-size: 12px; }
+.plays-page .execution-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.plays-page .execution-header p { margin: 0; line-height: 1.6; }
+.plays-page .execution-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin: 0; }
+.plays-page .execution-totals div { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
+.plays-page .execution-totals dt { color: var(--muted-foreground); font-size: 10px; text-transform: uppercase; letter-spacing: .6px; }
+.plays-page .execution-totals dd { margin: 3px 0 0; font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+.plays-page .execution-section h3 { margin: 0 0 4px; font-size: 12px; font-weight: 650; }
+.plays-page .execution-section > p { margin: 0 0 6px; }
+.plays-page .execution-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.plays-page .execution-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
+.plays-page .execution-list li > span:first-child { display: grid; gap: 2px; min-width: 0; }
+.plays-page .execution-list small { color: var(--muted-foreground); font-size: 11px; overflow-wrap: anywhere; }
+.plays-page .execution-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.plays-page .execution-actions select { height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--card); color: var(--foreground); font-size: 12px; }
+.plays-page .execution-notice { margin: 0; font-size: 10px; line-height: 1.6; }

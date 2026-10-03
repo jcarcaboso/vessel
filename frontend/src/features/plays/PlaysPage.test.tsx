@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
-import type { PlayFields, PlayHistory, PlayStatus, PlaySummary, SavedEvidence, SavedPlay, StatusRequest } from '@/api/plays'
+import type { PlayExecution, PlayFields, PlayHistory, PlayStatus, PlaySummary, SavedEvidence, SavedPlay, StatusRequest } from '@/api/plays'
 import { ApiError } from '@/api/system'
 import { accountFixture, idleMarketStream, instrumentCatalogFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { PlaysPage } from './PlaysPage'
@@ -26,6 +26,12 @@ function fakeServer() {
     if (!play) throw new ApiError('http', 'This play or image is no longer available.', 404)
     return play
   }
+  const execution = (play: SavedPlay): PlayExecution => ({
+    playId: play.summary.id, status: play.summary.status, tracked: play.summary.instrumentSource === 'venue', checkedAtUtc: null,
+    reason: play.summary.instrumentSource === 'venue' ? null : 'Manual instruments are not tracked at a venue.',
+    totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', fees: [] },
+    entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Venue facts.',
+  })
   const api = {
     plays: vi.fn(() => Promise.resolve([...plays.values()].map(play => play.summary))),
     play: vi.fn((id: string) => Promise.resolve(find(id))),
@@ -86,9 +92,11 @@ function fakeServer() {
       return Promise.resolve({ ...item })
     }),
     updateEvidenceMarkup: vi.fn(),
+    playExecution: vi.fn((id: string) => Promise.resolve(execution(find(id)))),
+    checkPlayExecution: vi.fn((id: string) => Promise.resolve(execution(find(id)))),
     deleteEvidence: vi.fn((id: string) => { evidence.splice(evidence.findIndex(item => item.id === id), 1); return Promise.resolve() }),
   }
-  return { api, plays, history, evidence }
+  return { api, plays, history, evidence, execution }
 }
 
 function Page({ api, accounts = [accountFixture], initial = createPlaysSession() }: { api: WorkspaceApi; accounts?: BrokerAccount[]; initial?: PlaysSession }) {
@@ -253,6 +261,34 @@ describe('saved plays', () => {
     const link = screen.getByRole('link', { name: 'Open BTC on Hyperliquid' })
     expect(link).toHaveAttribute('href', 'https://app.hyperliquid.xyz/trade/BTC')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+})
+
+describe('venue tracking', () => {
+  it('checks a tracked play when opened and takes the status that linked fills produced', async () => {
+    const server = fakeServer()
+    const venue = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}` }
+    const api = client(server, { instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}),
+      marketContext: () => new Promise(() => {}) })
+    const user = userEvent.setup()
+    render(<Page api={api} accounts={[venue]} />)
+    await user.click(await screen.findByRole('button', { name: 'New play' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Perpetual instrument' }), 'BTC')
+    await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
+    // The venue reports the entry filled: the server moves the play to Open on the next check.
+    server.api.checkPlayExecution.mockImplementation((id: string) => {
+      const play = server.plays.get(id)!
+      const opened = { ...play, summary: { ...play.summary, status: 'open' as const, version: play.summary.version + 1 } }
+      server.plays.set(id, opened)
+      return Promise.resolve(server.execution(opened))
+    })
+    await user.click(screen.getByRole('button', { name: 'Plan it' }))
+    await waitFor(() => expect(server.api.checkPlayExecution).toHaveBeenCalled())
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByText('Open', { selector: '.badge' })).toBeInTheDocument())
+    await user.click(screen.getByRole('tab', { name: 'Execution' }))
+    expect(screen.getByRole('button', { name: 'Check venue' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument()
   })
 })
 

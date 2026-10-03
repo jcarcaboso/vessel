@@ -10,6 +10,9 @@ public enum InstrumentSource { Venue, Manual }
 
 public enum CancelReason { Invalidated, Missed, ChangedMind, Expired, Mistake, Other }
 
+/// <summary>Who changed the status: the owner, or linked venue fills.</summary>
+public enum StatusChangeSource { Owner, Venue }
+
 // One trading idea. The plan is an application-validated JSON document; after planning, every plan
 // change is an append-only revision. It contains neither inferred executions nor an invented thesis.
 public sealed class Play
@@ -127,6 +130,20 @@ public sealed class Play
         ? Transition(PlayStatus.Planned, null, null, now)
         : throw new PlayRuleException("Only a paused Play can be resumed.");
 
+    /// <summary>The first linked entry fill. A fill while paused still opens the Play; the note says so.</summary>
+    public PlayStatusChange MarkOpen(string note, DateTimeOffset now) => Status is PlayStatus.Planned or PlayStatus.Paused
+        ? Transition(PlayStatus.Open, null, Status == PlayStatus.Paused ? $"{note} Filled while paused." : note, now, StatusChangeSource.Venue)
+        : throw new PlayRuleException("Only a planned or paused Play can open.");
+
+    /// <summary>All linked entry quantity has exited and no linked entry order rests.</summary>
+    public PlayStatusChange MarkClosed(string note, DateTimeOffset now)
+    {
+        if (Status != PlayStatus.Open) throw new PlayRuleException("Only an open Play can close.");
+        var change = Transition(PlayStatus.Closed, null, note, now, StatusChangeSource.Venue);
+        EndedAtUtc = now;
+        return change;
+    }
+
     public PlayStatusChange Cancel(CancelReason reason, string? note, DateTimeOffset now)
     {
         if (Status is not (PlayStatus.Draft or PlayStatus.Planned or PlayStatus.Paused))
@@ -138,9 +155,10 @@ public sealed class Play
         return change;
     }
 
-    private PlayStatusChange Transition(PlayStatus to, CancelReason? reason, string? note, DateTimeOffset now)
+    private PlayStatusChange Transition(PlayStatus to, CancelReason? reason, string? note, DateTimeOffset now,
+        StatusChangeSource source = StatusChangeSource.Owner)
     {
-        var change = new PlayStatusChange(this, Status, to, reason, note, now);
+        var change = new PlayStatusChange(this, Status, to, reason, note, now, source);
         Status = to;
         Touch(now);
         return change;
@@ -204,10 +222,12 @@ public sealed class PlayStatusChange
     public PlayStatus To { get; private set; }
     public CancelReason? Reason { get; private set; }
     public string? Note { get; private set; }
+    public StatusChangeSource Source { get; private set; }
     public DateTimeOffset OccurredAtUtc { get; private set; }
     private PlayStatusChange() { }
 
-    internal PlayStatusChange(Play play, PlayStatus from, PlayStatus to, CancelReason? reason, string? note, DateTimeOffset now)
+    internal PlayStatusChange(Play play, PlayStatus from, PlayStatus to, CancelReason? reason, string? note, DateTimeOffset now,
+        StatusChangeSource source)
     {
         note = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
         if (note?.Length > Play.MaxCancelNoteLength) throw new ArgumentException($"Notes are limited to {Play.MaxCancelNoteLength} characters.");
@@ -218,6 +238,7 @@ public sealed class PlayStatusChange
         To = to;
         Reason = reason;
         Note = note;
+        Source = source;
         OccurredAtUtc = now;
     }
 }

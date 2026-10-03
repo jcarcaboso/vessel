@@ -38,6 +38,10 @@ _Avoid_: Partially in, Executed as a status
 An append-only snapshot of a planned play's plan, with the reason it changed. Planning records revision 1.
 _Avoid_: Overwriting the original plan
 
+**Order link**:
+The association of one venue order with one level of a play: an entry, its stop, one of its targets, or an unplanned exit. Fills reach a play only through linked orders. Links are automatic when unambiguous, suggested otherwise, and remembered when the owner declines them.
+_Avoid_: Assigning fills by account and instrument alone
+
 **Execution progress**:
 How much of a play's planned entries and exits linked fills have covered. Derived from venue facts, never from price touches.
 

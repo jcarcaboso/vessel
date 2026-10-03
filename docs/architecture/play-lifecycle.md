@@ -106,3 +106,32 @@ Verification:
 - `pnpm check` passes 573 backend tests (PostgreSQL tests run against a disposable test database, none skipped), 288 frontend tests, both builds, lint and the prototype tests.
 - A headless Chromium 151 run against a real API and a scratch PostgreSQL database covered: save draft, the Hyperliquid catalogue and the link `https://app.hyperliquid.xyz/trade/HYPE`, Plan it, stop change with a revision reason, history diff ("Entry 1 stop: 37 → 38"), reload and reopen, cancel with reason, and evidence upload, note change, reload, removal and draft deletion. No console errors; no horizontal overflow at 1402, 1001 and 390 pixels.
 - Not covered: Open and Closed (they need order linking), concurrent edits from two browsers beyond the version check, and very large drawing sets.
+
+## Order and fill linking state
+
+October 3, 2026. Step 2 is implemented on branch `t3code/play-execution`, stacked on the saved-Plays branch.
+
+### Rules
+
+- **Sources**: Hyperliquid `frontendOpenOrders` (current book) and `historicalOrders` (latest 2,000 status updates, latest per order kept), plus the existing `userFills` sync. Only primary perpetual contracts; rejected orders are never stored.
+- **Relevance**: orders are stored in `imported_orders` only for contracts with a Planned, Paused or Open venue Play on that account, placed at or after the earliest such Play was created. Account deletion removes them with the other venue facts.
+- **Price match**: within one step of the fifth significant figure of the plan level, the precision Hyperliquid accepts (1 at 84,541; 0.01 at 100). Percentage stops and targets resolve against the entry price. A trigger order is compared at its trigger price, a limit order at its limit price.
+- **Level fit**: entries need the entry side and an order that is neither reduce-only nor a position TP/SL. Stops need a trigger order that is not a take profit. Targets accept limit or take-profit orders, not stop orders. Orders placed before the Play was created never match it.
+- **Unplanned exit**: when no level matches, an exit-side order on an Open Play links as an unplanned exit if it reduces the position (reduce-only, position TP/SL, or its fills close) and was placed after the Play's first linked entry fill.
+- **Automatic vs. confirmation**: one candidate links automatically. Several (concurrent Plays on the same level) become suggestions; the owner links one ("Link here") or declines ("Not this play"). Unlinking is remembered as dismissed and never re-proposed for that level; other suggestions for the order return if it is unlinked.
+- **Manual fallback**: other live or filled orders on the instrument since the Play was created (latest 20) can be linked by hand to any level or as an unplanned exit. An order belongs to at most one level of one Play (unique index on linked orders).
+- **Status**: the first linked entry fill moves Planned or Paused to Open (the note names the fill; a paused Play is flagged "Filled while paused"). Open becomes Closed when linked exit fills cover all linked entry fills and no linked entry order is still open. These changes are recorded with source `venue`. There is no automatic reverse transition.
+- **Edits**: after planning, an entry with linked fills keeps its price and share and cannot be removed. Its stop and targets, and untaken entries, can still change with a revision reason.
+
+### Checking
+
+`POST /api/plays/{id}/execution/check` runs the existing account sync (fills and snapshot), reads orders, then matches and applies transitions under a per-account advisory lock. It repeats matching while statuses move, so an entry and its exit in the same window settle in one check. `GET /api/plays/{id}/execution` returns the stored state; `POST …/execution/links` and `DELETE …/execution/links/{linkId}` link and unlink.
+
+The browser checks a tracked Play when it is opened or its status changes, and every 60 seconds while the tab is visible. The server-side monitor (step 4) will replace this polling. The editor shows linked orders and fills, suggestions and other orders in an Execution journal tab, so the locked layout is unchanged.
+
+### Verification
+
+- `pnpm check` passes 598 backend tests (PostgreSQL tests run, none skipped) and 291 frontend tests, lint, builds and prototype tests.
+- Live read-only check against a public Hyperliquid market-maker address on a scratch database (Play creation time moved back three days to cover existing history): the BTC entry at 84,541 linked exactly one filled order automatically and the Play moved to Open with the venue note; an exit placed after the entry fill linked as an unplanned exit; a manual link from the "other orders" list worked; one check took about 6 seconds. Headless Chromium showed the Execution tab with one automatic check on open, no Pause/Cancel for Open, the history entry "Planned → Open · from linked venue fills", no console errors and no overflow at 390 pixels.
+- The first live run found two problems, both fixed and covered by tests: a 2 bps tolerance (about $17 on BTC) linked neighbouring orders, and exits placed before the entry fill closed the Play.
+- Not covered: Open → Closed against live data (the sample account kept a position), Hyperliquid builder-deployed (HIP-3) markets, and history older than the latest 2,000 orders or fills.

@@ -6,6 +6,8 @@ import { venueName } from '@/features/workspace/format'
 import { ArrowLeft, History, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import { createDraft, type PlayDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
+import { ExecutionPanel } from './ExecutionPanel'
+import { usePlayExecution } from './usePlayExecution'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
 import {
   createPlaysSession, draftFromSaved, failure, fieldsFromDraft, isDirty, loadSavedPlay, planChanged, savedState, syncEvidence,
@@ -44,6 +46,20 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const [dialogError, setDialogError] = useState<string | null>(null)
 
   const { draft, saved } = session
+  const tracking = usePlayExecution(api, session.view === 'editor' && saved ? saved.summary.id : null, saved?.summary.status)
+
+  // Linked fills move a play to Open or Closed on the server; take the new status and version.
+  const venueStatus = tracking.execution?.playId === saved?.summary.id ? tracking.execution?.status : undefined
+  useEffect(() => {
+    const state = latest.current.saved
+    if (!venueStatus || !state || venueStatus === state.summary.status) return
+    let active = true
+    api.play(state.summary.id).then(play => {
+      const current = latest.current.saved
+      if (active && current?.summary.id === play.summary.id) update({ saved: { ...current, summary: play.summary } })
+    }).catch(cause => { if (active) setError(failure(cause)) })
+    return () => { active = false }
+  }, [api, venueStatus, update])
   const dirty = saved ? isDirty(draft, saved) : hasContent(draft)
   const status = saved?.summary.status ?? 'draft'
 
@@ -170,7 +186,10 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     <Button variant="ghost" size="sm" className="plays-back" onClick={() => update({ view: 'list' })}><ArrowLeft size={14} />All plays</Button>
     {error && <div className="workspace-alert" role="alert"><span>{error}</span><Button variant="ghost" size="sm" onClick={() => setError(null)}>Dismiss</Button></div>}
     <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={draft} onChange={next => update({ draft: next })}
-      {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} notice={notice} lockInstrument={locked} readOnly={readOnly} />
+      {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} notice={notice} lockInstrument={locked} readOnly={readOnly}
+      execution={saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}
+        entries={draft.entries} onCheck={() => { void tracking.check() }} onLink={request => { void tracking.link(request) }}
+        onUnlink={linkId => { void tracking.unlink(linkId) }} /> : undefined} />
     {dialog === 'revision' && saved && <RevisionDialog revision={saved.summary.planRevision} pending={saving} error={dialogError}
       onSave={reason => { void save(reason) }} onClose={() => setDialog(null)} />}
     {dialog === 'cancel' && <CancelDialog pending={busy === 'status'} error={dialogError}

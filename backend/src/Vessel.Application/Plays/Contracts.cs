@@ -39,7 +39,7 @@ public sealed record PlaySummaryDto(Guid Id, string Title, string Status, Guid A
 public sealed record PlayDto(PlaySummaryDto Summary, PlayPlanDocument Plan, JsonElement Drawings, string Review);
 
 public sealed record PlanRevisionDto(int Number, string Status, string Reason, DateTimeOffset CreatedAtUtc, PlayPlanDocument Plan);
-public sealed record StatusChangeDto(string From, string To, string? Reason, string? Note, DateTimeOffset OccurredAtUtc);
+public sealed record StatusChangeDto(string From, string To, string? Reason, string? Note, DateTimeOffset OccurredAtUtc, string Source = "owner");
 public sealed record PlayHistoryDto(IReadOnlyList<PlanRevisionDto> Revisions, IReadOnlyList<StatusChangeDto> StatusChanges);
 
 // Application owns this bounded port; EF details stay in Persistence. Reads are owner-filtered.
@@ -50,6 +50,8 @@ public interface IPlayStore
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);
     Task<List<PlayPlanRevision>> RevisionsAsync(Guid playId, CancellationToken ct);
     Task<List<PlayStatusChange>> StatusChangesAsync(Guid playId, CancellationToken ct);
+    /// <summary>Entries with at least one linked entry fill; their price, share and existence are fixed.</summary>
+    Task<IReadOnlySet<string>> FilledEntryIdsAsync(Guid playId, CancellationToken ct);
     void Add(Play play);
     void Add(PlayPlanRevision revision);
     void Add(PlayStatusChange change);

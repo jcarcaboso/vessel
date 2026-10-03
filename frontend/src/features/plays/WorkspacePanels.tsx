@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from 'react'
+import { useId, useState, type FormEvent, type ReactNode } from 'react'
 import { NotebookPen, Pencil } from 'lucide-react'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
@@ -108,7 +108,7 @@ const journalSections = [
   ['review', 'Review', 'Reflect on what happened, separately from the original thesis.'],
 ] as const
 
-export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceRequest = 0, readOnly = false, notesLabel = 'Draft notes' }: {
+export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceRequest = 0, readOnly = false, notesLabel = 'Draft notes', execution }: {
   notes: PlayDraft['notes']
   onChange: (notes: PlayDraft['notes']) => void
   evidence?: DraftEvidence[]
@@ -118,6 +118,8 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   /** Keeps the pre-trade notes fixed; the review stays editable. */
   readOnly?: boolean
   notesLabel?: string
+  /** Linked venue orders and fills of a saved play, shown as an Execution tab before the review. */
+  execution?: ReactNode
 }) {
   const id = useId()
   const [tab, setTab] = useState('thesis')
@@ -133,7 +135,8 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
         <TabsList className="journal-tab-list" aria-label="Journal sections">
           {journalSections.map(([key, label]) => <TabsTrigger key={key} value={key}>{label}
             {key === 'evidence' && evidence.length > 0 && <span className="journal-tab-count" aria-hidden="true">{evidence.length}</span>}
-          </TabsTrigger>)}
+          </TabsTrigger>).flatMap((trigger, index) => execution && journalSections[index]![0] === 'evidence'
+            ? [trigger, <TabsTrigger key="execution" value="execution">Execution</TabsTrigger>] : [trigger])}
         </TabsList>
         <span className="journal-draft-label">{notesLabel}</span>
       </header>
@@ -145,6 +148,7 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
           placeholder={`Write your ${label.toLowerCase()} notes.`} readOnly={readOnly && key !== 'review'}
           onChange={(event) => onChange({ ...notes, [key]: event.target.value })} />
       </TabsContent>)}
+      {execution && <TabsContent value="execution" className="journal-tab-content">{execution}</TabsContent>}
     </Tabs>
   </section>
 }
