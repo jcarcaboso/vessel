@@ -563,3 +563,14 @@
 .plays-page .execution-notice { margin: 0; font-size: 10px; line-height: 1.6; }
 
 .plays-page .leverage-warning { margin: 6px 0 0; color: var(--negative); font-size: 10px; }
+
+.plays-page .position-size-readout { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 12px; grid-column: 1 / -1; margin: 0; color: var(--muted-foreground); font-size: 10px; font-variant-numeric: tabular-nums; }
+.plays-page .position-size-readout strong { color: var(--foreground); font-size: 11px; font-weight: 600; }
+.leverage-dialog { max-width: min(640px, calc(100vw - 32px)); }
+.leverage-dialog .leverage-levels { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.leverage-dialog .leverage-levels :is(th, td) { padding: 7px 8px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+.leverage-dialog .leverage-levels thead th { color: var(--muted-foreground); font-size: 10px; font-weight: 600; }
+.leverage-dialog .leverage-levels tbody th { font-weight: 600; white-space: normal; }
+.leverage-dialog .leverage-size { margin: 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.6; }
+.leverage-dialog .leverage-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+@media (max-width: 520px) { .leverage-dialog .leverage-levels { display: block; overflow-x: auto; } }

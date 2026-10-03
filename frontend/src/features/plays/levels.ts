@@ -186,6 +186,23 @@ export function setExitShare(entry: DraftEntry, kind: ExitKind, id: string, shar
   return withExits(entry, kind, exitsOf(entry, kind).map(exit => exit.id === id ? { ...exit, share } : exit))
 }
 
+/** Stops and targets entered as a percentage with a value, in entry order. Their prices depend on the leverage. */
+export function percentLevels(entries: readonly DraftEntry[]) {
+  return entries.flatMap(entry => (['stop', 'target'] as const).flatMap(kind =>
+    exitsOf(entry, kind).filter(exit => exit.unit === 'percent' && unsigned(exit.value) !== null)
+      .map(exit => ({ entry, kind, exit, ref: { entryId: entry.id, kind, levelId: exit.id } as LevelRef }))))
+}
+
+/** Rewrites percentage stops and targets for a new leverage so their prices stay where they are. */
+export function keepPercentLevelPrices(entries: readonly DraftEntry[], from: number, to: number): DraftEntry[] {
+  const factor = Math.max(1, to) / Math.max(1, from)
+  const rescale = (exit: DraftExit): DraftExit => {
+    const percent = exit.unit === 'percent' ? unsigned(exit.value) : null
+    return percent === null ? exit : { ...exit, value: trim((percent * factor).toFixed(4)) }
+  }
+  return entries.map(entry => ({ ...entry, stops: entry.stops.map(rescale), targets: entry.targets.map(rescale) }))
+}
+
 const scalarFields = ['name', 'price', 'share'] as const
 const exitFields = ['unit', 'value', 'share'] as const
 

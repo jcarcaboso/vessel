@@ -4,7 +4,9 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input'
 import { createEntry, type DraftEntry, type PlayDraft } from './draft'
 import { EntryForm } from './EntryForm'
-import { leverageOf } from './levels'
+import { keepPercentLevelPrices, leverageOf, percentLevels } from './levels'
+import { LeverageChangeDialog } from './LeverageChangeDialog'
+import { defaultSizeUnits, formatMoney, formatQuantity, positionSize, type SizeUnits } from './sizing'
 import { Expand, Plus, Trash2 } from 'lucide-react'
 
 const leveragePresets = [1, 5, 10, 25, 50]
@@ -25,7 +27,7 @@ function allocatedShare(entries: DraftEntry[]) {
 }
 import { AvailableBudget } from './WorkspacePanels'
 
-export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, instrumentName = '' }: {
+export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, instrumentName = '', units = defaultSizeUnits }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
   selectedId: string
@@ -34,6 +36,8 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   /** Venue maximum for the chosen contract, or null when unknown. */
   maxLeverage?: number | null
   instrumentName?: string
+  /** Quote asset and contract for the size readout. */
+  units?: SizeUnits
 }) {
   const leverageLimit = maxLeverage ?? defaultMaxLeverage
   const leverage = leverageOf(draft.leverage)
@@ -72,10 +76,38 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
     onChange({ ...draft, entries: draft.entries.map(current => current.id === entry.id ? entry : current) })
   }
 
+  // Percentage stops and targets are returns at the leverage, so with any of them a new leverage is
+  // previewed in the controls and only applied once the owner chooses what happens to those levels.
+  const [leverageDraft, setLeverageDraft] = useState<string | null>(null)
+  const [pendingLeverage, setPendingLeverage] = useState<number | null>(null)
+  const needsConfirmation = percentLevels(draft.entries).length > 0
+  const shownLeverage = leverageDraft ?? draft.leverage
+  const clampLeverage = (value: string) => value === '' ? '' : String(Math.min(leverageLimit, Math.max(1, Math.round(Number(value)))))
+
   function updateLeverage(value: string) {
-    const leverage = value === '' ? '' : String(Math.min(leverageLimit, Math.max(1, Math.round(Number(value)))))
-    onChange({ ...draft, leverage })
+    const next = clampLeverage(value)
+    if (needsConfirmation) setLeverageDraft(next)
+    else onChange({ ...draft, leverage: next })
   }
+
+  /** Asks about percentage levels before applying a previewed leverage. A blank value goes back to the current one. */
+  function commitLeverage(value = leverageDraft) {
+    if (value === null || !needsConfirmation) return
+    if (value === '' || Number(value) === leverage) { setLeverageDraft(null); return }
+    setLeverageDraft(value)
+    setPendingLeverage(Number(value))
+  }
+
+  function finishLeverage(apply?: 'prices' | 'percentages') {
+    if (apply && pendingLeverage !== null) onChange({
+      ...draft, leverage: String(pendingLeverage),
+      entries: apply === 'prices' ? keepPercentLevelPrices(draft.entries, leverage, pendingLeverage) : draft.entries,
+    })
+    setPendingLeverage(null)
+    setLeverageDraft(null)
+  }
+
+  const sized = positionSize(draft, leverage)
 
   function splitEqually() {
     const shares = equalShares(draft.entries.length)
@@ -108,6 +140,12 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
           <Input id={`${prefix}-size`} type="number" min={0} step="any" value={draft.size} placeholder="Enter total size"
             onChange={event => onChange({ ...draft, size: event.target.value })} />
         </label>
+        {sized.notional !== null || sized.margin !== null ? <p className="position-size-readout" data-testid="size-readout">
+          {sized.notional !== null && <span>Position <strong>{formatMoney(sized.notional, units)}</strong></span>}
+          {draft.sizingMode === 'quantity' && sized.margin !== null && <span>Margin <strong>{formatMoney(sized.margin, units)}</strong></span>}
+          {sized.quantity !== null && draft.sizingMode === 'margin' && <span>≈ <strong>{formatQuantity(sized.quantity, units)}</strong></span>}
+          <small>at {leverage}×{sized.averageEntry === null ? ' · price an entry for the quantity' : ''}</small>
+        </p> : draft.size && draft.sizingMode === 'quantity' && <p className="position-size-readout"><small>Price an entry to see the position and margin.</small></p>}
         <label htmlFor={`${prefix}-sizing-mode`}>
           <span>Size input</span>
           <select id={`${prefix}-sizing-mode`} aria-label="Whole-position sizing" value={draft.sizingMode}
@@ -123,21 +161,25 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
       <div className="leverage-controls">
         <label htmlFor={`${prefix}-leverage-slider`}>Leverage <small>{maxLeverage ? `1× to ${maxLeverage}× on ${instrumentName || 'this contract'}` : '1× = unlevered'}</small></label>
         <div className="leverage-input-row">
-          <input id={`${prefix}-leverage-slider`} type="range" min={1} max={leverageLimit} step={1} value={Math.min(leverage, leverageLimit)}
-            style={{ '--range-progress': `${leverageLimit > 1 ? (Math.min(leverage, leverageLimit) - 1) / (leverageLimit - 1) * 100 : 100}%` } as CSSProperties}
-            aria-label="Leverage slider (×)" aria-valuetext={draft.leverage ? `${draft.leverage} times` : 'Not specified'}
-            onChange={event => updateLeverage(event.target.value)} />
-          <Input id={`${prefix}-leverage`} type="number" min={1} max={leverageLimit} step={1} value={draft.leverage}
-            aria-label="Leverage (×)" onChange={event => updateLeverage(event.target.value)} />
+          <input id={`${prefix}-leverage-slider`} type="range" min={1} max={leverageLimit} step={1} value={Math.min(leverageOf(shownLeverage), leverageLimit)}
+            style={{ '--range-progress': `${leverageLimit > 1 ? (Math.min(leverageOf(shownLeverage), leverageLimit) - 1) / (leverageLimit - 1) * 100 : 100}%` } as CSSProperties}
+            aria-label="Leverage slider (×)" aria-valuetext={shownLeverage ? `${shownLeverage} times` : 'Not specified'}
+            onChange={event => updateLeverage(event.target.value)}
+            onPointerUp={event => commitLeverage(clampLeverage(event.currentTarget.value))} onBlur={() => commitLeverage()} />
+          <Input id={`${prefix}-leverage`} type="number" min={1} max={leverageLimit} step={1} value={shownLeverage}
+            aria-label="Leverage (×)" onChange={event => updateLeverage(event.target.value)} onBlur={() => commitLeverage()}
+            onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commitLeverage() } }} />
           <span aria-hidden="true">×</span>
         </div>
         <div className="leverage-presets" role="group" aria-label="Leverage presets">
-          {presets.map(preset => <button key={preset} type="button" aria-pressed={draft.leverage === String(preset)}
-            onClick={() => updateLeverage(String(preset))}>{preset}×</button>)}
+          {presets.map(preset => <button key={preset} type="button" aria-pressed={shownLeverage === String(preset)}
+            onClick={() => needsConfirmation ? commitLeverage(String(preset)) : updateLeverage(String(preset))}>{preset}×</button>)}
         </div>
       </div>
       {leverage > leverageLimit && <p className="leverage-warning" role="alert">{leverage}× is above the {leverageLimit}× venue maximum for {instrumentName || 'this contract'}.</p>}
-      <p className="muted">Sizing and payoff calculations are deferred. Changing sizing units clears size. {maxLeverage ? 'The leverage range is the venue maximum for this contract.' : 'Without a venue contract, the 1× to 100× range is not venue-validated.'} Percentage stops and targets are returns at this leverage.</p>
+      {pendingLeverage !== null && <LeverageChangeDialog draft={draft} from={leverage} to={pendingLeverage} units={units}
+        onKeepPrices={() => finishLeverage('prices')} onKeepPercentages={() => finishLeverage('percentages')} onCancel={() => finishLeverage()} />}
+      <p className="muted">Position size is margin × leverage at the planned average entry, before fees, funding and venue margin rules. Payoff calculations are deferred. Changing sizing units clears size. {maxLeverage ? 'The leverage range is the venue maximum for this contract.' : 'Without a venue contract, the 1× to 100× range is not venue-validated.'} Percentage stops and targets are returns at this leverage.</p>
     </div>
     <div className="entries-heading">
       <div><h3>Distribute your entries <span className="entry-count">{String(draft.entries.length).padStart(2, '0')}</span></h3>

@@ -11,6 +11,7 @@ import { DirectionToggle } from './DirectionToggle'
 import { InstrumentPicker } from './InstrumentPicker'
 import { pairLabel, useInstrumentCatalog } from './instruments'
 import { leverageOf } from './levels'
+import { defaultSizeUnits, type SizeUnits } from './sizing'
 import { PositionEditor } from './PositionEditor'
 import { ChartPanel } from './PlayChart'
 import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
@@ -65,6 +66,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const instrumentInfo = draft.instrumentSource === 'venue' ? catalog.catalog?.instruments.find(item => item.contractId === draft.instrument) : undefined
   const instrumentName = instrumentInfo ? pairLabel(instrumentInfo) : draft.instrument
   const maxLeverage = instrumentInfo?.maxLeverage ?? null
+  const units: SizeUnits = instrumentInfo
+    ? { quote: instrumentInfo.quoteAsset, base: instrumentInfo.contractId, quantityDecimals: instrumentInfo.quantityDecimals }
+    : defaultSizeUnits
 
   const tradeUrl = account ? venueTradeUrl(account.venueId, draft.instrument, draft.instrumentSource) : null
   // In a read-only Play, the chart can still be viewed but not edited.
@@ -167,10 +171,10 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} />
       </div>
       {readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
-        <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} />
+        <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} units={units} />
       </fieldset> : <PositionEditor draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId}
-        maxLeverage={maxLeverage} instrumentName={instrumentName} />}
+        maxLeverage={maxLeverage} instrumentName={instrumentName} units={units} />}
     </div>
-    <PositionSummary draft={draft} />
+    <PositionSummary draft={draft} units={units} instrumentName={instrumentName} />
   </section>
 }

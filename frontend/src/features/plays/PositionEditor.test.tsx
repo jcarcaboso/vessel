@@ -240,6 +240,58 @@ describe('local-draft position editor', () => {
     expect(field('Entry 1 planned stop price (quote units)')).toHaveValue(190)
   })
 
+  it('asks before a leverage change moves percentage stops and targets', async () => {
+    const { user, onChange } = renderEditor(1)
+    await user.type(field('Entry 1 planned entry price (quote units)'), '200')
+    await user.click(unitButton('Entry 1 stop units', '% return at leverage'))
+    await user.type(field('Entry 1 planned stop return at 1× leverage (%)'), '5')
+    await user.type(screen.getByRole('spinbutton', { name: /Whole-position margin/ }), '100')
+    const calls = onChange.mock.calls.length
+
+    // Cancel keeps the leverage and the levels.
+    await user.click(screen.getByRole('button', { name: '10×' }))
+    let dialog = screen.getByRole('dialog', { name: 'Change leverage from 1× to 10×?' })
+    expect(within(dialog).getByRole('row', { name: /Entry 1 stop/ })).toHaveTextContent('Entry 1 stop5% · 19050% · 1905% · 199')
+    expect(within(dialog).getByText('Margin stays 100 quote units; the position goes from 100 quote units to 1,000 quote units (0.5 units → 5 units).')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(onChange.mock.calls.length).toBe(calls)
+    expect(field('Leverage (×)')).toHaveValue(1)
+
+    // Keeping prices rescales the percentage so the stop stays at 190.
+    await user.click(screen.getByRole('button', { name: '10×' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Keep prices' }))
+    expect(onChange.mock.lastCall?.[0]).toMatchObject({ leverage: '10' })
+    expect(onChange.mock.lastCall?.[0].entries[0]!.stops[0]).toMatchObject({ unit: 'percent', value: '50' })
+    expect(screen.getByText('≈ 190 · a 5% price move at 10×')).toBeInTheDocument()
+
+    // Keeping the percentage moves the stop; the slider previews until it is released.
+    const slider = screen.getByRole('slider', { name: 'Leverage slider (×)' })
+    fireEvent.change(slider, { target: { value: '20' } })
+    expect(field('Leverage (×)')).toHaveValue(20)
+    expect(onChange.mock.lastCall?.[0]).toMatchObject({ leverage: '10' })
+    fireEvent.pointerUp(slider)
+    dialog = screen.getByRole('dialog', { name: 'Change leverage from 10× to 20×?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Keep % and move the levels' }))
+    expect(onChange.mock.lastCall?.[0]).toMatchObject({ leverage: '20' })
+    expect(onChange.mock.lastCall?.[0].entries[0]!.stops[0]).toMatchObject({ value: '50' })
+    expect(screen.getByText('≈ 195 · a 2.5% price move at 20×')).toBeInTheDocument()
+
+    // Clearing the number field and leaving it keeps the current leverage.
+    await user.clear(field('Leverage (×)'))
+    await user.tab()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(field('Leverage (×)')).toHaveValue(20)
+  })
+
+  it('shows the position size and quantity the margin buys at the leverage', async () => {
+    const { user } = renderEditor(1)
+    await user.type(screen.getByRole('spinbutton', { name: /Whole-position margin/ }), '250')
+    expect(screen.getByTestId('size-readout')).toHaveTextContent('Position 250 quote unitsat 1× · price an entry for the quantity')
+    await user.click(screen.getByRole('button', { name: '5×' }))
+    await user.type(field('Entry 1 planned entry price (quote units)'), '2500')
+    expect(screen.getByTestId('size-readout')).toHaveTextContent('Position 1,250 quote units≈ 0.5 unitsat 5×')
+  })
+
   it('shows allocated quantity shares and splits them equally only on request', async () => {
     const { user, onChange } = renderEditor(1)
     expect(screen.getByRole('heading', { name: 'Distribute your entries 01' })).toBeInTheDocument()
