@@ -6,7 +6,7 @@ public enum OrderLinkState { Linked, Suggested, Dismissed }
 public enum OrderLinkSource { Automatic, Owner }
 
 /// <summary>
-/// Ties a venue order to one level of a Play: an entry, its stop, one of its targets, or an unplanned exit.
+/// Ties a venue order to one level of a Play: an entry, one of its stops or targets, or an unplanned exit.
 /// Fills reach a Play only through linked orders.
 /// </summary>
 public sealed class PlayOrderLink
@@ -19,20 +19,20 @@ public sealed class PlayOrderLink
     public OrderLinkRole Role { get; private set; }
     /// <summary>Plan entry ID; null for an unplanned exit.</summary>
     public string? EntryId { get; private set; }
-    /// <summary>Target ID for target links; null otherwise.</summary>
-    public string? TargetId { get; private set; }
+    /// <summary>Stop or target ID within the entry for stop and target links; null for entries and exits.</summary>
+    public string? LevelId { get; private set; }
     public OrderLinkState State { get; private set; }
     public OrderLinkSource Source { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
     private PlayOrderLink() { }
 
-    public PlayOrderLink(Play play, string orderId, OrderLinkRole role, string? entryId, string? targetId,
+    public PlayOrderLink(Play play, string orderId, OrderLinkRole role, string? entryId, string? levelId,
         OrderLinkState state, OrderLinkSource source, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(play);
         ArgumentException.ThrowIfNullOrWhiteSpace(orderId);
-        if ((role == OrderLinkRole.Exit) != (entryId is null) || (role == OrderLinkRole.Target) != (targetId is not null))
+        if ((role == OrderLinkRole.Exit) != (entryId is null) || (role is OrderLinkRole.Stop or OrderLinkRole.Target) != (levelId is not null))
             throw new ArgumentException("The level does not fit the link role.");
         Id = Guid.NewGuid();
         OwnerId = play.OwnerId;
@@ -41,7 +41,7 @@ public sealed class PlayOrderLink
         OrderId = orderId;
         Role = role;
         EntryId = entryId;
-        TargetId = targetId;
+        LevelId = levelId;
         State = state;
         Source = source;
         CreatedAtUtc = now;
@@ -49,13 +49,13 @@ public sealed class PlayOrderLink
     }
 
     /// <summary>Identifies the level within the Play, e.g. <c>target|entry-1|t-2</c>.</summary>
-    public string LevelKey => Key(Role, EntryId, TargetId);
+    public string LevelKey => Key(Role, EntryId, LevelId);
 
-    public static string Key(OrderLinkRole role, string? entryId, string? targetId) => role switch
+    public static string Key(OrderLinkRole role, string? entryId, string? levelId) => role switch
     {
         OrderLinkRole.Exit => "exit",
-        OrderLinkRole.Target => $"target|{entryId}|{targetId}",
-        _ => $"{role.ToString().ToLowerInvariant()}|{entryId}"
+        OrderLinkRole.Entry => $"entry|{entryId}",
+        _ => $"{role.ToString().ToLowerInvariant()}|{entryId}|{levelId}"
     };
 
     /// <summary>A suggestion that became the only candidate, e.g. after the owner declined the others.</summary>

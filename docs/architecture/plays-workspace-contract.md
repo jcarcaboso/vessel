@@ -19,7 +19,7 @@ October 1, 2026. The owner merged PR #1 and authorized the Plays page, delegated
 
 Drafts exist in React memory only. Navigation within the shell retains the draft; reload or disconnect discards it. Explain this on the page. Do not offer a Play save, publish, execution or lifecycle action. Saving a budget override changes only the local draft.
 
-Financial calculations remain deferred. Display chosen sizing and leverage without claiming calculated margin, notional exposure, average entry, reward-to-risk, stop loss or target profit. Instrument labels do not establish validated quote/base units; the editor labels prices as quote units and sizing as currency or instrument units. Account context and an explicit budget override use nominal USD separately. Price and entry-relative percentage inputs are distinct local representations. Switching units clears the value rather than inventing a conversion.
+Financial calculations remain deferred. Display chosen sizing and leverage without claiming calculated margin, notional exposure, average entry, reward-to-risk, stop loss or target profit. Instrument labels do not establish validated quote/base units; the editor labels prices as quote units and sizing as currency or instrument units. Account context and an explicit budget override use nominal USD separately. Price and percentage inputs are distinct local representations; a percentage is the return on margin at the play's leverage (see the October 3 refinements below). Switching units clears the value rather than inventing a conversion.
 
 No Play API, database migration, strategy-version editor, media upload, import allocation, monitoring, notification or chart dependency is added. Existing imported executions remain unassigned. The UI does not enforce a unique account/instrument combination or claim that a local draft is a saved Play.
 
@@ -67,7 +67,7 @@ The numbers above illustrate the shape, not current venue limits. Manual account
 
 Hyperliquid choices come from a metadata-only read of the primary perpetual DEX. Preserve exact contract IDs and exclude delisted contracts from selectable choices without changing historical-fill recognition. The UI loads when an enabled Hyperliquid account is selected, cancels stale reads, offers retry, and clearly labels an explicit manual fallback when unavailable. Account changes clear the prior instrument and local budget rather than carry a venue contract into another account.
 
-The displayed catalogue does not validate a complete order or position, price/base/quote units, margin tiers or trading eligibility. Keep sizing/payoff calculations deferred. Leverage controls use whole multipliers; the draft range remains 1× to 100× rather than silently resizing the user's chosen position from metadata.
+The displayed catalogue does not validate a complete order or position, price/base/quote units, margin tiers or trading eligibility. Keep sizing/payoff calculations deferred. Leverage controls use whole multipliers. With a venue contract the range is that contract's catalogue maximum; choosing a contract with a lower maximum lowers the plan's leverage to it, and a saved plan above it is flagged. Without one, the range is 1× to 100×. Size is never resized from metadata.
 
 Follow-up worker scopes:
 
@@ -119,3 +119,11 @@ October 1, 2026. Review of PR #2 against the approved Graphite prototype, using 
 - Frontend fix: when a successful reload disables or deletes the draft's account, the draft clears account, instrument and budget like an explicit account change. Previously a venue contract stayed in the draft and was shown as a manual label. Loading and failed reloads keep the last known list, so a transient error does not clear the draft. A regression test covers both disable and removal.
 - The summary gains the prototype's intro column: entry count, Long/Short in direction colour, instrument and leverage. "Not calculated", "Not chosen" and "Unavailable" values are muted so real figures carry the weight. Entry headers show the planned entry price once entered. Context status reads "Draft" instead of repeating the heading's "Local draft". The shell footer uses singular/plural account wording.
 - `pnpm check` passes 172 frontend, 387 backend and 76 prototype cases; 40 PostgreSQL cases skip without a test connection. No page or element overflow at 1402–320 pixels; columns remain aligned at 940 pixels.
+
+## October 3 refinements
+
+After PRs #5 and #6 merged, the owner asked for several stop losses, percentages that follow the leverage, more chart tools, venue leverage limits and instrument search.
+
+- **Several stops**: each entry has a list of stops like its list of targets. Each stop and target has its own unit and a share of the entry it closes. A new entry starts with one blank stop and one blank target at 100%. The `MultipleStops` migration turns each stored single stop (plans and plan revisions) into a one-item list at 100% and names the stop on existing stop order links.
+- **Percentages**: a stop or target in % is the return on margin at the play's leverage. The price moves % ÷ leverage from the entry, on the side the direction gives: at 10×, a 20% stop on a 2711.3 long sits at 2657.1. The editor shows that price and the price move under each % field. Changing leverage moves % levels; the order matcher resolves them the same way. Stored values are not converted: existing % levels are now read at the plan's leverage.
+- **Instruments**: the catalogue reports a quote asset per contract (`quoteAsset`, USDC for Hyperliquid primary perps). Venue contracts show as pairs (BTC/USDC) in the picker, the fixed instrument field, the venue link and the plays list; the stored contract ID is unchanged. The picker is a searchable combobox: type to filter (exact, then prefix, then contains, keeping the venue's order), arrow keys and Enter to choose, Escape to keep the current choice.

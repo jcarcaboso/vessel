@@ -1,13 +1,14 @@
 import type { ChartDrawing } from '@/components/chart/drawings'
 import type { ImageMarkup } from './markup'
 
-export interface DraftLevel {
+/**
+ * A stop or target. A percent value is the return on margin at the play's leverage, so the price
+ * moves value ÷ leverage percent from the entry. Share is the part of the entry it closes.
+ */
+export interface DraftExit {
   id: string
   unit: 'price' | 'percent'
   value: string
-}
-
-export interface DraftTarget extends DraftLevel {
   share: string
 }
 
@@ -17,8 +18,8 @@ export interface DraftEntry {
   color: string
   share: string
   price: string
-  stop: DraftLevel
-  targets: DraftTarget[]
+  stops: DraftExit[]
+  targets: DraftExit[]
 }
 
 export interface PlayDraft {
@@ -65,7 +66,7 @@ const localId = () => `d${Date.now().toString(36)}${Math.random().toString(36).s
 
 export const createEvidenceId = localId
 
-export function createTarget(share = ''): DraftTarget {
+export function createExit(share = ''): DraftExit {
   return { id: localId(), unit: 'price', value: '', share }
 }
 
@@ -73,8 +74,8 @@ export function createEntry(index: number): DraftEntry {
   return {
     id: localId(), name: `Entry ${index + 1}`, color: entryColors[index % entryColors.length]!,
     share: index === 0 ? '100' : '', price: '',
-    stop: { id: localId(), unit: 'price', value: '' },
-    targets: [createTarget('100')],
+    stops: [createExit('100')],
+    targets: [createExit('100')],
   }
 }
 

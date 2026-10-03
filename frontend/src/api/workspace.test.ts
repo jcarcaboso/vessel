@@ -163,7 +163,7 @@ describe('Core workspace API', () => {
 describe('Instrument catalogue requests', () => {
   const catalogue = {
     venueId: 'hyperliquid', marketScope: 'perpetuals', scope: 'primary-perpetual-dex',
-    instruments: [{ contractId: '1000PEPE', quantityDecimals: 0, maxLeverage: 10 }], notice: 'Primary perpetual DEX only.',
+    instruments: [{ contractId: '1000PEPE', quantityDecimals: 0, maxLeverage: 10, quoteAsset: 'USDC' }], notice: 'Primary perpetual DEX only.',
   }
   it('uses the authenticated metadata route with cancellation and preserves exact contract IDs', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(catalogue))))
@@ -176,10 +176,10 @@ describe('Instrument catalogue requests', () => {
   })
   it.each([
     { ...catalogue, marketScope: 'spot' },
-    { ...catalogue, instruments: [{ contractId: 'BTC', quantityDecimals: -1, maxLeverage: 10 }] },
-    { ...catalogue, instruments: [{ contractId: 'BTC', quantityDecimals: 2, maxLeverage: 1.5 }] },
+    { ...catalogue, instruments: [{ contractId: 'BTC', quantityDecimals: -1, maxLeverage: 10, quoteAsset: 'USDC' }] },
+    { ...catalogue, instruments: [{ contractId: 'BTC', quantityDecimals: 2, maxLeverage: 1.5, quoteAsset: 'USDC' }] },
     { ...catalogue, instruments: [catalogue.instruments[0], catalogue.instruments[0]] },
-    { ...catalogue, instruments: [{ contractId: ' BTC ', quantityDecimals: 2, maxLeverage: 10 }] },
+    { ...catalogue, instruments: [{ contractId: ' BTC ', quantityDecimals: 2, maxLeverage: 10, quoteAsset: 'USDC' }] },
     { ...catalogue, scope: 'manual' },
   ])('rejects malformed or unsupported catalogue data', async body => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))))

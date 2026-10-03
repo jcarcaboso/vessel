@@ -239,3 +239,14 @@ The owner asked to draw over evidence images and keep the marked version, with a
 - Server: `play_evidence.Markup` (`jsonb`, migration `EvidenceMarkup`). `PUT /api/evidence/{id}/markup` replaces and `DELETE /api/evidence/{id}/markup` clears; upload accepts an optional `markup` JSON field. `EvidenceMarkup.Normalize` validates dimensions (≤ 20000 px), shape count (≤ 200), unique IDs, `#rrggbb` colours, points inside the image (≤ 2000 per stroke), stroke width, text size and text (1–280 characters, no control characters), and stores only the fields each kind uses. Evidence DTOs include `markup`.
 
 Verified: backend 557 tests with real PostgreSQL (including the `jsonb` round trip); frontend 279 tests; headless Chromium drawing every tool on a real capture, moving and recolouring, Marked/Original toggle, flattened download, and the editor at 390 px without overflow. Found and fixed in the browser: the text box closed immediately because mouse-down moved focus. PR review, October 2: the viewer's marks layer was sized from the SVG's natural size rather than the shown image, so marks drifted in the Marked view; it is now laid over the image without adding size (verified equal rects in Chromium). Mark IDs combine time and randomness so marks added later cannot collide with saved markup, the markup toolbar drops its dividers when it wraps on narrow screens, and removal confirmation focuses Cancel.
+
+## Play fixes, October 3
+
+After PRs #5 and #6 merged, the owner reported issues from the LAN build and asked for more tools.
+
+- **Plan tools**: a group in the tool rail sets the selected entry's price, adds a stop and adds a target by clicking the chart (one click per use, magnet applies, Esc cancels). A stop or target fills the first blank one of its kind, otherwise it is added in price units; the first of its kind closes 100% of the entry. Adapter: `setPricePicker(active)` and `onPricePick(price)`. Plan tools and the in-chart editor are hidden for read-only plays.
+- **Several stops on the chart**: tags read `SL1`, `SL2` when an entry has several stops. The in-chart editor edits a stop's share and can add or remove stops and targets.
+- **Leverage**: % levels plot, drag and edit as returns at the play's leverage (see the plays workspace contract).
+- **One entry**: the Aggregate/selected menu and the entry legend appear only with several entries, and a single entry's tags drop the `E1` prefix (`Entry`, `SL`, `TP1`).
+- **Drawing tools**: vertical line (moves in time only, date label), date range (bars and duration) and price range (change and %), alongside the earlier set. Measurements are display-only.
+- **Captures**: capture worked in headless Chromium on the LAN build; the image goes to the journal's Evidence tab. A failing or throwing capture now reports an error (for example when browser privacy protection blocks canvas export) instead of leaving the button stuck, and success offers **Show** to scroll to the Evidence tab.

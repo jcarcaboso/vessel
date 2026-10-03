@@ -3,7 +3,7 @@ import type { ChartCandle } from './types'
 /** Version of the persisted drawing shape. Bump and migrate when fields change. */
 export const drawingSchemaVersion = 1
 
-export type DrawingKind = 'trend-line' | 'horizontal-line' | 'zone' | 'fibonacci' | 'position' | 'text'
+export type DrawingKind = 'trend-line' | 'horizontal-line' | 'vertical-line' | 'zone' | 'date-range' | 'price-range' | 'fibonacci' | 'position' | 'text'
 
 /** Anchors are UTC milliseconds and prices, never pixels or bar indexes, so they survive zoom and timeframe changes. */
 export interface DrawingPoint {
@@ -29,7 +29,7 @@ export interface ChartDrawing {
   schemaVersion: typeof drawingSchemaVersion
   kind: DrawingKind
   /**
-   * trend-line, zone, fibonacci: [start, end]. horizontal-line, text: [anchor].
+   * trend-line, zone, date-range, price-range, fibonacci: [start, end]. horizontal-line, vertical-line, text: [anchor].
    * position: [entry, target corner, stop corner]; the corners share the box's end time.
    */
   points: DrawingPoint[]
@@ -40,7 +40,24 @@ export interface ChartDrawing {
 }
 
 export const pointCount: Record<DrawingKind, 1 | 2> = {
-  'trend-line': 2, 'horizontal-line': 1, zone: 2, fibonacci: 2, position: 2, text: 1,
+  'trend-line': 2, 'horizontal-line': 1, 'vertical-line': 1, zone: 2, 'date-range': 2, 'price-range': 2, fibonacci: 2, position: 2, text: 1,
+}
+
+/** Display-only change between the two anchors of a price range. */
+export function priceRangeStats(start: DrawingPoint, end: DrawingPoint) {
+  const change = end.price - start.price
+  return { change, percent: change / start.price * 100 }
+}
+
+/** Compact duration such as "3d 4h", "2h 15m" or "45m" for date ranges. */
+export function formatDuration(milliseconds: number) {
+  const minutes = Math.round(Math.abs(milliseconds) / 60_000)
+  const days = Math.floor(minutes / 1440)
+  const hours = Math.floor(minutes % 1440 / 60)
+  const rest = minutes % 60
+  if (days) return hours ? `${days}d ${hours}h` : `${days}d`
+  if (hours) return rest ? `${hours}h ${rest}m` : `${hours}h`
+  return `${rest}m`
 }
 
 export const fibonacciLevels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] as const

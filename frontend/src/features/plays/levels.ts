@@ -1,18 +1,19 @@
 import type { PriceOverlay } from '@/components/chart/types'
-import { createTarget, type DraftEntry, type DraftLevel, type PlayDraft } from './draft'
+import { createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
 
 export type ChartView = 'aggregate' | 'selected'
-type LevelRef = { entryId: string; kind: 'entry' } | { entryId: string; kind: 'stop' } | { entryId: string; kind: 'target'; targetId: string }
+export type ExitKind = 'stop' | 'target'
+export type LevelRef = { entryId: string; kind: 'entry' } | { entryId: string; kind: ExitKind; levelId: string }
 
 const separator = '|'
-const overlayId = (ref: LevelRef) => ref.kind === 'target'
-  ? [ref.entryId, ref.kind, ref.targetId].join(separator) : [ref.entryId, ref.kind].join(separator)
+export const overlayId = (ref: LevelRef) => ref.kind === 'entry'
+  ? [ref.entryId, ref.kind].join(separator) : [ref.entryId, ref.kind, ref.levelId].join(separator)
 
 export function parseOverlayId(id: string): LevelRef | null {
-  const [entryId, kind, targetId] = id.split(separator)
+  const [entryId, kind, levelId] = id.split(separator)
   if (!entryId) return null
-  if (kind === 'entry' || kind === 'stop') return { entryId, kind }
-  if (kind === 'target' && targetId) return { entryId, kind, targetId }
+  if (kind === 'entry') return { entryId, kind }
+  if ((kind === 'stop' || kind === 'target') && levelId) return { entryId, kind, levelId }
   return null
 }
 
@@ -22,18 +23,35 @@ const positive = (value: string) => {
   return number !== null && number > 0 ? number : null
 }
 
+/** The play's whole-number leverage, or 1 while it is blank or invalid. */
+export function leverageOf(leverage: string) {
+  const value = Number(leverage)
+  return Number.isInteger(value) && value >= 1 ? value : 1
+}
+
+export const exitsOf = (entry: DraftEntry, kind: ExitKind) => kind === 'stop' ? entry.stops : entry.targets
+const withExits = (entry: DraftEntry, kind: ExitKind, exits: DraftExit[]): DraftEntry =>
+  kind === 'stop' ? { ...entry, stops: exits } : { ...entry, targets: exits }
+
+/** True when a target sits above the entry: long targets and short stops. */
+const above = (kind: ExitKind, direction: PlayDraft['direction']) => (kind === 'target') === (direction === 'long')
+
 /**
- * Plotting position of a stop or target. Percentages are unsigned distances from the entry, so
- * the side follows the direction. This is display placement, not a profit or risk calculation.
+ * Plotting position of a stop or target. A percentage is the unsigned return on margin at the
+ * play's leverage, so the price moves percent ÷ leverage from the entry, on the side the direction
+ * gives. This is display placement, not a profit or risk calculation.
  */
-export function levelPrice(entryPrice: number | null, level: DraftLevel, kind: 'stop' | 'target', direction: PlayDraft['direction']) {
+export function levelPrice(entryPrice: number | null, level: DraftExit, kind: ExitKind, direction: PlayDraft['direction'], leverage = 1) {
   if (level.unit === 'price') return positive(level.value)
-  const distance = unsigned(level.value)
-  if (entryPrice === null || distance === null) return null
-  const above = (kind === 'target') === (direction === 'long')
-  const price = entryPrice * (1 + (above ? distance : -distance) / 100)
+  const percent = unsigned(level.value)
+  if (entryPrice === null || percent === null) return null
+  const distance = percent / Math.max(1, leverage)
+  const price = entryPrice * (1 + (above(kind, direction) ? distance : -distance) / 100)
   return price > 0 ? price : null
 }
+
+/** Price move from the entry, in percent, that a percent level stands for at this leverage. */
+export const priceMovePercent = (percent: number, leverage: number) => percent / Math.max(1, leverage)
 
 // Stops and targets share risk colors across entries; the tag accent identifies the entry.
 const stopColor = 'var(--negative)'
@@ -57,25 +75,33 @@ export function averageEntryPrice(entries: readonly DraftEntry[], minimum = 2) {
   return weighted.reduce((sum, item) => sum + item.price * item.share, 0) / total
 }
 
-export function planOverlays(entries: readonly DraftEntry[], selectedId: string, view: ChartView, direction: PlayDraft['direction']): PriceOverlay[] {
+/** Short chart tag of a level, e.g. "E2 SL1". A single entry drops the entry prefix. */
+export function levelTag(entries: readonly DraftEntry[], ref: LevelRef) {
+  const index = entries.findIndex(entry => entry.id === ref.entryId)
+  const entry = entries[index]
+  const prefix = entries.length > 1 ? `E${index + 1}` : ''
+  if (ref.kind === 'entry' || !entry) return prefix || 'Entry'
+  const exits = exitsOf(entry, ref.kind)
+  const position = exits.findIndex(exit => exit.id === ref.levelId)
+  const name = `${ref.kind === 'stop' ? 'SL' : 'TP'}${exits.length > 1 || ref.kind === 'target' ? position + 1 : ''}`
+  return prefix ? `${prefix} ${name}` : name
+}
+
+export function planOverlays(entries: readonly DraftEntry[], selectedId: string, view: ChartView, direction: PlayDraft['direction'], leverage = 1): PriceOverlay[] {
   const overlays: PriceOverlay[] = []
-  entries.forEach((entry, index) => {
+  entries.forEach(entry => {
     const selected = entry.id === selectedId
     if (view === 'selected' && !selected) return
     // Every planned level can be dragged; dragging another entry's level selects that entry.
     const base = { color: entry.color, accent: entry.color, emphasis: selected ? 'selected' as const : 'normal' as const, draggable: true }
-    const tag = `E${index + 1}`
     const entryPrice = positive(entry.price)
-    if (entryPrice !== null) overlays.push({ ...base, id: overlayId({ entryId: entry.id, kind: 'entry' }), label: tag, price: entryPrice, kind: 'entry' })
-    const stop = levelPrice(entryPrice, entry.stop, 'stop', direction)
-    if (stop !== null) overlays.push({ ...base, id: overlayId({ entryId: entry.id, kind: 'stop' }), label: `${tag} SL`, price: stop, kind: 'stop', color: stopColor })
-    entry.targets.forEach((target, targetIndex) => {
-      const price = levelPrice(entryPrice, target, 'target', direction)
-      if (price !== null) overlays.push({
-        ...base, id: overlayId({ entryId: entry.id, kind: 'target', targetId: target.id }),
-        label: `${tag} TP${targetIndex + 1}`, price, kind: 'target', color: targetColor,
-      })
-    })
+    const entryRef = { entryId: entry.id, kind: 'entry' } as const
+    if (entryPrice !== null) overlays.push({ ...base, id: overlayId(entryRef), label: levelTag(entries, entryRef), price: entryPrice, kind: 'entry' })
+    for (const kind of ['stop', 'target'] as const) for (const exit of exitsOf(entry, kind)) {
+      const price = levelPrice(entryPrice, exit, kind, direction, leverage)
+      const ref = { entryId: entry.id, kind, levelId: exit.id }
+      if (price !== null) overlays.push({ ...base, id: overlayId(ref), label: levelTag(entries, ref), price, kind, color: kind === 'stop' ? stopColor : targetColor })
+    }
   })
   const average = view === 'aggregate' ? averageEntryPrice(entries) : null
   if (average !== null) overlays.push({
@@ -95,22 +121,20 @@ export function formatDraggedPrice(price: number) {
 const formatPercent = (percent: number) => trim(percent.toFixed(2))
 
 /** Writes a dragged price back in the level's own unit. Percent levels cannot cross the entry. */
-export function applyLevelDrag(entries: readonly DraftEntry[], id: string, price: number, direction: PlayDraft['direction']): DraftEntry[] {
+export function applyLevelDrag(entries: readonly DraftEntry[], id: string, price: number, direction: PlayDraft['direction'], leverage = 1): DraftEntry[] {
   const ref = parseOverlayId(id)
   if (!ref || !Number.isFinite(price) || price <= 0) return [...entries]
   return entries.map(entry => {
     if (entry.id !== ref.entryId) return entry
     if (ref.kind === 'entry') return { ...entry, price: formatDraggedPrice(price) }
     const entryPrice = positive(entry.price)
-    const move = <T extends DraftLevel>(level: T, kind: 'stop' | 'target'): T => {
+    const move = (level: DraftExit): DraftExit => {
       if (level.unit === 'price') return { ...level, value: formatDraggedPrice(price) }
       if (entryPrice === null) return level
-      const above = (kind === 'target') === (direction === 'long')
-      const distance = (above ? price - entryPrice : entryPrice - price) / entryPrice * 100
-      return { ...level, value: formatPercent(Math.max(0, distance)) }
+      const distance = (above(ref.kind, direction) ? price - entryPrice : entryPrice - price) / entryPrice * 100
+      return { ...level, value: formatPercent(Math.max(0, distance) * Math.max(1, leverage)) }
     }
-    if (ref.kind === 'stop') return { ...entry, stop: move(entry.stop, 'stop') }
-    return { ...entry, targets: entry.targets.map(target => target.id === ref.targetId ? move(target, 'target') : target) }
+    return withExits(entry, ref.kind, exitsOf(entry, ref.kind).map(exit => exit.id === ref.levelId ? move(exit) : exit))
   })
 }
 
@@ -118,43 +142,52 @@ export function applyLevelDrag(entries: readonly DraftEntry[], id: string, price
 const addedLevelDistance = 0.02
 
 /** Plotted price of one level, or null when it is blank or invalid. */
-export function overlayPrice(entry: DraftEntry, id: string, direction: PlayDraft['direction']) {
+export function overlayPrice(entry: DraftEntry, id: string, direction: PlayDraft['direction'], leverage = 1) {
   const ref = parseOverlayId(id)
   if (!ref || ref.entryId !== entry.id) return null
   const entryPrice = positive(entry.price)
   if (ref.kind === 'entry') return entryPrice
-  if (ref.kind === 'stop') return levelPrice(entryPrice, entry.stop, 'stop', direction)
-  const target = entry.targets.find(current => current.id === ref.targetId)
-  return target ? levelPrice(entryPrice, target, 'target', direction) : null
+  const exit = exitsOf(entry, ref.kind).find(current => current.id === ref.levelId)
+  return exit ? levelPrice(entryPrice, exit, ref.kind, direction, leverage) : null
 }
 
-/** Adds a price target beyond the entry in the trade's direction, or null without an entry price. */
-export function addChartTarget(entry: DraftEntry, direction: PlayDraft['direction']): DraftEntry | null {
+/**
+ * Puts a stop or target at `price`: fills the first blank one of that kind, or adds another. A new
+ * level is in price units; the first one of its kind closes the whole entry.
+ */
+export function placeExit(entry: DraftEntry, kind: ExitKind, price: number): DraftEntry {
+  const exits = exitsOf(entry, kind)
+  const value = formatDraggedPrice(price)
+  const blank = exits.find(exit => exit.value.trim() === '')
+  if (blank) return withExits(entry, kind, exits.map(exit => exit.id === blank.id ? { ...exit, unit: 'price', value } : exit))
+  return withExits(entry, kind, [...exits, { ...createExit(exits.length ? '' : '100'), value }])
+}
+
+/** Sets an entry price, or a stop or target as `placeExit` does, from a price picked on the chart. */
+export function placeLevel(entry: DraftEntry, kind: 'entry' | ExitKind, price: number): DraftEntry {
+  if (!Number.isFinite(price) || price <= 0) return entry
+  return kind === 'entry' ? { ...entry, price: formatDraggedPrice(price) } : placeExit(entry, kind, price)
+}
+
+/** Adds a stop or target a step beyond the last one, or null without an entry price. */
+export function addChartExit(entry: DraftEntry, kind: ExitKind, direction: PlayDraft['direction'], leverage = 1): DraftEntry | null {
   const entryPrice = positive(entry.price)
   if (entryPrice === null) return null
-  const price = entryPrice * (1 + (direction === 'long' ? 1 : -1) * addedLevelDistance * (entry.targets.length + 1))
-  return { ...entry, targets: [...entry.targets, { ...createTarget(), value: formatDraggedPrice(price) }] }
+  const plotted = exitsOf(entry, kind).filter(exit => levelPrice(entryPrice, exit, kind, direction, leverage) !== null).length
+  const sign = above(kind, direction) ? 1 : -1
+  return placeExit(entry, kind, entryPrice * (1 + sign * addedLevelDistance * (plotted + 1)))
 }
 
-/** Sets a price stop on the risk side of the entry when the entry has none plotted. */
-export function addChartStop(entry: DraftEntry, direction: PlayDraft['direction']): DraftEntry | null {
-  const entryPrice = positive(entry.price)
-  if (entryPrice === null) return null
-  const price = entryPrice * (1 - (direction === 'long' ? 1 : -1) * addedLevelDistance)
-  return { ...entry, stop: { ...entry.stop, unit: 'price', value: formatDraggedPrice(price) } }
+export function removeExit(entry: DraftEntry, kind: ExitKind, id: string): DraftEntry {
+  return withExits(entry, kind, exitsOf(entry, kind).filter(exit => exit.id !== id))
 }
 
-export function removeTarget(entry: DraftEntry, targetId: string): DraftEntry {
-  return { ...entry, targets: entry.targets.filter(target => target.id !== targetId) }
-}
-
-export function setTargetShare(entry: DraftEntry, targetId: string, share: string): DraftEntry {
-  return { ...entry, targets: entry.targets.map(target => target.id === targetId ? { ...target, share } : target) }
+export function setExitShare(entry: DraftEntry, kind: ExitKind, id: string, share: string): DraftEntry {
+  return withExits(entry, kind, exitsOf(entry, kind).map(exit => exit.id === id ? { ...exit, share } : exit))
 }
 
 const scalarFields = ['name', 'price', 'share'] as const
-const levelFields = ['unit', 'value'] as const
-const targetFields = ['unit', 'value', 'share'] as const
+const exitFields = ['unit', 'value', 'share'] as const
 
 /** Copies only the sub-fields that changed between `from` and `to` onto `current`. */
 function patchFields<T extends object, K extends keyof T>(current: T, from: T, to: T, fields: readonly K[]): T {
@@ -163,29 +196,34 @@ function patchFields<T extends object, K extends keyof T>(current: T, from: T, t
   return next
 }
 
+/** Patches one list of stops or targets by ID: changed sub-fields, additions and removals. */
+function patchExits(current: DraftExit[], from: DraftExit[], to: DraftExit[]) {
+  const before = new Map(from.map(exit => [exit.id, exit]))
+  const after = new Map(to.map(exit => [exit.id, exit]))
+  let exits = current
+    .filter(exit => !(before.has(exit.id) && !after.has(exit.id)))
+    .map(exit => {
+      const was = before.get(exit.id)
+      const now = after.get(exit.id)
+      return was && now ? patchFields(exit, was, now, exitFields) : exit
+    })
+  to.forEach((exit, index) => {
+    if (before.has(exit.id) || exits.some(existing => existing.id === exit.id)) return
+    exits = [...exits.slice(0, index), exit, ...exits.slice(index)]
+  })
+  const unchanged = exits.length === current.length && exits.every((exit, index) => exit === current[index])
+  return unchanged ? current : exits
+}
+
 /**
  * Applies one recorded edit (`from` → `to`) to the current entry, touching only what the edit
- * changed: scalar fields, stop sub-fields, and targets by ID (changed sub-fields, additions and
- * removals). Later edits to other fields or other targets, e.g. in the side editor, are preserved.
+ * changed: scalar fields, and stops and targets by ID (changed sub-fields, additions and removals).
+ * Later edits to other fields or other levels, e.g. in the side editor, are preserved.
  */
 export function applyEntryEdit(current: DraftEntry, from: DraftEntry, to: DraftEntry): DraftEntry {
   let next = patchFields(current, from, to, scalarFields)
-  const stop = patchFields(current.stop, from.stop, to.stop, levelFields)
-  if (stop !== current.stop) next = { ...next, stop }
-
-  const before = new Map(from.targets.map(target => [target.id, target]))
-  const after = new Map(to.targets.map(target => [target.id, target]))
-  let targets = current.targets
-    .filter(target => !(before.has(target.id) && !after.has(target.id)))
-    .map(target => {
-      const was = before.get(target.id)
-      const now = after.get(target.id)
-      return was && now ? patchFields(target, was, now, targetFields) : target
-    })
-  to.targets.forEach((target, index) => {
-    if (before.has(target.id) || targets.some(existing => existing.id === target.id)) return
-    targets = [...targets.slice(0, index), target, ...targets.slice(index)]
-  })
-  const unchanged = targets.length === current.targets.length && targets.every((target, index) => target === current.targets[index])
-  return unchanged ? next : { ...next, targets }
+  const stops = patchExits(current.stops, from.stops, to.stops)
+  if (stops !== current.stops) next = { ...next, stops }
+  const targets = patchExits(current.targets, from.targets, to.targets)
+  return targets === current.targets ? next : { ...next, targets }
 }

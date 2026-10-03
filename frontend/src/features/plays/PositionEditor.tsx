@@ -4,9 +4,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input'
 import { createEntry, type DraftEntry, type PlayDraft } from './draft'
 import { EntryForm } from './EntryForm'
+import { leverageOf } from './levels'
 import { Expand, Plus, Trash2 } from 'lucide-react'
 
-const leveragePresets = [1, 5, 10, 25]
+const leveragePresets = [1, 5, 10, 25, 50]
+/** Control range when the venue maximum is unknown, e.g. manual instruments. Saved plans accept up to 100×. */
+const defaultMaxLeverage = 100
 
 // Plain share bookkeeping, not a sizing calculation. Two decimals with the remainder on the last entry.
 function equalShares(count: number) {
@@ -22,13 +25,19 @@ function allocatedShare(entries: DraftEntry[]) {
 }
 import { AvailableBudget } from './WorkspacePanels'
 
-export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect }: {
+export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, instrumentName = '' }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
   selectedId: string
   selectionRequest?: number
   onSelect: (id: string) => void
+  /** Venue maximum for the chosen contract, or null when unknown. */
+  maxLeverage?: number | null
+  instrumentName?: string
 }) {
+  const leverageLimit = maxLeverage ?? defaultMaxLeverage
+  const leverage = leverageOf(draft.leverage)
+  const presets = leveragePresets.filter(preset => preset < leverageLimit).concat(leverageLimit)
   const prefix = useId()
   const [expanded, setExpanded] = useState(false)
   const sidebar = useRef<HTMLDivElement>(null)
@@ -64,7 +73,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   }
 
   function updateLeverage(value: string) {
-    const leverage = value === '' ? '' : String(Math.min(100, Math.max(1, Math.round(Number(value)))))
+    const leverage = value === '' ? '' : String(Math.min(leverageLimit, Math.max(1, Math.round(Number(value)))))
     onChange({ ...draft, leverage })
   }
 
@@ -112,22 +121,23 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
         </label>
       </div>
       <div className="leverage-controls">
-        <label htmlFor={`${prefix}-leverage-slider`}>Leverage <small>1× = unlevered</small></label>
+        <label htmlFor={`${prefix}-leverage-slider`}>Leverage <small>{maxLeverage ? `1× to ${maxLeverage}× on ${instrumentName || 'this contract'}` : '1× = unlevered'}</small></label>
         <div className="leverage-input-row">
-          <input id={`${prefix}-leverage-slider`} type="range" min={1} max={100} step={1} value={draft.leverage || '1'}
-            style={{ '--range-progress': `${(Number(draft.leverage || '1') - 1) / 99 * 100}%` } as CSSProperties}
+          <input id={`${prefix}-leverage-slider`} type="range" min={1} max={leverageLimit} step={1} value={Math.min(leverage, leverageLimit)}
+            style={{ '--range-progress': `${leverageLimit > 1 ? (Math.min(leverage, leverageLimit) - 1) / (leverageLimit - 1) * 100 : 100}%` } as CSSProperties}
             aria-label="Leverage slider (×)" aria-valuetext={draft.leverage ? `${draft.leverage} times` : 'Not specified'}
             onChange={event => updateLeverage(event.target.value)} />
-          <Input id={`${prefix}-leverage`} type="number" min={1} max={100} step={1} value={draft.leverage}
+          <Input id={`${prefix}-leverage`} type="number" min={1} max={leverageLimit} step={1} value={draft.leverage}
             aria-label="Leverage (×)" onChange={event => updateLeverage(event.target.value)} />
           <span aria-hidden="true">×</span>
         </div>
         <div className="leverage-presets" role="group" aria-label="Leverage presets">
-          {leveragePresets.map(preset => <button key={preset} type="button" aria-pressed={draft.leverage === String(preset)}
+          {presets.map(preset => <button key={preset} type="button" aria-pressed={draft.leverage === String(preset)}
             onClick={() => updateLeverage(String(preset))}>{preset}×</button>)}
         </div>
       </div>
-      <p className="muted">Sizing and payoff calculations are deferred. Changing sizing units clears size. The 1× to 100× control range is not venue-validated.</p>
+      {leverage > leverageLimit && <p className="leverage-warning" role="alert">{leverage}× is above the {leverageLimit}× venue maximum for {instrumentName || 'this contract'}.</p>}
+      <p className="muted">Sizing and payoff calculations are deferred. Changing sizing units clears size. {maxLeverage ? 'The leverage range is the venue maximum for this contract.' : 'Without a venue contract, the 1× to 100× range is not venue-validated.'} Percentage stops and targets are returns at this leverage.</p>
     </div>
     <div className="entries-heading">
       <div><h3>Distribute your entries <span className="entry-count">{String(draft.entries.length).padStart(2, '0')}</span></h3>
@@ -154,7 +164,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
         </button>
         {expanded && selected?.id === entry.id
           ? <p className="muted expanded-placeholder">Editing in the expanded dialog.</p>
-          : <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} />}
+          : <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} />}
         <div className="entry-actions">
           <Button type="button" variant="ghost" size="sm" className="remove-entry" aria-label={`Remove ${entry.name}`}
             disabled={draft.entries.length <= 1} onClick={() => removeEntry(entry.id)}><Trash2 size={12} aria-hidden="true" />Remove entry</Button>
@@ -188,7 +198,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
               {draft.entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
             </select>
           </label>
-          {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} />}
+          {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} />}
         </DialogContent>
       </Dialog>
     </div>

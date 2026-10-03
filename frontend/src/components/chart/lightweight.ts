@@ -247,6 +247,8 @@ class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   }
 }
 
+const timeLabel = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })
+
 export const createLightweightAdapter: ChartAdapterFactory = (container, callbacks) => {
   const theme = readTheme(container)
   const chart: IChartApi = createChart(container, {
@@ -288,7 +290,14 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       return time === null ? null : { time, price }
     },
     width: () => chart.timeScale().width(),
+    height: () => chart.paneSize().height,
     formatPrice: price => series.priceFormatter().format(price),
+    formatTime: time => timeLabel.format(new Date(time)),
+    bars: (from, to) => {
+      const start = index.logical(from)
+      const end = index.logical(to)
+      return start === null || end === null ? null : end - start
+    },
   }
   const drawingsLayer = new DrawingsPrimitive({
     line: theme.drawing, text: theme.foreground, muted: theme.muted, background: theme.card,
@@ -313,6 +322,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   // Drawings and level drags are handled before the chart sees the pointer, so panning stays off while they move.
   let drag: { id: string; pointerId: number; price: number; moved: boolean } | null = null
   let drawingPointer: number | null = null
+  // While picking, a click on the pane reports its price instead of panning, drawing or dragging.
+  let picking = false
   const pane = (event: PointerEvent) => {
     const rect = container.getBoundingClientRect()
     return { x: event.clientX - rect.left, y: event.clientY - rect.top }
@@ -324,6 +335,12 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     const { x, y } = pane(event)
     if (x > chart.timeScale().width()) return
     container.focus({ preventScroll: true })
+    if (picking) {
+      consume(event)
+      const point = space.point(x, y, drawings.magnet)
+      if (point) callbacks.onPricePick(point.price)
+      return
+    }
     if (!index.empty && drawings.pointerDown(x, y)) {
       consume(event)
       drawingPointer = event.pointerId
@@ -383,7 +400,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     const rect = container.getBoundingClientRect()
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
-    if (x > chart.timeScale().width() || drawings.tool || drawings.drawingAt(x, y)) return
+    if (x > chart.timeScale().width() || picking || drawings.tool || drawings.drawingAt(x, y)) return
     const hit = levels.levelAt(y)
     if (!hit || hit.overlay.kind === 'reference') return
     event.preventDefault()
@@ -427,26 +444,35 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
         lockChart(false)
       }
     },
-    capture(caption) {
-      // Levels and drawings are series primitives, so they are on the screenshot canvas.
-      const shot = chart.takeScreenshot(true, false)
-      const ratio = shot.width / Math.max(1, container.clientWidth)
-      const footer = Math.round(26 * ratio)
-      const canvas = document.createElement('canvas')
-      canvas.width = shot.width
-      canvas.height = shot.height + footer
-      const context = canvas.getContext('2d')
-      if (!context) return Promise.resolve(null)
-      context.drawImage(shot, 0, 0)
-      context.fillStyle = theme.card
-      context.fillRect(0, shot.height, canvas.width, footer)
-      context.fillStyle = theme.border
-      context.fillRect(0, shot.height, canvas.width, Math.max(1, Math.round(ratio)))
-      context.font = `500 ${Math.round(11 * ratio)}px ${theme.font}`
-      context.fillStyle = theme.muted
-      context.textBaseline = 'middle'
-      context.fillText(caption, Math.round(10 * ratio), shot.height + footer / 2)
-      return new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+    setPricePicker(active) {
+      picking = active
+      container.style.cursor = active ? 'crosshair' : ''
+    },
+    async capture(caption) {
+      // Levels and drawings are series primitives, so they are on the screenshot canvas. Browsers with
+      // canvas fingerprinting protection can refuse or blank the export; the caller reports a null result.
+      try {
+        const shot = chart.takeScreenshot(true, false)
+        const ratio = shot.width / Math.max(1, container.clientWidth)
+        const footer = Math.round(26 * ratio)
+        const canvas = document.createElement('canvas')
+        canvas.width = shot.width
+        canvas.height = shot.height + footer
+        const context = canvas.getContext('2d')
+        if (!context || !shot.width || !shot.height) return null
+        context.drawImage(shot, 0, 0)
+        context.fillStyle = theme.card
+        context.fillRect(0, shot.height, canvas.width, footer)
+        context.fillStyle = theme.border
+        context.fillRect(0, shot.height, canvas.width, Math.max(1, Math.round(ratio)))
+        context.font = `500 ${Math.round(11 * ratio)}px ${theme.font}`
+        context.fillStyle = theme.muted
+        context.textBaseline = 'middle'
+        context.fillText(caption, Math.round(10 * ratio), shot.height + footer / 2)
+        return await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+      } catch {
+        return null
+      }
     },
     destroy() {
       container.removeEventListener('dblclick', onDoubleClick)

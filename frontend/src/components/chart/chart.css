@@ -52,6 +52,7 @@
 .chart-stage { display: flex; flex: 1; min-height: 0; }
 .chart-tool-rail { display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; width: 40px; padding: 6px 0; border-right: 1px solid var(--border); overflow-y: auto; scrollbar-width: none; }
 .chart-rail-divider { width: 20px; height: 1px; margin: 4px 0; background: var(--border); }
+.chart-rail-group { display: contents; }
 .chart-stage > .chart-body { flex: 1; min-width: 0; }
 
 @media (max-width: 640px) {

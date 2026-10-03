@@ -1,6 +1,6 @@
 import {
-  distanceToSegment, drawingSchemaVersion, fibonacciLevels, fibonacciPrice, pointCount, positionPoints, positionStats,
-  type ChartDrawing, type DrawingKind, type DrawingPoint,
+  distanceToSegment, drawingSchemaVersion, fibonacciLevels, fibonacciPrice, formatDuration, pointCount, positionPoints, positionStats,
+  priceRangeStats, type ChartDrawing, type DrawingKind, type DrawingPoint,
 } from './drawings'
 
 /** Pane coordinate conversions supplied by the renderer adapter. */
@@ -10,7 +10,11 @@ export interface DrawingSpace {
   /** Inverse conversion; `snap` applies the magnet when enabled. */
   point(x: number, y: number, snap: boolean): DrawingPoint | null
   width(): number
+  height(): number
   formatPrice(price: number): string
+  formatTime(time: number): string
+  /** Bars between two times at the loaded interval, or null without candles. */
+  bars(from: number, to: number): number | null
 }
 
 export interface DrawingCallbacks {
@@ -203,15 +207,16 @@ export class DrawingController {
       const x = this.space.x(point.time)
       const y = this.space.y(point.price)
       if (x === null || y === null) return null
-      const moved = this.space.point(x + (drawing.kind === 'horizontal-line' ? 0 : dx), y + dy, false)
+      const moved = this.space.point(x + (drawing.kind === 'horizontal-line' ? 0 : dx), y + (drawing.kind === 'vertical-line' ? 0 : dy), false)
       if (!moved) return null
-      points.push(drawing.kind === 'horizontal-line' ? { time: point.time, price: moved.price } : moved)
+      points.push(drawing.kind === 'horizontal-line' ? { time: point.time, price: moved.price }
+        : drawing.kind === 'vertical-line' ? { time: moved.time, price: point.price } : moved)
     }
     return { ...drawing, points }
   }
 
   private handles(drawing: ChartDrawing) {
-    if (drawing.kind === 'horizontal-line' || drawing.kind === 'text') return []
+    if (pointCount[drawing.kind] === 1) return []
     return drawing.points.map(point => ({ x: this.space.x(point.time), y: this.space.y(point.price) }))
   }
 
@@ -242,6 +247,7 @@ export class DrawingController {
     switch (drawing.kind) {
       case 'trend-line': return stroke(distanceToSegment(x, y, x0!, y0!, x1!, y1!))
       case 'horizontal-line': return stroke(Math.abs(y - y0!))
+      case 'vertical-line': return stroke(Math.abs(x - x0!))
       case 'text': {
         const width = (drawing.text ?? '').length * textFont * 0.6 + 14
         return area(x >= x0! - 2 && x <= x0! + width && y >= y0! - 20 && y <= y0! + 4)
@@ -295,6 +301,38 @@ export class DrawingController {
         line(context, 0, y0!, width, y0!)
         label(context, theme, this.space.formatPrice(drawing.points[0]!.price), width - 8, y0! - 9, 'right')
         break
+      case 'vertical-line':
+        line(context, x0!, 0, x0!, this.space.height())
+        label(context, theme, this.space.formatTime(drawing.points[0]!.time), x0! + 6, this.space.height() - 12, 'left')
+        break
+      case 'date-range':
+      case 'price-range': {
+        const [start, end] = drawing.points as [DrawingPoint, DrawingPoint]
+        const left = Math.min(x0!, x1!)
+        const top = Math.min(y0!, y1!)
+        context.globalAlpha = 0.12
+        context.fillRect(left, top, Math.abs(x1! - x0!), Math.abs(y1! - y0!))
+        context.globalAlpha = 1
+        let text: string
+        if (drawing.kind === 'date-range') {
+          const middle = (y0! + y1!) / 2
+          line(context, x0!, top, x0!, top + Math.abs(y1! - y0!))
+          line(context, x1!, top, x1!, top + Math.abs(y1! - y0!))
+          arrow(context, x0!, middle, x1!, middle)
+          const bars = this.space.bars(start.time, end.time)
+          text = `${bars === null ? '' : `${Math.round(Math.abs(bars))} bars · `}${formatDuration(end.time - start.time)}`
+        } else {
+          const middle = (x0! + x1!) / 2
+          line(context, left, y0!, left + Math.abs(x1! - x0!), y0!)
+          line(context, left, y1!, left + Math.abs(x1! - x0!), y1!)
+          arrow(context, middle, y0!, middle, y1!)
+          const stats = priceRangeStats(start, end)
+          text = `${stats.change >= 0 ? '+' : '−'}${this.space.formatPrice(Math.abs(stats.change))} (${stats.percent >= 0 ? '+' : '−'}${Math.abs(stats.percent).toFixed(2)}%)`
+        }
+        const below = y1! >= y0!
+        tag(context, theme, text, (x0! + x1!) / 2, below ? Math.max(y0!, y1!) + 14 : top - 14, color)
+        break
+      }
       case 'zone':
         context.globalAlpha = 0.14
         context.fillRect(Math.min(x0!, x1!), Math.min(y0!, y1!), Math.abs(x1! - x0!), Math.abs(y1! - y0!))
@@ -375,6 +413,36 @@ function line(context: CanvasRenderingContext2D, x0: number, y0: number, x1: num
   context.moveTo(x0, y0)
   context.lineTo(x1, y1)
   context.stroke()
+}
+
+/** Line from (x0, y0) with an arrowhead at (x1, y1). */
+function arrow(context: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
+  line(context, x0, y0, x1, y1)
+  const angle = Math.atan2(y1 - y0, x1 - x0)
+  if (Math.hypot(x1 - x0, y1 - y0) < 8) return
+  context.beginPath()
+  context.moveTo(x1, y1)
+  context.lineTo(x1 - 7 * Math.cos(angle - 0.45), y1 - 7 * Math.sin(angle - 0.45))
+  context.moveTo(x1, y1)
+  context.lineTo(x1 - 7 * Math.cos(angle + 0.45), y1 - 7 * Math.sin(angle + 0.45))
+  context.stroke()
+}
+
+/** Centered measurement tag on a filled background. */
+function tag(context: CanvasRenderingContext2D, theme: DrawingTheme, text: string, x: number, y: number, color: string) {
+  const width = context.measureText(text).width + 14
+  context.setLineDash([])
+  context.fillStyle = theme.background
+  context.globalAlpha = 0.92
+  context.fillRect(x - width / 2, y - 10, width, 20)
+  context.globalAlpha = 1
+  context.strokeStyle = color
+  context.lineWidth = 1
+  context.strokeRect(x - width / 2, y - 10, width, 20)
+  context.fillStyle = theme.text
+  context.textAlign = 'center'
+  context.fillText(text, x, y)
+  context.textAlign = 'left'
 }
 
 function label(context: CanvasRenderingContext2D, theme: DrawingTheme, text: string, x: number, y: number, align: 'left' | 'right', muted = false) {

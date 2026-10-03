@@ -9,6 +9,8 @@ import type { DraftEvidence, PlayDraft } from './draft'
 import { captureFileName, createEvidence, evidenceLimits } from './evidence'
 import { DirectionToggle } from './DirectionToggle'
 import { InstrumentPicker } from './InstrumentPicker'
+import { pairLabel, useInstrumentCatalog } from './instruments'
+import { leverageOf } from './levels'
 import { PositionEditor } from './PositionEditor'
 import { ChartPanel } from './PlayChart'
 import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
@@ -59,6 +61,11 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   // Drawings follow the venue instrument, so switching away and back keeps them.
   const drawingKey = account && draft.instrument && draft.instrumentSource === 'venue' ? `${account.venueId}:${draft.instrument}` : ''
 
+  const catalog = useInstrumentCatalog(api, account)
+  const instrumentInfo = draft.instrumentSource === 'venue' ? catalog.catalog?.instruments.find(item => item.contractId === draft.instrument) : undefined
+  const instrumentName = instrumentInfo ? pairLabel(instrumentInfo) : draft.instrument
+  const maxLeverage = instrumentInfo?.maxLeverage ?? null
+
   const tradeUrl = account ? venueTradeUrl(account.venueId, draft.instrument, draft.instrumentSource) : null
   // In a read-only Play, the chart can still be viewed but not edited.
   const planChange = readOnly ? () => {} : onChange
@@ -79,6 +86,11 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
     return null
   }
 
+  const leftColumn = useRef<HTMLDivElement>(null)
+  // Runs after the expanded chart closes, so the journal is in the page again.
+  const showEvidence = () => requestAnimationFrame(() =>
+    leftColumn.current?.querySelector('[data-testid="journal-panel"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+
   function chooseAccount(id: string) {
     const next = enabledAccounts.find(account => account.id === id)
     onChange({ ...draft, accountId: id, instrument: '',
@@ -96,7 +108,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       <div className="plays-heading-actions">
         {tradeUrl && <a className="plays-venue-link" href={tradeUrl} target="_blank" rel="noopener noreferrer"
           title="Place the planned orders on the venue. Vessel never sends orders.">
-          <ExternalLink size={14} aria-hidden="true" />Open {draft.instrument} on {venueName(account!.venueId)}</a>}
+          <ExternalLink size={14} aria-hidden="true" />Open {instrumentName} on {venueName(account!.venueId)}</a>}
         {actions ?? <span className="workspace-badge"><PencilLine size={13} />Local draft</span>}
         {onReload && <Button variant="outline" onClick={onReload} disabled={loading} aria-busy={loading}>
           <RefreshCw size={14} className={loading ? 'is-spinning' : ''} />Reload accounts
@@ -121,10 +133,15 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         {filteredAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {venueName(account.venueId)}</option>)}
       </select></label>
       {lockInstrument ? <div className="plays-instrument-field"><label htmlFor="plays-fixed-instrument">Instrument</label>
-        <Input id="plays-fixed-instrument" aria-label="Perpetual instrument" value={draft.instrument} readOnly />
+        <Input id="plays-fixed-instrument" aria-label="Perpetual instrument" value={instrumentName} readOnly />
         <div className="instrument-feedback"><p>Fixed once planned.</p></div>
-      </div> : <InstrumentPicker key={accountId} account={account} api={api} value={draft.instrument} source={draft.instrumentSource}
-        onChange={(instrument, instrumentSource) => onChange({ ...draft, instrument, instrumentSource })} />}
+      </div> : <InstrumentPicker key={accountId} catalog={catalog} value={draft.instrument} source={draft.instrumentSource}
+        onChange={(instrument, instrumentSource) => {
+          // A new contract can allow less leverage than the plan uses; keep the plan within the venue maximum.
+          const max = instrumentSource === 'venue' ? catalog.catalog?.instruments.find(item => item.contractId === instrument)?.maxLeverage : undefined
+          const leverage = max !== undefined && leverageOf(draft.leverage) > max ? String(max) : draft.leverage
+          onChange({ ...draft, instrument, instrumentSource, leverage })
+        }} />}
       <div className="direction-field"><span className="field-label">Direction</span>
         <DirectionToggle value={draft.direction} onChange={direction => onChange({ ...draft, direction })} />
       </div>
@@ -134,23 +151,25 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
     <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} />
     <div className="workspace-toolbar"><span><i />THE PLAY <small>Your idea, before hindsight.</small></span><span>Side-by-side · Layout locked</span></div>
     <div className="workspace" data-testid="workspace">
-      <div className="left-column" data-testid="left-column">
+      <div ref={leftColumn} className="left-column" data-testid="left-column">
         <ChartPanel entries={draft.entries} selectedId={selectedId} onSelect={id => {
           setSelectedId(id)
           setSelectionRequest(current => current + 1)
-        }} instrument={draft.instrument} venue={account ? venueName(account.venueId) : null} direction={draft.direction}
+        }} instrument={draft.instrument} instrumentName={instrumentName} venue={account ? venueName(account.venueId) : null} direction={draft.direction}
+        leverage={leverageOf(draft.leverage)}
         source={account?.venueId === 'hyperliquid' && draft.instrumentSource === 'venue' ? { api, accountId: account.id } : null}
         onEntriesChange={entries => planChange({ ...draft, entries })}
         drawings={drawingKey ? draft.drawings[drawingKey] : undefined}
         onDrawingsChange={drawings => { if (drawingKey) planChange({ ...draft, drawings: { ...draft.drawings, [drawingKey]: drawings } }) }}
-        onCapture={addCapture} />
+        editable={!readOnly} onCapture={addCapture} onShowEvidence={showEvidence} />
         <PlayJournal notes={draft.notes} onChange={notes => onChange({ ...draft, notes: readOnly ? { ...draft.notes, review: notes.review } : notes })}
           execution={execution} readOnly={readOnly} notesLabel={status === 'draft' ? 'Draft notes' : 'Saved with the play'}
           evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} />
       </div>
       {readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
-        <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} />
-      </fieldset> : <PositionEditor draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} />}
+        <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} />
+      </fieldset> : <PositionEditor draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId}
+        maxLeverage={maxLeverage} instrumentName={instrumentName} />}
     </div>
     <PositionSummary draft={draft} />
   </section>

@@ -78,8 +78,8 @@ public sealed partial class HyperliquidAdapterTests
 
         Assert.Equal("hyperliquid", reader.VenueId);
         Assert.Collection(result.Instruments,
-            instrument => Assert.Equal(new VenueInstrument("BTC", 5, 40), instrument),
-            instrument => Assert.Equal(new VenueInstrument("ETH", 4, 20), instrument));
+            instrument => Assert.Equal(new VenueInstrument("BTC", 5, 40, "USDC"), instrument),
+            instrument => Assert.Equal(new VenueInstrument("ETH", 4, 20, "USDC"), instrument));
         Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(StateTime), result.Snapshot.ObservedAtUtc);
         Assert.Equal("primary-perpetual-dex", result.Snapshot.ValueScope);
         Assert.Equal(12345.678901234567890123m, result.Snapshot.AccountValueUsd);

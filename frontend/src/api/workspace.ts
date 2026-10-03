@@ -17,6 +17,8 @@ export interface VenueInstrument {
   contractId: string
   quantityDecimals: number
   maxLeverage: number
+  /** Asset prices are quoted and margined in, e.g. USDC for BTC/USDC. */
+  quoteAsset: string
 }
 export interface InstrumentCatalog {
   venueId: string
@@ -226,7 +228,8 @@ const instrumentCatalog = (v: unknown): v is InstrumentCatalog => object(v) &&
   Array.isArray(v.instruments) && v.instruments.length <= 10_000 &&
   v.instruments.every((i: unknown) => object(i) && text(i.contractId) && i.contractId.trim() === i.contractId &&
     i.contractId.length > 0 && i.contractId.length <= 128 && count(i.quantityDecimals) &&
-    (i.quantityDecimals as number) <= 28 && count(i.maxLeverage) && (i.maxLeverage as number) > 0) &&
+    (i.quantityDecimals as number) <= 28 && count(i.maxLeverage) && (i.maxLeverage as number) > 0 &&
+    text(i.quoteAsset) && /^[A-Za-z0-9]{1,16}$/.test(i.quoteAsset)) &&
   new Set(v.instruments.map((i: VenueInstrument) => i.contractId)).size === v.instruments.length &&
   (v.scope !== 'manual' || v.instruments.length === 0) && text(v.notice) && v.notice.length <= 1000
 const epoch = (v: unknown): v is number => count(v) && (v as number) > 0
