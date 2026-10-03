@@ -140,12 +140,6 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
           <Input id={`${prefix}-size`} type="number" min={0} step="any" value={draft.size} placeholder="Enter total size"
             onChange={event => onChange({ ...draft, size: event.target.value })} />
         </label>
-        {sized.notional !== null || sized.margin !== null ? <p className="position-size-readout" data-testid="size-readout">
-          {sized.notional !== null && <span>Position <strong>{formatMoney(sized.notional, units)}</strong></span>}
-          {draft.sizingMode === 'quantity' && sized.margin !== null && <span>Margin <strong>{formatMoney(sized.margin, units)}</strong></span>}
-          {sized.quantity !== null && draft.sizingMode === 'margin' && <span>≈ <strong>{formatQuantity(sized.quantity, units)}</strong></span>}
-          <small>at {leverage}×{sized.averageEntry === null ? ' · price an entry for the quantity' : ''}</small>
-        </p> : draft.size && draft.sizingMode === 'quantity' && <p className="position-size-readout"><small>Price an entry to see the position and margin.</small></p>}
         <label htmlFor={`${prefix}-sizing-mode`}>
           <span>Size input</span>
           <select id={`${prefix}-sizing-mode`} aria-label="Whole-position sizing" value={draft.sizingMode}
@@ -157,6 +151,12 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
             <option value="quantity">Quantity · instrument</option>
           </select>
         </label>
+        {sized.notional !== null || sized.margin !== null ? <p className="position-size-readout" data-testid="size-readout">
+          {sized.notional !== null && <span>Position <strong>{formatMoney(sized.notional, units)}</strong></span>}
+          {draft.sizingMode === 'quantity' && sized.margin !== null && <span>Margin <strong>{formatMoney(sized.margin, units)}</strong></span>}
+          {sized.quantity !== null && draft.sizingMode === 'margin' && <span>≈ <strong>{formatQuantity(sized.quantity, units)}</strong></span>}
+          <small>at {leverage}×{sized.averageEntry === null ? ' · price an entry for the quantity' : ''}</small>
+        </p> : draft.size && draft.sizingMode === 'quantity' && <p className="position-size-readout"><small>Price an entry to see the position and margin.</small></p>}
       </div>
       <div className="leverage-controls">
         <label htmlFor={`${prefix}-leverage-slider`}>Leverage <small>{maxLeverage ? `1× to ${maxLeverage}× on ${instrumentName || 'this contract'}` : '1× = unlevered'}</small></label>
