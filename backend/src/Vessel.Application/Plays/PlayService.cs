@@ -46,6 +46,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             var (instrument, source) = Instrument(account, request.Instrument, request.InstrumentSource);
             Apply(() => play.MoveTo(account, instrument, source, now));
         }
+        if (play.Status != PlayStatus.Draft && plan != play.Plan) await RequireFilledEntriesKept(play, request.Plan, ct);
         var revision = Apply(() => play.ChangePlan(plan, request.RevisionReason, now));
         Apply(() => play.Annotate(request.Title ?? "", drawings, request.Review ?? "", now));
         if (revision is not null) store.Add(revision);
@@ -100,7 +101,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var changes = await store.StatusChangesAsync(play.Id, ct);
         return new(revisions.Select(r => new PlanRevisionDto(r.Number, StatusName(r.Status), r.Reason, r.CreatedAtUtc, PlayDocuments.Read(r.Plan))).ToList(),
             changes.Select(c => new StatusChangeDto(StatusName(c.From), StatusName(c.To), c.Reason is { } reason ? ReasonName(reason) : null,
-                c.Note, c.OccurredAtUtc)).ToList());
+                c.Note, c.OccurredAtUtc, c.Source == StatusChangeSource.Venue ? "venue" : "owner")).ToList());
     }
 
     public async Task DeleteAsync(Guid id, CancellationToken ct)
@@ -112,6 +113,21 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         {
             try { await objects.DeleteAsync(key, CancellationToken.None); }
             catch (Exception) { /* Unreferenced objects are harmless; cleanup is a later maintenance task. */ }
+        }
+    }
+
+    /// <summary>A filled entry already happened: its price and share cannot be revised, nor the entry removed.</summary>
+    private async Task RequireFilledEntriesKept(Play play, PlayPlanDocument next, CancellationToken ct)
+    {
+        var filled = await store.FilledEntryIdsAsync(play.Id, ct);
+        if (filled.Count == 0) return;
+        var before = PlayDocuments.Read(play.Plan).Entries.ToDictionary(e => e.Id);
+        foreach (var id in filled)
+        {
+            if (!before.TryGetValue(id, out var old)) continue;
+            var now = next.Entries.FirstOrDefault(e => e.Id == id);
+            if (now is null || now.Price != old.Price || now.Share != old.Share)
+                throw new WorkspaceException(409, $"{old.Name} has fills, so its price and share stay as planned. Stops and targets can still change.");
         }
     }
 

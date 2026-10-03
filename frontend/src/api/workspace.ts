@@ -1,8 +1,8 @@
 import { SseOverflowError, SseParser } from './sse'
 import { ApiError } from './system'
 import {
-  isPlayHistory, isPlaySummary, isSavedEvidence, isSavedPlay,
-  type PlayFields, type PlayHistory, type PlaySummary, type SavedEvidence, type SavedPlay, type StatusRequest,
+  isPlayExecution, isPlayHistory, isPlaySummary, isSavedEvidence, isSavedPlay,
+  type LinkOrder, type PlayExecution, type PlayFields, type PlayHistory, type PlaySummary, type SavedEvidence, type SavedPlay, type StatusRequest,
 } from './plays'
 import type { ImageMarkup } from '@/features/plays/markup'
 
@@ -199,6 +199,11 @@ export interface WorkspaceApi {
   changePlayStatus(id: string, expectedVersion: number, request: StatusRequest): Promise<SavedPlay>
   playHistory(id: string, signal?: AbortSignal): Promise<PlayHistory>
   deletePlay(id: string): Promise<void>
+  playExecution(id: string, signal?: AbortSignal): Promise<PlayExecution>
+  /** Refreshes the account's fills and orders at the venue, links what matches and applies status changes. */
+  checkPlayExecution(id: string, signal?: AbortSignal): Promise<PlayExecution>
+  linkOrder(id: string, link: LinkOrder): Promise<PlayExecution>
+  unlinkOrder(id: string, linkId: string): Promise<PlayExecution>
   evidence(playId: string, signal?: AbortSignal): Promise<SavedEvidence[]>
   evidenceImage(id: string, signal?: AbortSignal): Promise<Blob>
   uploadEvidence(playId: string, image: Blob, fields: { source: 'capture' | 'upload'; note: string; markup: ImageMarkup | null; name: string }): Promise<SavedEvidence>
@@ -443,6 +448,13 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       json(`${playPath(id)}/status`, isSavedPlay, { method: 'POST', body: JSON.stringify({ expectedVersion, ...request }) }),
     playHistory: (id, signal) => json(`${playPath(id)}/history`, isPlayHistory, withSignal(signal)),
     deletePlay: id => json(playPath(id), none, { method: 'DELETE' }),
+    playExecution: (id, signal) => json(`${playPath(id)}/execution`, isPlayExecution, withSignal(signal)),
+    checkPlayExecution: (id, signal) => json(`${playPath(id)}/execution/check`, isPlayExecution, { method: 'POST', ...withSignal(signal) }, 45_000),
+    linkOrder: (id, link) => json(`${playPath(id)}/execution/links`, isPlayExecution, { method: 'POST', body: JSON.stringify(link) }),
+    unlinkOrder: (id, linkId) => {
+      if (!guid(linkId)) return Promise.reject(new ApiError('invalid-response', 'The link identifier is invalid.'))
+      return json(`${playPath(id)}/execution/links/${linkId}`, isPlayExecution, { method: 'DELETE' })
+    },
     evidence: (playId, signal) => json(`${playPath(playId)}/evidence`, (v): v is SavedEvidence[] => Array.isArray(v) && v.every(isSavedEvidence), withSignal(signal)),
     evidenceImage: async (id, signal) => {
       const response = await send(`${evidencePath(id)}/content`, { ...withSignal(signal), accept: 'image/*' }, 60_000)

@@ -40,6 +40,8 @@ internal sealed class MemoryPlayStore(Guid owner) : IPlayStore
     public void Add(Play play) => Plays.Add(play);
     public void Add(PlayPlanRevision revision) => Revisions.Add(revision);
     public void Add(PlayStatusChange change) => Changes.Add(change);
+    public HashSet<string> FilledEntries { get; } = [];
+    public Task<IReadOnlySet<string>> FilledEntryIdsAsync(Guid playId, CancellationToken ct) => Task.FromResult<IReadOnlySet<string>>(FilledEntries);
     public Task SaveAsync(CancellationToken ct) { Saves++; return Task.CompletedTask; }
     public Task<IReadOnlyList<string>> DeleteAsync(Play play, CancellationToken ct)
     {

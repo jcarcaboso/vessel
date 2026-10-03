@@ -74,6 +74,7 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
         // Explicit owner-filtered deletes run under the locked account's transaction.
         // Positions cascade from the snapshot, never from trading intent.
         await db.Fills.Where(f => f.AccountId == account.Id).ExecuteDeleteAsync(ct);
+        await db.Orders.Where(o => o.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Snapshots.Where(s => s.AccountId == account.Id).ExecuteDeleteAsync(ct);
         // Bulk deletes do not update EF's tracker. Detach only this account's deleted
         // facts so a context that previously refreshed it cannot sever required FKs.
@@ -82,6 +83,7 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
             var deleted = entry.Entity switch
             {
                 ImportedFill f => f.OwnerId == account.OwnerId && f.AccountId == account.Id,
+                ImportedOrder o => o.OwnerId == account.OwnerId && o.AccountId == account.Id,
                 AccountSnapshot s => s.OwnerId == account.OwnerId && s.AccountId == account.Id,
                 AccountPosition p => p.OwnerId == account.OwnerId && p.AccountId == account.Id,
                 _ => false

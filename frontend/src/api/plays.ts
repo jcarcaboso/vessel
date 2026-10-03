@@ -52,7 +52,7 @@ export interface PlayFields {
   review: string
 }
 export interface PlanRevision { number: number; status: PlayStatus; reason: string; createdAtUtc: string; plan: PlayPlan }
-export interface StatusChange { from: PlayStatus; to: PlayStatus; reason: CancelReason | null; note: string | null; occurredAtUtc: string }
+export interface StatusChange { from: PlayStatus; to: PlayStatus; reason: CancelReason | null; note: string | null; occurredAtUtc: string; source?: 'owner' | 'venue' }
 export interface PlayHistory { revisions: PlanRevision[]; statusChanges: StatusChange[] }
 export type StatusRequest =
   | { status: 'planned' | 'paused' }
@@ -95,7 +95,8 @@ export const isPlayHistory = (v: unknown): v is PlayHistory => object(v) && Arra
   v.revisions.every(r => object(r) && count(r.number) && playStatuses.includes(r.status as PlayStatus) && text(r.reason, 2000) &&
     date(r.createdAtUtc) && isPlayPlan(r.plan)) &&
   v.statusChanges.every(c => object(c) && playStatuses.includes(c.from as PlayStatus) && playStatuses.includes(c.to as PlayStatus) &&
-    nullable(x => cancelReasons.includes(x as CancelReason))(c.reason) && nullable(x => text(x, 2000))(c.note) && date(c.occurredAtUtc))
+    nullable(x => cancelReasons.includes(x as CancelReason))(c.reason) && nullable(x => text(x, 2000))(c.note) && date(c.occurredAtUtc) &&
+    (c.source === undefined || c.source === 'owner' || c.source === 'venue'))
 export const isSavedEvidence = (v: unknown): v is SavedEvidence => object(v) && guid(v.id) && guid(v.playId) &&
   (v.source === 'capture' || v.source === 'upload') && text(v.contentType, 64) && count(v.sizeBytes) && text(v.sha256, 64) &&
   text(v.note, 4000) && date(v.createdAtUtc) && date(v.updatedAtUtc) && (v.markup === null || object(v.markup))
@@ -114,3 +115,77 @@ export const cancelReasonLabels: Record<CancelReason, string> = {
   invalidated: 'Thesis invalidated', missed: 'Missed the entry', 'changed-mind': 'Changed my mind',
   expired: 'Expired', mistake: 'Created by mistake', other: 'Other',
 }
+
+/** A venue order as last seen. Prices and sizes keep the venue's exact decimals. */
+export interface ExecutionOrder {
+  orderId: string
+  side: 'A' | 'B'
+  orderType: string
+  limitPrice: string
+  triggerPrice: string | null
+  reduceOnly: boolean
+  isPositionTpsl: boolean
+  originalSize: string
+  remainingSize: string
+  placedAtUtc: string
+  status: 'open' | 'filled' | 'triggered' | 'canceled' | 'rejected' | 'other'
+  venueStatus: string
+  statusAtUtc: string
+}
+export interface ExecutionFill {
+  sourceFillId: string
+  direction: string
+  price: string
+  quantity: string
+  fee: string
+  feeToken: string
+  closedPnlUsd: string
+  occurredAtUtc: string
+}
+export type LinkRole = 'entry' | 'stop' | 'target' | 'exit'
+export interface OrderLink {
+  id: string
+  role: LinkRole
+  entryId: string | null
+  targetId: string | null
+  state: 'linked' | 'suggested'
+  source: 'automatic' | 'owner'
+  order: ExecutionOrder | null
+  filledQuantity: string
+  fills: ExecutionFill[]
+}
+export interface PlayExecution {
+  playId: string
+  status: PlayStatus
+  tracked: boolean
+  reason: string | null
+  checkedAtUtc: string | null
+  totals: { enteredQuantity: string; exitedQuantity: string; openQuantity: string; closedPnlUsd: string; fees: Array<{ token: string; amount: string }> }
+  entries: Array<{ entryId: string; filledQuantity: string; averageFillPrice: string | null; restingOrders: number }>
+  links: OrderLink[]
+  suggestions: OrderLink[]
+  unlinkedOrders: ExecutionOrder[]
+  notice: string
+}
+export interface LinkOrder { orderId: string; role: LinkRole; entryId?: string; targetId?: string }
+
+const decimalText = (v: unknown) => text(v, 100) && /^-?\d+(\.\d+)?$/.test(v)
+const executionOrder = (v: unknown): v is ExecutionOrder => object(v) && text(v.orderId, 128) && (v.side === 'A' || v.side === 'B') &&
+  text(v.orderType, 32) && decimalText(v.limitPrice) && (v.triggerPrice === null || decimalText(v.triggerPrice)) &&
+  typeof v.reduceOnly === 'boolean' && typeof v.isPositionTpsl === 'boolean' && decimalText(v.originalSize) && decimalText(v.remainingSize) &&
+  date(v.placedAtUtc) && ['open', 'filled', 'triggered', 'canceled', 'rejected', 'other'].includes(v.status as string) &&
+  text(v.venueStatus, 64) && date(v.statusAtUtc)
+const executionFill = (v: unknown): v is ExecutionFill => object(v) && text(v.sourceFillId, 128) && text(v.direction, 128) &&
+  decimalText(v.price) && decimalText(v.quantity) && decimalText(v.fee) && text(v.feeToken, 64) && decimalText(v.closedPnlUsd) && date(v.occurredAtUtc)
+const orderLink = (v: unknown): v is OrderLink => object(v) && guid(v.id) && ['entry', 'stop', 'target', 'exit'].includes(v.role as string) &&
+  nullable(x => text(x, 64))(v.entryId) && nullable(x => text(x, 64))(v.targetId) && (v.state === 'linked' || v.state === 'suggested') &&
+  (v.source === 'automatic' || v.source === 'owner') && (v.order === null || executionOrder(v.order)) && decimalText(v.filledQuantity) &&
+  Array.isArray(v.fills) && v.fills.every(executionFill)
+export const isPlayExecution = (v: unknown): v is PlayExecution => object(v) && guid(v.playId) && playStatuses.includes(v.status as PlayStatus) &&
+  typeof v.tracked === 'boolean' && nullable(x => text(x, 500))(v.reason) && nullable(date)(v.checkedAtUtc) &&
+  object(v.totals) && ['enteredQuantity', 'exitedQuantity', 'openQuantity', 'closedPnlUsd'].every(k => decimalText((v.totals as Record<string, unknown>)[k])) &&
+  Array.isArray(v.totals.fees) && v.totals.fees.every(f => object(f) && text(f.token, 64) && decimalText(f.amount)) &&
+  Array.isArray(v.entries) && v.entries.every(e => object(e) && text(e.entryId, 64) && decimalText(e.filledQuantity) &&
+    nullable(decimalText)(e.averageFillPrice) && count(e.restingOrders)) &&
+  Array.isArray(v.links) && v.links.every(orderLink) && Array.isArray(v.suggestions) && v.suggestions.every(orderLink) &&
+  Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) && text(v.notice, 1000)

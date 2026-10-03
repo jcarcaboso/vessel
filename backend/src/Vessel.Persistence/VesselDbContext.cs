@@ -21,6 +21,8 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<PlayEvidence> Evidence => Set<PlayEvidence>();
     public DbSet<PlayPlanRevision> PlanRevisions => Set<PlayPlanRevision>();
     public DbSet<PlayStatusChange> StatusChanges => Set<PlayStatusChange>();
+    public DbSet<ImportedOrder> Orders => Set<ImportedOrder>();
+    public DbSet<PlayOrderLink> OrderLinks => Set<PlayOrderLink>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -146,6 +148,41 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         statusChange.Property(x => x.To).HasConversion<string>().HasMaxLength(16);
         statusChange.Property(x => x.Reason).HasConversion<string>().HasMaxLength(16);
         statusChange.Property(x => x.Note).HasMaxLength(Play.MaxCancelNoteLength);
+        statusChange.Property(x => x.Source).HasConversion<string>().HasMaxLength(16).HasDefaultValue(StatusChangeSource.Owner)
+            .HasSentinel(StatusChangeSource.Owner);
+
+        var order = modelBuilder.Entity<ImportedOrder>();
+        order.ToTable("imported_orders");
+        order.HasKey(x => x.Id);
+        order.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
+            .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        order.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
+        order.HasIndex(x => new { x.OwnerId, x.AccountId, x.OrderId }).IsUnique();
+        order.Property(x => x.ContractId).HasMaxLength(128);
+        order.Property(x => x.OrderId).HasMaxLength(128);
+        order.Property(x => x.Side).HasMaxLength(8);
+        order.Property(x => x.OrderType).HasMaxLength(32);
+        order.Property(x => x.Status).HasMaxLength(16);
+        order.Property(x => x.VenueStatus).HasMaxLength(64);
+
+        var link = modelBuilder.Entity<PlayOrderLink>();
+        link.ToTable("play_order_links");
+        link.HasKey(x => x.Id);
+        link.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
+            .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        link.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
+        link.Ignore(x => x.LevelKey);
+        link.Property(x => x.OrderId).HasMaxLength(128);
+        link.Property(x => x.EntryId).HasMaxLength(64);
+        link.Property(x => x.TargetId).HasMaxLength(64);
+        link.Property(x => x.Role).HasConversion<string>().HasMaxLength(16);
+        link.Property(x => x.State).HasConversion<string>().HasMaxLength(16);
+        link.Property(x => x.Source).HasConversion<string>().HasMaxLength(16);
+        link.HasIndex(x => new { x.OwnerId, x.AccountId, x.OrderId });
+        link.HasIndex(x => new { x.OwnerId, x.PlayId });
+        // An order counts toward at most one level of one Play.
+        link.HasIndex(x => new { x.OwnerId, x.AccountId, x.OrderId }).IsUnique()
+            .HasDatabaseName("UX_play_order_links_linked_order").HasFilter("\"State\" = 'Linked'");
 
         var evidence = modelBuilder.Entity<PlayEvidence>();
         evidence.ToTable("play_evidence", table =>
@@ -185,6 +222,8 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
                 PlayEvidence evidence => evidence.OwnerId,
                 PlayPlanRevision revision => revision.OwnerId,
                 PlayStatusChange change => change.OwnerId,
+                ImportedOrder importedOrder => importedOrder.OwnerId,
+                PlayOrderLink orderLink => orderLink.OwnerId,
                 _ => (Guid?)null
             };
             if (ownerId.HasValue && (ownerId != CurrentOwnerId ||

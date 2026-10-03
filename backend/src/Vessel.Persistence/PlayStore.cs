@@ -16,6 +16,13 @@ public sealed class PlayStore(VesselDbContext db) : IPlayStore
         db.PlanRevisions.Where(x => x.PlayId == playId).OrderBy(x => x.Number).AsNoTracking().ToListAsync(ct);
     public Task<List<PlayStatusChange>> StatusChangesAsync(Guid playId, CancellationToken ct) =>
         db.StatusChanges.Where(x => x.PlayId == playId).OrderBy(x => x.OccurredAtUtc).ThenBy(x => x.Id).AsNoTracking().ToListAsync(ct);
+    public async Task<IReadOnlySet<string>> FilledEntryIdsAsync(Guid playId, CancellationToken ct)
+    {
+        var ids = await db.OrderLinks.Where(l => l.PlayId == playId && l.State == OrderLinkState.Linked && l.Role == OrderLinkRole.Entry &&
+                db.Fills.Any(f => f.AccountId == l.AccountId && f.OrderId == l.OrderId))
+            .Select(l => l.EntryId!).Distinct().ToListAsync(ct);
+        return ids.ToHashSet(StringComparer.Ordinal);
+    }
     public void Add(Play play) => db.Plays.Add(play);
     public void Add(PlayPlanRevision revision) => db.PlanRevisions.Add(revision);
     public void Add(PlayStatusChange change) => db.StatusChanges.Add(change);
@@ -36,6 +43,7 @@ public sealed class PlayStore(VesselDbContext db) : IPlayStore
         db.Evidence.RemoveRange(evidence);
         db.PlanRevisions.RemoveRange(await db.PlanRevisions.Where(x => x.PlayId == play.Id).ToListAsync(ct));
         db.StatusChanges.RemoveRange(await db.StatusChanges.Where(x => x.PlayId == play.Id).ToListAsync(ct));
+        db.OrderLinks.RemoveRange(await db.OrderLinks.Where(x => x.PlayId == play.Id).ToListAsync(ct));
         await db.SaveChangesAsync(ct);
         db.Plays.Remove(play);
         await SaveAsync(ct);

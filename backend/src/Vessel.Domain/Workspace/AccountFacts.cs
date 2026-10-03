@@ -59,3 +59,27 @@ public sealed class ImportedFill
     public string OrderId { get; set; } = null!;
     public string TransactionHash { get; set; } = null!;
 }
+
+// The latest known state of a venue order that could belong to a Play. A fact, not trading intent.
+public sealed class ImportedOrder
+{
+    public Guid Id { get; set; }
+    public Guid OwnerId { get; set; }
+    public Guid AccountId { get; set; }
+    public string ContractId { get; set; } = null!;
+    public string OrderId { get; set; } = null!;
+    public string Side { get; set; } = null!;
+    public string OrderType { get; set; } = null!;
+    public decimal LimitPrice { get; set; }
+    public decimal? TriggerPrice { get; set; }
+    public bool ReduceOnly { get; set; }
+    public bool IsPositionTpsl { get; set; }
+    public decimal OriginalSize { get; set; }
+    public decimal RemainingSize { get; set; }
+    public DateTimeOffset PlacedAtUtc { get; set; }
+    /// <summary>open, filled, triggered, canceled, rejected or other.</summary>
+    public string Status { get; set; } = null!;
+    public string VenueStatus { get; set; } = null!;
+    public DateTimeOffset StatusAtUtc { get; set; }
+    public DateTimeOffset ObservedAtUtc { get; set; }
+}

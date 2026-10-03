@@ -53,12 +53,13 @@ export const idleMarketStream: WorkspaceApi['marketStream'] = (_id, _query, sign
 
 /** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
 export function playApiStubs(): Pick<WorkspaceApi, 'plays' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' |
-  'deletePlay' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence'> {
+  'deletePlay' | 'playExecution' | 'checkPlayExecution' | 'linkOrder' | 'unlinkOrder' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence'> {
   const unexpected = () => Promise.reject(new Error('Unexpected play API call in this test.'))
   return {
     plays: vi.fn().mockResolvedValue([]), play: vi.fn(unexpected), createPlay: vi.fn(unexpected), updatePlay: vi.fn(unexpected),
     changePlayStatus: vi.fn(unexpected), playHistory: vi.fn().mockResolvedValue({ revisions: [], statusChanges: [] }),
-    deletePlay: vi.fn(unexpected), evidence: vi.fn().mockResolvedValue([]), evidenceImage: vi.fn(unexpected),
+    deletePlay: vi.fn(unexpected), playExecution: vi.fn(unexpected), checkPlayExecution: vi.fn(unexpected),
+    linkOrder: vi.fn(unexpected), unlinkOrder: vi.fn(unexpected), evidence: vi.fn().mockResolvedValue([]), evidenceImage: vi.fn(unexpected),
     uploadEvidence: vi.fn(unexpected), updateEvidenceNote: vi.fn(unexpected), updateEvidenceMarkup: vi.fn(unexpected), deleteEvidence: vi.fn(unexpected),
   }
 }

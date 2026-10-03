@@ -15,7 +15,7 @@ import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
 import './plays-workspace.css'
 
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, notice,
-  lockInstrument = false, readOnly = false }: {
+  lockInstrument = false, readOnly = false, execution }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -31,6 +31,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   lockInstrument?: boolean
   /** Closed and cancelled Plays keep their plan; only the review and evidence change. */
   readOnly?: boolean
+  /** Execution tab content for a saved play. */
+  execution?: ReactNode
 }) {
   const [selectedId, setSelectedId] = useState(draft.entries[0]!.id)
   const [selectionRequest, setSelectionRequest] = useState(0)
@@ -143,7 +145,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         onDrawingsChange={drawings => { if (drawingKey) planChange({ ...draft, drawings: { ...draft.drawings, [drawingKey]: drawings } }) }}
         onCapture={addCapture} />
         <PlayJournal notes={draft.notes} onChange={notes => onChange({ ...draft, notes: readOnly ? { ...draft.notes, review: notes.review } : notes })}
-          readOnly={readOnly} notesLabel={status === 'draft' ? 'Draft notes' : 'Saved with the play'}
+          execution={execution} readOnly={readOnly} notesLabel={status === 'draft' ? 'Draft notes' : 'Saved with the play'}
           evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} />
       </div>
       {readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
