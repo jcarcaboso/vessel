@@ -189,7 +189,7 @@ Do not average per-entry reward-to-risk ratios. Aggregate dollar profit and loss
 
 ## Lifecycle to explore
 
-The prototype has manual Draft, Planned, Active, Closed, and Cancelled labels. It does not implement execution-driven transitions or a settled lifecycle.
+The prototype has manual Draft, Planned, Active, Closed, and Cancelled labels. It does not implement execution-driven transitions or a settled lifecycle. October 3, 2026: the owner settled the application lifecycle in [the Play lifecycle](architecture/play-lifecycle.md).
 
 Questions remain around partially filled entries, partial exits, cancelled unfilled entries, moved stops, scaled positions, reopened ideas, and retrospective recording. A winning play can violate the strategy. A losing play can follow it correctly. Outcome and process review must remain separate.
 

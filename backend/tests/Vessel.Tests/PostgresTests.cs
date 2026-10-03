@@ -31,13 +31,13 @@ public sealed class PostgresTests
         await using (var db = database.Context(firstOwner))
         {
             db.Accounts.Add(accountA);
-            db.Plays.AddRange(new Play(Guid.NewGuid(), accountA, instrument), new Play(Guid.NewGuid(), accountA, instrument));
+            db.Plays.AddRange(TestPlays.Create(accountA, instrument), TestPlays.Create(accountA, instrument));
             await db.SaveChangesAsync();
         }
         await using (var db = database.Context(secondOwner))
         {
             db.Accounts.Add(accountB);
-            db.Plays.Add(new Play(Guid.NewGuid(), accountB, instrument));
+            db.Plays.Add(TestPlays.Create(accountB, instrument));
             await db.SaveChangesAsync();
         }
         await using (var db = database.Context(firstOwner))
@@ -45,7 +45,7 @@ public sealed class PostgresTests
             Assert.Single(await db.Accounts.ToListAsync());
             var plays = await db.Plays.ToListAsync();
             Assert.Equal(2, plays.Count);
-            Assert.All(plays, p => { Assert.Equal(firstOwner, p.OwnerId); Assert.Equal(PlayStatus.Active, p.Status); Assert.Equal(instrument, p.Instrument); });
+            Assert.All(plays, p => { Assert.Equal(firstOwner, p.OwnerId); Assert.Equal(PlayStatus.Draft, p.Status); Assert.Equal(instrument, p.Instrument); });
             Assert.Null(await db.Accounts.SingleOrDefaultAsync(x => x.Id == accountB.Id));
             Assert.Equal(3, await db.Plays.IgnoreQueryFilters().CountAsync());
         }
@@ -96,11 +96,11 @@ public sealed class PostgresTests
         await using (var db = database.Context(owner))
         {
             db.Accounts.Add(account);
-            db.Plays.Add(new Play(Guid.NewGuid(), account, new PerpetualInstrument("manual", "BTC-PERP")));
+            db.Plays.Add(TestPlays.Create(account, new PerpetualInstrument("manual", "BTC-PERP")));
             await db.SaveChangesAsync();
         }
         await using var foreign = database.Context(Guid.NewGuid());
-        (await foreign.Plays.IgnoreQueryFilters().SingleAsync()).Close();
+        (await foreign.Plays.IgnoreQueryFilters().SingleAsync()).Annotate("Foreign", "{}", "", DateTimeOffset.UnixEpoch);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => foreign.SaveChangesAsync());
     }
 

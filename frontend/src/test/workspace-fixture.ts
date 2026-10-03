@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import type { BrokerAccount, CandleSeries, InstrumentCatalog, MarketContext, Overview, Portfolio, WorkspaceApi } from '@/api/workspace'
 
 export const portfolioFixture: Portfolio = {
@@ -49,3 +50,15 @@ export const marketContextFixture: MarketContext = {
 /** A market stream that stays open without events until the caller aborts it. */
 export const idleMarketStream: WorkspaceApi['marketStream'] = (_id, _query, signal) =>
   new Promise(resolve => signal.aborted ? resolve() : signal.addEventListener('abort', () => resolve(), { once: true }))
+
+/** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
+export function playApiStubs(): Pick<WorkspaceApi, 'plays' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' |
+  'deletePlay' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence'> {
+  const unexpected = () => Promise.reject(new Error('Unexpected play API call in this test.'))
+  return {
+    plays: vi.fn().mockResolvedValue([]), play: vi.fn(unexpected), createPlay: vi.fn(unexpected), updatePlay: vi.fn(unexpected),
+    changePlayStatus: vi.fn(unexpected), playHistory: vi.fn().mockResolvedValue({ revisions: [], statusChanges: [] }),
+    deletePlay: vi.fn(unexpected), evidence: vi.fn().mockResolvedValue([]), evidenceImage: vi.fn(unexpected),
+    uploadEvidence: vi.fn(unexpected), updateEvidenceNote: vi.fn(unexpected), updateEvidenceMarkup: vi.fn(unexpected), deleteEvidence: vi.fn(unexpected),
+  }
+}

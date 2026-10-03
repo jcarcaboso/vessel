@@ -47,6 +47,7 @@ app.MapGet("/api/system", (ClaimsPrincipal user) => SystemMetadata.ForOwner(new 
     .RequireAuthorization();
 app.MapWorkspace();
 app.MapEvidence();
+app.MapPlays();
 if (app.Environment.IsDevelopment()) app.MapOpenApi().RequireAuthorization();
 
 app.Run();

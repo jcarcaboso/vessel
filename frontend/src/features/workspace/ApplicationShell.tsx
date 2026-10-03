@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import type { BrokerAccount, Overview, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { ApiError, type SystemInfo } from '@/api/system'
 import { Button } from '@/components/ui/button'
-import { PlayWorkspace } from '@/features/plays/PlayWorkspace'
-import { createDraft } from '@/features/plays/draft'
+import { PlaysPage } from '@/features/plays/PlaysPage'
+import { createPlaysSession } from '@/features/plays/saved'
 import { AccountDetail } from './AccountDetail'
 import { ActivityTable } from './ActivityTable'
 import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
@@ -46,7 +46,7 @@ function AccountRows({ accounts, portfolioNames, refreshing, onDetail, onSync, o
 
 export function ApplicationShell({ system, disconnect, api }: { system: SystemInfo; disconnect: () => void; api: WorkspaceApi }) {
   const [page, setPage] = useState<Page>(pageFromHash)
-  const [playDraft, setPlayDraft] = useState(createDraft)
+  const [playsSession, setPlaysSession] = useState(createPlaysSession)
   const [menuOpen, setMenuOpen] = useState(false)
   const [navigationCollapsed, setNavigationCollapsed] = useState(false)
   const [data, setData] = useState<Overview | null>(null)
@@ -175,7 +175,7 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
         {pending && <div className="workspace-loading" role="status">Loading your workspace…</div>}
         {!pending && !data && !error && <div className="workspace-alert">No workspace data is available.</div>}
 
-        {page === 'plays' && <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={playDraft} onChange={setPlayDraft} onReload={reload} loading={loading} />}
+        {page === 'plays' && <PlaysPage accounts={accounts} portfolios={portfolios} api={api} session={playsSession} onSession={setPlaysSession} onReload={reload} loading={loading} />}
 
         {page === 'overview' && data && <>
           <section className="workspace-stat-grid">

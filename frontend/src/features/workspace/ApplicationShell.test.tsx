@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
 import { systemFixture } from '@/test/system-fixture'
-import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, portfolioFixture } from '@/test/workspace-fixture'
+import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, playApiStubs, portfolioFixture } from '@/test/workspace-fixture'
 import { ApplicationShell } from './ApplicationShell'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
@@ -18,7 +18,7 @@ function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     snapshot: vi.fn().mockResolvedValue(null), fills: vi.fn().mockResolvedValue([]),
     sync: vi.fn().mockResolvedValue(accountFixture), instruments: vi.fn().mockResolvedValue(instrumentCatalogFixture),
     candles: vi.fn().mockResolvedValue(candleSeriesFixture), marketContext: vi.fn().mockResolvedValue(marketContextFixture),
-    marketStream: vi.fn(idleMarketStream), ...overrides,
+    marketStream: vi.fn(idleMarketStream), ...playApiStubs(), ...overrides,
   }
 }
 beforeEach(() => { window.history.replaceState(null, '', '/') })
@@ -107,6 +107,8 @@ describe('Main application shell', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Plays' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Plays' })).toHaveAttribute('aria-current', 'page')
     expect(screen.queryByRole('button', { name: 'Add account' })).not.toBeInTheDocument()
+    await screen.findByText(/No saved plays yet/)
+    await userEvent.click(screen.getByRole('button', { name: 'New play' }))
     await userEvent.type(screen.getByRole('textbox', { name: 'Play title' }), 'Local idea')
     await userEvent.click(screen.getByRole('button', { name: 'Collapse navigation' }))
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Local idea')
@@ -127,10 +129,14 @@ describe('Main application shell', () => {
   it('supports a direct Plays hash without a sample record or saved-play claim', async () => {
     window.history.replaceState(null, '', '/#plays')
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api()} />)
+    await screen.findByText(/No saved plays yet/)
+    expect(screen.queryByText('BTC reclaim at support')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'New play' }))
     await screen.findByText(/No enabled accounts are available/)
     expect(screen.getByRole('heading', { level: 1, name: 'Plays' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('')
-    expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByRole('status')).toHaveTextContent('Unsaved draft')
+    expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByRole('status')).toHaveTextContent('Not saved yet')
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled()
   })
   it('creates an owner-scoped portfolio and reloads the workspace', async () => {
     const client = api()

@@ -80,7 +80,7 @@ public sealed class AccountManagementPostgresTests
             first = (await VenueAccount(service, portfolioId)).Id; second = (await VenueAccount(service, portfolioId)).Id;
             await service.SyncAsync(first, default); await service.SyncAsync(second, default);
             var account = await db.Accounts.SingleAsync(a => a.Id == first);
-            db.Plays.AddRange(new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC")), new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC")));
+            db.Plays.AddRange(TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC")), TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC")));
             await db.SaveChangesAsync(); await service.UpdateAccountAsync(second, new("Disabled", portfolioId, false, 1), default);
             await service.RenamePortfolioAsync(portfolioId, new("Renamed"), default); await service.DeletePortfolioAsync(portfolioId, default);
         }
@@ -138,8 +138,8 @@ public sealed class AccountManagementPostgresTests
             var service = Service(db, owner); protectedId = (await VenueAccount(service)).Id; disposable = (await VenueAccount(service)).Id;
             await service.SyncAsync(protectedId, default); await service.SyncAsync(disposable, default);
             var account = await db.Accounts.SingleAsync(a => a.Id == protectedId);
-            var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC")); play.Close(); db.Plays.Add(play);
-            db.Plays.Add(new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC")));
+            var play = TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC")); play.Cancel(CancelReason.Other, null, DateTimeOffset.UnixEpoch); db.Plays.Add(play);
+            db.Plays.Add(TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC")));
             await db.SaveChangesAsync();
         }
         await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString); using var client = factory.AuthorizedClient();
@@ -152,7 +152,7 @@ public sealed class AccountManagementPostgresTests
         Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/api/accounts/{disposable}")).StatusCode);
         await using var verify = database.Context(owner);
         Assert.Equal(protectedId, (await verify.Accounts.SingleAsync()).Id); Assert.Single(await verify.Snapshots.ToListAsync()); Assert.Single(await verify.Positions.ToListAsync()); Assert.Single(await verify.Fills.ToListAsync());
-        Assert.Equal(2, await verify.Plays.CountAsync()); Assert.Contains(await verify.Plays.ToListAsync(), p => p.Status == PlayStatus.Closed); Assert.Contains(await verify.Plays.ToListAsync(), p => p.Status == PlayStatus.Active);
+        Assert.Equal(2, await verify.Plays.CountAsync()); Assert.Contains(await verify.Plays.ToListAsync(), p => p.Status == PlayStatus.Cancelled); Assert.Contains(await verify.Plays.ToListAsync(), p => p.Status == PlayStatus.Draft);
         var reenabled = await client.PutAsJsonAsync($"/api/accounts/{protectedId}", new UpdateAccountRequest("Enabled", null, true, 2)); Assert.Equal(HttpStatusCode.OK, reenabled.StatusCode);
         Assert.NotNull(await client.GetFromJsonAsync<SnapshotDto>($"/api/accounts/{protectedId}/snapshot")); Assert.Single((await client.GetFromJsonAsync<FillDto[]>($"/api/accounts/{protectedId}/fills"))!);
     }

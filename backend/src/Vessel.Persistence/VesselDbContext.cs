@@ -19,6 +19,8 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<AccountStablecoin> Stablecoins => Set<AccountStablecoin>();
     public DbSet<ImportedFill> Fills => Set<ImportedFill>();
     public DbSet<PlayEvidence> Evidence => Set<PlayEvidence>();
+    public DbSet<PlayPlanRevision> PlanRevisions => Set<PlayPlanRevision>();
+    public DbSet<PlayStatusChange> StatusChanges => Set<PlayStatusChange>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -103,6 +105,14 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         play.ToTable("plays");
         play.HasKey(x => x.Id);
         play.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
+        play.Property(x => x.InstrumentSource).HasConversion<string>().HasMaxLength(16);
+        play.Property(x => x.CancelReason).HasConversion<string>().HasMaxLength(16);
+        play.Property(x => x.Title).HasMaxLength(Play.MaxTitleLength);
+        play.Property(x => x.Plan).HasColumnType("jsonb");
+        play.Property(x => x.Drawings).HasColumnType("jsonb");
+        play.Property(x => x.Review).HasMaxLength(Play.MaxReviewLength);
+        play.Property(x => x.Version).IsConcurrencyToken();
+        play.HasIndex(x => new { x.OwnerId, x.UpdatedAtUtc });
         play.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         play.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
@@ -112,6 +122,30 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         // Deliberately non-unique. Distinct active ideas can share a venue position.
         play.HasIndex(x => new { x.OwnerId, x.AccountId, x.VenueId, x.ContractId });
         play.HasAlternateKey(x => new { x.OwnerId, x.Id });
+
+        var revision = modelBuilder.Entity<PlayPlanRevision>();
+        revision.ToTable("play_plan_revisions", table => table.HasCheckConstraint("CK_play_plan_revisions_number", "\"Number\" >= 1"));
+        revision.HasKey(x => x.Id);
+        // History is deleted only with its Draft, explicitly; it never cascades.
+        revision.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
+            .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        revision.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
+        revision.HasIndex(x => new { x.OwnerId, x.PlayId, x.Number }).IsUnique();
+        revision.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
+        revision.Property(x => x.Plan).HasColumnType("jsonb");
+        revision.Property(x => x.Reason).HasMaxLength(PlayPlanRevision.MaxReasonLength);
+
+        var statusChange = modelBuilder.Entity<PlayStatusChange>();
+        statusChange.ToTable("play_status_changes");
+        statusChange.HasKey(x => x.Id);
+        statusChange.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
+            .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        statusChange.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
+        statusChange.HasIndex(x => new { x.OwnerId, x.PlayId, x.OccurredAtUtc });
+        statusChange.Property(x => x.From).HasConversion<string>().HasMaxLength(16);
+        statusChange.Property(x => x.To).HasConversion<string>().HasMaxLength(16);
+        statusChange.Property(x => x.Reason).HasConversion<string>().HasMaxLength(16);
+        statusChange.Property(x => x.Note).HasMaxLength(Play.MaxCancelNoteLength);
 
         var evidence = modelBuilder.Entity<PlayEvidence>();
         evidence.ToTable("play_evidence", table =>
@@ -149,6 +183,8 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
                 AccountStablecoin stablecoin => stablecoin.OwnerId,
                 ImportedFill fill => fill.OwnerId,
                 PlayEvidence evidence => evidence.OwnerId,
+                PlayPlanRevision revision => revision.OwnerId,
+                PlayStatusChange change => change.OwnerId,
                 _ => (Guid?)null
             };
             if (ownerId.HasValue && (ownerId != CurrentOwnerId ||

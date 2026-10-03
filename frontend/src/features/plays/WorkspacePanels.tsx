@@ -108,13 +108,16 @@ const journalSections = [
   ['review', 'Review', 'Reflect on what happened, separately from the original thesis.'],
 ] as const
 
-export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceRequest = 0 }: {
+export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceRequest = 0, readOnly = false, notesLabel = 'Draft notes' }: {
   notes: PlayDraft['notes']
   onChange: (notes: PlayDraft['notes']) => void
   evidence?: DraftEvidence[]
   onEvidenceChange?: (update: (evidence: DraftEvidence[]) => DraftEvidence[]) => void
   /** Incremented to bring the Evidence tab forward, e.g. after a chart capture. */
   evidenceRequest?: number
+  /** Keeps the pre-trade notes fixed; the review stays editable. */
+  readOnly?: boolean
+  notesLabel?: string
 }) {
   const id = useId()
   const [tab, setTab] = useState('thesis')
@@ -132,14 +135,14 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
             {key === 'evidence' && evidence.length > 0 && <span className="journal-tab-count" aria-hidden="true">{evidence.length}</span>}
           </TabsTrigger>)}
         </TabsList>
-        <span className="journal-draft-label">Draft notes</span>
+        <span className="journal-draft-label">{notesLabel}</span>
       </header>
       {journalSections.map(([key, label, help]) => <TabsContent key={key} value={key} className="journal-tab-content">
         {key === 'evidence' && onEvidenceChange && <EvidencePanel evidence={evidence} onChange={onEvidenceChange} />}
         <label className="sr-only" htmlFor={`${id}-${key}`}>{label}</label>
         <p className="muted" id={`${id}-${key}-help`}>{help}</p>
         <textarea id={`${id}-${key}`} value={notes[key]} aria-describedby={`${id}-${key}-help`}
-          placeholder={`Write your ${label.toLowerCase()} notes.`}
+          placeholder={`Write your ${label.toLowerCase()} notes.`} readOnly={readOnly && key !== 'review'}
           onChange={(event) => onChange({ ...notes, [key]: event.target.value })} />
       </TabsContent>)}
     </Tabs>
