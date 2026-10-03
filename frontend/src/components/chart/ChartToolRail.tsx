@@ -4,6 +4,8 @@ import { ChartIconButton } from './ChartToolbar'
 export interface ChartTool {
   id: string
   label: string
+  /** One line on what the tool does, shown under its name in the tooltip. */
+  description?: string
   icon: ReactNode
   /** Unavailable tools stay visible but cannot be selected. */
   available: boolean
@@ -24,7 +26,8 @@ export function ChartToolRail({ tools, active, onSelect, groups = [], footer, un
   unavailableReason?: string
 }) {
   const button = (tool: ChartTool) => <ChartIconButton key={tool.id} label={tool.label} icon={tool.icon}
-    pressed={tool.pressed ?? tool.id === active} disabled={!tool.available} disabledReason={tool.unavailableReason ?? unavailableReason} onClick={() => onSelect(tool.id)} />
+    pressed={tool.pressed ?? tool.id === active} disabled={!tool.available} disabledReason={tool.unavailableReason ?? unavailableReason}
+    description={tool.description} tooltipSide="right" onClick={() => onSelect(tool.id)} />
   return <div className="chart-tool-rail" role="group" aria-label="Chart tools">
     {tools.map(button)}
     {groups.filter(group => group.tools.length > 0).map(group => <div key={group.label} className="chart-rail-group" role="group" aria-label={group.label}>

@@ -38,6 +38,9 @@ type Gesture =
   | { type: 'move'; drawing: ChartDrawing; x: number; y: number; moved: boolean }
   | { type: 'handle'; drawing: ChartDrawing; index: number; moved: boolean }
 
+/** Default level colors, from the swing end (0) to its start (1). */
+const fibonacciColors = ['#9aa4b2', '#f2b3ac', '#f5a97f', '#a9d6b6', '#7fd1d1', '#8fb8ff', '#9aa4b2'] as const
+
 const hitTolerance = 6
 const handleRadius = 5
 const maxDrawings = 200
@@ -263,7 +266,8 @@ export class DrawingController {
           const levelY = this.space.y(fibonacciPrice(start, end, level))
           return levelY === null ? Infinity : Math.abs(levelY - y)
         })]
-        return stroke(Math.min(...distances))
+        // A level line wins; anywhere between levels 0 and 1 still grabs the drawing.
+        return stroke(Math.min(...distances)) ?? area(within(y, y0!, y1!))
       }
       default: return area(within(x, x0!, x1!) && within(y, y0!, y1!))
     }
@@ -343,21 +347,33 @@ export class DrawingController {
         const [start, end] = drawing.points as [DrawingPoint, DrawingPoint]
         const left = Math.min(x0!, x1!)
         const right = Math.max(x0!, x1!)
+        const levels = fibonacciLevels.map((level, index) => ({
+          level, price: fibonacciPrice(start, end, level), y: this.space.y(fibonacciPrice(start, end, level)),
+          // A chosen color applies to every level; otherwise each level has its own.
+          color: drawing.style?.color ?? fibonacciColors[index]!,
+        }))
+        // Light bands between consecutive levels, then the levels and the swing line on top.
+        levels.slice(1).forEach((band, index) => {
+          const previous = levels[index]!
+          if (band.y === null || previous.y === null) return
+          context.globalAlpha = 0.08
+          context.fillStyle = band.color
+          context.fillRect(left, Math.min(previous.y, band.y), right - left, Math.abs(band.y - previous.y))
+        })
+        context.globalAlpha = 1
+        context.strokeStyle = color
         context.setLineDash([4, 3])
         line(context, x0!, y0!, x1!, y1!)
         context.setLineDash(dash)
-        for (const level of fibonacciLevels) {
-          const price = fibonacciPrice(start, end, level)
-          const y = this.space.y(price)
+        context.lineWidth = baseWidth
+        // Labels sit outside the drawing, on the left when there is room, so they never cover candles inside it.
+        const outsideLeft = left > 96
+        for (const { level, price, y, color: levelColor } of levels) {
           if (y === null) continue
-          context.strokeStyle = color
-          context.globalAlpha = level === 0 || level === 1 ? 1 : 0.6
-          context.lineWidth = baseWidth
+          context.strokeStyle = levelColor
           line(context, left, y, right, y)
-          context.globalAlpha = 1
-          label(context, theme, `${level} · ${this.space.formatPrice(price)}`, left + 4, y - 8, 'left', true)
+          tag(context, theme, `${level} (${this.space.formatPrice(price)})`, outsideLeft ? left - 6 : right + 6, y, levelColor, outsideLeft ? 'right' : 'left')
         }
-        context.setLineDash(dash)
         break
       }
       case 'position': {
@@ -428,21 +444,25 @@ function arrow(context: CanvasRenderingContext2D, x0: number, y0: number, x1: nu
   context.stroke()
 }
 
-/** Centered measurement tag on a filled background. */
-function tag(context: CanvasRenderingContext2D, theme: DrawingTheme, text: string, x: number, y: number, color: string) {
+/** Measurement tag on a filled background, centered on `x` or with that edge at `x`. */
+function tag(context: CanvasRenderingContext2D, theme: DrawingTheme, text: string, x: number, y: number, color: string,
+  align: 'center' | 'left' | 'right' = 'center') {
   const width = context.measureText(text).width + 14
+  const left = align === 'center' ? x - width / 2 : align === 'left' ? x : x - width
+  const lineWidth = context.lineWidth
   context.setLineDash([])
   context.fillStyle = theme.background
   context.globalAlpha = 0.92
-  context.fillRect(x - width / 2, y - 10, width, 20)
+  context.fillRect(left, y - 10, width, 20)
   context.globalAlpha = 1
   context.strokeStyle = color
   context.lineWidth = 1
-  context.strokeRect(x - width / 2, y - 10, width, 20)
+  context.strokeRect(left, y - 10, width, 20)
   context.fillStyle = theme.text
   context.textAlign = 'center'
-  context.fillText(text, x, y)
+  context.fillText(text, left + width / 2, y)
   context.textAlign = 'left'
+  context.lineWidth = lineWidth
 }
 
 function label(context: CanvasRenderingContext2D, theme: DrawingTheme, text: string, x: number, y: number, align: 'left' | 'right', muted = false) {

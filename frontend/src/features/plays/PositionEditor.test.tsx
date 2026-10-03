@@ -55,7 +55,7 @@ describe('local-draft position editor', () => {
     expect(screen.getByText(/Planned levels, not fills/)).toHaveTextContent('Unsaved edits stay in memory')
     expect(screen.queryByText(/sample/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^save/i })).not.toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: 'Whole-position sizing' })).toHaveValue('margin')
+    expect(screen.getByRole('button', { name: 'Margin in quote units' })).toHaveAttribute('aria-pressed', 'true')
     expect(unitButton('Entry 1 stop units', 'Price')).toHaveAttribute('aria-pressed', 'true')
   })
 
@@ -65,16 +65,36 @@ describe('local-draft position editor', () => {
     fireEvent.change(margin, { target: { value: '125.7500' } })
     expect(onChange.mock.lastCall?.[0].size).toBe('125.7500')
     expect(onChange.mock.lastCall?.[0].entries).toEqual(initial.entries)
-    const sizing = screen.getByRole('combobox', { name: 'Whole-position sizing' })
-    await user.selectOptions(sizing, 'margin')
+    await user.click(screen.getByRole('button', { name: 'Margin in quote units' }))
     expect(margin).toHaveValue(125.75)
-    await user.selectOptions(sizing, 'quantity')
+    // Without an entry price there is nothing to convert at, so the size clears.
+    await user.click(screen.getByRole('button', { name: 'Quantity in units' }))
     const quantity = screen.getByRole('spinbutton', { name: /Whole-position quantity/ })
     expect(quantity).toHaveValue(null)
     await user.type(quantity, '0.125')
     expect(onChange.mock.lastCall?.[0]).toMatchObject({ sizingMode: 'quantity', size: '0.125', leverage: '1' })
     expect(onChange.mock.lastCall?.[0].entries).toEqual(initial.entries)
-    expect(sizing).toHaveValue('quantity')
+    expect(screen.getByRole('button', { name: 'Quantity in units' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('converts the size between the quote asset and the contract at the leverage and entry', async () => {
+    const user = userEvent.setup()
+    function Converting() {
+      const [draft, setDraft] = useState<PlayDraft>(() => {
+        const base = { ...createDraft(), size: '500', leverage: '10' }
+        base.entries[0]!.price = '84000'
+        return base
+      })
+      return <PositionEditor draft={draft} onChange={setDraft} selectedId={draft.entries[0]!.id} onSelect={vi.fn()} maxLeverage={40}
+        instrumentName="BTC/USDC" units={{ quote: 'USDC', base: 'BTC', quantityDecimals: 5 }} />
+    }
+    render(<Converting />)
+    expect(screen.getByRole('button', { name: 'Margin in USDC' })).toHaveTextContent('USDC')
+    await user.click(screen.getByRole('button', { name: 'Quantity in BTC' }))
+    expect(screen.getByRole('spinbutton', { name: /Whole-position quantity/ })).toHaveValue(0.05952)
+    expect(screen.getByTestId('size-readout')).toHaveTextContent('Margin 499.97 USDC')
+    await user.click(screen.getByRole('button', { name: 'Margin in USDC' }))
+    expect(screen.getByRole('spinbutton', { name: /Whole-position margin/ })).toHaveValue(499.97)
   })
 
   it('links whole-number leverage controls, allows clearing and preserves size and planned levels', async () => {

@@ -7,7 +7,7 @@ import { ChartIconButton, ChartMenu, ChartToolbar, ChartToolbarDivider } from '@
 import { ChartToolRail } from '@/components/chart/ChartToolRail'
 import { drawingColors, type ChartDrawing } from '@/components/chart/drawings'
 import { DrawingEditBar } from '@/components/chart/DrawingEditBar'
-import { drawingToolLabels, drawingTools, drawingUtilityIcons, isDrawingKind } from '@/components/chart/drawingTools'
+import { drawingToolHints, drawingToolLabels, drawingTools, drawingUtilityIcons, isDrawingKind } from '@/components/chart/drawingTools'
 import { intervalName } from '@/components/chart/intervals'
 import { LiveIndicator } from '@/components/chart/LiveIndicator'
 import { TimeframeBar } from '@/components/chart/TimeframeBar'
@@ -56,14 +56,6 @@ interface ChartPanelProps {
 }
 
 const noDrawings: readonly ChartDrawing[] = []
-const creationHints: Record<string, string> = {
-  'trend-line': 'Drag, or click twice, to draw a trend line.',
-  'horizontal-line': 'Click to place a horizontal line.',
-  zone: 'Drag, or click twice, to mark a zone.',
-  fibonacci: 'Drag from the swing start to the swing end.',
-  position: 'Click the entry, then drag to the target. The stop mirrors it at 1R.',
-  text: 'Click to place a note, then edit its text.',
-}
 
 type PlanTool = 'entry' | ExitKind
 const planToolIcon = { size: 16, strokeWidth: 1.6, 'aria-hidden': true } as const
@@ -153,9 +145,9 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
     ...entries.map(entry => ({ value: entry.id, label: entry.name, swatch: entry.color }))]} />
   const priced = selectedEntry !== undefined && Number(selectedEntry.price) > 0
   const planTools = editable && selectedEntry ? [
-    { id: 'plan:entry', label: `Set ${selectedName} price on the chart`, icon: <ArrowRightToLine {...planToolIcon} />, available: true },
-    { id: 'plan:stop', label: `Add a stop to ${selectedName} on the chart`, icon: <OctagonX {...planToolIcon} />, available: priced, unavailableReason: 'Set the entry price first' },
-    { id: 'plan:target', label: `Add a target to ${selectedName} on the chart`, icon: <Target {...planToolIcon} />, available: priced, unavailableReason: 'Set the entry price first' },
+    { id: 'plan:entry', label: `Set ${selectedName} price on the chart`, description: 'Click the chart at the entry price.', icon: <ArrowRightToLine {...planToolIcon} />, available: true },
+    { id: 'plan:stop', label: `Add a stop to ${selectedName} on the chart`, description: 'Click the chart at the stop price. Add several for partial stops.', icon: <OctagonX {...planToolIcon} />, available: priced, unavailableReason: 'Set the entry price first' },
+    { id: 'plan:target', label: `Add a target to ${selectedName} on the chart`, description: 'Click the chart at the target price. Add several for partial targets.', icon: <Target {...planToolIcon} />, available: priced, unavailableReason: 'Set the entry price first' },
   ] : []
   const rail = <ChartToolRail tools={drawingTools} active={planTool ? `plan:${planTool}` : editor.tool ?? 'crosshair'}
     groups={[{ label: `Plan levels for ${selectedEntry?.name ?? 'the entry'}`, tools: planTools }]} onSelect={id => {
@@ -171,14 +163,14 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
     else if (id === 'clear') editor.clear()
     else { setPlanTool(null); editor.setTool(isDrawingKind(id) ? id : null) }
   }} footer={[
-    { id: 'magnet', label: 'Snap to candles', icon: drawingUtilityIcons.magnet, available: true, pressed: preferences.magnet },
+    { id: 'magnet', label: 'Snap to candles', description: 'Pulls anchors to a nearby open, high, low or close.', icon: drawingUtilityIcons.magnet, available: true, pressed: preferences.magnet },
     { id: 'undo', label: history.undoLabel ? `Undo: ${history.undoLabel}` : 'Undo', icon: drawingUtilityIcons.undo, available: history.canUndo, pressed: false },
     { id: 'redo', label: history.redoLabel ? `Redo: ${history.redoLabel}` : 'Redo', icon: drawingUtilityIcons.redo, available: history.canRedo, pressed: false },
     { id: 'clear', label: `Clear unlocked ${instrument} drawings`, icon: drawingUtilityIcons.clear, available: editor.clearable, pressed: false },
   ]} unavailableReason="Nothing to change" />
-  const planHint = planTool && `Click the chart to ${planTool === 'entry' ? `set ${selectedName} price` : `add a ${planTool} to ${selectedName}`}. The magnet snaps to candles. Esc cancels.`
+  const planHint = planTool && `Click the chart to ${planTool === 'entry' ? `set ${selectedName} price` : `add a ${planTool} to ${selectedName}`}. With the magnet on, it snaps to a nearby candle price. Esc cancels.`
   const drawingBar = planHint ? <div className="chart-drawing-bar" role="status">{planHint}</div>
-    : editor.tool ? <div className="chart-drawing-bar" role="status">{creationHints[editor.tool]} Esc cancels.</div>
+    : editor.tool ? <div className="chart-drawing-bar" role="status">{drawingToolHints[editor.tool]} Esc cancels.</div>
     : editor.selected ? <DrawingEditBar drawing={editor.selected} label={drawingToolLabels[editor.selected.kind]} defaultColor={drawingColors[0]}
       onStyle={style => editor.setStyle(editor.selected!.id, style)} onLocked={locked => editor.setLocked(editor.selected!.id, locked)}
       onDelete={editor.remove} onText={text => editor.setText(editor.selected!.id, text)} onTextFocus={editor.beginTextEdit} onTextBlur={editor.endTextEdit} /> : null

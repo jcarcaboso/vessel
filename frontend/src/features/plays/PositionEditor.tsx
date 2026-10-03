@@ -6,7 +6,7 @@ import { createEntry, type DraftEntry, type PlayDraft } from './draft'
 import { EntryForm } from './EntryForm'
 import { keepPercentLevelPrices, leverageOf, percentLevels } from './levels'
 import { LeverageChangeDialog } from './LeverageChangeDialog'
-import { defaultSizeUnits, formatMoney, formatQuantity, positionSize, type SizeUnits } from './sizing'
+import { convertSize, defaultSizeUnits, formatMoney, formatQuantity, positionSize, type SizeUnits } from './sizing'
 import { Expand, Plus, Trash2 } from 'lucide-react'
 
 const leveragePresets = [1, 5, 10, 25, 50]
@@ -136,21 +136,21 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
       <div className="whole-size-input">
         <label htmlFor={`${prefix}-size`}>
           <span>{draft.sizingMode === 'margin' ? 'Whole-position margin' : 'Whole-position quantity'}
-            <small>{draft.sizingMode === 'margin' ? 'currency units' : 'instrument units'}</small></span>
+            <small>{draft.sizingMode === 'margin' ? units.quote === defaultSizeUnits.quote ? 'currency units' : units.quote : units.base === defaultSizeUnits.base ? 'instrument units' : units.base}</small></span>
           <Input id={`${prefix}-size`} type="number" min={0} step="any" value={draft.size} placeholder="Enter total size"
             onChange={event => onChange({ ...draft, size: event.target.value })} />
         </label>
-        <label htmlFor={`${prefix}-sizing-mode`}>
-          <span>Size input</span>
-          <select id={`${prefix}-sizing-mode`} aria-label="Whole-position sizing" value={draft.sizingMode}
-            onChange={event => {
-              const sizingMode = event.target.value as PlayDraft['sizingMode']
-              if (sizingMode !== draft.sizingMode) onChange({ ...draft, sizingMode, size: '' })
-            }}>
-            <option value="margin">Margin · currency</option>
-            <option value="quantity">Quantity · instrument</option>
-          </select>
-        </label>
+        <div className="size-unit-field">
+          <span>Size in</span>
+          {/* Switching keeps the same position when it can be converted at the leverage and average entry. */}
+          <div className="size-unit-switch segmented" role="group" aria-label="Whole-position sizing">
+            {(['margin', 'quantity'] as const).map(mode => <button key={mode} type="button" aria-pressed={draft.sizingMode === mode}
+              aria-label={mode === 'margin' ? `Margin in ${units.quote}` : `Quantity in ${units.base}`}
+              onClick={() => {
+                if (mode !== draft.sizingMode) onChange({ ...draft, sizingMode: mode, size: convertSize(draft, leverage, units) })
+              }}>{mode === 'margin' ? units.quote === defaultSizeUnits.quote ? 'Currency' : units.quote : units.base === defaultSizeUnits.base ? 'Quantity' : units.base}</button>)}
+          </div>
+        </div>
         {sized.notional !== null || sized.margin !== null ? <p className="position-size-readout" data-testid="size-readout">
           {sized.notional !== null && <span>Position <strong>{formatMoney(sized.notional, units)}</strong></span>}
           {draft.sizingMode === 'quantity' && sized.margin !== null && <span>Margin <strong>{formatMoney(sized.margin, units)}</strong></span>}
@@ -179,7 +179,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
       {leverage > leverageLimit && <p className="leverage-warning" role="alert">{leverage}× is above the {leverageLimit}× venue maximum for {instrumentName || 'this contract'}.</p>}
       {pendingLeverage !== null && <LeverageChangeDialog draft={draft} from={leverage} to={pendingLeverage} units={units}
         onKeepPrices={() => finishLeverage('prices')} onKeepPercentages={() => finishLeverage('percentages')} onCancel={() => finishLeverage()} />}
-      <p className="muted">Position size is margin × leverage at the planned average entry, before fees, funding and venue margin rules. Payoff calculations are deferred. Changing sizing units clears size. {maxLeverage ? 'The leverage range is the venue maximum for this contract.' : 'Without a venue contract, the 1× to 100× range is not venue-validated.'} Percentage stops and targets are returns at this leverage.</p>
+      <p className="muted">Position size is margin × leverage at the planned average entry, before fees, funding and venue margin rules. Payoff calculations are deferred. Switching between margin and quantity converts the size at the leverage and average entry, or clears it without an entry price. {maxLeverage ? 'The leverage range is the venue maximum for this contract.' : 'Without a venue contract, the 1× to 100× range is not venue-validated.'} Percentage stops and targets are returns at this leverage.</p>
     </div>
     <div className="entries-heading">
       <div><h3>Distribute your entries <span className="entry-count">{String(draft.entries.length).padStart(2, '0')}</span></h3>

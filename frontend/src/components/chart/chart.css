@@ -111,3 +111,10 @@
 @media (max-width: 640px) {
   .chart-live-toggle { gap: 5px; padding: 0 6px; }
 }
+
+.chart-icon-tip { display: inline-flex; }
+.chart-tooltip { z-index: 70; display: grid; gap: 2px; max-width: 240px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--foreground); background: var(--popover, var(--card)); box-shadow: 0 8px 24px #0006; font-size: 11px; line-height: 1.4; }
+.chart-tooltip strong { font-weight: 600; }
+.chart-tooltip span { color: var(--muted-foreground); font-size: 10px; }
+/* A hint while a tool is active never blocks clicks on the chart beneath it. */
+.chart-drawing-bar[role="status"] { pointer-events: none; }

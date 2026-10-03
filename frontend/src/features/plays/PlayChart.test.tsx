@@ -785,8 +785,22 @@ describe('Chart captures', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('A play can hold at most 50 images.')
   })
 
-  it('keeps capture unavailable without market data', () => {
+  it('keeps capture unavailable without market data and says why in its tooltip', async () => {
     render(<ChartPanel entries={entries()} selectedId="" instrument="ETH-PERP" onSelect={vi.fn()} onCapture={vi.fn()} />)
-    expect(screen.getByRole('button', { name: 'Capture chart' })).toHaveAttribute('title', 'Capture chart · Needs market data')
+    const button = screen.getByRole('button', { name: 'Capture chart' })
+    expect(button).toBeDisabled()
+    await userEvent.hover(button.parentElement!)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Capture chartNeeds market data')
+  })
+
+  it('names each drawing tool and says how to use it in a tooltip', async () => {
+    const { factory } = fakeAdapter()
+    render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    await userEvent.hover(screen.getByRole('button', { name: 'Fibonacci retracement' }))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Fibonacci retracementDrag from the swing start to the swing end.')
+    await userEvent.click(screen.getByRole('button', { name: 'Price range' }))
+    expect(screen.getByText('Drag up or down to measure a price change. Esc cancels.')).toBeInTheDocument()
   })
 })

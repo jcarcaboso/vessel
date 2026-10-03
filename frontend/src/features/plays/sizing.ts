@@ -63,3 +63,17 @@ export function sizeChange(draft: Pick<PlayDraft, 'size' | 'sizingMode' | 'entri
     return `Quantity stays ${formatQuantity(before.quantity, units)}; margin goes from ${formatMoney(before.margin, units)} to ${formatMoney(after.margin, units)}.`
   return null
 }
+
+/**
+ * The same position in the other sizing unit: margin ↔ quantity at the leverage and planned average
+ * entry. Blank when the size or an entry price is missing, so nothing is invented.
+ */
+export function convertSize(draft: Pick<PlayDraft, 'size' | 'sizingMode' | 'entries'>, leverage: number, units: SizeUnits) {
+  const sized = positionSize(draft, leverage)
+  if (draft.sizingMode === 'margin') {
+    if (sized.quantity === null) return ''
+    const digits = units.quantityDecimals ?? 6
+    return String(Number(sized.quantity.toFixed(digits)))
+  }
+  return sized.margin === null ? '' : String(Number(sized.margin.toFixed(2)))
+}

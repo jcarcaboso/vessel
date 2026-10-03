@@ -247,6 +247,9 @@ class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   }
 }
 
+/** Pixels within which the magnet pulls an anchor to a candle's open, high, low or close. */
+const magnetReach = 12
+
 const timeLabel = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })
 
 export const createLightweightAdapter: ChartAdapterFactory = (container, callbacks) => {
@@ -285,7 +288,12 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       const price = series.coordinateToPrice(y)
       if (logical === null || price === null || !Number.isFinite(price) || price <= 0) return null
       const candle = snap ? loaded[index.candleIndex(logical) ?? -1] : undefined
-      if (candle) return { time: candle.time, price: snapPrice(candle, price) }
+      if (candle) {
+        // Snap only near a candle price, so a click away from the candles keeps the price under the cursor.
+        const snapped = snapPrice(candle, price)
+        const snappedY = series.priceToCoordinate(snapped)
+        return { time: candle.time, price: snappedY !== null && Math.abs(snappedY - y) <= magnetReach ? snapped : price }
+      }
       const time = index.time(logical)
       return time === null ? null : { time, price }
     },
