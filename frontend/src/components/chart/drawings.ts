@@ -60,7 +60,9 @@ export function formatDuration(milliseconds: number) {
   return `${rest}m`
 }
 
-export const fibonacciLevels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] as const
+/** Retracement levels; 0.618 to 0.65 is the golden pocket. */
+export const fibonacciLevels = [0, 0.236, 0.382, 0.5, 0.618, 0.65, 0.786, 1] as const
+export const goldenPocket = [0.618, 0.65] as const
 
 /** Level 1 sits at the start anchor and level 0 at the end anchor, as in common charting tools. */
 export const fibonacciPrice = (start: DrawingPoint, end: DrawingPoint, level: number) => end.price + (start.price - end.price) * level

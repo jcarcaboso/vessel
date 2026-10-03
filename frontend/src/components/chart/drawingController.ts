@@ -1,5 +1,5 @@
 import {
-  distanceToSegment, drawingSchemaVersion, fibonacciLevels, fibonacciPrice, formatDuration, pointCount, positionPoints, positionStats,
+  distanceToSegment, drawingSchemaVersion, fibonacciLevels, fibonacciPrice, goldenPocket, formatDuration, pointCount, positionPoints, positionStats,
   priceRangeStats, type ChartDrawing, type DrawingKind, type DrawingPoint,
 } from './drawings'
 
@@ -38,8 +38,9 @@ type Gesture =
   | { type: 'move'; drawing: ChartDrawing; x: number; y: number; moved: boolean }
   | { type: 'handle'; drawing: ChartDrawing; index: number; moved: boolean }
 
-/** Default level colors, from the swing end (0) to its start (1). */
-const fibonacciColors = ['#9aa4b2', '#f2b3ac', '#f5a97f', '#a9d6b6', '#7fd1d1', '#8fb8ff', '#9aa4b2'] as const
+/** Default level colors, from the swing end (0) to its start (1); the golden pocket levels are gold. */
+const fibonacciColors = ['#9aa4b2', '#ef5f6b', '#f59a3c', '#4cbf7f', '#e3b341', '#e3b341', '#4f9cf0', '#b07fe0'] as const
+const gold = '#e3b341'
 
 const hitTolerance = 6
 const handleRadius = 5
@@ -69,10 +70,18 @@ export class DrawingController {
   magnet = false
   private gesture: Gesture | null = null
   private preview: ChartDrawing | null = null
+  /** Pane x of the free vertical guide shown while a tool is active, or null. */
+  private guide: number | null = null
 
   constructor(private readonly space: DrawingSpace, private readonly callbacks: DrawingCallbacks, private readonly requestUpdate: () => void) {}
 
   get busy() { return this.gesture !== null }
+
+  setGuide(x: number | null) {
+    if (x === this.guide) return
+    this.guide = x
+    this.requestUpdate()
+  }
 
   setTool(tool: DrawingKind | null) {
     this.tool = tool
@@ -280,6 +289,15 @@ export class DrawingController {
     context.font = `500 ${textFont - 1}px ${theme.font}`
     context.textBaseline = 'middle'
     for (const drawing of all) this.renderOne(context, theme, drawing, drawing.id === this.selectedId || drawing === this.preview)
+    if (this.guide !== null) {
+      context.strokeStyle = theme.muted
+      context.lineWidth = 1
+      context.setLineDash([4, 4])
+      line(context, this.guide, 0, this.guide, this.space.height())
+      context.setLineDash([])
+      const point = this.space.point(this.guide, 0, false)
+      if (point) tag(context, theme, this.space.formatTime(point.time), this.guide, this.space.height() - 12, theme.muted)
+    }
     context.restore()
   }
 
@@ -352,12 +370,13 @@ export class DrawingController {
           // A chosen color applies to every level; otherwise each level has its own.
           color: drawing.style?.color ?? fibonacciColors[index]!,
         }))
-        // Light bands between consecutive levels, then the levels and the swing line on top.
+        // Light bands between consecutive levels with the golden pocket in gold, then the levels and the swing line on top.
         levels.slice(1).forEach((band, index) => {
           const previous = levels[index]!
           if (band.y === null || previous.y === null) return
-          context.globalAlpha = 0.08
-          context.fillStyle = band.color
+          const pocket = previous.level === goldenPocket[0] && band.level === goldenPocket[1]
+          context.globalAlpha = pocket ? 0.3 : 0.08
+          context.fillStyle = pocket ? gold : band.color
           context.fillRect(left, Math.min(previous.y, band.y), right - left, Math.abs(band.y - previous.y))
         })
         context.globalAlpha = 1
@@ -368,11 +387,17 @@ export class DrawingController {
         context.lineWidth = baseWidth
         // Labels sit outside the drawing, on the left when there is room, so they never cover candles inside it.
         const outsideLeft = left > 96
-        for (const { level, price, y, color: levelColor } of levels) {
-          if (y === null) continue
+        const placed = levels.filter(item => item.y !== null) as Array<typeof levels[number] & { y: number }>
+        for (const { y, color: levelColor } of placed) {
           context.strokeStyle = levelColor
           line(context, left, y, right, y)
-          tag(context, theme, `${level} (${this.space.formatPrice(price)})`, outsideLeft ? left - 6 : right + 6, y, levelColor, outsideLeft ? 'right' : 'left')
+        }
+        // Close levels (such as the golden pocket) get their labels stacked so they never cover each other.
+        let previous = -Infinity
+        for (const { level, price, y, color: levelColor } of [...placed].sort((a, b) => a.y - b.y)) {
+          const labelY = Math.max(y, previous + 21)
+          previous = labelY
+          tag(context, theme, `${level} (${this.space.formatPrice(price)})`, outsideLeft ? left - 6 : right + 6, labelY, levelColor, outsideLeft ? 'right' : 'left')
         }
         break
       }

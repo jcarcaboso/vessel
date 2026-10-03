@@ -277,14 +277,29 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   let loaded: readonly ChartCandle[] = []
   let index = new TimeIndex([])
 
+  /**
+   * The library converts only whole bars (x → bar rounds up, a fractional bar → 0), which would tie every
+   * anchor to a candle. Bars are evenly spaced, so drawings convert linearly from bars 0 and 1.
+   */
+  const barAxis = () => {
+    const scale = chart.timeScale()
+    const origin = scale.logicalToCoordinate(0 as Logical)
+    const next = scale.logicalToCoordinate(1 as Logical)
+    return origin === null || next === null || next === origin ? null : { origin, spacing: next - origin }
+  }
+  const floatLogical = (x: number) => {
+    const axis = barAxis()
+    return axis ? (x - axis.origin) / axis.spacing : chart.timeScale().coordinateToLogical(x)
+  }
   const space: DrawingSpace = {
     x: time => {
       const logical = index.logical(time)
-      return logical === null ? null : chart.timeScale().logicalToCoordinate(logical as Logical)
+      const axis = barAxis()
+      return logical === null || !axis ? null : axis.origin + logical * axis.spacing
     },
     y: price => series.priceToCoordinate(price),
     point: (x, y, snap) => {
-      const logical = chart.timeScale().coordinateToLogical(x)
+      const logical = floatLogical(x)
       const price = series.coordinateToPrice(y)
       if (logical === null || price === null || !Number.isFinite(price) || price <= 0) return null
       const candle = snap ? loaded[index.candleIndex(logical) ?? -1] : undefined
@@ -369,7 +384,17 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     container.setPointerCapture?.(event.pointerId)
     lockChart(true)
   }
+  // While a tool is active, the chart's crosshair (which jumps from bar to bar) gives way to a free guide.
+  let guiding = false
+  const updateGuide = () => {
+    const active = picking || drawings.tool !== null
+    if (active === guiding) return
+    guiding = active
+    chart.applyOptions({ crosshair: { vertLine: { visible: !active, labelVisible: !active } } })
+    if (!active) drawings.setGuide(null)
+  }
   const onPointerMove = (event: PointerEvent) => {
+    if (guiding) drawings.setGuide(pane(event).x)
     if (drawings.busy) {
       const { x, y } = pane(event)
       if (drawings.pointerMove(x, y)) consume(event)
@@ -419,6 +444,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   container.addEventListener('pointermove', onPointerMove, true)
   container.addEventListener('pointerup', endDrag, true)
   container.addEventListener('pointercancel', endDrag, true)
+  const onPointerLeave = () => drawings.setGuide(null)
+  container.addEventListener('pointerleave', onPointerLeave)
 
   const adapter: ChartAdapter = {
     setCandles(candles, reset) {
@@ -451,10 +478,12 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
         drawings.setTool(tool)
         lockChart(false)
       }
+      updateGuide()
     },
     setPricePicker(active) {
       picking = active
       container.style.cursor = active ? 'crosshair' : ''
+      updateGuide()
     },
     async capture(caption) {
       // Levels and drawings are series primitives, so they are on the screenshot canvas. Browsers with
@@ -488,6 +517,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       container.removeEventListener('pointermove', onPointerMove, true)
       container.removeEventListener('pointerup', endDrag, true)
       container.removeEventListener('pointercancel', endDrag, true)
+      container.removeEventListener('pointerleave', onPointerLeave)
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
       chart.remove()
     },

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DrawingController, buildPoints, type DrawingSpace } from './drawingController'
-import { TimeIndex, fibonacciPrice, formatDuration, isChartDrawing, positionStats, priceRangeStats, snapPrice, type ChartDrawing } from './drawings'
+import { TimeIndex, fibonacciLevels, fibonacciPrice, formatDuration, goldenPocket, isChartDrawing, positionStats, priceRangeStats, snapPrice, type ChartDrawing } from './drawings'
 
 const hour = 3_600_000
 const candles = [0, 1, 2, 3].map(i => ({ time: 1_000 * hour + i * hour, open: 100 + i, high: 105 + i, low: 95 + i, close: 102 + i }))
@@ -40,6 +40,10 @@ describe('drawing geometry', () => {
     expect(positionStats(points)).toEqual({ side: 'long', targetPercent: 10, stopPercent: 10, ratio: 1 })
     expect(positionStats([{ time: 0, price: 100 }, { time: 1, price: 80 }, { time: 1, price: 105 }])).toMatchObject({ side: 'short', ratio: 4 })
     expect(buildPoints('position', { time: 0, price: 10 }, { time: 1, price: 50 })[2]!.price).toBeGreaterThan(0)
+  })
+  it('includes the golden pocket between 0.618 and 0.65', () => {
+    expect(fibonacciLevels).toEqual([0, 0.236, 0.382, 0.5, 0.618, 0.65, 0.786, 1])
+    expect(goldenPocket.map(level => fibonacciPrice({ time: 0, price: 100 }, { time: 1, price: 200 }, level))).toEqual([138.2, 135])
   })
   it('measures price and date ranges for display', () => {
     expect(priceRangeStats({ time: 0, price: 80 }, { time: 1, price: 100 })).toEqual({ change: 20, percent: 25 })
@@ -191,14 +195,15 @@ describe('drawing controller', () => {
 })
 
 describe('drawing hit areas', () => {
-  it('selects a Fibonacci only near its levels or diagonal, so drawings inside it stay reachable', () => {
+  it('keeps drawings inside a Fibonacci reachable and selects the Fibonacci elsewhere in it', () => {
     const { callbacks, drawings } = controller()
     const fib: ChartDrawing = { id: 'f', schemaVersion: 1, kind: 'fibonacci', points: [{ time: 6_000_000, price: 400 }, { time: 18_000_000, price: 600 }] }
-    const line: ChartDrawing = { id: 't', schemaVersion: 1, kind: 'trend-line', points: [{ time: 9_000_000, price: 470 }, { time: 15_000_000, price: 470 }] }
+    // Between the 0.382 (523.6) and 0.5 (500) levels.
+    const line: ChartDrawing = { id: 't', schemaVersion: 1, kind: 'trend-line', points: [{ time: 9_000_000, price: 512 }, { time: 15_000_000, price: 512 }] }
     drawings.drawings = [line, fib]
-    drawings.pointerDown(200, 530)
+    drawings.pointerDown(200, 488)
     expect(callbacks.onDrawingSelect).toHaveBeenLastCalledWith('t')
-    drawings.pointerUp(200, 530)
+    drawings.pointerUp(200, 488)
     drawings.pointerDown(250, 500)
     expect(callbacks.onDrawingSelect).toHaveBeenLastCalledWith('f')
   })
