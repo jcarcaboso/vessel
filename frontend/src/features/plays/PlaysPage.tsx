@@ -6,6 +6,7 @@ import { venueName } from '@/features/workspace/format'
 import { ArrowLeft, History, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import { createDraft, type PlayDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
+import { instrumentLabel } from './instruments'
 import { ExecutionPanel } from './ExecutionPanel'
 import { usePlayExecution } from './usePlayExecution'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
@@ -22,7 +23,7 @@ type Filter = typeof filters[number][0]
 function hasContent(draft: PlayDraft) {
   return !!(draft.title.trim() || draft.accountId || draft.instrument || draft.size || draft.evidence.length ||
     Object.values(draft.drawings).some(items => items.length) || Object.values(draft.notes).some(note => note.trim()) ||
-    draft.entries.some(entry => entry.price || entry.stop.value || entry.targets.some(target => target.value)))
+    draft.entries.some(entry => entry.price || entry.stops.some(stop => stop.value) || entry.targets.some(target => target.value)))
 }
 
 export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false }: {
@@ -245,7 +246,7 @@ function PlayList({ api, accounts, busy, error, unsaved, onOpen, onNew, onContin
       {shown.map(play => <li key={play.id}>
         <button type="button" className="plays-list-item" disabled={!!unsaved || busy} onClick={() => onOpen(play.id)} aria-label={`Open ${play.title || 'Untitled play'}`}>
           <span className="plays-list-title"><strong>{play.title || 'Untitled play'}</strong>
-            <small>{play.instrument ?? 'No instrument'} · {venueName(play.venueId)} · {accountName(play.accountId)}</small></span>
+            <small>{play.instrument ? instrumentLabel(play.venueId, play.instrument, play.instrumentSource) : 'No instrument'} · {venueName(play.venueId)} · {accountName(play.accountId)}</small></span>
           <span className={`direction-chip ${play.direction}`}>{play.direction === 'long' ? 'Long' : 'Short'}</span>
           <span className={`badge play-status-${play.status}`}>{statusLabels[play.status]}</span>
           <small className="plays-list-meta">{play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated {new Date(play.updatedAtUtc).toLocaleDateString()}</small>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
-import { Camera, ChartNoAxesCombined, Maximize2, RefreshCw } from 'lucide-react'
+import { ArrowRightToLine, Camera, ChartNoAxesCombined, Maximize2, OctagonX, RefreshCw, Target } from 'lucide-react'
 import type { CandleInterval, WorkspaceApi } from '@/api/workspace'
 import { CandleChart, type CandleChartControl } from '@/components/chart/CandleChart'
 import { ChartHeader, type ChartStat } from '@/components/chart/ChartHeader'
@@ -7,7 +7,7 @@ import { ChartIconButton, ChartMenu, ChartToolbar, ChartToolbarDivider } from '@
 import { ChartToolRail } from '@/components/chart/ChartToolRail'
 import { drawingColors, type ChartDrawing } from '@/components/chart/drawings'
 import { DrawingEditBar } from '@/components/chart/DrawingEditBar'
-import { drawingToolLabels, drawingTools, drawingUtilityIcons, isDrawingKind } from '@/components/chart/drawingTools'
+import { drawingToolHints, drawingToolLabels, drawingTools, drawingUtilityIcons, isDrawingKind } from '@/components/chart/drawingTools'
 import { intervalName } from '@/components/chart/intervals'
 import { LiveIndicator } from '@/components/chart/LiveIndicator'
 import { TimeframeBar } from '@/components/chart/TimeframeBar'
@@ -22,7 +22,7 @@ import { useLiveMarket } from '@/features/market/useLiveMarket'
 import { describeMarket, useMarketContext } from '@/features/market/useMarketContext'
 import type { DraftEntry, PlayDraft } from './draft'
 import { LevelEditor } from './LevelEditor'
-import { applyEntryEdit, applyLevelDrag, averageEntryPrice, formatDraggedPrice, parseOverlayId, planOverlays, type ChartView } from './levels'
+import { applyEntryEdit, applyLevelDrag, averageEntryPrice, formatDraggedPrice, levelTag, parseOverlayId, placeLevel, planOverlays, type ChartView, type ExitKind } from './levels'
 
 export interface ChartSource {
   api: WorkspaceApi
@@ -34,8 +34,16 @@ interface ChartPanelProps {
   selectedId: string
   onSelect: (id: string) => void
   instrument: string
+  /** Display name such as BTC/USDC; defaults to the contract. */
+  instrumentName?: string
   venue?: string | null
   direction?: PlayDraft['direction']
+  /** The play's leverage; percentage levels are returns at it. */
+  leverage?: number
+  /** False for read-only plays: levels can be viewed but not placed or dragged. */
+  editable?: boolean
+  /** Brings the Evidence tab into view after a capture. */
+  onShowEvidence?: () => void
   /** Venue market data for the chosen account; null keeps the placeholder (manual or unsupported). */
   source?: ChartSource | null
   onEntriesChange?: (entries: DraftEntry[]) => void
@@ -48,19 +56,16 @@ interface ChartPanelProps {
 }
 
 const noDrawings: readonly ChartDrawing[] = []
-const creationHints: Record<string, string> = {
-  'trend-line': 'Drag, or click twice, to draw a trend line.',
-  'horizontal-line': 'Click to place a horizontal line.',
-  zone: 'Drag, or click twice, to mark a zone.',
-  fibonacci: 'Drag from the swing start to the swing end.',
-  position: 'Click the entry, then drag to the target. The stop mirrors it at 1R.',
-  text: 'Click to place a note, then edit its text.',
-}
+
+type PlanTool = 'entry' | ExitKind
+const planToolIcon = { size: 16, strokeWidth: 1.6, 'aria-hidden': true } as const
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'UTC', hour12: false })
 
-export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = null, direction = 'long', source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, onCapture, createAdapter }: ChartPanelProps) {
+export function ChartPanel({ entries, selectedId, onSelect, instrument, instrumentName = instrument, venue = null, direction = 'long', leverage = 1,
+  editable = true, source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, onCapture, onShowEvidence, createAdapter }: ChartPanelProps) {
   const [view, setView] = useState<ChartView>('aggregate')
+  const [planTool, setPlanTool] = useState<PlanTool | null>(null)
   const [preferences, setPreferences] = useChartPreferences()
   const scopeKey = `${source?.accountId ?? ''}|${instrument}`
   const history = useChartHistory(scopeKey)
@@ -91,7 +96,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = 
       const entry = ref && current.find(item => item.id === ref.entryId)
       if (!ref || !entry) return
       dragStart.current ??= entry
-      const next = applyLevelDrag(current, id, price, direction)
+      const next = applyLevelDrag(current, id, price, direction, leverage)
       onEntriesChange?.(next)
       if (phase === 'end') {
         const after = next.find(item => item.id === ref.entryId)!
@@ -107,8 +112,19 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = 
       if (ref.entryId !== selectedId) onSelect(ref.entryId)
     },
   }
+  const selectedEntry = entries.find(entry => entry.id === selectedId) ?? entries[0]
+  const selectedTag = selectedEntry ? levelTag(entries, { entryId: selectedEntry.id, kind: 'entry' }) : ''
+  const selectedName = entries.length > 1 && selectedEntry ? selectedEntry.name : 'the entry'
+  /** Places a level for the selected entry at a price picked on the chart. One pick per tool use. */
+  const pickPrice = (price: number) => {
+    const entry = latest.current.entries.find(item => item.id === selectedEntry?.id)
+    if (!planTool || !entry) return
+    applyEntry(placeLevel(entry, planTool, price), planTool === 'entry' ? `Set ${selectedTag} entry price` : `Add ${selectedTag} ${planTool}`)
+    setPlanTool(null)
+  }
   const onChartKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const key = event.key.toLowerCase()
+    if (planTool && key === 'escape') { event.preventDefault(); setPlanTool(null); return }
     if ((event.metaKey || event.ctrlKey) && (key === 'y' || key === 'z' && event.shiftKey)) { event.preventDefault(); history.redo() }
     else if ((event.metaKey || event.ctrlKey) && key === 'z') { event.preventDefault(); history.undo() }
     else editor.onKeyDown(event)
@@ -117,44 +133,62 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = 
   const [expanded, setExpanded] = useState(false)
   const expandButton = useRef<HTMLButtonElement>(null)
   const live = source !== null && instrument !== ''
-  const overlays = useMemo(() => planOverlays(entries, selectedId, view, direction), [entries, selectedId, view, direction])
+  const overlays = useMemo(() => planOverlays(entries, selectedId, view, direction, leverage), [entries, selectedId, view, direction, leverage])
   const average = view === 'aggregate' ? averageEntryPrice(entries) : null
+  const several = entries.length > 1
 
-  const viewMenu = <ChartMenu label="Chart view" value={view === 'aggregate' ? 'aggregate' : selectedId} onChange={value => {
+  // One entry is both the aggregate and the selection, so the view choice only appears with several.
+  const viewMenu = several && <ChartMenu label="Chart view" value={view === 'aggregate' ? 'aggregate' : selectedId} onChange={value => {
     if (value === 'aggregate') setView('aggregate')
     else { setView('selected'); onSelect(value) }
   }} options={[{ value: 'aggregate', label: 'Aggregate · All entries' },
     ...entries.map(entry => ({ value: entry.id, label: entry.name, swatch: entry.color }))]} />
-  const rail = <ChartToolRail tools={drawingTools} active={editor.tool ?? 'crosshair'} onSelect={id => {
+  const priced = selectedEntry !== undefined && Number(selectedEntry.price) > 0
+  const planTools = editable && selectedEntry ? [
+    { id: 'plan:entry', label: `Set ${selectedName} price on the chart`, description: 'Click the chart at the entry price.', icon: <ArrowRightToLine {...planToolIcon} />, available: true },
+    { id: 'plan:stop', label: `Add a stop to ${selectedName} on the chart`, description: 'Click the chart at the stop price. Add several for partial stops.', icon: <OctagonX {...planToolIcon} />, available: priced, unavailableReason: 'Set the entry price first' },
+    { id: 'plan:target', label: `Add a target to ${selectedName} on the chart`, description: 'Click the chart at the target price. Add several for partial targets.', icon: <Target {...planToolIcon} />, available: priced, unavailableReason: 'Set the entry price first' },
+  ] : []
+  const rail = <ChartToolRail tools={drawingTools} active={planTool ? `plan:${planTool}` : editor.tool ?? 'crosshair'}
+    groups={[{ label: `Plan levels for ${selectedEntry?.name ?? 'the entry'}`, tools: planTools }]} onSelect={id => {
+    if (id.startsWith('plan:')) {
+      const tool = id.slice(5) as PlanTool
+      editor.setTool(null)
+      setPlanTool(current => current === tool ? null : tool)
+      return
+    }
     if (id === 'magnet') setPreferences({ magnet: !preferences.magnet })
     else if (id === 'undo') history.undo()
     else if (id === 'redo') history.redo()
     else if (id === 'clear') editor.clear()
-    else editor.setTool(isDrawingKind(id) ? id : null)
+    else { setPlanTool(null); editor.setTool(isDrawingKind(id) ? id : null) }
   }} footer={[
-    { id: 'magnet', label: 'Snap to candles', icon: drawingUtilityIcons.magnet, available: true, pressed: preferences.magnet },
+    { id: 'magnet', label: 'Snap to candles', description: 'Pulls anchors to a nearby open, high, low or close.', icon: drawingUtilityIcons.magnet, available: true, pressed: preferences.magnet },
     { id: 'undo', label: history.undoLabel ? `Undo: ${history.undoLabel}` : 'Undo', icon: drawingUtilityIcons.undo, available: history.canUndo, pressed: false },
     { id: 'redo', label: history.redoLabel ? `Redo: ${history.redoLabel}` : 'Redo', icon: drawingUtilityIcons.redo, available: history.canRedo, pressed: false },
     { id: 'clear', label: `Clear unlocked ${instrument} drawings`, icon: drawingUtilityIcons.clear, available: editor.clearable, pressed: false },
   ]} unavailableReason="Nothing to change" />
-  const drawingBar = editor.tool ? <div className="chart-drawing-bar" role="status">{creationHints[editor.tool]} Esc cancels.</div>
+  const planHint = planTool && `Click the chart to ${planTool === 'entry' ? `set ${selectedName} price` : `add a ${planTool} to ${selectedName}`}. With the magnet on, it snaps to a nearby candle price. Esc cancels.`
+  const drawingBar = planHint ? <div className="chart-drawing-bar" role="status">{planHint}</div>
+    : editor.tool ? <div className="chart-drawing-bar" role="status">{drawingToolHints[editor.tool]} Esc cancels.</div>
     : editor.selected ? <DrawingEditBar drawing={editor.selected} label={drawingToolLabels[editor.selected.kind]} defaultColor={drawingColors[0]}
       onStyle={style => editor.setStyle(editor.selected!.id, style)} onLocked={locked => editor.setLocked(editor.selected!.id, locked)}
       onDelete={editor.remove} onText={text => editor.setText(editor.selected!.id, text)} onTextFocus={editor.beginTextEdit} onTextBlur={editor.endTextEdit} /> : null
   const editedRef = levelEdit ? parseOverlayId(levelEdit.id) : null
   const editedIndex = editedRef ? entries.findIndex(entry => entry.id === editedRef.entryId) : -1
-  const levelEditor = levelEdit && editedIndex >= 0 ? <LevelEditor key={levelEdit.id} entry={entries[editedIndex]!} entryIndex={editedIndex}
-    overlayId={levelEdit.id} anchor={levelEdit.anchor} direction={direction} onApply={applyEntry}
+  const levelEditor = levelEdit && editedIndex >= 0 && editable ? <LevelEditor key={levelEdit.id} entries={entries} entry={entries[editedIndex]!}
+    overlayId={levelEdit.id} anchor={levelEdit.anchor} direction={direction} leverage={leverage} onApply={applyEntry}
     onClose={() => setLevelEdit(null)} /> : null
   const drawingProps = {
     drawings, selectedDrawingId: editor.selectedId, tool: editor.tool, magnet: preferences.magnet,
+    pricePicker: planTool !== null, onPricePick: pickPrice,
     onDrawingCreate: editor.create, onDrawingChange: editor.change, onDrawingSelect: editor.select, onKeyDown: onChartKeyDown,
     ...levelProps,
   }
 
   return <section className="panel chart-panel" aria-label="Chart" data-testid="chart-panel">
     {live ? <LiveChart key={`${source.accountId}|${instrument}`} source={source} instrument={instrument} interval={interval}
-      caption={`${instrument} · ${venue ? `${venue} ` : ''}trade candles`} venue={venue} onCapture={onCapture}
+      instrumentName={instrumentName} caption={`${instrumentName} · ${venue ? `${venue} ` : ''}trade candles`} venue={venue} onCapture={onCapture} onShowEvidence={onShowEvidence}
       timeframes={<TimeframeBar value={interval} favorites={preferences.favorites}
         onChange={next => setPreferences({ interval: next })} onFavoritesChange={favorites => setPreferences({ favorites })} />}
       liveUpdates={preferences.live} onLiveUpdatesChange={on => setPreferences({ live: on })}
@@ -162,7 +196,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = 
       onExpandedChange={setExpanded} onDialogClosed={() => expandButton.current?.focus({ preventScroll: true })} />
       : <>
         <ChartToolbar label="Chart controls" end={<>
-          <span className="chart-status"><span className="chart-source">{instrument ? `${instrument} · ${venue ? `${venue} · ` : ''}no market data provider` : 'No perpetual instrument selected'}</span></span>
+          <span className="chart-status"><span className="chart-source">{instrument ? `${instrumentName} · ${venue ? `${venue} · ` : ''}no market data provider` : 'No perpetual instrument selected'}</span></span>
           <ChartIconButton label="Capture chart" icon={<Camera size={15} aria-hidden="true" />} disabled disabledReason="Needs market data" />
           <ChartIconButton label="Expand chart" icon={<Maximize2 size={15} aria-hidden="true" />} disabled disabledReason="Needs market data" />
         </>} />
@@ -173,26 +207,28 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, venue = 
           <p>No candles, live prices or execution observations are shown.</p>
         </div>
       </>}
-    <div className="chart-legend" role="group" aria-label="Planned entries">
+    {several && <div className="chart-legend" role="group" aria-label="Planned entries">
       {entries.map((entry) => <button key={entry.id} type="button" aria-pressed={entry.id === selectedId}
         style={{ '--entry-color': entry.color } as CSSProperties} onClick={() => onSelect(entry.id)}>
         <i aria-hidden="true" /><span>{entry.name}</span>
         <small>{entry.share ? `${entry.share}% of quantity` : 'Share not set'}</small>
       </button>)}
       {average !== null && <span className="chart-legend-average"><i aria-hidden="true" />Average entry <strong>{formatDraggedPrice(average)}</strong></span>}
-      {entries.length === 0 && <p className="muted">No planned entries.</p>}
-    </div>
-    <p className="chart-caption">{view === 'aggregate' ? 'Aggregate planned entries. Selecting an entry focuses its editor and keeps the other entries visible. The average is quantity-weighted over entries with a price and share.' : 'Selected entry only.'} {live ? 'Drag the selected entry’s levels or edit them in the editor.' : ''} Planned levels are not fills.</p>
+    </div>}
+    {entries.length === 0 && <p className="chart-legend muted">No planned entries.</p>}
+    <p className="chart-caption">{!several ? '' : view === 'aggregate' ? 'Aggregate planned entries. Selecting an entry focuses its editor and keeps the other entries visible. The average is quantity-weighted over entries with a price and share. ' : 'Selected entry only. '}{live && editable ? 'Place levels with the plan tools beside the chart, drag them, or click a tag to edit. ' : ''}Planned levels are not fills.</p>
   </section>
 }
 
-function LiveChart({ source, instrument, interval, caption, venue, onCapture, liveUpdates, onLiveUpdatesChange, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
+function LiveChart({ source, instrument, instrumentName, interval, caption, venue, onCapture, onShowEvidence, liveUpdates, onLiveUpdatesChange, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
   source: ChartSource
   instrument: string
+  instrumentName: string
   interval: CandleInterval
   caption: string
   venue: string | null
   onCapture?: ((image: Blob, context: string) => string | null) | undefined
+  onShowEvidence?: (() => void) | undefined
   liveUpdates: boolean
   onLiveUpdatesChange: (on: boolean) => void
   timeframes: ReactNode
@@ -219,7 +255,7 @@ function LiveChart({ source, instrument, interval, caption, venue, onCapture, li
   const [capture, setCapture] = useState<{ busy: boolean; message: string; failed: boolean }>({ busy: false, message: '', failed: false })
   useEffect(() => {
     if (!capture.message) return
-    const timer = setTimeout(() => setCapture(current => ({ ...current, message: '' })), 4000)
+    const timer = setTimeout(() => setCapture(current => ({ ...current, message: '' })), 8000)
     return () => clearTimeout(timer)
   }, [capture.message])
   const latestCapture = useRef(onCapture)
@@ -227,11 +263,21 @@ function LiveChart({ source, instrument, interval, caption, venue, onCapture, li
   const captureChart = async () => {
     if (!onCapture || capture.busy) return
     const now = new Date()
-    const context = [instrument, venue, intervalName(interval)].filter(Boolean).join(' · ')
+    const context = [instrumentName, venue, intervalName(interval)].filter(Boolean).join(' · ')
     setCapture({ busy: true, message: '', failed: false })
-    const image = await chart.current?.capture(`${context} · ${now.toISOString().slice(0, 16).replace('T', ' ')} UTC · Planned levels are not fills`) ?? null
-    const problem = !image ? 'The chart could not be captured.' : latestCapture.current?.(image, context) ?? null
-    setCapture({ busy: false, message: problem ?? 'Capture added to Evidence', failed: problem !== null })
+    let image: Blob | null
+    try {
+      image = await chart.current?.capture(`${context} · ${now.toISOString().slice(0, 16).replace('T', ' ')} UTC · Planned levels are not fills`) ?? null
+    } catch {
+      image = null
+    }
+    const problem = !image ? 'The chart could not be captured. Browser privacy or fingerprinting protection can block chart images; allow canvas access for this site and try again.'
+      : latestCapture.current?.(image, context) ?? null
+    setCapture({ busy: false, message: problem ?? 'Capture added to the Evidence tab of the journal.', failed: problem !== null })
+  }
+  const showEvidence = () => {
+    onExpandedChange(false)
+    onShowEvidence?.()
   }
   const updatedAt = [data.retrievedAt, live.lastEventAt].filter((value): value is string => value !== null)
     .reduce<string | null>((latest, value) => latest === null || Date.parse(value) > Date.parse(latest) ? value : latest, null)
@@ -286,7 +332,8 @@ function LiveChart({ source, instrument, interval, caption, venue, onCapture, li
     </div>
   </div>
   const notices = <>
-    {capture.message && <p className={capture.failed ? 'chart-notice' : 'chart-notice chart-notice-success'} role={capture.failed ? 'alert' : 'status'}>{capture.message}</p>}
+    {capture.message && <p className={capture.failed ? 'chart-notice' : 'chart-notice chart-notice-success'} role={capture.failed ? 'alert' : 'status'}>{capture.message}
+      {!capture.failed && onShowEvidence && <> <button type="button" onClick={showEvidence}>Show</button></>}</p>}
     {data.status === 'ready' && data.error && <p className="chart-notice" role="alert">Refresh failed: {data.error} Showing the previous candles.</p>}
     {data.olderError && <p className="chart-notice" role="alert">Older candles failed to load. <button type="button" onClick={data.retryOlder}>Retry</button></p>}
     {data.historyExhausted && data.candles.length > 0 && <p className="chart-notice">Start of available venue history. {data.notice}</p>}

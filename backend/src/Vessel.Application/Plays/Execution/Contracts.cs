@@ -6,12 +6,12 @@ using Vessel.Application.Venues;
 
 namespace Vessel.Application.Plays.Execution;
 
-/// <summary>Links an order to a plan level: role entry, stop or target with its entry (and target), or exit.</summary>
+/// <summary>Links an order to a plan level: role entry with its entry, stop or target with its entry and level, or exit.</summary>
 public sealed record LinkOrderRequest(
     [property: JsonRequired] string OrderId,
     [property: JsonRequired] string Role,
     string? EntryId = null,
-    string? TargetId = null);
+    string? LevelId = null);
 
 public sealed record ExecutionOrderDto(string OrderId, string Side, string OrderType, string LimitPrice, string? TriggerPrice,
     bool ReduceOnly, bool IsPositionTpsl, string OriginalSize, string RemainingSize, DateTimeOffset PlacedAtUtc,
@@ -20,7 +20,7 @@ public sealed record ExecutionOrderDto(string OrderId, string Side, string Order
 public sealed record ExecutionFillDto(string SourceFillId, string Direction, string Price, string Quantity, string Fee,
     string FeeToken, string ClosedPnlUsd, DateTimeOffset OccurredAtUtc);
 
-public sealed record OrderLinkDto(Guid Id, string Role, string? EntryId, string? TargetId, string State, string Source,
+public sealed record OrderLinkDto(Guid Id, string Role, string? EntryId, string? LevelId, string State, string Source,
     ExecutionOrderDto? Order, string FilledQuantity, IReadOnlyList<ExecutionFillDto> Fills);
 
 public sealed record EntryProgressDto(string EntryId, string FilledQuantity, string? AverageFillPrice, int RestingOrders);

@@ -4,9 +4,14 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input'
 import { createEntry, type DraftEntry, type PlayDraft } from './draft'
 import { EntryForm } from './EntryForm'
+import { keepPercentLevelPrices, leverageOf, percentLevels } from './levels'
+import { LeverageChangeDialog } from './LeverageChangeDialog'
+import { convertSize, defaultSizeUnits, formatMoney, formatQuantity, positionSize, type SizeUnits } from './sizing'
 import { Expand, Plus, Trash2 } from 'lucide-react'
 
-const leveragePresets = [1, 5, 10, 25]
+const leveragePresets = [1, 5, 10, 25, 50]
+/** Control range when the venue maximum is unknown, e.g. manual instruments. Saved plans accept up to 100×. */
+const defaultMaxLeverage = 100
 
 // Plain share bookkeeping, not a sizing calculation. Two decimals with the remainder on the last entry.
 function equalShares(count: number) {
@@ -22,13 +27,21 @@ function allocatedShare(entries: DraftEntry[]) {
 }
 import { AvailableBudget } from './WorkspacePanels'
 
-export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect }: {
+export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, instrumentName = '', units = defaultSizeUnits }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
   selectedId: string
   selectionRequest?: number
   onSelect: (id: string) => void
+  /** Venue maximum for the chosen contract, or null when unknown. */
+  maxLeverage?: number | null
+  instrumentName?: string
+  /** Quote asset and contract for the size readout. */
+  units?: SizeUnits
 }) {
+  const leverageLimit = maxLeverage ?? defaultMaxLeverage
+  const leverage = leverageOf(draft.leverage)
+  const presets = leveragePresets.filter(preset => preset < leverageLimit).concat(leverageLimit)
   const prefix = useId()
   const [expanded, setExpanded] = useState(false)
   const sidebar = useRef<HTMLDivElement>(null)
@@ -63,10 +76,38 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
     onChange({ ...draft, entries: draft.entries.map(current => current.id === entry.id ? entry : current) })
   }
 
+  // Percentage stops and targets are returns at the leverage, so with any of them a new leverage is
+  // previewed in the controls and only applied once the owner chooses what happens to those levels.
+  const [leverageDraft, setLeverageDraft] = useState<string | null>(null)
+  const [pendingLeverage, setPendingLeverage] = useState<number | null>(null)
+  const needsConfirmation = percentLevels(draft.entries).length > 0
+  const shownLeverage = leverageDraft ?? draft.leverage
+  const clampLeverage = (value: string) => value === '' ? '' : String(Math.min(leverageLimit, Math.max(1, Math.round(Number(value)))))
+
   function updateLeverage(value: string) {
-    const leverage = value === '' ? '' : String(Math.min(100, Math.max(1, Math.round(Number(value)))))
-    onChange({ ...draft, leverage })
+    const next = clampLeverage(value)
+    if (needsConfirmation) setLeverageDraft(next)
+    else onChange({ ...draft, leverage: next })
   }
+
+  /** Asks about percentage levels before applying a previewed leverage. A blank value goes back to the current one. */
+  function commitLeverage(value = leverageDraft) {
+    if (value === null || !needsConfirmation) return
+    if (value === '' || Number(value) === leverage) { setLeverageDraft(null); return }
+    setLeverageDraft(value)
+    setPendingLeverage(Number(value))
+  }
+
+  function finishLeverage(apply?: 'prices' | 'percentages') {
+    if (apply && pendingLeverage !== null) onChange({
+      ...draft, leverage: String(pendingLeverage),
+      entries: apply === 'prices' ? keepPercentLevelPrices(draft.entries, leverage, pendingLeverage) : draft.entries,
+    })
+    setPendingLeverage(null)
+    setLeverageDraft(null)
+  }
+
+  const sized = positionSize(draft, leverage)
 
   function splitEqually() {
     const shares = equalShares(draft.entries.length)
@@ -95,39 +136,50 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
       <div className="whole-size-input">
         <label htmlFor={`${prefix}-size`}>
           <span>{draft.sizingMode === 'margin' ? 'Whole-position margin' : 'Whole-position quantity'}
-            <small>{draft.sizingMode === 'margin' ? 'currency units' : 'instrument units'}</small></span>
+            <small>{draft.sizingMode === 'margin' ? units.quote === defaultSizeUnits.quote ? 'currency units' : units.quote : units.base === defaultSizeUnits.base ? 'instrument units' : units.base}</small></span>
           <Input id={`${prefix}-size`} type="number" min={0} step="any" value={draft.size} placeholder="Enter total size"
             onChange={event => onChange({ ...draft, size: event.target.value })} />
         </label>
-        <label htmlFor={`${prefix}-sizing-mode`}>
-          <span>Size input</span>
-          <select id={`${prefix}-sizing-mode`} aria-label="Whole-position sizing" value={draft.sizingMode}
-            onChange={event => {
-              const sizingMode = event.target.value as PlayDraft['sizingMode']
-              if (sizingMode !== draft.sizingMode) onChange({ ...draft, sizingMode, size: '' })
-            }}>
-            <option value="margin">Margin · currency</option>
-            <option value="quantity">Quantity · instrument</option>
-          </select>
-        </label>
+        <div className="size-unit-field">
+          <span>Size in</span>
+          {/* Switching keeps the same position when it can be converted at the leverage and average entry. */}
+          <div className="size-unit-switch segmented" role="group" aria-label="Whole-position sizing">
+            {(['margin', 'quantity'] as const).map(mode => <button key={mode} type="button" aria-pressed={draft.sizingMode === mode}
+              aria-label={mode === 'margin' ? `Margin in ${units.quote}` : `Quantity in ${units.base}`}
+              onClick={() => {
+                if (mode !== draft.sizingMode) onChange({ ...draft, sizingMode: mode, size: convertSize(draft, leverage, units) })
+              }}>{mode === 'margin' ? units.quote === defaultSizeUnits.quote ? 'Currency' : units.quote : units.base === defaultSizeUnits.base ? 'Quantity' : units.base}</button>)}
+          </div>
+        </div>
+        {sized.notional !== null || sized.margin !== null ? <p className="position-size-readout" data-testid="size-readout">
+          {sized.notional !== null && <span>Position <strong>{formatMoney(sized.notional, units)}</strong></span>}
+          {draft.sizingMode === 'quantity' && sized.margin !== null && <span>Margin <strong>{formatMoney(sized.margin, units)}</strong></span>}
+          {sized.quantity !== null && draft.sizingMode === 'margin' && <span>≈ <strong>{formatQuantity(sized.quantity, units)}</strong></span>}
+          <small>at {leverage}×{sized.averageEntry === null ? ' · price an entry for the quantity' : ''}</small>
+        </p> : draft.size && draft.sizingMode === 'quantity' && <p className="position-size-readout"><small>Price an entry to see the position and margin.</small></p>}
       </div>
       <div className="leverage-controls">
-        <label htmlFor={`${prefix}-leverage-slider`}>Leverage <small>1× = unlevered</small></label>
+        <label htmlFor={`${prefix}-leverage-slider`}>Leverage <small>{maxLeverage ? `1× to ${maxLeverage}× on ${instrumentName || 'this contract'}` : '1× = unlevered'}</small></label>
         <div className="leverage-input-row">
-          <input id={`${prefix}-leverage-slider`} type="range" min={1} max={100} step={1} value={draft.leverage || '1'}
-            style={{ '--range-progress': `${(Number(draft.leverage || '1') - 1) / 99 * 100}%` } as CSSProperties}
-            aria-label="Leverage slider (×)" aria-valuetext={draft.leverage ? `${draft.leverage} times` : 'Not specified'}
-            onChange={event => updateLeverage(event.target.value)} />
-          <Input id={`${prefix}-leverage`} type="number" min={1} max={100} step={1} value={draft.leverage}
-            aria-label="Leverage (×)" onChange={event => updateLeverage(event.target.value)} />
+          <input id={`${prefix}-leverage-slider`} type="range" min={1} max={leverageLimit} step={1} value={Math.min(leverageOf(shownLeverage), leverageLimit)}
+            style={{ '--range-progress': `${leverageLimit > 1 ? (Math.min(leverageOf(shownLeverage), leverageLimit) - 1) / (leverageLimit - 1) * 100 : 100}%` } as CSSProperties}
+            aria-label="Leverage slider (×)" aria-valuetext={shownLeverage ? `${shownLeverage} times` : 'Not specified'}
+            onChange={event => updateLeverage(event.target.value)}
+            onPointerUp={event => commitLeverage(clampLeverage(event.currentTarget.value))} onBlur={() => commitLeverage()} />
+          <Input id={`${prefix}-leverage`} type="number" min={1} max={leverageLimit} step={1} value={shownLeverage}
+            aria-label="Leverage (×)" onChange={event => updateLeverage(event.target.value)} onBlur={() => commitLeverage()}
+            onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commitLeverage() } }} />
           <span aria-hidden="true">×</span>
         </div>
         <div className="leverage-presets" role="group" aria-label="Leverage presets">
-          {leveragePresets.map(preset => <button key={preset} type="button" aria-pressed={draft.leverage === String(preset)}
-            onClick={() => updateLeverage(String(preset))}>{preset}×</button>)}
+          {presets.map(preset => <button key={preset} type="button" aria-pressed={shownLeverage === String(preset)}
+            onClick={() => needsConfirmation ? commitLeverage(String(preset)) : updateLeverage(String(preset))}>{preset}×</button>)}
         </div>
       </div>
-      <p className="muted">Sizing and payoff calculations are deferred. Changing sizing units clears size. The 1× to 100× control range is not venue-validated.</p>
+      {leverage > leverageLimit && <p className="leverage-warning" role="alert">{leverage}× is above the {leverageLimit}× venue maximum for {instrumentName || 'this contract'}.</p>}
+      {pendingLeverage !== null && <LeverageChangeDialog draft={draft} from={leverage} to={pendingLeverage} units={units}
+        onKeepPrices={() => finishLeverage('prices')} onKeepPercentages={() => finishLeverage('percentages')} onCancel={() => finishLeverage()} />}
+      <p className="muted">Position size is margin × leverage at the planned average entry, before fees, funding and venue margin rules. Payoff calculations are deferred. Switching between margin and quantity converts the size at the leverage and average entry, or clears it without an entry price. {maxLeverage ? 'The leverage range is the venue maximum for this contract.' : 'Without a venue contract, the 1× to 100× range is not venue-validated.'} Percentage stops and targets are returns at this leverage.</p>
     </div>
     <div className="entries-heading">
       <div><h3>Distribute your entries <span className="entry-count">{String(draft.entries.length).padStart(2, '0')}</span></h3>
@@ -154,7 +206,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
         </button>
         {expanded && selected?.id === entry.id
           ? <p className="muted expanded-placeholder">Editing in the expanded dialog.</p>
-          : <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} />}
+          : <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} />}
         <div className="entry-actions">
           <Button type="button" variant="ghost" size="sm" className="remove-entry" aria-label={`Remove ${entry.name}`}
             disabled={draft.entries.length <= 1} onClick={() => removeEntry(entry.id)}><Trash2 size={12} aria-hidden="true" />Remove entry</Button>
@@ -188,7 +240,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
               {draft.entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
             </select>
           </label>
-          {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} />}
+          {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} />}
         </DialogContent>
       </Dialog>
     </div>

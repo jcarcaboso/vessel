@@ -8,24 +8,26 @@ export function describeOrder(order: ExecutionOrder) {
   return `${side} ${order.orderType.toLowerCase()} ${price} · ${size}`
 }
 
+/** Targets are always numbered; a single stop is just "stop", like the chart tags. */
+const exitName = (entry: DraftEntry, kind: 'stop' | 'target', index: number) =>
+  kind === 'target' || entry.stops.length > 1 ? `${entry.name} ${kind} ${index + 1}` : `${entry.name} ${kind}`
+
 /** Readable name of a plan level, e.g. "Entry 1 target 2". */
-export function levelName(entries: readonly DraftEntry[], link: Pick<OrderLink, 'role' | 'entryId' | 'targetId'>) {
+export function levelName(entries: readonly DraftEntry[], link: Pick<OrderLink, 'role' | 'entryId' | 'levelId'>) {
   if (link.role === 'exit') return 'Unplanned exit'
   const entry = entries.find(item => item.id === link.entryId)
-  const name = entry?.name ?? 'Removed entry'
-  if (link.role === 'entry') return name
-  if (link.role === 'stop') return `${name} stop`
-  const index = entry?.targets.findIndex(target => target.id === link.targetId) ?? -1
-  return index >= 0 ? `${name} target ${index + 1}` : `${name} removed target`
+  if (link.role === 'entry') return entry?.name ?? 'Removed entry'
+  const index = (link.role === 'stop' ? entry?.stops : entry?.targets)?.findIndex(exit => exit.id === link.levelId) ?? -1
+  return entry && index >= 0 ? exitName(entry, link.role, index) : `${entry?.name ?? 'Removed entry'} removed ${link.role}`
 }
 
 export function levelOptions(entries: readonly DraftEntry[], open: boolean) {
   const options: Array<{ value: string; label: string; request: Omit<LinkOrder, 'orderId'> }> = []
   for (const entry of entries) {
     options.push({ value: `entry|${entry.id}`, label: entry.name, request: { role: 'entry', entryId: entry.id } })
-    options.push({ value: `stop|${entry.id}`, label: `${entry.name} stop`, request: { role: 'stop', entryId: entry.id } })
-    entry.targets.forEach((target, index) => options.push({ value: `target|${entry.id}|${target.id}`, label: `${entry.name} target ${index + 1}`,
-      request: { role: 'target', entryId: entry.id, targetId: target.id } }))
+    for (const kind of ['stop', 'target'] as const) (kind === 'stop' ? entry.stops : entry.targets).forEach((exit, index) => options.push({
+      value: `${kind}|${entry.id}|${exit.id}`, label: exitName(entry, kind, index), request: { role: kind, entryId: entry.id, levelId: exit.id },
+    }))
   }
   if (open) options.push({ value: 'exit', label: 'Unplanned exit', request: { role: 'exit' } })
   return options

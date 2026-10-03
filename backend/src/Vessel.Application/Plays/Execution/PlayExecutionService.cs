@@ -46,7 +46,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var mine = links.Where(l => l.PlayId == play.Id).ToList();
         var fills = (await store.FillsAsync(play.AccountId, mine.Select(l => l.OrderId).Distinct().ToList(), ct)).ToLookup(f => f.OrderId);
         var linked = mine.Where(l => l.State == OrderLinkState.Linked)
-            .OrderBy(l => l.Role).ThenBy(l => l.EntryId).ThenBy(l => l.TargetId).ThenBy(l => l.OrderId).ToList();
+            .OrderBy(l => l.Role).ThenBy(l => l.EntryId).ThenBy(l => l.LevelId).ThenBy(l => l.OrderId).ToList();
         var suggestions = mine.Where(l => l.State == OrderLinkState.Suggested && !linkedOrders.Contains(l.OrderId)).ToList();
         // Cancelled orders that never filled cannot be part of the play, so only live or filled ones are offered.
         var unlinked = play.ContractId is null ? [] : orders.Values
@@ -70,7 +70,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             return new EntryProgressDto(entry.Id, Money(quantity), quantity > 0 ? Money(filled.Sum(f => f.Price * f.Quantity) / quantity) : null,
                 own.Count(l => orders.TryGetValue(l.OrderId, out var o) && o.Status == "open"));
         }).ToList();
-        OrderLinkDto Link(PlayOrderLink link) => new(link.Id, Name(link.Role), link.EntryId, link.TargetId, Name(link.State), Name(link.Source),
+        OrderLinkDto Link(PlayOrderLink link) => new(link.Id, Name(link.Role), link.EntryId, link.LevelId, Name(link.State), Name(link.Source),
             orders.TryGetValue(link.OrderId, out var order) ? OrderDto(order) : null, Money(fills[link.OrderId].Sum(f => f.Quantity)),
             fills[link.OrderId].OrderBy(f => f.OccurredAtUtc).Select(FillDto).ToList());
         var reason = UntrackedReason(play, account);
@@ -91,9 +91,12 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var plan = PlayDocuments.Read(play.Plan);
         var entry = role == OrderLinkRole.Exit ? null : plan.Entries.FirstOrDefault(e => e.Id == request.EntryId)
             ?? throw new WorkspaceException(400, "Choose an entry of this play.");
-        var targetId = role == OrderLinkRole.Target
-            ? entry!.Targets.FirstOrDefault(t => t.Id == request.TargetId)?.Id ?? throw new WorkspaceException(400, "Choose a target of this entry.")
-            : null;
+        var levelId = role switch
+        {
+            OrderLinkRole.Stop => entry!.Stops.FirstOrDefault(s => s.Id == request.LevelId)?.Id ?? throw new WorkspaceException(400, "Choose a stop of this entry."),
+            OrderLinkRole.Target => entry!.Targets.FirstOrDefault(t => t.Id == request.LevelId)?.Id ?? throw new WorkspaceException(400, "Choose a target of this entry."),
+            _ => null
+        };
         await store.WithAccountLockAsync(play.AccountId, async () =>
         {
             var order = (await store.OrdersAsync(play.AccountId, ct)).FirstOrDefault(o => o.OrderId == request.OrderId && o.ContractId == play.ContractId)
@@ -102,10 +105,10 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             if (links.Any(l => l.OrderId == order.OrderId && l.State == OrderLinkState.Linked))
                 throw new WorkspaceException(409, "This order is already linked. Unlink it first.");
             var now = time.GetUtcNow();
-            var key = PlayOrderLink.Key(role, entry?.Id, targetId);
+            var key = PlayOrderLink.Key(role, entry?.Id, levelId);
             var existing = links.FirstOrDefault(l => l.PlayId == play.Id && l.OrderId == order.OrderId && l.LevelKey == key);
             if (existing is not null) existing.Confirm(now);
-            else store.Add(new PlayOrderLink(play, order.OrderId, role, entry?.Id, targetId, OrderLinkState.Linked, OrderLinkSource.Owner, now));
+            else store.Add(new PlayOrderLink(play, order.OrderId, role, entry?.Id, levelId, OrderLinkState.Linked, OrderLinkSource.Owner, now));
             // Other suggestions for this order stay hidden while it is linked and return if it is unlinked.
             await store.SaveAsync(ct);
             await ApplyTransitionsAsync(play.AccountId, [play], ct);
@@ -176,7 +179,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
                 if (existing is not null) existing.LinkAutomatically(now);
                 else
                 {
-                    var link = new PlayOrderLink(play, order.OrderId, level.Role, level.EntryId, level.TargetId, OrderLinkState.Linked, OrderLinkSource.Automatic, now);
+                    var link = new PlayOrderLink(play, order.OrderId, level.Role, level.EntryId, level.LevelId, OrderLinkState.Linked, OrderLinkSource.Automatic, now);
                     store.Add(link);
                     links.Add(link);
                 }
@@ -185,7 +188,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             foreach (var candidate in candidates)
             {
                 if (links.Any(l => l.PlayId == candidate.Play.Id && l.OrderId == order.OrderId && l.LevelKey == candidate.Level.Key)) continue;
-                var link = new PlayOrderLink(candidate.Play, order.OrderId, candidate.Level.Role, candidate.Level.EntryId, candidate.Level.TargetId,
+                var link = new PlayOrderLink(candidate.Play, order.OrderId, candidate.Level.Role, candidate.Level.EntryId, candidate.Level.LevelId,
                     OrderLinkState.Suggested, OrderLinkSource.Automatic, now);
                 store.Add(link);
                 links.Add(link);

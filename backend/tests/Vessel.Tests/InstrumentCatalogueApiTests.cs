@@ -110,10 +110,11 @@ public sealed class InstrumentCatalogueApiTests
         Assert.Equal("Primary perpetual DEX metadata only. No orders, balances or execution refresh.",
             root.GetProperty("notice").GetString());
         var instrument = Assert.Single(root.GetProperty("instruments").EnumerateArray());
-        Assert.Equal(new[] { "contractId", "quantityDecimals", "maxLeverage" }, instrument.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(new[] { "contractId", "quantityDecimals", "maxLeverage", "quoteAsset" }, instrument.EnumerateObject().Select(p => p.Name));
         Assert.Equal("MiXeD", instrument.GetProperty("contractId").GetString());
         Assert.Equal(5, instrument.GetProperty("quantityDecimals").GetInt32());
         Assert.Equal(40, instrument.GetProperty("maxLeverage").GetInt32());
+        Assert.Equal("USDC", instrument.GetProperty("quoteAsset").GetString());
         var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal("https://api.hyperliquid.xyz/info", request.Uri);

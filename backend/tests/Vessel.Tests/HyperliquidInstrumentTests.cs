@@ -25,7 +25,7 @@ public sealed partial class HyperliquidAdapterTests
         using var client = Client(handler);
         var instruments = await new HyperliquidPerpetualReader(client, new TestClock())
             .ReadInstrumentsAsync(CancellationToken.None);
-        Assert.Equal(new[] { new VenueInstrument("BTC", 5, 40), new("MiXeD", 0, 3), new("btc", 28, 1) }, instruments);
+        Assert.Equal(new[] { new VenueInstrument("BTC", 5, 40, "USDC"), new("MiXeD", 0, 3, "USDC"), new("btc", 28, 1, "USDC") }, instruments);
         var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal("https://api.hyperliquid.xyz/info", request.Uri);
@@ -47,7 +47,7 @@ public sealed partial class HyperliquidAdapterTests
     {
         var fill = Mutate(Fill, node => node["coin"] = "ETH");
         var result = await Read(fills: $"[{fill}]");
-        Assert.Contains(new VenueInstrument("ETH", 4, 20), result.Instruments);
+        Assert.Contains(new VenueInstrument("ETH", 4, 20, "USDC"), result.Instruments);
         Assert.Equal("ETH", Assert.Single(result.Fills).ContractId);
         Assert.DoesNotContain(await ReadCatalogue(Meta), instrument => instrument.ContractId == "ETH");
     }

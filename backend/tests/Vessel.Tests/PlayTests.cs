@@ -16,8 +16,8 @@ namespace Vessel.Tests;
 internal static class TestPlays
 {
     public static PlayPlanDocument Plan(string price = "100", string stop = "95") => new("long", "margin", "250", "3", null,
-        [new PlanEntry("entry-1", "Entry 1", "#b9c9e4", "100", price, new PlanLevel("stop-1", "price", stop),
-            [new PlanTarget("target-1", "price", "110", "100")])],
+        [new PlanEntry("entry-1", "Entry 1", "#b9c9e4", "100", price, [new PlanExit("stop-1", "price", stop, "100")],
+            [new PlanExit("target-1", "price", "110", "100")])],
         new PlanNotes("Breakout retest", "Close below 94", "", ""));
 
     public static Play Create(Account account, PerpetualInstrument? instrument) => new(Guid.NewGuid(), account, instrument,
@@ -138,8 +138,11 @@ public sealed class PlayDocumentTests
             TestPlays.Plan("12abc"), TestPlays.Plan() with { Leverage = "2.5" }, TestPlays.Plan() with { Leverage = "101" },
             TestPlays.Plan() with { Direction = "up" }, TestPlays.Plan() with { Entries = [] },
             TestPlays.Plan() with { Entries = [TestPlays.Plan().Entries[0], TestPlays.Plan().Entries[0]] },
-            TestPlays.Plan() with { Entries = [TestPlays.Plan().Entries[0] with { Stop = new PlanLevel("stop-1", "pips", "1") }] },
+            TestPlays.Plan() with { Entries = [TestPlays.Plan().Entries[0] with { Stops = [new PlanExit("stop-1", "pips", "1", "100")] }] },
             TestPlays.Plan() with { Notes = new PlanNotes(new string('x', 20001), "", "", "") },
+            TestPlays.Plan() with { Entries = [TestPlays.Plan().Entries[0] with { Stops = Enumerable.Range(0, 11).Select(i => new PlanExit($"s{i}", "price", "90", "")).ToList() }] },
+            // Stop and target IDs share one namespace with entries.
+            TestPlays.Plan() with { Entries = [TestPlays.Plan().Entries[0] with { Stops = [new PlanExit("target-1", "price", "90", "100")] }] },
         })
             Assert.Equal(400, Assert.Throws<WorkspaceException>(() => PlayDocuments.Normalize(invalid)).StatusCode);
     }
@@ -235,7 +238,7 @@ public sealed class PlayServiceTests
 
         var history = await service.HistoryAsync(play.Summary.Id, default);
         Assert.Equal(["Planned", "Stop under the new swing low"], history.Revisions.Select(r => r.Reason));
-        Assert.Equal(["95", "97"], history.Revisions.Select(r => r.Plan.Entries[0].Stop.Value));
+        Assert.Equal(["95", "97"], history.Revisions.Select(r => r.Plan.Entries[0].Stops[0].Value));
         Assert.Equal(("draft", "planned"), (history.StatusChanges.Single().From, history.StatusChanges.Single().To));
     }
 
@@ -309,7 +312,7 @@ public sealed class PlayPostgresTests
 
         var history = (await client.GetFromJsonAsync<PlayHistoryDto>($"/api/plays/{play.Summary.Id}/history"))!;
         Assert.Equal([1, 2], history.Revisions.Select(r => r.Number));
-        Assert.Equal("97", history.Revisions[1].Plan.Entries[0].Stop.Value);
+        Assert.Equal("97", history.Revisions[1].Plan.Entries[0].Stops[0].Value);
         Assert.Equal(HttpStatusCode.Conflict, (await client.DeleteAsync($"/api/plays/{play.Summary.Id}")).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await client.DeleteAsync($"/api/accounts/{account.Id}")).StatusCode);
 
@@ -321,7 +324,7 @@ public sealed class PlayPostgresTests
 
         await using var db2 = database.Context(owner);
         Assert.Equal("97", await db2.Database.SqlQueryRaw<string>(
-            "SELECT \"Plan\"->'entries'->0->'stop'->>'value' AS \"Value\" FROM plays").SingleAsync());
+            "SELECT \"Plan\"->'entries'->0->'stops'->0->>'value' AS \"Value\" FROM plays").SingleAsync());
     }
 
     [PostgresFact]

@@ -23,8 +23,8 @@ export const overviewFixture: Overview = {
 export const instrumentCatalogFixture: InstrumentCatalog = {
   venueId: 'hyperliquid', marketScope: 'perpetuals', scope: 'primary-perpetual-dex',
   instruments: [
-    { contractId: 'BTC', quantityDecimals: 5, maxLeverage: 40 },
-    { contractId: '1000PEPE', quantityDecimals: 0, maxLeverage: 10 },
+    { contractId: 'BTC', quantityDecimals: 5, maxLeverage: 40, quoteAsset: 'USDC' },
+    { contractId: '1000PEPE', quantityDecimals: 0, maxLeverage: 10, quoteAsset: 'USDC' },
   ],
   notice: 'Primary perpetual DEX metadata only. No orders, balances or execution refresh.',
 }

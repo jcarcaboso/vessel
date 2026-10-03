@@ -7,12 +7,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { money } from '../workspace/format'
 import type { DraftEvidence, PlayDraft } from './draft'
 import { EvidencePanel } from './EvidencePanel'
-import { averageEntryPrice, formatDraggedPrice } from './levels'
+import { averageEntryPrice, formatDraggedPrice, leverageOf } from './levels'
+import { defaultSizeUnits, formatMoney, formatQuantity, positionSize, type SizeUnits } from './sizing'
 import './plays-workspace.css'
 
 const displayMoney = (value: string | null | undefined) => value == null ? 'Unavailable' : money(value)
 // Placeholder values stay readable but recede, so real figures carry the visual weight.
-const isPlaceholder = (value: string) => ['Unavailable', 'Not calculated', 'Not chosen', 'Not set'].includes(value)
+const isPlaceholder = (value: string) => ['Unavailable', 'Not calculated', 'Not chosen', 'Not set', 'Needs a size', 'Needs an entry price'].includes(value)
 
 export function AvailableBudget({ draft, onChange }: {
   draft: PlayDraft
@@ -153,15 +154,19 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   </section>
 }
 
-export function PositionSummary({ draft }: { draft: PlayDraft }) {
+export function PositionSummary({ draft, units = defaultSizeUnits, instrumentName }: { draft: PlayDraft; units?: SizeUnits; instrumentName?: string }) {
   const size = draft.size ? `${draft.size} ${draft.sizingMode === 'margin' ? 'currency units' : 'instrument units'}` : 'Not chosen'
   const count = draft.entries.length
   // Same quantity-weighted planned average as the chart's AVG line, for one or more priced entries.
   const average = averageEntryPrice(draft.entries, 1)
+  const sized = positionSize(draft, leverageOf(draft.leverage))
+  const missing = draft.size ? 'Needs an entry price' : 'Needs a size'
   const values: Array<[string, string]> = [
     [draft.sizingMode === 'margin' ? 'Chosen margin' : 'Chosen quantity', size],
     ['Chosen leverage', draft.leverage ? `${draft.leverage}×` : 'Not chosen'],
-    ...['Committed margin', 'Notional exposure'].map((label): [string, string] => [label, 'Not calculated']),
+    ['Committed margin', sized.margin === null ? missing : formatMoney(sized.margin, units)],
+    ['Position size', sized.notional === null ? missing : formatMoney(sized.notional, units)],
+    ['Planned quantity', sized.quantity === null ? missing : formatQuantity(sized.quantity, units)],
     ['Planned average entry', average === null ? 'Not set' : formatDraggedPrice(average)],
     ...['Reward / risk', 'All-stops loss', 'All-targets profit'].map((label): [string, string] => [label, 'Not calculated']),
   ]
@@ -169,11 +174,11 @@ export function PositionSummary({ draft }: { draft: PlayDraft }) {
     <div className="summary-intro">
       <h2>Full-position summary</h2>
       <strong>{count} {count === 1 ? 'entry' : 'entries'} · <span data-direction={draft.direction}>{draft.direction === 'long' ? 'Long' : 'Short'}</span></strong>
-      <small>{draft.instrument || 'No instrument'} · Leverage {draft.leverage || '–'}×</small>
+      <small>{instrumentName || draft.instrument || 'No instrument'} · Leverage {draft.leverage || '–'}×</small>
     </div>
     <dl>
       {values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd data-placeholder={isPlaceholder(value)}>{value}</dd></div>)}
     </dl>
-    <p className="summary-note">Planned position only. Financial calculations are deferred, and no execution or realized return is implied.</p>
+    <p className="summary-note">Planned position only. Margin, size and quantity are before fees, funding and venue margin rules; payoff calculations are deferred. No execution or realized return is implied.</p>
   </section>
 }

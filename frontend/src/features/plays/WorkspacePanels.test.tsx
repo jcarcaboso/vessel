@@ -187,31 +187,38 @@ describe('Play journal', () => {
 })
 
 describe('Position summary', () => {
-  it('echoes chosen margin and leverage, shows the planned average entry, and never calculates exposure or payoff', () => {
+  it('derives margin, position size and quantity from the margin and leverage, but no payoff', () => {
     const draft = { ...createDraft(), size: '1000', leverage: '5' }
     draft.entries[0]!.price = '2000'
-    draft.entries[0]!.stop.value = '1900'
+    draft.entries[0]!.stops[0]!.value = '1900'
     draft.entries[0]!.targets[0]!.value = '2200'
-    render(<PositionSummary draft={draft} />)
+    render(<PositionSummary draft={draft} units={{ quote: 'USDC', base: 'ETH', quantityDecimals: 4 }} instrumentName="ETH/USDC" />)
     const summary = screen.getByTestId('summary-panel')
-    expect(within(summary).getByText('Chosen margin')).toBeInTheDocument()
-    expect(within(summary).getByText('1000 currency units')).toBeInTheDocument()
-    expect(within(summary).getByText('5×')).toBeInTheDocument()
-    expect(within(summary).getAllByText('Not calculated')).toHaveLength(5)
-    expect(within(summary).getByText('Planned average entry').nextElementSibling).toHaveTextContent('2000')
-    expect(within(summary).queryByText(/\$|5000|1900|2200/)).not.toBeInTheDocument()
-    expect(within(summary).getByText(/no execution or realized return is implied/)).toBeInTheDocument()
+    const value = (label: string) => within(summary).getByText(label).nextElementSibling
+    expect(value('Chosen margin')).toHaveTextContent('1000 currency units')
+    expect(value('Chosen leverage')).toHaveTextContent('5×')
+    expect(value('Committed margin')).toHaveTextContent('1,000 USDC')
+    expect(value('Position size')).toHaveTextContent('5,000 USDC')
+    expect(value('Planned quantity')).toHaveTextContent('2.5 ETH')
+    expect(value('Planned average entry')).toHaveTextContent('2000')
+    expect(within(summary).getAllByText('Not calculated')).toHaveLength(3)
+    expect(within(summary).queryByText(/1900|2200/)).not.toBeInTheDocument()
+    expect(within(summary).getByText(/No execution or realized return is implied/)).toBeInTheDocument()
     expect(within(summary).getByText('Long')).toHaveAttribute('data-direction', 'long')
-    expect(within(summary).getByText('No instrument · Leverage 5×')).toBeInTheDocument()
-    expect(within(summary).getAllByText('Not calculated')[0]).toHaveAttribute('data-placeholder', 'true')
-    expect(within(summary).getByText('1000 currency units')).toHaveAttribute('data-placeholder', 'false')
+    expect(within(summary).getByText('ETH/USDC · Leverage 5×')).toBeInTheDocument()
+    expect(value('Position size')).toHaveAttribute('data-placeholder', 'false')
   })
 
-  it('echoes quantity with units without converting it to USD', () => {
-    render(<PositionSummary draft={{ ...createDraft(), sizingMode: 'quantity', size: '0.125', leverage: '3' }} />)
-    expect(screen.getByText('Chosen quantity')).toBeInTheDocument()
+  it('derives margin from a quantity once an entry is priced', () => {
+    const draft = { ...createDraft(), sizingMode: 'quantity' as const, size: '0.125', leverage: '4' }
+    const view = render(<PositionSummary draft={draft} />)
     expect(screen.getByText('0.125 instrument units')).toBeInTheDocument()
-    expect(screen.getAllByText('Not calculated')).toHaveLength(5)
+    expect(screen.getByText('Committed margin').nextElementSibling).toHaveTextContent('Needs an entry price')
+    expect(screen.getByText('Planned quantity').nextElementSibling).toHaveTextContent('0.125 units')
+    draft.entries[0]!.price = '80000'
+    view.rerender(<PositionSummary draft={{ ...draft }} />)
+    expect(screen.getByText('Position size').nextElementSibling).toHaveTextContent('10,000 quote units')
+    expect(screen.getByText('Committed margin').nextElementSibling).toHaveTextContent('2,500 quote units')
   })
 
   it('does not insert a sample size for an empty draft', () => {
@@ -219,6 +226,6 @@ describe('Position summary', () => {
     expect(screen.getByText('Not chosen')).toBeInTheDocument()
     expect(screen.getByText('Not set')).toHaveAttribute('data-placeholder', 'true')
     expect(screen.getByText('1×')).toBeInTheDocument()
-    expect(screen.getAllByText('Not calculated')).toHaveLength(5)
+    expect(screen.getAllByText('Needs a size')).toHaveLength(3)
   })
 })

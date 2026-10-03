@@ -9,6 +9,7 @@ export const createLazyLightweightAdapter: ChartAdapterFactory = (container, cal
   let overlays: readonly PriceOverlay[] | null = null
   let drawings: [readonly ChartDrawing[], string | null] | null = null
   let tool: [DrawingKind | null, boolean] | null = null
+  let picking = false
   void import('./lightweight').then(({ createLightweightAdapter }) => {
     if (destroyed) return
     adapter = createLightweightAdapter(container, callbacks)
@@ -16,6 +17,7 @@ export const createLazyLightweightAdapter: ChartAdapterFactory = (container, cal
     if (overlays) adapter.setOverlays(overlays)
     if (drawings) adapter.setDrawings(...drawings)
     if (tool) adapter.setDrawingTool(...tool)
+    if (picking) adapter.setPricePicker(true)
   })
   return {
     setCandles(next, reset) {
@@ -33,6 +35,10 @@ export const createLazyLightweightAdapter: ChartAdapterFactory = (container, cal
     setDrawingTool(next, magnet) {
       if (adapter) adapter.setDrawingTool(next, magnet)
       else tool = [next, magnet]
+    },
+    setPricePicker(active) {
+      if (adapter) adapter.setPricePicker(active)
+      else picking = active
     },
     capture(caption) {
       return adapter ? adapter.capture(caption) : Promise.resolve(null)

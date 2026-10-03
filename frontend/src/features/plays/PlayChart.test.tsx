@@ -7,14 +7,14 @@ import { createWorkspaceApi, type CandleSeries, type MarketStreamEvent, type Wor
 import type { ChartDrawing, DrawingKind } from '@/components/chart/drawings'
 import type { ChartAdapterFactory, ChartCallbacks, ChartCandle, PriceOverlay } from '@/components/chart/types'
 import { accountFixture, candleSeriesFixture, idleMarketStream, marketContextFixture } from '@/test/workspace-fixture'
-import { createEntry, createTarget, type DraftEntry } from './draft'
+import { createEntry, createExit, type DraftEntry } from './draft'
 import { ChartPanel } from './PlayChart'
 
 function fakeAdapter() {
   const state = {
     candles: [] as readonly ChartCandle[], resets: [] as boolean[], overlays: [] as readonly PriceOverlay[], callbacks: null as ChartCallbacks | null,
     created: 0, destroyed: 0, drawings: [] as readonly ChartDrawing[], selectedDrawingId: null as string | null, tool: null as DrawingKind | null, magnet: false,
-    captions: [] as string[],
+    captions: [] as string[], picking: false,
   }
   const factory: ChartAdapterFactory = (_container, callbacks) => {
     state.created++
@@ -24,6 +24,7 @@ function fakeAdapter() {
       setOverlays(overlays) { state.overlays = overlays },
       setDrawings(drawings, selectedId) { state.drawings = drawings; state.selectedDrawingId = selectedId },
       setDrawingTool(tool, magnet) { state.tool = tool; state.magnet = magnet },
+      setPricePicker(active) { state.picking = active },
       capture(caption) { state.captions.push(caption); return Promise.resolve(new Blob(['png'], { type: 'image/png' })) },
       destroy() { state.destroyed++ },
     }
@@ -39,7 +40,7 @@ function chartApi(candles: WorkspaceApi['candles'], marketContext: WorkspaceApi[
 beforeEach(() => localStorage.clear())
 
 const entries = (): DraftEntry[] => [
-  { ...createEntry(0), price: '101', stop: { id: 'stop-1', unit: 'price', value: '99' } },
+  { ...createEntry(0), price: '101', stops: [{ id: 'stop-1', unit: 'price', value: '99', share: '100' }] },
   { ...createEntry(1), price: '100' },
 ]
 
@@ -95,7 +96,7 @@ describe('Chart panel', () => {
       source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
     await screen.findByText(/Updated/)
     act(() => state.callbacks!.onLevelDrag(state.overlays[1]!.id, 97.123456, 'move'))
-    expect(onEntriesChange).toHaveBeenLastCalledWith([{ ...list[0], stop: { id: 'stop-1', unit: 'price', value: '97.123' } }, list[1]])
+    expect(onEntriesChange).toHaveBeenLastCalledWith([{ ...list[0], stops: [{ id: 'stop-1', unit: 'price', value: '97.123', share: '100' }] }, list[1]])
   })
 
   it('switches between aggregate and selected views from the dropdown', async () => {
@@ -409,15 +410,15 @@ describe('Chart panel level editing', () => {
     return <>
       <ChartPanel entries={list} selectedId={selected} onSelect={id => { setSelected(id); onSelect(id) }} instrument="BTC" onEntriesChange={setList}
         source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />
-      <output data-testid="entries">{JSON.stringify(list.map(e => ({ price: e.price, stop: e.stop, targets: e.targets.map(t => [t.unit, t.value, t.share]), share: e.share })))}</output>
+      <output data-testid="entries">{JSON.stringify(list.map(e => ({ price: e.price, stop: e.stops[0], stops: e.stops.map(s => [s.unit, s.value, s.share]), targets: e.targets.map(t => [t.unit, t.value, t.share]), share: e.share })))}</output>
       <button type="button" onClick={() => setList(current => current.map((e, i) => i === 1 ? { ...e, share: '25' } : e))}>side edit</button>
     </>
   }
   const two = (): DraftEntry[] => [
-    { ...createEntry(0), price: '100', share: '50', stop: { id: 's1', unit: 'percent', value: '5' }, targets: [{ ...createTarget('100'), id: 't1', value: '110' }] },
-    { ...createEntry(1), price: '90', share: '50', stop: { id: 's2', unit: 'price', value: '85' }, targets: [] },
+    { ...createEntry(0), price: '100', share: '50', stops: [{ id: 's1', unit: 'percent', value: '5', share: '100' }], targets: [{ ...createExit('100'), id: 't1', value: '110' }] },
+    { ...createEntry(1), price: '90', share: '50', stops: [{ id: 's2', unit: 'price', value: '85', share: '100' }], targets: [] },
   ]
-  const shown = () => JSON.parse(screen.getByTestId('entries').textContent!) as { price: string; share: string; stop: { unit: string; value: string }; targets: string[][] }[]
+  const shown = () => JSON.parse(screen.getByTestId('entries').textContent!) as { price: string; share: string; stop: { unit: string; value: string }; stops: string[][]; targets: string[][] }[]
 
   it('drags any entry level, selects that entry, and undoes and redoes the whole move', async () => {
     const { state, factory } = fakeAdapter()
@@ -450,10 +451,10 @@ describe('Chart panel level editing', () => {
     await screen.findByText(/Updated/)
     const stop = state.overlays.find(o => o.label === 'E1 SL')!
     act(() => state.callbacks!.onLevelEdit(stop.id, { x: 40, y: 120 }))
-    const form = screen.getByRole('form', { name: 'Edit E1 Stop' })
+    const form = screen.getByRole('form', { name: 'Edit Entry 1 stop' })
     const price = within(form).getByRole('textbox', { name: 'Price' })
     expect(price).toHaveValue('95')
-    expect(within(form).getByText(/Stored as a % from entry/)).toBeInTheDocument()
+    expect(within(form).getByText(/Stored as a % return at 1× leverage/)).toBeInTheDocument()
     await userEvent.clear(price)
     await userEvent.type(price, '92{Enter}')
     expect(shown()[0]!.stop).toMatchObject({ unit: 'percent', value: '8' })
@@ -463,11 +464,11 @@ describe('Chart panel level editing', () => {
   it('edits target share, adds and removes targets and adds a missing stop from the chart', async () => {
     const { state, factory } = fakeAdapter()
     const initial = two()
-    initial[1] = { ...initial[1]!, stop: { id: 's2', unit: 'price', value: '' } }
+    initial[1] = { ...initial[1]!, stops: [{ id: 's2', unit: 'price', value: '', share: '100' }] }
     render(<LevelHarness factory={factory} initial={initial} />)
     await screen.findByText(/Updated/)
     act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'E1 TP1')!.id, { x: 10, y: 10 }))
-    let form = screen.getByRole('form', { name: 'Edit E1 Target 1' })
+    let form = screen.getByRole('form', { name: 'Edit Entry 1 target 1' })
     await userEvent.clear(within(form).getByRole('textbox', { name: /Share/ }))
     await userEvent.type(within(form).getByRole('textbox', { name: /Share/ }), '60')
     await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
@@ -479,11 +480,53 @@ describe('Chart panel level editing', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Remove target' }))
     expect(shown()[0]!.targets).toEqual([['price', '104', '']])
     act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'E2')!.id, { x: 10, y: 10 }))
-    form = screen.getByRole('form', { name: 'Edit E2 Entry' })
+    form = screen.getByRole('form', { name: 'Edit Entry 2' })
     await userEvent.click(within(form).getByRole('button', { name: 'Add stop' }))
     expect(shown()[1]!.stop).toMatchObject({ unit: 'price', value: '88.2' })
     await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
     expect(shown()[1]!.stop.value).toBe('')
+  })
+
+  it('places the selected entry price, stops and targets by clicking the chart', async () => {
+    const { state, factory } = fakeAdapter()
+    const initial = two()
+    initial[0] = { ...initial[0]!, price: '', stops: [{ id: 's1', unit: 'price', value: '', share: '100' }], targets: [] }
+    render(<LevelHarness factory={factory} initial={initial} />)
+    await screen.findByText(/Updated/)
+    const plan = screen.getByRole('group', { name: 'Plan levels for Entry 1' })
+    expect(within(plan).getByRole('button', { name: 'Add a stop to Entry 1 on the chart' })).toBeDisabled()
+    await userEvent.click(within(plan).getByRole('button', { name: 'Set Entry 1 price on the chart' }))
+    expect(state.picking).toBe(true)
+    expect(screen.getByText(/Click the chart to set Entry 1 price/)).toBeInTheDocument()
+    act(() => state.callbacks!.onPricePick(101.234))
+    expect(shown()[0]!.price).toBe('101.23')
+    expect(state.picking).toBe(false)
+
+    // The first stop fills the blank one; the next adds another without a share.
+    for (const price of [97, 95]) {
+      await userEvent.click(within(plan).getByRole('button', { name: 'Add a stop to Entry 1 on the chart' }))
+      act(() => state.callbacks!.onPricePick(price))
+    }
+    expect(shown()[0]!.stops).toEqual([['price', '97', '100'], ['price', '95', '']])
+    expect(state.overlays.filter(o => o.kind === 'stop').map(o => o.label)).toEqual(['E1 SL1', 'E1 SL2', 'E2 SL'])
+    await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    expect(shown()[0]!.stops).toEqual([['price', '97', '100']])
+
+    await userEvent.click(within(plan).getByRole('button', { name: 'Add a target to Entry 1 on the chart' }))
+    screen.getByRole('application').focus()
+    await userEvent.keyboard('{Escape}')
+    expect(state.picking).toBe(false)
+    expect(shown()[0]!.targets).toEqual([])
+  })
+
+  it('shows one entry without the aggregate view, legend or entry prefixes', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<LevelHarness factory={factory} initial={[two()[0]!]} />)
+    await screen.findByText(/Updated/)
+    expect(screen.queryByRole('button', { name: /Chart view/ })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Planned entries' })).toBeNull()
+    expect(state.overlays.map(o => o.label)).toEqual(['Entry', 'SL', 'TP1'])
+    expect(screen.getByRole('group', { name: 'Plan levels for Entry 1' })).toBeInTheDocument()
   })
 
   it('rejects invalid prices and closes with Escape', async () => {
@@ -685,10 +728,10 @@ describe('Chart panel review regressions', () => {
   it('undoes a chart TP1 edit without reverting a later sidebar TP2 edit, and redoes it', async () => {
     const { state, factory } = fakeAdapter()
     const initial: DraftEntry[] = [{ ...createEntry(0), price: '85000', share: '100',
-      targets: [{ ...createTarget('50'), id: 'tp1', value: '90000' }, { ...createTarget('50'), id: 'tp2', value: '92000' }] }]
+      targets: [{ ...createExit('50'), id: 'tp1', value: '90000' }, { ...createExit('50'), id: 'tp2', value: '92000' }] }]
     render(<Harness factory={factory} initial={initial} />)
     await screen.findByText(/Updated/)
-    act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'E1 TP1')!.id, { x: 10, y: 10 }))
+    act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'TP1')!.id, { x: 10, y: 10 }))
     const price = screen.getByRole('textbox', { name: 'Price' })
     await userEvent.clear(price)
     await userEvent.type(price, '91000{Enter}')
@@ -702,7 +745,7 @@ describe('Chart panel review regressions', () => {
 
   it('keeps an open level editor inside the chart when the chart narrows', async () => {
     const { state, factory } = fakeAdapter()
-    const initial: DraftEntry[] = [{ ...createEntry(0), price: '100', share: '100', targets: [{ ...createTarget('100'), id: 'tp1', value: '110' }] }]
+    const initial: DraftEntry[] = [{ ...createEntry(0), price: '100', share: '100', targets: [{ ...createExit('100'), id: 'tp1', value: '110' }] }]
     render(<Harness factory={factory} initial={initial} />)
     await screen.findByText(/Updated/)
     const body = screen.getByTestId('chart-body')
@@ -711,8 +754,8 @@ describe('Chart panel review regressions', () => {
       Object.defineProperty(body, 'clientHeight', { configurable: true, value: height })
     }
     size(735, 360)
-    act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'E1 TP1')!.id, { x: 700, y: 100 }))
-    const form = screen.getByRole('form', { name: 'Edit E1 Target 1' })
+    act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'TP1')!.id, { x: 700, y: 100 }))
+    const form = screen.getByRole('form', { name: 'Edit Entry 1 target 1' })
     expect(parseFloat(form.style.left) + parseFloat(form.style.width)).toBeLessThanOrEqual(735)
     size(322, 320)
     act(() => { window.dispatchEvent(new Event('resize')) })
@@ -736,14 +779,28 @@ describe('Chart captures', () => {
     await userEvent.click(button)
     expect(onCapture).toHaveBeenCalledWith(expect.any(Blob), 'BTC · Hyperliquid · 1 hour')
     expect(state.captions[0]).toMatch(/^BTC · Hyperliquid · 1 hour · \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · Planned levels are not fills$/)
-    expect(await screen.findByText('Capture added to Evidence')).toHaveAttribute('role', 'status')
+    expect(await screen.findByText(/Capture added to the Evidence tab/)).toHaveAttribute('role', 'status')
 
     await userEvent.click(button)
     expect(await screen.findByRole('alert')).toHaveTextContent('A play can hold at most 50 images.')
   })
 
-  it('keeps capture unavailable without market data', () => {
+  it('keeps capture unavailable without market data and says why in its tooltip', async () => {
     render(<ChartPanel entries={entries()} selectedId="" instrument="ETH-PERP" onSelect={vi.fn()} onCapture={vi.fn()} />)
-    expect(screen.getByRole('button', { name: 'Capture chart' })).toHaveAttribute('title', 'Capture chart · Needs market data')
+    const button = screen.getByRole('button', { name: 'Capture chart' })
+    expect(button).toBeDisabled()
+    await userEvent.hover(button.parentElement!)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Capture chartNeeds market data')
+  })
+
+  it('names each drawing tool and says how to use it in a tooltip', async () => {
+    const { factory } = fakeAdapter()
+    render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    await userEvent.hover(screen.getByRole('button', { name: 'Fibonacci retracement' }))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Fibonacci retracementDrag from the swing start to the swing end.')
+    await userEvent.click(screen.getByRole('button', { name: 'Price range' }))
+    expect(screen.getByText('Drag up or down to measure a price change. Esc cancels.')).toBeInTheDocument()
   })
 })

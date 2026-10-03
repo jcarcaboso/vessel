@@ -1,6 +1,6 @@
 import {
-  distanceToSegment, drawingSchemaVersion, fibonacciLevels, fibonacciPrice, pointCount, positionPoints, positionStats,
-  type ChartDrawing, type DrawingKind, type DrawingPoint,
+  distanceToSegment, drawingSchemaVersion, fibonacciLevels, fibonacciPrice, goldenPocket, formatDuration, pointCount, positionPoints, positionStats,
+  priceRangeStats, type ChartDrawing, type DrawingKind, type DrawingPoint,
 } from './drawings'
 
 /** Pane coordinate conversions supplied by the renderer adapter. */
@@ -10,7 +10,11 @@ export interface DrawingSpace {
   /** Inverse conversion; `snap` applies the magnet when enabled. */
   point(x: number, y: number, snap: boolean): DrawingPoint | null
   width(): number
+  height(): number
   formatPrice(price: number): string
+  formatTime(time: number): string
+  /** Bars between two times at the loaded interval, or null without candles. */
+  bars(from: number, to: number): number | null
 }
 
 export interface DrawingCallbacks {
@@ -33,6 +37,10 @@ type Gesture =
   | { type: 'create'; start: DrawingPoint; startX: number; startY: number; moved: boolean; awaiting: boolean }
   | { type: 'move'; drawing: ChartDrawing; x: number; y: number; moved: boolean }
   | { type: 'handle'; drawing: ChartDrawing; index: number; moved: boolean }
+
+/** Default level colors, from the swing end (0) to its start (1); the golden pocket levels are gold. */
+const fibonacciColors = ['#9aa4b2', '#ef5f6b', '#f59a3c', '#4cbf7f', '#e3b341', '#e3b341', '#4f9cf0', '#b07fe0'] as const
+const gold = '#e3b341'
 
 const hitTolerance = 6
 const handleRadius = 5
@@ -62,10 +70,18 @@ export class DrawingController {
   magnet = false
   private gesture: Gesture | null = null
   private preview: ChartDrawing | null = null
+  /** Pane x of the free vertical guide shown while a tool is active, or null. */
+  private guide: number | null = null
 
   constructor(private readonly space: DrawingSpace, private readonly callbacks: DrawingCallbacks, private readonly requestUpdate: () => void) {}
 
   get busy() { return this.gesture !== null }
+
+  setGuide(x: number | null) {
+    if (x === this.guide) return
+    this.guide = x
+    this.requestUpdate()
+  }
 
   setTool(tool: DrawingKind | null) {
     this.tool = tool
@@ -203,15 +219,16 @@ export class DrawingController {
       const x = this.space.x(point.time)
       const y = this.space.y(point.price)
       if (x === null || y === null) return null
-      const moved = this.space.point(x + (drawing.kind === 'horizontal-line' ? 0 : dx), y + dy, false)
+      const moved = this.space.point(x + (drawing.kind === 'horizontal-line' ? 0 : dx), y + (drawing.kind === 'vertical-line' ? 0 : dy), false)
       if (!moved) return null
-      points.push(drawing.kind === 'horizontal-line' ? { time: point.time, price: moved.price } : moved)
+      points.push(drawing.kind === 'horizontal-line' ? { time: point.time, price: moved.price }
+        : drawing.kind === 'vertical-line' ? { time: moved.time, price: point.price } : moved)
     }
     return { ...drawing, points }
   }
 
   private handles(drawing: ChartDrawing) {
-    if (drawing.kind === 'horizontal-line' || drawing.kind === 'text') return []
+    if (pointCount[drawing.kind] === 1) return []
     return drawing.points.map(point => ({ x: this.space.x(point.time), y: this.space.y(point.price) }))
   }
 
@@ -242,6 +259,7 @@ export class DrawingController {
     switch (drawing.kind) {
       case 'trend-line': return stroke(distanceToSegment(x, y, x0!, y0!, x1!, y1!))
       case 'horizontal-line': return stroke(Math.abs(y - y0!))
+      case 'vertical-line': return stroke(Math.abs(x - x0!))
       case 'text': {
         const width = (drawing.text ?? '').length * textFont * 0.6 + 14
         return area(x >= x0! - 2 && x <= x0! + width && y >= y0! - 20 && y <= y0! + 4)
@@ -257,7 +275,8 @@ export class DrawingController {
           const levelY = this.space.y(fibonacciPrice(start, end, level))
           return levelY === null ? Infinity : Math.abs(levelY - y)
         })]
-        return stroke(Math.min(...distances))
+        // A level line wins; anywhere between levels 0 and 1 still grabs the drawing.
+        return stroke(Math.min(...distances)) ?? area(within(y, y0!, y1!))
       }
       default: return area(within(x, x0!, x1!) && within(y, y0!, y1!))
     }
@@ -270,6 +289,15 @@ export class DrawingController {
     context.font = `500 ${textFont - 1}px ${theme.font}`
     context.textBaseline = 'middle'
     for (const drawing of all) this.renderOne(context, theme, drawing, drawing.id === this.selectedId || drawing === this.preview)
+    if (this.guide !== null) {
+      context.strokeStyle = theme.muted
+      context.lineWidth = 1
+      context.setLineDash([4, 4])
+      line(context, this.guide, 0, this.guide, this.space.height())
+      context.setLineDash([])
+      const point = this.space.point(this.guide, 0, false)
+      if (point) tag(context, theme, this.space.formatTime(point.time), this.guide, this.space.height() - 12, theme.muted)
+    }
     context.restore()
   }
 
@@ -295,6 +323,38 @@ export class DrawingController {
         line(context, 0, y0!, width, y0!)
         label(context, theme, this.space.formatPrice(drawing.points[0]!.price), width - 8, y0! - 9, 'right')
         break
+      case 'vertical-line':
+        line(context, x0!, 0, x0!, this.space.height())
+        label(context, theme, this.space.formatTime(drawing.points[0]!.time), x0! + 6, this.space.height() - 12, 'left')
+        break
+      case 'date-range':
+      case 'price-range': {
+        const [start, end] = drawing.points as [DrawingPoint, DrawingPoint]
+        const left = Math.min(x0!, x1!)
+        const top = Math.min(y0!, y1!)
+        context.globalAlpha = 0.12
+        context.fillRect(left, top, Math.abs(x1! - x0!), Math.abs(y1! - y0!))
+        context.globalAlpha = 1
+        let text: string
+        if (drawing.kind === 'date-range') {
+          const middle = (y0! + y1!) / 2
+          line(context, x0!, top, x0!, top + Math.abs(y1! - y0!))
+          line(context, x1!, top, x1!, top + Math.abs(y1! - y0!))
+          arrow(context, x0!, middle, x1!, middle)
+          const bars = this.space.bars(start.time, end.time)
+          text = `${bars === null ? '' : `${Math.round(Math.abs(bars))} bars · `}${formatDuration(end.time - start.time)}`
+        } else {
+          const middle = (x0! + x1!) / 2
+          line(context, left, y0!, left + Math.abs(x1! - x0!), y0!)
+          line(context, left, y1!, left + Math.abs(x1! - x0!), y1!)
+          arrow(context, middle, y0!, middle, y1!)
+          const stats = priceRangeStats(start, end)
+          text = `${stats.change >= 0 ? '+' : '−'}${this.space.formatPrice(Math.abs(stats.change))} (${stats.percent >= 0 ? '+' : '−'}${Math.abs(stats.percent).toFixed(2)}%)`
+        }
+        const below = y1! >= y0!
+        tag(context, theme, text, (x0! + x1!) / 2, below ? Math.max(y0!, y1!) + 14 : top - 14, color)
+        break
+      }
       case 'zone':
         context.globalAlpha = 0.14
         context.fillRect(Math.min(x0!, x1!), Math.min(y0!, y1!), Math.abs(x1! - x0!), Math.abs(y1! - y0!))
@@ -305,21 +365,40 @@ export class DrawingController {
         const [start, end] = drawing.points as [DrawingPoint, DrawingPoint]
         const left = Math.min(x0!, x1!)
         const right = Math.max(x0!, x1!)
+        const levels = fibonacciLevels.map((level, index) => ({
+          level, price: fibonacciPrice(start, end, level), y: this.space.y(fibonacciPrice(start, end, level)),
+          // A chosen color applies to every level; otherwise each level has its own.
+          color: drawing.style?.color ?? fibonacciColors[index]!,
+        }))
+        // Light bands between consecutive levels with the golden pocket in gold, then the levels and the swing line on top.
+        levels.slice(1).forEach((band, index) => {
+          const previous = levels[index]!
+          if (band.y === null || previous.y === null) return
+          const pocket = previous.level === goldenPocket[0] && band.level === goldenPocket[1]
+          context.globalAlpha = pocket ? 0.3 : 0.08
+          context.fillStyle = pocket ? gold : band.color
+          context.fillRect(left, Math.min(previous.y, band.y), right - left, Math.abs(band.y - previous.y))
+        })
+        context.globalAlpha = 1
+        context.strokeStyle = color
         context.setLineDash([4, 3])
         line(context, x0!, y0!, x1!, y1!)
         context.setLineDash(dash)
-        for (const level of fibonacciLevels) {
-          const price = fibonacciPrice(start, end, level)
-          const y = this.space.y(price)
-          if (y === null) continue
-          context.strokeStyle = color
-          context.globalAlpha = level === 0 || level === 1 ? 1 : 0.6
-          context.lineWidth = baseWidth
+        context.lineWidth = baseWidth
+        // Labels sit outside the drawing, on the left when there is room, so they never cover candles inside it.
+        const outsideLeft = left > 96
+        const placed = levels.filter(item => item.y !== null) as Array<typeof levels[number] & { y: number }>
+        for (const { y, color: levelColor } of placed) {
+          context.strokeStyle = levelColor
           line(context, left, y, right, y)
-          context.globalAlpha = 1
-          label(context, theme, `${level} · ${this.space.formatPrice(price)}`, left + 4, y - 8, 'left', true)
         }
-        context.setLineDash(dash)
+        // Close levels (such as the golden pocket) get their labels stacked so they never cover each other.
+        let previous = -Infinity
+        for (const { level, price, y, color: levelColor } of [...placed].sort((a, b) => a.y - b.y)) {
+          const labelY = Math.max(y, previous + 21)
+          previous = labelY
+          tag(context, theme, `${level} (${this.space.formatPrice(price)})`, outsideLeft ? left - 6 : right + 6, labelY, levelColor, outsideLeft ? 'right' : 'left')
+        }
         break
       }
       case 'position': {
@@ -375,6 +454,40 @@ function line(context: CanvasRenderingContext2D, x0: number, y0: number, x1: num
   context.moveTo(x0, y0)
   context.lineTo(x1, y1)
   context.stroke()
+}
+
+/** Line from (x0, y0) with an arrowhead at (x1, y1). */
+function arrow(context: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
+  line(context, x0, y0, x1, y1)
+  const angle = Math.atan2(y1 - y0, x1 - x0)
+  if (Math.hypot(x1 - x0, y1 - y0) < 8) return
+  context.beginPath()
+  context.moveTo(x1, y1)
+  context.lineTo(x1 - 7 * Math.cos(angle - 0.45), y1 - 7 * Math.sin(angle - 0.45))
+  context.moveTo(x1, y1)
+  context.lineTo(x1 - 7 * Math.cos(angle + 0.45), y1 - 7 * Math.sin(angle + 0.45))
+  context.stroke()
+}
+
+/** Measurement tag on a filled background, centered on `x` or with that edge at `x`. */
+function tag(context: CanvasRenderingContext2D, theme: DrawingTheme, text: string, x: number, y: number, color: string,
+  align: 'center' | 'left' | 'right' = 'center') {
+  const width = context.measureText(text).width + 14
+  const left = align === 'center' ? x - width / 2 : align === 'left' ? x : x - width
+  const lineWidth = context.lineWidth
+  context.setLineDash([])
+  context.fillStyle = theme.background
+  context.globalAlpha = 0.92
+  context.fillRect(left, y - 10, width, 20)
+  context.globalAlpha = 1
+  context.strokeStyle = color
+  context.lineWidth = 1
+  context.strokeRect(left, y - 10, width, 20)
+  context.fillStyle = theme.text
+  context.textAlign = 'center'
+  context.fillText(text, left + width / 2, y)
+  context.textAlign = 'left'
+  context.lineWidth = lineWidth
 }
 
 function label(context: CanvasRenderingContext2D, theme: DrawingTheme, text: string, x: number, y: number, align: 'left' | 'right', muted = false) {

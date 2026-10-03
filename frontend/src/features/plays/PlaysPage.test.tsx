@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { pickInstrument } from '@/test/instrument'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
 import type { PlayExecution, PlayFields, PlayHistory, PlayStatus, PlaySummary, SavedEvidence, SavedPlay, StatusRequest } from '@/api/plays'
 import { ApiError } from '@/api/system'
@@ -257,8 +258,8 @@ describe('saved plays', () => {
     await user.click(await screen.findByRole('button', { name: 'New play' }))
     await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
     expect(screen.queryByRole('link', { name: /on Hyperliquid/ })).not.toBeInTheDocument()
-    await user.selectOptions(await screen.findByRole('combobox', { name: 'Perpetual instrument' }), 'BTC')
-    const link = screen.getByRole('link', { name: 'Open BTC on Hyperliquid' })
+    await pickInstrument(user, 'BTC')
+    const link = screen.getByRole('link', { name: 'Open BTC/USDC on Hyperliquid' })
     expect(link).toHaveAttribute('href', 'https://app.hyperliquid.xyz/trade/BTC')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
   })
@@ -274,7 +275,7 @@ describe('venue tracking', () => {
     render(<Page api={api} accounts={[venue]} />)
     await user.click(await screen.findByRole('button', { name: 'New play' }))
     await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
-    await user.selectOptions(await screen.findByRole('combobox', { name: 'Perpetual instrument' }), 'BTC')
+    await pickInstrument(user, 'BTC')
     await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
     // The venue reports the entry filled: the server moves the play to Open on the next check.
     server.api.checkPlayExecution.mockImplementation((id: string) => {
@@ -295,13 +296,13 @@ describe('venue tracking', () => {
 describe('saved play helpers', () => {
   it('describes plan revisions by entry and target identity', () => {
     const draft = createDraft()
-    const before = planFromDraft({ ...draft, entries: [{ ...draft.entries[0]!, price: '100', stop: { ...draft.entries[0]!.stop, value: '95' } }] })
+    const before = planFromDraft({ ...draft, entries: [{ ...draft.entries[0]!, price: '100', stops: [{ ...draft.entries[0]!.stops[0]!, value: '95' }] }] })
     const entry = before.entries[0]!
-    const after = { ...before, leverage: '5', entries: [{ ...entry, stop: { ...entry.stop, unit: 'percent' as const, value: '3' },
+    const after = { ...before, leverage: '5', entries: [{ ...entry, stops: [{ ...entry.stops[0]!, unit: 'percent' as const, value: '3' }, { id: 's2', unit: 'price' as const, value: '90', share: '' }],
       targets: [{ ...entry.targets[0]!, value: '110' }, { id: 't2', unit: 'price' as const, value: '120', share: '50' }] }],
       notes: { ...before.notes, thesis: 'Changed' } }
     expect(describePlanChanges(before, after)).toEqual([
-      'Leverage: 1× → 5×', 'Entry 1 stop: 95 → 3%', 'Entry 1 target 1: blank → 110', 'Entry 1 target 2 added at 120', 'Thesis edited',
+      'Leverage: 1× → 5×', 'Entry 1 stop 1: 95 → 3%', 'Entry 1 stop 2 added at 90', 'Entry 1 target 1: blank → 110', 'Entry 1 target 2 added at 120', 'Thesis edited',
     ])
     expect(describePlanChanges(after, { ...after, entries: [] })).toEqual(['Entry 1 removed'])
   })

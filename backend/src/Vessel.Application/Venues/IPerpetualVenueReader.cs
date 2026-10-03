@@ -9,7 +9,8 @@ public interface IPerpetualVenueReader
     Task<PerpetualVenueReadResult> ReadAsync(string publicAddress, CancellationToken cancellationToken);
 }
 
-public sealed record VenueInstrument(string ContractId, int QuantityDecimals, int MaxLeverage);
+/// <summary>A selectable perpetual. Prices are quoted and margined in <paramref name="QuoteAsset"/>, e.g. BTC/USDC.</summary>
+public sealed record VenueInstrument(string ContractId, int QuantityDecimals, int MaxLeverage, string QuoteAsset);
 
 public sealed record VenuePosition(
     string ContractId,
