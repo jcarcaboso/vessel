@@ -131,3 +131,7 @@
 .chart-tool-favorite:hover { color: var(--foreground); background: var(--accent); }
 .chart-tool-favorite[aria-pressed="true"] { color: #e3b341; }
 .chart-favorite-tools { display: flex; align-items: center; gap: 2px; }
+
+/* Actions that remove something read red. */
+.chart-icon-button.is-destructive:not(:disabled), .chart-drawing-bar .chart-delete { color: color-mix(in srgb, var(--negative) 80%, var(--muted-foreground)); }
+.chart-icon-button.is-destructive:not(:disabled):hover, .chart-drawing-bar .chart-delete:hover:not(:disabled) { color: var(--negative); background: color-mix(in srgb, var(--negative) 12%, transparent); }

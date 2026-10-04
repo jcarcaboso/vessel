@@ -136,7 +136,7 @@ describe('Main application shell', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Plays' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('')
     expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByText('Draft', { selector: '.badge' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Save$/ })).toBeDisabled()
   })
   it('creates an owner-scoped portfolio and reloads the workspace', async () => {
     const client = api()

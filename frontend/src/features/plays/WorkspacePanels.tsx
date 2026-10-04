@@ -1,5 +1,5 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react'
-import { NotebookPen, Pencil } from 'lucide-react'
+import { NotebookPen, Pencil, Plus, RotateCcw } from 'lucide-react'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,49 +15,61 @@ const displayMoney = (value: string | null | undefined) => value == null ? 'Unav
 // Placeholder values stay readable but recede, so real figures carry the visual weight.
 const isPlaceholder = (value: string) => ['Unavailable', 'Not calculated', 'Not chosen', 'Not set', 'Needs a size', 'Needs an entry price'].includes(value)
 
-export function AvailableBudget({ draft, onChange }: {
+/**
+ * The play's budget: a manual amount when set, otherwise what the account has available. Without
+ * either, only a "Set budget" action shows.
+ */
+export function AvailableBudget({ draft, onChange, available = null }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
+  /** The account's available wallet amount in nominal USD, or null when unknown. */
+  available?: string | null
 }) {
   const [editing, setEditing] = useState(false)
   const [budget, setBudget] = useState('')
   const [error, setError] = useState('')
   const id = useId()
+  const manual = draft.budgetOverride
+  // An empty wallet is not a budget; the owner sets one instead.
+  const usable = available != null && Number(available) > 0 ? available : null
+  const value = manual ?? usable
 
   function saveBudget(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const value = budget.trim()
-    if (value && !/^\d+(\.\d+)?$/.test(value)) {
-      setError('Enter a non-negative USD amount, or leave blank to remove the override.')
+    const text = budget.trim()
+    if (text && !/^\d+(\.\d+)?$/.test(text)) {
+      setError('Enter a non-negative USD amount, or leave it blank to use the available amount.')
       return
     }
-    onChange({ ...draft, budgetOverride: value || null })
+    onChange({ ...draft, budgetOverride: text || null })
     setEditing(false)
     setError('')
   }
+  const edit = () => { setBudget(manual ?? ''); setError(''); setEditing(true) }
 
-  return <div className="available-budget">
-    <label htmlFor={`${id}-budget`}><span>Available budget</span>{' '}<small>Nominal USD</small></label>
-    {editing ? <form onSubmit={saveBudget} noValidate>
-      <Input id={`${id}-budget`} inputMode="decimal" autoFocus value={budget} maxLength={100}
-        aria-invalid={!!error} aria-describedby={`${id}-budget-help${error ? ` ${id}-budget-error` : ''}`}
-        onChange={(event) => { setBudget(event.target.value); setError('') }} />
-      <p id={`${id}-budget-help`} className="muted">Local override only. Leave blank to remove it.</p>
-      {error && <p id={`${id}-budget-error`} className="error" role="alert">{error}</p>}
-      <div className="budget-actions">
-        <Button type="submit" size="sm">Save budget</Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => { setEditing(false); setError('') }}>Cancel</Button>
-      </div>
-    </form> : <>
-      <div className="budget-value-row">
-        <Input id={`${id}-budget`} readOnly value={displayMoney(draft.budgetOverride)} data-placeholder={draft.budgetOverride === null}
-          title={draft.budgetOverride ?? 'No budget set. Use the pencil to set one for this play.'} />
-        <Button type="button" variant="outline" size="icon" aria-label="Edit available budget"
-          onClick={() => { setBudget(draft.budgetOverride ?? ''); setError(''); setEditing(true) }}>
-          <Pencil aria-hidden="true" size={14} />
-        </Button>
-      </div>
-    </>}
+  if (editing) return <form className="available-budget available-budget-editing" onSubmit={saveBudget} noValidate>
+    <label htmlFor={`${id}-budget`}>Budget <small>$</small></label>
+    <Input id={`${id}-budget`} inputMode="decimal" autoFocus value={budget} maxLength={100} placeholder={usable ?? '0'}
+      aria-invalid={!!error} aria-describedby={error ? `${id}-budget-error` : undefined}
+      onChange={(event) => { setBudget(event.target.value); setError('') }} />
+    {error && <p id={`${id}-budget-error`} className="error" role="alert">{error}</p>}
+    <div className="budget-actions">
+      <Button type="submit" size="sm">Save budget</Button>
+      <Button type="button" variant="ghost" size="sm" onClick={() => { setEditing(false); setError('') }}>Cancel</Button>
+    </div>
+  </form>
+
+  if (value == null) return <div className="available-budget available-budget-empty">
+    <Button type="button" variant="ghost" size="sm" className="set-budget" onClick={edit}><Plus size={13} aria-hidden="true" />Set budget</Button>
+  </div>
+
+  return <div className="available-budget" role="group" aria-label="Budget">
+    <span className="budget-label">Budget</span>
+    <strong title={value}>{displayMoney(value)}</strong>
+    <small>{manual != null ? 'manual' : 'available'}</small>
+    <Button type="button" variant="ghost" size="icon-sm" aria-label="Edit budget" title="Set a budget for this play" onClick={edit}><Pencil aria-hidden="true" size={13} /></Button>
+    {manual != null && usable != null && <Button type="button" variant="ghost" size="icon-sm" aria-label="Use the available amount"
+      title="Use the available amount" onClick={() => onChange({ ...draft, budgetOverride: null })}><RotateCcw aria-hidden="true" size={13} /></Button>}
   </div>
 }
 

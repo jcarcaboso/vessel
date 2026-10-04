@@ -225,7 +225,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
     { id: 'magnet', label: 'Snap to candles', description: 'Pulls anchors to a nearby open, high, low or close.', icon: drawingUtilityIcons.magnet, available: true, pressed: preferences.magnet },
     { id: 'undo', label: history.undoLabel ? `Undo: ${history.undoLabel}` : 'Undo', icon: drawingUtilityIcons.undo, available: history.canUndo, pressed: false },
     { id: 'redo', label: history.redoLabel ? `Redo: ${history.redoLabel}` : 'Redo', icon: drawingUtilityIcons.redo, available: history.canRedo, pressed: false },
-    { id: 'clear', label: `Clear unlocked ${instrument} drawings`, icon: drawingUtilityIcons.clear, available: editor.clearable, pressed: false },
+    { id: 'clear', label: `Clear unlocked ${instrument} drawings`, icon: drawingUtilityIcons.clear, available: editor.clearable, pressed: false, destructive: true },
   ]} unavailableReason="Nothing to change" />
   const planHint = planTool && `${planTool === 'entry' ? priced ? 'Click to add an entry' : `Click to set ${selectedName} price` : `Click to add a ${planTool} to ${selectedName}`}. Esc cancels.`
   const drawingBar = planHint ? <div className="chart-drawing-bar" role="status">{planHint}</div>

@@ -159,23 +159,30 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const statusBlocked = dirty ? 'Save your changes first' : undefined
   const pending = busy !== null
 
-  const actions = <div className="play-actions">
-    {saved && <Button variant="ghost" size="sm" onClick={() => setDialog('history')}><History size={14} />History</Button>}
-    <Button size="sm" variant={status === 'draft' ? 'outline' : 'default'} disabled={!dirty || pending || !draft.accountId}
+  // The same buttons stay in the same places whether or not the play is saved; unavailable ones are disabled.
+  const statusAction = status === 'draft'
+    ? <Button size="sm" className="play-primary" disabled={pending || !draft.accountId || !draft.instrument}
+      title={!draft.instrument ? 'Choose an instrument and price an entry to plan' : 'Commit to this plan. Later changes become revisions.'}
+      onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Plan it</Button>
+    : status === 'planned' ? <Button size="sm" variant="outline" disabled={pending || dirty} title={statusBlocked ?? 'Orders withdrawn, idea still valid'}
+      onClick={() => { void changeStatus({ status: 'paused' }) }}><Pause size={14} />Pause</Button>
+    : status === 'paused' ? <Button size="sm" className="play-primary" disabled={pending || dirty} title={statusBlocked}
+      onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Resume</Button>
+    : null
+  const cancellable = status === 'planned' || status === 'paused'
+  const actions = <div className="play-actions" role="group" aria-label="Play actions">
+    <Button variant="outline" size="sm" disabled={!saved} title={saved ? 'Plan revisions and status changes' : 'Save the play first'}
+      onClick={() => setDialog('history')}><History size={14} />History</Button>
+    <Button size="sm" variant="outline" className="play-save" disabled={!dirty || pending || !draft.accountId}
       title={!draft.accountId ? 'Choose an account to save' : undefined}
       onClick={() => { if (needsReason) { setDialogError(null); setDialog('revision') } else void save() }}>
-      <Save size={14} />{saving ? 'Saving…' : !dirty && saved ? 'Saved' : status === 'draft' ? 'Save draft' : 'Save changes'}</Button>
-    {status === 'draft' && <Button size="sm" disabled={pending || !draft.accountId || !draft.instrument}
-      title={!draft.instrument ? 'Choose an instrument and price an entry to plan' : 'Commit to this plan. Later changes become revisions.'}
-      onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Plan it</Button>}
-    {status === 'planned' && <Button size="sm" variant="outline" disabled={pending || dirty} title={statusBlocked ?? 'Orders withdrawn, idea still valid'}
-      onClick={() => { void changeStatus({ status: 'paused' }) }}><Pause size={14} />Pause</Button>}
-    {status === 'paused' && <Button size="sm" disabled={pending || dirty} title={statusBlocked}
-      onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Resume</Button>}
-    {(status === 'planned' || status === 'paused') && <Button size="sm" variant="ghost" className="danger-action" disabled={pending || dirty}
-      title={statusBlocked} onClick={() => { setDialogError(null); setDialog('cancel') }}><X size={14} />Cancel play</Button>}
-    {saved && status === 'draft' && <Button size="sm" variant="ghost" className="danger-action" disabled={pending}
-      onClick={() => { setDialogError(null); setDialog('delete') }}><Trash2 size={14} />Delete</Button>}
+      <Save size={14} />{saving ? 'Saving…' : !dirty && saved ? 'Saved' : 'Save'}</Button>
+    {statusAction}
+    {cancellable
+      ? <Button size="sm" variant="outline" className="danger-action" disabled={pending || dirty}
+        title={statusBlocked} onClick={() => { setDialogError(null); setDialog('cancel') }}><X size={14} />Cancel play</Button>
+      : status === 'draft' && <Button size="sm" variant="outline" className="danger-action" disabled={pending || !saved}
+        title={saved ? 'Delete this draft' : 'Nothing saved yet'} onClick={() => { setDialogError(null); setDialog('delete') }}><Trash2 size={14} />Delete</Button>}
   </div>
 
   // One short line, only when it changes what the owner can do; the buttons and status badge say the rest.

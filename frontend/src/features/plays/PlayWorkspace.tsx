@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
-import { Button } from '@/components/ui/button'
 import { ExternalLink, Info, PencilLine, RefreshCw } from 'lucide-react'
 import { statusLabels, venueTradeUrl, type PlayStatus } from '@/api/plays'
 import { Input } from '@/components/ui/input'
@@ -113,9 +112,6 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           title="Place the planned orders on the venue. Vessel never sends orders.">
           <ExternalLink size={14} aria-hidden="true" />Open {instrumentName} on {venueName(account!.venueId)}</a>}
         {actions ?? <span className="workspace-badge"><PencilLine size={13} />Local draft</span>}
-        {onReload && <Button variant="outline" onClick={onReload} disabled={loading} aria-busy={loading}>
-          <RefreshCw size={14} className={loading ? 'is-spinning' : ''} />Reload accounts
-        </Button>}
       </div>
     </div>
     {notice && <p className="plays-draft-notice" role="status"><Info size={14} aria-hidden="true" /><span>{notice}</span></p>}
@@ -130,7 +126,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         {portfolios.map(portfolio => <option key={portfolio.id} value={portfolio.id}>{portfolio.name}</option>)}
         {enabledAccounts.some(account => account.portfolioId === null) && <option value="unassigned">Unassigned accounts</option>}
       </select></label>
-      <label>Account<select value={lockInstrument ? draft.accountId : accountId} disabled={lockInstrument || (loading && !accounts.length)} onChange={event => chooseAccount(event.target.value)}>
+      <label>Account{onReload && <button type="button" className="plays-reload-accounts" aria-label="Reload accounts" title="Reload accounts"
+        onClick={event => { event.preventDefault(); onReload() }} disabled={loading} aria-busy={loading}>
+        <RefreshCw size={12} className={loading ? 'is-spinning' : ''} aria-hidden="true" /></button>}<select value={lockInstrument ? draft.accountId : accountId} disabled={lockInstrument || (loading && !accounts.length)} onChange={event => chooseAccount(event.target.value)}>
         <option value="">Choose an account</option>
         {lockInstrument && !account && <option value={draft.accountId}>Unavailable or disabled account</option>}
         {filteredAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {venueName(account.venueId)}</option>)}
@@ -169,9 +167,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} />
       </div>
       {readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
-        <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} units={units} />
+        <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} units={units} availableBudget={account?.availableStablecoinNominalUsd ?? null} />
       </fieldset> : <PositionEditor draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId}
-        maxLeverage={maxLeverage} instrumentName={instrumentName} units={units} />}
+        maxLeverage={maxLeverage} instrumentName={instrumentName} units={units} availableBudget={account?.availableStablecoinNominalUsd ?? null} />}
     </div>
     <PositionSummary draft={draft} units={units} instrumentName={instrumentName} />
   </section>

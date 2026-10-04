@@ -73,7 +73,8 @@ describe('Play draft workspace', () => {
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
     const capital = within(screen.getByTestId('capital-context'))
     expect(capital.getAllByText('$1,250.12').length).toBeGreaterThan(0)
-    expect(within(screen.getByTestId('position-panel')).getByRole('textbox', { name: /^Available budget/ })).toHaveValue('Unavailable')
+    // The account has no available wallet amount, so its value is not used as a budget.
+    expect(within(screen.getByTestId('position-panel')).getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
   })
 
   it('never offers disabled accounts, and allows outlining a draft without accounts', () => {
@@ -107,11 +108,11 @@ describe('Play draft workspace', () => {
 
   it('discards an unfinished budget edit when its account context changes', async () => {
     render(<Workspace />)
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    await userEvent.type(screen.getByRole('textbox', { name: /^Available budget/ }), '70')
+    await userEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Budget $' }), '70')
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
     expect(screen.queryByRole('button', { name: 'Save budget' })).not.toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: /^Available budget/ })).toHaveValue('Unavailable')
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
   })
 
   it('keeps original thesis and retrospective review independent', async () => {
@@ -132,12 +133,13 @@ describe('Play draft workspace', () => {
     render(<AccountWorkspace accounts={[first, second]} api={api} />)
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), first.id)
     await pickInstrument(userEvent, 'BTC')
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    await userEvent.type(screen.getByRole('textbox', { name: /^Available budget/ }), '70')
+    await userEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Budget $' }), '70')
     await userEvent.click(screen.getByRole('button', { name: 'Save budget' }))
+    expect(screen.getByRole('group', { name: 'Budget' })).toHaveTextContent('$70.00manual')
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), second.id)
     expect(screen.getByRole('combobox', { name: 'Perpetual instrument' })).toHaveValue('')
-    expect(screen.getByRole('textbox', { name: /^Available budget/ })).toHaveValue('Unavailable')
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Perpetual instrument' })).toBeEnabled())
     expect(instruments).toHaveBeenLastCalledWith(second.id, expect.any(AbortSignal))
   })

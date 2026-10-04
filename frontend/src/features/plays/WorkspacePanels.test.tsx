@@ -27,8 +27,7 @@ describe('Capital context', () => {
     expect(metric('Account balance')).toHaveTextContent('Unavailable')
     expect(within(capital).queryByText('Wallet total')).toBeNull()
     expect(metric('Margin / balance')).toHaveTextContent('—')
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('Unavailable')
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveAttribute('readonly')
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
     expect(within(capital).queryByRole('combobox')).not.toBeInTheDocument()
   })
 
@@ -77,81 +76,85 @@ describe('Capital context', () => {
     expect(metric('Account balance')).toHaveTextContent('Unavailable')
   })
 
-  it('saves an explicit local override without changing real account values or rounding its stored amount', async () => {
-    const initial = { ...createDraft(), accountId: accountFixture.id }
+})
+
+describe('Budget', () => {
+  function Budget({ initial = createDraft(), available = null as string | null, onChange = vi.fn() }) {
+    const [draft, setDraft] = useState(initial)
+    return <AvailableBudget key={draft.accountId} draft={draft} available={available} onChange={next => { setDraft(next); onChange(next) }} />
+  }
+  const budget = () => screen.getByRole('group', { name: 'Budget' })
+
+  it('uses the available amount until a manual budget is set, and can go back to it', async () => {
     const onChange = vi.fn()
-    render(<BudgetHarness initial={initial} accounts={[accountFixture]} portfolios={[portfolioFixture]} onChange={onChange} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    const input = screen.getByRole('textbox', { name: 'Available budget Nominal USD' })
-    expect(input).not.toHaveAttribute('readonly')
+    render(<Budget available="151.77" onChange={onChange} />)
+    expect(budget()).toHaveTextContent('Budget$151.77available')
+    await userEvent.click(screen.getByRole('button', { name: 'Edit budget' }))
+    const input = screen.getByRole('textbox', { name: 'Budget $' })
+    expect(input).toHaveAttribute('placeholder', '151.77')
     await userEvent.type(input, '9007199254740990.99')
     expect(onChange).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: 'Save budget' }))
-    expect(onChange).toHaveBeenCalledExactlyOnceWith({ ...initial, budgetOverride: '9007199254740990.99' })
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('$9,007,199,254,740,990.99')
-    expect(screen.getAllByText('$1,250.12')).toHaveLength(2)
-    expect(accountFixture.accountValueUsd).toBe('1250.123456')
+    expect(onChange.mock.lastCall![0].budgetOverride).toBe('9007199254740990.99')
+    expect(budget()).toHaveTextContent('$9,007,199,254,740,990.99manual')
+    await userEvent.click(screen.getByRole('button', { name: 'Use the available amount' }))
+    expect(onChange.mock.lastCall![0].budgetOverride).toBeNull()
+    expect(budget()).toHaveTextContent('$151.77available')
   })
 
-  it('cancels without applying an override and restores the saved value on reopening', async () => {
+  it('treats an empty wallet as no available budget', () => {
+    render(<Budget available="0" />)
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
+  })
+
+  it('offers only a set action without an available amount, and accepts an explicit zero', async () => {
     const onChange = vi.fn()
-    render(<BudgetHarness initial={{ ...createDraft(), budgetOverride: '250' }} onChange={onChange} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    const input = screen.getByRole('textbox', { name: 'Available budget Nominal USD' })
+    render(<Budget onChange={onChange} />)
+    expect(screen.queryByRole('group', { name: 'Budget' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Budget $' }), '100')
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Budget $' }), '0')
+    await userEvent.click(screen.getByRole('button', { name: 'Save budget' }))
+    expect(onChange.mock.calls[0]![0].budgetOverride).toBe('0')
+    expect(budget()).toHaveTextContent('$0.00manual')
+    expect(screen.queryByRole('button', { name: 'Use the available amount' })).toBeNull()
+  })
+
+  it('restores the saved value when an edit is cancelled', async () => {
+    const onChange = vi.fn()
+    render(<Budget initial={{ ...createDraft(), budgetOverride: '250' }} onChange={onChange} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Edit budget' }))
+    const input = screen.getByRole('textbox', { name: 'Budget $' })
+    expect(input).toHaveValue('250')
     await userEvent.clear(input)
     await userEvent.type(input, '500')
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(onChange).not.toHaveBeenCalled()
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('$250.00')
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('250')
-  })
-
-  it('cancels a first edit back to unavailable and accepts an explicitly saved zero', async () => {
-    const onChange = vi.fn()
-    render(<BudgetHarness onChange={onChange} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    await userEvent.type(screen.getByRole('textbox', { name: 'Available budget Nominal USD' }), '100')
-    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(onChange).not.toHaveBeenCalled()
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('Unavailable')
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    await userEvent.type(screen.getByRole('textbox', { name: 'Available budget Nominal USD' }), '0')
-    await userEvent.click(screen.getByRole('button', { name: 'Save budget' }))
-    expect(onChange.mock.calls[0]![0].budgetOverride).toBe('0')
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('$0.00')
+    expect(budget()).toHaveTextContent('$250.00')
   })
 
   it.each(['-10', 'NaN', '1e6', '1,000', '1.2.3'])('rejects invalid budget %s without applying it', async (value) => {
     const onChange = vi.fn()
-    render(<BudgetHarness onChange={onChange} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    await userEvent.type(screen.getByRole('textbox', { name: 'Available budget Nominal USD' }), value)
+    render(<Budget onChange={onChange} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Budget $' }), value)
     await userEvent.click(screen.getByRole('button', { name: 'Save budget' }))
     expect(onChange).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent('Enter a non-negative USD amount')
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('textbox', { name: 'Budget $' })).toHaveAttribute('aria-invalid', 'true')
   })
 
-  it('removes a local override only after saving an empty field', async () => {
-    const onChange = vi.fn()
-    render(<BudgetHarness initial={{ ...createDraft(), budgetOverride: '250' }} onChange={onChange} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    await userEvent.clear(screen.getByRole('textbox', { name: 'Available budget Nominal USD' }))
-    expect(onChange).not.toHaveBeenCalled()
-    await userEvent.click(screen.getByRole('button', { name: 'Save budget' }))
-    expect(onChange.mock.calls[0]![0].budgetOverride).toBeNull()
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('Unavailable')
-  })
-
-  it('discards an open unsaved override when the selected account changes', async () => {
+  it('discards an open unsaved budget when the selected account changes', async () => {
     const onChange = vi.fn()
     const initial = { ...createDraft(), accountId: accountFixture.id }
     const { rerender } = render(<AvailableBudget key={initial.accountId} draft={initial} onChange={onChange} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    await userEvent.type(screen.getByRole('textbox', { name: 'Available budget Nominal USD' }), '100')
+    await userEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Budget $' }), '100')
     rerender(<AvailableBudget key="" draft={{ ...initial, accountId: '' }} onChange={onChange} />)
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('Unavailable')
     expect(screen.queryByRole('button', { name: 'Save budget' })).not.toBeInTheDocument()
     expect(onChange).not.toHaveBeenCalled()
   })

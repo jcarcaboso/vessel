@@ -2,12 +2,12 @@ import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } f
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { createNextEntry, type DraftEntry, type PlayDraft } from './draft'
+import { createNextEntry, renumberEntries, type DraftEntry, type PlayDraft } from './draft'
 import { EntryForm } from './EntryForm'
 import { keepPercentLevelPrices, leverageOf, percentLevels } from './levels'
 import { LeverageChangeDialog } from './LeverageChangeDialog'
 import { convertSize, defaultSizeUnits, formatMoney, formatQuantity, positionSize, type SizeUnits } from './sizing'
-import { Expand, Plus, Trash2 } from 'lucide-react'
+import { Equal, Expand, Plus, Trash2 } from 'lucide-react'
 
 const leveragePresets = [1, 5, 10, 25, 50]
 /** Control range when the venue maximum is unknown, e.g. manual instruments. Saved plans accept up to 100×. */
@@ -27,7 +27,7 @@ function allocatedShare(entries: DraftEntry[]) {
 }
 import { AvailableBudget } from './WorkspacePanels'
 
-export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, instrumentName = '', units = defaultSizeUnits }: {
+export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
   selectedId: string
@@ -38,6 +38,8 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   instrumentName?: string
   /** Quote asset and contract for the size readout. */
   units?: SizeUnits
+  /** What the account has available, used as the budget unless a manual one is set. */
+  availableBudget?: string | null
 }) {
   const leverageLimit = maxLeverage ?? defaultMaxLeverage
   const leverage = leverageOf(draft.leverage)
@@ -122,7 +124,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
 
   function removeEntry(id: string) {
     if (draft.entries.length <= 1) return
-    const entries = draft.entries.filter(entry => entry.id !== id)
+    const entries = renumberEntries(draft.entries.filter(entry => entry.id !== id))
     onChange({ ...draft, entries })
     if (selected?.id === id) onSelect(entries[0]!.id)
   }
@@ -131,7 +133,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   return <section className="plays-position panel position-panel" aria-label="Position" data-testid="position-panel">
     <h2 className="sr-only">Position</h2>
       <div className="position-context position-sizing position-builder">
-        <AvailableBudget key={draft.accountId} draft={draft} onChange={onChange} />
+        <AvailableBudget key={draft.accountId} draft={draft} onChange={onChange} available={availableBudget} />
         <div className="whole-size-input">
           <label htmlFor={`${prefix}-size`}>
             <span>{draft.sizingMode === 'margin' ? 'Margin' : 'Quantity'}</span>
@@ -147,7 +149,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
                 aria-label={mode === 'margin' ? `Margin in ${units.quote}` : `Quantity in ${units.base}`}
                 onClick={() => {
                   if (mode !== draft.sizingMode) onChange({ ...draft, sizingMode: mode, size: convertSize(draft, leverage, units) })
-                }}>{mode === 'margin' ? units.quote === defaultSizeUnits.quote ? 'Currency' : units.quote : units.base === defaultSizeUnits.base ? 'Quantity' : units.base}</button>)}
+                }}>{mode === 'margin' ? '$' : units.base === defaultSizeUnits.base ? 'Qty' : units.base}</button>)}
             </div>
           </div>
           {sized.notional !== null || sized.margin !== null ? <p className="position-size-readout" data-testid="size-readout">
@@ -181,61 +183,57 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
       </div>
         <div className="entries-heading">
           <h3>Entries <span className="entry-count">{draft.entries.length}</span></h3>
-          <span data-complete={allocated === 100}>{allocated === null ? 'Shares not set' : `${allocated}% of quantity allocated`}</span>
-          <Button type="button" variant="ghost" size="sm" className="split-equally" onClick={splitEqually}>Split equally</Button>
+          <span className="entries-allocated" data-complete={allocated === 100} title="Share of the position's quantity given to entries">{allocated === null ? '—' : `${allocated}%`}</span>
+          <Button type="button" variant="ghost" size="icon-sm" className="split-equally" aria-label="Split equally" title="Split shares equally" onClick={splitEqually}><Equal size={14} aria-hidden="true" /></Button>
+          <Button type="button" variant="ghost" size="icon-sm" className="add-entry" aria-label="Add entry" title="Add entry" onClick={addEntry}><Plus size={14} aria-hidden="true" /></Button>
+          <Dialog open={expanded} onOpenChange={open => {
+            if (open) sidebarBeforeExpansion.current = { selectedId, scrollTop: sidebar.current?.scrollTop ?? 0 }
+            setExpanded(open)
+          }}>
+            <DialogTrigger asChild>
+              <Button ref={expandButton} type="button" variant="ghost" size="icon-sm" className="expand-entry" aria-label="Expand selected entry" title="Expand selected entry" disabled={!selected}><Expand size={14} aria-hidden="true" /></Button>
+            </DialogTrigger>
+            <DialogContent className="entry-dialog plays-entry-dialog" onCloseAutoFocus={event => {
+              event.preventDefault()
+              if (selectedId === sidebarBeforeExpansion.current.selectedId) {
+                sidebar.current?.scrollTo({ top: sidebarBeforeExpansion.current.scrollTop, behavior: 'auto' })
+              } else {
+                revealEntry(selectedId, false)
+              }
+              expandButton.current?.focus({ preventScroll: true })
+            }}>
+              <DialogHeader>
+                <DialogTitle>Expanded entry editor</DialogTitle>
+                <DialogDescription className="sr-only">The same entry form with more room. Escape returns to the list.</DialogDescription>
+              </DialogHeader>
+              <label htmlFor={`${prefix}-expanded-entry`}>Entry
+                <select id={`${prefix}-expanded-entry`} value={selected?.id ?? ''} onChange={event => selectEntry(event.target.value)}>
+                  {draft.entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+                </select>
+              </label>
+              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} />}
+            </DialogContent>
+          </Dialog>
         </div>
         <div ref={sidebar} className="entry-sidebar" data-testid="entry-sidebar" tabIndex={0} aria-label="Entries">
           {draft.entries.map(entry => <article key={entry.id} className="entry-card" data-selected={selected?.id === entry.id}
             style={{ '--entry-color': entry.color } as CSSProperties} aria-label={`${entry.name} editor`}>
-            <button type="button" className="entry-header" aria-pressed={selected?.id === entry.id} aria-expanded={selected?.id === entry.id}
-              ref={node => { if (node) entryButtons.current.set(entry.id, node); else entryButtons.current.delete(entry.id) }}
-              onClick={() => selectEntry(entry.id)}>
-              <strong><i aria-hidden="true" />{entry.name}</strong>
-              <span className="entry-header-price">{entry.price ? `@ ${entry.price}` : 'No price'}</span>
-              <span>{entry.share === '' ? '—' : `${entry.share}%`}</span>
-              {selected?.id !== entry.id && <small className="entry-header-levels">{levelCount(entry)}</small>}
-            </button>
-            {shown(entry.id) && <>
-              <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} />
-              <div className="entry-actions">
-                <Button type="button" variant="ghost" size="sm" className="remove-entry" aria-label={`Remove ${entry.name}`}
-                  disabled={draft.entries.length <= 1} onClick={() => removeEntry(entry.id)}><Trash2 size={12} aria-hidden="true" />Remove entry</Button>
-              </div>
-            </>}
+            <div className="entry-header-row">
+              <button type="button" className="entry-header" aria-pressed={selected?.id === entry.id} aria-expanded={selected?.id === entry.id}
+                ref={node => { if (node) entryButtons.current.set(entry.id, node); else entryButtons.current.delete(entry.id) }}
+                onClick={() => selectEntry(entry.id)}>
+                <strong><i aria-hidden="true" />{entry.name}</strong>
+                <span className="entry-header-price">{entry.price ? `@ ${entry.price}` : 'No price'}</span>
+                <span>{entry.share === '' ? '—' : `${entry.share}%`}</span>
+                {selected?.id !== entry.id && <small className="entry-header-levels">{levelCount(entry)}</small>}
+              </button>
+              {draft.entries.length > 1 && <Button type="button" variant="ghost" size="icon-sm" className="remove-entry" aria-label={`Remove ${entry.name}`}
+                title={`Remove ${entry.name}`} onClick={() => removeEntry(entry.id)}><Trash2 size={13} aria-hidden="true" /></Button>}
+            </div>
+            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} />}
             {expanded && selected?.id === entry.id && <p className="muted expanded-placeholder">Editing in the expanded view.</p>}
           </article>)}
         </div>
-    <div className="entry-actions">
-      <Button type="button" variant="outline" className="add-entry" onClick={addEntry}><Plus size={14} aria-hidden="true" />Add entry</Button>
-      <Dialog open={expanded} onOpenChange={open => {
-        if (open) sidebarBeforeExpansion.current = { selectedId, scrollTop: sidebar.current?.scrollTop ?? 0 }
-        setExpanded(open)
-      }}>
-        <DialogTrigger asChild>
-          <Button ref={expandButton} type="button" variant="outline" className="expand-entry" aria-label="Expand selected entry" disabled={!selected}><Expand size={14} aria-hidden="true" />Expand</Button>
-        </DialogTrigger>
-        <DialogContent className="entry-dialog plays-entry-dialog" onCloseAutoFocus={event => {
-          event.preventDefault()
-          if (selectedId === sidebarBeforeExpansion.current.selectedId) {
-            sidebar.current?.scrollTo({ top: sidebarBeforeExpansion.current.scrollTop, behavior: 'auto' })
-          } else {
-            revealEntry(selectedId, false)
-          }
-          expandButton.current?.focus({ preventScroll: true })
-        }}>
-          <DialogHeader>
-            <DialogTitle>Expanded entry editor</DialogTitle>
-            <DialogDescription className="sr-only">The same entry form with more room. Escape returns to the list.</DialogDescription>
-          </DialogHeader>
-          <label htmlFor={`${prefix}-expanded-entry`}>Entry
-            <select id={`${prefix}-expanded-entry`} value={selected?.id ?? ''} onChange={event => selectEntry(event.target.value)}>
-              {draft.entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
-            </select>
-          </label>
-          {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} />}
-        </DialogContent>
-      </Dialog>
-    </div>
   </section>
 }
 

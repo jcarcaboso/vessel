@@ -15,6 +15,8 @@ export interface ChartTool {
   pressed?: boolean
   /** Why this tool is unavailable; defaults to the rail's reason. */
   unavailableReason?: string
+  /** Marks an action that removes something, shown in red. */
+  destructive?: boolean
 }
 
 /** Related tools behind one button, which shows `current`; a side panel lists them all. */
@@ -41,7 +43,7 @@ export function ChartToolRail({ tools, active, onSelect, groups = [], footer, un
 }) {
   const button = (tool: ChartTool) => <ChartIconButton key={tool.id} label={tool.label} icon={tool.icon}
     pressed={tool.pressed ?? tool.id === active} disabled={!tool.available} disabledReason={tool.unavailableReason ?? unavailableReason}
-    description={tool.description} tooltipSide="right" onClick={() => onSelect(tool.id)} />
+    description={tool.description} tooltipSide="right" className={tool.destructive ? 'is-destructive' : undefined} onClick={() => onSelect(tool.id)} />
   return <div className="chart-tool-rail" role="group" aria-label="Chart tools">
     {tools.map(item => isGroup(item) && item.tools.length === 1 ? button(item.tools[0]!) : isGroup(item)
       ? <ToolGroupButton key={item.id} group={item} active={active} onSelect={onSelect} favorites={favorites} onToggleFavorite={onToggleFavorite} />

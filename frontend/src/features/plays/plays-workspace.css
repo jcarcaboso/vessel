@@ -603,3 +603,37 @@
 .plays-page .exit-row input, .plays-entry-dialog .exit-row input { height: 32px; }
 .plays-page .exit-row .remove-target, .plays-entry-dialog .exit-row .remove-target { width: 24px; height: 32px; padding: 0; color: var(--muted-foreground); }
 .plays-page .exit-row .level-resolved, .plays-entry-dialog .exit-row .level-resolved { grid-column: 2 / -1; margin: -2px 0 0; color: var(--muted-foreground); font-size: 9px; font-variant-numeric: tabular-nums; }
+
+/* Header actions: one outline style, the status step filled, destructive actions red and last. */
+.plays-page .play-actions .play-save { min-width: 82px; justify-content: center; }
+.plays-page .play-actions .danger-action { border-color: color-mix(in srgb, var(--negative) 45%, var(--border)); color: var(--negative); }
+.plays-page .play-actions .danger-action:hover:not(:disabled) { background: color-mix(in srgb, var(--negative) 12%, transparent); color: var(--negative); }
+.plays-page .plays-heading-actions .plays-venue-link { height: 32px; }
+.plays-page .plays-reload-accounts { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: 6px; padding: 0; border: 0; border-radius: 4px; color: var(--muted-foreground); background: transparent; vertical-align: middle; cursor: pointer; }
+.plays-page .plays-reload-accounts:hover { color: var(--foreground); background: var(--accent); }
+/* Destructive icon actions read red. */
+.plays-page .remove-entry, .plays-page .remove-target, .plays-entry-dialog .remove-target { color: color-mix(in srgb, var(--negative) 75%, var(--muted-foreground)) !important; }
+.plays-page .remove-entry:hover, .plays-page .remove-target:hover, .plays-entry-dialog .remove-target:hover { color: var(--negative) !important; background: color-mix(in srgb, var(--negative) 12%, transparent); }
+
+/* Budget: one line with its source, or a single "Set budget" action. */
+.plays-page .available-budget:not(.available-budget-editing):not(.available-budget-empty) { display: flex; align-items: center; gap: 8px; padding: 9px 12px; }
+.plays-page .available-budget .budget-label { color: var(--muted-foreground); font-size: 11px; }
+.plays-page .available-budget strong { margin-left: auto; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.plays-page .available-budget small { color: var(--muted-foreground); font-size: 10px; }
+.plays-page .available-budget-empty { padding: 0; border: 0; background: transparent; }
+.plays-page .available-budget-empty .set-budget { justify-self: start; height: 26px; padding: 2px 4px; color: var(--ring); font-size: 11px; }
+
+/* Entries: heading with count, allocation and icon actions; each entry header has its remove icon at the right. */
+.plays-page .position-panel .entries-heading { flex-wrap: nowrap; gap: 4px; }
+.plays-page .position-panel .entries-heading .entries-allocated { margin-right: 4px; font-size: 11px; }
+.plays-page .position-panel .entries-heading [data-complete="true"] { color: var(--positive); }
+.plays-page .position-panel .entries-heading button { width: 26px; height: 26px; padding: 0; color: var(--muted-foreground); }
+.plays-page .position-panel .entries-heading button:hover:not(:disabled) { color: var(--foreground); }
+.plays-page .position-panel .entries-heading .add-entry { color: var(--ring); }
+.plays-page .entry-header-row { display: flex; align-items: stretch; background: var(--secondary); }
+.plays-page .entry-card[data-selected="true"] .entry-header-row { background: color-mix(in srgb, var(--entry-color) 9%, var(--card)); }
+.plays-page .entry-header-row .entry-header { flex: 1; min-width: 0; background: transparent; border-bottom: 0; }
+.plays-page .entry-header-row .remove-entry { align-self: center; width: 28px; height: 28px; margin-right: 6px; padding: 0; }
+.plays-page .entry-card[data-selected="true"] .entry-header-row { border-bottom: 1px solid var(--border); }
+.plays-page .position-panel .entries-heading > * { align-self: center; margin: 0; }
+.plays-page .position-panel .entries-heading .expand-entry { display: inline-grid; place-items: center; }

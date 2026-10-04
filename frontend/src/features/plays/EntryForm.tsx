@@ -14,7 +14,7 @@ function LevelUnits({ value, label, onChange }: {
     {(['price', 'percent'] as const).map(unit => <button key={unit} type="button" aria-pressed={unit === value}
       aria-label={unit === 'price' ? 'Price' : '% return at leverage'}
       onClick={() => { if (unit !== value) onChange(unit) }}>
-      {unit === 'price' ? 'Price' : '%'}
+      {unit === 'price' ? '$' : '%'}
     </button>)}
   </div>
 }
@@ -55,7 +55,7 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix }: {
         <LevelUnits label={`${entry.name} ${label(index)} units`} value={exit.unit}
           onChange={unit => update(exit.id, { unit, value: '' })} />
         <Input id={`${prefix}-${exit.id}-value`} type="number" step="any" min={0} className={kind === 'stop' ? 'exit-value-stop' : 'exit-value-target'}
-          placeholder={exit.unit === 'price' ? 'Price' : kind === 'stop' ? 'Loss %' : 'Gain %'}
+          placeholder={exit.unit === 'price' ? '$' : kind === 'stop' ? 'Loss %' : 'Gain %'}
           aria-label={`${entry.name} planned ${label(index)} ${exit.unit === 'price' ? 'price (quote units)' : `return at ${leverage}× leverage (%)`}`}
           value={exit.value} onChange={event => update(exit.id, { value: event.target.value })} />
         <Input id={`${prefix}-${exit.id}-share`} type="number" step="any" min={0} max={100} placeholder="Share %" className="exit-share"

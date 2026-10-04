@@ -79,6 +79,11 @@ export function createEntry(index: number): DraftEntry {
   }
 }
 
+/** Renames default-named entries to "Entry 1", "Entry 2"… in order, e.g. after one is removed. Colors stay. */
+export function renumberEntries(entries: readonly DraftEntry[]): DraftEntry[] {
+  return entries.map((entry, index) => /^Entry \d+$/.test(entry.name) && entry.name !== `Entry ${index + 1}` ? { ...entry, name: `Entry ${index + 1}` } : entry)
+}
+
 /** A blank entry after the existing ones, named after the first free "Entry n". */
 export function createNextEntry(entries: readonly DraftEntry[]): DraftEntry {
   let index = entries.length
