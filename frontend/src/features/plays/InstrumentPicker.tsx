@@ -17,8 +17,16 @@ export function InstrumentPicker({ catalog: state, value, source, onChange }: {
   const choices = useMemo(() => catalog?.instruments ?? [], [catalog])
   const selected = choices.find(instrument => instrument.contractId === value)
 
+  // Switching between the venue catalogue and a manual label sits beside the field label.
+  const sourceSwitch = accountId !== null && (manual
+    ? <Button type="button" variant="ghost" size="sm" onClick={() => { onChange(value, 'venue'); state.retry() }}>Use venue catalogue</Button>
+    : <Button type="button" variant="ghost" size="sm" aria-label="Enter manually" onClick={() => onChange(value, 'manual')}>Manual</Button>)
+
   return <div className="plays-instrument-field">
-    <label htmlFor={`${id}-instrument`}>Instrument</label>
+    <div className="plays-field-heading">
+      <label htmlFor={`${id}-instrument`}>Instrument</label>
+      {sourceSwitch && <span className="instrument-actions">{sourceSwitch}</span>}
+    </div>
     {manual ? <Input id={`${id}-instrument`} aria-label="Perpetual instrument" value={value}
       placeholder="Manual contract label" onChange={event => onChange(event.target.value, 'manual')} />
       : <InstrumentSearch id={`${id}-instrument`} choices={choices} value={value} selected={selected}
@@ -29,14 +37,8 @@ export function InstrumentPicker({ catalog: state, value, source, onChange }: {
         catalog && <p>{!choices.length && 'No selectable primary perpetual contracts.'}
           {selected && <abbr title="Venue maximum leverage for this contract. The leverage control is limited to it.">Max {selected.maxLeverage}×</abbr>}
           {value && !selected && <span> · {value} is not in the current catalogue</span>}</p>}
-      {accountId !== null && <div className="instrument-actions">
-        {manual ? <Button type="button" variant="ghost" size="sm" onClick={() => {
-          onChange(value, 'venue')
-          state.retry()
-        }}>Use venue catalogue</Button> :
-          <Button type="button" variant="ghost" size="sm" aria-label="Enter manually"
-            onClick={() => onChange(value, 'manual')}>Manual</Button>}
-        {error && <Button type="button" variant="ghost" size="sm" onClick={state.retry}>Retry instruments</Button>}
+      {accountId !== null && error && <div className="instrument-actions">
+        <Button type="button" variant="ghost" size="sm" onClick={state.retry}>Retry instruments</Button>
       </div>}
     </div>
   </div>

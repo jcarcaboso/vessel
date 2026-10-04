@@ -251,6 +251,37 @@ describe('saved plays', () => {
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Kept')
   })
 
+  it('blocks saving stops and targets on the wrong side and offers the corrections', async () => {
+    const server = fakeServer()
+    const user = userEvent.setup()
+    render(<Page api={client(server)} />)
+    await user.click(await screen.findByRole('button', { name: 'New play' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
+    await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
+    const stop = screen.getByRole('spinbutton', { name: 'Entry 1 planned stop price (quote units)' })
+    await user.type(stop, '105')
+    await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned target 1 price (quote units)' }), '90')
+    expect(stop).toHaveAttribute('aria-invalid', 'true')
+    const notices = within(screen.getByRole('region', { name: 'Plan notifications' }))
+    expect(notices.getByText('Entry 1 stop is above the entry price; a long stop goes below it.')).toBeInTheDocument()
+    expect(notices.getByText('Entry 1 target 1 is below the entry price; a long target goes above it.')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    expect(server.api.createPlay).not.toHaveBeenCalled()
+    expect(screen.getByText(/^Not saved: fix the plan first\. 2 stops and targets/)).toBeInTheDocument()
+
+    await user.click(notices.getByRole('button', { name: 'Switch to Short' }))
+    expect(screen.getByRole('button', { name: /Short/, pressed: true })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Plan notifications' })).toBeNull()
+    expect(screen.queryByText(/Not saved/)).toBeNull()
+    await user.click(screen.getByRole('button', { name: /Long/ }))
+    await user.click(screen.getByRole('button', { name: 'Swap stops and targets' }))
+    expect(screen.getByRole('spinbutton', { name: 'Entry 1 planned stop price (quote units)' })).toHaveValue(90)
+    expect(screen.getByRole('spinbutton', { name: 'Entry 1 planned target 1 price (quote units)' })).toHaveValue(105)
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    await waitFor(() => expect(server.api.createPlay).toHaveBeenCalledOnce())
+  })
+
   it('links a venue instrument to its trading page on the venue', async () => {
     const venue = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}` }
     const server = fakeServer()

@@ -129,7 +129,7 @@ public sealed class PlayDocumentTests
     [Fact]
     public void Plans_keep_exact_numbers_and_reject_malformed_input()
     {
-        var plan = PlayDocuments.Normalize(TestPlays.Plan("0.000012340"));
+        var plan = PlayDocuments.Normalize(TestPlays.Plan("0.000012340", "0.00001"));
         Assert.Equal("0.000012340", plan.Entries[0].Price);
         Assert.Equal(PlayDocuments.Serialize(plan), PlayDocuments.Serialize(PlayDocuments.Read(PlayDocuments.Serialize(plan))));
         Assert.Equal("", PlayDocuments.Normalize(TestPlays.Plan("")).Entries[0].Price);
@@ -145,6 +145,22 @@ public sealed class PlayDocumentTests
             TestPlays.Plan() with { Entries = [TestPlays.Plan().Entries[0] with { Stops = [new PlanExit("target-1", "price", "90", "100")] }] },
         })
             Assert.Equal(400, Assert.Throws<WorkspaceException>(() => PlayDocuments.Normalize(invalid)).StatusCode);
+    }
+
+    [Fact]
+    public void Price_stops_and_targets_must_sit_on_their_side_of_the_entry()
+    {
+        var reversed = TestPlays.Plan(stop: "105");
+        Assert.Equal("Entry 1: a long stop goes below the entry price.",
+            Assert.Throws<WorkspaceException>(() => PlayDocuments.Normalize(reversed)).Message);
+        Assert.Throws<WorkspaceException>(() => PlayDocuments.Normalize(TestPlays.Plan(stop: "100")));
+        // The same levels describe a short with the stop and target swapped.
+        var entry = reversed.Entries[0];
+        PlayDocuments.Normalize(reversed with { Direction = "short", Entries = [entry with { Targets = [new PlanExit("target-1", "price", "90", "100")] }] });
+        // Percent levels and unpriced entries are not checked.
+        PlayDocuments.Normalize(TestPlays.Plan("") with { Direction = "short" });
+        PlayDocuments.Normalize(TestPlays.Plan() with { Direction = "short", Entries = [entry with {
+            Stops = [new PlanExit("stop-1", "percent", "5", "100")], Targets = [new PlanExit("target-1", "percent", "10", "100")] }] });
     }
 
     [Fact]
@@ -195,7 +211,7 @@ public sealed class PlayServiceTests
     [Fact]
     public async Task Creates_a_draft_with_exact_plan_text()
     {
-        var play = await Create(plan: TestPlays.Plan("0.00001230"));
+        var play = await Create(plan: TestPlays.Plan("0.00001230", "0.00001"));
         Assert.Equal(("draft", "Breakout", "BTC", "venue", "long", 0), (play.Summary.Status, play.Summary.Title,
             play.Summary.Instrument, play.Summary.InstrumentSource, play.Summary.Direction, play.Summary.PlanRevision));
         Assert.Equal("0.00001230", play.Plan.Entries[0].Price);

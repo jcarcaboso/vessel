@@ -57,10 +57,29 @@ public static partial class PlayDocuments
         }).ToList();
         List<PlanExit> Exits(IEnumerable<PlanExit> exits, string kind) => exits.Select(exit => exit is null ? throw Invalid($"{kind} must not be null.")
             : new PlanExit(Id(exit.Id), Unit(exit.Unit), Number(exit.Value), Number(exit.Share))).ToList();
+        foreach (var entry in entries) RequireSides(entry, plan.Direction);
         return new PlayPlanDocument(plan.Direction, plan.SizingMode, Number(plan.Size), plan.Leverage,
             plan.BudgetOverride is null ? null : Number(plan.BudgetOverride), entries,
             new PlanNotes(Note(plan.Notes.Thesis), Note(plan.Notes.Invalidation), Note(plan.Notes.Strategy), Note(plan.Notes.Evidence)));
     }
+
+    /// <summary>
+    /// Price stops and targets must sit on their side of a priced entry: long stops below and targets above,
+    /// short the reverse. Percent levels are placed by direction, so they always do.
+    /// </summary>
+    private static void RequireSides(PlanEntry entry, string direction)
+    {
+        if (Positive(entry.Price) is not { } entryPrice) return;
+        foreach (var (kind, exits) in new[] { ("stop", entry.Stops), ("target", entry.Targets) })
+        {
+            var above = kind == "target" == (direction == "long");
+            if (exits.Any(exit => exit.Unit == "price" && Positive(exit.Value) is { } price && (above ? price <= entryPrice : price >= entryPrice)))
+                throw Invalid($"{entry.Name}: a {direction} {kind} goes {(above ? "above" : "below")} the entry price.");
+        }
+    }
+
+    private static decimal? Positive(string value) =>
+        decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && number > 0 ? number : null;
 
     /// <summary>A plan is ready to commit when at least one entry has a positive price.</summary>
     public static void RequirePlannable(PlayPlanDocument plan)

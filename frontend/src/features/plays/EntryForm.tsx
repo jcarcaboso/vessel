@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
 import { exitsOf, formatDraggedPrice, levelPrice, priceMovePercent, type ExitKind } from './levels'
+import { wrongSide } from './planChecks'
 
 function LevelUnits({ value, label, onChange }: {
   value: DraftExit['unit']
@@ -51,12 +52,14 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix }: {
     {exits.map((exit, index) => {
       const resolved = exit.unit === 'percent' ? levelPrice(entryPrice, exit, kind, direction, leverage) : null
       const move = exit.unit === 'percent' && Number(exit.value) > 0 ? priceMovePercent(Number(exit.value), leverage) : null
+      const wrong = wrongSide(entryPrice, exit, kind, direction)
       return <div key={exit.id} className="exit-row" role="group" aria-label={`${entry.name} ${label(index)}`}>
         <LevelUnits label={`${entry.name} ${label(index)} units`} value={exit.unit}
           onChange={unit => update(exit.id, { unit, value: '' })} />
         <Input id={`${prefix}-${exit.id}-value`} type="number" step="any" min={0} className={kind === 'stop' ? 'exit-value-stop' : 'exit-value-target'}
           placeholder={exit.unit === 'price' ? '$' : kind === 'stop' ? 'Loss %' : 'Gain %'}
           aria-label={`${entry.name} planned ${label(index)} ${exit.unit === 'price' ? 'price (quote units)' : `return at ${leverage}× leverage (%)`}`}
+          aria-invalid={wrong || undefined} title={wrong ? `A ${direction} ${kind} goes ${(kind === 'target') === (direction === 'long') ? 'above' : 'below'} the entry price` : undefined}
           value={exit.value} onChange={event => update(exit.id, { value: event.target.value })} />
         <Input id={`${prefix}-${exit.id}-share`} type="number" step="any" min={0} max={100} placeholder="Share %" className="exit-share"
           aria-label={`${entry.name} ${label(index)} share (%)`} value={exit.share}

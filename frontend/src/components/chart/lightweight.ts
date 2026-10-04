@@ -252,6 +252,9 @@ const magnetReach = 12
 
 const timeLabel = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })
 
+/** Bars of space right of the last candle when a chart opens. */
+const openingRightOffset = 12
+
 export const createLightweightAdapter: ChartAdapterFactory = (container, callbacks) => {
   const theme = readTheme(container)
   const chart: IChartApi = createChart(container, {
@@ -262,7 +265,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     },
     grid: { vertLines: { color: theme.grid }, horzLines: { color: theme.grid } },
     rightPriceScale: { borderColor: theme.border },
-    timeScale: { borderColor: theme.border, timeVisible: true, secondsVisible: false },
+    // Room right of the last candle keeps it clear of the price scale labels and level tags when the chart opens.
+    timeScale: { borderColor: theme.border, timeVisible: true, secondsVisible: false, rightOffset: openingRightOffset },
     crosshair: { mode: CrosshairMode.Normal },
   })
   const series = chart.addSeries(CandlestickSeries, {
@@ -461,7 +465,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       })))
       if (reset) {
         chart.priceScale('right').applyOptions({ autoScale: true })
-        chart.timeScale().scrollToRealTime()
+        // Jump, not animate, to the latest candles.
+        chart.timeScale().scrollToPosition(openingRightOffset, false)
       }
     },
     setOverlays(overlays) {

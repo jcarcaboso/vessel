@@ -9,6 +9,7 @@ import { PlayWorkspace } from './PlayWorkspace'
 import { instrumentLabel } from './instruments'
 import { ExecutionPanel } from './ExecutionPanel'
 import { usePlayExecution } from './usePlayExecution'
+import { planIssues, planIssueSummary } from './planChecks'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
 import {
   createPlaysSession, draftFromSaved, failure, fieldsFromDraft, isDirty, loadSavedPlay, planChanged, savedState, syncEvidence,
@@ -45,6 +46,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const [error, setError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<null | 'revision' | 'cancel' | 'delete' | 'history'>(null)
   const [dialogError, setDialogError] = useState<string | null>(null)
+  // A blocked save shows why until the plan is fixed.
+  const [blockedSave, setBlockedSave] = useState(false)
 
   const { draft, saved } = session
   const tracking = usePlayExecution(api, session.view === 'editor' && saved ? saved.summary.id : null, saved?.summary.status)
@@ -62,12 +65,22 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     return () => { active = false }
   }, [api, venueStatus, update])
   const dirty = saved ? isDirty(draft, saved) : hasContent(draft)
+  const issues = planIssues(draft.entries, draft.direction)
+  if (blockedSave && !issues.length) setBlockedSave(false)
   const status = saved?.summary.status ?? 'draft'
+
+  /** Stops and targets on the wrong side of their entry block saving and planning until they are fixed. */
+  function planBlocked() {
+    const blocked = planIssues(latest.current.draft.entries, latest.current.draft.direction).length > 0
+    if (blocked) setBlockedSave(true)
+    return blocked
+  }
 
   /** Saves the draft and its evidence. Returns the saved state, or null when the save failed. */
   async function save(reason?: string): Promise<SavedState | null> {
     const { draft: sent, saved: before } = latest.current
     if (!sent.accountId) { setError('Choose an account before saving.'); return null }
+    if (planBlocked()) return null
     setBusy('save'); setError(null); setDialogError(null)
     try {
       const fields = fieldsFromDraft(sent)
@@ -99,6 +112,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
 
   async function changeStatus(request: StatusRequest) {
     let state = latest.current.saved
+    if (request.status === 'planned' && planBlocked()) return
     if (request.status === 'planned' && status === 'draft' && (!state || isDirty(latest.current.draft, state))) {
       state = await save()
       if (!state) return
@@ -175,7 +189,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       onClick={() => setDialog('history')}><History size={14} />History</Button>
     <Button size="sm" variant="outline" className="play-save" disabled={!dirty || pending || !draft.accountId}
       title={!draft.accountId ? 'Choose an account to save' : undefined}
-      onClick={() => { if (needsReason) { setDialogError(null); setDialog('revision') } else void save() }}>
+      onClick={() => { if (planBlocked()) return; if (needsReason) { setDialogError(null); setDialog('revision') } else void save() }}>
       <Save size={14} />{saving ? 'Saving…' : !dirty && saved ? 'Saved' : 'Save'}</Button>
     {statusAction}
     {cancellable
@@ -194,6 +208,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   return <>
     <Button variant="ghost" size="sm" className="plays-back" onClick={() => update({ view: 'list' })}><ArrowLeft size={14} />All plays</Button>
     {error && <div className="workspace-alert" role="alert"><span>{error}</span><Button variant="ghost" size="sm" onClick={() => setError(null)}>Dismiss</Button></div>}
+    {blockedSave && issues.length > 0 && <div className="workspace-alert" role="alert"><span>Not saved: fix the plan first. {planIssueSummary(issues)}</span>
+      <Button variant="ghost" size="sm" onClick={() => setBlockedSave(false)}>Dismiss</Button></div>}
     <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={draft} onChange={next => update({ draft: next })}
       {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} {...(notice ? { notice } : {})} lockInstrument={locked} readOnly={readOnly}
       execution={saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}

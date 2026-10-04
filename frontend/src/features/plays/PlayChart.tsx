@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
-import { ArrowRightToLine, Camera, ChartNoAxesCombined, Maximize2, OctagonX, RefreshCw, Star, Target } from 'lucide-react'
+import { ArrowRightToLine, Camera, ChartNoAxesCombined, Layers, Maximize2, OctagonX, RefreshCw, Star, Target } from 'lucide-react'
 import { Popover } from 'radix-ui'
 import type { CandleInterval, WorkspaceApi } from '@/api/workspace'
 import { CandleChart, type CandleChartControl } from '@/components/chart/CandleChart'
 import { ChartHeader, type ChartStat } from '@/components/chart/ChartHeader'
-import { ChartIconButton, ChartMenu, ChartToolbar, ChartToolbarDivider } from '@/components/chart/ChartToolbar'
+import { ChartIconButton, ChartToolbar, ChartToolbarDivider } from '@/components/chart/ChartToolbar'
 import { ChartToolRail, type ChartToolGroup } from '@/components/chart/ChartToolRail'
 import { drawingColors, type ChartDrawing } from '@/components/chart/drawings'
 import { DrawingEditBar } from '@/components/chart/DrawingEditBar'
@@ -152,12 +152,6 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   const average = view === 'aggregate' ? averageEntryPrice(entries) : null
   const several = entries.length > 1
 
-  // One entry is both the aggregate and the selection, so the view choice only appears with several.
-  const viewMenu = several && <ChartMenu label="Chart view" value={view === 'aggregate' ? 'aggregate' : selectedId} onChange={value => {
-    if (value === 'aggregate') setView('aggregate')
-    else { setView('selected'); onSelect(value) }
-  }} options={[{ value: 'aggregate', label: 'Aggregate · All entries' },
-    ...entries.map(entry => ({ value: entry.id, label: entry.name, swatch: entry.color }))]} />
   const priced = selectedEntry !== undefined && Number(selectedEntry.price) > 0
   const planTools = editable && selectedEntry ? [
     { id: 'plan:entry', label: 'Add an entry on the chart', description: Number(selectedEntry.price) > 0 ? 'Click the chart at the price of a new entry.' : `Click the chart at ${selectedName} price.`, icon: <ArrowRightToLine {...planToolIcon} />, available: true },
@@ -251,7 +245,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
       timeframes={<TimeframeBar value={interval} favorites={preferences.favorites}
         onChange={next => setPreferences({ interval: next })} onFavoritesChange={favorites => setPreferences({ favorites })} />}
       liveUpdates={preferences.live} onLiveUpdatesChange={on => setPreferences({ live: on })}
-      viewMenu={<>{viewMenu}{viewMenu && favoriteTools && <ChartToolbarDivider />}{favoriteTools}</>} rail={rail} drawingBar={<>{drawingBar}{levelEditor}</>} drawingProps={drawingProps} overlays={overlays} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}
+      viewMenu={favoriteTools} rail={rail} drawingBar={<>{drawingBar}{levelEditor}</>} drawingProps={drawingProps} overlays={overlays} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}
       onExpandedChange={setExpanded} onDialogClosed={() => expandButton.current?.focus({ preventScroll: true })} />
       : <>
         <ChartToolbar label="Chart controls" end={<>
@@ -266,11 +260,16 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
           <p>No candles, live prices or execution observations are shown.</p>
         </div>
       </>}
+    {/* One entry is both the whole plan and the selection, so the view choice only appears with several. */}
     {several && <div className="chart-legend" role="group" aria-label="Planned entries">
-      {entries.map((entry) => <button key={entry.id} type="button" aria-pressed={entry.id === selectedId}
-        style={{ '--entry-color': entry.color } as CSSProperties} onClick={() => onSelect(entry.id)}>
+      <button type="button" className="chart-legend-all" aria-pressed={view === 'aggregate'} aria-label="All entries"
+        title="Show all entries and the average entry" onClick={() => setView('aggregate')}>
+        <Layers size={14} aria-hidden="true" /><span>All</span></button>
+      {entries.map((entry) => <button key={entry.id} type="button" aria-pressed={view === 'selected' && entry.id === selectedId}
+        data-selected={entry.id === selectedId} title={`Show only ${entry.name}`}
+        style={{ '--entry-color': entry.color } as CSSProperties} onClick={() => { setView('selected'); onSelect(entry.id) }}>
         <i aria-hidden="true" /><span>{entry.name}</span>
-        <small>{entry.share ? `${entry.share}% of quantity` : 'Share not set'}</small>
+        <small>{entry.share ? `${entry.share}%` : 'Share not set'}</small>
       </button>)}
       {average !== null && <span className="chart-legend-average"><i aria-hidden="true" />Average entry <strong>{formatDraggedPrice(average)}</strong></span>}
     </div>}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { ExternalLink, Info, PencilLine, RefreshCw } from 'lucide-react'
 import { statusLabels, venueTradeUrl, type PlayStatus } from '@/api/plays'
@@ -11,6 +11,7 @@ import { InstrumentPicker } from './InstrumentPicker'
 import { pairLabel, useInstrumentCatalog } from './instruments'
 import { leverageOf } from './levels'
 import { defaultSizeUnits, type SizeUnits } from './sizing'
+import { PlanNotices } from './PlanNotices'
 import { PositionEditor } from './PositionEditor'
 import { ChartPanel } from './PlayChart'
 import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
@@ -36,6 +37,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   /** Execution tab content for a saved play. */
   execution?: ReactNode
 }) {
+  const fieldId = useId()
   const [selectedId, setSelectedId] = useState(draft.entries[0]!.id)
   const [selectionRequest, setSelectionRequest] = useState(0)
   const [portfolioFilter, setPortfolioFilter] = useState('')
@@ -126,13 +128,18 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         {portfolios.map(portfolio => <option key={portfolio.id} value={portfolio.id}>{portfolio.name}</option>)}
         {enabledAccounts.some(account => account.portfolioId === null) && <option value="unassigned">Unassigned accounts</option>}
       </select></label>
-      <label>Account{onReload && <button type="button" className="plays-reload-accounts" aria-label="Reload accounts" title="Reload accounts"
-        onClick={event => { event.preventDefault(); onReload() }} disabled={loading} aria-busy={loading}>
-        <RefreshCw size={12} className={loading ? 'is-spinning' : ''} aria-hidden="true" /></button>}<select value={lockInstrument ? draft.accountId : accountId} disabled={lockInstrument || (loading && !accounts.length)} onChange={event => chooseAccount(event.target.value)}>
-        <option value="">Choose an account</option>
-        {lockInstrument && !account && <option value={draft.accountId}>Unavailable or disabled account</option>}
-        {filteredAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {venueName(account.venueId)}</option>)}
-      </select></label>
+      <div className="plays-account-field"><label htmlFor={`${fieldId}-account`} className="field-label">Account</label>
+        <div className="plays-select-row">
+          <select id={`${fieldId}-account`} value={lockInstrument ? draft.accountId : accountId} disabled={lockInstrument || (loading && !accounts.length)} onChange={event => chooseAccount(event.target.value)}>
+            <option value="">Choose an account</option>
+            {lockInstrument && !account && <option value={draft.accountId}>Unavailable or disabled account</option>}
+            {filteredAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {venueName(account.venueId)}</option>)}
+          </select>
+          {onReload && <button type="button" className="plays-reload-accounts" aria-label="Reload accounts" title="Reload accounts"
+            onClick={onReload} disabled={loading} aria-busy={loading}>
+            <RefreshCw size={13} className={loading ? 'is-spinning' : ''} aria-hidden="true" /></button>}
+        </div>
+      </div>
       {lockInstrument ? <div className="plays-instrument-field"><label htmlFor="plays-fixed-instrument">Instrument</label>
         <Input id="plays-fixed-instrument" aria-label="Perpetual instrument" value={instrumentName} readOnly />
         <div className="instrument-feedback"><p>Fixed once planned.</p></div>
@@ -148,6 +155,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       </div>
       <div className="plays-context-status"><span className="field-label">Status</span><span className={`badge play-status-${status}`}>{statusLabels[status]}</span></div>
     </fieldset>
+    <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} />
     {!loading && !enabledAccounts.length && <p className="plays-context-note">No enabled accounts yet. You can outline the play and add an account later.</p>}
     <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} />
     <div className="workspace" data-testid="workspace">

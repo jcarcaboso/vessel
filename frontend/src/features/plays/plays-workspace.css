@@ -47,7 +47,7 @@
 .plays-page .plays-draft-fields > label { align-content: start; }
 .plays-page .plays-draft-fields > label,
 .plays-page .plays-draft-fields .field-label,
-.plays-page .plays-instrument-field > label,
+.plays-page .plays-field-heading > label,
 .plays-page .plays-context-title { color: var(--muted-foreground); font-size: 8px; font-weight: 600; letter-spacing: 1.1px; text-transform: uppercase; }
 .plays-page .plays-draft-fields .field-label,
 .plays-page .plays-context-title { display: block; margin-bottom: 7px; }
@@ -56,6 +56,9 @@
 .plays-page .plays-context-status strong { display: block; font-size: 11px; font-weight: 650; line-height: 28px; overflow-wrap: anywhere; }
 .plays-page .plays-context-status .badge { display: inline-block; padding: 5px 7px; font-size: 9px; color: var(--muted-foreground); background: var(--accent); }
 .plays-page .plays-instrument-field label { display: block; }
+.plays-page .plays-field-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 15px; }
+.plays-page .plays-field-heading .instrument-actions { margin: 0; }
+.plays-page .plays-field-heading .instrument-actions button { min-height: 15px; height: auto; padding: 0 2px; font-size: 9px; }
 .plays-page .instrument-search { position: relative; }
 .plays-page .instrument-options { position: absolute; z-index: 40; top: calc(100% + 4px); left: -8px; right: -8px; min-width: 190px; max-height: min(340px, 55dvh); overflow-y: auto; margin: 0; padding: 5px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); box-shadow: 0 12px 34px #0007; list-style: none; }
 .plays-page .instrument-options [role="option"] { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 30px; padding: 5px 8px; border-radius: 5px; font-size: 11px; font-weight: 600; cursor: pointer; }
@@ -174,6 +177,9 @@
 .plays-page .chart-legend { display: flex; flex-wrap: wrap; gap: 5px; padding: 9px 13px; border-top: 1px solid var(--border); }
 .plays-page .chart-legend button { display: inline-flex; align-items: center; gap: 8px; padding: 8px 11px; border: 1px solid transparent; border-radius: 6px; color: var(--muted-foreground); background: transparent; font-size: 11px; }
 .plays-page .chart-legend button[aria-pressed="true"] { color: var(--foreground); background: color-mix(in srgb, var(--entry-color) 8%, var(--card)); border-color: color-mix(in srgb, var(--entry-color) 45%, var(--border)); }
+.plays-page .chart-legend button[data-selected="true"][aria-pressed="false"] { color: var(--foreground); }
+.plays-page .chart-legend .chart-legend-all { gap: 6px; }
+.plays-page .chart-legend .chart-legend-all[aria-pressed="true"] { --entry-color: var(--foreground); }
 .plays-page .chart-legend i { width: 12px; height: 3px; border-radius: 1px; background: var(--entry-color); flex-shrink: 0; }
 .plays-page .chart-legend small { color: var(--muted-foreground); font-size: 9px; }
 .plays-page .chart-caption { padding: 0 16px 12px; color: var(--muted-foreground); font-size: 9px; line-height: 1.7; }
@@ -609,7 +615,10 @@
 .plays-page .play-actions .danger-action { border-color: color-mix(in srgb, var(--negative) 45%, var(--border)); color: var(--negative); }
 .plays-page .play-actions .danger-action:hover:not(:disabled) { background: color-mix(in srgb, var(--negative) 12%, transparent); color: var(--negative); }
 .plays-page .plays-heading-actions .plays-venue-link { height: 32px; }
-.plays-page .plays-reload-accounts { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: 6px; padding: 0; border: 0; border-radius: 4px; color: var(--muted-foreground); background: transparent; vertical-align: middle; cursor: pointer; }
+.plays-page .plays-select-row { display: flex; align-items: center; gap: 6px; }
+.plays-page .plays-select-row select { flex: 1; min-width: 0; }
+.plays-page .plays-reload-accounts { display: inline-grid; flex-shrink: 0; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; color: var(--muted-foreground); background: transparent; cursor: pointer; }
+.plays-page .plays-reload-accounts:disabled { opacity: .5; cursor: default; }
 .plays-page .plays-reload-accounts:hover { color: var(--foreground); background: var(--accent); }
 /* Destructive icon actions read red. */
 .plays-page .remove-entry, .plays-page .remove-target, .plays-entry-dialog .remove-target { color: color-mix(in srgb, var(--negative) 75%, var(--muted-foreground)) !important; }
@@ -637,3 +646,15 @@
 .plays-page .entry-card[data-selected="true"] .entry-header-row { border-bottom: 1px solid var(--border); }
 .plays-page .position-panel .entries-heading > * { align-self: center; margin: 0; }
 .plays-page .position-panel .entries-heading .expand-entry { display: inline-grid; place-items: center; }
+
+/* Notifications about the plan sit between the play fields and the workspace. */
+.plays-page .plays-notifications { display: grid; gap: 8px; margin-top: 12px; }
+.plays-page .plays-notification { display: flex; align-items: flex-start; gap: 10px; padding: 11px 14px; border: 1px solid var(--border); border-left-width: 3px; border-radius: 7px; background: var(--card); font-size: 11px; line-height: 1.6; }
+.plays-page .plays-notification > svg { flex-shrink: 0; margin-top: 2px; }
+.plays-page .plays-notification.is-error { border-color: color-mix(in srgb, var(--negative) 45%, var(--border)); border-left-color: var(--negative); background: color-mix(in srgb, var(--negative) 6%, var(--card)); }
+.plays-page .plays-notification.is-error > svg { color: var(--negative); }
+.plays-page .plays-notification-body { flex: 1; min-width: 0; }
+.plays-page .plays-notification-body strong { display: block; font-weight: 650; }
+.plays-page .plays-notification-body ul { margin: 2px 0 0; padding: 0; list-style: none; color: var(--muted-foreground); }
+.plays-page .plays-notification-actions { display: flex; flex-wrap: wrap; gap: 6px; align-self: center; }
+.plays-page .plays-notification-actions button { gap: 6px; }
