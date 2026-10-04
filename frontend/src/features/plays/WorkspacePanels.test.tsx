@@ -24,52 +24,57 @@ describe('Capital context', () => {
   it('leaves unknown values and budget unavailable without seeding accounts', () => {
     render(<BudgetHarness />)
     const capital = screen.getByTestId('capital-context')
-    expect(within(capital).getAllByText('Unavailable')).toHaveLength(2)
-    expect(metric('Portfolio')).toHaveAttribute('title', 'Nominal USD; coverage unavailable, known account values only.')
-    expect(metric('Margin / portfolio')).toHaveTextContent('—')
+    expect(metric('Account balance')).toHaveTextContent('Unavailable')
+    expect(within(capital).queryByText('Wallet total')).toBeNull()
+    expect(metric('Margin / balance')).toHaveTextContent('—')
     expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('Unavailable')
     expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveAttribute('readonly')
     expect(within(capital).queryByRole('combobox')).not.toBeInTheDocument()
   })
 
-  it('displays exact API values with separate primary perps and nominal wallet coverage', () => {
-    const account: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid',
-      accountValueUsd: '9007199254740990.99', availableStablecoinNominalUsd: '123.45',
-      stablecoinScope: 'HyperCore supported stablecoins', accountMode: 'unified' }
-    const portfolio: Portfolio = { ...portfolioFixture, totalValueUsd: '9007199254740990.99', valueCoverage: 'partial' }
+  it('shows the portfolio balance, wallet total and available amount of a unified account without perps equity', () => {
+    const account: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', accountValueUsd: '0',
+      availableStablecoinNominalUsd: '150', totalStablecoinNominalUsd: '151.77', balanceUsd: '151.77',
+      stablecoinScope: 'hypercore-spot-stablecoins', accountMode: 'unifiedAccount' }
+    const portfolio: Portfolio = { ...portfolioFixture, totalValueUsd: '0', balanceUsd: '1151.77', balanceCoverage: 'complete' }
     render(<BudgetHarness initial={{ ...createDraft(), accountId: account.id }} accounts={[account]} portfolios={[portfolio]} />)
-    expect(screen.getAllByText('$9,007,199,254,740,990.99')).toHaveLength(2)
-    expect(metric('Perps equity')).toHaveTextContent('$9,007,199,254,740,990.99')
-    expect(metric('Portfolio')).toHaveAttribute('title', expect.stringContaining('coverage partial'))
-    expect(metric('Wallet stablecoins')).toHaveTextContent('$123.45')
-    expect(metric('Wallet stablecoins')).toHaveAttribute('title', 'HyperCore supported stablecoins · unified. Nominal 1 token = 1 USD; not added to perps equity.')
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('Unavailable')
+    expect(metric(`${portfolio.name} balance`)).toHaveTextContent('$1,151.77')
+    expect(metric(`${portfolio.name} balance`)).toHaveAttribute('title', expect.stringContaining('coverage complete'))
+    expect(metric('Wallet total')).toHaveTextContent('$151.77')
+    expect(metric('Wallet total')).toHaveAttribute('title', 'hypercore-spot-stablecoins · unifiedAccount. Nominal 1 token = 1 USD.')
+    expect(metric('Available')).toHaveTextContent('$150.00')
+    expect(within(screen.getByTestId('capital-context')).queryByText('Perps equity')).toBeNull()
   })
 
-  it('shows margin and exposure as shares of the portfolio once the position is sized', () => {
-    const portfolio: Portfolio = { ...portfolioFixture, totalValueUsd: '10000' }
+  it('shows perps equity beside the wallet for a standard account', () => {
+    const account: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', portfolioId: null, accountValueUsd: '1000',
+      availableStablecoinNominalUsd: '10', totalStablecoinNominalUsd: '10', balanceUsd: '1010', accountMode: 'default' }
+    render(<BudgetHarness initial={{ ...createDraft(), accountId: account.id }} accounts={[account]} portfolios={[portfolioFixture]} />)
+    expect(metric('Account balance')).toHaveTextContent('$1,010.00')
+    expect(metric('Perps equity')).toHaveTextContent('$1,000.00')
+  })
+
+  it('shows margin and exposure as shares of the balance once the position is sized', () => {
+    const portfolio: Portfolio = { ...portfolioFixture, totalValueUsd: '10000', balanceUsd: '10000' }
     const draft = { ...createDraft(), accountId: accountFixture.id, size: '500', leverage: '4' }
     draft.entries[0]!.price = '100'
     render(<BudgetHarness initial={draft} accounts={[accountFixture]} portfolios={[portfolio]} />)
-    expect(metric('Margin / portfolio')).toHaveTextContent('5.0%')
-    expect(metric('Exposure / portfolio')).toHaveTextContent('20.0%')
+    expect(metric('Margin / balance')).toHaveTextContent('5.0%')
+    expect(metric('Exposure / balance')).toHaveTextContent('20.0%')
   })
 
   it('keeps a reported zero distinct from missing values and does not create a default portfolio', () => {
     const account = { ...accountFixture, portfolioId: null, accountValueUsd: '0' }
     render(<BudgetHarness initial={{ ...createDraft(), accountId: account.id }} accounts={[account]} portfolios={[portfolioFixture]} />)
-    expect(screen.getByText('$0.00')).toBeInTheDocument()
-    expect(metric('Account value')).toHaveAttribute('title', expect.stringContaining('Unassigned'))
+    expect(metric('Account balance')).toHaveTextContent('$0.00')
     expect(screen.queryByText(/Swing trading/)).not.toBeInTheDocument()
-    expect(metric('Portfolio')).toHaveTextContent('Unavailable')
   })
 
   it('does not reveal a disabled account value or its portfolio', () => {
     render(<BudgetHarness initial={{ ...createDraft(), accountId: accountFixture.id }}
       accounts={[{ ...accountFixture, isEnabled: false }]} portfolios={[portfolioFixture]} />)
     expect(screen.queryByText('$1,250.12')).not.toBeInTheDocument()
-    expect(metric('Account value')).not.toHaveAttribute('title')
-    expect(within(screen.getByTestId('capital-context')).getAllByText('Unavailable')).toHaveLength(2)
+    expect(metric('Account balance')).toHaveTextContent('Unavailable')
   })
 
   it('saves an explicit local override without changing real account values or rounding its stored amount', async () => {

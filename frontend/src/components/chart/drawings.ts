@@ -3,7 +3,11 @@ import type { ChartCandle } from './types'
 /** Version of the persisted drawing shape. Bump and migrate when fields change. */
 export const drawingSchemaVersion = 1
 
-export type DrawingKind = 'trend-line' | 'horizontal-line' | 'vertical-line' | 'zone' | 'date-range' | 'price-range' | 'fibonacci' | 'position' | 'text'
+export type DrawingKind = 'trend-line' | 'horizontal-line' | 'vertical-line' | 'zone' | 'date-range' | 'price-range' | 'fibonacci'
+  | 'long-position' | 'short-position' | 'position' | 'text'
+
+/** Long, short and the earlier combined position box, which took its side from the drag. */
+export const isPositionKind = (kind: DrawingKind) => kind === 'long-position' || kind === 'short-position' || kind === 'position'
 
 /** Anchors are UTC milliseconds and prices, never pixels or bar indexes, so they survive zoom and timeframe changes. */
 export interface DrawingPoint {
@@ -40,7 +44,8 @@ export interface ChartDrawing {
 }
 
 export const pointCount: Record<DrawingKind, 1 | 2> = {
-  'trend-line': 2, 'horizontal-line': 1, 'vertical-line': 1, zone: 2, 'date-range': 2, 'price-range': 2, fibonacci: 2, position: 2, text: 1,
+  'trend-line': 2, 'horizontal-line': 1, 'vertical-line': 1, zone: 2, 'date-range': 2, 'price-range': 2, fibonacci: 2,
+  'long-position': 2, 'short-position': 2, position: 2, text: 1,
 }
 
 /** Display-only change between the two anchors of a price range. */
@@ -66,6 +71,17 @@ export const goldenPocket = [0.618, 0.65] as const
 
 /** Level 1 sits at the start anchor and level 0 at the end anchor, as in common charting tools. */
 export const fibonacciPrice = (start: DrawingPoint, end: DrawingPoint, level: number) => end.price + (start.price - end.price) * level
+
+/**
+ * Builds a long or short box from its entry and the dragged corner. The side is the tool's: the dragged
+ * distance sets the target on the profit side and the stop mirrors it at 1R. The box ends at the corner's time.
+ */
+export function sidedPositionPoints(side: 'long' | 'short', entry: DrawingPoint, corner: DrawingPoint): DrawingPoint[] {
+  const distance = Math.abs(corner.price - entry.price)
+  const sign = side === 'long' ? 1 : -1
+  const time = corner.time === entry.time ? entry.time + 1 : corner.time
+  return [entry, { time, price: entry.price + sign * distance }, { time, price: Math.max(entry.price - sign * distance, entry.price * 0.0001) }]
+}
 
 /** Builds a position box from its entry and the dragged corner; the stop mirrors the target at 1R. */
 export function positionPoints(entry: DrawingPoint, corner: DrawingPoint): DrawingPoint[] {
@@ -155,7 +171,7 @@ export function isChartDrawing(value: unknown): value is ChartDrawing {
   if (typeof value !== 'object' || value === null) return false
   const drawing = value as Partial<ChartDrawing>
   const expected = drawing.kind && drawing.kind in pointCount
-    ? drawing.kind === 'position' ? 3 : pointCount[drawing.kind] : 0
+    ? isPositionKind(drawing.kind) ? 3 : pointCount[drawing.kind] : 0
   return typeof drawing.id === 'string' && drawing.schemaVersion === drawingSchemaVersion && expected > 0 &&
     Array.isArray(drawing.points) && drawing.points.length === expected &&
     drawing.points.every(point => Number.isFinite(point?.time) && Number.isFinite(point?.price) && point.price > 0) &&

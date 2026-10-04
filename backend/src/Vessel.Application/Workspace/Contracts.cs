@@ -13,11 +13,17 @@ public sealed record UpdateAccountRequest(
     [property: JsonRequired] Guid? PortfolioId,
     [property: JsonRequired] bool IsEnabled,
     [property: JsonRequired] long ExpectedRevision);
-public sealed record PortfolioDto(Guid Id, string Name, int AccountCount, string? TotalValueUsd, string ValueCoverage);
+/// <summary>
+/// TotalValueUsd sums primary perps (or manual) values. BalanceUsd sums account balances: perps plus stablecoin wallet,
+/// or the wallet alone in unified and portfolio-margin modes, so no ledger is counted twice.
+/// </summary>
+public sealed record PortfolioDto(Guid Id, string Name, int AccountCount, string? TotalValueUsd, string ValueCoverage,
+    string? BalanceUsd = null, string BalanceCoverage = "unavailable");
 public sealed record AccountDto(Guid Id, Guid? PortfolioId, string Name, string VenueId, string? Address,
     string? AccountValueUsd, DateTimeOffset? LastSyncedAtUtc, string SyncStatus, string? LastSyncError,
     int PositionCount, string? HistoryNotice, bool IsEnabled, long SettingsRevision,
-    string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null);
+    string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null,
+    string? TotalStablecoinNominalUsd = null, string? BalanceUsd = null);
 public sealed record AccountInstrumentsDto(string VenueId, string MarketScope, string Scope,
     IReadOnlyList<VenueInstrument> Instruments, string Notice);
 public sealed record PositionDto(string ContractId, string SignedQuantity, string EntryPrice,

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ChevronRight, Star } from 'lucide-react'
+import { Star } from 'lucide-react'
 import { Popover } from 'radix-ui'
 import { ChartIconButton } from './ChartToolbar'
 
@@ -43,7 +43,7 @@ export function ChartToolRail({ tools, active, onSelect, groups = [], footer, un
     pressed={tool.pressed ?? tool.id === active} disabled={!tool.available} disabledReason={tool.unavailableReason ?? unavailableReason}
     description={tool.description} tooltipSide="right" onClick={() => onSelect(tool.id)} />
   return <div className="chart-tool-rail" role="group" aria-label="Chart tools">
-    {tools.map(item => isGroup(item)
+    {tools.map(item => isGroup(item) && item.tools.length === 1 ? button(item.tools[0]!) : isGroup(item)
       ? <ToolGroupButton key={item.id} group={item} active={active} onSelect={onSelect} favorites={favorites} onToggleFavorite={onToggleFavorite} />
       : button(item))}
     {groups.filter(group => group.tools.length > 0).map(group => <div key={group.label} className="chart-rail-group" role="group" aria-label={group.label}>
@@ -67,7 +67,7 @@ function ToolGroupButton({ group, active, onSelect, favorites, onToggleFavorite 
       pressed={group.tools.some(tool => tool.id === active)} onClick={() => onSelect(current.id)} />
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <button type="button" className="chart-tool-group-more" aria-label={`${group.label} tools`}><ChevronRight size={9} aria-hidden="true" /></button>
+        <button type="button" className="chart-tool-group-more" aria-label={`${group.label} tools`}><i aria-hidden="true" /></button>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content className="chart-popover chart-tool-flyout" side="right" align="start" sideOffset={6} aria-label={`${group.label} tools`}>

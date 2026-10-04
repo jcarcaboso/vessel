@@ -2,7 +2,6 @@ import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } f
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { createNextEntry, type DraftEntry, type PlayDraft } from './draft'
 import { EntryForm } from './EntryForm'
 import { keepPercentLevelPrices, leverageOf, percentLevels } from './levels'
@@ -62,13 +61,6 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
     if (focus) button.focus({ preventScroll: true })
   }, [])
 
-  // A selection made elsewhere, e.g. on the chart, opens the Entries tab before the entry is revealed there.
-  const [tab, setTab] = useState<'position' | 'entries'>('position')
-  const [selectionSeen, setSelectionSeen] = useState({ id: selectedId, request: selectionRequest })
-  if (selectionSeen.id !== selectedId || selectionSeen.request !== selectionRequest) {
-    setSelectionSeen({ id: selectedId, request: selectionRequest })
-    setTab('entries')
-  }
   useEffect(() => {
     if (previousSelection.current.id === selectedId && previousSelection.current.request === selectionRequest) return
     previousSelection.current = { id: selectedId, request: selectionRequest }
@@ -137,13 +129,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
 
   const shown = (id: string) => selected?.id === id && !(expanded && selected?.id === id)
   return <section className="plays-position panel position-panel" aria-label="Position" data-testid="position-panel">
-    <Tabs value={tab} onValueChange={value => setTab(value as typeof tab)} className="position-tabs">
-      <TabsList variant="line" aria-label="Position sections">
-        <TabsTrigger value="position">Position</TabsTrigger>
-        <TabsTrigger value="entries">Entries <span className="entry-count">{draft.entries.length}</span></TabsTrigger>
-      </TabsList>
-      {/* Both tabs stay mounted so the entry list keeps its scroll position and can be revealed at once. */}
-      <TabsContent value="position" forceMount className="position-tab">
+    <h2 className="sr-only">Position</h2>
       <div className="position-context position-sizing position-builder">
         <AvailableBudget key={draft.accountId} draft={draft} onChange={onChange} />
         <div className="whole-size-input">
@@ -193,9 +179,8 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
         {pendingLeverage !== null && <LeverageChangeDialog draft={draft} from={leverage} to={pendingLeverage} units={units}
           onKeepPrices={() => finishLeverage('prices')} onKeepPercentages={() => finishLeverage('percentages')} onCancel={() => finishLeverage()} />}
       </div>
-      </TabsContent>
-      <TabsContent value="entries" forceMount className="entries-tab">
         <div className="entries-heading">
+          <h3>Entries <span className="entry-count">{draft.entries.length}</span></h3>
           <span data-complete={allocated === 100}>{allocated === null ? 'Shares not set' : `${allocated}% of quantity allocated`}</span>
           <Button type="button" variant="ghost" size="sm" className="split-equally" onClick={splitEqually}>Split equally</Button>
         </div>
@@ -251,8 +236,6 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
         </DialogContent>
       </Dialog>
     </div>
-      </TabsContent>
-    </Tabs>
   </section>
 }
 

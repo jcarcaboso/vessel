@@ -19,6 +19,39 @@ public sealed class StablecoinPersistenceTests
     public void Observed_empty_wallet_is_exact_zero() => Assert.Equal("0", StablecoinTotals.Sum([]));
 
     [PostgresFact]
+    public async Task Balances_use_the_wallet_alone_in_unified_mode_and_add_perps_otherwise_and_sum_per_portfolio()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using var db = database.Context(owner);
+        var reader = new FixtureReader();
+        var service = new WorkspaceService(new Vessel.Persistence.WorkspaceStore(db), new CoreOwner(owner), reader);
+        var portfolio = await service.CreatePortfolioAsync(new("Both modes"), default);
+        Vessel.Application.Venues.PerpetualVenueReadResult With(string mode, decimal perps) => reader.Result with
+        {
+            Snapshot = reader.Result.Snapshot with
+            {
+                AccountValueUsd = perps,
+                StablecoinWallet = new(DateTimeOffset.UtcNow, mode, "hypercore-spot-stablecoins", [new("USDC", 0, "0x6d1e7cde53ba9467b783cb7c530ce054", 151.77m, 1.77m, 150m)]),
+            }
+        };
+        var unified = await service.CreateAccountAsync(new(portfolio.Id, "Unified", "hyperliquid", "0x" + new string('2', 40)), default);
+        reader.Result = With("unifiedAccount", 0m);
+        unified = await service.SyncAsync(unified.Id, default);
+        Assert.Equal(("151.77", "151.77", "150"), (unified.BalanceUsd, unified.TotalStablecoinNominalUsd, unified.AvailableStablecoinNominalUsd));
+
+        var standard = await service.CreateAccountAsync(new(portfolio.Id, "Standard", "hyperliquid", "0x" + new string('3', 40)), default);
+        reader.Result = With("default", 1000m);
+        standard = await service.SyncAsync(standard.Id, default);
+        Assert.Equal("1151.77", standard.BalanceUsd);
+
+        var summary = Assert.Single(await service.PortfoliosAsync(default));
+        Assert.Equal(("1303.54", "complete"), (summary.BalanceUsd, summary.BalanceCoverage));
+        // The perps-only total keeps its meaning.
+        Assert.Equal("1000", summary.TotalValueUsd);
+    }
+
+    [PostgresFact]
     public async Task Wallet_roundtrips_without_overwriting_perp_equity_and_survives_disable_enable()
     {
         await using var database = await CoreDatabase.CreateAsync();

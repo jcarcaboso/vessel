@@ -52,7 +52,7 @@ describe('local-draft position editor', () => {
     expect(field('Entry 1 planned target 1 price (quote units)')).toHaveValue(null)
     expect(field('Entry 1 quantity share (%)')).toHaveValue(100)
     expect(screen.getByRole('button', { name: 'Remove Entry 1' })).toBeDisabled()
-    expect(screen.getByRole('tab', { name: 'Position' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByRole('tab')).toBeNull()
     expect(screen.queryByText(/sample/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^save/i })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Margin in quote units' })).toHaveAttribute('aria-pressed', 'true')
@@ -316,7 +316,7 @@ describe('local-draft position editor', () => {
 
   it('shows allocated quantity shares and splits them equally only on request', async () => {
     const { user, onChange } = renderEditor(1)
-    expect(screen.getByRole('tab', { name: 'Entries 1' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Entries 1' })).toBeInTheDocument()
     expect(within(entryHeader('Entry 1')).queryByText(/^@/)).not.toBeInTheDocument()
     await user.type(field('Entry 1 planned entry price (quote units)'), '64200')
     expect(within(entryHeader('Entry 1')).getByText('@ 64200')).toBeInTheDocument()
@@ -330,7 +330,7 @@ describe('local-draft position editor', () => {
     expect(screen.getByText('Shares not set')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Split equally' }))
     expect(onChange.mock.lastCall?.[0].entries.map(entry => entry.share)).toEqual(['33.33', '33.33', '33.34'])
-    expect(screen.getByRole('tab', { name: 'Entries 3' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Entries 3' })).toBeInTheDocument()
     expect(screen.getByText('100% of quantity allocated')).toHaveAttribute('data-complete', 'true')
     await user.click(entryHeader('Entry 3'))
     await user.clear(field('Entry 3 quantity share (%)'))
@@ -375,11 +375,11 @@ describe('local-draft position editor', () => {
     expect(within(entryHeader('Entry 1')).getByText('1 SL · 1 TP')).toBeInTheDocument()
   })
 
-  it('opens the Entries tab when an entry is selected elsewhere, e.g. on the chart', () => {
+  it('opens an entry selected elsewhere, e.g. on the chart', () => {
     const { initial, selectExternally } = renderEditor()
-    expect(screen.getByRole('tab', { name: 'Position' })).toHaveAttribute('aria-selected', 'true')
     selectExternally(initial.entries[1]!.id)
-    expect(screen.getByRole('tab', { name: /Entries/ })).toHaveAttribute('aria-selected', 'true')
+    expect(entryHeader('Entry 2')).toHaveAttribute('aria-expanded', 'true')
+    expect(field('Entry 2 planned entry price (quote units)')).toBeInTheDocument()
   })
 
   it('reveals external selection only inside the bounded sidebar and focuses with preventScroll', () => {

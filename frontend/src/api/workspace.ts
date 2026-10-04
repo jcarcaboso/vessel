@@ -12,6 +12,9 @@ export interface Portfolio {
   accountCount: number
   totalValueUsd: string | null
   valueCoverage: 'complete' | 'partial' | 'unavailable'
+  /** Sum of account balances (perps plus stablecoin wallet, or the wallet alone in unified modes). */
+  balanceUsd?: string | null
+  balanceCoverage?: 'complete' | 'partial' | 'unavailable'
 }
 export interface VenueInstrument {
   contractId: string
@@ -104,6 +107,10 @@ export interface BrokerAccount {
   availableStablecoinNominalUsd?: string | null
   stablecoinScope?: string | null
   accountMode?: string | null
+  /** Supported stablecoins in the wallet, held amounts included. */
+  totalStablecoinNominalUsd?: string | null
+  /** Nominal balance: perps plus wallet, or the wallet alone in unified and portfolio-margin modes. */
+  balanceUsd?: string | null
   settingsRevision?: number
 }
 export interface ImportedFill {
@@ -254,7 +261,9 @@ const streamLimit = 1024 * 1024
 const instrumentPattern = /^[A-Za-z0-9_-]{1,32}$/
 const portfolio = (v: unknown): v is Portfolio => object(v) && guid(v.id) && text(v.name) &&
   count(v.accountCount) && nullableDecimal(v.totalValueUsd) &&
-  ['complete', 'partial', 'unavailable'].includes(String(v.valueCoverage))
+  ['complete', 'partial', 'unavailable'].includes(String(v.valueCoverage)) &&
+  (v.balanceUsd === undefined || nullableDecimal(v.balanceUsd)) &&
+  (v.balanceCoverage === undefined || ['complete', 'partial', 'unavailable'].includes(String(v.balanceCoverage)))
 const account = (v: unknown): v is BrokerAccount => object(v) && guid(v.id) &&
   (v.portfolioId === null || guid(v.portfolioId)) && text(v.name) && text(v.venueId) &&
   nullableText(v.address) && nullableDecimal(v.accountValueUsd) &&
@@ -265,6 +274,8 @@ const account = (v: unknown): v is BrokerAccount => object(v) && guid(v.id) &&
   (v.availableStablecoinNominalUsd === undefined || nullableDecimal(v.availableStablecoinNominalUsd)) &&
   (v.stablecoinScope === undefined || nullableText(v.stablecoinScope)) &&
   (v.accountMode === undefined || nullableText(v.accountMode)) &&
+  (v.totalStablecoinNominalUsd === undefined || nullableDecimal(v.totalStablecoinNominalUsd)) &&
+  (v.balanceUsd === undefined || nullableDecimal(v.balanceUsd)) &&
   (v.settingsRevision === undefined || typeof v.settingsRevision === 'number' && count(v.settingsRevision) && v.settingsRevision > 0)
 const fill = (v: unknown): v is ImportedFill => object(v) && guid(v.id) && guid(v.accountId) &&
   ['contractId', 'side', 'direction', 'feeToken', 'orderId', 'sourceFillId', 'transactionHash'].every(k => text(v[k])) &&

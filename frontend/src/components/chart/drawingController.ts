@@ -1,5 +1,6 @@
 import {
-  distanceToSegment, drawingSchemaVersion, fibonacciLevels, fibonacciPrice, goldenPocket, formatDuration, pointCount, positionPoints, positionStats,
+  distanceToSegment, drawingSchemaVersion, fibonacciLevels, fibonacciPrice, goldenPocket, formatDuration, isPositionKind, pointCount, positionPoints, positionStats,
+  sidedPositionPoints,
   priceRangeStats, type ChartDrawing, type DrawingKind, type DrawingPoint,
 } from './drawings'
 
@@ -53,6 +54,7 @@ const drawingId = () => `drawing-${Date.now().toString(36)}-${++nextId}`
 
 export function buildPoints(kind: DrawingKind, start: DrawingPoint, end: DrawingPoint): DrawingPoint[] {
   if (pointCount[kind] === 1) return [start]
+  if (kind === 'long-position' || kind === 'short-position') return sidedPositionPoints(kind === 'long-position' ? 'long' : 'short', start, end)
   if (kind === 'position') {
     const points = positionPoints(start, end)
     // Keep the mirrored stop above zero for very wide long boxes.
@@ -156,6 +158,15 @@ export class DrawingController {
     if (!gesture) return false
     if (gesture.type === 'create') {
       if (gesture.moved) return this.finishCreate(x, y)
+      // A click places a long or short box of a default size, ready to adjust by its handles.
+      if (this.tool === 'long-position' || this.tool === 'short-position') {
+        const points = this.defaultPosition(this.tool, gesture.startX, gesture.startY)
+        this.gesture = null
+        this.preview = null
+        if (points) this.create(points)
+        else this.requestUpdate()
+        return true
+      }
       // A click without dragging waits for a second click.
       gesture.awaiting = true
       return true
@@ -195,13 +206,23 @@ export class DrawingController {
     this.requestUpdate()
   }
 
+  /** A box 140 px wide with the target 60 px and the stop 40 px from the entry, on the tool's side. */
+  private defaultPosition(kind: 'long-position' | 'short-position', x: number, y: number): DrawingPoint[] | null {
+    const sign = kind === 'long-position' ? -1 : 1
+    const entry = this.space.point(x, y, this.magnet)
+    const target = this.space.point(x + 140, y + sign * 60, false)
+    const stop = this.space.point(x + 140, y - sign * 40, false)
+    if (!entry || !target || !stop) return null
+    return [entry, { time: target.time, price: target.price }, { time: target.time, price: stop.price }]
+  }
+
   private draft(points: DrawingPoint[]): ChartDrawing {
     return { id: drawingId(), schemaVersion: drawingSchemaVersion, kind: this.tool!, points, ...(this.tool === 'text' ? { text: 'Note' } : {}) }
   }
 
   private resize(drawing: ChartDrawing, index: number, point: DrawingPoint): ChartDrawing {
     const points = drawing.points.map(existing => ({ ...existing }))
-    if (drawing.kind === 'position') {
+    if (isPositionKind(drawing.kind)) {
       if (index === 0) points[0] = point
       else {
         // Target and stop share the box's end time; each handle moves its own price.
@@ -264,6 +285,8 @@ export class DrawingController {
         const width = (drawing.text ?? '').length * textFont * 0.6 + 14
         return area(x >= x0! - 2 && x <= x0! + width && y >= y0! - 20 && y <= y0! + 4)
       }
+      case 'long-position':
+      case 'short-position':
       case 'position': {
         const y2 = (ys as number[])[2]!
         return area(within(x, x0!, x1!) && within(y, Math.min(y1!, y2), Math.max(y1!, y2)))
@@ -401,6 +424,8 @@ export class DrawingController {
         }
         break
       }
+      case 'long-position':
+      case 'short-position':
       case 'position': {
         const y2 = (ys as number[])[2]!
         const left = Math.min(x0!, x1!)
@@ -415,8 +440,11 @@ export class DrawingController {
         line(context, left, y0!, left + boxWidth, y0!)
         const stats = positionStats(drawing.points)
         if (stats) {
-          label(context, theme, `${stats.side === 'long' ? 'Long' : 'Short'} target ${stats.targetPercent.toFixed(2)}%`, left + 4, y1! + (y1! < y0! ? 10 : -10), 'left')
-          label(context, theme, `Stop ${stats.stopPercent.toFixed(2)}%${stats.ratio === null ? '' : ` · R ${stats.ratio.toFixed(2)}`}`, left + 4, y2 + (y2 > y0! ? -10 : 10), 'left')
+          const [, target, stop] = drawing.points as [DrawingPoint, DrawingPoint, DrawingPoint]
+          const middle = left + boxWidth / 2
+          tag(context, theme, `Target ${this.space.formatPrice(target.price)} (${stats.targetPercent.toFixed(2)}%)`, middle, y1! + (y1! < y0! ? -14 : 14), theme.positive)
+          tag(context, theme, `Stop ${this.space.formatPrice(stop.price)} (${stats.stopPercent.toFixed(2)}%)`, middle, y2 + (y2 > y0! ? 14 : -14), theme.negative)
+          if (stats.ratio !== null) tag(context, theme, `R ${stats.ratio.toFixed(2)}`, middle, y0!, drawing.style?.color ?? theme.text)
         }
         break
       }

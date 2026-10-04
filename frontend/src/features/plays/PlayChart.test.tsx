@@ -829,7 +829,8 @@ describe('Chart captures', () => {
     render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
       source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
     await screen.findByText(/Updated/)
-    const favorites = () => within(screen.getByRole('group', { name: 'Favorite drawing tools' })).getAllByRole('button').map(button => button.getAttribute('aria-label'))
+    const favorites = () => within(screen.getByRole('group', { name: 'Favorite drawing tools' })).getAllByRole('button')
+      .map(button => button.getAttribute('aria-label')).filter(label => label !== 'Choose favorite tools')
     expect(favorites()).toEqual(['Trend line', 'Horizontal line', 'Fibonacci retracement'])
     await userEvent.click(screen.getByRole('button', { name: 'Lines tools' }))
     await userEvent.click(screen.getByRole('button', { name: 'Add Vertical line to favorites' }))
@@ -839,5 +840,10 @@ describe('Chart captures', () => {
     expect(JSON.parse(localStorage.getItem('vessel.chart.preferences.v1')!).drawingFavorites).toEqual(['horizontal-line', 'fibonacci', 'vertical-line'])
     await userEvent.click(within(screen.getByRole('group', { name: 'Favorite drawing tools' })).getByRole('button', { name: 'Vertical line' }))
     expect(state.tool).toBe('vertical-line')
+    // Single tools have no group panel; the star picker lists every tool.
+    expect(screen.queryByRole('button', { name: 'Fibonacci tools' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Choose favorite tools' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Add Text note to favorites' }))
+    expect(favorites()).toContain('Text note')
   })
 })

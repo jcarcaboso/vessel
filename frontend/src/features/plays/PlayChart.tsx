@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
-import { ArrowRightToLine, Camera, ChartNoAxesCombined, Maximize2, OctagonX, RefreshCw, Target } from 'lucide-react'
+import { ArrowRightToLine, Camera, ChartNoAxesCombined, Maximize2, OctagonX, RefreshCw, Star, Target } from 'lucide-react'
+import { Popover } from 'radix-ui'
 import type { CandleInterval, WorkspaceApi } from '@/api/workspace'
 import { CandleChart, type CandleChartControl } from '@/components/chart/CandleChart'
 import { ChartHeader, type ChartStat } from '@/components/chart/ChartHeader'
@@ -190,11 +191,33 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
     const favorites = preferences.drawingFavorites
     setPreferences({ drawingFavorites: favorites.includes(id) ? favorites.filter(kind => kind !== id) : [...favorites, id] })
   }
-  const favoriteTools = preferences.drawingFavorites.length > 0 && <div className="chart-favorite-tools" role="group" aria-label="Favorite drawing tools">
+  const favoriteTools = <div className="chart-favorite-tools" role="group" aria-label="Favorite drawing tools">
     {preferences.drawingFavorites.map(kind => {
       const tool = drawingToolsByKind[kind]
       return <ChartIconButton key={kind} label={tool.label} description={tool.description} icon={tool.icon} pressed={editor.tool === kind} onClick={() => selectTool(kind)} />
     })}
+    <Popover.Root>
+      <Popover.Trigger asChild>
+        <button type="button" className="chart-icon-button chart-favorites-edit" aria-label="Choose favorite tools" title="Choose favorite tools"><Star size={14} aria-hidden="true" /></button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content className="chart-popover chart-tool-flyout" align="start" sideOffset={6} aria-label="Favorite tools">
+          <p className="chart-tool-flyout-title">Favorites</p>
+          <ul>
+            {drawingToolGroups.flatMap(group => group.kinds).map(kind => {
+              const tool = drawingToolsByKind[kind]
+              const favorite = preferences.drawingFavorites.includes(kind)
+              return <li key={kind}>
+                <span className="chart-popover-choice">{tool.icon}<span>{tool.label}</span></span>
+                <button type="button" className="chart-tool-favorite" aria-pressed={favorite} onClick={() => toggleFavorite(kind)}
+                  aria-label={favorite ? `Remove ${tool.label} from favorites` : `Add ${tool.label} to favorites`}>
+                  <Star size={13} aria-hidden="true" fill={favorite ? 'currentColor' : 'none'} /></button>
+              </li>
+            })}
+          </ul>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   </div>
   const rail = <ChartToolRail tools={railTools} active={planTool ? `plan:${planTool}` : editor.tool ?? 'crosshair'}
     favorites={preferences.drawingFavorites} onToggleFavorite={toggleFavorite}

@@ -69,26 +69,30 @@ export function CapitalContext({ accounts, portfolios, draft }: {
   const account = accounts.find(item => item.id === draft.accountId && item.isEnabled !== false)
   const portfolio = portfolios.find(item => item.id === account?.portfolioId)
   const hyperliquid = account?.venueId === 'hyperliquid'
+  // Unified and portfolio-margin accounts keep all balances in the wallet; their perps state is not meaningful.
+  const unified = account?.accountMode === 'unifiedAccount' || account?.accountMode === 'portfolioMargin'
   const sized = positionSize(draft, leverageOf(draft.leverage))
-  const portfolioValue = portfolio?.totalValueUsd == null ? null : Number(portfolio.totalValueUsd)
-  // Shares of portfolio value treat the quote asset as USD, like the nominal account values.
-  const share = (value: number | null) => value === null || !portfolioValue ? '—' : `${(value / portfolioValue * 100).toFixed(1)}%`
-  const scope = `Nominal USD; coverage ${portfolio?.valueCoverage ?? 'unavailable'}, known account values only.`
+  // A portfolio sums its accounts' balances; an unassigned account stands on its own.
+  const balance = portfolio ? portfolio.balanceUsd ?? portfolio.totalValueUsd : account?.balanceUsd ?? account?.accountValueUsd ?? null
+  const balanceValue = balance == null ? null : Number(balance)
+  // Shares of the balance treat the quote asset as USD, like the nominal account values.
+  const share = (value: number | null) => value === null || !balanceValue ? '—' : `${(value / balanceValue * 100).toFixed(1)}%`
+  const coverage = portfolio?.balanceCoverage ?? portfolio?.valueCoverage
+  const metric = (label: string, value: string | null | undefined, title?: string) =>
+    <div title={title}><dt>{label}</dt><dd data-placeholder={value == null}>{displayMoney(value)}</dd></div>
   return <section className="panel capital-context" aria-label="Capital context" data-testid="capital-context">
     <div className="capital-values">
       <h2 className="capital-title sr-only">Capital context</h2>
       <dl className="capital-metrics">
-        <div title={scope}><dt>Portfolio</dt>
-          <dd data-placeholder={portfolio?.totalValueUsd == null}>{displayMoney(portfolio?.totalValueUsd)}</dd>
-        </div>
-        <div title={account ? `${account.name} · ${portfolio?.name ?? 'Unassigned'}` : undefined}><dt>{hyperliquid ? 'Perps equity' : 'Account value'}</dt>
-          <dd data-placeholder={account?.accountValueUsd == null}>{displayMoney(account?.accountValueUsd)}</dd>
-        </div>
-        <div title="Committed margin as a share of portfolio value"><dt>Margin / portfolio</dt><dd data-placeholder={share(sized.margin) === '—'}>{share(sized.margin)}</dd></div>
-        <div title="Position size (notional) as a share of portfolio value"><dt>Exposure / portfolio</dt><dd data-placeholder={share(sized.notional) === '—'}>{share(sized.notional)}</dd></div>
-        {hyperliquid && <div title={`${account.stablecoinScope ?? 'Supported stablecoin wallet'}${account.accountMode ? ` · ${account.accountMode}` : ''}. Nominal 1 token = 1 USD; not added to perps equity.`}>
-          <dt>Wallet stablecoins</dt><dd data-placeholder={account.availableStablecoinNominalUsd == null}>{displayMoney(account.availableStablecoinNominalUsd)}</dd>
-        </div>}
+        {metric(portfolio ? `${portfolio.name} balance` : 'Account balance', balance,
+          `Nominal USD${coverage ? `; coverage ${coverage}` : ''}. Perps equity plus supported stablecoins, or the wallet alone in unified accounts.`)}
+        {hyperliquid && metric('Wallet total', account.totalStablecoinNominalUsd,
+          `${account.stablecoinScope ?? 'Supported stablecoin wallet'}${account.accountMode ? ` · ${account.accountMode}` : ''}. Nominal 1 token = 1 USD.`)}
+        {hyperliquid && metric('Available', account.availableStablecoinNominalUsd, 'Wallet total minus amounts held by open orders.')}
+        {hyperliquid && !unified && metric('Perps equity', account.accountValueUsd, 'Primary perpetual account value.')}
+        {!hyperliquid && account && metric('Account value', account.accountValueUsd)}
+        <div title="Committed margin as a share of the balance"><dt>Margin / balance</dt><dd data-placeholder={share(sized.margin) === '—'}>{share(sized.margin)}</dd></div>
+        <div title="Position size (notional) as a share of the balance"><dt>Exposure / balance</dt><dd data-placeholder={share(sized.notional) === '—'}>{share(sized.notional)}</dd></div>
       </dl>
     </div>
   </section>

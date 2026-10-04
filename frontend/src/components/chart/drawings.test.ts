@@ -165,6 +165,26 @@ describe('drawing controller', () => {
     expect(drawings.cursor(150, 450)).toBe('move')
   })
 
+  it('places long and short boxes by a click or sizes them by a drag, on the side of the tool', () => {
+    const { callbacks, drawings } = controller()
+    drawings.setTool('long-position')
+    drawings.pointerDown(100, 500)
+    drawings.pointerUp(100, 500)
+    // A click: entry at the pointer, target 60 px above, stop 40 px below, 140 px wide.
+    expect(callbacks.onDrawingCreate).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'long-position', points: [{ time: 6_000_000, price: 500 }, { time: 14_400_000, price: 560 }, { time: 14_400_000, price: 460 }],
+    }))
+    drawings.setTool('short-position')
+    drawings.pointerDown(100, 500)
+    drawings.pointerMove(200, 450)
+    drawings.pointerUp(200, 450)
+    // A drag upwards still makes a short: target below, stop mirrored above at 1R.
+    expect(callbacks.onDrawingCreate).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'short-position', points: [{ time: 6_000_000, price: 500 }, { time: 12_000_000, price: 450 }, { time: 12_000_000, price: 550 }],
+    }))
+    expect(isChartDrawing(callbacks.onDrawingCreate.mock.lastCall![0])).toBe(true)
+  })
+
   it('keeps position target and stop on the shared end time', () => {
     const { callbacks, drawings } = controller()
     const position: ChartDrawing = { id: 'p', schemaVersion: 1, kind: 'position', points: buildPoints('position', { time: 6_000_000, price: 500 }, { time: 12_000_000, price: 550 }) }
