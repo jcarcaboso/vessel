@@ -4,10 +4,10 @@ import type { CandleInterval, WorkspaceApi } from '@/api/workspace'
 import { CandleChart, type CandleChartControl } from '@/components/chart/CandleChart'
 import { ChartHeader, type ChartStat } from '@/components/chart/ChartHeader'
 import { ChartIconButton, ChartMenu, ChartToolbar, ChartToolbarDivider } from '@/components/chart/ChartToolbar'
-import { ChartToolRail } from '@/components/chart/ChartToolRail'
+import { ChartToolRail, type ChartToolGroup } from '@/components/chart/ChartToolRail'
 import { drawingColors, type ChartDrawing } from '@/components/chart/drawings'
 import { DrawingEditBar } from '@/components/chart/DrawingEditBar'
-import { drawingToolHints, drawingToolLabels, drawingTools, drawingUtilityIcons, isDrawingKind } from '@/components/chart/drawingTools'
+import { crosshairTool, drawingToolGroups, drawingToolHints, drawingToolLabels, drawingToolsByKind, drawingUtilityIcons, isDrawingKind } from '@/components/chart/drawingTools'
 import { intervalName } from '@/components/chart/intervals'
 import { LiveIndicator } from '@/components/chart/LiveIndicator'
 import { TimeframeBar } from '@/components/chart/TimeframeBar'
@@ -20,7 +20,7 @@ import { useChartPreferences } from '@/features/market/chartPreferences'
 import { useCandles } from '@/features/market/useCandles'
 import { useLiveMarket } from '@/features/market/useLiveMarket'
 import { describeMarket, useMarketContext } from '@/features/market/useMarketContext'
-import type { DraftEntry, PlayDraft } from './draft'
+import { createNextEntry, type DraftEntry, type PlayDraft } from './draft'
 import { LevelEditor } from './LevelEditor'
 import { applyEntryEdit, applyLevelDrag, averageEntryPrice, formatDraggedPrice, levelTag, parseOverlayId, placeLevel, planOverlays, type ChartView, type ExitKind } from './levels'
 
@@ -115,12 +115,26 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   const selectedEntry = entries.find(entry => entry.id === selectedId) ?? entries[0]
   const selectedTag = selectedEntry ? levelTag(entries, { entryId: selectedEntry.id, kind: 'entry' }) : ''
   const selectedName = entries.length > 1 && selectedEntry ? selectedEntry.name : 'the entry'
-  /** Places a level for the selected entry at a price picked on the chart. One pick per tool use. */
+  /**
+   * Places a level at a price picked on the chart, one pick per tool use. The entry tool prices the
+   * selected entry when it has no price yet, and otherwise adds a new entry at that price.
+   */
   const pickPrice = (price: number) => {
-    const entry = latest.current.entries.find(item => item.id === selectedEntry?.id)
+    const current = latest.current.entries
+    const entry = current.find(item => item.id === selectedEntry?.id)
     if (!planTool || !entry) return
-    applyEntry(placeLevel(entry, planTool, price), planTool === 'entry' ? `Set ${selectedTag} entry price` : `Add ${selectedTag} ${planTool}`)
     setPlanTool(null)
+    if (planTool === 'entry' && Number(entry.price) > 0) {
+      const added = placeLevel(createNextEntry(current), 'entry', price)
+      const change = (next: DraftEntry[]) => latest.current.onEntriesChange?.(next)
+      change([...current, added])
+      history.push({ label: `Add ${added.name}`,
+        undo: () => change(latest.current.entries.filter(item => item.id !== added.id)),
+        redo: () => change([...latest.current.entries.filter(item => item.id !== added.id), added]) })
+      onSelect(added.id)
+      return
+    }
+    applyEntry(placeLevel(entry, planTool, price), planTool === 'entry' ? `Set ${selectedTag} entry price` : `Add ${selectedTag} ${planTool}`)
   }
   const onChartKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const key = event.key.toLowerCase()
@@ -145,12 +159,11 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
     ...entries.map(entry => ({ value: entry.id, label: entry.name, swatch: entry.color }))]} />
   const priced = selectedEntry !== undefined && Number(selectedEntry.price) > 0
   const planTools = editable && selectedEntry ? [
-    { id: 'plan:entry', label: `Set ${selectedName} price on the chart`, description: 'Click the chart at the entry price.', icon: <ArrowRightToLine {...planToolIcon} />, available: true },
+    { id: 'plan:entry', label: 'Add an entry on the chart', description: Number(selectedEntry.price) > 0 ? 'Click the chart at the price of a new entry.' : `Click the chart at ${selectedName} price.`, icon: <ArrowRightToLine {...planToolIcon} />, available: true },
     { id: 'plan:stop', label: `Add a stop to ${selectedName} on the chart`, description: 'Click the chart at the stop price. Add several for partial stops.', icon: <OctagonX {...planToolIcon} />, available: priced, unavailableReason: 'Set the entry price first' },
     { id: 'plan:target', label: `Add a target to ${selectedName} on the chart`, description: 'Click the chart at the target price. Add several for partial targets.', icon: <Target {...planToolIcon} />, available: priced, unavailableReason: 'Set the entry price first' },
   ] : []
-  const rail = <ChartToolRail tools={drawingTools} active={planTool ? `plan:${planTool}` : editor.tool ?? 'crosshair'}
-    groups={[{ label: `Plan levels for ${selectedEntry?.name ?? 'the entry'}`, tools: planTools }]} onSelect={id => {
+  const selectTool = (id: string) => {
     if (id.startsWith('plan:')) {
       const tool = id.slice(5) as PlanTool
       editor.setTool(null)
@@ -161,14 +174,37 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
     else if (id === 'undo') history.undo()
     else if (id === 'redo') history.redo()
     else if (id === 'clear') editor.clear()
-    else { setPlanTool(null); editor.setTool(isDrawingKind(id) ? id : null) }
-  }} footer={[
+    else if (isDrawingKind(id)) {
+      setPlanTool(null)
+      editor.setTool(editor.tool === id ? null : id)
+      const group = drawingToolGroups.find(item => item.kinds.includes(id))
+      if (group && preferences.toolChoice[group.id] !== id) setPreferences({ toolChoice: { ...preferences.toolChoice, [group.id]: id } })
+    } else { setPlanTool(null); editor.setTool(null) }
+  }
+  const railTools = [crosshairTool, ...drawingToolGroups.map((group): ChartToolGroup => ({
+    id: group.id, label: group.label, tools: group.kinds.map(kind => drawingToolsByKind[kind]),
+    current: preferences.toolChoice[group.id] ?? group.kinds[0]!,
+  }))]
+  const toggleFavorite = (id: string) => {
+    if (!isDrawingKind(id)) return
+    const favorites = preferences.drawingFavorites
+    setPreferences({ drawingFavorites: favorites.includes(id) ? favorites.filter(kind => kind !== id) : [...favorites, id] })
+  }
+  const favoriteTools = preferences.drawingFavorites.length > 0 && <div className="chart-favorite-tools" role="group" aria-label="Favorite drawing tools">
+    {preferences.drawingFavorites.map(kind => {
+      const tool = drawingToolsByKind[kind]
+      return <ChartIconButton key={kind} label={tool.label} description={tool.description} icon={tool.icon} pressed={editor.tool === kind} onClick={() => selectTool(kind)} />
+    })}
+  </div>
+  const rail = <ChartToolRail tools={railTools} active={planTool ? `plan:${planTool}` : editor.tool ?? 'crosshair'}
+    favorites={preferences.drawingFavorites} onToggleFavorite={toggleFavorite}
+    groups={[{ label: `Plan levels for ${selectedEntry?.name ?? 'the entry'}`, tools: planTools }]} onSelect={selectTool} footer={[
     { id: 'magnet', label: 'Snap to candles', description: 'Pulls anchors to a nearby open, high, low or close.', icon: drawingUtilityIcons.magnet, available: true, pressed: preferences.magnet },
     { id: 'undo', label: history.undoLabel ? `Undo: ${history.undoLabel}` : 'Undo', icon: drawingUtilityIcons.undo, available: history.canUndo, pressed: false },
     { id: 'redo', label: history.redoLabel ? `Redo: ${history.redoLabel}` : 'Redo', icon: drawingUtilityIcons.redo, available: history.canRedo, pressed: false },
     { id: 'clear', label: `Clear unlocked ${instrument} drawings`, icon: drawingUtilityIcons.clear, available: editor.clearable, pressed: false },
   ]} unavailableReason="Nothing to change" />
-  const planHint = planTool && `Click the chart to ${planTool === 'entry' ? `set ${selectedName} price` : `add a ${planTool} to ${selectedName}`}. With the magnet on, it snaps to a nearby candle price. Esc cancels.`
+  const planHint = planTool && `${planTool === 'entry' ? priced ? 'Click to add an entry' : `Click to set ${selectedName} price` : `Click to add a ${planTool} to ${selectedName}`}. Esc cancels.`
   const drawingBar = planHint ? <div className="chart-drawing-bar" role="status">{planHint}</div>
     : editor.tool ? <div className="chart-drawing-bar" role="status">{drawingToolHints[editor.tool]} Esc cancels.</div>
     : editor.selected ? <DrawingEditBar drawing={editor.selected} label={drawingToolLabels[editor.selected.kind]} defaultColor={drawingColors[0]}
@@ -192,7 +228,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
       timeframes={<TimeframeBar value={interval} favorites={preferences.favorites}
         onChange={next => setPreferences({ interval: next })} onFavoritesChange={favorites => setPreferences({ favorites })} />}
       liveUpdates={preferences.live} onLiveUpdatesChange={on => setPreferences({ live: on })}
-      viewMenu={viewMenu} rail={rail} drawingBar={<>{drawingBar}{levelEditor}</>} drawingProps={drawingProps} overlays={overlays} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}
+      viewMenu={<>{viewMenu}{viewMenu && favoriteTools && <ChartToolbarDivider />}{favoriteTools}</>} rail={rail} drawingBar={<>{drawingBar}{levelEditor}</>} drawingProps={drawingProps} overlays={overlays} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}
       onExpandedChange={setExpanded} onDialogClosed={() => expandButton.current?.focus({ preventScroll: true })} />
       : <>
         <ChartToolbar label="Chart controls" end={<>
@@ -216,7 +252,6 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
       {average !== null && <span className="chart-legend-average"><i aria-hidden="true" />Average entry <strong>{formatDraggedPrice(average)}</strong></span>}
     </div>}
     {entries.length === 0 && <p className="chart-legend muted">No planned entries.</p>}
-    <p className="chart-caption">{!several ? '' : view === 'aggregate' ? 'Aggregate planned entries. Selecting an entry focuses its editor and keeps the other entries visible. The average is quantity-weighted over entries with a price and share. ' : 'Selected entry only. '}{live && editable ? 'Place levels with the plan tools beside the chart, drag them, or click a tag to edit. ' : ''}Planned levels are not fills.</p>
   </section>
 }
 

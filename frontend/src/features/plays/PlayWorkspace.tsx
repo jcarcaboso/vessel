@@ -104,10 +104,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   return <section className="plays-page" aria-label="Play draft workspace">
     <h1 className="sr-only">Plays</h1>
     <div className="plays-draft-heading">
-      <div className="page-heading-copy"><span className="eyebrow">A LITTLE INTENTION BEFORE THE TRADE</span>
+      <div className="page-heading-copy">
         <input className="plays-title-input" aria-label="Play title" value={draft.title} maxLength={200}
           placeholder="Name this play" disabled={readOnly} onChange={event => onChange({ ...draft, title: event.target.value })} />
-        <p>A place for the setup, the decisions, and what you learn.</p>
       </div>
       <div className="plays-heading-actions">
         {tradeUrl && <a className="plays-venue-link" href={tradeUrl} target="_blank" rel="noopener noreferrer"
@@ -119,7 +118,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         </Button>}
       </div>
     </div>
-    <p className="plays-draft-notice" role="status"><Info size={14} aria-hidden="true" /><span>{notice ?? 'Unsaved draft. Edits, captures and images stay in this browser session while you navigate. Reloading the page or disconnecting discards them. Draft edits are not sent to a venue.'}</span></p>
+    {notice && <p className="plays-draft-notice" role="status"><Info size={14} aria-hidden="true" /><span>{notice}</span></p>}
     <fieldset className="plays-draft-fields" disabled={readOnly}>
       <legend className="sr-only">Play context</legend>
       <label className="plays-portfolio-field">Portfolio<select value={effectiveFilter} disabled={lockInstrument} onChange={event => {
@@ -151,9 +150,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       </div>
       <div className="plays-context-status"><span className="field-label">Status</span><span className={`badge play-status-${status}`}>{statusLabels[status]}</span></div>
     </fieldset>
-    <p className="plays-context-note">{!loading && !enabledAccounts.length ? 'No enabled accounts are available. You can outline a draft before adding an account. ' : ''}Perpetuals only. Planned levels are not fills. Position validation and execution assignment are deferred.</p>
+    {!loading && !enabledAccounts.length && <p className="plays-context-note">No enabled accounts yet. You can outline the play and add an account later.</p>}
     <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} />
-    <div className="workspace-toolbar"><span><i />THE PLAY <small>Your idea, before hindsight.</small></span><span>Side-by-side · Layout locked</span></div>
     <div className="workspace" data-testid="workspace">
       <div ref={leftColumn} className="left-column" data-testid="left-column">
         <ChartPanel entries={draft.entries} selectedId={selectedId} onSelect={id => {
@@ -167,7 +165,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         onDrawingsChange={drawings => { if (drawingKey) planChange({ ...draft, drawings: { ...draft.drawings, [drawingKey]: drawings } }) }}
         editable={!readOnly} onCapture={addCapture} onShowEvidence={showEvidence} />
         <PlayJournal notes={draft.notes} onChange={notes => onChange({ ...draft, notes: readOnly ? { ...draft.notes, review: notes.review } : notes })}
-          execution={execution} readOnly={readOnly} notesLabel={status === 'draft' ? 'Draft notes' : 'Saved with the play'}
+          execution={execution} readOnly={readOnly}
           evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} />
       </div>
       {readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>

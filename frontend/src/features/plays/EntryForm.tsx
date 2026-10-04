@@ -1,5 +1,5 @@
 import { useId } from 'react'
-import { X } from 'lucide-react'
+import { Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
@@ -20,8 +20,8 @@ function LevelUnits({ value, label, onChange }: {
 }
 
 const copy = {
-  stop: { legend: 'Planned stops', singular: 'stop', title: 'Stop', price: 'Stop price', percent: 'Loss on margin' },
-  target: { legend: 'Partial planned targets', singular: 'target', title: 'Target', price: 'Target price', percent: 'Gain on margin' },
+  stop: { legend: 'Planned stops', singular: 'stop' },
+  target: { legend: 'Planned targets', singular: 'target' },
 } as const
 
 /** Stops or targets of one entry. Each closes a share of the entry; percentages are returns at the play's leverage. */
@@ -41,43 +41,35 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix }: {
   // Single stops keep the short "stop" names; numbering starts once there are several.
   const label = (index: number) => exits.length > 1 || kind === 'target' ? `${kind} ${index + 1}` : kind
 
-  return <fieldset className={kind === 'stop' ? 'entry-targets entry-stops' : 'entry-targets'}>
-    <legend>{text.legend}</legend>
+  return <fieldset className={kind === 'stop' ? 'exit-list exit-stops' : 'exit-list exit-targets'}>
+    <legend className="sr-only">{text.legend}</legend>
+    <div className="exit-list-heading">
+      <span>{kind === 'stop' ? 'Stops' : 'Targets'}</span>
+      <Button type="button" variant="ghost" size="icon-sm" className="add-target" aria-label={`Add ${text.singular} to ${entry.name}`} title={`Add ${text.singular}`}
+        onClick={() => set([...exits, createExit(exits.length ? '' : '100')])}><Plus size={13} aria-hidden="true" /></Button>
+    </div>
     {exits.map((exit, index) => {
       const resolved = exit.unit === 'percent' ? levelPrice(entryPrice, exit, kind, direction, leverage) : null
       const move = exit.unit === 'percent' && Number(exit.value) > 0 ? priceMovePercent(Number(exit.value), leverage) : null
-      return <fieldset key={exit.id} className="entry-target">
-        <legend>{text.title} {exits.length > 1 || kind === 'target' ? index + 1 : ''}</legend>
-        <div className="level-mode">
-          <span>{text.title} units</span>
-          <LevelUnits label={`${entry.name} ${label(index)} units`} value={exit.unit}
-            onChange={unit => update(exit.id, { unit, value: '' })} />
-        </div>
-        <label className={kind === 'stop' ? 'stop-label' : 'target-label'} htmlFor={`${prefix}-${exit.id}-value`}>
-          <span>{exit.unit === 'price' ? text.price : text.percent}
-            <small>{exit.unit === 'price' ? 'quote units' : `% at ${leverage}×`}</small></span>
-          <Input id={`${prefix}-${exit.id}-value`} type="number" step="any" min={0}
-            aria-label={`${entry.name} planned ${label(index)} ${exit.unit === 'price' ? 'price (quote units)' : `return at ${leverage}× leverage (%)`}`}
-            value={exit.value} onChange={event => update(exit.id, { value: event.target.value })} />
-        </label>
-        <label className="target-share" htmlFor={`${prefix}-${exit.id}-share`}>
-          <span>Share <small>% of entry</small></span>
-          <Input id={`${prefix}-${exit.id}-share`} type="number" step="any" min={0} max={100}
-            aria-label={`${entry.name} ${label(index)} share (%)`} value={exit.share}
-            onChange={event => update(exit.id, { share: event.target.value })} />
-        </label>
+      return <div key={exit.id} className="exit-row" role="group" aria-label={`${entry.name} ${label(index)}`}>
+        <LevelUnits label={`${entry.name} ${label(index)} units`} value={exit.unit}
+          onChange={unit => update(exit.id, { unit, value: '' })} />
+        <Input id={`${prefix}-${exit.id}-value`} type="number" step="any" min={0} className={kind === 'stop' ? 'exit-value-stop' : 'exit-value-target'}
+          placeholder={exit.unit === 'price' ? 'Price' : kind === 'stop' ? 'Loss %' : 'Gain %'}
+          aria-label={`${entry.name} planned ${label(index)} ${exit.unit === 'price' ? 'price (quote units)' : `return at ${leverage}× leverage (%)`}`}
+          value={exit.value} onChange={event => update(exit.id, { value: event.target.value })} />
+        <Input id={`${prefix}-${exit.id}-share`} type="number" step="any" min={0} max={100} placeholder="Share %" className="exit-share"
+          aria-label={`${entry.name} ${label(index)} share (%)`} value={exit.share}
+          onChange={event => update(exit.id, { share: event.target.value })} />
         <Button type="button" variant="ghost" size="icon-sm" className="remove-target" aria-label={`Remove ${entry.name} ${label(index)}`}
           onClick={() => set(exits.filter(current => current.id !== exit.id))}>
           <X aria-hidden="true" size={14} />
         </Button>
         {move !== null && <p className="level-resolved">
-          {resolved === null ? `A ${formatDraggedPrice(move)}% price move. Set the entry price to place it.`
-            : `≈ ${formatDraggedPrice(resolved)} · a ${formatDraggedPrice(move)}% price move at ${leverage}×`}
+          {resolved === null ? `${formatDraggedPrice(move)}% price move` : `≈ ${formatDraggedPrice(resolved)} · ${formatDraggedPrice(move)}% move at ${leverage}×`}
         </p>}
-      </fieldset>
+      </div>
     })}
-    <Button type="button" variant="ghost" size="sm" className="add-target" aria-label={`Add ${text.singular} to ${entry.name}`}
-      onClick={() => set([...exits, createExit(exits.length ? '' : '100')])}>Add {text.singular}</Button>
   </fieldset>
 }
 
@@ -94,19 +86,18 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
 
   return <div className="entry-fields">
     <label htmlFor={`${prefix}-share`}>
-      <span>Quantity share <small>% of full position</small></span>
+      <span>Share %</span>
       <Input id={`${prefix}-share`} type="number" step="any" min={0} max={100}
         aria-label={`${entry.name} quantity share (%)`} value={entry.share}
         onChange={event => onChange({ ...entry, share: event.target.value })} />
     </label>
     <label htmlFor={`${prefix}-price`}>
-      <span>Planned entry price <small>quote units</small></span>
+      <span>Entry price</span>
       <Input id={`${prefix}-price`} type="number" step="any" min={0}
         aria-label={`${entry.name} planned entry price (quote units)`} value={entry.price}
         onChange={event => onChange({ ...entry, price: event.target.value })} />
     </label>
     <ExitList entry={entry} kind="stop" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} />
     <ExitList entry={entry} kind="target" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} />
-    <p className="muted">Planned levels, not fills. A % level is the return on margin at the play's leverage, so at {leverage}× it is a {leverage === 1 ? 'price move of the same size' : `${leverage} times smaller price move`}. Switching level units clears the value. Unsaved edits stay in memory.</p>
   </div>
 }

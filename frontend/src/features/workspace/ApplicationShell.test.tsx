@@ -132,10 +132,10 @@ describe('Main application shell', () => {
     await screen.findByText(/No saved plays yet/)
     expect(screen.queryByText('BTC reclaim at support')).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'New play' }))
-    await screen.findByText(/No enabled accounts are available/)
+    await screen.findByText(/No enabled accounts yet/)
     expect(screen.getByRole('heading', { level: 1, name: 'Plays' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('')
-    expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByRole('status')).toHaveTextContent('Not saved yet')
+    expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByText('Draft', { selector: '.badge' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled()
   })
   it('creates an owner-scoped portfolio and reloads the workspace', async () => {

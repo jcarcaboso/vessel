@@ -55,16 +55,16 @@ describe('Play draft workspace', () => {
     expect(left.children[1]).toBe(screen.getByTestId('journal-panel'))
     expect(workspace.children[0]).toBe(left)
     expect(workspace.children[1]).toBe(screen.getByTestId('position-panel'))
-    expect(workspace.previousElementSibling).toHaveClass('workspace-toolbar')
+    expect(workspace.previousElementSibling).toBe(screen.getByTestId('capital-context'))
     expect(screen.getByTestId('capital-context').compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(workspace.nextElementSibling).toBe(screen.getByTestId('summary-panel'))
-    expect(screen.getByRole('status')).toHaveTextContent('Unsaved draft')
-    expect(screen.getByRole('status')).toHaveTextContent('disconnecting discards them')
+    // A local draft shows no banner; the status badge and buttons say enough.
+    expect(document.querySelector('.plays-draft-notice')).toBeNull()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('')
     expect(screen.getByRole('textbox', { name: 'Perpetual instrument' })).toHaveValue('')
     expect(screen.queryByRole('img', { name: /candles/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Save/ })).not.toBeInTheDocument()
-    expect(within(screen.getByTestId('summary-panel')).getAllByText('Not calculated').length).toBeGreaterThan(0)
+    expect(within(screen.getByTestId('summary-panel')).getAllByText('Needs a size').length).toBeGreaterThan(0)
   })
 
   it('uses a real enabled account without assuming its value is an available budget', async () => {
@@ -79,13 +79,13 @@ describe('Play draft workspace', () => {
   it('never offers disabled accounts, and allows outlining a draft without accounts', () => {
     render(<Workspace disabled />)
     expect(screen.queryByRole('option', { name: /Main account/ })).not.toBeInTheDocument()
-    expect(screen.getByText(/No enabled accounts are available/)).toBeInTheDocument()
+    expect(screen.getByText(/No enabled accounts yet/)).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toBeEnabled()
   })
 
   it('does not claim accounts are empty while the account context is still loading', () => {
     render(<PlayWorkspace accounts={[]} portfolios={[]} api={createWorkspaceApi('test-only')} draft={createDraft()} onChange={vi.fn()} loading />)
-    expect(screen.queryByText(/No enabled accounts are available/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/No enabled accounts yet/)).not.toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Account' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toBeEnabled()
   })

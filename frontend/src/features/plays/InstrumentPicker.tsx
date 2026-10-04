@@ -26,8 +26,8 @@ export function InstrumentPicker({ catalog: state, value, source, onChange }: {
     <div className="instrument-feedback">
       {error && <p role="alert">{error}</p>}
       {manual ? <p>Manual label, not venue-validated.</p> :
-        catalog && <p>{choices.length ? 'Primary perps' : 'No selectable primary perpetual contracts.'}
-          {selected && <abbr title="Venue maximum leverage for this contract. The leverage control is limited to it.">· Max {selected.maxLeverage}×</abbr>}
+        catalog && <p>{!choices.length && 'No selectable primary perpetual contracts.'}
+          {selected && <abbr title="Venue maximum leverage for this contract. The leverage control is limited to it.">Max {selected.maxLeverage}×</abbr>}
           {value && !selected && <span> · {value} is not in the current catalogue</span>}</p>}
       {accountId !== null && <div className="instrument-actions">
         {manual ? <Button type="button" variant="ghost" size="sm" onClick={() => {

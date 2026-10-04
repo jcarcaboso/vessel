@@ -495,9 +495,9 @@ describe('Chart panel level editing', () => {
     await screen.findByText(/Updated/)
     const plan = screen.getByRole('group', { name: 'Plan levels for Entry 1' })
     expect(within(plan).getByRole('button', { name: 'Add a stop to Entry 1 on the chart' })).toBeDisabled()
-    await userEvent.click(within(plan).getByRole('button', { name: 'Set Entry 1 price on the chart' }))
+    await userEvent.click(within(plan).getByRole('button', { name: 'Add an entry on the chart' }))
     expect(state.picking).toBe(true)
-    expect(screen.getByText(/Click the chart to set Entry 1 price/)).toBeInTheDocument()
+    expect(screen.getByText(/Click to set Entry 1 price/)).toBeInTheDocument()
     act(() => state.callbacks!.onPricePick(101.234))
     expect(shown()[0]!.price).toBe('101.23')
     expect(state.picking).toBe(false)
@@ -517,6 +517,21 @@ describe('Chart panel level editing', () => {
     await userEvent.keyboard('{Escape}')
     expect(state.picking).toBe(false)
     expect(shown()[0]!.targets).toEqual([])
+  })
+
+  it('adds a new entry with the entry tool once the selected entry has a price, and undoes it', async () => {
+    const { state, factory } = fakeAdapter()
+    const onSelect = vi.fn()
+    render(<LevelHarness factory={factory} onSelect={onSelect} initial={two()} />)
+    await screen.findByText(/Updated/)
+    await userEvent.click(within(screen.getByRole('group', { name: 'Plan levels for Entry 1' })).getByRole('button', { name: 'Add an entry on the chart' }))
+    expect(screen.getByText(/Click to add an entry/)).toBeInTheDocument()
+    act(() => state.callbacks!.onPricePick(95.555))
+    expect(shown().map(entry => entry.price)).toEqual(['100', '90', '95.555'])
+    expect(onSelect).toHaveBeenLastCalledWith(expect.any(String))
+    expect(state.overlays.some(o => o.label === 'E3')).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: /^Undo: Add Entry 3/ }))
+    expect(shown()).toHaveLength(2)
   })
 
   it('shows one entry without the aggregate view, legend or entry prefixes', async () => {
@@ -798,9 +813,31 @@ describe('Chart captures', () => {
     render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
       source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
     await screen.findByText(/Updated/)
-    await userEvent.hover(screen.getByRole('button', { name: 'Fibonacci retracement' }))
+    const rail = screen.getByRole('group', { name: 'Chart tools' })
+    await userEvent.hover(within(rail).getByRole('button', { name: 'Fibonacci retracement' }))
     expect(await screen.findByRole('tooltip')).toHaveTextContent('Fibonacci retracementDrag from the swing start to the swing end.')
-    await userEvent.click(screen.getByRole('button', { name: 'Price range' }))
-    expect(screen.getByText('Drag up or down to measure a price change. Esc cancels.')).toBeInTheDocument()
+    // Measure tools sit behind one button; its panel lists them all.
+    await userEvent.click(within(rail).getByRole('button', { name: 'Measure tools' }))
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Measure tools' })).getByRole('button', { name: 'Date range' }))
+    expect(screen.getByText('Drag across time to measure bars and duration. Esc cancels.')).toBeInTheDocument()
+    // The group button now shows the tool used last.
+    expect(within(rail).getByRole('button', { name: 'Date range' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('pins starred drawing tools to the toolbar and remembers them', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    const favorites = () => within(screen.getByRole('group', { name: 'Favorite drawing tools' })).getAllByRole('button').map(button => button.getAttribute('aria-label'))
+    expect(favorites()).toEqual(['Trend line', 'Horizontal line', 'Fibonacci retracement'])
+    await userEvent.click(screen.getByRole('button', { name: 'Lines tools' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Add Vertical line to favorites' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Trend line from favorites' }))
+    await userEvent.keyboard('{Escape}')
+    expect(favorites()).toEqual(['Horizontal line', 'Fibonacci retracement', 'Vertical line'])
+    expect(JSON.parse(localStorage.getItem('vessel.chart.preferences.v1')!).drawingFavorites).toEqual(['horizontal-line', 'fibonacci', 'vertical-line'])
+    await userEvent.click(within(screen.getByRole('group', { name: 'Favorite drawing tools' })).getByRole('button', { name: 'Vertical line' }))
+    expect(state.tool).toBe('vertical-line')
   })
 })

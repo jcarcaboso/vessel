@@ -68,7 +68,7 @@ describe('Venue instrument picker', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
     await user.type(field(), 'xyz')
     expect(screen.getByText('No perpetual matches “xyz”.')).toBeInTheDocument()
-    await user.click(screen.getByText('Primary perps'))
+    await user.click(document.body)
     expect(field()).toHaveValue('')
   })
   it('labels venue contracts as pairs in lists and keeps manual labels as entered', () => {

@@ -153,7 +153,7 @@ describe('saved plays', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Save revision' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(server.api.updatePlay.mock.lastCall![1]).toMatchObject({ revisionReason: 'Stop under the new swing low', expectedVersion: 2 })
-    expect(screen.getByRole('status')).toHaveTextContent('revision 2')
+    expect(screen.getByRole('status')).toHaveTextContent('Revision 2')
 
     // A title change alone is saved without a reason.
     await user.type(screen.getByRole('textbox', { name: 'Play title' }), ' v2')
@@ -182,7 +182,7 @@ describe('saved plays', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Cancel play' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(server.api.changePlayStatus.mock.lastCall![2]).toEqual({ status: 'cancelled', reason: 'missed', note: 'Price ran away' })
-    expect(screen.getByRole('status')).toHaveTextContent('Cancelled. The plan is kept')
+    expect(screen.getByRole('status')).toHaveTextContent('Cancelled. Only the review and images can change.')
     expect(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toBeDisabled()
     await user.click(screen.getByRole('tab', { name: 'Thesis' }))

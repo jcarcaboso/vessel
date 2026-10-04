@@ -26,18 +26,28 @@ export const drawingToolHints: Record<DrawingKind, string> = {
 
 const tool = (id: DrawingKind, icon: ReactNode): ChartTool => ({ id, label: drawingToolLabels[id], description: drawingToolHints[id], icon, available: true })
 
-/** The drawing set, led by the crosshair for selecting and moving. */
-export const drawingTools: readonly ChartTool[] = [
-  { id: 'crosshair', label: 'Crosshair', description: 'Select, move and resize drawings and levels.', icon: <Crosshair {...icon} />, available: true },
-  tool('trend-line', <Slash {...icon} />),
-  tool('horizontal-line', <Minus {...icon} />),
-  tool('vertical-line', <SeparatorVertical {...icon} />),
-  tool('zone', <RectangleHorizontal {...icon} />),
-  tool('date-range', <MoveHorizontal {...icon} />),
-  tool('price-range', <MoveVertical {...icon} />),
-  tool('fibonacci', <Rows4 {...icon} />),
-  tool('position', <ArrowUpDown {...icon} />),
-  tool('text', <Type {...icon} />),
+export const crosshairTool: ChartTool = { id: 'crosshair', label: 'Crosshair', description: 'Select, move and resize drawings and levels.', icon: <Crosshair {...icon} />, available: true }
+
+/** Every drawing tool by kind. */
+export const drawingToolsByKind: Record<DrawingKind, ChartTool> = {
+  'trend-line': tool('trend-line', <Slash {...icon} />),
+  'horizontal-line': tool('horizontal-line', <Minus {...icon} />),
+  'vertical-line': tool('vertical-line', <SeparatorVertical {...icon} />),
+  zone: tool('zone', <RectangleHorizontal {...icon} />),
+  'date-range': tool('date-range', <MoveHorizontal {...icon} />),
+  'price-range': tool('price-range', <MoveVertical {...icon} />),
+  fibonacci: tool('fibonacci', <Rows4 {...icon} />),
+  position: tool('position', <ArrowUpDown {...icon} />),
+  text: tool('text', <Type {...icon} />),
+}
+
+/** Rail groups, each a button showing its last-used tool and a panel listing the rest. */
+export const drawingToolGroups: readonly { id: string; label: string; kinds: readonly DrawingKind[] }[] = [
+  { id: 'lines', label: 'Lines', kinds: ['trend-line', 'horizontal-line', 'vertical-line'] },
+  { id: 'fibonacci', label: 'Fibonacci', kinds: ['fibonacci'] },
+  { id: 'shapes', label: 'Shapes and positions', kinds: ['zone', 'position'] },
+  { id: 'measure', label: 'Measure', kinds: ['price-range', 'date-range'] },
+  { id: 'text', label: 'Notes', kinds: ['text'] },
 ]
 
 export const drawingUtilityIcons = {

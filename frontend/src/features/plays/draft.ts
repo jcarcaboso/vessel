@@ -79,6 +79,13 @@ export function createEntry(index: number): DraftEntry {
   }
 }
 
+/** A blank entry after the existing ones, named after the first free "Entry n". */
+export function createNextEntry(entries: readonly DraftEntry[]): DraftEntry {
+  let index = entries.length
+  while (entries.some(entry => entry.name === `Entry ${index + 1}`)) index += 1
+  return createEntry(index)
+}
+
 export function createDraft(): PlayDraft {
   return {
     title: '', accountId: '', instrument: '', instrumentSource: 'manual', direction: 'long',

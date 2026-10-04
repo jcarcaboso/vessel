@@ -178,16 +178,17 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       onClick={() => { setDialogError(null); setDialog('delete') }}><Trash2 size={14} />Delete</Button>}
   </div>
 
-  const notice = !saved ? 'Not saved yet. Save the draft to keep it, with its drawings and images. Nothing is sent to a venue.'
-    : readOnly ? `${statusLabels[status]}. The plan is kept as it was; you can still write the review and add images.`
-    : locked ? `${statusLabels[status]} · revision ${saved.summary.planRevision}. Stops, targets and untaken entries can still change; each saved change asks why and becomes a revision. Vessel never sends orders.`
-    : dirty ? 'Unsaved changes. Save to keep them.' : 'Saved draft. Plan it when you are ready to place the orders.'
+  // One short line, only when it changes what the owner can do; the buttons and status badge say the rest.
+  const notice = !saved ? null
+    : readOnly ? `${statusLabels[status]}. Only the review and images can change.`
+    : dirty ? 'Unsaved changes.'
+    : locked ? `Revision ${saved.summary.planRevision}. Saved plan changes ask for a reason.` : null
 
   return <>
     <Button variant="ghost" size="sm" className="plays-back" onClick={() => update({ view: 'list' })}><ArrowLeft size={14} />All plays</Button>
     {error && <div className="workspace-alert" role="alert"><span>{error}</span><Button variant="ghost" size="sm" onClick={() => setError(null)}>Dismiss</Button></div>}
     <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={draft} onChange={next => update({ draft: next })}
-      {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} notice={notice} lockInstrument={locked} readOnly={readOnly}
+      {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} {...(notice ? { notice } : {})} lockInstrument={locked} readOnly={readOnly}
       execution={saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}
         entries={draft.entries} onCheck={() => { void tracking.check() }} onLink={request => { void tracking.link(request) }}
         onUnlink={linkId => { void tracking.unlink(linkId) }} /> : undefined} />

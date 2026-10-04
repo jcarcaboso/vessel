@@ -256,3 +256,9 @@ After PRs #5 and #6 merged, the owner reported issues from the LAN build and ask
 - **Tool check**: in headless Chromium on live BTC candles, every drawing tool was created, deselected, reselected by clicking it, moved, resized by a handle (two-point tools) and deleted.
 - **Free drawing**: anchors are no longer tied to candles. Lightweight Charts converts pointer x to a whole bar (rounding up) and returns 0 for a fractional bar, so the adapter converts linearly from bars 0 and 1 in both directions. Anchors keep the exact time under the pointer, also between candles and beyond the last one; only the magnet (when on and within reach) snaps. While a drawing or plan tool is active, the chart's bar-snapping vertical crosshair is hidden and a free dashed guide with its time follows the pointer.
 - **Fibonacci levels**: 0, 0.236, 0.382, 0.5, 0.618, 0.65, 0.786 and 1, each with a distinct color. The golden pocket (0.618 to 0.65) is gold and filled more strongly than the other bands. Labels stack so close levels never overlap.
+
+## Tool groups and favorites, October 4
+
+- The rail shows the crosshair, then one button per group: Lines (trend, horizontal, vertical), Fibonacci, Shapes and positions (zone, long/short), Measure (price and date range) and Notes. A group button shows its last-used tool (kept in chart preferences); its small arrow opens a panel listing the group's tools, each with a star.
+- Starred tools appear in the chart toolbar between the timeframes/view menu and the status, for one-click access. Favorites are stored with the chart preferences (default: trend line, horizontal line, Fibonacci).
+- The plan entry tool sets the selected entry's price when it has none; otherwise a click adds a new entry at that price and selects it (one undo step). Before, it only ever moved the selected entry.
