@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { statusLabels, type PlayStatus, type PlaySummary, type StatusRequest } from '@/api/plays'
 import { Button } from '@/components/ui/button'
+import { useNotifications } from '@/components/notifications/notifications'
 import { venueName } from '@/features/workspace/format'
 import { ArrowLeft, History, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import { createDraft, type PlayDraft } from './draft'
@@ -43,11 +44,14 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     onSession(latest.current)
   }, [onSession])
   const [busy, setBusy] = useState<null | 'save' | 'status' | 'open' | 'delete'>(null)
-  const [error, setError] = useState<string | null>(null)
+  // Errors appear as popup notifications; a newer one replaces the last, and starting another action clears it.
+  const { notify, dismiss } = useNotifications()
+  const setError = useCallback((message: string | null) => {
+    if (message) notify({ tone: 'error', key: 'plays-error', message })
+    else dismiss('plays-error')
+  }, [notify, dismiss])
   const [dialog, setDialog] = useState<null | 'revision' | 'cancel' | 'delete' | 'history'>(null)
   const [dialogError, setDialogError] = useState<string | null>(null)
-  // A blocked save shows why until the plan is fixed.
-  const [blockedSave, setBlockedSave] = useState(false)
 
   const { draft, saved } = session
   const tracking = usePlayExecution(api, session.view === 'editor' && saved ? saved.summary.id : null, saved?.summary.status)
@@ -63,17 +67,18 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       if (active && current?.summary.id === play.summary.id) update({ saved: { ...current, summary: play.summary } })
     }).catch(cause => { if (active) setError(failure(cause)) })
     return () => { active = false }
-  }, [api, venueStatus, update])
+  }, [api, venueStatus, update, setError])
   const dirty = saved ? isDirty(draft, saved) : hasContent(draft)
-  const issues = planIssues(draft.entries, draft.direction)
-  if (blockedSave && !issues.length) setBlockedSave(false)
+  // A blocked save says why until the plan is fixed.
+  const fixed = planIssues(draft.entries, draft.direction).length === 0
+  useEffect(() => { if (fixed) dismiss('plan-blocked') }, [fixed, dismiss])
   const status = saved?.summary.status ?? 'draft'
 
   /** Stops and targets on the wrong side of their entry block saving and planning until they are fixed. */
   function planBlocked() {
-    const blocked = planIssues(latest.current.draft.entries, latest.current.draft.direction).length > 0
-    if (blocked) setBlockedSave(true)
-    return blocked
+    const issues = planIssues(latest.current.draft.entries, latest.current.draft.direction)
+    if (issues.length) notify({ tone: 'error', key: 'plan-blocked', title: 'Not saved', message: `Fix the plan first. ${planIssueSummary(issues)}` })
+    return issues.length > 0
   }
 
   /** Saves the draft and its evidence. Returns the saved state, or null when the save failed. */
@@ -158,7 +163,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   }
 
   if (session.view === 'list') {
-    return <PlayList api={api} accounts={accounts} busy={busy === 'open'} error={error}
+    return <PlayList api={api} accounts={accounts} busy={busy === 'open'}
       unsaved={dirty ? draft.title.trim() || 'Untitled play' : null}
       onOpen={id => { void open(id) }}
       onNew={() => { setError(null); update({ view: 'editor', draft: createDraft(), saved: null }) }}
@@ -207,9 +212,6 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
 
   return <>
     <Button variant="ghost" size="sm" className="plays-back" onClick={() => update({ view: 'list' })}><ArrowLeft size={14} />All plays</Button>
-    {error && <div className="workspace-alert" role="alert"><span>{error}</span><Button variant="ghost" size="sm" onClick={() => setError(null)}>Dismiss</Button></div>}
-    {blockedSave && issues.length > 0 && <div className="workspace-alert" role="alert"><span>Not saved: fix the plan first. {planIssueSummary(issues)}</span>
-      <Button variant="ghost" size="sm" onClick={() => setBlockedSave(false)}>Dismiss</Button></div>}
     <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={draft} onChange={next => update({ draft: next })}
       {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} {...(notice ? { notice } : {})} lockInstrument={locked} readOnly={readOnly}
       execution={saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}
@@ -224,11 +226,10 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   </>
 }
 
-function PlayList({ api, accounts, busy, error, unsaved, onOpen, onNew, onContinue, onDiscard }: {
+function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onDiscard }: {
   api: WorkspaceApi
   accounts: BrokerAccount[]
   busy: boolean
-  error: string | null
   /** Title of the play with unsaved changes, if any. */
   unsaved: string | null
   onOpen: (id: string) => void
@@ -258,7 +259,6 @@ function PlayList({ api, accounts, busy, error, unsaved, onOpen, onNew, onContin
     {unsaved && <div className="workspace-alert plays-unsaved" role="status"><span>Unsaved changes in <strong>{unsaved}</strong>. Save or discard them before opening another play.</span>
       <Button variant="outline" size="sm" onClick={onContinue}>Continue editing</Button>
       <Button variant="ghost" size="sm" className="danger-action" onClick={onDiscard}>Discard changes</Button></div>}
-    {error && <div className="workspace-alert" role="alert"><span>{error}</span></div>}
     <div className="plays-list-filters" role="group" aria-label="Show plays">
       {filters.map(([value, label]) => <button key={value} type="button" className={filter === value ? 'active' : ''} aria-pressed={filter === value}
         onClick={() => setFilter(value)}>{label}</button>)}

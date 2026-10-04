@@ -7,6 +7,7 @@ import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api
 import type { PlayExecution, PlayFields, PlayHistory, PlayStatus, PlaySummary, SavedEvidence, SavedPlay, StatusRequest } from '@/api/plays'
 import { ApiError } from '@/api/system'
 import { accountFixture, idleMarketStream, instrumentCatalogFixture, portfolioFixture } from '@/test/workspace-fixture'
+import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { PlaysPage } from './PlaysPage'
 import { createDraft } from './draft'
 import { createPlaysSession, describePlanChanges, planFromDraft, syncEvidence, type PlaysSession } from './saved'
@@ -102,7 +103,7 @@ function fakeServer() {
 
 function Page({ api, accounts = [accountFixture], initial = createPlaysSession() }: { api: WorkspaceApi; accounts?: BrokerAccount[]; initial?: PlaysSession }) {
   const [session, setSession] = useState(initial)
-  return <PlaysPage accounts={accounts} portfolios={[portfolioFixture]} api={api} session={session} onSession={setSession} />
+  return <NotificationProvider><PlaysPage accounts={accounts} portfolios={[portfolioFixture]} api={api} session={session} onSession={setSession} /></NotificationProvider>
 }
 
 const client = (server: ReturnType<typeof fakeServer>, overrides: Partial<WorkspaceApi> = {}) =>
@@ -268,7 +269,7 @@ describe('saved plays', () => {
 
     await user.click(screen.getByRole('button', { name: /^Save$/ }))
     expect(server.api.createPlay).not.toHaveBeenCalled()
-    expect(screen.getByText(/^Not saved: fix the plan first\. 2 stops and targets/)).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Notifications' })).getByRole('alert')).toHaveTextContent(/Not saved.*Fix the plan first\. 2 stops and targets/)
 
     await user.click(notices.getByRole('button', { name: 'Switch to Short' }))
     expect(screen.getByRole('button', { name: /Short/, pressed: true })).toBeInTheDocument()
