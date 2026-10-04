@@ -39,6 +39,8 @@ export interface ChartCallbacks {
   onDrawingSelect(id: string | null): void
   /** Asks to edit a level in place, e.g. after a double-click or a click on its tag. `anchor` is in pane pixels. */
   onLevelEdit(id: string, anchor: { x: number; y: number }): void
+  /** A click while the price picker is on, with the price under the pointer (magnet applied). */
+  onPricePick(price: number): void
 }
 
 /** Boundary that keeps the charting library out of feature code. */
@@ -49,6 +51,8 @@ export interface ChartAdapter {
   setDrawings(drawings: readonly ChartDrawing[], selectedId: string | null): void
   /** `null` is the crosshair: select, move and resize instead of creating. */
   setDrawingTool(tool: DrawingKind | null, magnet: boolean): void
+  /** While on, clicks report a price through `onPricePick` instead of selecting, drawing or panning. */
+  setPricePicker(active: boolean): void
   /**
    * PNG of the chart as shown, including planned levels and drawings but not the crosshair, with
    * `caption` in a footer. Null until the renderer is ready.

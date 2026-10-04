@@ -16,7 +16,7 @@ export interface CandleChartControl {
  * behind the adapter so it never sees plays, journals or execution data.
  */
 export function CandleChart({
-  candles, overlays, viewKey, label, drawings = noDrawings, selectedDrawingId = null, tool = null, magnet = false,
+  candles, overlays, viewKey, label, drawings = noDrawings, selectedDrawingId = null, tool = null, magnet = false, pricePicker = false,
   onKeyDown, createAdapter = createLazyLightweightAdapter, controlRef, ...handlers
 }: {
   candles: readonly ChartCandle[]
@@ -28,6 +28,8 @@ export function CandleChart({
   selectedDrawingId?: string | null
   tool?: DrawingKind | null
   magnet?: boolean
+  /** Clicks report a price through `onPricePick`, e.g. to place a plan level. */
+  pricePicker?: boolean
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void
   createAdapter?: ChartAdapterFactory
   controlRef?: Ref<CandleChartControl>
@@ -50,6 +52,7 @@ export function CandleChart({
       onDrawingChange: (drawing, phase) => callbacks.current.onDrawingChange?.(drawing, phase),
       onDrawingSelect: id => callbacks.current.onDrawingSelect?.(id),
       onLevelEdit: (id, anchor) => callbacks.current.onLevelEdit?.(id, anchor),
+      onPricePick: price => callbacks.current.onPricePick?.(price),
     })
     adapter.current = created
     shownKey.current = null
@@ -68,6 +71,7 @@ export function CandleChart({
   useEffect(() => { adapter.current?.setOverlays(overlays) }, [overlays, createAdapter])
   useEffect(() => { adapter.current?.setDrawings(drawings, selectedDrawingId) }, [drawings, selectedDrawingId, createAdapter])
   useEffect(() => { adapter.current?.setDrawingTool(tool, magnet) }, [tool, magnet, createAdapter])
+  useEffect(() => { adapter.current?.setPricePicker(pricePicker) }, [pricePicker, createAdapter])
 
   // Focusable so Delete, Escape and undo shortcuts reach the feature while the pointer works on the canvas.
   return <div ref={container} className="candle-chart" role="application" aria-roledescription="chart" aria-label={label}

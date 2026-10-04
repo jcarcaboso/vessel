@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { pickInstrument } from '@/test/instrument'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
 import type { PlayExecution, PlayFields, PlayHistory, PlayStatus, PlaySummary, SavedEvidence, SavedPlay, StatusRequest } from '@/api/plays'
 import { ApiError } from '@/api/system'
 import { accountFixture, idleMarketStream, instrumentCatalogFixture, portfolioFixture } from '@/test/workspace-fixture'
+import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { PlaysPage } from './PlaysPage'
 import { createDraft } from './draft'
 import { createPlaysSession, describePlanChanges, planFromDraft, syncEvidence, type PlaysSession } from './saved'
@@ -101,7 +103,7 @@ function fakeServer() {
 
 function Page({ api, accounts = [accountFixture], initial = createPlaysSession() }: { api: WorkspaceApi; accounts?: BrokerAccount[]; initial?: PlaysSession }) {
   const [session, setSession] = useState(initial)
-  return <PlaysPage accounts={accounts} portfolios={[portfolioFixture]} api={api} session={session} onSession={setSession} />
+  return <NotificationProvider><PlaysPage accounts={accounts} portfolios={[portfolioFixture]} api={api} session={session} onSession={setSession} /></NotificationProvider>
 }
 
 const client = (server: ReturnType<typeof fakeServer>, overrides: Partial<WorkspaceApi> = {}) =>
@@ -145,18 +147,18 @@ describe('saved plays', () => {
     await user.clear(stop)
     await user.type(stop, '97')
     expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled()
-    await user.click(screen.getByRole('button', { name: /Save changes/ }))
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
     const dialog = screen.getByRole('dialog', { name: 'Why did the plan change?' })
     expect(within(dialog).getByRole('button', { name: 'Save revision' })).toBeDisabled()
     await user.type(within(dialog).getByRole('textbox', { name: 'Reason' }), 'Stop under the new swing low')
     await user.click(within(dialog).getByRole('button', { name: 'Save revision' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(server.api.updatePlay.mock.lastCall![1]).toMatchObject({ revisionReason: 'Stop under the new swing low', expectedVersion: 2 })
-    expect(screen.getByRole('status')).toHaveTextContent('revision 2')
+    expect(screen.getByRole('status')).toHaveTextContent('Revision 2')
 
     // A title change alone is saved without a reason.
     await user.type(screen.getByRole('textbox', { name: 'Play title' }), ' v2')
-    await user.click(screen.getByRole('button', { name: /Save changes/ }))
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
     await waitFor(() => expect(server.api.updatePlay).toHaveBeenCalledTimes(2))
     expect(server.api.updatePlay.mock.lastCall![1]).not.toHaveProperty('revisionReason')
 
@@ -181,14 +183,14 @@ describe('saved plays', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Cancel play' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(server.api.changePlayStatus.mock.lastCall![2]).toEqual({ status: 'cancelled', reason: 'missed', note: 'Price ran away' })
-    expect(screen.getByRole('status')).toHaveTextContent('Cancelled. The plan is kept')
+    expect(screen.getByRole('status')).toHaveTextContent('Cancelled. Only the review and images can change.')
     expect(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toBeDisabled()
     await user.click(screen.getByRole('tab', { name: 'Thesis' }))
     expect(screen.getByRole('textbox', { name: 'Thesis' })).toHaveAttribute('readonly')
     await user.click(screen.getByRole('tab', { name: 'Review' }))
     await user.type(screen.getByRole('textbox', { name: 'Review' }), 'Waited too long.')
-    await user.click(screen.getByRole('button', { name: /Save changes/ }))
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
     await waitFor(() => expect(server.api.updatePlay.mock.lastCall![1]).toMatchObject({ review: 'Waited too long.' }))
   })
 
@@ -199,7 +201,7 @@ describe('saved plays', () => {
     await user.click(await screen.findByRole('button', { name: 'New play' }))
     await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
     await user.type(screen.getByRole('textbox', { name: 'Play title' }), 'First')
-    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
     await waitFor(() => expect(server.api.createPlay).toHaveBeenCalledOnce())
     await user.type(screen.getByRole('textbox', { name: 'Play title' }), ' edited')
     await user.click(screen.getByRole('button', { name: 'All plays' }))
@@ -228,9 +230,11 @@ describe('saved plays', () => {
     render(<Page api={client(server)} />)
     await user.click(await screen.findByRole('button', { name: 'New play' }))
     await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
-    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Save draft' }))
-    await user.click(await screen.findByRole('button', { name: 'Delete' }))
+    // Delete keeps its place but stays disabled until the draft is saved.
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Delete' })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete draft' }))
     await screen.findByText(/No saved plays yet/)
     expect(server.api.deletePlay).toHaveBeenCalledWith(ids(1))
@@ -243,9 +247,40 @@ describe('saved plays', () => {
     await user.click(await screen.findByRole('button', { name: 'New play' }))
     await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
     await user.type(screen.getByRole('textbox', { name: 'Play title' }), 'Kept')
-    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Enable the account before using it for a Play.')
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Kept')
+  })
+
+  it('blocks saving stops and targets on the wrong side and offers the corrections', async () => {
+    const server = fakeServer()
+    const user = userEvent.setup()
+    render(<Page api={client(server)} />)
+    await user.click(await screen.findByRole('button', { name: 'New play' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
+    await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
+    const stop = screen.getByRole('spinbutton', { name: 'Entry 1 planned stop price (quote units)' })
+    await user.type(stop, '105')
+    await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned target 1 price (quote units)' }), '90')
+    expect(stop).toHaveAttribute('aria-invalid', 'true')
+    const notices = within(screen.getByRole('region', { name: 'Plan notifications' }))
+    expect(notices.getByText('Entry 1 stop is above the entry price; a long stop goes below it.')).toBeInTheDocument()
+    expect(notices.getByText('Entry 1 target 1 is below the entry price; a long target goes above it.')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    expect(server.api.createPlay).not.toHaveBeenCalled()
+    expect(within(screen.getByRole('region', { name: 'Notifications' })).getByRole('alert')).toHaveTextContent(/Not saved.*Fix the plan first\. 2 stops and targets/)
+
+    await user.click(notices.getByRole('button', { name: 'Switch to Short' }))
+    expect(screen.getByRole('button', { name: /Short/, pressed: true })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Plan notifications' })).toBeNull()
+    expect(screen.queryByText(/Not saved/)).toBeNull()
+    await user.click(screen.getByRole('button', { name: /Long/ }))
+    await user.click(screen.getByRole('button', { name: 'Swap stops and targets' }))
+    expect(screen.getByRole('spinbutton', { name: 'Entry 1 planned stop price (quote units)' })).toHaveValue(90)
+    expect(screen.getByRole('spinbutton', { name: 'Entry 1 planned target 1 price (quote units)' })).toHaveValue(105)
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    await waitFor(() => expect(server.api.createPlay).toHaveBeenCalledOnce())
   })
 
   it('links a venue instrument to its trading page on the venue', async () => {
@@ -257,8 +292,8 @@ describe('saved plays', () => {
     await user.click(await screen.findByRole('button', { name: 'New play' }))
     await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
     expect(screen.queryByRole('link', { name: /on Hyperliquid/ })).not.toBeInTheDocument()
-    await user.selectOptions(await screen.findByRole('combobox', { name: 'Perpetual instrument' }), 'BTC')
-    const link = screen.getByRole('link', { name: 'Open BTC on Hyperliquid' })
+    await pickInstrument(user, 'BTC')
+    const link = screen.getByRole('link', { name: 'Open BTC/USDC on Hyperliquid' })
     expect(link).toHaveAttribute('href', 'https://app.hyperliquid.xyz/trade/BTC')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
   })
@@ -274,7 +309,7 @@ describe('venue tracking', () => {
     render(<Page api={api} accounts={[venue]} />)
     await user.click(await screen.findByRole('button', { name: 'New play' }))
     await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
-    await user.selectOptions(await screen.findByRole('combobox', { name: 'Perpetual instrument' }), 'BTC')
+    await pickInstrument(user, 'BTC')
     await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
     // The venue reports the entry filled: the server moves the play to Open on the next check.
     server.api.checkPlayExecution.mockImplementation((id: string) => {
@@ -295,13 +330,13 @@ describe('venue tracking', () => {
 describe('saved play helpers', () => {
   it('describes plan revisions by entry and target identity', () => {
     const draft = createDraft()
-    const before = planFromDraft({ ...draft, entries: [{ ...draft.entries[0]!, price: '100', stop: { ...draft.entries[0]!.stop, value: '95' } }] })
+    const before = planFromDraft({ ...draft, entries: [{ ...draft.entries[0]!, price: '100', stops: [{ ...draft.entries[0]!.stops[0]!, value: '95' }] }] })
     const entry = before.entries[0]!
-    const after = { ...before, leverage: '5', entries: [{ ...entry, stop: { ...entry.stop, unit: 'percent' as const, value: '3' },
+    const after = { ...before, leverage: '5', entries: [{ ...entry, stops: [{ ...entry.stops[0]!, unit: 'percent' as const, value: '3' }, { id: 's2', unit: 'price' as const, value: '90', share: '' }],
       targets: [{ ...entry.targets[0]!, value: '110' }, { id: 't2', unit: 'price' as const, value: '120', share: '50' }] }],
       notes: { ...before.notes, thesis: 'Changed' } }
     expect(describePlanChanges(before, after)).toEqual([
-      'Leverage: 1× → 5×', 'Entry 1 stop: 95 → 3%', 'Entry 1 target 1: blank → 110', 'Entry 1 target 2 added at 120', 'Thesis edited',
+      'Leverage: 1× → 5×', 'Entry 1 stop 1: 95 → 3%', 'Entry 1 stop 2 added at 90', 'Entry 1 target 1: blank → 110', 'Entry 1 target 2 added at 120', 'Thesis edited',
     ])
     expect(describePlanChanges(after, { ...after, entries: [] })).toEqual(['Entry 1 removed'])
   })

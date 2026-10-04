@@ -5,9 +5,9 @@ export type PlayStatus = typeof playStatuses[number]
 export const cancelReasons = ['invalidated', 'missed', 'changed-mind', 'expired', 'mistake', 'other'] as const
 export type CancelReason = typeof cancelReasons[number]
 
-export interface PlanLevel { id: string; unit: 'price' | 'percent'; value: string }
-export interface PlanTarget extends PlanLevel { share: string }
-export interface PlanEntry { id: string; name: string; color: string; share: string; price: string; stop: PlanLevel; targets: PlanTarget[] }
+/** A stop or target. A percent value is the return on margin at the plan's leverage; share is the part of the entry it closes. */
+export interface PlanExit { id: string; unit: 'price' | 'percent'; value: string; share: string }
+export interface PlanEntry { id: string; name: string; color: string; share: string; price: string; stops: PlanExit[]; targets: PlanExit[] }
 /** The plan as stored and revised. Number fields keep the exact text entered. */
 export interface PlayPlan {
   direction: 'long' | 'short'
@@ -76,10 +76,10 @@ const guid = (v: unknown) => text(v) && /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}
 const date = (v: unknown) => text(v, 64) && Number.isFinite(Date.parse(v))
 const nullable = <T>(check: (v: unknown) => boolean) => (v: unknown): v is T | null => v === null || check(v)
 const count = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
-const level = (v: unknown): v is PlanLevel => object(v) && text(v.id, 64) && (v.unit === 'price' || v.unit === 'percent') && text(v.value, 64)
+const exit = (v: unknown): v is PlanExit => object(v) && text(v.id, 64) && (v.unit === 'price' || v.unit === 'percent') &&
+  text(v.value, 64) && text(v.share, 64)
 const entry = (v: unknown): v is PlanEntry => object(v) && text(v.id, 64) && text(v.name, 100) && text(v.color, 16) &&
-  text(v.share, 64) && text(v.price, 64) && level(v.stop) && Array.isArray(v.targets) &&
-  v.targets.every(t => level(t) && text((t as { share?: unknown }).share, 64))
+  text(v.share, 64) && text(v.price, 64) && Array.isArray(v.stops) && v.stops.every(exit) && Array.isArray(v.targets) && v.targets.every(exit)
 export const isPlayPlan = (v: unknown): v is PlayPlan => object(v) && (v.direction === 'long' || v.direction === 'short') &&
   (v.sizingMode === 'margin' || v.sizingMode === 'quantity') && text(v.size, 64) && text(v.leverage, 8) &&
   nullable(x => text(x, 64))(v.budgetOverride) && Array.isArray(v.entries) && v.entries.length > 0 && v.entries.every(entry) &&
@@ -147,7 +147,8 @@ export interface OrderLink {
   id: string
   role: LinkRole
   entryId: string | null
-  targetId: string | null
+  /** Stop or target ID within the entry; null for entries and unplanned exits. */
+  levelId: string | null
   state: 'linked' | 'suggested'
   source: 'automatic' | 'owner'
   order: ExecutionOrder | null
@@ -167,7 +168,7 @@ export interface PlayExecution {
   unlinkedOrders: ExecutionOrder[]
   notice: string
 }
-export interface LinkOrder { orderId: string; role: LinkRole; entryId?: string; targetId?: string }
+export interface LinkOrder { orderId: string; role: LinkRole; entryId?: string; levelId?: string }
 
 const decimalText = (v: unknown) => text(v, 100) && /^-?\d+(\.\d+)?$/.test(v)
 const executionOrder = (v: unknown): v is ExecutionOrder => object(v) && text(v.orderId, 128) && (v.side === 'A' || v.side === 'B') &&
@@ -178,7 +179,7 @@ const executionOrder = (v: unknown): v is ExecutionOrder => object(v) && text(v.
 const executionFill = (v: unknown): v is ExecutionFill => object(v) && text(v.sourceFillId, 128) && text(v.direction, 128) &&
   decimalText(v.price) && decimalText(v.quantity) && decimalText(v.fee) && text(v.feeToken, 64) && decimalText(v.closedPnlUsd) && date(v.occurredAtUtc)
 const orderLink = (v: unknown): v is OrderLink => object(v) && guid(v.id) && ['entry', 'stop', 'target', 'exit'].includes(v.role as string) &&
-  nullable(x => text(x, 64))(v.entryId) && nullable(x => text(x, 64))(v.targetId) && (v.state === 'linked' || v.state === 'suggested') &&
+  nullable(x => text(x, 64))(v.entryId) && nullable(x => text(x, 64))(v.levelId) && (v.state === 'linked' || v.state === 'suggested') &&
   (v.source === 'automatic' || v.source === 'owner') && (v.order === null || executionOrder(v.order)) && decimalText(v.filledQuantity) &&
   Array.isArray(v.fills) && v.fills.every(executionFill)
 export const isPlayExecution = (v: unknown): v is PlayExecution => object(v) && guid(v.playId) && playStatuses.includes(v.status as PlayStatus) &&

@@ -154,6 +154,9 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         }
     }
 
+    /// <summary>Primary perpetual DEX contracts are quoted and margined in USDC.</summary>
+    private const string PrimaryQuoteAsset = "USDC";
+
     private static List<VenueInstrument> ReadInstruments(JsonElement meta, bool selectableOnly = false)
     {
         var result = new List<VenueInstrument>();
@@ -172,7 +175,7 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
                 throw new VenueReadException(InvalidResponse);
             // Delisted contracts still identify historical positions and fills during refresh.
             if (!selectableOnly || delisted.ValueKind != JsonValueKind.True)
-                result.Add(new(name, decimals, leverage));
+                result.Add(new(name, decimals, leverage, PrimaryQuoteAsset));
         }
         return result;
     }

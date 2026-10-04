@@ -52,6 +52,7 @@
 .chart-stage { display: flex; flex: 1; min-height: 0; }
 .chart-tool-rail { display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; width: 40px; padding: 6px 0; border-right: 1px solid var(--border); overflow-y: auto; scrollbar-width: none; }
 .chart-rail-divider { width: 20px; height: 1px; margin: 4px 0; background: var(--border); }
+.chart-rail-group { display: contents; }
 .chart-stage > .chart-body { flex: 1; min-width: 0; }
 
 @media (max-width: 640px) {
@@ -110,3 +111,27 @@
 @media (max-width: 640px) {
   .chart-live-toggle { gap: 5px; padding: 0 6px; }
 }
+
+.chart-icon-tip { display: inline-flex; }
+.chart-tooltip { z-index: 70; display: grid; gap: 2px; max-width: 240px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--foreground); background: var(--popover, var(--card)); box-shadow: 0 8px 24px #0006; font-size: 11px; line-height: 1.4; }
+.chart-tooltip strong { font-weight: 600; }
+.chart-tooltip span { color: var(--muted-foreground); font-size: 10px; }
+/* A hint while a tool is active never blocks clicks on the chart beneath it. */
+.chart-drawing-bar[role="status"] { pointer-events: none; }
+
+.chart-tool-group { position: relative; display: inline-flex; }
+/* Group menu: a small corner triangle on the group's button, like common charting tools. */
+.chart-tool-group-more { position: absolute; right: 0; bottom: 0; display: grid; place-items: end; width: 12px; height: 12px; padding: 1px; border: 0; border-radius: 0 0 5px 0; color: var(--muted-foreground); background: transparent; cursor: pointer; }
+.chart-tool-group-more i { width: 0; height: 0; border-style: solid; border-width: 0 0 5px 5px; border-color: transparent transparent currentColor transparent; }
+.chart-tool-group-more:hover, .chart-tool-group-more[data-state="open"] { color: var(--foreground); background: var(--accent); }
+.chart-tool-flyout { min-width: 210px; }
+.chart-tool-flyout-title { margin: 2px 6px 6px; color: var(--muted-foreground); font-size: 10px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; }
+.chart-tool-flyout li .chart-popover-choice { flex: 1; gap: 9px; }
+.chart-tool-favorite { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 5px; color: var(--muted-foreground); background: transparent; cursor: pointer; }
+.chart-tool-favorite:hover { color: var(--foreground); background: var(--accent); }
+.chart-tool-favorite[aria-pressed="true"] { color: #e3b341; }
+.chart-favorite-tools { display: flex; align-items: center; gap: 2px; }
+
+/* Actions that remove something read red. */
+.chart-icon-button.is-destructive:not(:disabled), .chart-drawing-bar .chart-delete { color: color-mix(in srgb, var(--negative) 80%, var(--muted-foreground)); }
+.chart-icon-button.is-destructive:not(:disabled):hover, .chart-drawing-bar .chart-delete:hover:not(:disabled) { color: var(--negative); background: color-mix(in srgb, var(--negative) 12%, transparent); }

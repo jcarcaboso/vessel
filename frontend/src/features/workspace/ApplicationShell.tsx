@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import type { BrokerAccount, Overview, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { ApiError, type SystemInfo } from '@/api/system'
 import { Button } from '@/components/ui/button'
+import { NotificationProvider } from '@/components/notifications/NotificationProvider'
+import { useNotifications } from '@/components/notifications/notifications'
 import { PlaysPage } from '@/features/plays/PlaysPage'
 import { createPlaysSession } from '@/features/plays/saved'
 import { AccountDetail } from './AccountDetail'
@@ -10,8 +12,8 @@ import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
 import { money, shortAddress, time, venueName } from './format'
 import {
-  Activity, ArrowRight, ArrowUpRight, Check, CircleHelp, Database, Folder, LayoutDashboard,
-  LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, ShieldCheck, Wallet, X, BookOpen, Pencil,
+  Activity, ArrowRight, ArrowUpRight, CircleHelp, Database, Folder, LayoutDashboard,
+  LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, ShieldCheck, Wallet, BookOpen, Pencil,
 } from 'lucide-react'
 import './application-shell.css'
 
@@ -44,7 +46,14 @@ function AccountRows({ accounts, portfolioNames, refreshing, onDetail, onSync, o
     </tr>)}</tbody></table></div>
 }
 
-export function ApplicationShell({ system, disconnect, api }: { system: SystemInfo; disconnect: () => void; api: WorkspaceApi }) {
+type ShellProps = { system: SystemInfo; disconnect: () => void; api: WorkspaceApi }
+
+export function ApplicationShell(props: ShellProps) {
+  return <NotificationProvider><Shell {...props} /></NotificationProvider>
+}
+
+function Shell({ system, disconnect, api }: ShellProps) {
+  const { notify } = useNotifications()
   const [page, setPage] = useState<Page>(pageFromHash)
   const [playsSession, setPlaysSession] = useState(createPlaysSession)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -52,7 +61,6 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
   const [data, setData] = useState<Overview | null>(null)
   const [loaded, setLoaded] = useState<{ api: WorkspaceApi; key: number } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [mutationError, setMutationError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState<string | null>(null)
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
   const [portfolioFilter, setPortfolioFilter] = useState('')
@@ -60,7 +68,7 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
   const [accountDialog, setAccountDialog] = useState(false)
   const [managedPortfolio, setManagedPortfolio] = useState<Portfolio | null>(null)
   const [managedAccount, setManagedAccount] = useState<BrokerAccount | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
+  const setNotice = useCallback((message: string) => { notify({ tone: 'success', message }) }, [notify])
   const [reloadKey, setReloadKey] = useState(0)
   const reload = useCallback(() => setReloadKey(key => key + 1), [])
   // Derived from the request generation so Reload shows progress and a repeated
@@ -85,11 +93,6 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
       .catch(cause => { if (active) { setLoadError(cause instanceof ApiError ? cause.message : 'The workspace could not be loaded.'); setLoaded({ api, key: reloadKey }) } })
     return () => { active = false; controller.abort() }
   }, [api, reloadKey])
-  useEffect(() => {
-    if (!notice) return
-    const timer = setTimeout(() => setNotice(null), 5500)
-    return () => clearTimeout(timer)
-  }, [notice])
   useEffect(() => {
     if (!menuOpen) return
     const sidebar = document.getElementById('workspace-nav')!
@@ -125,11 +128,11 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
   }
   async function sync(id: string) {
     if (refreshing) return
-    setRefreshing(id); setMutationError(null)
+    setRefreshing(id)
     try {
       await api.sync(id); setNotice('Account refreshed. Recent execution facts remain unassigned to plays.')
     } catch (cause) {
-      setMutationError(cause instanceof ApiError ? cause.message : 'The venue refresh did not complete.')
+      notify({ tone: 'error', key: 'account-refresh', message: cause instanceof ApiError ? cause.message : 'The venue refresh did not complete.' })
     } finally { setRefreshing(null); reload() }
   }
   const portfolios = data?.portfolios ?? [], accounts = data?.accounts ?? []
@@ -171,7 +174,6 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
           {page === 'portfolios' ? <Button onClick={() => setPortfolioDialog(true)}><Plus size={15} />New portfolio</Button> : page !== 'settings' && page !== 'activity' && <Button onClick={() => setAccountDialog(true)} disabled={pending || !data}><Plus size={15} />Add account</Button>}
         </div></section>}
         {error && <div className="workspace-alert" role="alert"><CircleHelp size={17} /><span>{error}</span><Button variant="ghost" size="sm" onClick={reload}>Try again</Button></div>}
-        {mutationError && <div className="workspace-alert" role="alert"><CircleHelp size={17} /><span>{mutationError}</span><Button variant="ghost" size="sm" onClick={() => setMutationError(null)}>Dismiss</Button></div>}
         {pending && <div className="workspace-loading" role="status">Loading your workspace…</div>}
         {!pending && !data && !error && <div className="workspace-alert">No workspace data is available.</div>}
 
@@ -220,6 +222,5 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
     <CreateAccountDialog open={accountDialog} onOpenChange={setAccountDialog} api={api} portfolios={portfolios} onCreated={created} />
     {managedPortfolio && <ManagePortfolioDialog key={managedPortfolio.id} portfolio={managedPortfolio} api={api} onClose={() => setManagedPortfolio(null)} onChanged={managementChanged} />}
     {managedAccount && <ManageAccountDialog key={managedAccount.id} account={managedAccount} portfolios={portfolios} api={api} onClose={() => setManagedAccount(null)} onChanged={managementChanged} onStale={reload} />}
-    {notice && <div className="workspace-toast" role="status"><Check size={16} />{notice}<button aria-label="Dismiss message" onClick={() => setNotice(null)}><X size={14} /></button></div>}
   </div>
 }

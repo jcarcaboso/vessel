@@ -6,6 +6,7 @@ import { createWorkspaceApi, type BrokerAccount, type InstrumentCatalog, type Wo
 import { ApiError } from '@/api/system'
 import { accountFixture, instrumentCatalogFixture } from '@/test/workspace-fixture'
 import { InstrumentPicker } from './InstrumentPicker'
+import { instrumentLabel, searchInstruments, useInstrumentCatalog } from './instruments'
 
 const wallet: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid' }
 function api() {
@@ -15,10 +16,15 @@ function Harness({ account = wallet, client, onChange = vi.fn() }: {
   account?: BrokerAccount; client: WorkspaceApi; onChange?: (value: string, source: 'manual' | 'venue') => void
 }) {
   const [selection, setSelection] = useState({ value: '', source: 'venue' as 'manual' | 'venue' })
-  return <InstrumentPicker account={account} api={client} {...selection} onChange={(value, source) => {
+  const catalog = useInstrumentCatalog(client, account)
+  return <InstrumentPicker catalog={catalog} {...selection} onChange={(value, source) => {
     setSelection({ value, source }); onChange(value, source)
   }} />
 }
+function Fixed({ client, value }: { client: WorkspaceApi; value: string }) {
+  return <InstrumentPicker catalog={useInstrumentCatalog(client, wallet)} value={value} source="venue" onChange={vi.fn()} />
+}
+const field = () => screen.getByRole('combobox', { name: 'Perpetual instrument' })
 function deferred() {
   let resolve!: (catalog: InstrumentCatalog) => void
   const promise = new Promise<InstrumentCatalog>(accept => { resolve = accept })
@@ -26,24 +32,66 @@ function deferred() {
 }
 
 describe('Venue instrument picker', () => {
-  it('retrieves exact venue contract choices without defaulting to a sample instrument', async () => {
+  it('searches exact venue contracts as pairs without defaulting to a sample instrument', async () => {
     const client = api(), onChange = vi.fn()
+    const user = userEvent.setup()
     render(<Harness client={client} onChange={onChange} />)
-    await screen.findByRole('option', { name: '1000PEPE perpetual' })
+    await waitFor(() => expect(field()).toBeEnabled())
     expect(client.instruments).toHaveBeenCalledWith(wallet.id, expect.any(AbortSignal))
-    expect(screen.getByRole('combobox', { name: 'Perpetual instrument' })).toHaveValue('')
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Perpetual instrument' }), '1000PEPE')
+    expect(field()).toHaveValue('')
+    await user.click(field())
+    expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['BTC/USDC40×', '1000PEPE/USDC10×'])
+    await user.type(field(), 'pepe')
+    expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['1000PEPE/USDC10×'])
+    await user.keyboard('{Enter}')
     expect(onChange).toHaveBeenLastCalledWith('1000PEPE', 'venue')
-    expect(screen.getByText(/Max 10×/)).toHaveAttribute('title', 'Catalogue maximum leverage. Full position validation is deferred.')
+    expect(field()).toHaveValue('1000PEPE/USDC')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(screen.getByText(/Max 10×/)).toHaveAttribute('title', 'Venue maximum leverage for this contract. The leverage control is limited to it.')
+  })
+  it('moves through matches with the arrow keys and restores the choice on Escape', async () => {
+    const client = api(), onChange = vi.fn()
+    const user = userEvent.setup()
+    render(<Harness client={client} onChange={onChange} />)
+    await waitFor(() => expect(field()).toBeEnabled())
+    await user.click(field())
+    await user.keyboard('{ArrowDown}')
+    expect(screen.getByRole('option', { selected: true })).toHaveTextContent('1000PEPE/USDC')
+    expect(field()).toHaveAttribute('aria-activedescendant', expect.stringContaining('1000PEPE'))
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(onChange).not.toHaveBeenCalled()
+    // Focus alone does not open the list.
+    await user.tab()
+    await user.tab({ shift: true })
+    expect(field()).toHaveFocus()
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    await user.type(field(), 'xyz')
+    expect(screen.getByText('No perpetual matches “xyz”.')).toBeInTheDocument()
+    await user.click(document.body)
+    expect(field()).toHaveValue('')
+  })
+  it('labels venue contracts as pairs in lists and keeps manual labels as entered', () => {
+    expect(instrumentLabel('hyperliquid', 'BTC', 'venue')).toBe('BTC/USDC')
+    expect(instrumentLabel('hyperliquid', 'BTC-PERP', 'manual')).toBe('BTC-PERP')
+    expect(instrumentLabel('manual', 'ES', 'manual')).toBe('ES')
+  })
+  it('ranks exact and prefix matches before other matches, keeping catalogue order', () => {
+    const list = ['ETHFI', 'ETH', 'METH', 'BTC'].map(contractId => ({ contractId, quantityDecimals: 2, maxLeverage: 5, quoteAsset: 'USDC' }))
+    expect(searchInstruments(list, 'eth').map(item => item.contractId)).toEqual(['ETH', 'ETHFI', 'METH'])
+    expect(searchInstruments(list, 'ETH/USDC').map(item => item.contractId)).toEqual(['ETH', 'METH'])
+    // Ties keep catalogue order, where the venue lists major contracts first.
+    expect(searchInstruments([...list, { ...list[0]!, contractId: 'BANANA' }], 'b').map(item => item.contractId)).toEqual(['BTC', 'BANANA'])
+    expect(searchInstruments(list, ' ').map(item => item.contractId)).toEqual(['ETHFI', 'ETH', 'METH', 'BTC'])
   })
   it('shows a disabled loading selector until metadata arrives', async () => {
     const request = deferred(), client = api()
     client.instruments.mockReturnValue(request.promise)
     render(<Harness client={client} />)
-    expect(screen.getByRole('combobox', { name: 'Perpetual instrument' })).toBeDisabled()
-    expect(screen.getByRole('combobox', { name: 'Perpetual instrument' })).toHaveAttribute('aria-busy', 'true')
+    expect(field()).toBeDisabled()
+    expect(field()).toHaveAttribute('aria-busy', 'true')
     await act(async () => request.resolve(instrumentCatalogFixture))
-    expect(screen.getByRole('combobox', { name: 'Perpetual instrument' })).toBeEnabled()
+    expect(field()).toBeEnabled()
   })
   it('offers safe retry and an explicit manual fallback after a failed read', async () => {
     const client = api()
@@ -51,7 +99,7 @@ describe('Venue instrument picker', () => {
     render(<Harness client={client} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('Catalogue unavailable.')
     await userEvent.click(screen.getByRole('button', { name: 'Retry instruments' }))
-    await screen.findByRole('option', { name: 'BTC perpetual' })
+    await waitFor(() => expect(field()).toBeEnabled())
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(client.instruments).toHaveBeenCalledTimes(2)
     await userEvent.click(screen.getByRole('button', { name: 'Enter manually' }))
@@ -74,10 +122,10 @@ describe('Venue instrument picker', () => {
     const signal = client.instruments.mock.calls[0]![1] as AbortSignal
     view.rerender(<Harness client={client} account={{ ...wallet, id: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee' }} />)
     expect(signal.aborted).toBe(true)
-    await act(async () => second.resolve({ ...instrumentCatalogFixture, instruments: [{ contractId: 'ETH', quantityDecimals: 4, maxLeverage: 20 }] }))
+    await act(async () => second.resolve({ ...instrumentCatalogFixture, instruments: [{ contractId: 'ETH', quantityDecimals: 4, maxLeverage: 20, quoteAsset: 'USDC' }] }))
     await act(async () => first.resolve(instrumentCatalogFixture))
-    expect(screen.getByRole('option', { name: 'ETH perpetual' })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: 'BTC perpetual' })).not.toBeInTheDocument()
+    await userEvent.click(field())
+    expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['ETH/USDC20×'])
   })
   it('cancels metadata on unmount without invoking another request', () => {
     const client = api(), request = deferred()
@@ -93,13 +141,12 @@ describe('Venue instrument picker', () => {
     client.instruments.mockResolvedValue({ ...instrumentCatalogFixture, venueId: 'manual', scope: 'manual', instruments: [] })
     render(<Harness client={client} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('does not match the selected venue')
-    expect(screen.getByRole('combobox', { name: 'Perpetual instrument' })).toBeDisabled()
+    expect(field()).toBeDisabled()
   })
   it('keeps a removed contract visible as unverified rather than inventing its current availability', async () => {
-    const client = api()
-    render(<InstrumentPicker account={wallet} api={client} value="OLD" source="venue" onChange={vi.fn()} />)
-    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Perpetual instrument' })).toBeEnabled())
-    expect(screen.getByRole('option', { name: 'OLD · not in current catalogue' })).toBeDisabled()
-    expect(screen.getByRole('combobox', { name: 'Perpetual instrument' })).toHaveValue('OLD')
+    render(<Fixed client={api()} value="OLD" />)
+    await waitFor(() => expect(field()).toBeEnabled())
+    expect(screen.getByText(/OLD is not in the current catalogue/)).toBeInTheDocument()
+    expect(field()).toHaveValue('OLD')
   })
 })

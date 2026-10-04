@@ -145,8 +145,11 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             var members = accounts.Where(a => a.PortfolioId == p.Id).ToList();
             var enabledMembers = members.Where(a => a.IsEnabled).ToList();
             var values = enabledMembers.Select(Value).Where(v => v.HasValue).ToList();
+            var balances = enabledMembers.Select(a => Balance(a, snapshots.GetValueOrDefault(a.Id))).Where(v => v.HasValue).ToList();
             return new PortfolioDto(p.Id, p.Name, members.Count, values.Count == 0 ? null : StablecoinTotals.Sum(values.Select(v => v!.Value)),
-                values.Count == 0 ? "unavailable" : values.Count == enabledMembers.Count ? "complete" : "partial");
+                values.Count == 0 ? "unavailable" : values.Count == enabledMembers.Count ? "complete" : "partial",
+                balances.Count == 0 ? null : StablecoinTotals.Sum(balances.Select(v => v!.Value)),
+                balances.Count == 0 ? "unavailable" : balances.Count == enabledMembers.Count ? "complete" : "partial");
         }).ToList();
     }
 
@@ -249,7 +252,23 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         Money(a.VenueId == "manual" ? a.ManualAccountValueUsd : s?.AccountValueUsd), a.LastSyncedAtUtc,
         a.SyncStatus, a.LastSyncError, a.IsEnabled ? s?.Positions.Count ?? 0 : 0, a.HistoryNotice, a.IsEnabled, a.SettingsRevision,
         s?.StablecoinsObservedAtUtc is null ? null : StablecoinTotals.Sum(s.Stablecoins.Select(balance => balance.Available)),
-        s?.StablecoinScope, s?.AccountMode);
+        s?.StablecoinScope, s?.AccountMode,
+        s?.StablecoinsObservedAtUtc is null ? null : StablecoinTotals.Sum(s.Stablecoins.Select(balance => balance.Total)),
+        Balance(a, s) is { } balance ? StablecoinTotals.Sum([balance]) : null);
+
+    /// <summary>
+    /// What the account holds in nominal USD. Unified and portfolio-margin accounts keep every balance in the spot
+    /// wallet (their perp state is not meaningful), so the wallet total is the balance. Other modes keep separate perp and
+    /// spot ledgers, so perps equity and the wallet total add up. Supported stablecoins only; other assets are excluded.
+    /// </summary>
+    private static decimal? Balance(Account a, AccountSnapshot? s)
+    {
+        if (a.VenueId == "manual") return a.ManualAccountValueUsd;
+        if (s is null) return null;
+        decimal? wallet = s.StablecoinsObservedAtUtc is null ? null : s.Stablecoins.Sum(balance => balance.Total);
+        if (s.AccountMode is "unifiedAccount" or "portfolioMargin") return wallet;
+        return s.AccountValueUsd is { } perps ? perps + (wallet ?? 0) : wallet;
+    }
     private static StablecoinWalletDto? WalletDto(AccountSnapshot snapshot) =>
         snapshot.StablecoinsObservedAtUtc is not { } observed ? null :
         new(observed, snapshot.AccountMode!, snapshot.StablecoinScope!,

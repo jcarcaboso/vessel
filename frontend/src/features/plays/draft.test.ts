@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createDraft, createEntry, createTarget } from './draft'
+import { createDraft, createEntry, createExit } from './draft'
 
 describe('local play drafts', () => {
   it('starts empty and works without secure-context UUID support', () => {
@@ -24,7 +24,7 @@ describe('local play drafts', () => {
     const ids = [
       first.entries[0]!.id, second.entries[0]!.id,
       first.entries[0]!.targets[0]!.id, second.entries[0]!.targets[0]!.id,
-      createEntry(1).id, createTarget().id,
+      createEntry(1).id, createExit().id,
     ]
     expect(new Set(ids).size).toBe(ids.length)
   })

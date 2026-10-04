@@ -5,9 +5,12 @@ using Vessel.Application.Workspace;
 
 namespace Vessel.Application.Plays;
 
-public sealed record PlanLevel(string Id, string Unit, string Value);
-public sealed record PlanTarget(string Id, string Unit, string Value, string Share);
-public sealed record PlanEntry(string Id, string Name, string Color, string Share, string Price, PlanLevel Stop, IReadOnlyList<PlanTarget> Targets);
+/// <summary>
+/// A stop or target of one entry. A percent value is the return on margin at the plan's leverage, so the
+/// price distance from the entry is the value divided by the leverage. Share is the part of the entry it closes.
+/// </summary>
+public sealed record PlanExit(string Id, string Unit, string Value, string Share);
+public sealed record PlanEntry(string Id, string Name, string Color, string Share, string Price, IReadOnlyList<PlanExit> Stops, IReadOnlyList<PlanExit> Targets);
 public sealed record PlanNotes(string Thesis, string Invalidation, string Strategy, string Evidence);
 
 /// <summary>
@@ -22,6 +25,7 @@ public static partial class PlayDocuments
 {
     public const int MaxEntries = 20;
     public const int MaxTargets = 10;
+    public const int MaxStops = 10;
     public const int MaxNoteLength = 20000;
     public const int MaxDrawingsLength = 1_000_000;
     public const int MaxDrawingInstruments = 100;
@@ -43,19 +47,39 @@ public static partial class PlayDocuments
         string Id(string? id) => id is not null && IdPattern().IsMatch(id) && ids.Add(id) ? id : throw Invalid("Plan items need unique IDs.");
         var entries = plan.Entries.Select(entry =>
         {
-            if (entry is null || entry.Stop is null || entry.Targets is null) throw Invalid("Entries need a stop and targets.");
+            if (entry is null || entry.Stops is null || entry.Targets is null) throw Invalid("Entries need stop and target lists.");
             if (entry.Targets.Count > MaxTargets) throw Invalid($"An entry has at most {MaxTargets} targets.");
+            if (entry.Stops.Count > MaxStops) throw Invalid($"An entry has at most {MaxStops} stops.");
             if (entry.Name is null || entry.Name.Length is 0 or > 100 || entry.Name.Any(char.IsControl)) throw Invalid("Entry names need 1 to 100 characters.");
             if (entry.Color is null || !ColorPattern().IsMatch(entry.Color)) throw Invalid("Entry colours must be #rrggbb.");
             return new PlanEntry(Id(entry.Id), entry.Name, entry.Color.ToLowerInvariant(), Number(entry.Share), Number(entry.Price),
-                new PlanLevel(Id(entry.Stop.Id), Unit(entry.Stop.Unit), Number(entry.Stop.Value)),
-                entry.Targets.Select(target => target is null ? throw Invalid("Targets must not be null.")
-                    : new PlanTarget(Id(target.Id), Unit(target.Unit), Number(target.Value), Number(target.Share))).ToList());
+                Exits(entry.Stops, "Stops"), Exits(entry.Targets, "Targets"));
         }).ToList();
+        List<PlanExit> Exits(IEnumerable<PlanExit> exits, string kind) => exits.Select(exit => exit is null ? throw Invalid($"{kind} must not be null.")
+            : new PlanExit(Id(exit.Id), Unit(exit.Unit), Number(exit.Value), Number(exit.Share))).ToList();
+        foreach (var entry in entries) RequireSides(entry, plan.Direction);
         return new PlayPlanDocument(plan.Direction, plan.SizingMode, Number(plan.Size), plan.Leverage,
             plan.BudgetOverride is null ? null : Number(plan.BudgetOverride), entries,
             new PlanNotes(Note(plan.Notes.Thesis), Note(plan.Notes.Invalidation), Note(plan.Notes.Strategy), Note(plan.Notes.Evidence)));
     }
+
+    /// <summary>
+    /// Price stops and targets must sit on their side of a priced entry: long stops below and targets above,
+    /// short the reverse. Percent levels are placed by direction, so they always do.
+    /// </summary>
+    private static void RequireSides(PlanEntry entry, string direction)
+    {
+        if (Positive(entry.Price) is not { } entryPrice) return;
+        foreach (var (kind, exits) in new[] { ("stop", entry.Stops), ("target", entry.Targets) })
+        {
+            var above = kind == "target" == (direction == "long");
+            if (exits.Any(exit => exit.Unit == "price" && Positive(exit.Value) is { } price && (above ? price <= entryPrice : price >= entryPrice)))
+                throw Invalid($"{entry.Name}: a {direction} {kind} goes {(above ? "above" : "below")} the entry price.");
+        }
+    }
+
+    private static decimal? Positive(string value) =>
+        decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && number > 0 ? number : null;
 
     /// <summary>A plan is ready to commit when at least one entry has a positive price.</summary>
     public static void RequirePlannable(PlayPlanDocument plan)

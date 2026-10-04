@@ -47,7 +47,7 @@ export function ExecutionPanel({ execution, error, busy, entries, onCheck, onLin
         <span><strong>{levelName(entries, link)}</strong>{link.order && <small>{describeOrder(link.order)} · {link.order.status}</small>}</span>
         <span className="execution-actions">
           <Button size="sm" disabled={busy || !editable || !link.order} onClick={() => onLink({ orderId: link.order?.orderId ?? '', role: link.role,
-            ...(link.entryId ? { entryId: link.entryId } : {}), ...(link.targetId ? { targetId: link.targetId } : {}) })}>
+            ...(link.entryId ? { entryId: link.entryId } : {}), ...(link.levelId ? { levelId: link.levelId } : {}) })}>
             <Link2 size={13} />Link here</Button>
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => onUnlink(link.id)}>Not this play</Button>
         </span>

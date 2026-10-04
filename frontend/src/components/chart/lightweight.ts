@@ -247,6 +247,14 @@ class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   }
 }
 
+/** Pixels within which the magnet pulls an anchor to a candle's open, high, low or close. */
+const magnetReach = 12
+
+const timeLabel = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })
+
+/** Bars of space right of the last candle when a chart opens. */
+const openingRightOffset = 12
+
 export const createLightweightAdapter: ChartAdapterFactory = (container, callbacks) => {
   const theme = readTheme(container)
   const chart: IChartApi = createChart(container, {
@@ -257,7 +265,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     },
     grid: { vertLines: { color: theme.grid }, horzLines: { color: theme.grid } },
     rightPriceScale: { borderColor: theme.border },
-    timeScale: { borderColor: theme.border, timeVisible: true, secondsVisible: false },
+    // Room right of the last candle keeps it clear of the price scale labels and level tags when the chart opens.
+    timeScale: { borderColor: theme.border, timeVisible: true, secondsVisible: false, rightOffset: openingRightOffset },
     crosshair: { mode: CrosshairMode.Normal },
   })
   const series = chart.addSeries(CandlestickSeries, {
@@ -272,23 +281,50 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   let loaded: readonly ChartCandle[] = []
   let index = new TimeIndex([])
 
+  /**
+   * The library converts only whole bars (x → bar rounds up, a fractional bar → 0), which would tie every
+   * anchor to a candle. Bars are evenly spaced, so drawings convert linearly from bars 0 and 1.
+   */
+  const barAxis = () => {
+    const scale = chart.timeScale()
+    const origin = scale.logicalToCoordinate(0 as Logical)
+    const next = scale.logicalToCoordinate(1 as Logical)
+    return origin === null || next === null || next === origin ? null : { origin, spacing: next - origin }
+  }
+  const floatLogical = (x: number) => {
+    const axis = barAxis()
+    return axis ? (x - axis.origin) / axis.spacing : chart.timeScale().coordinateToLogical(x)
+  }
   const space: DrawingSpace = {
     x: time => {
       const logical = index.logical(time)
-      return logical === null ? null : chart.timeScale().logicalToCoordinate(logical as Logical)
+      const axis = barAxis()
+      return logical === null || !axis ? null : axis.origin + logical * axis.spacing
     },
     y: price => series.priceToCoordinate(price),
     point: (x, y, snap) => {
-      const logical = chart.timeScale().coordinateToLogical(x)
+      const logical = floatLogical(x)
       const price = series.coordinateToPrice(y)
       if (logical === null || price === null || !Number.isFinite(price) || price <= 0) return null
       const candle = snap ? loaded[index.candleIndex(logical) ?? -1] : undefined
-      if (candle) return { time: candle.time, price: snapPrice(candle, price) }
+      if (candle) {
+        // Snap only near a candle price, so a click away from the candles keeps the price under the cursor.
+        const snapped = snapPrice(candle, price)
+        const snappedY = series.priceToCoordinate(snapped)
+        return { time: candle.time, price: snappedY !== null && Math.abs(snappedY - y) <= magnetReach ? snapped : price }
+      }
       const time = index.time(logical)
       return time === null ? null : { time, price }
     },
     width: () => chart.timeScale().width(),
+    height: () => chart.paneSize().height,
     formatPrice: price => series.priceFormatter().format(price),
+    formatTime: time => timeLabel.format(new Date(time)),
+    bars: (from, to) => {
+      const start = index.logical(from)
+      const end = index.logical(to)
+      return start === null || end === null ? null : end - start
+    },
   }
   const drawingsLayer = new DrawingsPrimitive({
     line: theme.drawing, text: theme.foreground, muted: theme.muted, background: theme.card,
@@ -313,6 +349,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   // Drawings and level drags are handled before the chart sees the pointer, so panning stays off while they move.
   let drag: { id: string; pointerId: number; price: number; moved: boolean } | null = null
   let drawingPointer: number | null = null
+  // While picking, a click on the pane reports its price instead of panning, drawing or dragging.
+  let picking = false
   const pane = (event: PointerEvent) => {
     const rect = container.getBoundingClientRect()
     return { x: event.clientX - rect.left, y: event.clientY - rect.top }
@@ -324,6 +362,12 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     const { x, y } = pane(event)
     if (x > chart.timeScale().width()) return
     container.focus({ preventScroll: true })
+    if (picking) {
+      consume(event)
+      const point = space.point(x, y, drawings.magnet)
+      if (point) callbacks.onPricePick(point.price)
+      return
+    }
     if (!index.empty && drawings.pointerDown(x, y)) {
       consume(event)
       drawingPointer = event.pointerId
@@ -344,7 +388,17 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     container.setPointerCapture?.(event.pointerId)
     lockChart(true)
   }
+  // While a tool is active, the chart's crosshair (which jumps from bar to bar) gives way to a free guide.
+  let guiding = false
+  const updateGuide = () => {
+    const active = picking || drawings.tool !== null
+    if (active === guiding) return
+    guiding = active
+    chart.applyOptions({ crosshair: { vertLine: { visible: !active, labelVisible: !active } } })
+    if (!active) drawings.setGuide(null)
+  }
   const onPointerMove = (event: PointerEvent) => {
+    if (guiding) drawings.setGuide(pane(event).x)
     if (drawings.busy) {
       const { x, y } = pane(event)
       if (drawings.pointerMove(x, y)) consume(event)
@@ -383,7 +437,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     const rect = container.getBoundingClientRect()
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
-    if (x > chart.timeScale().width() || drawings.tool || drawings.drawingAt(x, y)) return
+    if (x > chart.timeScale().width() || picking || drawings.tool || drawings.drawingAt(x, y)) return
     const hit = levels.levelAt(y)
     if (!hit || hit.overlay.kind === 'reference') return
     event.preventDefault()
@@ -394,6 +448,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   container.addEventListener('pointermove', onPointerMove, true)
   container.addEventListener('pointerup', endDrag, true)
   container.addEventListener('pointercancel', endDrag, true)
+  const onPointerLeave = () => drawings.setGuide(null)
+  container.addEventListener('pointerleave', onPointerLeave)
 
   const adapter: ChartAdapter = {
     setCandles(candles, reset) {
@@ -409,7 +465,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       })))
       if (reset) {
         chart.priceScale('right').applyOptions({ autoScale: true })
-        chart.timeScale().scrollToRealTime()
+        // Jump, not animate, to the latest candles.
+        chart.timeScale().scrollToPosition(openingRightOffset, false)
       }
     },
     setOverlays(overlays) {
@@ -426,27 +483,38 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
         drawings.setTool(tool)
         lockChart(false)
       }
+      updateGuide()
     },
-    capture(caption) {
-      // Levels and drawings are series primitives, so they are on the screenshot canvas.
-      const shot = chart.takeScreenshot(true, false)
-      const ratio = shot.width / Math.max(1, container.clientWidth)
-      const footer = Math.round(26 * ratio)
-      const canvas = document.createElement('canvas')
-      canvas.width = shot.width
-      canvas.height = shot.height + footer
-      const context = canvas.getContext('2d')
-      if (!context) return Promise.resolve(null)
-      context.drawImage(shot, 0, 0)
-      context.fillStyle = theme.card
-      context.fillRect(0, shot.height, canvas.width, footer)
-      context.fillStyle = theme.border
-      context.fillRect(0, shot.height, canvas.width, Math.max(1, Math.round(ratio)))
-      context.font = `500 ${Math.round(11 * ratio)}px ${theme.font}`
-      context.fillStyle = theme.muted
-      context.textBaseline = 'middle'
-      context.fillText(caption, Math.round(10 * ratio), shot.height + footer / 2)
-      return new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+    setPricePicker(active) {
+      picking = active
+      container.style.cursor = active ? 'crosshair' : ''
+      updateGuide()
+    },
+    async capture(caption) {
+      // Levels and drawings are series primitives, so they are on the screenshot canvas. Browsers with
+      // canvas fingerprinting protection can refuse or blank the export; the caller reports a null result.
+      try {
+        const shot = chart.takeScreenshot(true, false)
+        const ratio = shot.width / Math.max(1, container.clientWidth)
+        const footer = Math.round(26 * ratio)
+        const canvas = document.createElement('canvas')
+        canvas.width = shot.width
+        canvas.height = shot.height + footer
+        const context = canvas.getContext('2d')
+        if (!context || !shot.width || !shot.height) return null
+        context.drawImage(shot, 0, 0)
+        context.fillStyle = theme.card
+        context.fillRect(0, shot.height, canvas.width, footer)
+        context.fillStyle = theme.border
+        context.fillRect(0, shot.height, canvas.width, Math.max(1, Math.round(ratio)))
+        context.font = `500 ${Math.round(11 * ratio)}px ${theme.font}`
+        context.fillStyle = theme.muted
+        context.textBaseline = 'middle'
+        context.fillText(caption, Math.round(10 * ratio), shot.height + footer / 2)
+        return await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+      } catch {
+        return null
+      }
     },
     destroy() {
       container.removeEventListener('dblclick', onDoubleClick)
@@ -454,6 +522,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       container.removeEventListener('pointermove', onPointerMove, true)
       container.removeEventListener('pointerup', endDrag, true)
       container.removeEventListener('pointercancel', endDrag, true)
+      container.removeEventListener('pointerleave', onPointerLeave)
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
       chart.remove()
     },

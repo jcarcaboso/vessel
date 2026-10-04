@@ -174,7 +174,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         link.Ignore(x => x.LevelKey);
         link.Property(x => x.OrderId).HasMaxLength(128);
         link.Property(x => x.EntryId).HasMaxLength(64);
-        link.Property(x => x.TargetId).HasMaxLength(64);
+        link.Property(x => x.LevelId).HasMaxLength(64);
         link.Property(x => x.Role).HasConversion<string>().HasMaxLength(16);
         link.Property(x => x.State).HasConversion<string>().HasMaxLength(16);
         link.Property(x => x.Source).HasConversion<string>().HasMaxLength(16);

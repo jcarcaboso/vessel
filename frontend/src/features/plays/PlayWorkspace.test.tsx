@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { pickInstrument } from '@/test/instrument'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
 import { accountFixture, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { PlayWorkspace } from './PlayWorkspace'
@@ -35,7 +36,7 @@ describe('Play draft workspace', () => {
     const onDraft = vi.fn<(draft: PlayDraft) => void>()
     const view = render(<ReloadedWorkspace accounts={[venue]} onDraft={onDraft} />)
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
-    await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Perpetual instrument' }), 'BTC')
+    await pickInstrument(userEvent, 'BTC')
     expect(onDraft.mock.lastCall?.[0]).toMatchObject({ accountId: venue.id, instrument: 'BTC', instrumentSource: 'venue' })
     view.rerender(<ReloadedWorkspace accounts={[{ ...venue, isEnabled: false }]} onDraft={onDraft} />)
     expect(onDraft.mock.lastCall?.[0]).toMatchObject({ accountId: '', instrument: '', instrumentSource: 'manual', budgetOverride: null })
@@ -54,16 +55,16 @@ describe('Play draft workspace', () => {
     expect(left.children[1]).toBe(screen.getByTestId('journal-panel'))
     expect(workspace.children[0]).toBe(left)
     expect(workspace.children[1]).toBe(screen.getByTestId('position-panel'))
-    expect(workspace.previousElementSibling).toHaveClass('workspace-toolbar')
+    expect(workspace.previousElementSibling).toBe(screen.getByTestId('capital-context'))
     expect(screen.getByTestId('capital-context').compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(workspace.nextElementSibling).toBe(screen.getByTestId('summary-panel'))
-    expect(screen.getByRole('status')).toHaveTextContent('Unsaved draft')
-    expect(screen.getByRole('status')).toHaveTextContent('disconnecting discards them')
+    // A local draft shows no banner; the status badge and buttons say enough.
+    expect(document.querySelector('.plays-draft-notice')).toBeNull()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('')
     expect(screen.getByRole('textbox', { name: 'Perpetual instrument' })).toHaveValue('')
     expect(screen.queryByRole('img', { name: /candles/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Save/ })).not.toBeInTheDocument()
-    expect(within(screen.getByTestId('summary-panel')).getAllByText('Not calculated').length).toBeGreaterThan(0)
+    expect(within(screen.getByTestId('summary-panel')).getAllByText('Needs a size').length).toBeGreaterThan(0)
   })
 
   it('uses a real enabled account without assuming its value is an available budget', async () => {
@@ -72,19 +73,20 @@ describe('Play draft workspace', () => {
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
     const capital = within(screen.getByTestId('capital-context'))
     expect(capital.getAllByText('$1,250.12').length).toBeGreaterThan(0)
-    expect(within(screen.getByTestId('position-panel')).getByRole('textbox', { name: /^Available budget/ })).toHaveValue('Unavailable')
+    // The account has no available wallet amount, so its value is not used as a budget.
+    expect(within(screen.getByTestId('position-panel')).getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
   })
 
   it('never offers disabled accounts, and allows outlining a draft without accounts', () => {
     render(<Workspace disabled />)
     expect(screen.queryByRole('option', { name: /Main account/ })).not.toBeInTheDocument()
-    expect(screen.getByText(/No enabled accounts are available/)).toBeInTheDocument()
+    expect(screen.getByText(/No enabled accounts yet/)).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toBeEnabled()
   })
 
   it('does not claim accounts are empty while the account context is still loading', () => {
     render(<PlayWorkspace accounts={[]} portfolios={[]} api={createWorkspaceApi('test-only')} draft={createDraft()} onChange={vi.fn()} loading />)
-    expect(screen.queryByText(/No enabled accounts are available/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/No enabled accounts yet/)).not.toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Account' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toBeEnabled()
   })
@@ -106,11 +108,11 @@ describe('Play draft workspace', () => {
 
   it('discards an unfinished budget edit when its account context changes', async () => {
     render(<Workspace />)
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    await userEvent.type(screen.getByRole('textbox', { name: /^Available budget/ }), '70')
+    await userEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Budget $' }), '70')
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
     expect(screen.queryByRole('button', { name: 'Save budget' })).not.toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: /^Available budget/ })).toHaveValue('Unavailable')
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
   })
 
   it('keeps original thesis and retrospective review independent', async () => {
@@ -130,16 +132,30 @@ describe('Play draft workspace', () => {
     const api = { ...createWorkspaceApi('test-only'), instruments }
     render(<AccountWorkspace accounts={[first, second]} api={api} />)
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), first.id)
-    await screen.findByRole('option', { name: 'BTC perpetual' })
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Perpetual instrument' }), 'BTC')
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    await userEvent.type(screen.getByRole('textbox', { name: /^Available budget/ }), '70')
+    await pickInstrument(userEvent, 'BTC')
+    await userEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Budget $' }), '70')
     await userEvent.click(screen.getByRole('button', { name: 'Save budget' }))
+    expect(screen.getByRole('group', { name: 'Budget' })).toHaveTextContent('$70.00manual')
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), second.id)
     expect(screen.getByRole('combobox', { name: 'Perpetual instrument' })).toHaveValue('')
-    expect(screen.getByRole('textbox', { name: /^Available budget/ })).toHaveValue('Unavailable')
-    await screen.findByRole('option', { name: 'BTC perpetual' })
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Perpetual instrument' })).toBeEnabled())
     expect(instruments).toHaveBeenLastCalledWith(second.id, expect.any(AbortSignal))
+  })
+
+  it('keeps leverage within the venue maximum of the chosen contract', async () => {
+    const wallet = { ...accountFixture, venueId: 'hyperliquid' }
+    const user = userEvent.setup()
+    render(<AccountWorkspace accounts={[wallet]} api={{ ...createWorkspaceApi('test-only'), ...catalogueApi }} />)
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), wallet.id)
+    await pickInstrument(user, 'BTC')
+    await user.click(screen.getByRole('button', { name: '25×' }))
+    expect(screen.getByRole('spinbutton', { name: 'Leverage (×)' })).toHaveValue(25)
+    await pickInstrument(user, '1000PEPE')
+    expect(screen.getByRole('spinbutton', { name: 'Leverage (×)' })).toHaveValue(10)
+    expect(screen.getByRole('slider', { name: 'Leverage slider (×)' })).toHaveAttribute('max', '10')
+    expect(screen.getByRole('link', { name: 'Open 1000PEPE/USDC on Hyperliquid' })).toBeInTheDocument()
   })
 
   it('filters accounts by real portfolio and unassigned grouping without inventing a portfolio', async () => {
@@ -179,11 +195,11 @@ describe('Play draft workspace', () => {
     }
     render(<CaptureWorkspace />)
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
-    await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Perpetual instrument' }), 'BTC')
+    await pickInstrument(userEvent, 'BTC')
     await screen.findByText(/Updated/)
     // The jsdom renderer stub cannot draw, so the capture reports a failure without touching the draft.
     await userEvent.click(screen.getByRole('button', { name: 'Capture chart' }))
-    expect(await screen.findByText('The chart could not be captured.')).toBeInTheDocument()
+    expect(await screen.findByText(/The chart could not be captured\./)).toBeInTheDocument()
     expect(onDraft.mock.lastCall?.[0].evidence).toEqual([])
   })
 })

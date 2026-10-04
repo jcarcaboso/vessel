@@ -1,6 +1,6 @@
 import { forwardRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
-import { Popover } from 'radix-ui'
+import { Popover, Tooltip } from 'radix-ui'
 
 /** One compact control row. `end` content is pushed to the right edge. */
 export function ChartToolbar({ label, children, end }: { label: string; children?: ReactNode; end?: ReactNode }) {
@@ -18,16 +18,35 @@ type IconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-label
   label: string
   icon: ReactNode
   pressed?: boolean
-  /** Explanation shown as a tooltip when the action is unavailable. */
+  /** Explanation shown in the tooltip when the action is unavailable. */
   disabledReason?: string
+  /** One line under the name in the tooltip, e.g. how to use a drawing tool. */
+  description?: string | undefined
+  tooltipSide?: 'top' | 'right' | 'bottom' | 'left'
 }
 
-/** Square icon action with a visible tooltip and an accessible name. */
+/**
+ * Square icon action with a tooltip naming it, and an accessible name. The tooltip is on a wrapper so
+ * it also explains disabled actions, which receive no pointer events.
+ */
 export const ChartIconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function ChartIconButton(
-  { label, icon, pressed, disabledReason, className, disabled, ...props }, ref) {
-  return <button ref={ref} type="button" className={['chart-icon-button', className].filter(Boolean).join(' ')}
-    aria-label={label} title={disabled && disabledReason ? `${label} · ${disabledReason}` : label}
-    aria-pressed={pressed} disabled={disabled} {...props}>{icon}</button>
+  { label, icon, pressed, disabledReason, description, tooltipSide = 'bottom', className, disabled, ...props }, ref) {
+  const detail = disabled && disabledReason ? disabledReason : description
+  return <Tooltip.Provider delayDuration={250} skipDelayDuration={400}>
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>
+        <span className="chart-icon-tip">
+          <button ref={ref} type="button" className={['chart-icon-button', className].filter(Boolean).join(' ')}
+            aria-label={label} aria-pressed={pressed} disabled={disabled} {...props}>{icon}</button>
+        </span>
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content className="chart-tooltip" side={tooltipSide} sideOffset={6} collisionPadding={8}>
+          <strong>{label}</strong>{detail && <span>{detail}</span>}
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  </Tooltip.Provider>
 })
 
 export interface ChartMenuOption<T extends string> {

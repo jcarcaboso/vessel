@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DrawingController, buildPoints, type DrawingSpace } from './drawingController'
-import { TimeIndex, fibonacciPrice, isChartDrawing, positionStats, snapPrice, type ChartDrawing } from './drawings'
+import { TimeIndex, fibonacciLevels, fibonacciPrice, formatDuration, goldenPocket, isChartDrawing, positionStats, priceRangeStats, snapPrice, type ChartDrawing } from './drawings'
 
 const hour = 3_600_000
 const candles = [0, 1, 2, 3].map(i => ({ time: 1_000 * hour + i * hour, open: 100 + i, high: 105 + i, low: 95 + i, close: 102 + i }))
@@ -41,6 +41,18 @@ describe('drawing geometry', () => {
     expect(positionStats([{ time: 0, price: 100 }, { time: 1, price: 80 }, { time: 1, price: 105 }])).toMatchObject({ side: 'short', ratio: 4 })
     expect(buildPoints('position', { time: 0, price: 10 }, { time: 1, price: 50 })[2]!.price).toBeGreaterThan(0)
   })
+  it('includes the golden pocket between 0.618 and 0.65', () => {
+    expect(fibonacciLevels).toEqual([0, 0.236, 0.382, 0.5, 0.618, 0.65, 0.786, 1])
+    expect(goldenPocket.map(level => fibonacciPrice({ time: 0, price: 100 }, { time: 1, price: 200 }, level))).toEqual([138.2, 135])
+  })
+  it('measures price and date ranges for display', () => {
+    expect(priceRangeStats({ time: 0, price: 80 }, { time: 1, price: 100 })).toEqual({ change: 20, percent: 25 })
+    expect(priceRangeStats({ time: 0, price: 100 }, { time: 1, price: 80 })).toEqual({ change: -20, percent: -20 })
+    expect(formatDuration(45 * 60_000)).toBe('45m')
+    expect(formatDuration(-(2 * 60 + 15) * 60_000)).toBe('2h 15m')
+    expect(formatDuration((3 * 24 + 4) * 3_600_000)).toBe('3d 4h')
+    expect(formatDuration(2 * 24 * 3_600_000)).toBe('2d')
+  })
   it('validates stored drawings by kind and anchors', () => {
     const valid: ChartDrawing = { id: 'a', schemaVersion: 1, kind: 'trend-line', points: [{ time: 1, price: 2 }, { time: 3, price: 4 }] }
     expect(isChartDrawing(valid)).toBe(true)
@@ -48,6 +60,9 @@ describe('drawing geometry', () => {
     expect(isChartDrawing({ ...valid, schemaVersion: 2 })).toBe(false)
     expect(isChartDrawing({ ...valid, points: [{ time: 1, price: -2 }, { time: 3, price: 4 }] })).toBe(false)
     expect(isChartDrawing({ ...valid, kind: 'position', points: [{ time: 1, price: 2 }, { time: 3, price: 4 }, { time: 3, price: 1 }] })).toBe(true)
+    expect(isChartDrawing({ ...valid, kind: 'vertical-line', points: [{ time: 1, price: 2 }] })).toBe(true)
+    expect(isChartDrawing({ ...valid, kind: 'date-range' })).toBe(true)
+    expect(isChartDrawing({ ...valid, kind: 'price-range', points: [{ time: 1, price: 2 }] })).toBe(false)
   })
 })
 
@@ -57,7 +72,10 @@ const space: DrawingSpace = {
   y: price => 1000 - price,
   point: (x, y, snap) => ({ time: (snap ? Math.round(x / 60) * 60 : x) * 60_000, price: 1000 - y }),
   width: () => 800,
+  height: () => 600,
   formatPrice: price => price.toFixed(2),
+  formatTime: time => `t${time}`,
+  bars: (from, to) => (to - from) / 3_600_000,
 }
 
 function controller() {
@@ -112,6 +130,61 @@ describe('drawing controller', () => {
     expect(callbacks.onDrawingSelect).toHaveBeenLastCalledWith(null)
   })
 
+  it('moves a vertical line only in time and selects it near its x', () => {
+    const { callbacks, drawings } = controller()
+    drawings.setTool('vertical-line')
+    drawings.pointerDown(300, 420)
+    const created = callbacks.onDrawingCreate.mock.lastCall![0] as ChartDrawing
+    expect(created).toMatchObject({ kind: 'vertical-line', points: [{ time: 18_000_000, price: 580 }] })
+    drawings.setTool(null)
+    drawings.drawings = [created]
+    expect(drawings.drawingAt(303, 50)?.id).toBe(created.id)
+    expect(drawings.drawingAt(320, 50)).toBeNull()
+    drawings.pointerDown(300, 100)
+    drawings.pointerMove(340, 160)
+    drawings.pointerUp(340, 160)
+    expect(callbacks.onDrawingChange).toHaveBeenLastCalledWith({ ...created, points: [{ time: 20_400_000, price: 580 }] }, 'end')
+  })
+
+  it('draws date and price ranges as two-point boxes with handles', () => {
+    const { callbacks, drawings } = controller()
+    for (const kind of ['date-range', 'price-range'] as const) {
+      drawings.setTool(kind)
+      drawings.pointerDown(100, 500)
+      drawings.pointerMove(200, 400)
+      drawings.pointerUp(200, 400)
+      expect(callbacks.onDrawingCreate).toHaveBeenLastCalledWith(expect.objectContaining({
+        kind, points: [{ time: 6_000_000, price: 500 }, { time: 12_000_000, price: 600 }],
+      }))
+    }
+    const range = callbacks.onDrawingCreate.mock.lastCall![0] as ChartDrawing
+    drawings.setTool(null)
+    drawings.drawings = [range]
+    drawings.selectedId = range.id
+    expect(drawings.cursor(200, 400)).toBe('grab')
+    expect(drawings.cursor(150, 450)).toBe('move')
+  })
+
+  it('places long and short boxes by a click or sizes them by a drag, on the side of the tool', () => {
+    const { callbacks, drawings } = controller()
+    drawings.setTool('long-position')
+    drawings.pointerDown(100, 500)
+    drawings.pointerUp(100, 500)
+    // A click: entry at the pointer, target 60 px above, stop 40 px below, 140 px wide.
+    expect(callbacks.onDrawingCreate).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'long-position', points: [{ time: 6_000_000, price: 500 }, { time: 14_400_000, price: 560 }, { time: 14_400_000, price: 460 }],
+    }))
+    drawings.setTool('short-position')
+    drawings.pointerDown(100, 500)
+    drawings.pointerMove(200, 450)
+    drawings.pointerUp(200, 450)
+    // A drag upwards still makes a short: target below, stop mirrored above at 1R.
+    expect(callbacks.onDrawingCreate).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'short-position', points: [{ time: 6_000_000, price: 500 }, { time: 12_000_000, price: 450 }, { time: 12_000_000, price: 550 }],
+    }))
+    expect(isChartDrawing(callbacks.onDrawingCreate.mock.lastCall![0])).toBe(true)
+  })
+
   it('keeps position target and stop on the shared end time', () => {
     const { callbacks, drawings } = controller()
     const position: ChartDrawing = { id: 'p', schemaVersion: 1, kind: 'position', points: buildPoints('position', { time: 6_000_000, price: 500 }, { time: 12_000_000, price: 550 }) }
@@ -142,14 +215,15 @@ describe('drawing controller', () => {
 })
 
 describe('drawing hit areas', () => {
-  it('selects a Fibonacci only near its levels or diagonal, so drawings inside it stay reachable', () => {
+  it('keeps drawings inside a Fibonacci reachable and selects the Fibonacci elsewhere in it', () => {
     const { callbacks, drawings } = controller()
     const fib: ChartDrawing = { id: 'f', schemaVersion: 1, kind: 'fibonacci', points: [{ time: 6_000_000, price: 400 }, { time: 18_000_000, price: 600 }] }
-    const line: ChartDrawing = { id: 't', schemaVersion: 1, kind: 'trend-line', points: [{ time: 9_000_000, price: 470 }, { time: 15_000_000, price: 470 }] }
+    // Between the 0.382 (523.6) and 0.5 (500) levels.
+    const line: ChartDrawing = { id: 't', schemaVersion: 1, kind: 'trend-line', points: [{ time: 9_000_000, price: 512 }, { time: 15_000_000, price: 512 }] }
     drawings.drawings = [line, fib]
-    drawings.pointerDown(200, 530)
+    drawings.pointerDown(200, 488)
     expect(callbacks.onDrawingSelect).toHaveBeenLastCalledWith('t')
-    drawings.pointerUp(200, 530)
+    drawings.pointerUp(200, 488)
     drawings.pointerDown(250, 500)
     expect(callbacks.onDrawingSelect).toHaveBeenLastCalledWith('f')
   })

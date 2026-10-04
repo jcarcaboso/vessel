@@ -23,7 +23,7 @@ public sealed class InstrumentCatalogueTests
         store.Fills.Add(new ImportedFill { Id = Guid.NewGuid(), OwnerId = owner, AccountId = account.Id, ContractId = "ETH" });
         var before = JsonSerializer.Serialize(new { store.Accounts, store.Snapshots, store.Fills });
         var reader = new FixtureReader { Fail = failure };
-        reader.Result = reader.Result with { Instruments = [new("MiXeD", 5, 40), new("BTC", 0, 3)] };
+        reader.Result = reader.Result with { Instruments = [new("MiXeD", 5, 40, "USDC"), new("BTC", 0, 3, "USDC")] };
         var service = new WorkspaceService(store, new CoreOwner(owner), reader);
         using var caller = new CancellationTokenSource();
 

@@ -5,9 +5,9 @@ using Vessel.Domain.Workspace;
 namespace Vessel.Application.Plays.Execution;
 
 /// <summary>A plan level an order could belong to, with the price and side it implies.</summary>
-public sealed record PlanLevelTarget(OrderLinkRole Role, string? EntryId, string? TargetId, decimal? Price, string Side)
+public sealed record PlanLevelTarget(OrderLinkRole Role, string? EntryId, string? LevelId, decimal? Price, string Side)
 {
-    public string Key => PlayOrderLink.Key(Role, EntryId, TargetId);
+    public string Key => PlayOrderLink.Key(Role, EntryId, LevelId);
 }
 
 public sealed record MatchCandidate(Play Play, PlanLevelTarget Level);
@@ -21,18 +21,23 @@ public static class ExecutionMatcher
 
     public static bool IsActive(Play play) => play.Status is PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open;
 
-    /// <summary>Entries, stops and targets with prices resolved; percent levels use the entry price.</summary>
+    /// <summary>
+    /// Entries, stops and targets with prices resolved. A percent level is a return on margin, so its price
+    /// distance from the entry is the percentage divided by the plan's leverage.
+    /// </summary>
     public static IEnumerable<PlanLevelTarget> Levels(PlayPlanDocument plan)
     {
         var long_ = plan.Direction == "long";
+        var leverage = int.TryParse(plan.Leverage, NumberStyles.None, CultureInfo.InvariantCulture, out var value) && value >= 1 ? value : 1;
         string entrySide = long_ ? "B" : "A", exitSide = long_ ? "A" : "B";
         foreach (var entry in plan.Entries)
         {
             var price = Positive(entry.Price);
             yield return new(OrderLinkRole.Entry, entry.Id, null, price, entrySide);
-            yield return new(OrderLinkRole.Stop, entry.Id, null, Resolve(price, entry.Stop.Unit, entry.Stop.Value, below: long_), exitSide);
+            foreach (var stop in entry.Stops)
+                yield return new(OrderLinkRole.Stop, entry.Id, stop.Id, Resolve(price, stop, leverage, below: long_), exitSide);
             foreach (var target in entry.Targets)
-                yield return new(OrderLinkRole.Target, entry.Id, target.Id, Resolve(price, target.Unit, target.Value, below: !long_), exitSide);
+                yield return new(OrderLinkRole.Target, entry.Id, target.Id, Resolve(price, target, leverage, below: !long_), exitSide);
         }
     }
 
@@ -95,10 +100,11 @@ public static class ExecutionMatcher
         return value;
     }
 
-    private static decimal? Resolve(decimal? entry, string unit, string value, bool below)
+    private static decimal? Resolve(decimal? entry, PlanExit exit, int leverage, bool below)
     {
-        if (unit == "price") return Positive(value);
-        if (entry is not { } price || !TryDecimal(value, out var distance) || distance < 0) return null;
+        if (exit.Unit == "price") return Positive(exit.Value);
+        if (entry is not { } price || !TryDecimal(exit.Value, out var percent) || percent < 0) return null;
+        var distance = percent / leverage;
         var resolved = price * (1 + (below ? -distance : distance) / 100);
         return resolved > 0 ? resolved : null;
     }

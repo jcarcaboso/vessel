@@ -1,5 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+/* One app typeface; Inter is self-hosted from @fontsource-variable/inter. */
+:root { --app-font: 'Inter Variable', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
 
 @custom-variant dark (&:is(.dark *));
 
@@ -61,7 +63,7 @@
 
 @layer base {
   * { border-color: var(--border); box-sizing: border-box; }
-  body { margin: 0; background: var(--background); color: var(--foreground); font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+  body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--app-font); font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: antialiased; font-size: 14px; line-height: 1.5; }
   h1, h2, p { margin: 0; }
   h1 { font-size: clamp(22px, 3vw, 30px); font-weight: 600; }
   h2 { font-size: 15px; font-weight: 600; }

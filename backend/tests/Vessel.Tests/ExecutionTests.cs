@@ -52,7 +52,7 @@ public sealed class ExecutionMatcherTests
         Assert.Equal("entry|entry-1", Assert.Single(Match(Order("B", 100.01m), play)).Level.Key);
         Assert.Empty(Match(Order("B", 100.02m), play));
         Assert.Empty(Match(Order("A", 100m), play));
-        Assert.Equal("stop|entry-1", Assert.Single(Match(Order("A", 94m, 95m, "Stop Market", true), play)).Level.Key);
+        Assert.Equal("stop|entry-1|stop-1", Assert.Single(Match(Order("A", 94m, 95m, "Stop Market", true), play)).Level.Key);
         // A resting limit at the stop price is not a stop.
         Assert.Empty(Match(Order("A", 95m, reduceOnly: true), play));
         Assert.Equal("target|entry-1|target-1", Assert.Single(Match(Order("A", 110m, reduceOnly: true), play)).Level.Key);
@@ -62,17 +62,35 @@ public sealed class ExecutionMatcherTests
     }
 
     [Fact]
-    public void Resolves_percent_levels_and_short_sides()
+    public void Resolves_percent_levels_as_returns_at_the_plan_leverage_and_short_sides()
     {
         var plan = TestPlays.Plan() with
         {
-            Direction = "short",
-            Entries = [TestPlays.Plan().Entries[0] with { Stop = new PlanLevel("stop-1", "percent", "5"), Targets = [new PlanTarget("target-1", "percent", "10", "100")] }],
+            Direction = "short", Leverage = "1",
+            Entries = [TestPlays.Plan().Entries[0] with { Stops = [new PlanExit("stop-1", "percent", "5", "100")], Targets = [new PlanExit("target-1", "percent", "10", "100")] }],
         };
         var play = Planned(plan);
         Assert.Single(Match(Order("A", 100m), play));
-        Assert.Equal("stop|entry-1", Assert.Single(Match(Order("B", 106m, 105m, "Stop Market", true), play)).Level.Key);
+        Assert.Equal("stop|entry-1|stop-1", Assert.Single(Match(Order("B", 106m, 105m, "Stop Market", true), play)).Level.Key);
         Assert.Equal("target|entry-1|target-1", Assert.Single(Match(Order("B", 90m, reduceOnly: true), play)).Level.Key);
+
+        // At 5x, a 5% loss on margin is a 1% move and a 10% gain is a 2% move.
+        var levered = Planned(plan with { Leverage = "5" });
+        Assert.Empty(Match(Order("B", 106m, 105m, "Stop Market", true), levered));
+        Assert.Equal("stop|entry-1|stop-1", Assert.Single(Match(Order("B", 102m, 101m, "Stop Market", true), levered)).Level.Key);
+        Assert.Equal("target|entry-1|target-1", Assert.Single(Match(Order("B", 98m, reduceOnly: true), levered)).Level.Key);
+    }
+
+    [Fact]
+    public void Each_stop_of_an_entry_is_its_own_level()
+    {
+        var plan = TestPlays.Plan() with
+        {
+            Entries = [TestPlays.Plan().Entries[0] with { Stops = [new PlanExit("stop-1", "price", "95", "50"), new PlanExit("stop-2", "price", "90", "50")] }],
+        };
+        var play = Planned(plan);
+        Assert.Equal("stop|entry-1|stop-1", Assert.Single(Match(Order("A", 94m, 95m, "Stop Market", true), play)).Level.Key);
+        Assert.Equal("stop|entry-1|stop-2", Assert.Single(Match(Order("A", 89m, 90m, "Stop Market", true), play)).Level.Key);
     }
 
     [Fact]
@@ -220,6 +238,27 @@ public sealed class ExecutionPostgresTests
         Assert.Empty((await h.Execution.GetAsync(first.Summary.Id, default)).Links);
         Assert.Single((await h.Execution.GetAsync(second.Summary.Id, default)).Links);
         Assert.NotEqual(Guid.Empty, suggestion.Id);
+    }
+
+    [PostgresFact]
+    public async Task The_owner_links_an_order_to_one_of_several_stops()
+    {
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var plan = TestPlays.Plan() with
+        {
+            Entries = [TestPlays.Plan().Entries[0] with { Stops = [new PlanExit("stop-1", "price", "95", "50"), new PlanExit("stop-2", "price", "90", "50")] }],
+        };
+        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Two stops", plan), default);
+        var play = await h.Plays.ChangeStatusAsync(draft.Summary.Id, new(draft.Summary.Version, "planned"), default);
+        h.Orders.Orders.AddRange([Order("41", "A", 89m, trigger: 90m, type: "Stop Market", reduceOnly: true), Order("42", "A", 80m, trigger: 85m, type: "Stop Market", reduceOnly: true)]);
+        var execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        var automatic = Assert.Single(execution.Links);
+        Assert.Equal(("41", "stop", "stop-2"), (automatic.Order!.OrderId, automatic.Role, automatic.LevelId));
+
+        await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.LinkAsync(play.Summary.Id, new("42", "stop", "entry-1", "target-1"), default));
+        execution = await h.Execution.LinkAsync(play.Summary.Id, new("42", "stop", "entry-1", "stop-1"), default);
+        Assert.Equal(["stop-1", "stop-2"], execution.Links.Select(l => l.LevelId));
     }
 
     [PostgresFact]
