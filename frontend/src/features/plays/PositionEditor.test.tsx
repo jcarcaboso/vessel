@@ -389,6 +389,31 @@ describe('local-draft position editor', () => {
     expect(screen.getByTestId('liquidation-estimate')).toHaveTextContent('Liq. ≈ 112.19')
   })
 
+  it('shows each entry its own liquidation estimate and follows a change of direction', async () => {
+    function Harness() {
+      const [draft, setDraft] = useState(createDraft)
+      return <>
+        <button type="button" onClick={() => setDraft(current => ({ ...current, direction: current.direction === 'long' ? 'short' : 'long' }))}>Flip</button>
+        <PositionEditor draft={draft} onChange={setDraft} selectedId={draft.entries[0]!.id} onSelect={() => {}} maxLeverage={20} />
+      </>
+    }
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.type(field('Entry 1 planned entry price (quote units)'), '121.54')
+    await user.click(screen.getByRole('button', { name: '10×' }))
+    expect(screen.getByTestId('entry-liquidation')).toHaveTextContent('Liq. ≈ 112.19 7.69% below entry')
+    await user.type(field('Entry 1 planned stop price (quote units)'), '112')
+    expect(field('Entry 1 planned stop price (quote units)')).toHaveAttribute('data-warning', 'true')
+    await user.click(screen.getByRole('button', { name: 'Flip' }))
+    expect(screen.getByTestId('entry-liquidation')).toHaveTextContent('Liq. ≈ 130.43 7.32% above entry')
+    expect(screen.getByTestId('liquidation-estimate')).toHaveTextContent('Liq. ≈ 130.43')
+    // Below a short's entry the stop is on the wrong side: an error, not a liquidation warning.
+    expect(field('Entry 1 planned stop price (quote units)')).not.toHaveAttribute('data-warning')
+    await user.clear(field('Entry 1 planned stop price (quote units)'))
+    await user.type(field('Entry 1 planned stop price (quote units)'), '131')
+    expect(field('Entry 1 planned stop price (quote units)')).toHaveAttribute('data-warning', 'true')
+  })
+
   it('holds the margin to the available amount and offers to use it', async () => {
     const onChange = vi.fn<(draft: PlayDraft) => void>()
     function Harness() {

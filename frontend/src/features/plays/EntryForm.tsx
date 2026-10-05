@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
 import { exitsOf, formatDraggedPrice, levelPrice, priceMovePercent, type ExitKind } from './levels'
 import { wrongSide } from './planChecks'
+import { estimatedLiquidation } from './sizing'
 
 function LevelUnits({ value, label, onChange }: {
   value: DraftExit['unit']
@@ -20,19 +21,23 @@ function LevelUnits({ value, label, onChange }: {
   </div>
 }
 
+const percent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
+
 const copy = {
   stop: { legend: 'Planned stops', singular: 'stop' },
   target: { legend: 'Planned targets', singular: 'target' },
 } as const
 
 /** Stops or targets of one entry. Each closes a share of the entry; percentages are returns at the play's leverage. */
-function ExitList({ entry, kind, direction, leverage, onChange, prefix }: {
+function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidation }: {
   entry: DraftEntry
   kind: ExitKind
   direction: PlayDraft['direction']
   leverage: number
   onChange: (entry: DraftEntry) => void
   prefix: string
+  /** The plan's estimated liquidation price; stops past it are flagged. */
+  liquidation: number | null
 }) {
   const exits = exitsOf(entry, kind)
   const text = copy[kind]
@@ -53,13 +58,17 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix }: {
       const resolved = exit.unit === 'percent' ? levelPrice(entryPrice, exit, kind, direction, leverage) : null
       const move = exit.unit === 'percent' && Number(exit.value) > 0 ? priceMovePercent(Number(exit.value), leverage) : null
       const wrong = wrongSide(entryPrice, exit, kind, direction)
+      const stopPrice = kind === 'stop' ? levelPrice(entryPrice, exit, kind, direction, leverage) : null
+      const pastLiquidation = !wrong && stopPrice !== null && liquidation !== null && (direction === 'long' ? stopPrice <= liquidation : stopPrice >= liquidation)
       return <div key={exit.id} className="exit-row" role="group" aria-label={`${entry.name} ${label(index)}`}>
         <LevelUnits label={`${entry.name} ${label(index)} units`} value={exit.unit}
           onChange={unit => update(exit.id, { unit, value: '' })} />
         <Input id={`${prefix}-${exit.id}-value`} type="number" step="any" min={0} className={kind === 'stop' ? 'exit-value-stop' : 'exit-value-target'}
           placeholder={exit.unit === 'price' ? '$' : kind === 'stop' ? 'Loss %' : 'Gain %'}
           aria-label={`${entry.name} planned ${label(index)} ${exit.unit === 'price' ? 'price (quote units)' : `return at ${leverage}× leverage (%)`}`}
-          aria-invalid={wrong || undefined} title={wrong ? `A ${direction} ${kind} goes ${(kind === 'target') === (direction === 'long') ? 'above' : 'below'} the entry price` : undefined}
+          aria-invalid={wrong || undefined} data-warning={pastLiquidation || undefined}
+          title={wrong ? `A ${direction} ${kind} goes ${(kind === 'target') === (direction === 'long') ? 'above' : 'below'} the entry price`
+            : pastLiquidation ? `Past the estimated liquidation price of ${formatDraggedPrice(liquidation!)}; it would not trigger first` : undefined}
           value={exit.value} onChange={event => update(exit.id, { value: event.target.value })} />
         <Input id={`${prefix}-${exit.id}-share`} type="number" step="any" min={0} max={100} placeholder="Share %" className="exit-share"
           aria-label={`${entry.name} ${label(index)} share (%)`} value={exit.share}
@@ -76,7 +85,7 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix }: {
   </fieldset>
 }
 
-export function EntryForm({ entry, onChange, idPrefix, direction = 'long', leverage = 1, shareLocked = false }: {
+export function EntryForm({ entry, onChange, idPrefix, direction = 'long', leverage = 1, shareLocked = false, maxLeverage = null, liquidation = null }: {
   entry: DraftEntry
   onChange: (entry: DraftEntry) => void
   idPrefix?: string
@@ -85,9 +94,16 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
   leverage?: number
   /** A single entry takes the whole position, so its share cannot change. */
   shareLocked?: boolean
+  /** Venue maximum for the contract, for the liquidation estimate; null when unknown. */
+  maxLeverage?: number | null
+  /** The whole plan's estimated liquidation price, which stops are checked against. */
+  liquidation?: number | null
 }) {
   const generatedId = useId()
   const prefix = idPrefix ?? generatedId
+  // With several entries this is the entry on its own; a single entry is the whole plan.
+  const own = estimatedLiquidation([{ ...entry, share: '100' }], direction, leverage, maxLeverage)
+  const entryPrice = Number(entry.price) > 0 ? Number(entry.price) : null
 
   return <div className="entry-fields">
     <label htmlFor={`${prefix}-share`}>
@@ -103,7 +119,12 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
         aria-label={`${entry.name} planned entry price (quote units)`} value={entry.price}
         onChange={event => onChange({ ...entry, price: event.target.value })} />
     </label>
-    <ExitList entry={entry} kind="stop" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} />
-    <ExitList entry={entry} kind="target" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} />
+    {own !== null && entryPrice !== null && <p className="entry-liquidation" data-testid="entry-liquidation"
+      title={`Estimated for isolated margin at ${leverage}×${shareLocked ? '' : ' if only this entry fills'}; ignores fees, funding and margin tiers. Cross margin liquidates further away.`}>
+      Liq. ≈ <strong>{formatDraggedPrice(own)}</strong>
+      {' '}<span>{percent.format(Math.abs(own - entryPrice) / entryPrice * 100)}% {direction === 'long' ? 'below' : 'above'} entry{shareLocked ? '' : ' · this entry alone'}</span>
+    </p>}
+    <ExitList entry={entry} kind="stop" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={liquidation ?? own} />
+    <ExitList entry={entry} kind="target" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={null} />
   </div>
 }

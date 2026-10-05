@@ -332,6 +332,12 @@
 .plays-entry-dialog .entry-fields label > span { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 3px; font-size: inherit; }
 .plays-page .entry-fields input,
 .plays-entry-dialog .entry-fields input { height: 35px; padding: 8px 9px; font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.plays-page .entry-liquidation,
+.plays-entry-dialog .entry-liquidation { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; grid-column: 1 / -1; margin: -6px 0 0; color: var(--muted-foreground); font-size: 10px; font-variant-numeric: tabular-nums; }
+.plays-page .entry-liquidation strong,
+.plays-entry-dialog .entry-liquidation strong { color: var(--negative); font-size: 11px; font-weight: 600; }
+.plays-page .entry-fields input[data-warning="true"],
+.plays-entry-dialog .entry-fields input[data-warning="true"] { border-color: var(--warning); }
 .plays-page .entry-fields small,
 .plays-entry-dialog .entry-fields small { color: var(--muted-foreground); font-size: 9px; }
 .plays-page .entry-fields > p,

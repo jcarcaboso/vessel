@@ -221,7 +221,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
                   {draft.entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
                 </select>
               </label>
-              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} />}
+              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation} />}
             </DialogContent>
           </Dialog>
         </div>
@@ -241,7 +241,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
               {draft.entries.length > 1 && <Button type="button" variant="ghost" size="icon-sm" className="remove-entry" aria-label={`Remove ${entry.name}`}
                 title={`Remove ${entry.name}`} onClick={() => removeEntry(entry.id)}><Trash2 size={13} aria-hidden="true" /></Button>}
             </div>
-            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} />}
+            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation} />}
             {expanded && selected?.id === entry.id && <p className="muted expanded-placeholder">Editing in the expanded view.</p>}
           </article>)}
         </div>
