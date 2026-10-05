@@ -10,7 +10,7 @@ import { DirectionToggle } from './DirectionToggle'
 import { InstrumentPicker } from './InstrumentPicker'
 import { pairLabel, useInstrumentCatalog } from './instruments'
 import { leverageOf } from './levels'
-import { defaultSizeUnits, type SizeUnits } from './sizing'
+import { defaultSizeUnits, estimatedLiquidation, type SizeUnits } from './sizing'
 import { PlanNotices } from './PlanNotices'
 import { PositionEditor } from './PositionEditor'
 import { ChartPanel } from './PlayChart'
@@ -155,7 +155,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       </div>
       <div className="plays-context-status"><span className="field-label">Status</span><span className={`badge play-status-${status}`}>{statusLabels[status]}</span></div>
     </fieldset>
-    <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} />
+    <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} maxLeverage={maxLeverage} />
     {!loading && !enabledAccounts.length && <p className="plays-context-note">No enabled accounts yet. You can outline the play and add an account later.</p>}
     <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} />
     <div className="workspace" data-testid="workspace">
@@ -164,7 +164,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           setSelectedId(id)
           setSelectionRequest(current => current + 1)
         }} instrument={draft.instrument} instrumentName={instrumentName} venue={account ? venueName(account.venueId) : null} direction={draft.direction}
-        leverage={leverageOf(draft.leverage)}
+        leverage={leverageOf(draft.leverage)} liquidation={estimatedLiquidation(draft.entries, draft.direction, leverageOf(draft.leverage), maxLeverage)}
         source={account?.venueId === 'hyperliquid' && draft.instrumentSource === 'venue' ? { api, accountId: account.id } : null}
         onEntriesChange={entries => planChange({ ...draft, entries })}
         drawings={drawingKey ? draft.drawings[drawingKey] : undefined}
@@ -175,9 +175,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} />
       </div>
       {readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
-        <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} units={units} availableBudget={account?.availableStablecoinNominalUsd ?? null} />
+        <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} units={units} availableBudget={account?.availableStablecoinNominalUsd ?? null} checkBudget={false} />
       </fieldset> : <PositionEditor draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId}
-        maxLeverage={maxLeverage} instrumentName={instrumentName} units={units} availableBudget={account?.availableStablecoinNominalUsd ?? null} />}
+        maxLeverage={maxLeverage} instrumentName={instrumentName} units={units} availableBudget={account?.availableStablecoinNominalUsd ?? null} checkBudget={status === 'draft'} />}
     </div>
     <PositionSummary draft={draft} units={units} instrumentName={instrumentName} />
   </section>

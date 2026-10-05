@@ -11,6 +11,8 @@ import { instrumentLabel } from './instruments'
 import { ExecutionPanel } from './ExecutionPanel'
 import { usePlayExecution } from './usePlayExecution'
 import { planIssues, planIssueSummary } from './planChecks'
+import { formatMoney, marginOverBudget } from './sizing'
+import { leverageOf } from './levels'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
 import {
   createPlaysSession, draftFromSaved, failure, fieldsFromDraft, isDirty, loadSavedPlay, planChanged, savedState, syncEvidence,
@@ -70,15 +72,28 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   }, [api, venueStatus, update, setError])
   const dirty = saved ? isDirty(draft, saved) : hasContent(draft)
   // A blocked save says why until the plan is fixed.
-  const fixed = planIssues(draft.entries, draft.direction).length === 0
-  useEffect(() => { if (fixed) dismiss('plan-blocked') }, [fixed, dismiss])
   const status = saved?.summary.status ?? 'draft'
+  const fixed = !planProblem(draft, status)
+  useEffect(() => { if (fixed) dismiss('plan-blocked') }, [fixed, dismiss])
 
-  /** Stops and targets on the wrong side of their entry block saving and planning until they are fixed. */
+  /**
+   * Stops and targets on the wrong side of their entry, and a draft's margin above its budget, block
+   * saving and planning until they are fixed. Once orders may rest the venue counts their margin as
+   * used, so the budget is only held while the play is a draft.
+   */
+  function planProblem(current: PlayDraft, currentStatus: PlayStatus) {
+    const issues = planIssues(current.entries, current.direction)
+    if (issues.length) return planIssueSummary(issues)
+    const account = accounts.find(item => item.id === current.accountId)
+    const over = currentStatus === 'draft' ? marginOverBudget(current, leverageOf(current.leverage), account?.availableStablecoinNominalUsd) : null
+    const units = { quote: 'USD', base: '', quantityDecimals: null }
+    return over && `The margin (${formatMoney(over.margin, units)}) is above the ${formatMoney(over.budget.amount, units)} ${over.budget.source === 'manual' ? 'budget' : 'available'}.`
+  }
+
   function planBlocked() {
-    const issues = planIssues(latest.current.draft.entries, latest.current.draft.direction)
-    if (issues.length) notify({ tone: 'error', key: 'plan-blocked', title: 'Not saved', message: `Fix the plan first. ${planIssueSummary(issues)}` })
-    return issues.length > 0
+    const problem = planProblem(latest.current.draft, latest.current.saved?.summary.status ?? 'draft')
+    if (problem) notify({ tone: 'error', key: 'plan-blocked', title: 'Not saved', message: `Fix the plan first. ${problem}` })
+    return !!problem
   }
 
   /** Saves the draft and its evidence. Returns the saved state, or null when the save failed. */
