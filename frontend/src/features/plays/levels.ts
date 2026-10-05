@@ -118,23 +118,15 @@ export function formatDraggedPrice(price: number) {
   return trim(price.toFixed(decimals))
 }
 
-const formatPercent = (percent: number) => trim(percent.toFixed(2))
-
-/** Writes a dragged price back in the level's own unit. Percent levels cannot cross the entry. */
-export function applyLevelDrag(entries: readonly DraftEntry[], id: string, price: number, direction: PlayDraft['direction'], leverage = 1): DraftEntry[] {
+/** A chart drag chooses a fixed price, switching percentage stops and targets to price units. */
+export function applyLevelDrag(entries: readonly DraftEntry[], id: string, price: number): DraftEntry[] {
   const ref = parseOverlayId(id)
   if (!ref || !Number.isFinite(price) || price <= 0) return [...entries]
   return entries.map(entry => {
     if (entry.id !== ref.entryId) return entry
     if (ref.kind === 'entry') return { ...entry, price: formatDraggedPrice(price) }
-    const entryPrice = positive(entry.price)
-    const move = (level: DraftExit): DraftExit => {
-      if (level.unit === 'price') return { ...level, value: formatDraggedPrice(price) }
-      if (entryPrice === null) return level
-      const distance = (above(ref.kind, direction) ? price - entryPrice : entryPrice - price) / entryPrice * 100
-      return { ...level, value: formatPercent(Math.max(0, distance) * Math.max(1, leverage)) }
-    }
-    return withExits(entry, ref.kind, exitsOf(entry, ref.kind).map(exit => exit.id === ref.levelId ? move(exit) : exit))
+    return withExits(entry, ref.kind, exitsOf(entry, ref.kind).map(exit =>
+      exit.id === ref.levelId ? { ...exit, unit: 'price', value: formatDraggedPrice(price) } : exit))
   })
 }
 

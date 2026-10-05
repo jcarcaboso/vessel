@@ -404,11 +404,11 @@ describe('Chart panel drawing editing', () => {
 })
 
 describe('Chart panel level editing', () => {
-  function LevelHarness({ factory, onSelect = vi.fn(), initial }: { factory: ChartAdapterFactory; onSelect?: (id: string) => void; initial: DraftEntry[] }) {
+  function LevelHarness({ factory, onSelect = vi.fn(), initial, leverage = 1 }: { factory: ChartAdapterFactory; onSelect?: (id: string) => void; initial: DraftEntry[]; leverage?: number }) {
     const [list, setList] = useState(initial)
     const [selected, setSelected] = useState(initial[0]!.id)
     return <>
-      <ChartPanel entries={list} selectedId={selected} onSelect={id => { setSelected(id); onSelect(id) }} instrument="BTC" onEntriesChange={setList}
+      <ChartPanel entries={list} selectedId={selected} onSelect={id => { setSelected(id); onSelect(id) }} instrument="BTC" leverage={leverage} onEntriesChange={setList}
         source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />
       <output data-testid="entries">{JSON.stringify(list.map(e => ({ price: e.price, stop: e.stops[0], stops: e.stops.map(s => [s.unit, s.value, s.share]), targets: e.targets.map(t => [t.unit, t.value, t.share]), share: e.share })))}</output>
       <button type="button" onClick={() => setList(current => current.map((e, i) => i === 1 ? { ...e, share: '25' } : e))}>side edit</button>
@@ -445,7 +445,28 @@ describe('Chart panel level editing', () => {
     expect(shown()[1]!.stop.value).toBe('83.5')
   })
 
-  it('edits a level price on the chart and keeps a percentage level in its unit', async () => {
+  it.each(['stop', 'target'] as const)('switches a dragged percentage %s to price units and restores both fields on undo/redo', async kind => {
+    const { state, factory } = fakeAdapter()
+    const initial = two()
+    initial[0]!.targets[0] = { ...initial[0]!.targets[0]!, unit: 'percent', value: '15' }
+    render(<LevelHarness factory={factory} initial={initial} leverage={3} />)
+    await screen.findByText(/Updated/)
+    const level = state.overlays.find(o => o.label === (kind === 'stop' ? 'E1 SL' : 'E1 TP1'))!
+    const price = kind === 'stop' ? 92.5 : 118.125
+    const value = kind === 'stop' ? '92.5' : '118.13'
+    const selectedExit = () => kind === 'stop' ? shown()[0]!.stops[0] : shown()[0]!.targets[0]
+    act(() => state.callbacks!.onLevelDrag(level.id, price, 'move'))
+    expect(selectedExit()).toEqual(['price', value, '100'])
+    act(() => state.callbacks!.onLevelDrag(level.id, price, 'end'))
+    expect(selectedExit()).toEqual(['price', value, '100'])
+    expect(shown()[1]!.stop).toMatchObject({ unit: 'price', value: '85' })
+    await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    expect(selectedExit()).toEqual(['percent', kind === 'stop' ? '5' : '15', '100'])
+    await userEvent.click(screen.getByRole('button', { name: /^Redo/ }))
+    expect(selectedExit()).toEqual(['price', value, '100'])
+  })
+
+  it('edits a percentage level price on the chart and switches it to price units', async () => {
     const { state, factory } = fakeAdapter()
     render(<LevelHarness factory={factory} initial={two()} />)
     await screen.findByText(/Updated/)
@@ -454,11 +475,27 @@ describe('Chart panel level editing', () => {
     const form = screen.getByRole('form', { name: 'Edit Entry 1 stop' })
     const price = within(form).getByRole('textbox', { name: 'Price' })
     expect(price).toHaveValue('95')
-    expect(within(form).getByText(/Stored as a % return at 1× leverage/)).toBeInTheDocument()
+    expect(within(form).getByText(/Editing this price switches the level from % to price units/)).toBeInTheDocument()
     await userEvent.clear(price)
     await userEvent.type(price, '92{Enter}')
-    expect(shown()[0]!.stop).toMatchObject({ unit: 'percent', value: '8' })
+    expect(shown()[0]!.stop).toMatchObject({ unit: 'price', value: '92' })
     expect(screen.queryByRole('form')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    expect(shown()[0]!.stop).toMatchObject({ unit: 'percent', value: '5' })
+    await userEvent.click(screen.getByRole('button', { name: /^Redo/ }))
+    expect(shown()[0]!.stop).toMatchObject({ unit: 'price', value: '92' })
+  })
+
+  it('keeps percentage units when only the exit share is edited on the chart', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<LevelHarness factory={factory} initial={two()} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onLevelEdit(state.overlays.find(o => o.label === 'E1 SL')!.id, { x: 40, y: 120 }))
+    const form = screen.getByRole('form', { name: 'Edit Entry 1 stop' })
+    await userEvent.clear(within(form).getByRole('textbox', { name: /Share/ }))
+    await userEvent.type(within(form).getByRole('textbox', { name: /Share/ }), '60')
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    expect(shown()[0]!.stops[0]).toEqual(['percent', '5', '60'])
   })
 
   it('edits target share, adds and removes targets and adds a missing stop from the chart', async () => {

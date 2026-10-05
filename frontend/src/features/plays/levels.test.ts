@@ -66,10 +66,10 @@ describe('dragging planned levels', () => {
     expect(formatDraggedPrice(0.0000123456)).toBe('0.00001235')
   })
 
-  it('keeps each level in its own unit and leaves other entries untouched', () => {
+  it('stores dragged stops and targets as prices and leaves other entries untouched', () => {
     const first = entry(0, {
       price: '100', stops: [stop('s', 'percent', '5')],
-      targets: [{ ...createExit('100'), id: 't1', unit: 'price', value: '120' }],
+      targets: [{ ...createExit('100'), id: 't1', unit: 'percent', value: '20' }],
     })
     const other = entry(1, { price: '80' })
     const overlays = planOverlays([first, other], first.id, 'aggregate', 'long')
@@ -77,30 +77,33 @@ describe('dragging planned levels', () => {
     const targetId = overlays.find(o => o.kind === 'target')!.id
     const entryId = overlays.find(o => o.label === 'E1')!.id
 
-    let entries = applyLevelDrag([first, other], stopId, 92.5, 'long')
-    expect(entries[0]!.stops[0]).toEqual(stop('s', 'percent', '7.5'))
+    let entries = applyLevelDrag([first, other], stopId, 92.5)
+    expect(entries[0]!.stops[0]).toEqual(stop('s', 'price', '92.5'))
     expect(entries[1]).toBe(other)
-    entries = applyLevelDrag(entries, targetId, 131.234, 'long')
-    expect(entries[0]!.targets[0]!.value).toBe('131.23')
-    entries = applyLevelDrag(entries, entryId, 101.11, 'long')
+    expect(entries[0]!.targets).toEqual(first.targets)
+    entries = applyLevelDrag(entries, targetId, 131.234)
+    expect(entries[0]!.targets[0]).toMatchObject({ unit: 'price', value: '131.23', share: '100' })
+    entries = applyLevelDrag(entries, entryId, 101.11)
     expect(entries[0]!.price).toBe('101.11')
-    expect(entries[0]!.stops[0]!.value).toBe('7.5')
-    // At 5x the same 7.5% price move is a 37.5% loss on margin.
-    expect(applyLevelDrag([first], stopId, 92.5, 'long', 5)[0]!.stops[0]!.value).toBe('37.5')
+    expect(entries[0]!.stops[0]!.value).toBe('92.5')
+    // Later entry-price or leverage changes must not move a chart-chosen price.
+    expect(planOverlays(entries, first.id, 'aggregate', 'long', 5).find(o => o.id === stopId)!.price).toBe(92.5)
+    expect(planOverlays(entries, first.id, 'aggregate', 'long', 5).find(o => o.id === targetId)!.price).toBe(131.23)
   })
 
-  it('clamps percentage levels at the entry instead of flipping sides', () => {
+  it('stores the actual dragged price across the entry, leaving wrong-side checks to plan validation', () => {
     const first = entry(0, { price: '100', stops: [stop('s', 'percent', '5')] })
     const stopId = planOverlays([first], first.id, 'aggregate', 'short').find(o => o.kind === 'stop')!.id
-    expect(applyLevelDrag([first], stopId, 98, 'short')[0]!.stops[0]!.value).toBe('0')
-    expect(applyLevelDrag([first], stopId, 110, 'short')[0]!.stops[0]!.value).toBe('10')
+    expect(applyLevelDrag([first], stopId, 98)[0]!.stops[0]).toEqual(stop('s', 'price', '98'))
+    expect(applyLevelDrag([first], stopId, 110)[0]!.stops[0]).toEqual(stop('s', 'price', '110'))
   })
 
   it('ignores unknown ids and invalid prices', () => {
     const first = entry(0, { price: '100' })
     expect(parseOverlayId('nonsense')).toBeNull()
-    expect(applyLevelDrag([first], 'nonsense', 10, 'long')[0]).toBe(first)
-    expect(applyLevelDrag([first], `${first.id}|entry`, Number.NaN, 'long')[0]).toBe(first)
+    expect(applyLevelDrag([first], 'nonsense', 10)[0]).toBe(first)
+    for (const price of [Number.NaN, Infinity, 0, -1])
+      expect(applyLevelDrag([first], `${first.id}|entry`, price)[0]).toBe(first)
   })
 })
 

@@ -10,8 +10,8 @@ import {
 const decimal = /^\d+(\.\d+)?$/
 
 /**
- * In-chart editor for one planned level. The chart always edits a price; levels entered as a
- * percentage keep that unit and store the equivalent return at the play's leverage, as dragging does.
+ * In-chart editor for one planned level. Changing a price switches percentage levels to price
+ * units, as dragging does. A share-only edit leaves the level's unit and value unchanged.
  */
 export function LevelEditor({ entries, entry, overlayId, anchor, direction, leverage, onApply, onClose }: {
   entries: readonly DraftEntry[]
@@ -26,7 +26,8 @@ export function LevelEditor({ entries, entry, overlayId, anchor, direction, leve
   const ref = parseOverlayId(overlayId)
   const exit = ref && ref.kind !== 'entry' ? exitsOf(entry, ref.kind).find(current => current.id === ref.levelId) ?? null : null
   const current = overlayPrice(entry, overlayId, direction, leverage)
-  const [price, setPrice] = useState(current === null ? '' : formatDraggedPrice(current))
+  const [initialPrice] = useState(current === null ? '' : formatDraggedPrice(current))
+  const [price, setPrice] = useState(initialPrice)
   const [share, setShare] = useState(exit?.share ?? '')
   const [error, setError] = useState('')
   const input = useRef<HTMLInputElement>(null)
@@ -69,7 +70,7 @@ export function LevelEditor({ entries, entry, overlayId, anchor, direction, leve
     event.preventDefault()
     if (!decimal.test(price.trim()) || Number(price) <= 0) { setError('Enter a price above zero.'); return }
     if (exit && share.trim() !== '' && (!decimal.test(share.trim()) || Number(share) > 100)) { setError('Share must be 0 to 100%.'); return }
-    let next = applyLevelDrag([entry], overlayId, Number(price), direction, leverage)[0]!
+    let next = Number(price) === Number(initialPrice) ? entry : applyLevelDrag([entry], overlayId, Number(price))[0]!
     if (exit && ref?.kind !== 'entry') next = setExitShare(next, ref!.kind, exit.id, share.trim())
     onApply(next, `Edit ${readable.toLowerCase()}`)
     onClose()
@@ -91,7 +92,7 @@ export function LevelEditor({ entries, entry, overlayId, anchor, direction, leve
       <label>Price<input ref={input} inputMode="decimal" value={price} aria-invalid={error !== ''} onChange={event => { setPrice(event.target.value); setError('') }} /></label>
       {exit && <label>Share <small>% of entry</small><input inputMode="decimal" value={share} onChange={event => { setShare(event.target.value); setError('') }} /></label>}
     </div>
-    {percentUnit && <p className="level-editor-note">Stored as a % return at {leverage}× leverage, the unit chosen in the editor.</p>}
+    {percentUnit && <p className="level-editor-note">Editing this price switches the level from % to price units. Editing only its share keeps %.</p>}
     {error && <p className="level-editor-error" role="alert">{error}</p>}
     <div className="level-editor-actions">
       <Button type="submit" size="sm">Save</Button>

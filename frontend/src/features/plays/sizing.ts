@@ -1,4 +1,4 @@
-import type { DraftEntry, PlayDraft } from './draft'
+import type { DraftEntry, DraftExit, PlayDraft } from './draft'
 import { averageEntryPrice, exitsOf, levelPrice, type ExitKind } from './levels'
 
 const positive = (value: string) => /^\d+(\.\d+)?$/.test(value.trim()) && Number(value) > 0 ? Number(value) : null
@@ -26,6 +26,28 @@ export function positionSize(draft: Pick<PlayDraft, 'size' | 'sizingMode' | 'ent
   }
   const notional = averageEntry === null ? null : size * averageEntry
   return { margin: notional === null ? null : notional / lever, notional, quantity: size, averageEntry }
+}
+
+/**
+ * One exit's underlying price move, return on its margin and estimated result in quote units.
+ * Quantity already includes leverage; apply only the entry and exit quantity shares, not leverage again.
+ * Before fees, funding and slippage. Missing/invalid quantity or shares leave the amount unknown.
+ */
+export function exitEstimate(entry: DraftEntry, exit: DraftExit, kind: ExitKind, direction: PlayDraft['direction'], leverage: number, quantity: number | null) {
+  const entryPrice = positive(entry.price)
+  const price = levelPrice(entryPrice, exit, kind, direction, leverage)
+  if (entryPrice === null || price === null || !Number.isFinite(entryPrice) || !Number.isFinite(price)) return null
+  const distance = (price - entryPrice) * (direction === 'long' ? 1 : -1) * (kind === 'stop' ? -1 : 1)
+  if (distance <= 0) return null
+  const fraction = (value: string) => /^\d+(\.\d+)?$/.test(value.trim()) && Number(value) <= 100 ? Number(value) / 100 : null
+  const entryShare = fraction(entry.share)
+  const exitShare = fraction(exit.share)
+  const amount = quantity !== null && Number.isFinite(quantity) && quantity >= 0 && entryShare !== null && exitShare !== null
+    ? quantity * entryShare * exitShare * distance : null
+  const move = distance / entryPrice * 100
+  const returnPercent = move * Math.max(1, leverage)
+  if (!Number.isFinite(returnPercent)) return null
+  return { price, move, returnPercent, amount: Number.isFinite(amount) ? amount : null }
 }
 
 /** Units for the size readout: the quote asset (e.g. USDC) and the contract (e.g. ETH) when known. */

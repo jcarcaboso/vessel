@@ -103,7 +103,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
       const entry = ref && current.find(item => item.id === ref.entryId)
       if (!ref || !entry) return
       dragStart.current ??= entry
-      const next = applyLevelDrag(current, id, price, direction, leverage)
+      const next = applyLevelDrag(current, id, price)
       onEntriesChange?.(next)
       if (phase === 'end') {
         const after = next.find(item => item.id === ref.entryId)!

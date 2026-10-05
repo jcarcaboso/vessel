@@ -46,7 +46,7 @@ Durable storage per [the proposal](proposal.md): PostgreSQL metadata (owner, key
 | C2 | Backend candles endpoint | — | `IMarketDataReader` in Application, Hyperliquid `candleSnapshot` in Infrastructure, `GET /api/accounts/{id}/candles?instrument&interval&before`, owner/enabled checks, bounded count, exact decimal strings, gap/coverage metadata, short in-memory cache, handler-mocked tests. |
 | C3 | Reusable chart component | C1 | `components/chart`: adapter interface + LWC implementation, timeframe selector, resize, older-history loading, loading/empty/error/stale states, Graphite theming, attribution. API client method and validator. Remove the unused `SampleChart`. |
 | C4 | Planned levels overlay and selection | C3 | Map draft entries to overlays (resolve percent stops/targets against entry price, skip invalid), entry colors, canvas axis labels, Aggregate/selected dropdown, click and keyboard selection through the existing `selectionRequest` path. Legend stays. |
-| C5 | Drag planned levels | C4 | Drag selected entry's entry/stop/targets; write back in the level's own unit (price or percent); price precision from metadata; keyboard nudge alternative. |
+| C5 | Drag planned levels | C4 | Drag selected entry's entry/stop/targets; write a fixed price, switching percentage stops/targets to price units; price precision from metadata; keyboard nudge alternative. |
 | C6 | Drawing tools | C3 | Toolbar and manager: trend line, horizontal line/ray, rectangle zone, Fibonacci retracement, long/short box, text note. Select, move, delete, undo, lock, clear. Stored in the draft per instrument. |
 | C7 | Expanded chart dialog | C3 | In-page dialog sharing candles, levels, drawings and selection; Escape and focus restoration. |
 | C8 | Captures in the draft | C4, C6 | Capture button, composed PNG, Evidence tab grid with per-capture note, download with note, remove with confirmation, count limit. In memory, discarded on reload like the rest of the draft. |
@@ -87,7 +87,7 @@ The owner authorized starting chart implementation: candles endpoint, reusable c
 - `components/chart` owns a renderer-neutral `CandleChart` with an adapter boundary; it receives candles, price overlays, selection and theme, never the Play draft. Lightweight Charts is the only implementation; tests use a fake adapter.
 - Plays maps draft entries to overlays: percent stops/targets resolve against the entry price for display only; invalid or blank levels are omitted. Planned levels are not fills.
 - Aggregate/selected dropdown; clicking a level or legend item uses the existing selection request path.
-- Dragging a selected entry's level writes back in the level's own unit (price or percent of entry), rounded to five significant figures. Percent levels cannot cross the entry. The numeric editor fields remain the keyboard and screen-reader path; canvas keyboard nudging was not added.
+- Initially, dragging a selected entry's level wrote back in the level's own unit (price or percent of entry), rounded to five significant figures, and percent levels could not cross the entry. The October 5 correction below supersedes that unit-preserving behavior. The numeric editor fields remain the keyboard and screen-reader path; canvas keyboard nudging was not added.
 - Timeframe selector and manual Refresh; older history loads on scroll-left until exhausted. Loading, empty, error and stale states are explicit. TradingView attribution is shown.
 - Expanded chart is an in-page dialog sharing the same state, with Escape and focus restoration.
 - Manual instruments, no account or no instrument keep the placeholder.
@@ -145,7 +145,7 @@ October 2, 2026. The owner asked to start the drawing tools after PR #3 was open
 ### On-chart level editing and undo/redo, October 2
 
 - Every planned entry, stop and target can be dragged on the chart, not only the selected entry's. Dragging another entry's level selects that entry when the drag ends. Handles still mark the selected entry. `AVG` stays read-only.
-- Clicking a level's tag or double-clicking its line opens an in-chart editor. The chart always edits a **price**; a level entered as a percentage keeps its unit and stores the equivalent distance, as dragging does. Targets also edit their share. The editor can add a target (2% steps beyond the entry in the trade direction), add a missing stop (2% on the risk side) and remove a target. All edits go into the same draft as the side editor.
+- Clicking a level's tag or double-clicking its line opens an in-chart editor. The chart always edits a **price**; initially, a level entered as a percentage kept its unit and stored the equivalent distance, as dragging did (superseded by the October 5 correction below). Targets also edit their share. The editor can add a target (2% steps beyond the entry in the trade direction), add a missing stop (2% on the risk side) and remove a target. All edits go into the same draft as the side editor.
 - `useChartHistory` provides one undo/redo history for chart edits: drawings and level drags or edits. Entry actions reapply only the fields they changed, so later side-editor edits survive undo. Ctrl/Cmd+Z undoes; Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes; the rail has Undo and Redo with the action name. Edits made in the side editor are not part of chart history.
 - Verified in headless Chromium against live HYPE: dragging an unselected entry's stop selected it and updated its field (84 → 82.897), tag click and double-click opened the editor, a saved target price updated the editor (94 → 95), add target, undo and redo. `pnpm check`: 441 backend (40 skipped), 241 frontend, 76 prototype.
 
@@ -228,6 +228,10 @@ Backend (saved Plays):
 Not included: Play save (no Play API yet, so nothing uploads draft images today), orphan-object cleanup, backup procedure for the evidence directory, and S3-compatible storage. Back up the evidence directory together with the database.
 
 Verified: backend 553 tests including real PostgreSQL (migration, owner filter, write guard, restrict, hash check); frontend 273 tests; live API upload/read/edit/delete with real files on disk, 413/415/401 paths; headless Chromium capture with levels, a drawing and the footer, uploads with a rejected file, viewer note editing, removal confirmation, and no horizontal overflow at 390 px.
+
+### Chart-picked SL/TP prices, October 5
+
+The owner clarified that moving a percentage stop or target on the chart must switch it to **price units**, rather than retain a percentage representation. Chart drags now store the actual dragged price with the existing five-significant-figure precision, preserving the exit ID, share and sibling levels. Explicitly changing the price in the chart popover does the same; changing only its share leaves its unit/value unchanged. Undo restores both the previous unit and value; redo restores the price. Later leverage or entry-price changes do not move the chart-chosen price. Existing wrong-side plan validation applies instead of silently clamping a drag at the entry. Unmoved percentage levels retain their leveraged-return meaning. No persisted-plan migration is needed.
 
 ### Image markup, October 2
 

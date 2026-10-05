@@ -248,7 +248,8 @@ describe('local-draft position editor', () => {
     await user.type(field('Entry 1 planned entry price (quote units)'), '200')
     await user.click(unitButton('Entry 1 stop units', '% return at leverage'))
     await user.type(field('Entry 1 planned stop return at 10× leverage (%)'), '20')
-    expect(screen.getByText('≈ 196 · 2% move at 10×')).toBeInTheDocument()
+    expect(screen.getByText('≈ 196 · 2% price move (1×)')).toBeInTheDocument()
+    expect(screen.getByText('20% loss at 10×')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Add stop to Entry 1' }))
     await user.type(field('Entry 1 planned stop 2 price (quote units)'), '190')
     await user.clear(field('Entry 1 stop 1 share (%)'))
@@ -259,6 +260,28 @@ describe('local-draft position editor', () => {
     await user.click(screen.getByRole('button', { name: 'Remove Entry 1 stop 1' }))
     expect(onChange.mock.lastCall?.[0].entries[0]!.stops).toHaveLength(1)
     expect(field('Entry 1 planned stop price (quote units)')).toHaveValue(190)
+  })
+
+  it('shows the 1× move, leveraged outcome and estimated money in both entry editors', async () => {
+    const user = userEvent.setup()
+    const draft = createDraft()
+    const entry = draft.entries[0]!
+    draft.size = '130'
+    draft.leverage = '3'
+    entry.price = '3.75'
+    entry.stops[0] = { ...entry.stops[0]!, unit: 'percent', value: '10' }
+    entry.targets[0] = { ...entry.targets[0]!, unit: 'percent', value: '50' }
+    render(<PositionEditor draft={draft} onChange={vi.fn()} selectedId={entry.id} onSelect={vi.fn()}
+      units={{ quote: 'USDC', base: 'LIT', quantityDecimals: 2 }} maxLeverage={5} />)
+    const check = (scope: ReturnType<typeof within>) => {
+      expect(scope.getByText('≈ 3.625 · 3.3333% price move (1×)')).toBeInTheDocument()
+      expect(scope.getByText('10% loss at 3× · Est. loss 13 USDC')).toBeInTheDocument()
+      expect(scope.getByText('≈ 4.375 · 16.667% price move (1×)')).toBeInTheDocument()
+      expect(scope.getByText('50% gain at 3× · Est. gain 65 USDC')).toBeInTheDocument()
+    }
+    check(within(screen.getByRole('article', { name: 'Entry 1 editor' })))
+    await user.click(screen.getByRole('button', { name: 'Expand selected entry' }))
+    check(within(screen.getByRole('dialog')))
   })
 
   it('asks before a leverage change moves percentage stops and targets', async () => {
@@ -283,7 +306,7 @@ describe('local-draft position editor', () => {
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Keep prices' }))
     expect(onChange.mock.lastCall?.[0]).toMatchObject({ leverage: '10' })
     expect(onChange.mock.lastCall?.[0].entries[0]!.stops[0]).toMatchObject({ unit: 'percent', value: '50' })
-    expect(screen.getByText('≈ 190 · 5% move at 10×')).toBeInTheDocument()
+    expect(screen.getByText('≈ 190 · 5% price move (1×)')).toBeInTheDocument()
 
     // Keeping the percentage moves the stop; the slider previews until it is released.
     const slider = screen.getByRole('slider', { name: 'Leverage slider (×)' })
@@ -295,7 +318,7 @@ describe('local-draft position editor', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Keep % and move the levels' }))
     expect(onChange.mock.lastCall?.[0]).toMatchObject({ leverage: '20' })
     expect(onChange.mock.lastCall?.[0].entries[0]!.stops[0]).toMatchObject({ value: '50' })
-    expect(screen.getByText('≈ 195 · 2.5% move at 20×')).toBeInTheDocument()
+    expect(screen.getByText('≈ 195 · 2.5% price move (1×)')).toBeInTheDocument()
 
     // Clearing the number field and leaving it keeps the current leverage.
     await user.clear(field('Leverage (×)'))
