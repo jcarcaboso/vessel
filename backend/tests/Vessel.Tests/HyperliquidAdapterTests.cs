@@ -93,7 +93,7 @@ public sealed partial class HyperliquidAdapterTests
         Assert.Equal("18446744073709551615", fill.SourceFillId);
         Assert.Equal("9007199254740993", fill.OrderId);
         Assert.Equal("BTC", fill.ContractId);
-        Assert.Equal("B", fill.Side);
+        Assert.Equal(("buy", "close"), (fill.Side, fill.PositionEffect));
         Assert.Equal("Close Short", fill.Direction); // Not inferred as "Open Long" from side.
         Assert.Equal(61235.1234567890123456m, fill.Price);
         Assert.Equal(0.001234567890123456789m, fill.Quantity);

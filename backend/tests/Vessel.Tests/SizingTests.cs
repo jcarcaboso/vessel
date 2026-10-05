@@ -138,10 +138,11 @@ public sealed class SizingServiceTests
     private static PlanEntry Entry(string id, string share, string price, params PlanExit[] stops) =>
         new(id, id, "#b9c9e4", share, price, stops, [new PlanExit(id + "-target", "price", "120", "100")]);
 
-    private static ImportedFill Fill(decimal price, decimal quantity, decimal pnl = 0, decimal fee = 0.1m, string token = "USDC", int minutes = 0) => new()
+    private static ImportedFill Fill(decimal price, decimal quantity, decimal pnl = 0, decimal fee = 0.1m, string token = "USDC", int minutes = 0,
+        string pnlBasis = ExecutionFacts.PnlGross) => new()
     {
-        Id = Guid.NewGuid(), Price = price, Quantity = quantity, ClosedPnlUsd = pnl, Fee = fee, FeeToken = token,
-        OccurredAtUtc = Planned.AddMinutes(30 + minutes), OrderId = "o", ContractId = "BTC", SourceFillId = "f", Side = "B", Direction = "", TransactionHash = "",
+        Id = Guid.NewGuid(), Price = price, Quantity = quantity, ClosedPnlUsd = pnl, Fee = fee, FeeToken = token, PnlBasis = pnlBasis,
+        OccurredAtUtc = Planned.AddMinutes(30 + minutes), OrderId = "o", ContractId = "BTC", SourceFillId = "f", Side = ExecutionFacts.Buy, Direction = "", TransactionHash = "",
     };
 
     private ClosedPlayFacts Closed(PlayPlanDocument plan, IEnumerable<LinkedFill> fills, PlayPlanDocument? revised = null, int closedDay = 2)
@@ -166,6 +167,25 @@ public sealed class SizingServiceTests
         Assert.Equal((19.8m, 200m, 10m, PlayOutcomeKind.Win, true), (outcome.NetResult, outcome.EntryNotional, outcome.PlannedRisk, outcome.Kind, outcome.FeesComplete));
         Assert.Equal(9.9m, outcome.ReturnPercent);
         Assert.Equal(1.98m, outcome.RMultiple);
+    }
+
+    [Fact]
+    public void Net_of_fee_closed_pnl_is_not_reduced_by_its_fee_again()
+    {
+        // RISEx-style: every fill's closed PnL already includes its fee (an opening fill reports -fee).
+        var outcome = SizingService.Outcome(Closed(Plan(), [
+            new(OrderLinkRole.Entry, Fill(100, 2, pnl: -0.1m, fee: 0.1m, pnlBasis: ExecutionFacts.PnlNetOfFee)),
+            new(OrderLinkRole.Target, Fill(110, 2, pnl: 19.9m, fee: 0.1m, pnlBasis: ExecutionFacts.PnlNetOfFee))]))!;
+        Assert.Equal((19.8m, true, PlayOutcomeKind.Win), (outcome.NetResult, outcome.FeesComplete, outcome.Kind));
+    }
+
+    [Fact]
+    public void A_net_of_fee_fill_paid_in_another_token_still_counts_as_complete()
+    {
+        var outcome = SizingService.Outcome(Closed(Plan(), [
+            new(OrderLinkRole.Entry, Fill(100, 1, pnl: -0.5m, fee: 0.5m, token: "HYPE", pnlBasis: ExecutionFacts.PnlNetOfFee)),
+            new(OrderLinkRole.Stop, Fill(95, 1, pnl: -5.1m, pnlBasis: ExecutionFacts.PnlNetOfFee))]))!;
+        Assert.Equal((-5.6m, true), (outcome.NetResult, outcome.FeesComplete));
     }
 
     [Fact]
@@ -228,7 +248,8 @@ public sealed class SizingPostgresTests
         DateTimeOffset.UtcNow);
 
     private static VenueFill Fill(string id, string orderId, string dir, decimal price, decimal pnl) =>
-        new(id, "BTC", dir.StartsWith("Open") ? "B" : "A", dir, price, 1m, 0.01m, "USDC", pnl, DateTimeOffset.UtcNow, orderId, "hash-" + id, "{}");
+        new(id, "BTC", dir.StartsWith("Open") ? ExecutionFacts.Buy : ExecutionFacts.Sell, dir, price, 1m, 0.01m, "USDC", pnl, DateTimeOffset.UtcNow, orderId, "hash-" + id, "{}",
+            HyperliquidPerpetualReader.EffectOf(dir));
 
     [PostgresFact]
     public async Task Record_comes_from_linked_fills_of_closed_plays_on_enabled_accounts_of_the_owner()
@@ -247,7 +268,7 @@ public sealed class SizingPostgresTests
 
         var play = await plays.CreateAsync(new CreatePlayRequest(account.Id, "BTC", "venue", "Breakout", TestPlays.Plan()), default);
         play = await plays.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "planned"), default);
-        orders.Orders.AddRange([Order("21", "B", 100m, "filled"), Order("22", "A", 110m, "filled", reduceOnly: true)]);
+        orders.Orders.AddRange([Order("21", "buy", 100m, "filled"), Order("22", "sell", 110m, "filled", reduceOnly: true)]);
         reader.Result = reader.Result with { Fills = [Fill("g1", "21", "Open Long", 100m, 0), Fill("g2", "22", "Close Long", 110m, 10m)] };
         Assert.Equal("closed", (await execution.CheckAsync(play.Summary.Id, default)).Status);
 

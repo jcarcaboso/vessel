@@ -11,7 +11,7 @@ public interface IVenueOrderReader
 public enum VenueOrderStatus { Open, Filled, Triggered, Canceled, Rejected, Other }
 
 /// <summary>
-/// One order at the venue. Prices and sizes are exact. A trigger order (stop or take profit) acts at
+/// One order at the venue. <see cref="Side"/> is <c>buy</c> or <c>sell</c>. Prices and sizes are exact. A trigger order (stop or take profit) acts at
 /// <see cref="TriggerPrice"/>; a plain limit order rests at <see cref="LimitPrice"/>.
 /// </summary>
 public sealed record VenueOrder(

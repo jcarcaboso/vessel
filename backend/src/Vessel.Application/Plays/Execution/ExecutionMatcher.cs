@@ -29,7 +29,7 @@ public static class ExecutionMatcher
     {
         var long_ = plan.Direction == "long";
         var leverage = int.TryParse(plan.Leverage, NumberStyles.None, CultureInfo.InvariantCulture, out var value) && value >= 1 ? value : 1;
-        string entrySide = long_ ? "B" : "A", exitSide = long_ ? "A" : "B";
+        string entrySide = long_ ? ExecutionFacts.Buy : ExecutionFacts.Sell, exitSide = long_ ? ExecutionFacts.Sell : ExecutionFacts.Buy;
         foreach (var entry in plan.Entries)
         {
             var price = Positive(entry.Price);
@@ -41,7 +41,7 @@ public static class ExecutionMatcher
         }
     }
 
-    public static string ExitSide(PlayPlanDocument plan) => plan.Direction == "long" ? "A" : "B";
+    public static string ExitSide(PlayPlanDocument plan) => plan.Direction == "long" ? ExecutionFacts.Sell : ExecutionFacts.Buy;
 
     /// <summary>
     /// Candidates for one order. Planned levels win over an unplanned exit, which is only proposed for an
