@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createEntry, type DraftEntry } from './draft'
-import { estimatedLiquidation, marginOverBudget, rewardToRisk, sizeForBudget } from './sizing'
+import { entryResults, estimatedLiquidation, formatResult, marginOverBudget, rewardToRisk, sizeForBudget } from './sizing'
 
 const entry = (price: string, share = '100'): DraftEntry => ({ ...createEntry(0), price, share })
 
@@ -48,5 +48,39 @@ describe('reward to risk', () => {
     const planned: DraftEntry = { ...base, price: '100',
       stops: [{ ...base.stops[0]!, unit: 'percent', value: '10' }], targets: [{ ...base.targets[0]!, unit: 'percent', value: '25' }] }
     expect(rewardToRisk(planned, 'short', 5)).toBeCloseTo(2.5, 6)
+  })
+})
+
+describe('entry results', () => {
+  const units = { quote: 'USDC', base: 'SOL', quantityDecimals: 2 }
+  const levels = (base: DraftEntry, stop: string, targets: Array<[string, string]>): DraftEntry => ({
+    ...base, stops: [{ ...base.stops[0]!, value: stop }],
+    targets: targets.map(([value, share], index) => ({ ...base.targets[0]!, id: `t${index}`, value, share })),
+  })
+
+  it('gives each level its share of the entry quantity at the price move', () => {
+    // 100 margin at 10× on one entry at 100: 10 units.
+    const planned = levels(entry('100'), '95', [['110', '50'], ['120', '50']])
+    const results = entryResults({ size: '100', sizingMode: 'margin', direction: 'long', entries: [planned] }, 10, planned)
+    expect(results.stops).toBeCloseTo(-50, 6)
+    expect(results.targets).toBeCloseTo(50 + 100, 6)
+    expect(Object.values(results.levels).map(value => Math.round(value))).toEqual([-50, 50, 100])
+    expect(formatResult(results.stops!, units)).toBe('−50 USDC')
+    expect(formatResult(results.targets!, units)).toBe('+150 USDC')
+  })
+
+  it('splits the position by entry share and follows the direction', () => {
+    const first = levels(entry('100', '50'), '105', [['90', '100']])
+    const second = levels(entry('110', '50'), '115', [['90', '100']])
+    // Quantity 1000 ÷ 105 average; each entry holds half.
+    const draft = { size: '100', sizingMode: 'margin' as const, direction: 'short' as const, entries: [first, second] }
+    const quantity = 1000 / 105 / 2
+    expect(entryResults(draft, 10, first).stops).toBeCloseTo(-5 * quantity, 6)
+    expect(entryResults(draft, 10, second).targets).toBeCloseTo(20 * quantity, 6)
+  })
+
+  it('is unknown until the position is sized', () => {
+    const planned = levels(entry('100'), '95', [['110', '100']])
+    expect(entryResults({ size: '', sizingMode: 'margin', direction: 'long', entries: [planned] }, 10, planned)).toEqual({ levels: {}, stops: null, targets: null })
   })
 })

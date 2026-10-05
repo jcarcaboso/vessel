@@ -36,6 +36,11 @@ function entryHeader(name: string) {
   return within(screen.getByRole('article', { name: `${name} editor` })).getByRole('button', { name: new RegExp(`^${name}`) })
 }
 
+/** The line under a % level, which can end with the level's planned result. */
+function resolvedLevel(text: string) {
+  return screen.getByText((_, element) => !!element?.classList.contains('level-resolved') && !!element.textContent?.startsWith(text))
+}
+
 function unitButton(group: string, unit: 'Price' | '% return at leverage') {
   return within(screen.getByRole('group', { name: group })).getByRole('button', { name: unit })
 }
@@ -248,7 +253,7 @@ describe('local-draft position editor', () => {
     await user.type(field('Entry 1 planned entry price (quote units)'), '200')
     await user.click(unitButton('Entry 1 stop units', '% return at leverage'))
     await user.type(field('Entry 1 planned stop return at 10× leverage (%)'), '20')
-    expect(screen.getByText('≈ 196 · 2% move at 10×')).toBeInTheDocument()
+    expect(resolvedLevel('≈ 196 · 2% move at 10×')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Add stop to Entry 1' }))
     await user.type(field('Entry 1 planned stop 2 price (quote units)'), '190')
     await user.clear(field('Entry 1 stop 1 share (%)'))
@@ -283,7 +288,7 @@ describe('local-draft position editor', () => {
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Keep prices' }))
     expect(onChange.mock.lastCall?.[0]).toMatchObject({ leverage: '10' })
     expect(onChange.mock.lastCall?.[0].entries[0]!.stops[0]).toMatchObject({ unit: 'percent', value: '50' })
-    expect(screen.getByText('≈ 190 · 5% move at 10×')).toBeInTheDocument()
+    expect(resolvedLevel('≈ 190 · 5% move at 10×')).toBeInTheDocument()
 
     // Keeping the percentage moves the stop; the slider previews until it is released.
     const slider = screen.getByRole('slider', { name: 'Leverage slider (×)' })
@@ -295,7 +300,7 @@ describe('local-draft position editor', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Keep % and move the levels' }))
     expect(onChange.mock.lastCall?.[0]).toMatchObject({ leverage: '20' })
     expect(onChange.mock.lastCall?.[0].entries[0]!.stops[0]).toMatchObject({ value: '50' })
-    expect(screen.getByText('≈ 195 · 2.5% move at 20×')).toBeInTheDocument()
+    expect(resolvedLevel('≈ 195 · 2.5% move at 20×')).toBeInTheDocument()
 
     // Clearing the number field and leaving it keeps the current leverage.
     await user.clear(field('Leverage (×)'))
@@ -412,6 +417,23 @@ describe('local-draft position editor', () => {
     await user.clear(field('Entry 1 planned stop price (quote units)'))
     await user.type(field('Entry 1 planned stop price (quote units)'), '131')
     expect(field('Entry 1 planned stop price (quote units)')).toHaveAttribute('data-warning', 'true')
+  })
+
+  it('shows the planned result of each stop and target and the entry totals', async () => {
+    function Harness() {
+      const [draft, setDraft] = useState(() => ({ ...createDraft(), size: '100', leverage: '10' }))
+      return <PositionEditor draft={draft} onChange={setDraft} selectedId={draft.entries[0]!.id} onSelect={() => {}}
+        units={{ quote: 'USDC', base: 'SOL', quantityDecimals: 2 }} />
+    }
+    const user = userEvent.setup()
+    render(<Harness />)
+    expect(screen.queryByTestId('entry-results')).toBeNull()
+    await user.type(field('Entry 1 planned entry price (quote units)'), '100')
+    await user.type(field('Entry 1 planned stop price (quote units)'), '95')
+    await user.type(field('Entry 1 planned target 1 price (quote units)'), '120')
+    expect(screen.getByTestId('entry-results')).toHaveTextContent('At stops −50 USDCAt targets +200 USDC')
+    expect(screen.getByRole('group', { name: 'Entry 1 stop' })).toHaveTextContent('−50 USDC')
+    expect(screen.getByRole('group', { name: 'Entry 1 target 1' })).toHaveTextContent('+200 USDC')
   })
 
   it('holds the margin to the available amount and offers to use it', async () => {

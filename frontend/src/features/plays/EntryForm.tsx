@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
 import { exitsOf, formatDraggedPrice, levelPrice, priceMovePercent, type ExitKind } from './levels'
 import { wrongSide } from './planChecks'
-import { estimatedLiquidation } from './sizing'
+import { defaultSizeUnits, estimatedLiquidation, formatResult, type EntryResults, type SizeUnits } from './sizing'
 
 function LevelUnits({ value, label, onChange }: {
   value: DraftExit['unit']
@@ -29,7 +29,7 @@ const copy = {
 } as const
 
 /** Stops or targets of one entry. Each closes a share of the entry; percentages are returns at the play's leverage. */
-function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidation }: {
+function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidation, results, units }: {
   entry: DraftEntry
   kind: ExitKind
   direction: PlayDraft['direction']
@@ -38,6 +38,8 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
   prefix: string
   /** The plan's estimated liquidation price; stops past it are flagged. */
   liquidation: number | null
+  results: EntryResults | null
+  units: SizeUnits
 }) {
   const exits = exitsOf(entry, kind)
   const text = copy[kind]
@@ -77,15 +79,18 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
           onClick={() => set(exits.filter(current => current.id !== exit.id))}>
           <X aria-hidden="true" size={14} />
         </Button>
-        {move !== null && <p className="level-resolved">
-          {resolved === null ? `${formatDraggedPrice(move)}% price move` : `≈ ${formatDraggedPrice(resolved)} · ${formatDraggedPrice(move)}% move at ${leverage}×`}
+        {(move !== null || results?.levels[exit.id] !== undefined) && <p className="level-resolved">
+          {move !== null && (resolved === null ? `${formatDraggedPrice(move)}% price move` : `≈ ${formatDraggedPrice(resolved)} · ${formatDraggedPrice(move)}% move at ${leverage}×`)}
+          {move !== null && results?.levels[exit.id] !== undefined && ' · '}
+          {results?.levels[exit.id] !== undefined && <strong className="level-result" data-sign={results.levels[exit.id]! < 0 ? 'negative' : 'positive'}
+            title={`Planned result of this ${kind} for ${entry.name}, before fees and funding`}>{formatResult(results.levels[exit.id]!, units)}</strong>}
         </p>}
       </div>
     })}
   </fieldset>
 }
 
-export function EntryForm({ entry, onChange, idPrefix, direction = 'long', leverage = 1, shareLocked = false, maxLeverage = null, liquidation = null }: {
+export function EntryForm({ entry, onChange, idPrefix, direction = 'long', leverage = 1, shareLocked = false, maxLeverage = null, liquidation = null, results = null, units = defaultSizeUnits }: {
   entry: DraftEntry
   onChange: (entry: DraftEntry) => void
   idPrefix?: string
@@ -98,6 +103,9 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
   maxLeverage?: number | null
   /** The whole plan's estimated liquidation price, which stops are checked against. */
   liquidation?: number | null
+  /** Planned results of the stops and targets; null until the position is sized. */
+  results?: EntryResults | null
+  units?: SizeUnits
 }) {
   const generatedId = useId()
   const prefix = idPrefix ?? generatedId
@@ -124,7 +132,12 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
       Liq. ≈ <strong>{formatDraggedPrice(own)}</strong>
       {' '}<span>{percent.format(Math.abs(own - entryPrice) / entryPrice * 100)}% {direction === 'long' ? 'below' : 'above'} entry{shareLocked ? '' : ' · this entry alone'}</span>
     </p>}
-    <ExitList entry={entry} kind="stop" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={liquidation ?? own} />
-    <ExitList entry={entry} kind="target" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={null} />
+    {results && (results.stops !== null || results.targets !== null) && <p className="entry-results" data-testid="entry-results"
+      title="If every stop, or every target, of this entry fills at its planned price and share; before fees and funding">
+      {results.stops !== null && <span>At stops <strong data-sign={results.stops < 0 ? 'negative' : 'positive'}>{formatResult(results.stops, units)}</strong></span>}
+      {results.targets !== null && <span>At targets <strong data-sign={results.targets < 0 ? 'negative' : 'positive'}>{formatResult(results.targets, units)}</strong></span>}
+    </p>}
+    <ExitList entry={entry} kind="stop" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={liquidation ?? own} results={results} units={units} />
+    <ExitList entry={entry} kind="target" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={null} results={results} units={units} />
   </div>
 }

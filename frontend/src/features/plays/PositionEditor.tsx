@@ -7,7 +7,7 @@ import { EntryForm } from './EntryForm'
 import { formatDraggedPrice, keepPercentLevelPrices, leverageOf, percentLevels } from './levels'
 import { LeverageChangeDialog } from './LeverageChangeDialog'
 import {
-  convertSize, defaultSizeUnits, estimatedLiquidation, formatMoney, formatQuantity, formatRewardToRisk, marginOverBudget, positionSize, rewardToRisk, sizeForBudget, type SizeUnits,
+  convertSize, defaultSizeUnits, entryResults, estimatedLiquidation, formatMoney, formatResult, formatQuantity, formatRewardToRisk, marginOverBudget, positionSize, rewardToRisk, sizeForBudget, type SizeUnits,
 } from './sizing'
 import { Equal, Expand, Plus, Trash2 } from 'lucide-react'
 
@@ -221,7 +221,8 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
                   {draft.entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
                 </select>
               </label>
-              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation} />}
+              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation}
+                results={entryResults(draft, leverage, selected)} units={units} />}
             </DialogContent>
           </Dialog>
         </div>
@@ -236,12 +237,13 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
                 <span className="entry-header-price">{entry.price ? `@ ${entry.price}` : 'No price'}</span>
                 <span>{entry.share === '' ? '—' : `${entry.share}%`}</span>
                 <RewardToRisk entry={entry} direction={draft.direction} leverage={leverage} />
-                {selected?.id !== entry.id && <small className="entry-header-levels">{levelCount(entry)}</small>}
+                {selected?.id !== entry.id && <small className="entry-header-levels">{levelCount(entry, entryResults(draft, leverage, entry), units)}</small>}
               </button>
               {draft.entries.length > 1 && <Button type="button" variant="ghost" size="icon-sm" className="remove-entry" aria-label={`Remove ${entry.name}`}
                 title={`Remove ${entry.name}`} onClick={() => removeEntry(entry.id)}><Trash2 size={13} aria-hidden="true" /></Button>}
             </div>
-            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation} />}
+            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation}
+              results={entryResults(draft, leverage, entry)} units={units} />}
             {expanded && selected?.id === entry.id && <p className="muted expanded-placeholder">Editing in the expanded view.</p>}
           </article>)}
         </div>
@@ -257,9 +259,10 @@ function RewardToRisk({ entry, direction, leverage }: { entry: DraftEntry; direc
   </span>
 }
 
-/** "2 SL · 1 TP" for a collapsed entry, counting levels with a value. */
-function levelCount(entry: DraftEntry) {
+/** "2 SL −40 USDC · 1 TP +80 USDC" for a collapsed entry, counting levels with a value; results once sized. */
+function levelCount(entry: DraftEntry, results: ReturnType<typeof entryResults>, units: SizeUnits) {
   const stops = entry.stops.filter(stop => stop.value.trim() !== '').length
   const targets = entry.targets.filter(target => target.value.trim() !== '').length
-  return [stops && `${stops} SL`, targets && `${targets} TP`].filter(Boolean).join(' · ')
+  const result = (value: number | null) => value === null ? '' : ` ${formatResult(value, units)}`
+  return [stops && `${stops} SL${result(results.stops)}`, targets && `${targets} TP${result(results.targets)}`].filter(Boolean).join(' · ')
 }

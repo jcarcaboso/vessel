@@ -161,3 +161,46 @@ export function estimatedLiquidation(entries: PlayDraft['entries'], direction: P
     : averageEntry * (1 + margin) / (1 + maintenance)
   return price > 0 ? price : null
 }
+
+/**
+ * Planned result of each stop and target of one entry, in the quote asset, before fees and funding.
+ * The entry's quantity is its share of the whole position (shares normalized over the priced
+ * entries, as the average entry is), and each level closes its own share of that quantity.
+ * Totals are what the entry makes if every stop, or every target, fills. Unknown parts are null.
+ */
+export interface EntryResults {
+  levels: Record<string, number>
+  stops: number | null
+  targets: number | null
+}
+
+export function entryResults(draft: Pick<PlayDraft, 'size' | 'sizingMode' | 'entries' | 'direction'>, leverage: number, entry: DraftEntry): EntryResults {
+  const empty: EntryResults = { levels: {}, stops: null, targets: null }
+  const { quantity } = positionSize(draft, leverage)
+  const entryPrice = positive(entry.price)
+  const share = positive(entry.share)
+  if (quantity === null || entryPrice === null || share === null) return empty
+  const totalShare = draft.entries.reduce((sum, item) => sum + (positive(item.price) !== null ? positive(item.share) ?? 0 : 0), 0)
+  const entryQuantity = quantity * share / totalShare
+  const sign = draft.direction === 'long' ? 1 : -1
+  const levels: Record<string, number> = {}
+  const total = (kind: ExitKind) => {
+    let sum: number | null = null
+    for (const exit of exitsOf(entry, kind)) {
+      const price = levelPrice(entryPrice, exit, kind, draft.direction, leverage)
+      const closes = positive(exit.share)
+      if (price === null || closes === null) continue
+      const result = sign * (price - entryPrice) * entryQuantity * Math.min(closes, 100) / 100
+      levels[exit.id] = result
+      sum = (sum ?? 0) + result
+    }
+    return sum
+  }
+  return { stops: total('stop'), targets: total('target'), levels }
+}
+
+/** "+200 USDC" or "−100 USDC", two decimals at most. */
+export function formatResult(value: number, units: SizeUnits) {
+  const rounded = Math.round(value * 100) / 100
+  return `${rounded < 0 ? '−' : rounded > 0 ? '+' : ''}${money.format(Math.abs(rounded))} ${units.quote}`
+}
