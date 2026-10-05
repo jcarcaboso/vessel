@@ -182,9 +182,14 @@ describe('leverage suggestion', () => {
     expect(suggestLeverage(plan({ size: '1200' }), 1, 50, 1000, sizing(), null)).toBeNull()
   })
 
-  it('needs a budget', () => {
+  it('without a budget only brings a liquidation inside the stops back out', () => {
     expect(suggestLeverage(plan(), 2, 50, null, sizing(), 2400)).toBeNull()
     expect(suggestLeverage(plan(), 2, 50, 0, sizing(), 2400)).toBeNull()
+    // A long at 120.5 with a stop at 114 on a 20× contract: 20× liquidates near 117.4, inside the stop;
+    // 13× (about 114.08) is still inside; 12× (about 113.3) is the highest that clears it.
+    const sol = { ...draft([entry('120.5', '100', [['114']])]), leverage: '20' }
+    expect(suggestLeverage(sol, 20, 20, null, sizing(), null)).toEqual({ leverage: 12 })
+    expect(suggestLeverage(sol, 12, 20, null, sizing(), null)).toBeNull()
   })
 
   it('keeps the estimated liquidation beyond the farthest stop', () => {

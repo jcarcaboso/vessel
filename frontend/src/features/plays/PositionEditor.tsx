@@ -218,7 +218,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
         {leverageSuggestion && <SuggestionLine testId="leverage-suggestion" label="Accept suggested leverage"
           title="Lowest whole leverage that fits the margin in the budget with the estimated liquidation beyond the farthest stop"
           onAccept={() => needsConfirmation ? commitLeverage(String(leverageSuggestion.leverage)) : updateLeverage(String(leverageSuggestion.leverage))}>
-          Leverage <strong>{leverageSuggestion.leverage}×</strong> fits the budget, liq. past the stops</SuggestionLine>}
+          Leverage <strong>{leverageSuggestion.leverage}×</strong> {heldBudget !== null && heldBudget > 0 ? 'fits the budget, liq.' : 'keeps liq.'} past the stops</SuggestionLine>}
         {sizing && onRiskChange && <TrackRecord sizing={sizing} onRiskChange={onRiskChange} />}
         {leverage > leverageLimit && <p className="leverage-warning" role="alert">{leverage}× is above the {leverageLimit}× venue maximum for {instrumentName || 'this contract'}.</p>}
         {pendingLeverage !== null && <LeverageChangeDialog draft={draft} from={leverage} to={pendingLeverage} units={units}

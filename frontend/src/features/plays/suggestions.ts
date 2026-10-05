@@ -181,19 +181,24 @@ function farthestStop(entries: readonly DraftEntry[], direction: Direction, leve
  * liquidation beyond the farthest stop, capped at the venue maximum and, while exposure is reduced,
  * at the current leverage. The position is the risk-based quantity, else the entered quantity; an
  * entered margin fixes the margin, so leverage cannot fit it. Stops are read at their current prices.
- * Null without a budget, when nothing fits or when it is the current leverage.
+ * Without a budget (or a position to fit) only the liquidation decides: the highest leverage below the
+ * current one that clears the stops. Null when nothing fits or when it is the current leverage.
  */
 export function suggestLeverage(draft: SizedDraft & Pick<PlayDraft, 'leverage'>, leverage: number, maxLeverage: number | null, budget: number | null,
   sizing: SizingDocument, notional: number | null, defaultMaximum = 100) {
   const position = notional ?? (draft.sizingMode === 'quantity' ? positionSize(draft, leverage).notional : null)
-  if (budget === null || budget <= 0 || position === null || position <= 0) return null
-  const reduced = (amount(sizing.exposure.multiplier) ?? 1) < 1
-  const cap = Math.min(maxLeverage ?? defaultMaximum, reduced ? leverage : Infinity)
   const stop = farthestStop(draft.entries, draft.direction, leverage)
   const clear = (candidate: number) => {
     const liquidation = estimatedLiquidation(draft.entries, draft.direction, candidate, maxLeverage)
     return liquidation === null || stop === null || (draft.direction === 'long' ? liquidation < stop : liquidation > stop)
   }
+  if (budget === null || budget <= 0 || position === null || position <= 0) {
+    if (clear(leverage)) return null
+    for (let candidate = leverage - 1; candidate >= 1; candidate--) if (clear(candidate)) return { leverage: candidate }
+    return null
+  }
+  const reduced = (amount(sizing.exposure.multiplier) ?? 1) < 1
+  const cap = Math.min(maxLeverage ?? defaultMaximum, reduced ? leverage : Infinity)
   // Same cent allowance as the over-budget check.
   const lowest = Math.max(1, Math.ceil(position / (budget + 0.005) - tolerance))
   // Only when the current leverage is a problem: the margin does not fit, the liquidation is inside a stop,
