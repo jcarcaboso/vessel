@@ -1,0 +1,64 @@
+# Venue credentials: secure storage
+
+October 5, 2026. The owner approved storing a Lighter **read-only** token so Vessel can read orders. This is the first secret Vessel keeps on behalf of the owner. The design below applies to any later venue credential, but only read-only credentials are in scope. Vessel never stores keys that can trade or withdraw.
+
+## Threats considered
+
+| Threat | Requirement |
+| --- | --- |
+| Database dump or backup leaks (most likely: `pg_dump`, the volume, a copied backup) | Ciphertext in the database is useless without a key kept outside the database. |
+| Ciphertext copied onto another account's row | Decryption is bound to owner, account and purpose. |
+| Token echoed to the browser, logs, exceptions or OpenAPI examples | Write-only API; the plaintext exists only inside the venue adapter's request. |
+| A trading-capable token pasted by mistake | Accept only Lighter's `ro:` format, and only for the same account index. |
+| Lost or rotated encryption key | Keys carry IDs. Old keys stay decrypt-only until re-encryption, and losing the key only means re-entering tokens. |
+
+Out of scope: a compromised API host. A process that must call the venue can always read the token.
+
+## Options compared
+
+| Option | Verdict |
+| --- | --- |
+| **Application-level AES-256-GCM with a master key outside the DB** (`System.Security.Cryptography.AesGcm`, versioned key ring from a mode-600 file or environment) | **Chosen.** No new dependency, explicit and testable. Associated data binds each ciphertext to its row, and DB backups stay safe. It fits the current `.env` and systemd `EnvironmentFile` operation. |
+| ASP.NET Core Data Protection | Rejected as the store. Microsoft states it is "not primarily intended for indefinite persistence of confidential payloads". Its key ring must still be protected outside the DB, and expiry/revocation semantics add risk for tokens that live for years. |
+| PostgreSQL `pgcrypto` | Rejected. The key travels in SQL text, where statement logs and `pg_stat_statements` can expose it, and the DB holds key and data together. |
+| External secret manager (OpenBao/Vault, Infisical, SOPS) | Not now: too much to operate for a single-user self-hosted app. The `ICredentialVault` port lets one replace the local vault later, the same way `IEvidenceObjectStore` admits S3. |
+| OS keyring | Not available to a container or systemd service user. |
+
+## Design
+
+**Port (Application):** `ICredentialVault`
+- `Seal(OwnerId, AccountId, Purpose, plaintext) → SealedCredential(KeyId, Nonce, Ciphertext, Tag)`
+- `Open(OwnerId, AccountId, Purpose, sealed) → plaintext`
+
+The Application layer never sees key material.
+
+**Implementation (Infrastructure):** `AesGcmCredentialVault`
+- 256-bit keys, 96-bit random nonce per seal, 128-bit tag.
+- Associated data = `vessel:credential:v1|{ownerId}|{accountId}|{purpose}`.
+- Configured under `Vessel:Credentials`: `ActiveKeyId`, and `Keys:{id}` (base64, 32 bytes) or `KeyFile`, a path to a mode-600 JSON key ring. Validated at startup (`ValidateOnStart`, like `Vessel:Evidence`). With no key configured, the API starts but credential endpoints answer 503 "Credential storage is not configured". Sync without credentials keeps working.
+- Development: `pnpm dev` reads `Vessel__Credentials__…` from root `.env` and never passes it to Vite, like the auth token. `docs/development.md` documents generating a key with `openssl rand -base64 32`.
+- Rotation: add a new key, switch `ActiveKeyId`, run the explicit `pnpm credentials:reseal` command (or re-enter tokens), then remove the old key.
+
+**Persistence:** a table `account_credentials`, one row per account and purpose:
+- `account_id` (FK, cascade delete with the account), `owner_id`, `purpose` (`lighter-read-token`)
+- `key_id`, `nonce`, `ciphertext`, `tag`
+- non-secret metadata parsed before sealing: `scope` (`single|all`), `expires_at`, `created_at`, `last_verified_at`, `last_error`
+
+Owner scope and the account lock apply as for other account writes.
+
+**API:** write-only.
+- `PUT /api/accounts/{id}/credential` with `{ token }` validates, verifies at the venue, seals and stores.
+- `DELETE /api/accounts/{id}/credential` removes it.
+- `AccountDto` gains only `credential: { scope, expiresAt, lastVerifiedAt, status } | null`. No endpoint ever returns the token, a prefix or a hash.
+
+**Validation for Lighter before sealing:**
+- The token matches `^ro:(\d{1,19}):(single|all):(\d{10}):[0-9a-f]+$` and is ≤ 512 characters.
+- The index equals the account's index. For `all`, it must be the master index listed by `accountsByL1Address` for the same L1 address.
+- The expiry lies in the future.
+- One verification read (`accountActiveOrders`) succeeds. A rejected token gives 400 "Lighter did not accept this read-only token". Nothing is stored on failure.
+
+**Handling rules:**
+- The plaintext lives only in the adapter call that sets the `Authorization` header. It is never placed in a URL (`auth=` query parameter), exception message, log scope or `RawJson`.
+- Venue HttpClients already use `RemoveAllLoggers()`. Keep it, and add a test that a failing venue read with a credential never includes the token in the exception or problem details.
+- Expiry within 14 days shows a warning on the account. After expiry, order reads stop with "Token expired: enter a new read-only token". Snapshots and fills continue on public reads.
+- Deleting the account deletes the credential. Disabling it keeps the credential but blocks every read, as disable already does.
