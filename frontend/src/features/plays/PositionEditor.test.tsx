@@ -313,20 +313,25 @@ describe('local-draft position editor', () => {
     expect(screen.getByTestId('size-readout')).toHaveTextContent('Position 1,250 quote units≈ 0.5 unitsat 5×')
   })
 
-  it('shows allocated quantity shares and splits them equally only on request', async () => {
+  it('splits shares equally as entries are added and locks a single entry to the whole position', async () => {
     const { user, onChange } = renderEditor(1)
     expect(screen.getByRole('heading', { name: 'Entries 1' })).toBeInTheDocument()
     expect(within(entryHeader('Entry 1')).queryByText(/^@/)).not.toBeInTheDocument()
     await user.type(field('Entry 1 planned entry price (quote units)'), '64200')
     expect(within(entryHeader('Entry 1')).getByText('@ 64200')).toBeInTheDocument()
     expect(screen.getByText('100%', { selector: '.entries-allocated' })).toHaveAttribute('data-complete', 'true')
+    expect(field('Entry 1 quantity share (%)')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Split equally' })).toBeDisabled()
     await user.click(screen.getByRole('button', { name: 'Add entry' }))
+    expect(onChange.mock.lastCall?.[0].entries.map(entry => entry.share)).toEqual(['50', '50'])
+    expect(screen.getByRole('button', { name: 'Split equally' })).toBeEnabled()
     await user.click(screen.getByRole('button', { name: 'Add entry' }))
-    expect(onChange.mock.lastCall?.[0].entries.map(entry => entry.share)).toEqual(['100', '', ''])
+    expect(onChange.mock.lastCall?.[0].entries.map(entry => entry.share)).toEqual(['33.33', '33.33', '33.34'])
     expect(screen.getByText('100%', { selector: '.entries-allocated' })).toBeInTheDocument()
     await user.click(entryHeader('Entry 1'))
+    expect(field('Entry 1 quantity share (%)')).toBeEnabled()
     await user.clear(field('Entry 1 quantity share (%)'))
-    expect(screen.getByText('—', { selector: '.entries-allocated' })).toBeInTheDocument()
+    expect(screen.getByText('66.67%', { selector: '.entries-allocated' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Split equally' }))
     expect(onChange.mock.lastCall?.[0].entries.map(entry => entry.share)).toEqual(['33.33', '33.33', '33.34'])
     expect(screen.getByRole('heading', { name: 'Entries 3' })).toBeInTheDocument()
@@ -334,16 +339,80 @@ describe('local-draft position editor', () => {
     await user.click(entryHeader('Entry 3'))
     await user.clear(field('Entry 3 quantity share (%)'))
     expect(screen.getByText('66.66%', { selector: '.entries-allocated' })).toHaveAttribute('data-complete', 'false')
+    // An uneven split is left to the owner; removing down to one entry gives it the whole position.
+    await user.click(screen.getByRole('button', { name: 'Remove Entry 3' }))
+    expect(onChange.mock.lastCall?.[0].entries.map(entry => entry.share)).toEqual(['33.33', '33.33'])
+    await user.click(screen.getByRole('button', { name: 'Remove Entry 2' }))
+    expect(onChange.mock.lastCall?.[0].entries.map(entry => entry.share)).toEqual(['100'])
+    expect(screen.getByRole('button', { name: 'Split equally' })).toBeDisabled()
   })
 
-  it('adds blank entries using distinct identities without changing existing shares or reusing names', async () => {
+  it('keeps an equal split equal when an entry is removed', async () => {
+    const { user, onChange } = renderEditor(1)
+    await user.click(screen.getByRole('button', { name: 'Add entry' }))
+    await user.click(screen.getByRole('button', { name: 'Add entry' }))
+    await user.click(screen.getByRole('button', { name: 'Remove Entry 2' }))
+    expect(onChange.mock.lastCall?.[0].entries.map(entry => entry.share)).toEqual(['50', '50'])
+  })
+
+  it('shows the planned reward to risk of each entry in its header', async () => {
+    const { user } = renderEditor(1)
+    const ratio = () => entryHeader('Entry 1').querySelector('.entry-header-rr')
+    expect(ratio()).toHaveTextContent('R:R —')
+    await user.type(field('Entry 1 planned entry price (quote units)'), '100')
+    await user.type(field('Entry 1 planned stop price (quote units)'), '95')
+    await user.type(field('Entry 1 planned target 1 price (quote units)'), '110')
+    expect(ratio()).toHaveTextContent('R:R 1:2')
+    // Targets weigh by the share they close: half at +10 and half at +20 is a +15 average.
+    await user.click(screen.getByRole('button', { name: 'Add target to Entry 1' }))
+    await user.clear(field('Entry 1 target 1 share (%)'))
+    await user.type(field('Entry 1 target 1 share (%)'), '50')
+    await user.type(field('Entry 1 planned target 2 price (quote units)'), '120')
+    await user.type(field('Entry 1 target 2 share (%)'), '50')
+    expect(ratio()).toHaveTextContent('R:R 1:3')
+    // A level on the wrong side has no ratio; the plan check reports it.
+    await user.clear(field('Entry 1 planned stop price (quote units)'))
+    await user.type(field('Entry 1 planned stop price (quote units)'), '105')
+    expect(ratio()).toHaveTextContent('R:R —')
+  })
+
+  it('shows the estimated liquidation price at the leverage', async () => {
+    function Harness() {
+      const [draft, setDraft] = useState(createDraft)
+      return <PositionEditor draft={draft} onChange={setDraft} selectedId={draft.entries[0]!.id} onSelect={() => {}} maxLeverage={20} />
+    }
+    const user = userEvent.setup()
+    render(<Harness />)
+    expect(screen.queryByTestId('liquidation-estimate')).toBeNull()
+    await user.type(field('Entry 1 planned entry price (quote units)'), '121.54')
+    await user.click(screen.getByRole('button', { name: '10×' }))
+    expect(screen.getByTestId('liquidation-estimate')).toHaveTextContent('Liq. ≈ 112.19')
+  })
+
+  it('holds the margin to the available amount and offers to use it', async () => {
+    const onChange = vi.fn<(draft: PlayDraft) => void>()
+    function Harness() {
+      const [draft, setDraft] = useState(() => ({ ...createDraft(), size: '263' }))
+      return <PositionEditor draft={draft} onChange={next => { onChange(next); setDraft(next) }} selectedId={draft.entries[0]!.id} onSelect={() => {}}
+        availableBudget="151.77" units={{ quote: 'USDC', base: 'SOL', quantityDecimals: 2 }} />
+    }
+    const user = userEvent.setup()
+    render(<Harness />)
+    expect(screen.getByRole('alert')).toHaveTextContent('Margin 263 USDC is above the 151.77 USDC available.')
+    expect(screen.getByRole('spinbutton', { name: /Whole-position margin/ })).toHaveAttribute('aria-invalid', 'true')
+    await user.click(screen.getByRole('button', { name: 'Use 151.77 USDC' }))
+    expect(onChange.mock.lastCall?.[0].size).toBe('151.77')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('adds blank entries using distinct identities and names, splitting the shares equally', async () => {
     vi.stubGlobal('crypto', {})
     const { user, initial, onChange } = renderEditor(1)
     await user.click(screen.getByRole('button', { name: 'Add entry' }))
     const added = onChange.mock.lastCall?.[0].entries[1]
-    expect(added).toMatchObject({ name: 'Entry 2', share: '', price: '', stops: [{ unit: 'price', value: '', share: '100' }] })
+    expect(added).toMatchObject({ name: 'Entry 2', share: '50', price: '', stops: [{ unit: 'price', value: '', share: '100' }] })
     expect(added?.id).not.toBe(initial.entries[0]!.id)
-    expect(onChange.mock.lastCall?.[0].entries[0]).toEqual(initial.entries[0])
+    expect(onChange.mock.lastCall?.[0].entries[0]).toEqual({ ...initial.entries[0], share: '50' })
     expect(entryHeader('Entry 2')).toHaveAttribute('aria-pressed', 'true')
     await user.click(entryHeader('Entry 1'))
     await user.click(screen.getByRole('button', { name: 'Remove Entry 1' }))
@@ -358,7 +427,7 @@ describe('local-draft position editor', () => {
     const { user } = renderEditor()
     expect(field('Entry 1 planned entry price (quote units)')).toBeInTheDocument()
     expect(screen.queryByRole('spinbutton', { name: 'Entry 2 planned entry price (quote units)' })).toBeNull()
-    await user.click(within(entryHeader('Entry 2')).getByText('—'))
+    await user.click(within(entryHeader('Entry 2')).getByText('No price'))
     expect(entryHeader('Entry 2')).toHaveFocus()
     expect(entryHeader('Entry 2')).toHaveAttribute('aria-expanded', 'true')
     expect(field('Entry 2 planned entry price (quote units)')).toBeInTheDocument()

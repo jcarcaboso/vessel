@@ -76,13 +76,15 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix }: {
   </fieldset>
 }
 
-export function EntryForm({ entry, onChange, idPrefix, direction = 'long', leverage = 1 }: {
+export function EntryForm({ entry, onChange, idPrefix, direction = 'long', leverage = 1, shareLocked = false }: {
   entry: DraftEntry
   onChange: (entry: DraftEntry) => void
   idPrefix?: string
   direction?: PlayDraft['direction']
   /** The play's leverage; percentage levels are returns on margin at it. */
   leverage?: number
+  /** A single entry takes the whole position, so its share cannot change. */
+  shareLocked?: boolean
 }) {
   const generatedId = useId()
   const prefix = idPrefix ?? generatedId
@@ -91,7 +93,8 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
     <label htmlFor={`${prefix}-share`}>
       <span>Share %</span>
       <Input id={`${prefix}-share`} type="number" step="any" min={0} max={100}
-        aria-label={`${entry.name} quantity share (%)`} value={entry.share}
+        aria-label={`${entry.name} quantity share (%)`} value={shareLocked ? '100' : entry.share} disabled={shareLocked}
+        title={shareLocked ? 'A single entry takes the whole position. Add an entry to split it.' : undefined}
         onChange={event => onChange({ ...entry, share: event.target.value })} />
     </label>
     <label htmlFor={`${prefix}-price`}>

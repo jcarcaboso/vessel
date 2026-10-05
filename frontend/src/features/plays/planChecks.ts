@@ -1,6 +1,6 @@
 import type { DraftEntry, DraftExit, PlayDraft } from './draft'
 import { levelName } from './execution'
-import { exitsOf, type ExitKind } from './levels'
+import { exitsOf, formatDraggedPrice, levelPrice, type ExitKind } from './levels'
 
 type Direction = PlayDraft['direction']
 
@@ -58,4 +58,18 @@ export function planFixes(draft: Pick<PlayDraft, 'entries' | 'direction'>) {
 /** One line for the save error. */
 export function planIssueSummary(issues: readonly PlanIssue[]) {
   return issues.length === 1 ? issues[0]!.message : `${issues.length} stops and targets are on the wrong side of their entry.`
+}
+
+/**
+ * Stops that would not trigger before the estimated liquidation price: at or below it for a long,
+ * at or above it for a short. A warning, not an error, since the liquidation price is an estimate.
+ */
+export function stopsPastLiquidation(entries: readonly DraftEntry[], direction: Direction, leverage: number, liquidation: number | null) {
+  if (liquidation === null) return []
+  return entries.flatMap(entry => entry.stops.flatMap(stop => {
+    const price = levelPrice(positive(entry.price), stop, 'stop', direction, leverage)
+    if (price === null || (direction === 'long' ? price > liquidation : price < liquidation)) return []
+    return [{ entryId: entry.id, levelId: stop.id,
+      message: `${levelName(entries, { role: 'stop', entryId: entry.id, levelId: stop.id })} at ${formatDraggedPrice(price)} is past the estimated liquidation price of ${formatDraggedPrice(liquidation)}.` }]
+  }))
 }

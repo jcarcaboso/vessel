@@ -21,7 +21,7 @@ import { useChartPreferences } from '@/features/market/chartPreferences'
 import { useCandles } from '@/features/market/useCandles'
 import { useLiveMarket } from '@/features/market/useLiveMarket'
 import { describeMarket, useMarketContext } from '@/features/market/useMarketContext'
-import { createNextEntry, type DraftEntry, type PlayDraft } from './draft'
+import { addEntry, createNextEntry, removeEntry, type DraftEntry, type PlayDraft } from './draft'
 import { LevelEditor } from './LevelEditor'
 import { applyEntryEdit, applyLevelDrag, averageEntryPrice, formatDraggedPrice, levelTag, parseOverlayId, placeLevel, planOverlays, type ChartView, type ExitKind } from './levels'
 
@@ -41,6 +41,8 @@ interface ChartPanelProps {
   direction?: PlayDraft['direction']
   /** The play's leverage; percentage levels are returns at it. */
   leverage?: number
+  /** Estimated liquidation price of the whole plan, drawn as a reference line. */
+  liquidation?: number | null
   /** False for read-only plays: levels can be viewed but not placed or dragged. */
   editable?: boolean
   /** Brings the Evidence tab into view after a capture. */
@@ -59,11 +61,15 @@ interface ChartPanelProps {
 const noDrawings: readonly ChartDrawing[] = []
 
 type PlanTool = 'entry' | ExitKind
+/** The estimated liquidation price as a dashed reference line; it is derived, so it cannot be dragged. */
+const liquidationOverlay = (price: number): PriceOverlay => ({
+  id: 'aggregate:liquidation', label: 'LIQ ≈', price, color: 'var(--negative)', kind: 'reference', emphasis: 'normal', draggable: false,
+})
 const planToolIcon = { size: 16, strokeWidth: 1.6, 'aria-hidden': true } as const
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'UTC', hour12: false })
 
-export function ChartPanel({ entries, selectedId, onSelect, instrument, instrumentName = instrument, venue = null, direction = 'long', leverage = 1,
+export function ChartPanel({ entries, selectedId, onSelect, instrument, instrumentName = instrument, venue = null, direction = 'long', leverage = 1, liquidation = null,
   editable = true, source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, onCapture, onShowEvidence, createAdapter }: ChartPanelProps) {
   const [view, setView] = useState<ChartView>('aggregate')
   const [planTool, setPlanTool] = useState<PlanTool | null>(null)
@@ -128,10 +134,10 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
     if (planTool === 'entry' && Number(entry.price) > 0) {
       const added = placeLevel(createNextEntry(current), 'entry', price)
       const change = (next: DraftEntry[]) => latest.current.onEntriesChange?.(next)
-      change([...current, added])
+      change(addEntry(current, added))
       history.push({ label: `Add ${added.name}`,
-        undo: () => change(latest.current.entries.filter(item => item.id !== added.id)),
-        redo: () => change([...latest.current.entries.filter(item => item.id !== added.id), added]) })
+        undo: () => change(removeEntry(latest.current.entries, added.id)),
+        redo: () => change(addEntry(latest.current.entries.filter(item => item.id !== added.id), added)) })
       onSelect(added.id)
       return
     }
@@ -148,7 +154,10 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   const [expanded, setExpanded] = useState(false)
   const expandButton = useRef<HTMLButtonElement>(null)
   const live = source !== null && instrument !== ''
-  const overlays = useMemo(() => planOverlays(entries, selectedId, view, direction, leverage), [entries, selectedId, view, direction, leverage])
+  const overlays = useMemo(() => {
+    const plan = planOverlays(entries, selectedId, view, direction, leverage)
+    return liquidation === null ? plan : [...plan, liquidationOverlay(liquidation)]
+  }, [entries, selectedId, view, direction, leverage, liquidation])
   const average = view === 'aggregate' ? averageEntryPrice(entries) : null
   const several = entries.length > 1
 

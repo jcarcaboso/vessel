@@ -2,23 +2,18 @@ import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } f
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { createNextEntry, renumberEntries, type DraftEntry, type PlayDraft } from './draft'
+import { addEntry as withEntry, createNextEntry, removeEntry as withoutEntry, splitEqually as equalSplit, type DraftEntry, type PlayDraft } from './draft'
 import { EntryForm } from './EntryForm'
-import { keepPercentLevelPrices, leverageOf, percentLevels } from './levels'
+import { formatDraggedPrice, keepPercentLevelPrices, leverageOf, percentLevels } from './levels'
 import { LeverageChangeDialog } from './LeverageChangeDialog'
-import { convertSize, defaultSizeUnits, formatMoney, formatQuantity, positionSize, type SizeUnits } from './sizing'
+import {
+  convertSize, defaultSizeUnits, estimatedLiquidation, formatMoney, formatQuantity, formatRewardToRisk, marginOverBudget, positionSize, rewardToRisk, sizeForBudget, type SizeUnits,
+} from './sizing'
 import { Equal, Expand, Plus, Trash2 } from 'lucide-react'
 
 const leveragePresets = [1, 5, 10, 25, 50]
 /** Control range when the venue maximum is unknown, e.g. manual instruments. Saved plans accept up to 100×. */
 const defaultMaxLeverage = 100
-
-// Plain share bookkeeping, not a sizing calculation. Two decimals with the remainder on the last entry.
-function equalShares(count: number) {
-  const base = Math.floor(10000 / count) / 100
-  return Array.from({ length: count }, (_, index) =>
-    String(index === count - 1 ? Number((100 - base * (count - 1)).toFixed(2)) : base))
-}
 
 function allocatedShare(entries: DraftEntry[]) {
   const shares = entries.map(entry => entry.share.trim()).filter(Boolean).map(Number)
@@ -27,7 +22,7 @@ function allocatedShare(entries: DraftEntry[]) {
 }
 import { AvailableBudget } from './WorkspacePanels'
 
-export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null }: {
+export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null, checkBudget = true }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
   selectedId: string
@@ -40,6 +35,8 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   units?: SizeUnits
   /** What the account has available, used as the budget unless a manual one is set. */
   availableBudget?: string | null
+  /** Holds the margin to the budget. Off once orders may rest, since the venue then counts their margin as used. */
+  checkBudget?: boolean
 }) {
   const leverageLimit = maxLeverage ?? defaultMaxLeverage
   const leverage = leverageOf(draft.leverage)
@@ -110,21 +107,25 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   }
 
   const sized = positionSize(draft, leverage)
+  const liquidation = estimatedLiquidation(draft.entries, draft.direction, leverage, maxLeverage)
+  const overBudget = checkBudget ? marginOverBudget(draft, leverage, availableBudget) : null
+  const budgetSize = overBudget ? sizeForBudget(draft, leverage, overBudget.budget.value, units) : null
+  // One entry takes the whole position, so its share and the split are fixed.
+  const single = draft.entries.length === 1
 
   function splitEqually() {
-    const shares = equalShares(draft.entries.length)
-    onChange({ ...draft, entries: draft.entries.map((entry, index) => ({ ...entry, share: shares[index]! })) })
+    onChange({ ...draft, entries: equalSplit(draft.entries) })
   }
 
   function addEntry() {
     const entry = createNextEntry(draft.entries)
-    onChange({ ...draft, entries: [...draft.entries, entry] })
+    onChange({ ...draft, entries: withEntry(draft.entries, entry) })
     onSelect(entry.id)
   }
 
   function removeEntry(id: string) {
-    if (draft.entries.length <= 1) return
-    const entries = renumberEntries(draft.entries.filter(entry => entry.id !== id))
+    if (single) return
+    const entries = withoutEntry(draft.entries, id)
     onChange({ ...draft, entries })
     if (selected?.id === id) onSelect(entries[0]!.id)
   }
@@ -138,6 +139,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
           <label htmlFor={`${prefix}-size`}>
             <span>{draft.sizingMode === 'margin' ? 'Margin' : 'Quantity'}</span>
             <Input id={`${prefix}-size`} type="number" min={0} step="any" value={draft.size} placeholder="0"
+              aria-invalid={overBudget ? true : undefined} aria-describedby={overBudget ? `${prefix}-over-budget` : undefined}
             aria-label={draft.sizingMode === 'margin' ? `Whole-position margin (${units.quote})` : `Whole-position quantity (${units.base})`}
               onChange={event => onChange({ ...draft, size: event.target.value })} />
           </label>
@@ -152,12 +154,20 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
                 }}>{mode === 'margin' ? '$' : units.base === defaultSizeUnits.base ? 'Qty' : units.base}</button>)}
             </div>
           </div>
-          {sized.notional !== null || sized.margin !== null ? <p className="position-size-readout" data-testid="size-readout">
+          {sized.notional !== null || sized.margin !== null || liquidation !== null ? <p className="position-size-readout" data-testid="size-readout">
             {sized.notional !== null && <span>Position <strong>{formatMoney(sized.notional, units)}</strong></span>}
             {draft.sizingMode === 'quantity' && sized.margin !== null && <span>Margin <strong>{formatMoney(sized.margin, units)}</strong></span>}
             {sized.quantity !== null && draft.sizingMode === 'margin' && <span>≈ <strong>{formatQuantity(sized.quantity, units)}</strong></span>}
             <small>at {leverage}×</small>
+            {liquidation !== null && <span className="size-liquidation" data-testid="liquidation-estimate"
+              title="Estimated for isolated margin with every entry filled at its planned price; ignores fees, funding and margin tiers. Cross margin liquidates further away. The venue shows the real price once the position is open.">
+              Liq. ≈ <strong>{formatDraggedPrice(liquidation)}</strong></span>}
           </p> : null}
+          {overBudget && <p id={`${prefix}-over-budget`} className="size-over-budget" role="alert">
+            <span>Margin {formatMoney(overBudget.margin, units)} is above the {formatMoney(overBudget.budget.amount, units)} {overBudget.budget.source === 'manual' ? 'budget' : 'available'}.</span>
+            {budgetSize !== null && <Button type="button" variant="outline" size="sm" onClick={() => onChange({ ...draft, size: budgetSize })}>
+              Use {draft.sizingMode === 'margin' ? formatMoney(overBudget.budget.amount, units) : formatQuantity(Number(budgetSize), units)}</Button>}
+          </p>}
         </div>
         <div className="leverage-controls">
           <label htmlFor={`${prefix}-leverage-slider`}>Leverage {maxLeverage && <small>Max {maxLeverage}×</small>}</label>
@@ -184,7 +194,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
         <div className="entries-heading">
           <h3>Entries <span className="entry-count">{draft.entries.length}</span></h3>
           <span className="entries-allocated" data-complete={allocated === 100} title="Share of the position's quantity given to entries">{allocated === null ? '—' : `${allocated}%`}</span>
-          <Button type="button" variant="ghost" size="icon-sm" className="split-equally" aria-label="Split equally" title="Split shares equally" onClick={splitEqually}><Equal size={14} aria-hidden="true" /></Button>
+          <Button type="button" variant="ghost" size="icon-sm" className="split-equally" aria-label="Split equally" title={single ? 'A single entry takes the whole position' : 'Split shares equally'} disabled={single} onClick={splitEqually}><Equal size={14} aria-hidden="true" /></Button>
           <Button type="button" variant="ghost" size="icon-sm" className="add-entry" aria-label="Add entry" title="Add entry" onClick={addEntry}><Plus size={14} aria-hidden="true" /></Button>
           <Dialog open={expanded} onOpenChange={open => {
             if (open) sidebarBeforeExpansion.current = { selectedId, scrollTop: sidebar.current?.scrollTop ?? 0 }
@@ -211,7 +221,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
                   {draft.entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
                 </select>
               </label>
-              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} />}
+              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} />}
             </DialogContent>
           </Dialog>
         </div>
@@ -225,16 +235,26 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
                 <strong><i aria-hidden="true" />{entry.name}</strong>
                 <span className="entry-header-price">{entry.price ? `@ ${entry.price}` : 'No price'}</span>
                 <span>{entry.share === '' ? '—' : `${entry.share}%`}</span>
+                <RewardToRisk entry={entry} direction={draft.direction} leverage={leverage} />
                 {selected?.id !== entry.id && <small className="entry-header-levels">{levelCount(entry)}</small>}
               </button>
               {draft.entries.length > 1 && <Button type="button" variant="ghost" size="icon-sm" className="remove-entry" aria-label={`Remove ${entry.name}`}
                 title={`Remove ${entry.name}`} onClick={() => removeEntry(entry.id)}><Trash2 size={13} aria-hidden="true" /></Button>}
             </div>
-            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} />}
+            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} />}
             {expanded && selected?.id === entry.id && <p className="muted expanded-placeholder">Editing in the expanded view.</p>}
           </article>)}
         </div>
   </section>
+}
+
+/** Planned reward to risk in the entry header; a dash until it has a price, a stop and a target. */
+function RewardToRisk({ entry, direction, leverage }: { entry: DraftEntry; direction: PlayDraft['direction']; leverage: number }) {
+  const ratio = rewardToRisk(entry, direction, leverage)
+  return <span className="entry-header-rr" data-weak={ratio !== null && ratio < 1 ? true : undefined}
+    title="Planned reward to risk: share-weighted target distance over stop distance, before fees">
+    <small>R:R</small> {ratio === null ? '—' : formatRewardToRisk(ratio)}
+  </span>
 }
 
 /** "2 SL · 1 TP" for a collapsed entry, counting levels with a value. */

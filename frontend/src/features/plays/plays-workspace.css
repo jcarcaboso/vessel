@@ -572,6 +572,9 @@
 .plays-page .leverage-warning { margin: 6px 0 0; color: var(--negative); font-size: 10px; }
 
 .plays-page .position-size-readout { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 12px; grid-column: 1 / -1; margin: 0; color: var(--muted-foreground); font-size: 10px; font-variant-numeric: tabular-nums; }
+.plays-page .position-size-readout .size-liquidation strong { color: var(--negative); }
+.plays-page .size-over-budget { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; grid-column: 1 / -1; margin: 0; color: var(--negative); font-size: 10px; }
+.plays-page .size-over-budget button { height: 24px; font-size: 10px; }
 .plays-page .position-size-readout strong { color: var(--foreground); font-size: 11px; font-weight: 600; }
 .leverage-dialog { max-width: min(640px, calc(100vw - 32px)); }
 .leverage-dialog .leverage-levels { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -594,7 +597,10 @@
 .plays-page .position-panel .split-equally { height: 22px; padding: 2px 0; color: var(--ring); font-size: 10px; }
 .plays-page .position-panel .entry-card { margin-bottom: 8px; }
 .plays-page .position-panel .entry-card[data-selected="false"] .entry-header { border-bottom: 0; }
-.plays-page .position-panel .entry-header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; padding: 10px 12px; }
+.plays-page .position-panel .entry-header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; padding: 10px 12px; }
+.plays-page .position-panel .entry-header .entry-header-rr { color: var(--foreground); white-space: nowrap; }
+.plays-page .position-panel .entry-header .entry-header-rr small { color: var(--muted-foreground); font-size: 9px; }
+.plays-page .position-panel .entry-header .entry-header-rr[data-weak="true"] { color: var(--warning); }
 .plays-page .position-panel .entry-header .entry-header-levels { grid-column: 1 / -1; color: var(--muted-foreground); font-size: 9px; }
 .plays-page .position-panel .entry-header .entry-header-levels:empty { display: none; }
 .plays-page .position-panel .entry-header span { font-size: 10px; font-variant-numeric: tabular-nums; }
@@ -638,6 +644,7 @@
 .plays-page .position-panel .entries-heading [data-complete="true"] { color: var(--positive); }
 .plays-page .position-panel .entries-heading button { width: 26px; height: 26px; padding: 0; color: var(--muted-foreground); }
 .plays-page .position-panel .entries-heading button:hover:not(:disabled) { color: var(--foreground); }
+.plays-page .position-panel .entries-heading button:disabled { opacity: .38; background: transparent; }
 .plays-page .position-panel .entries-heading .add-entry { color: var(--ring); }
 .plays-page .entry-header-row { display: flex; align-items: stretch; background: var(--secondary); }
 .plays-page .entry-card[data-selected="true"] .entry-header-row { background: color-mix(in srgb, var(--entry-color) 9%, var(--card)); }
@@ -653,6 +660,8 @@
 .plays-page .plays-notification > svg { flex-shrink: 0; margin-top: 2px; }
 .plays-page .plays-notification.is-error { border-color: color-mix(in srgb, var(--negative) 45%, var(--border)); border-left-color: var(--negative); background: color-mix(in srgb, var(--negative) 6%, var(--card)); }
 .plays-page .plays-notification.is-error > svg { color: var(--negative); }
+.plays-page .plays-notification.is-warning { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); border-left-color: var(--warning); background: color-mix(in srgb, var(--warning) 6%, var(--card)); }
+.plays-page .plays-notification.is-warning > svg { color: var(--warning); }
 .plays-page .plays-notification-body { flex: 1; min-width: 0; }
 .plays-page .plays-notification-body strong { display: block; font-weight: 650; }
 .plays-page .plays-notification-body ul { margin: 2px 0 0; padding: 0; list-style: none; color: var(--muted-foreground); }
