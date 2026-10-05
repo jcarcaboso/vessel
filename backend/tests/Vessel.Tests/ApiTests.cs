@@ -81,7 +81,7 @@ public sealed class ApiTests
         Assert.True(root.GetProperty("allowsConcurrentPlays").GetBoolean());
         Assert.Equal("11111111-1111-1111-1111-111111111111", root.GetProperty("owner").GetProperty("id").GetString());
         Assert.Equal("Owner", root.GetProperty("owner").GetProperty("displayName").GetString());
-        Assert.Equal(new[] { "hyperliquid:Hyperliquid:read-only", "lighter:Lighter:planned", "quantfury:Quantfury:candidate", "manual:Manual:manual" },
+        Assert.Equal(new[] { "hyperliquid:Hyperliquid:read-only", "risex:RISEx:read-only", "lighter:Lighter:planned", "quantfury:Quantfury:candidate", "manual:Manual:manual" },
             root.GetProperty("venues").EnumerateArray().Select(v =>
                 $"{v.GetProperty("id").GetString()}:{v.GetProperty("name").GetString()}:{v.GetProperty("status").GetString()}"));
         // Capabilities tell the browser what each venue can do; planned venues can do nothing yet.
@@ -99,6 +99,14 @@ public sealed class ApiTests
         Assert.Equal(["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M"],
             hyperliquid.GetProperty("intervals").EnumerateArray().Select(i => i.GetString()));
         Assert.Empty(venues["manual"].GetProperty("intervals").EnumerateArray());
+        var risex = venues["risex"];
+        Assert.Equal(("evm-address", "tick-size", "https://www.rise.trade/trade/{instrument}"),
+            (risex.GetProperty("source").GetString(), risex.GetProperty("priceRule").GetString(), risex.GetProperty("tradeUrlTemplate").GetString()));
+        Assert.Equal(["1m", "5m", "15m", "1h", "4h", "1d", "1w"], risex.GetProperty("intervals").EnumerateArray().Select(i => i.GetString()));
+        // Public reads by address; no live stream and no stablecoin wallet.
+        Assert.False(risex.GetProperty("capabilities").GetProperty("stream").GetBoolean());
+        Assert.False(risex.GetProperty("capabilities").GetProperty("stablecoinWallet").GetBoolean());
+        Assert.True(risex.GetProperty("capabilities").GetProperty("orders").GetBoolean());
         Assert.DoesNotContain(TestToken, body);
         Assert.DoesNotContain(TestToken, string.Join(Environment.NewLine, factory.Logs));
     }

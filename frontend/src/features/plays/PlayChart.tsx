@@ -60,6 +60,8 @@ interface ChartPanelProps {
   intervals?: readonly CandleInterval[] | undefined
   /** The instrument's price tick; levels placed or dragged on the chart round to it. */
   priceStep?: number | null
+  /** False for venues without a live stream: the chart refreshes on request only. */
+  streamable?: boolean
 }
 
 const noDrawings: readonly ChartDrawing[] = []
@@ -75,7 +77,7 @@ const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute:
 
 export function ChartPanel({ entries, selectedId, onSelect, instrument, instrumentName = instrument, venue = null, direction = 'long', leverage = 1, liquidation = null,
   editable = true, source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, onCapture, onShowEvidence, createAdapter,
-  intervals = candleIntervals, priceStep = null }: ChartPanelProps) {
+  intervals = candleIntervals, priceStep = null, streamable = true }: ChartPanelProps) {
   const [view, setView] = useState<ChartView>('aggregate')
   const [planTool, setPlanTool] = useState<PlanTool | null>(null)
   const [preferences, setPreferences] = useChartPreferences()
@@ -260,7 +262,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
       instrumentName={instrumentName} caption={`${instrumentName} · ${venue ? `${venue} ` : ''}trade candles`} venue={venue} onCapture={onCapture} onShowEvidence={onShowEvidence}
       timeframes={<TimeframeBar value={interval} favorites={preferences.favorites} available={intervals}
         onChange={next => setPreferences({ interval: next })} onFavoritesChange={favorites => setPreferences({ favorites })} />}
-      liveUpdates={preferences.live} onLiveUpdatesChange={on => setPreferences({ live: on })}
+      liveUpdates={preferences.live && streamable} streamable={streamable} onLiveUpdatesChange={on => setPreferences({ live: on })}
       viewMenu={favoriteTools} rail={rail} drawingBar={<>{drawingBar}{levelEditor}</>} drawingProps={drawingProps} overlays={overlays} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}
       onExpandedChange={setExpanded} onDialogClosed={() => expandButton.current?.focus({ preventScroll: true })} />
       : <>
@@ -272,7 +274,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
         <div className="chart-placeholder">
           <span className="chart-placeholder-icon" aria-hidden="true"><ChartNoAxesCombined size={27} /></span>
           <strong>{instrument ? 'No market data for this instrument' : 'Choose an instrument'}</strong>
-          <p>{instrument ? 'Manual accounts and labels have no candle provider yet. Planned levels stay in the editor.' : 'Select a Hyperliquid account and perpetual to load candles.'}</p>
+          <p>{instrument ? 'Manual accounts and labels have no candle provider yet. Planned levels stay in the editor.' : 'Select an exchange account and perpetual to load candles.'}</p>
           <p>No candles, live prices or execution observations are shown.</p>
         </div>
       </>}
@@ -293,7 +295,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   </section>
 }
 
-function LiveChart({ source, instrument, instrumentName, interval, caption, venue, onCapture, onShowEvidence, liveUpdates, onLiveUpdatesChange, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
+function LiveChart({ source, instrument, instrumentName, interval, caption, venue, onCapture, onShowEvidence, liveUpdates, streamable, onLiveUpdatesChange, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
   source: ChartSource
   instrument: string
   instrumentName: string
@@ -303,6 +305,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
   onCapture?: ((image: Blob, context: string) => string | null) | undefined
   onShowEvidence?: (() => void) | undefined
   liveUpdates: boolean
+  streamable: boolean
   onLiveUpdatesChange: (on: boolean) => void
   timeframes: ReactNode
   viewMenu: ReactNode
@@ -375,7 +378,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
     <span className="chart-status" role="status" aria-live={live.state === 'off' ? 'polite' : 'off'} title={`${caption}${status ? ` · ${status}` : ''}`}>
       {/* The instrument is shown in the play fields; the source stays available as a tooltip and to screen readers. */}
       <span className="chart-source sr-only">{caption} · </span>{status && <span>{status}</span>}</span>
-    <LiveIndicator state={live.state} onToggle={onLiveUpdatesChange} />
+    {streamable && <LiveIndicator state={live.state} onToggle={onLiveUpdatesChange} />}
     <ChartIconButton label="Refresh" icon={<RefreshCw size={15} aria-hidden="true" className={data.refreshing ? 'is-spinning' : ''} />}
       onClick={refresh} disabled={data.status === 'loading' || data.refreshing} aria-busy={data.refreshing} />
     <ChartToolbarDivider />
