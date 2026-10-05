@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark"><title>Vessel · Define a strategy (concepts)</title>
+<link rel="stylesheet" href="strategies-shape.css">
+<style>
+/* shared bits for this page */
+.lab{font-size:10px;color:var(--muted-fg);font-weight:500;display:block;margin-bottom:6px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.icon{padding:4px 8px;font-size:13px;line-height:1}
+.add{font-size:10px;padding:5px 8px}
+.empty{font-size:10px;color:var(--faint);margin:4px 0}
+.notebox{font-size:10px;line-height:1.7;background:#1c2433;border:1px solid #3e5378;color:#c9d9f5;border-radius:5px;padding:8px 11px}
+.seg.dir button[aria-pressed=true][data-v=Long]{background:#18241c;color:var(--positive)}.seg.dir button[aria-pressed=true][data-v=Short]{background:#2a1b1a;color:var(--negative)}
+.dir-Long{color:var(--positive)}.dir-Short{color:var(--negative)}
+.reqs{list-style:none;padding:0;margin:0 0 14px;display:grid;gap:5px;font-size:11px}.reqs li:before{content:'○';display:inline-block;width:16px;color:var(--faint)}.reqs li.ok{color:var(--muted-fg)}.reqs li.ok:before{content:'✓';color:var(--positive)}
+.sub{font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted-fg);font-weight:600;margin:0 0 10px}
+/* 1 builder */
+.b-wrap{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:18px;align-items:start}
+.b-preview{position:sticky;top:18px}
+.b-head{display:flex;gap:10px;align-items:center;padding:12px 18px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.b-head input{flex:1;min-width:160px;font-size:15px;font-weight:600;background:none;border-color:transparent;padding:6px 8px}.b-head input:hover,.b-head input:focus{border-color:var(--border);background:var(--field)}
+.stepper{list-style:none;margin:0;padding:0 10px;display:flex;gap:2px;border-bottom:1px solid var(--border);overflow-x:auto}
+.stepper button{background:none;border:0;border-radius:0;padding:12px 10px;font-size:11px;color:var(--muted-fg);white-space:nowrap;display:flex;gap:7px;align-items:center}
+.stepper b{width:18px;height:18px;border-radius:50%;border:1px solid #4c596b;display:grid;place-items:center;font-size:9px;font-weight:600}
+.stepper .done b{background:#18241c;border-color:#3d5a47;color:var(--positive)}
+.stepper button[aria-current=step]{color:var(--foreground);box-shadow:inset 0 -2px 0 var(--primary)}
+.step-body{padding:20px 22px;min-height:380px}
+.step-head{margin-bottom:16px}.step-head h3{font-size:15px;font-weight:600}.step-head p{font-size:11px;color:var(--muted-fg);margin-top:5px;line-height:1.7;max-width:660px}
+.b-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 18px;border-top:1px solid var(--border);background:var(--card-2)}
+.starts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.start-card{border:1px solid var(--line);border-radius:6px;padding:14px;background:var(--card-2);display:flex;flex-direction:column;gap:8px;min-width:0}
+.start-card h4{font-size:12px}.start-card p{font-size:10px;color:var(--muted-fg);line-height:1.6}
+.opt{display:block;width:100%;text-align:left;background:var(--field);font-weight:400}.opt strong{display:block;font-size:11px;font-weight:600}.opt small{color:var(--muted-fg)}.opt[aria-pressed=true]{border-color:#7c8da7;background:#222a35}
+.hyp{display:grid;gap:12px}
+.sentence{margin-top:16px;padding:14px 16px;border:1px dashed #4c596b;border-radius:6px;font-size:13px;line-height:1.8;background:var(--card-2)}.sentence .eyebrow{display:block;margin-bottom:4px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.kgroup{border-top:1px solid var(--line);padding:12px 0}.kgroup:first-child{border-top:0;padding-top:0}
+.kg-head{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+.brule{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px;align-items:center;margin:6px 0}.brule input{min-width:0;width:100%}
+.brule.ph input{border-style:dashed}.tpl-tag{grid-column:1/-1;font-size:9px;color:var(--warning);margin-top:-2px}
+.preds{display:grid;gap:6px;margin-bottom:8px}.pred{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}.pred input{width:100%}
+.every{display:flex;align-items:center;gap:8px;font-size:11px;flex-wrap:wrap}.every input{width:70px}
+.summary{display:grid;grid-template-columns:130px minmax(0,1fr);gap:8px 14px;font-size:11px;line-height:1.6;margin:0 0 16px}.summary dt{color:var(--muted-fg);font-size:10px}.summary dd{margin:0;min-width:0}
+.done{display:grid;gap:14px;max-width:640px}.done h3{font-size:17px}
+.stage-box{border:1px solid var(--line);border-radius:6px;padding:12px;display:grid;gap:8px;background:var(--card-2)}
+.pv{padding:16px 18px}.pv-head h3{font-size:14px;margin:6px 0 8px;font-weight:600}.pv-head .faint{font-size:10px}
+.pv-thesis{font-size:11px;line-height:1.7;margin:12px 0;color:#cfd6e0}
+.pv-rule{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}.pv-rule p{font-size:11px;line-height:1.55;margin-top:4px}.pv-rule.ph p{color:var(--faint);font-style:italic}
+.seg.mini button{padding:3px 6px;font-size:9px}.seg.mini button:disabled{opacity:.7}
+.nice{font-size:9px;color:var(--muted-fg);margin-left:4px}
+.pv-inv{border-top:1px solid var(--line);padding-top:10px;margin-top:4px}.pv-inv p{font-size:11px;line-height:1.6;margin-top:4px}
+.pv-foot{font-size:9px;color:var(--faint);line-height:1.6;margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+/* 2 sheet */
+.sh-bar{margin-bottom:14px}.sh-bar .pad{display:flex;gap:14px 20px;align-items:center;flex-wrap:wrap}
+.sh-bar select{min-width:220px}
+.uses{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:10px;color:var(--muted-fg)}.uses .badge.cur{color:var(--foreground);border-color:#7c8da7}
+.sheet{display:grid;grid-template-columns:200px minmax(0,1fr);gap:18px;align-items:start}
+.outline{position:sticky;top:18px;padding:8px}
+.outline button{display:flex;justify-content:space-between;gap:8px;width:100%;background:none;border:0;text-align:left;padding:8px 10px;font-size:11px;color:var(--muted-fg)}.outline button:hover{color:var(--foreground);background:var(--muted)}
+.outline .cnt{font-size:9px;color:var(--warning)}.outline .cnt:empty{display:none}
+.doc{overflow:visible}
+.wc-bar{position:sticky;top:0;z-index:1;background:#211d16;border-bottom:1px solid #5b4c34;padding:10px 18px;display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;border-radius:var(--radius) var(--radius) 0 0;font-size:11px}
+.wc-bar.clean{background:var(--card-2);border-color:var(--border)}.wc-bar .grow{flex:1;min-width:180px}.wc-bar small{display:block;color:var(--muted-fg)}
+.wc-bar details{width:100%;font-size:10px;color:var(--muted-fg)}.wc-bar details ul{margin:6px 0 0;padding-left:18px;line-height:1.7}
+.dotw{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--warning);margin-right:6px}.wc-bar.clean .dotw{background:var(--flat-mark)}
+.sec{padding:20px 26px;border-top:1px solid var(--line);scroll-margin-top:70px}.sec:first-of-type{border-top:0}
+.sec>h3{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted-fg);font-weight:600;margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.blk{position:relative;padding:4px 0 4px 12px;border-left:2px solid transparent;margin:4px 0}.blk.changed{border-left-color:var(--warning)}
+.blk-lab{font-size:10px;color:var(--muted-fg);display:block}
+textarea.inline,input.inline{background:transparent;border-color:transparent;font-size:13px;line-height:1.7;padding:4px 6px;width:100%}textarea.inline:hover,textarea.inline:focus,input.inline:hover,input.inline:focus{border-color:var(--border);background:var(--field)}
+.was{font-size:10px;color:var(--muted-fg);margin:2px 6px 0;line-height:1.6}.was:empty{display:none}
+del{color:#e3a69f;background:#3a2321;border-radius:3px;padding:0 3px}
+.scope-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 18px}
+.srule{display:grid;grid-template-columns:22px 100px minmax(0,1fr) auto auto;grid-template-areas:"n k t s r";gap:6px;align-items:center;padding:6px 0 6px 10px;border-left:2px solid transparent}
+.srule .rn{grid-area:n;font-size:9px;color:var(--muted-fg);width:20px;height:20px;border:1px solid #4c596b;border-radius:50%;display:grid;place-items:center}
+.srule .kindsel{grid-area:k}.srule .rtext{grid-area:t;min-width:0}.srule .seg{grid-area:s}.srule .rtools{grid-area:r;display:flex;gap:2px}
+.srule.new{border-left-color:var(--positive)}.srule.edited{border-left-color:var(--warning)}
+.rtag{font-size:9px;margin:2px 6px 0;line-height:1.5}.rtag:empty{display:none}.srule.new .rtag{color:var(--positive)}.srule.edited .rtag{color:var(--warning)}
+.kindsel{font-size:9px;letter-spacing:.8px;text-transform:uppercase;padding:5px 4px;font-weight:650;width:100%}
+.kindsel.context{color:#c9c2e8}.kindsel.trigger{color:var(--info)}.kindsel.risk{color:var(--warning)}.kindsel.exit{color:var(--positive)}.kindsel.avoid{color:var(--negative)}
+.removed{margin-top:8px;display:grid;gap:4px}.removed div{display:flex;gap:8px;align-items:center;font-size:11px;padding-left:12px;border-left:2px solid var(--negative)}
+.add-row{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.vlist{display:grid;gap:8px}.vrow{display:grid;grid-template-columns:70px minmax(0,1fr);gap:10px;font-size:11px;line-height:1.6;padding:8px 0;border-top:1px solid var(--line)}.vrow:first-child{border-top:0}.vrow strong{font-size:12px}
+.unver{font-size:9px;color:var(--muted-fg);font-weight:500;letter-spacing:0;text-transform:none}
+/* 3 example */
+.ex-wrap{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:18px;align-items:start}
+.ex-src{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.schem svg{display:block;width:100%;height:auto;background:#12151a;border-radius:6px;border:1px solid var(--line)}.schem.pickable svg{cursor:crosshair}.schem.upload svg{border:1px dashed #6b7686}
+.schem-cap{font-size:9px;color:var(--faint);margin-top:6px;line-height:1.6}
+.meta{display:flex;gap:6px 12px;flex-wrap:wrap;font-size:10px;color:var(--muted-fg);margin:10px 0 0}
+.prompt{border-top:1px solid var(--line);padding:14px 0}.prompt:first-child{border-top:0;padding-top:0}.prompt h4{font-size:12px;margin-bottom:4px}.prompt p{font-size:10px;color:var(--muted-fg);margin-bottom:8px;line-height:1.6}
+.prompt .row{margin-top:8px}
+.cand{display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;padding:10px 6px;border-top:1px solid var(--line);border-radius:4px}.cand[aria-current=true]{background:#1f252e}.cand.accepted{opacity:.6}
+.mk{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:700;background:var(--primary);color:var(--primary-fg);border:0;padding:0}
+.cand input{width:100%}.cand .row{margin-top:6px}
+.counter{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px;align-items:start;margin-top:10px}
+/* 4 preflight */
+.pf-wrap{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:18px;align-items:start}
+.pf-rule{padding:10px 0;border-top:1px solid var(--line)}.pf-rule:first-child{border-top:0}.pf-rule .row{gap:6px}.pf-rule input{flex:1;min-width:0}
+.pf-rule.flag{border-left:2px solid var(--warning);padding-left:10px}
+.tally{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.pf-tabs{display:flex;gap:6px;flex-wrap:wrap;padding:12px 18px;border-bottom:1px solid var(--border)}.pf-tabs button{font-size:10px;padding:5px 9px}.pf-tabs button[aria-pressed=true]{background:#2a313c;border-color:#7c8da7}.pf-tabs i{font-style:normal;color:var(--faint);margin-left:4px}
+.pf-q{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}.pf-q p{font-size:12px;line-height:1.55;margin-top:4px}
+.seg button[aria-pressed=true].na{background:#232933}.seg button[aria-pressed=true].unclear{background:#302a20;color:var(--warning)}
+.rec{font-size:10px;margin-top:4px}
+.verdict{font-size:11px;padding:10px 12px;border-radius:5px;border:1px solid var(--border);background:var(--card-2);margin-top:12px}.verdict.yes{border-color:#3d5a47;color:var(--positive)}.verdict.no{border-color:#6a4d48;color:var(--negative)}.verdict.unclear{border-color:#695940;color:var(--warning)}
+@media(max-width:1180px){.b-wrap{grid-template-columns:minmax(0,1fr) 300px}.ex-wrap,.pf-wrap{grid-template-columns:1fr}}
+@media(max-width:1000px){.b-wrap,.sheet{grid-template-columns:1fr}.b-preview,.outline{position:static}.starts{grid-template-columns:1fr}.outline{display:flex;flex-wrap:wrap;gap:2px}.outline button{width:auto}}
+@media(max-width:600px){.grid2,.scope-grid{grid-template-columns:1fr}.summary{grid-template-columns:1fr;gap:2px}.summary dd{margin-bottom:8px}.step-body{padding:16px}.sec{padding:16px}
+ .srule{grid-template-columns:22px minmax(0,1fr) auto;grid-template-areas:"n k r" "n t t" "n s s";padding-left:6px}.srule .seg{justify-self:start}
+ .pf-q{grid-template-columns:1fr}.counter{grid-template-columns:1fr}.b-foot{flex-wrap:wrap}.sh-bar select{min-width:0;width:100%}.sh-bar label.field{width:100%}}
+</style>
+</head>
+<body>
+<aside class="sidebar">
+ <div class="brand"><span class="mono">V</span>Vessel</div>
+ <div class="nav-label">WORKSPACE</div>
+ <nav class="nav" aria-label="Workspace (mock)"><a href="#"><i></i>Overview</a><a href="#"><i></i>Plays</a><a href="#" class="active" aria-current="page"><i></i>Strategies</a><a href="#"><i></i>Portfolios</a><a href="#"><i></i>Accounts</a><a href="#"><i></i>Activity</a></nav>
+ <p class="note">Disposable prototype. Shell links are inert. Strategies and plays are sample data in browser memory; reload resets them. This page covers creating and defining a strategy only.</p>
+</aside>
+<div class="main">
+ <header class="top"><div>Workspace <span class="muted">&nbsp;/&nbsp;</span> Strategies <span class="muted">&nbsp;/&nbsp;</span> <strong>Define</strong></div><span class="badge sample">SAMPLE DATA<span class="hide-sm"> · NO PERFORMANCE CLAIMS</span></span></header>
+ <div class="content">
+  <div class="heading"><div><div class="eyebrow">Creating a strategy</div><h1>Define a strategy</h1><p>Four alternative ways to write a strategy's hypothesis, scope and rules before Plays use it. How a strategy behaved across Plays is a separate page. Nothing here measures or scores results; stages stay your decision.</p></div></div>
+  <nav class="ideas" aria-label="Ideas">
+   <button class="idea" data-idea="builder" aria-pressed="true"><strong>1 · Guided builder</strong><span>Step by step from hypothesis to a frozen v1, with a live Play preview.</span></button>
+   <button class="idea" data-idea="sheet" aria-pressed="false"><strong>2 · Playbook sheet</strong><span>Edit the strategy as one document; freeze changes as a new version.</span></button>
+   <button class="idea" data-idea="example" aria-pressed="false"><strong>3 · From a real example</strong><span>Turn a past Play into candidate rules pinned on its chart.</span></button>
+   <button class="idea" data-idea="preflight" aria-pressed="false"><strong>4 · Pre-flight test</strong><span>Dry-run the rules on past plays to find the vague ones.</span></button>
+  </nav>
+  <section id="view-builder"></section>
+  <section id="view-sheet" hidden></section>
+  <section id="view-example" hidden></section>
+  <section id="view-preflight" hidden></section>
+ </div>
+</div>
+<dialog id="freeze-dlg"><form method="dialog" id="freeze-form"><h2 id="fd-title">Freeze</h2><p class="muted" id="fd-text" style="font-size:11px;line-height:1.8;margin-bottom:12px"></p><ul class="reqs" id="fd-reqs"></ul><label class="field">Why is it changing?<textarea id="fd-reason" rows="3" maxlength="800" placeholder="What did the plays or your reviews show?"></textarea></label><div class="actions"><button type="button" id="fd-cancel">Cancel</button><button class="primary" id="fd-ok" type="submit" disabled>Freeze</button></div></form></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+<script type="module">
+import { KINDS, STAGES, clone, latest, versionOf, definitionOf, esc, thesisSentence } from './strategies-shape-data.mjs';
+
+const db = clone();
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const uid = () => 'r' + Math.random().toString(36).slice(2, 8);
+const TODAY = new Date().toISOString().slice(0, 10);
+const KO = Object.keys(KINDS);
+const INSTR = ['BTC', 'ETH', 'SOL', 'HYPE', 'XRP', 'DOGE'];
+const TFS = ['1m', '5m', '15m', '1H', '4H', '1D', '1W'];
+const REGIMES = ['Trend', 'Range', 'High volatility', 'Low volatility', 'News-driven'];
+const getPath = (o, p) => p.split('.').reduce((a, k) => a?.[k], o);
+const setPath = (o, p, v) => { const ks = p.split('.'), last = ks.pop(); ks.reduce((a, k) => (a[k] ??= {}), o)[last] = v; };
+const S = id => db.strategies.find(s => s.id === id);
+let tt; const toast = m => { $('#toast').textContent = m; clearTimeout(tt); tt = setTimeout(() => $('#toast').textContent = '', 3800); };
+const opts = (list, cur) => list.map(v => `<option ${v === cur ? 'selected' : ''}>${esc(v)}</option>`).join('');
+const kindOpts = cur => KO.map(k => `<option value="${k}" ${k === cur ? 'selected' : ''}>${KINDS[k].label}</option>`).join('');
+const blankDef = () => ({ name: '', thesis: { when: '', expect: '', because: '' }, scope: { instruments: [], direction: 'Both', timeframes: { setup: '4H', entry: '1H' }, regime: [], sessions: 'Any' }, rules: [], invalidation: '', management: '', reviewPlan: { predictions: [], stopRule: '', checkEvery: 10 }, examples: [] });
+const scopeLine = sc => `<span class="dir-${esc(sc.direction)}">${esc(sc.direction)}</span> · ${esc(sc.instruments.join(', ') || 'any instrument')} · setup ${esc(sc.timeframes.setup || '–')} / entry ${esc(sc.timeframes.entry || '–')}${sc.regime.length ? ' · ' + esc(sc.regime.join(' / ')) : ''}`;
+function reqs(def, reason) {
+  return [
+    ['A name', !!def.name?.trim()],
+    ['Thesis “when”', !!def.thesis.when.trim()],
+    ['At least one trigger or entry rule', def.rules.some(r => (r.kind === 'trigger' || r.kind === 'entry') && r.text.trim())],
+    ['Invalidation', !!def.invalidation.trim()],
+    ['A reason for this version', !!reason.trim()],
+  ];
+}
+const reqsHTML = list => list.map(([l, ok]) => `<li class="${ok ? 'ok' : ''}">${l}</li>`).join('');
+
+/* ---------- idea switching ---------- */
+const renderers = { builder: renderBuilder, sheet: renderSheet, example: renderExample, preflight: renderPreflight };
+function showIdea(id) {
+  if (!renderers[id]) id = 'builder';
+  $$('.idea').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.idea === id)));
+  for (const k in renderers) $('#view-' + k).hidden = k !== id;
+  renderers[id]();
+  history.replaceState(null, '', '#' + id);
+}
+$$('.idea').forEach(b => b.addEventListener('click', () => showIdea(b.dataset.idea)));
+
+/* =====================================================================
+   1 · GUIDED BUILDER
+   ===================================================================== */
+const ph = (kind, hint) => ({ id: uid(), kind, text: '', hint, required: true });
+const TEMPLATES = {
+  breakout: { label: 'Breakout retest', blurb: 'Level → break → retest entry', make: () => ({ thesis: { when: 'Price closes beyond a level that has been tested several times', expect: 'the first retest holds', because: '' }, scope: { direction: 'Both', timeframes: { setup: '1D', entry: '4H' }, regime: ['Trend'] }, rules: [ph('context', 'Define the level: how many touches, on which timeframe?'), ph('trigger', 'What counts as a break? Close beyond it, by how much?'), ph('entry', 'Where exactly do you enter on the retest?'), ph('risk', 'Where is the stop, and how much do you risk?'), ph('avoid', 'When would you skip a valid-looking break?')] }) },
+  range: { label: 'Range fade', blurb: 'Fade the edges of a defined range', make: () => ({ thesis: { when: 'Price reaches the edge of an established range', expect: 'it rotates back towards the middle', because: '' }, scope: { direction: 'Both', timeframes: { setup: '4H', entry: '1H' }, regime: ['Range'] }, rules: [ph('context', 'What makes it a range? Touches, duration, width?'), ph('trigger', 'What rejection do you need at the edge?'), ph('entry', 'Limit at the edge, or after confirmation?'), ph('risk', 'Stop beyond the edge by how much?'), ph('exit', 'Mid-range, opposite edge, or both?')] }) },
+  pullback: { label: 'Pullback in trend', blurb: 'Join a trend after a pullback', make: () => ({ thesis: { when: 'A clear trend pulls back to a level or average', expect: 'the trend resumes', because: '' }, scope: { direction: 'Both', timeframes: { setup: '4H', entry: '1H' }, regime: ['Trend'] }, rules: [ph('context', 'How do you define the trend so a later you agrees? (avoid “price is trending”)'), ph('trigger', 'What shows the pullback is over?'), ph('entry', 'Where do you enter?'), ph('risk', 'Where is the stop?'), ph('avoid', 'What kind of pullback is too deep to count?')] }) },
+};
+const STEPS = ['Start', 'Hypothesis', 'Where it applies', 'Rules', 'Invalidation', 'Review plan', 'Freeze v1'];
+const B = { step: 0, start: null, draft: blankDef(), reason: '', savedId: null, frozen: null, stageReason: '' };
+
+function stepDone(i) {
+  const d = B.draft;
+  return [!!B.start, !!d.thesis.when.trim(), d.scope.instruments.length > 0, d.rules.some(r => r.text.trim()), !!d.invalidation.trim(), !!(d.reviewPlan.stopRule.trim() || d.reviewPlan.predictions.some(p => p.trim())), !!B.frozen][i];
+}
+const stepperHTML = () => STEPS.map((s, i) => `<li><button data-act="b-step" data-i="${i}" aria-current="${i === B.step ? 'step' : 'false'}" class="${stepDone(i) ? 'done' : ''}"><b>${stepDone(i) ? '✓' : i || '·'}</b>${s}</button></li>`).join('');
+const sentenceHTML = t => `<span class="eyebrow">Reads as</span>${t.when.trim() ? esc(thesisSentence(t)) : '<span class="faint">Write “when” to see the hypothesis as one sentence.</span>'}`;
+
+function previewHTML(d, verLabel) {
+  const rules = KO.flatMap(k => d.rules.filter(r => r.kind === k));
+  return `<div class="pv"><div class="pv-head"><div class="eyebrow">Preview · Play › Strategy tab</div><h3>${d.name.trim() ? esc(d.name) : '<span class="faint">Untitled strategy</span>'}</h3><div class="row wrap" style="gap:6px"><span class="badge">${esc(verLabel)}</span><span class="faint">${scopeLine(d.scope)}</span></div></div>
+  <p class="pv-thesis">${d.thesis.when.trim() ? esc(thesisSentence(d.thesis)) : '<span class="faint">Hypothesis not written yet.</span>'}</p>
+  <div>${rules.length ? rules.map(r => `<div class="pv-rule ${r.text.trim() ? '' : 'ph'}"><div><span class="kind ${r.kind}">${KINDS[r.kind].label}</span>${r.required ? '' : '<span class="nice">nice-to-have</span>'}<p>${r.text.trim() ? esc(r.text) : esc(r.hint || 'Empty rule')}</p></div><div class="seg mini" aria-hidden="true"><button tabindex="-1" disabled>Met</button><button tabindex="-1" disabled>Broken</button><button tabindex="-1" disabled>N/A</button></div></div>`).join('') : '<p class="faint" style="font-size:11px">No rules yet. The Play will list them here as a checklist.</p>'}</div>
+  ${d.invalidation.trim() ? `<div class="pv-inv"><span class="eyebrow">Invalidation</span><p>${esc(d.invalidation)}</p></div>` : ''}
+  <p class="pv-foot">Inside a Play you answer each rule as met, broken or n/a. A broken must-have shows as a deviation; nice-to-have rules are only noted. Nothing is scored.</p></div>`;
+}
+
+function stepHTML() {
+  const d = B.draft;
+  if (B.frozen) return doneHTML();
+  switch (B.step) {
+    case 0: return `<div class="step-head"><h3>Where do you want to start?</h3><p>Every starting point gives you an editable draft. Nothing is frozen until the last step, and you can save it as an Idea with only a name at any time.</p></div>
+      <div class="starts">
+       <div class="start-card"><h4>Blank</h4><p>An empty draft. Best when you already know the idea.</p><button class="opt" data-act="start-blank" aria-pressed="${B.start === 'blank'}"><strong>Start blank</strong></button></div>
+       <div class="start-card"><h4>From a template</h4><p>Scaffolds with placeholder questions instead of rules. A template is not a tested strategy.</p>${Object.entries(TEMPLATES).map(([k, t]) => `<button class="opt" data-act="start-tpl" data-v="${k}" aria-pressed="${B.start === 'tpl:' + k}"><strong>${t.label}</strong><small>${t.blurb}</small></button>`).join('')}</div>
+       <div class="start-card"><h4>Duplicate a strategy</h4><p>Copies the latest version into a new, unfrozen strategy. The original and its Plays are untouched.</p>${db.strategies.filter(s => definitionOf(s)).map(s => `<button class="opt" data-act="start-dup" data-v="${esc(s.id)}" aria-pressed="${B.start === 'dup:' + s.id}"><strong>${esc(s.name)}</strong><small>${latest(s) ? 'v' + latest(s).n : 'working draft'} · ${STAGES[s.stage].label}</small></button>`).join('')}</div>
+      </div>`;
+    case 1: return `<div class="step-head"><h3>Hypothesis</h3><p>A claim you could later find wrong. Write it so a future you could disagree with it.</p></div>
+      <div class="hyp">
+       <label class="field">When… <textarea rows="2" data-b="thesis.when" placeholder="An established range is swept below its low and closes back inside">${esc(d.thesis.when)}</textarea></label>
+       <label class="field">Then I expect… <textarea rows="2" data-b="thesis.expect" placeholder="price to rotate back towards the middle of the range">${esc(d.thesis.expect)}</textarea></label>
+       <label class="field">Because… <small class="faint">optional, but it tells you what to check when it fails</small><textarea rows="2" data-b="thesis.because" placeholder="stops below the low get taken and late sellers are trapped">${esc(d.thesis.because)}</textarea></label>
+      </div><div class="sentence" id="b-sentence">${sentenceHTML(d.thesis)}</div>`;
+    case 2: return `<div class="step-head"><h3>Where it applies</h3><p>Scope is descriptive. A Play outside it can still pick the strategy; the Play would show it as outside scope.</p></div>
+      <div class="grid2">
+       <div><span class="lab">Instruments <span class="faint">(primary perpetuals; none = any)</span></span><div class="chips">${[...new Set([...INSTR, ...d.scope.instruments])].map(i => `<button class="chip" data-act="b-inst" data-v="${esc(i)}" aria-pressed="${d.scope.instruments.includes(i)}">${esc(i)}</button>`).join('')}</div></div>
+       <div><span class="lab">Direction</span><div class="seg dir">${['Long', 'Short', 'Both'].map(v => `<button data-act="b-dir" data-v="${v}" aria-pressed="${d.scope.direction === v}">${v}</button>`).join('')}</div></div>
+       <label class="field">Setup timeframe<select data-b="scope.timeframes.setup">${opts(TFS, d.scope.timeframes.setup)}</select></label>
+       <label class="field">Entry timeframe<select data-b="scope.timeframes.entry">${opts(TFS, d.scope.timeframes.entry)}</select></label>
+       <div><span class="lab">Market regime</span><div class="chips">${REGIMES.map(i => `<button class="chip" data-act="b-regime" data-v="${esc(i)}" aria-pressed="${d.scope.regime.includes(i)}">${esc(i)}</button>`).join('')}</div></div>
+       <label class="field">Sessions<input data-b="scope.sessions" value="${esc(d.scope.sessions)}" placeholder="Any, London open, US CPI release…"></label>
+      </div>`;
+    case 3: return `<div class="step-head"><h3>Rules</h3><p>Each rule should be something you can answer as met or broken from the chart or the Play. Must-have rules define the setup; nice-to-have rules are preferences.</p></div>
+      ${KO.map(k => `<div class="kgroup"><div class="kg-head"><span class="kind ${k}">${KINDS[k].label}</span><small class="muted">${KINDS[k].hint}</small></div>
+        ${d.rules.filter(r => r.kind === k).map(r => `<div class="brule ${r.text.trim() ? '' : r.hint ? 'ph' : ''}" data-row="${r.id}"><input data-rule="${r.id}" value="${esc(r.text)}" placeholder="${esc(r.hint || 'Something you could check on a chart')}" aria-label="${KINDS[k].label} rule"><div class="seg"><button data-act="b-req" data-id="${r.id}" data-v="1" aria-pressed="${r.required}">Must</button><button data-act="b-req" data-id="${r.id}" data-v="0" aria-pressed="${!r.required}">Nice</button></div><button class="ghost icon" data-act="b-del-rule" data-id="${r.id}" aria-label="Delete rule">×</button>${!r.text.trim() && r.hint ? '<span class="tpl-tag">Template placeholder: write the rule in your own words or delete it</span>' : ''}</div>`).join('') || `<p class="empty">No ${KINDS[k].label.toLowerCase()} rules.</p>`}
+        <button class="ghost add" data-act="b-add-rule" data-kind="${k}">+ Add ${KINDS[k].label.toLowerCase()} rule</button></div>`).join('')}`;
+    case 4: return `<div class="step-head"><h3>Invalidation and management</h3><p>What proves this particular setup wrong, and how you manage it once in. Exit targets stay in the Rules so a Play can check them.</p></div>
+      <div class="hyp"><label class="field">Invalidation: the setup is wrong if… <textarea rows="3" data-b="invalidation" placeholder="Acceptance below the swept low. Do not widen the stop to justify an entry.">${esc(d.invalidation)}</textarea></label>
+      <label class="field">Management notes <small class="faint">optional</small><textarea rows="3" data-b="management" placeholder="When the stop moves to entry, what you do around funding, partials…">${esc(d.management)}</textarea></label></div>`;
+    case 5: return `<div class="step-head"><h3>Review plan</h3><p>Decide now what you will look at later, so the review is not written after the fact. Vessel does not score these; you read the Plays and decide.</p></div>
+      <span class="lab">Predictions you can check later by reading the Plays</span>
+      <div class="preds">${d.reviewPlan.predictions.map((p, i) => `<div class="pred"><input data-pred="${i}" value="${esc(p)}" placeholder="e.g. Most valid setups reach mid-range before the stop" aria-label="Prediction ${i + 1}"><button class="ghost icon" data-act="b-del-pred" data-i="${i}" aria-label="Remove prediction">×</button></div>`).join('') || '<p class="empty">No predictions yet.</p>'}</div>
+      <button class="ghost add" data-act="b-add-pred">+ Add prediction</button>
+      <div class="hyp" style="margin-top:16px"><label class="field">Stop rule: I'll shelve it if… <textarea rows="2" data-b="reviewPlan.stopRule" placeholder="10 rule-following plays on one version show nothing, or I keep breaking the same rule">${esc(d.reviewPlan.stopRule)}</textarea></label>
+      <div class="every">Review it every <input type="number" min="1" max="99" data-b="reviewPlan.checkEvery" value="${esc(d.reviewPlan.checkEvery)}" aria-label="Plays between reviews"> plays that use a version.</div>
+      <p class="caveat">A review is a reminder to read the plays, not a verdict. Shelving or keeping the strategy stays your call, with a reason.</p></div>`;
+    case 6: {
+      const counts = KO.map(k => [k, d.rules.filter(r => r.kind === k && r.text.trim()).length]).filter(([, n]) => n);
+      const empties = d.rules.filter(r => !r.text.trim()).length;
+      const r = reqs(d, B.reason);
+      return `<div class="step-head"><h3>Freeze v1</h3><p>Freezing makes this text the version Plays will reference. Later changes become v2 with their own reason.</p></div>
+       <dl class="summary">
+        <dt>Hypothesis</dt><dd>${d.thesis.when.trim() ? esc(thesisSentence(d.thesis)) : '<span class="warn">Not written</span>'}</dd>
+        <dt>Scope</dt><dd>${scopeLine(d.scope)}${d.scope.sessions ? ' · ' + esc(d.scope.sessions) : ''}</dd>
+        <dt>Rules</dt><dd>${counts.length ? counts.map(([k, n]) => `<span class="kind ${k}">${KINDS[k].label} ${n}</span>`).join(' ') : '<span class="warn">None</span>'}${empties ? `<br><small class="warn">${empties} empty or placeholder rule${empties > 1 ? 's' : ''} will be left out.</small>` : ''}</dd>
+        <dt>Invalidation</dt><dd>${d.invalidation.trim() ? esc(d.invalidation) : '<span class="warn">Not written</span>'}</dd>
+        <dt>Review plan</dt><dd>${d.reviewPlan.predictions.filter(p => p.trim()).length} prediction(s) · every ${esc(d.reviewPlan.checkEvery)} plays${d.reviewPlan.stopRule.trim() ? ' · shelve if ' + esc(d.reviewPlan.stopRule) : ' · <span class="faint">no stop rule</span>'}</dd>
+        ${d.examples.length ? `<dt>Examples</dt><dd>${d.examples.map(e => `${esc(e.playId)} <span class="faint">(${e.kind === 'setup' ? 'setup' : 'counterexample'})</span>`).join(', ')}</dd>` : ''}
+       </dl>
+       <span class="sub">Needed to freeze</span><ul class="reqs" id="b-reqs">${reqsHTML(r)}</ul>
+       <label class="field">Why this first version? <textarea id="b-reason" rows="2" placeholder="What made you write this down now?">${esc(B.reason)}</textarea></label>
+       <p class="notebox" style="margin:12px 0">After freezing, new Plays can pick <b>${esc(d.name || 'this strategy')} · v1</b> and check its rules. The stage stays <b>Idea</b> until you move it.</p>
+       <div class="row wrap"><button class="primary" data-act="b-freeze" id="b-freeze-btn" ${r.every(x => x[1]) ? '' : 'disabled'}>Freeze v1</button><small class="muted">Not ready? “Save as Idea” above needs only a name.</small></div>`;
+    }
+  }
+}
+function doneHTML() {
+  const s = S(B.frozen.id);
+  return `<div class="done"><div class="row wrap"><span class="badge">v1 frozen · ${esc(B.frozen.date)}</span><span class="badge ${s.stage}">${STAGES[s.stage].label}</span></div>
+   <h3>${esc(s.name)} · v1</h3><p class="muted" style="font-size:11px;line-height:1.7">Reason: ${esc(B.frozen.reason)}</p>
+   <p class="notebox">New Plays can now pick this version. If you change the rules later, that becomes v2 with its own reason; Plays already on v1 keep v1.</p>
+   <div class="stage-box"><span class="sub" style="margin:0">Stage</span><p style="font-size:11px;line-height:1.7" class="muted">Freezing does not change the stage. Moving to Testing means you intend to use it in Plays to collect evidence.</p>
+   ${s.stage === 'idea' ? `<label class="field">Reason <input id="b-stage-reason" value="${esc(B.stageReason)}" placeholder="e.g. Ready to try it on the next few setups"></label><div><button data-act="b-stage" id="b-stage-btn" ${B.stageReason.trim() ? '' : 'disabled'}>Move to Testing</button></div>` : `<p style="font-size:11px">Moved to ${STAGES[s.stage].label}: ${esc(s.stageReason)}</p>`}</div>
+   <div><button class="primary" data-act="b-reset">Start another strategy</button></div></div>`;
+}
+function renderBuilder() {
+  const d = B.draft;
+  $('#view-builder').innerHTML = `<p class="why"><strong>Guided builder.</strong> Walks you from a hypothesis to a frozen v1, one question at a time, while the right side shows the checklist a Play will display. <strong>Suits</strong> a first strategy or turning a loose idea into something testable. <strong>Trade-off:</strong> slow for small edits to an existing strategy, and a stepper can make the steps feel like gates; here every step can be skipped and only freezing has requirements.</p>
+  <div class="b-wrap"><div class="panel">
+   <div class="b-head"><input data-b="name" value="${esc(d.name)}" placeholder="Strategy name" aria-label="Strategy name" ${B.frozen ? 'disabled' : ''}><button data-act="b-save-idea" ${B.frozen ? 'disabled' : ''}>${B.savedId ? 'Update Idea' : 'Save as Idea'}</button></div>
+   <ol class="stepper" id="b-stepper">${stepperHTML()}</ol>
+   <div class="step-body" id="b-body">${stepHTML()}</div>
+   ${B.frozen ? '' : `<div class="b-foot"><button data-act="b-back" ${B.step === 0 ? 'disabled' : ''}>← Back</button><small class="faint">${B.savedId ? 'Saved as Idea · unfrozen' : 'Draft in browser memory'}</small>${B.step < 6 ? `<button class="primary" data-act="b-next">${B.step === 0 && !B.start ? 'Skip, start blank' : 'Next: ' + STEPS[B.step + 1]} →</button>` : '<span></span>'}</div>`}
+  </div>
+  <aside class="panel b-preview" id="b-preview">${previewHTML(d, B.frozen ? 'v1 · frozen' : 'v1 · not frozen yet')}</aside></div>`;
+}
+function bLive() {
+  const d = B.draft;
+  $('#b-preview').innerHTML = previewHTML(d, B.frozen ? 'v1 · frozen' : 'v1 · not frozen yet');
+  $('#b-stepper').innerHTML = stepperHTML();
+  if ($('#b-sentence')) $('#b-sentence').innerHTML = sentenceHTML(d.thesis);
+  if ($('#b-reqs')) { const r = reqs(d, B.reason); $('#b-reqs').innerHTML = reqsHTML(r); $('#b-freeze-btn').disabled = !r.every(x => x[1]); }
+}
+function bLoad(def, start) {
+  const base = blankDef();
+  B.draft = { ...base, ...def, thesis: { ...base.thesis, ...def.thesis }, scope: { ...base.scope, ...def.scope, timeframes: { ...base.scope.timeframes, ...def.scope?.timeframes } }, reviewPlan: { ...base.reviewPlan, ...def.reviewPlan } };
+  B.start = start; B.step = 1; renderBuilder();
+}
+const vb = $('#view-builder');
+vb.addEventListener('input', e => {
+  const el = e.target, d = B.draft;
+  if (el.dataset.b) { setPath(d, el.dataset.b, el.type === 'number' ? (parseInt(el.value) || 1) : el.value); }
+  else if (el.dataset.rule) {
+    const r = d.rules.find(x => x.id === el.dataset.rule); r.text = el.value;
+    const row = el.closest('.brule'); if (r.hint) { row.classList.toggle('ph', !r.text.trim()); const tag = $('.tpl-tag', row); if (tag) tag.hidden = !!r.text.trim(); }
+  }
+  else if (el.dataset.pred) d.reviewPlan.predictions[+el.dataset.pred] = el.value;
+  else if (el.id === 'b-reason') B.reason = el.value;
+  else if (el.id === 'b-stage-reason') { B.stageReason = el.value; $('#b-stage-btn').disabled = !el.value.trim(); return; }
+  bLive();
+});
+vb.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const d = B.draft, a = b.dataset.act, v = b.dataset.v;
+  const toggle = (arr, x) => arr.includes(x) ? arr.splice(arr.indexOf(x), 1) : arr.push(x);
+  switch (a) {
+    case 'start-blank': bLoad({ name: d.name }, 'blank'); break;
+    case 'start-tpl': bLoad({ name: d.name || TEMPLATES[v].label + ' (my version)', ...TEMPLATES[v].make() }, 'tpl:' + v); toast('Template loaded. Placeholders are questions, not rules: rewrite or delete them.'); break;
+    case 'start-dup': { const s = S(v), src = structuredClone(definitionOf(s)); bLoad({ name: 'Copy of ' + s.name, thesis: src.thesis, scope: src.scope, rules: src.rules.map(r => ({ ...r, id: uid() })), invalidation: src.invalidation, reviewPlan: structuredClone(s.reviewPlan) }, 'dup:' + v); toast(`Copied ${s.name}${latest(s) ? ' v' + latest(s).n : ''}. The original is unchanged.`); break; }
+    case 'b-step': B.step = +b.dataset.i; renderBuilder(); break;
+    case 'b-next': if (B.step === 0 && !B.start) B.start = 'blank'; B.step = Math.min(6, B.step + 1); renderBuilder(); break;
+    case 'b-back': B.step = Math.max(0, B.step - 1); renderBuilder(); break;
+    case 'b-inst': toggle(d.scope.instruments, v); renderBuilder(); break;
+    case 'b-regime': toggle(d.scope.regime, v); renderBuilder(); break;
+    case 'b-dir': d.scope.direction = v; renderBuilder(); break;
+    case 'b-add-rule': { const r = { id: uid(), kind: b.dataset.kind, text: '', required: true }; d.rules.push(r); renderBuilder(); $(`[data-rule="${r.id}"]`)?.focus(); break; }
+    case 'b-del-rule': d.rules = d.rules.filter(r => r.id !== b.dataset.id); renderBuilder(); break;
+    case 'b-req': d.rules.find(r => r.id === b.dataset.id).required = v === '1'; renderBuilder(); break;
+    case 'b-add-pred': d.reviewPlan.predictions.push(''); renderBuilder(); $(`[data-pred="${d.reviewPlan.predictions.length - 1}"]`)?.focus(); break;
+    case 'b-del-pred': d.reviewPlan.predictions.splice(+b.dataset.i, 1); renderBuilder(); break;
+    case 'b-save-idea': {
+      if (!d.name.trim()) { toast('Give it a name first. That is all an Idea needs.'); $('[data-b="name"]').focus(); return; }
+      let s = B.savedId && S(B.savedId);
+      if (!s) { s = { id: 's-' + uid(), created: TODAY, stage: 'idea', stageReason: 'Saved from the guided builder.', stageDate: TODAY, versions: [] }; db.strategies.push(s); B.savedId = s.id; }
+      Object.assign(s, { name: d.name, reviewPlan: structuredClone(d.reviewPlan), examples: structuredClone(d.examples), working: structuredClone({ thesis: d.thesis, scope: d.scope, rules: d.rules.filter(r => r.text.trim()), invalidation: d.invalidation }) });
+      renderBuilder(); toast('Saved as Idea. Nothing is frozen, so Plays cannot reference it yet.'); break;
+    }
+    case 'b-freeze': {
+      if (!reqs(d, B.reason).every(x => x[1])) return;
+      let s = B.savedId && S(B.savedId);
+      if (!s) { s = { id: 's-' + uid(), created: TODAY, stage: 'idea', stageReason: 'Created in the guided builder.', stageDate: TODAY, versions: [] }; db.strategies.push(s); }
+      Object.assign(s, { name: d.name, reviewPlan: structuredClone(d.reviewPlan), examples: structuredClone(d.examples) }); delete s.working;
+      s.versions.push({ n: 1, date: TODAY, reason: B.reason, ...structuredClone({ thesis: d.thesis, scope: d.scope, rules: d.rules.filter(r => r.text.trim()).map(({ hint, ...r }) => r), invalidation: d.invalidation }) });
+      B.frozen = { id: s.id, date: TODAY, reason: B.reason }; renderBuilder(); toast(`${d.name} v1 frozen. Plays can now reference it.`); break;
+    }
+    case 'b-stage': { const s = S(B.frozen.id); s.stage = 'testing'; s.stageReason = B.stageReason; s.stageDate = TODAY; renderBuilder(); toast('Moved to Testing, with your reason.'); break; }
+    case 'b-reset': Object.assign(B, { step: 0, start: null, draft: blankDef(), reason: '', savedId: null, frozen: null, stageReason: '' }); renderBuilder(); break;
+  }
+});
+
+/* =====================================================================
+   2 · PLAYBOOK SHEET
+   ===================================================================== */
+const SH = { sid: 'reclaim', wc: {} };
+const EMPTY = { thesis: { when: '', expect: '', because: '' }, scope: { instruments: [], direction: 'Both', timeframes: { setup: '', entry: '' }, regime: [], sessions: '' }, rules: [], invalidation: '' };
+const FIELDS = [['thesis.when', 'hypothesis', 'Thesis “when”'], ['thesis.expect', 'hypothesis', 'Thesis “expect”'], ['thesis.because', 'hypothesis', 'Thesis “because”'], ['scope.instruments', 'scope', 'Instruments'], ['scope.direction', 'scope', 'Direction'], ['scope.timeframes.setup', 'scope', 'Setup timeframe'], ['scope.timeframes.entry', 'scope', 'Entry timeframe'], ['scope.regime', 'scope', 'Regime'], ['scope.sessions', 'scope', 'Sessions'], ['invalidation', 'invalidation', 'Invalidation']];
+const SECTIONS = [['hypothesis', 'Hypothesis'], ['scope', 'Where it applies'], ['rules', 'Rules'], ['invalidation', 'Invalidation'], ['review', 'Review plan'], ['versions', 'Versions']];
+const showV = v => Array.isArray(v) ? v.join(', ') : String(v ?? '');
+function wcOf(s) {
+  if (!SH.wc[s.id]) { const src = definitionOf(s) || EMPTY; SH.wc[s.id] = structuredClone({ thesis: { ...EMPTY.thesis, ...src.thesis }, scope: { ...EMPTY.scope, ...src.scope }, rules: src.rules || [], invalidation: src.invalidation || '' }); }
+  return SH.wc[s.id];
+}
+function sheetDiff(s) {
+  const wc = wcOf(s), base = latest(s) || EMPTY, ch = [], fields = {}, rules = {};
+  for (const [k, sec, label] of FIELDS) { const a = showV(getPath(wc, k)), b = showV(getPath(base, k)); if (a.trim() !== b.trim()) { ch.push({ sec, label: label + ' edited' }); fields[k] = b; } }
+  const bm = new Map(base.rules.map(r => [r.id, r]));
+  wc.rules.forEach(r => {
+    const o = bm.get(r.id);
+    if (!o) { rules[r.id] = { t: 'new' }; ch.push({ sec: 'rules', label: 'Rule added: ' + (r.text || '(empty)') }); return; }
+    const d = []; if (o.text !== r.text) d.push('reworded'); if (o.kind !== r.kind) d.push(`${KINDS[o.kind].label} → ${KINDS[r.kind].label}`); if (o.required !== r.required) d.push(r.required ? 'now must-have' : 'now nice-to-have');
+    if (d.length) { rules[r.id] = { t: 'edited', d, was: o.text !== r.text ? o.text : null }; ch.push({ sec: 'rules', label: 'Rule ' + d.join(', ') + ': ' + r.text }); }
+  });
+  const removed = base.rules.filter(r => !wc.rules.some(x => x.id === r.id));
+  removed.forEach(r => ch.push({ sec: 'rules', label: 'Rule removed: ' + r.text }));
+  const a = wc.rules.filter(r => bm.has(r.id)).map(r => r.id).join(), b = base.rules.filter(r => wc.rules.some(x => x.id === r.id)).map(r => r.id).join();
+  if (a !== b) ch.push({ sec: 'rules', label: 'Rules reordered' });
+  return { ch, fields, rules, removed, base: latest(s) };
+}
+const blk = (key, label, body) => `<div class="blk" data-key="${key}"><span class="blk-lab">${label}</span>${body}<div class="was"></div></div>`;
+function renderSheet() {
+  const s = S(SH.sid), wc = wcOf(s), base = latest(s), next = (base?.n || 0) + 1;
+  const used = s.versions.map(v => [v.n, db.plays.filter(p => p.s === s.id && p.v === v.n).length]);
+  $('#view-sheet').innerHTML = `<p class="why"><strong>Playbook sheet.</strong> The strategy is one living document you edit in place, like a page in a trading playbook. Edits go to a working copy marked against the frozen latest version, and freezing them makes the next version with a reason. <strong>Suits</strong> refining a strategy you already use. <strong>Trade-off:</strong> very fast to change, so it relies on the diff and the required reason to keep revisions deliberate; it gives little guidance for a blank page.</p>
+  <div class="panel sh-bar"><div class="pad">
+   <label class="field">Strategy<select id="sh-pick">${db.strategies.map(x => `<option value="${esc(x.id)}" ${x.id === s.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+   <div class="row wrap" style="gap:6px"><span class="badge ${s.stage}">${STAGES[s.stage].label}</span><small class="muted">${esc(s.stageReason)}</small></div>
+   <div class="uses"><span>Plays reference:</span>${used.length ? used.slice().reverse().map(([n, c]) => `<span class="badge ${n === base.n ? 'cur' : ''}">v${n} · ${c} play${c === 1 ? '' : 's'}</span>`).join('') + `<span>New Plays pick <b>v${base.n}</b> until you freeze v${next}.</span>` : '<span>nothing yet. Plays can only reference a frozen version.</span>'}</div>
+  </div></div>
+  <div class="sheet">
+   <nav class="panel outline" aria-label="Sections">${SECTIONS.map(([k, l]) => `<button data-act="sh-go" data-v="${k}">${l}<span class="cnt" data-cnt="${k}"></span></button>`).join('')}</nav>
+   <div class="panel doc">
+    <div class="wc-bar" id="sh-wcbar"></div>
+    <section class="sec" id="sh-hypothesis"><h3>Hypothesis</h3>
+     ${blk('thesis.when', 'When', `<textarea class="inline" rows="2" data-s="thesis.when">${esc(wc.thesis.when)}</textarea>`)}
+     ${blk('thesis.expect', 'Then I expect', `<textarea class="inline" rows="1" data-s="thesis.expect">${esc(wc.thesis.expect)}</textarea>`)}
+     ${blk('thesis.because', 'Because', `<textarea class="inline" rows="1" data-s="thesis.because" placeholder="Why should this work?">${esc(wc.thesis.because)}</textarea>`)}
+    </section>
+    <section class="sec" id="sh-scope"><h3>Where it applies</h3><div class="scope-grid">
+     ${blk('scope.instruments', 'Instruments', `<div class="chips" style="margin:6px 0">${[...new Set([...INSTR, ...wc.scope.instruments])].map(i => `<button class="chip" data-act="sh-inst" data-v="${esc(i)}" aria-pressed="${wc.scope.instruments.includes(i)}">${esc(i)}</button>`).join('')}</div>`)}
+     ${blk('scope.direction', 'Direction', `<div class="seg dir" style="margin:6px 0">${['Long', 'Short', 'Both'].map(v => `<button data-act="sh-dir" data-v="${v}" aria-pressed="${wc.scope.direction === v}">${v}</button>`).join('')}</div>`)}
+     ${blk('scope.timeframes.setup', 'Setup timeframe', `<select data-s="scope.timeframes.setup" style="margin:6px 0">${opts(TFS, wc.scope.timeframes.setup)}</select>`)}
+     ${blk('scope.timeframes.entry', 'Entry timeframe', `<select data-s="scope.timeframes.entry" style="margin:6px 0">${opts(TFS, wc.scope.timeframes.entry)}</select>`)}
+     ${blk('scope.regime', 'Market regime', `<div class="chips" style="margin:6px 0">${REGIMES.map(i => `<button class="chip" data-act="sh-regime" data-v="${esc(i)}" aria-pressed="${wc.scope.regime.includes(i)}">${esc(i)}</button>`).join('')}</div>`)}
+     ${blk('scope.sessions', 'Sessions', `<input class="inline" data-s="scope.sessions" value="${esc(wc.scope.sessions)}">`)}
+    </div></section>
+    <section class="sec" id="sh-rules"><h3>Rules <span class="unver">checked one by one inside each Play</span></h3>
+     <div id="sh-rule-list">${wc.rules.map((r, i) => `<div class="srule" data-rid="${r.id}"><span class="rn">${i + 1}</span><select class="kindsel ${r.kind}" data-sr="kind" aria-label="Kind">${kindOpts(r.kind)}</select><div class="rtext"><input class="inline" data-sr="text" value="${esc(r.text)}" aria-label="Rule ${i + 1}" placeholder="Describe something you can check"><div class="rtag"></div></div><div class="seg"><button data-act="sh-req" data-v="1" aria-pressed="${r.required}">Must</button><button data-act="sh-req" data-v="0" aria-pressed="${!r.required}">Nice</button></div><div class="rtools"><button class="ghost icon" data-act="sh-up" aria-label="Move up" ${i ? '' : 'disabled'}>↑</button><button class="ghost icon" data-act="sh-down" aria-label="Move down" ${i < wc.rules.length - 1 ? '' : 'disabled'}>↓</button><button class="ghost icon" data-act="sh-del" aria-label="Delete rule">×</button></div></div>`).join('') || '<p class="empty">No rules yet.</p>'}</div>
+     <div class="removed" id="sh-removed"></div>
+     <div class="add-row"><select id="sh-newkind" aria-label="Kind for the new rule">${kindOpts('trigger')}</select><button data-act="sh-add">+ Add rule</button></div>
+    </section>
+    <section class="sec" id="sh-invalidation"><h3>Invalidation</h3>${blk('invalidation', 'The setup is wrong if', `<textarea class="inline" rows="2" data-s="invalidation" placeholder="What proves this setup wrong?">${esc(wc.invalidation)}</textarea>`)}</section>
+    <section class="sec" id="sh-review"><h3>Review plan <span class="unver">strategy-level, not versioned: saved as you type, does not change what Plays use</span></h3>
+     <div class="preds">${s.reviewPlan.predictions.map((p, i) => `<div class="pred"><input class="inline" data-rp="${i}" value="${esc(p)}" aria-label="Prediction ${i + 1}"><button class="ghost icon" data-act="sh-del-pred" data-v="${i}" aria-label="Remove prediction">×</button></div>`).join('') || '<p class="empty">No predictions.</p>'}</div>
+     <button class="ghost add" data-act="sh-add-pred">+ Add prediction</button>
+     <label class="field" style="margin-top:10px">I'll shelve it if…<textarea class="inline" rows="2" data-rp="stopRule">${esc(s.reviewPlan.stopRule)}</textarea></label>
+     <div class="every" style="margin-top:6px">Review every <input type="number" min="1" data-rp="checkEvery" value="${esc(s.reviewPlan.checkEvery)}" aria-label="Plays between reviews"> plays on a version.</div>
+    </section>
+    <section class="sec" id="sh-versions"><h3>Versions</h3><div class="vlist">
+     <div class="vrow"><strong class="warn">Working</strong><div>Unfrozen copy you are editing. No Play can reference it.</div></div>
+     ${s.versions.slice().reverse().map(v => `<div class="vrow"><strong>v${v.n}</strong><div><small class="muted">${esc(v.date)} · ${used.find(u => u[0] === v.n)[1]} plays${v.n === base.n ? ' · latest, new Plays pick this' : ''}</small><div>${esc(v.reason)}</div></div></div>`).join('')}
+    </div></section>
+   </div>
+  </div>`;
+  sheetMarks();
+}
+function sheetMarks() {
+  const s = S(SH.sid), { ch, fields, rules, removed, base } = sheetDiff(s), next = (base?.n || 0) + 1, n = ch.length;
+  const bar = $('#sh-wcbar'); bar.classList.toggle('clean', !n);
+  bar.innerHTML = `<div class="grow"><span class="dotw"></span><b>Working copy</b> · ${base ? (n ? `<b>${n}</b> change${n > 1 ? 's' : ''} since v${base.n}` : `same as v${base.n}`) : 'no frozen version yet'}<small>${base ? `Plays keep using v${base.n} until you freeze v${next}.` : 'Plays can only reference a strategy once v1 is frozen.'}</small></div>
+   <button data-act="sh-discard" ${n ? '' : 'disabled'}>Discard changes</button><button class="primary" data-act="sh-freeze" ${n ? '' : 'disabled'}>Freeze as v${next}…</button>
+   ${n ? `<details><summary>What changed</summary><ul>${ch.map(c => `<li>${esc(c.label)}</li>`).join('')}</ul></details>` : ''}`;
+  $$('#view-sheet .blk').forEach(el => { const k = el.dataset.key, on = k in fields; el.classList.toggle('changed', on); $('.was', el).innerHTML = on ? (fields[k].trim() ? `v${base?.n ?? 0}: <del>${esc(fields[k])}</del>` : 'was empty') : ''; });
+  $$('#view-sheet .srule').forEach(el => { const m = rules[el.dataset.rid]; el.classList.toggle('new', m?.t === 'new'); el.classList.toggle('edited', m?.t === 'edited'); $('.rtag', el).innerHTML = !m ? '' : m.t === 'new' ? 'new in working copy' : esc(m.d.join(' · ')) + (m.was ? ` · was <del>${esc(m.was)}</del>` : ''); });
+  $('#sh-removed').innerHTML = removed.map(r => `<div><del>${esc(r.text)}</del><button class="ghost add" data-act="sh-restore" data-v="${esc(r.id)}">Restore</button></div>`).join('');
+  for (const [k] of SECTIONS) { const c = ch.filter(x => x.sec === k).length; $(`[data-cnt="${k}"]`).textContent = c ? c + ' changed' : ''; }
+}
+const vs = $('#view-sheet');
+vs.addEventListener('input', e => {
+  const el = e.target, s = S(SH.sid), wc = wcOf(s);
+  if (el.id === 'sh-pick' || el.id === 'sh-newkind') return;
+  if (el.dataset.s) setPath(wc, el.dataset.s, el.value);
+  else if (el.dataset.sr) { const r = wc.rules.find(x => x.id === el.closest('.srule').dataset.rid); r[el.dataset.sr] = el.value; if (el.dataset.sr === 'kind') el.className = 'kindsel ' + el.value; }
+  else if (el.dataset.rp !== undefined) { const k = el.dataset.rp; if (k === 'stopRule') s.reviewPlan.stopRule = el.value; else if (k === 'checkEvery') s.reviewPlan.checkEvery = parseInt(el.value) || 1; else s.reviewPlan.predictions[+k] = el.value; return; }
+  sheetMarks();
+});
+vs.addEventListener('change', e => { if (e.target.id === 'sh-pick') { SH.sid = e.target.value; renderSheet(); } });
+vs.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const s = S(SH.sid), wc = wcOf(s), a = b.dataset.act, v = b.dataset.v, row = b.closest('.srule'), i = row ? wc.rules.findIndex(r => r.id === row.dataset.rid) : -1;
+  const toggle = (arr, x) => arr.includes(x) ? arr.splice(arr.indexOf(x), 1) : arr.push(x);
+  switch (a) {
+    case 'sh-go': $('#sh-' + v).scrollIntoView({ behavior: 'smooth', block: 'start' }); return;
+    case 'sh-inst': toggle(wc.scope.instruments, v); break;
+    case 'sh-regime': toggle(wc.scope.regime, v); break;
+    case 'sh-dir': wc.scope.direction = v; break;
+    case 'sh-req': wc.rules[i].required = v === '1'; break;
+    case 'sh-up': [wc.rules[i - 1], wc.rules[i]] = [wc.rules[i], wc.rules[i - 1]]; break;
+    case 'sh-down': [wc.rules[i + 1], wc.rules[i]] = [wc.rules[i], wc.rules[i + 1]]; break;
+    case 'sh-del': wc.rules.splice(i, 1); break;
+    case 'sh-add': { const r = { id: uid(), kind: $('#sh-newkind').value, text: '', required: true }; wc.rules.push(r); renderSheet(); $(`.srule[data-rid="${r.id}"] input`).focus(); return; }
+    case 'sh-restore': { const base = latest(s) || EMPTY, idx = base.rules.findIndex(r => r.id === v); wc.rules.splice(Math.min(idx, wc.rules.length), 0, structuredClone(base.rules[idx])); break; }
+    case 'sh-discard': delete SH.wc[s.id]; toast('Working copy reset to the latest version.'); break;
+    case 'sh-add-pred': s.reviewPlan.predictions.push(''); break;
+    case 'sh-del-pred': s.reviewPlan.predictions.splice(+v, 1); break;
+    case 'sh-freeze': openFreeze(s); return;
+  }
+  renderSheet();
+});
+const fd = $('#freeze-dlg');
+function openFreeze(s) {
+  const base = latest(s), n = (base?.n || 0) + 1, { ch } = sheetDiff(s);
+  fd.dataset.sid = s.id; $('#fd-title').textContent = `Freeze ${s.name} as v${n}`;
+  $('#fd-text').textContent = base ? `${ch.length} change${ch.length > 1 ? 's' : ''} since v${base.n}. Plays already linked to v${base.n} or earlier keep their version; new Plays can pick v${n}.` : 'This becomes the first version Plays can reference.';
+  $('#fd-reason').value = ''; fdLive(); fd.showModal(); $('#fd-reason').focus();
+}
+function fdLive() { const s = S(fd.dataset.sid), r = reqs({ name: s.name, ...wcOf(s) }, $('#fd-reason').value); $('#fd-reqs').innerHTML = reqsHTML(r); $('#fd-ok').disabled = !r.every(x => x[1]); $('#fd-ok').textContent = 'Freeze v' + ((latest(s)?.n || 0) + 1); }
+$('#fd-reason').addEventListener('input', fdLive);
+$('#fd-cancel').addEventListener('click', () => fd.close());
+$('#freeze-form').addEventListener('submit', e => {
+  e.preventDefault(); const s = S(fd.dataset.sid), reason = $('#fd-reason').value.trim(), wc = wcOf(s);
+  if (!reqs({ name: s.name, ...wc }, reason).every(x => x[1])) return;
+  const n = (latest(s)?.n || 0) + 1;
+  s.versions.push({ n, date: TODAY, reason, ...structuredClone(wc), rules: wc.rules.filter(r => r.text.trim()) }); delete s.working; delete SH.wc[s.id];
+  fd.close(); renderSheet(); toast(`v${n} frozen. Existing Plays keep their version; new Plays can pick v${n}.`);
+});
+
+/* =====================================================================
+   3 · FROM A REAL EXAMPLE
+   ===================================================================== */
+const PROMPTS = {
+  setup: { q: 'What made this a setup?', hint: 'What did you see before acting? Each answer becomes a candidate rule.', kind: 'trigger', at: [25, .28] },
+  wrong: { q: 'Where would it have been wrong?', hint: 'The place or event that proves the idea wrong. Can become a risk rule or the invalidation.', kind: 'risk', at: [23, .12] },
+  skip: { q: 'What would have made you skip it?', hint: 'Things that, if present, would have kept you out even with everything else there.', kind: 'avoid', at: [12, .74] },
+  diff: { q: 'What is different in the counterexample?', hint: 'Compare it with the example. Differences often become Avoid rules.', kind: 'avoid', at: null },
+};
+const EX = { playId: 'P-030', source: 'play', ans: { setup: '', wrong: '', skip: '', diff: '' }, kinds: { setup: 'trigger', wrong: 'risk', skip: 'avoid', diff: 'avoid' }, cands: [], sel: null, n: 0, counter: null, cPick: 'P-023', cCaption: '', invalidation: '', name: '' };
+const pastPlays = () => db.plays.filter(p => p.status === 'Closed' || p.status === 'Cancelled').sort((a, b) => b.date.localeCompare(a.date));
+const SHAPE = [.5, .56, .62, .6, .52, .44, .38, .36, .42, .5, .58, .63, .6, .53, .46, .4, .37, .41, .47, .44, .39, .35, .28, .2, .17, .24, .33, .4, .42, .38, .36, .4, .47, .53, .58, .6, .63, .66, .7, .72];
+function rng(seed) { let h = 2166136261; for (const c of String(seed)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return () => { h = Math.imul(h ^ (h >>> 15), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return ((h ^= h >>> 16) >>> 0) / 4294967296; }; }
+const W = 600, H = 300, CW = W / SHAPE.length, yOf = v => H - 26 - v * (H - 52);
+function schematicSVG(seed, { markers = [], label = 'SCHEMATIC PLACEHOLDER · NOT MARKET DATA', id = '' } = {}) {
+  const r = rng(seed); let prev = SHAPE[0], c = '';
+  SHAPE.forEach((v, i) => {
+    const cl = Math.min(.95, Math.max(.05, v + (r() - .5) * .05)), o = prev, hi = Math.max(o, cl) + r() * .04, lo = Math.min(o, cl) - r() * .04, up = cl >= o, x = i * CW + CW / 2, col = up ? '#6f9e7d' : '#b97a72';
+    c += `<line x1="${x}" x2="${x}" y1="${yOf(hi).toFixed(1)}" y2="${yOf(lo).toFixed(1)}" stroke="${col}"/><rect x="${(x - CW * .3).toFixed(1)}" y="${yOf(Math.max(o, cl)).toFixed(1)}" width="${(CW * .6).toFixed(1)}" height="${Math.max(1.5, Math.abs(yOf(o) - yOf(cl))).toFixed(1)}" fill="${col}"/>`; prev = cl;
+  });
+  const grid = [1, 2, 3, 4, 5].map(k => `<line x1="0" x2="${W}" y1="${k * 50}" y2="${k * 50}" stroke="#1d2229"/>`).join('');
+  const rng2 = `<line x1="0" x2="${CW * 22}" y1="${yOf(.64)}" y2="${yOf(.64)}" stroke="#7f8896" stroke-dasharray="5 4"/><line x1="0" x2="${CW * 30}" y1="${yOf(.35)}" y2="${yOf(.35)}" stroke="#7f8896" stroke-dasharray="5 4"/><text x="6" y="${yOf(.64) - 6}" fill="#7f8896" font-size="10">range high</text><text x="6" y="${yOf(.35) + 14}" fill="#7f8896" font-size="10">range low</text>`;
+  const mk = markers.map(m => `<g data-mk="${m.id}" style="cursor:pointer"><circle cx="${m.x}" cy="${m.y}" r="12" fill="${m.sel ? '#edd49e' : '#c5cfdd'}" stroke="#0f1114" stroke-width="2"/><text x="${m.x}" y="${m.y + 4}" text-anchor="middle" font-size="11" font-weight="700" fill="#11161d">${m.n}</text></g>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" ${id ? `id="${id}"` : ''} role="img" aria-label="Schematic placeholder chart, not market data">${grid}${rng2}${c}${mk}<text x="${W - 8}" y="${H - 8}" text-anchor="end" fill="#5c6675" font-size="10" letter-spacing="1">${label}</text></svg>`;
+}
+function renderExample() {
+  const p = db.plays.find(x => x.id === EX.playId), s = S(p.s), past = pastPlays();
+  const markers = EX.cands.filter(c => c.x != null && c.status !== 'dismissed').map(c => ({ ...c, sel: c.id === EX.sel }));
+  const accepted = EX.cands.filter(c => c.status === 'accepted'), open = EX.cands.filter(c => c.status === 'candidate');
+  const cp = EX.counter && db.plays.find(x => x.id === EX.counter.playId);
+  $('#view-example').innerHTML = `<p class="why"><strong>Start from a real example.</strong> Pick a Play you remember well (or a captured image) and answer three questions about it. Each answer becomes a candidate rule pinned to a numbered marker on the example, and you review candidates into the rule list. A counterexample sharpens what to avoid. <strong>Suits</strong> turning intuition (“I know it when I see it”) into rules. <strong>Trade-off:</strong> one example overfits easily; rules come out specific to that chart and still need a hypothesis written afterwards, so it hands off to the builder.</p>
+  <div class="ex-wrap">
+   <div class="stack">
+    <div class="panel"><div class="panel-head"><div><h2>The example</h2><p>Click a candidate, then click the chart to move its marker.</p></div>
+     <div class="ex-src"><select id="ex-play" aria-label="Example play">${past.map(x => `<option value="${x.id}" ${x.id === EX.playId && EX.source === 'play' ? 'selected' : ''}>${x.id} · ${esc(x.title)}</option>`).join('')}</select><button data-act="ex-upload" aria-pressed="${EX.source === 'image'}">Use an image instead</button></div></div>
+     <div class="pad"><div class="schem pickable ${EX.source === 'image' ? 'upload' : ''}" id="ex-chart">${schematicSVG(EX.source === 'image' ? 'upload' : p.id, { markers, label: EX.source === 'image' ? 'UPLOADED IMAGE PLACEHOLDER' : 'SCHEMATIC PLACEHOLDER · NOT MARKET DATA', id: 'ex-svg' })}</div>
+      <p class="schem-cap">${EX.source === 'image' ? 'Stand-in for an uploaded or captured image. In Vessel this would be your own capture; the drawing here is not market data.' : 'Schematic placeholder drawn by the prototype, not market data. In Vessel this would be the Play’s chart capture or evidence image.'}</p>
+      ${EX.source === 'play' ? `<div class="meta"><span><b>${p.id}</b> ${esc(p.title)}</span><span class="dir-${p.dir}">${p.dir}</span><span>${p.inst}</span><span>${p.status}${p.cancel ? ' · ' + esc(p.cancel) : ''}</span><span>${p.date}</span><span>${esc(s.name)} v${p.v}</span></div>${p.note ? `<p class="muted" style="font-size:11px;margin-top:8px;line-height:1.6">Your note: ${esc(p.note)}</p>` : ''}` : ''}
+     </div></div>
+    <div class="panel"><div class="panel-head"><div><h2>Counterexample</h2><p>A play that looked similar but you would not want to take again.</p></div></div>
+     <div class="pad">${cp ? `<div class="counter"><div class="schem">${schematicSVG(cp.id + 'c', { label: 'SCHEMATIC' })}</div><div><div class="row wrap" style="gap:6px"><span class="badge shelved">counterexample</span><b style="font-size:11px">${cp.id} · ${esc(cp.title)}</b></div><p style="font-size:11px;margin-top:6px;line-height:1.6">${esc(EX.counter.caption) || '<span class="faint">No caption</span>'}</p><button class="ghost add" data-act="ex-uncounter" style="margin-top:6px">Remove</button></div></div>`
+       : `<div class="grid2"><label class="field">Play<select id="ex-cpick">${past.filter(x => x.id !== EX.playId).map(x => `<option value="${x.id}" ${x.id === EX.cPick ? 'selected' : ''}>${x.id} · ${esc(x.title)}</option>`).join('')}</select></label><label class="field">Why it's a counterexample<input id="ex-ccap" value="${esc(EX.cCaption)}" placeholder="Swept straight into a daily level"></label></div><div style="margin-top:10px"><button data-act="ex-counter">Attach counterexample</button></div>`}</div></div>
+   </div>
+   <div class="stack">
+    <div class="panel"><div class="panel-head"><div><h2>Questions</h2><p>Short, concrete answers work best. Pin as many as you like.</p></div></div>
+     <div class="pad">${Object.entries(PROMPTS).filter(([k]) => k !== 'diff' || EX.counter).map(([k, q]) => `<div class="prompt"><h4>${q.q}</h4><p>${q.hint}</p><textarea rows="2" data-exa="${k}" placeholder="${k === 'setup' ? 'Two touches each side, then a shallow sweep and a 4H close back in' : k === 'wrong' ? 'A 4H close back below the swept low' : k === 'skip' ? 'A daily level just below the sweep' : 'The sweep ran into a daily level'}">${esc(EX.ans[k])}</textarea>
+      <div class="row wrap"><select data-exk="${k}" aria-label="Kind">${kindOpts(EX.kinds[k])}</select><button data-act="ex-pin" data-v="${k}">Pin as candidate rule</button>${k === 'wrong' ? '<button class="ghost" data-act="ex-inv">Use as invalidation</button>' : ''}</div></div>`).join('')}</div></div>
+    <div class="panel"><div class="panel-head"><div><h2>Candidates <span class="faint">(${open.length})</span></h2><p>Reword into something checkable, then accept or dismiss.</p></div></div>
+     <div class="pad" style="padding-top:6px">${open.map(c => `<div class="cand" aria-current="${c.id === EX.sel}" data-cid="${c.id}"><button class="mk" data-act="ex-sel" aria-label="Select marker ${c.n}">${c.x != null ? c.n : 'C'}</button><div><input data-cand="${c.id}" value="${esc(c.text)}" aria-label="Candidate ${c.n}"><div class="row wrap" style="gap:6px"><select data-candk="${c.id}" aria-label="Kind">${kindOpts(c.kind)}</select><div class="seg"><button data-act="ex-req" data-v="1" aria-pressed="${c.required}">Must</button><button data-act="ex-req" data-v="0" aria-pressed="${!c.required}">Nice</button></div><button class="primary" data-act="ex-accept">Accept</button><button class="ghost" data-act="ex-dismiss">Dismiss</button></div><small class="faint">From “${PROMPTS[c.from].q}”${c.x == null ? ' · no marker' : ''}</small></div></div>`).join('') || '<p class="empty">Answer a question and pin it to create a candidate.</p>'}</div></div>
+    <div class="panel"><div class="panel-head"><div><h2>Rule list (draft)</h2><p>${accepted.length} accepted${EX.invalidation ? ' · invalidation set' : ''}</p></div><button class="primary" data-act="ex-send" ${accepted.length ? '' : 'disabled'}>Continue in builder →</button></div>
+     <div class="pad">${KO.filter(k => accepted.some(c => c.kind === k)).map(k => `<div class="kgroup"><div class="kg-head"><span class="kind ${k}">${KINDS[k].label}</span></div>${accepted.filter(c => c.kind === k).map(c => `<div class="row between" style="font-size:11px;padding:4px 0;gap:8px"><span>${c.x != null ? `<b class="faint">#${c.n}</b> ` : ''}${esc(c.text)}${c.required ? '' : ' <span class="nice">nice-to-have</span>'}</span><button class="ghost add" data-act="ex-unaccept" data-v="${c.id}">Back to candidates</button></div>`).join('')}</div>`).join('') || '<p class="empty">No rules accepted yet.</p>'}
+      ${EX.invalidation ? `<div class="pv-inv"><span class="eyebrow">Invalidation</span><p>${esc(EX.invalidation)}</p></div>` : ''}
+      <p class="pv-foot">The builder opens at the hypothesis with these rules, the invalidation and the examples attached. Nothing is saved until you save or freeze there.</p></div></div>
+   </div>
+  </div>`;
+}
+const ve = $('#view-example');
+ve.addEventListener('input', e => {
+  const el = e.target;
+  if (el.dataset.exa) EX.ans[el.dataset.exa] = el.value;
+  else if (el.dataset.exk) EX.kinds[el.dataset.exk] = el.value;
+  else if (el.dataset.cand) EX.cands.find(c => c.id === el.dataset.cand).text = el.value;
+  else if (el.dataset.candk) { EX.cands.find(c => c.id === el.dataset.candk).kind = el.value; }
+  else if (el.id === 'ex-ccap') EX.cCaption = el.value;
+});
+ve.addEventListener('change', e => {
+  if (e.target.id === 'ex-play') { EX.playId = e.target.value; EX.source = 'play'; renderExample(); }
+  if (e.target.id === 'ex-cpick') EX.cPick = e.target.value;
+});
+ve.addEventListener('click', e => {
+  const mk = e.target.closest('[data-mk]');
+  if (mk) { EX.sel = mk.dataset.mk; renderExample(); return; }
+  const svg = e.target.closest('#ex-svg');
+  if (svg && !e.target.closest('[data-act]')) {
+    const c = EX.cands.find(x => x.id === EX.sel && x.status === 'candidate');
+    if (!c) { toast('Select a candidate first, then click the chart to place its marker.'); return; }
+    const r = svg.getBoundingClientRect(); c.x = Math.round((e.clientX - r.left) / r.width * W); c.y = Math.round((e.clientY - r.top) / r.height * H); renderExample(); return;
+  }
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const a = b.dataset.act, v = b.dataset.v, cid = b.closest('.cand')?.dataset.cid, c = EX.cands.find(x => x.id === cid);
+  switch (a) {
+    case 'ex-upload': EX.source = EX.source === 'image' ? 'play' : 'image'; break;
+    case 'ex-pin': {
+      const text = EX.ans[v].trim(); if (!text) { toast('Write an answer first.'); return; }
+      const at = PROMPTS[v].at, k = EX.cands.filter(x => x.from === v).length, n = ++EX.n;
+      EX.cands.push({ id: uid(), n, from: v, text, kind: EX.kinds[v], required: true, status: 'candidate', x: at ? Math.round(at[0] * CW + CW / 2 + k * 22) : null, y: at ? Math.round(yOf(at[1])) : null });
+      EX.sel = EX.cands.at(-1).id; EX.ans[v] = ''; toast(at ? `Candidate #${n} pinned. Click the chart to move its marker.` : `Candidate #${n} added.`); break;
+    }
+    case 'ex-inv': { const t = EX.ans.wrong.trim(); if (!t) { toast('Write an answer first.'); return; } EX.invalidation = t; EX.ans.wrong = ''; toast('Set as the invalidation.'); break; }
+    case 'ex-sel': EX.sel = cid; break;
+    case 'ex-req': c.required = v === '1'; break;
+    case 'ex-accept': if (!c.text.trim()) { toast('A rule needs text.'); return; } c.status = 'accepted'; if (EX.sel === c.id) EX.sel = null; break;
+    case 'ex-dismiss': c.status = 'dismissed'; if (EX.sel === c.id) EX.sel = null; break;
+    case 'ex-unaccept': EX.cands.find(x => x.id === v).status = 'candidate'; break;
+    case 'ex-counter': EX.counter = { playId: EX.cPick, caption: EX.cCaption.trim() }; break;
+    case 'ex-uncounter': EX.counter = null; break;
+    case 'ex-send': {
+      const p = db.plays.find(x => x.id === EX.playId);
+      const examples = [...(EX.source === 'play' ? [{ playId: p.id, kind: 'setup', caption: 'Starting example' }] : []), ...(EX.counter ? [{ playId: EX.counter.playId, kind: 'counterexample', caption: EX.counter.caption }] : [])];
+      bLoad({ name: B.draft.name || (EX.source === 'play' ? `From ${p.id}: ${p.title}` : 'From a captured example'), scope: EX.source === 'play' ? { instruments: [p.inst], direction: p.dir } : {}, rules: EX.cands.filter(x => x.status === 'accepted').map(x => ({ id: uid(), kind: x.kind, text: x.text, required: x.required })), invalidation: EX.invalidation, examples }, 'example');
+      B.frozen = null; showIdea('builder'); toast('Rules carried over. Write the hypothesis next.'); return;
+    }
+  }
+  renderExample();
+});
+
+/* =====================================================================
+   4 · PRE-FLIGHT TEST
+   ===================================================================== */
+const PF = { sid: null, rules: [], idx: 0, ans: {} };
+const pfCandidates = () => db.strategies.filter(s => latest(s) && db.plays.some(p => p.s === s.id && (p.status === 'Closed' || p.status === 'Cancelled')));
+const pfPlays = () => db.plays.filter(p => p.s === PF.sid && (p.status === 'Closed' || p.status === 'Cancelled')).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+function pfLoad(sid) { PF.sid = sid; PF.rules = structuredClone(latest(S(sid)).rules); PF.idx = 0; PF.ans = {}; }
+function recorded(p, r) { const v = versionOf(S(PF.sid), p.v), vr = v?.rules.find(x => x.id === r.id && x.text === r.text); return vr ? p.checks[r.id] : undefined; }
+const LBL = { met: 'met', broken: 'broken', na: 'n/a', unclear: 'couldn’t tell' };
+function verdict(p) {
+  const a = PF.ans[p.id] || {}, rs = PF.rules.filter(r => r.text.trim()), vals = rs.map(r => [r, a[r.id]]), done = vals.filter(([, x]) => x).length;
+  if (vals.some(([, x]) => x === 'unclear')) return ['unclear', 'Can’t tell: at least one rule couldn’t be answered from what you had.'];
+  if (done < rs.length) return ['', `${done} of ${rs.length} rules answered.`];
+  if (vals.some(([r, x]) => r.required && x === 'broken')) return ['no', 'Would not have qualified under these rules: a must-have is broken.'];
+  return ['yes', 'Would have qualified under these rules.'];
+}
+function tally(r) {
+  const ps = pfPlays(); let ans = 0, unc = 0, dis = 0;
+  for (const p of ps) { const x = PF.ans[p.id]?.[r.id]; if (!x) continue; ans++; if (x === 'unclear') unc++; else { const rec = recorded(p, r); if (rec && rec !== x) dis++; } }
+  return { ans, unc, dis, of: ps.length };
+}
+function renderPreflight() {
+  const cands = pfCandidates();
+  if (!PF.sid || !S(PF.sid) || !latest(S(PF.sid))) pfLoad(cands[0].id);
+  const s = S(PF.sid), ps = pfPlays(), p = ps[PF.idx], a = PF.ans[p.id] ||= {};
+  const flagged = PF.rules.filter(r => { const t = tally(r); return t.unc || t.dis; });
+  const [vk, vt] = verdict(p);
+  $('#view-preflight').innerHTML = `<p class="why"><strong>Pre-flight test.</strong> Before freezing, dry-run the rules against a few past plays and answer each rule as if you were planning that play. A rule you can't answer, or answer differently from what you recorded at the time, is too vague. Outcomes are hidden on purpose: this tests whether the rules are clear, not whether they worked. <strong>Suits</strong> tightening a strategy before a new version, or checking a duplicated one. <strong>Trade-off:</strong> needs past plays, and answering in hindsight is biased; it finds ambiguity, not edge.</p>
+  <div class="pf-wrap">
+   <div class="panel"><div class="panel-head"><div><h2>Rules under test</h2><p>Draft copy of v${latest(s).n}. Rewording a rule clears its answers.</p></div><select id="pf-pick" aria-label="Strategy">${cands.map(x => `<option value="${esc(x.id)}" ${x.id === s.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
+    <div class="pad">${PF.rules.map(r => { const t = tally(r); return `<div class="pf-rule ${t.unc || t.dis ? 'flag' : ''}"><div class="row"><span class="kind ${r.kind}">${KINDS[r.kind].label}</span><input data-pfr="${r.id}" value="${esc(r.text)}" aria-label="Rule text" placeholder="Describe something you can check"></div>
+      <div class="tally"><span class="chip">answered ${t.ans}/${t.of}</span>${t.unc ? `<span class="chip warn">couldn’t tell ×${t.unc}</span>` : ''}${t.dis ? `<span class="chip warn">differs from the record ×${t.dis}</span>` : ''}</div></div>`; }).join('')}
+     <div class="add-row"><select id="pf-newkind" aria-label="Kind for new rule">${kindOpts('trigger')}</select><button data-act="pf-add">+ Add rule</button></div>
+     <div style="margin-top:16px"><span class="sub">Too vague?</span>${flagged.length ? `<p style="font-size:11px;line-height:1.7">${flagged.length} rule${flagged.length > 1 ? 's' : ''} flagged. Try naming an observable event, a number or a timeframe: “at least two touches on 4H” rather than “a clear range”.</p>` : '<p class="empty">No rule flagged yet. Flags appear when you can’t answer a rule or your answer differs from what you recorded in the Play.</p>'}</div>
+     <div class="row wrap" style="margin-top:12px"><button data-act="pf-sheet">Open these rules in the sheet →</button><small class="faint">Freezing still happens there, with a reason.</small></div>
+    </div></div>
+   <div class="panel"><div class="pf-tabs">${ps.map((x, i) => { const n = Object.values(PF.ans[x.id] || {}).filter(Boolean).length; return `<button data-act="pf-go" data-v="${i}" aria-pressed="${i === PF.idx}">${x.id}<i>${n}/${PF.rules.filter(r => r.text.trim()).length}</i></button>`; }).join('')}</div>
+    <div class="pad"><div class="row between wrap"><div><b style="font-size:13px">${p.id} · ${esc(p.title)}</b><div class="meta" style="margin-top:4px"><span class="dir-${p.dir}">${p.dir}</span><span>${p.inst}</span><span>${p.date}</span><span>${p.status === 'Cancelled' ? 'Cancelled' : 'Closed'}</span></div></div><span class="badge">outcome hidden</span></div>
+     <div class="schem" style="margin-top:12px">${schematicSVG(p.id)}</div><p class="schem-cap">Schematic placeholder, not market data. In Vessel this would be the Play’s chart capture as of planning.</p>
+     <p class="muted" style="font-size:10px;margin-top:10px;line-height:1.6">Would this play have qualified? Met = the rule was respected (for Avoid rules: the thing to avoid was absent).</p>
+     ${PF.rules.filter(r => r.text.trim()).map(r => { const x = a[r.id], rec = recorded(p, r); return `<div class="pf-q"><div><span class="kind ${r.kind}">${KINDS[r.kind].label}</span>${r.required ? '' : '<span class="nice">nice-to-have</span>'}<p>${esc(r.text)}</p>${x && x !== 'unclear' && rec && rec !== x ? `<div class="rec warn">At the time you recorded “${LBL[rec]}”. The rule may be read two ways.</div>` : ''}</div>
+      <div class="seg">${['met', 'broken', 'na', 'unclear'].map(k => `<button class="${k}" data-act="pf-ans" data-r="${r.id}" data-v="${k}" aria-pressed="${x === k}">${k === 'na' ? 'N/A' : k === 'unclear' ? 'Can’t tell' : k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div></div>`; }).join('')}
+     <div class="verdict ${vk}">${vt}</div>
+     <div class="row between" style="margin-top:12px"><button data-act="pf-go" data-v="${PF.idx - 1}" ${PF.idx ? '' : 'disabled'}>← Previous play</button><button data-act="pf-go" data-v="${PF.idx + 1}" ${PF.idx < ps.length - 1 ? '' : 'disabled'}>Next play →</button></div>
+    </div></div>
+  </div>`;
+}
+const vp = $('#view-preflight');
+vp.addEventListener('input', e => { const el = e.target; if (el.dataset.pfr) PF.rules.find(r => r.id === el.dataset.pfr).text = el.value; });
+vp.addEventListener('change', e => {
+  const el = e.target;
+  if (el.id === 'pf-pick') { pfLoad(el.value); renderPreflight(); }
+  else if (el.dataset.pfr) { let n = 0; for (const k in PF.ans) if (PF.ans[k][el.dataset.pfr]) { delete PF.ans[k][el.dataset.pfr]; n++; } renderPreflight(); if (n) toast('Reworded: answers for this rule cleared. Re-answer it.'); }
+});
+vp.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const a = b.dataset.act, v = b.dataset.v, ps = pfPlays();
+  switch (a) {
+    case 'pf-go': PF.idx = Math.max(0, Math.min(ps.length - 1, +v)); break;
+    case 'pf-ans': { const m = PF.ans[ps[PF.idx].id] ||= {}; m[b.dataset.r] = m[b.dataset.r] === v ? undefined : v; break; }
+    case 'pf-add': { const r = { id: uid(), kind: $('#pf-newkind').value, text: '', required: true }; PF.rules.push(r); renderPreflight(); $(`[data-pfr="${r.id}"]`).focus(); return; }
+    case 'pf-sheet': { const s = S(PF.sid); wcOf(s).rules = structuredClone(PF.rules.filter(r => r.text.trim())); SH.sid = s.id; showIdea('sheet'); toast('Rules copied into the working copy. The diff shows what changed.'); return; }
+  }
+  renderPreflight();
+});
+
+showIdea(location.hash.slice(1) || 'builder');
+</script>
+</body>
+</html>

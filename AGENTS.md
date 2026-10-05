@@ -42,3 +42,5 @@ The existing Trading Diary project points to a different GitLab repository. Do n
 ## Package manager
 
 Use pnpm for all JavaScript/TypeScript package operations, never npm or yarn. The exact pnpm version is pinned in root `package.json`; the workspace uses one root `pnpm-lock.yaml`. Use Corepack if pnpm is not installed. .NET packages continue to use the .NET CLI and NuGet lockfiles.
+
+October 5, 2026: strategy discovery produced disposable prototypes (`prototype/strategies-*.html`, `strategies-capture.mjs`, `strategies-shape-*`; record in `docs/design/strategy-alternatives.md`). The owner settled that definition and behaviour are separate concepts, strategies are generic (no concrete assets) and pictures drawn on charts explain the idea. `docs/architecture/strategies-plan.md` is a draft development plan that reuses the existing Play, chart, markup and evidence code; it is for owner refinement and does not authorize implementation. The prototypes call Hyperliquid's public API directly from the browser; production must not.
