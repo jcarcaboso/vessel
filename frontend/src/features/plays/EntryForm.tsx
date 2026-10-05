@@ -5,7 +5,17 @@ import { Input } from '@/components/ui/input'
 import { createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
 import { exitsOf, formatDraggedPrice, levelPrice, priceMovePercent, type ExitKind } from './levels'
 import { wrongSide } from './planChecks'
-import { estimatedLiquidation } from './sizing'
+import { estimatedLiquidation, formatRewardToRisk } from './sizing'
+import { SuggestionLine } from './Suggestions'
+import { suggestMaxStop, suggestMinTarget } from './suggestions'
+
+/** Limits the stop and target suggestions follow, from the sizing record. */
+export interface LevelLimits {
+  maxStopPercent: number
+  minRewardRisk: number
+  maxStopSource: 'default' | 'averageGain'
+  minRewardRiskSource: 'default' | 'battingAverage'
+}
 
 function LevelUnits({ value, label, onChange }: {
   value: DraftExit['unit']
@@ -29,7 +39,7 @@ const copy = {
 } as const
 
 /** Stops or targets of one entry. Each closes a share of the entry; percentages are returns at the play's leverage. */
-function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidation }: {
+function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidation, limits }: {
   entry: DraftEntry
   kind: ExitKind
   direction: PlayDraft['direction']
@@ -38,6 +48,8 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
   prefix: string
   /** The plan's estimated liquidation price; stops past it are flagged. */
   liquidation: number | null
+  /** Suggestion limits; null shows none. */
+  limits: LevelLimits | null
 }) {
   const exits = exitsOf(entry, kind)
   const text = copy[kind]
@@ -45,6 +57,7 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
   const update = (id: string, change: Partial<DraftExit>) => set(exits.map(exit => exit.id === id ? { ...exit, ...change } : exit))
   const entryPrice = Number(entry.price) > 0 ? Number(entry.price) : null
   // Single stops keep the short "stop" names; numbering starts once there are several.
+  const minTarget = kind === 'target' && limits ? suggestMinTarget(entry, direction, leverage, limits.minRewardRisk) : null
   const label = (index: number) => exits.length > 1 || kind === 'target' ? `${kind} ${index + 1}` : kind
 
   return <fieldset className={kind === 'stop' ? 'exit-list exit-stops' : 'exit-list exit-targets'}>
@@ -59,6 +72,7 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
       const move = exit.unit === 'percent' && Number(exit.value) > 0 ? priceMovePercent(Number(exit.value), leverage) : null
       const wrong = wrongSide(entryPrice, exit, kind, direction)
       const stopPrice = kind === 'stop' ? levelPrice(entryPrice, exit, kind, direction, leverage) : null
+      const maxStop = kind === 'stop' && limits ? suggestMaxStop(entry, exit, direction, leverage, limits.maxStopPercent) : null
       const pastLiquidation = !wrong && stopPrice !== null && liquidation !== null && (direction === 'long' ? stopPrice <= liquidation : stopPrice >= liquidation)
       return <div key={exit.id} className="exit-row" role="group" aria-label={`${entry.name} ${label(index)}`}>
         <LevelUnits label={`${entry.name} ${label(index)} units`} value={exit.unit}
@@ -80,12 +94,21 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
         {move !== null && <p className="level-resolved">
           {resolved === null ? `${formatDraggedPrice(move)}% price move` : `≈ ${formatDraggedPrice(resolved)} · ${formatDraggedPrice(move)}% move at ${leverage}×`}
         </p>}
+        {maxStop && <SuggestionLine testId="max-stop-suggestion" label={`Accept suggested ${entry.name} ${label(index)}`}
+          title={limits!.maxStopSource === 'averageGain' ? 'Half your average gain' : 'Absolute maximum stop distance from the entry'}
+          onAccept={() => update(exit.id, { value: maxStop.value })}>
+          Max stop {percent.format(limits!.maxStopPercent)}%: <strong>{exit.unit === 'percent' ? `${maxStop.value}% (≈ ${formatDraggedPrice(maxStop.price)})` : maxStop.value}</strong></SuggestionLine>}
       </div>
     })}
+    {minTarget && <SuggestionLine testId="min-target-suggestion" label={`Accept suggested ${entry.name} ${label(exits.findIndex(exit => exit.id === minTarget.levelId))}`}
+      title={limits!.minRewardRiskSource === 'battingAverage' ? 'Break-even reward to risk at your batting average' : 'Minimum planned reward to risk'}
+      onAccept={() => update(minTarget.levelId, { value: minTarget.value })}>
+      {formatRewardToRisk(limits!.minRewardRisk)} needs {label(exits.findIndex(exit => exit.id === minTarget.levelId))} at <strong>
+        {exits.find(exit => exit.id === minTarget.levelId)?.unit === 'percent' ? `${minTarget.value}% (≈ ${formatDraggedPrice(minTarget.price)})` : minTarget.value}</strong></SuggestionLine>}
   </fieldset>
 }
 
-export function EntryForm({ entry, onChange, idPrefix, direction = 'long', leverage = 1, shareLocked = false, maxLeverage = null, liquidation = null }: {
+export function EntryForm({ entry, onChange, idPrefix, direction = 'long', leverage = 1, shareLocked = false, maxLeverage = null, liquidation = null, limits = null }: {
   entry: DraftEntry
   onChange: (entry: DraftEntry) => void
   idPrefix?: string
@@ -98,6 +121,8 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
   maxLeverage?: number | null
   /** The whole plan's estimated liquidation price, which stops are checked against. */
   liquidation?: number | null
+  /** Limits for the max-stop and min-target suggestions; null on read-only plays or without the record. */
+  limits?: LevelLimits | null
 }) {
   const generatedId = useId()
   const prefix = idPrefix ?? generatedId
@@ -124,7 +149,7 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
       Liq. ≈ <strong>{formatDraggedPrice(own)}</strong>
       {' '}<span>{percent.format(Math.abs(own - entryPrice) / entryPrice * 100)}% {direction === 'long' ? 'below' : 'above'} entry{shareLocked ? '' : ' · this entry alone'}</span>
     </p>}
-    <ExitList entry={entry} kind="stop" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={liquidation ?? own} />
-    <ExitList entry={entry} kind="target" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={null} />
+    <ExitList entry={entry} kind="stop" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={liquidation ?? own} limits={limits} />
+    <ExitList entry={entry} kind="target" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={null} limits={limits} />
   </div>
 }

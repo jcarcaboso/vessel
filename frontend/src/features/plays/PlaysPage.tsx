@@ -10,6 +10,7 @@ import { PlayWorkspace } from './PlayWorkspace'
 import { instrumentLabel } from './instruments'
 import { ExecutionPanel } from './ExecutionPanel'
 import { usePlayExecution } from './usePlayExecution'
+import { useSizing } from './useSizing'
 import { planIssues, planIssueSummary } from './planChecks'
 import { formatMoney, marginOverBudget } from './sizing'
 import { leverageOf } from './levels'
@@ -56,6 +57,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const [dialogError, setDialogError] = useState<string | null>(null)
 
   const { draft, saved } = session
+  // Loaded once per page visit; without it the sizing suggestions stay hidden.
+  const sizing = useSizing(api)
   const tracking = usePlayExecution(api, session.view === 'editor' && saved ? saved.summary.id : null, saved?.summary.status)
 
   // Linked fills move a play to Open or Closed on the server; take the new status and version.
@@ -229,6 +232,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     <Button variant="ghost" size="sm" className="plays-back" onClick={() => update({ view: 'list' })}><ArrowLeft size={14} />All plays</Button>
     <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={draft} onChange={next => update({ draft: next })}
       {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} {...(notice ? { notice } : {})} lockInstrument={locked} readOnly={readOnly}
+      sizing={sizing.sizing} onRiskChange={sizing.updateRisk}
       execution={saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}
         entries={draft.entries} onCheck={() => { void tracking.check() }} onLink={request => { void tracking.link(request) }}
         onUnlink={linkId => { void tracking.unlink(linkId) }} /> : undefined} />

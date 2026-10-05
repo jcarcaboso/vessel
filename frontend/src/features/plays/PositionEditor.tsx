@@ -7,9 +7,12 @@ import { EntryForm } from './EntryForm'
 import { formatDraggedPrice, keepPercentLevelPrices, leverageOf, percentLevels } from './levels'
 import { LeverageChangeDialog } from './LeverageChangeDialog'
 import {
-  convertSize, defaultSizeUnits, estimatedLiquidation, formatMoney, formatQuantity, formatRewardToRisk, marginOverBudget, positionSize, rewardToRisk, sizeForBudget, type SizeUnits,
+  convertSize, defaultSizeUnits, estimatedLiquidation, formatMoney, formatQuantity, formatRewardToRisk, marginOverBudget, playBudget, positionSize, rewardToRisk, sizeForBudget, type SizeUnits,
 } from './sizing'
 import { Equal, Expand, Plus, Trash2 } from 'lucide-react'
+import type { SizingDocument } from '@/api/sizing'
+import { SuggestionLine, TrackRecord } from './Suggestions'
+import { exposureLabels, riskSize, suggestLeverage, suggestSize } from './suggestions'
 
 const leveragePresets = [1, 5, 10, 25, 50]
 /** Control range when the venue maximum is unknown, e.g. manual instruments. Saved plans accept up to 100×. */
@@ -22,7 +25,8 @@ function allocatedShare(entries: DraftEntry[]) {
 }
 import { AvailableBudget } from './WorkspacePanels'
 
-export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null, checkBudget = true }: {
+export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null, checkBudget = true,
+  sizing = null, balance = null, onRiskChange }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
   selectedId: string
@@ -37,6 +41,12 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   availableBudget?: string | null
   /** Holds the margin to the budget. Off once orders may rest, since the venue then counts their margin as used. */
   checkBudget?: boolean
+  /** Risk settings, record and limits for suggestions; null hides them (read-only plays, or the record did not load). */
+  sizing?: SizingDocument | null
+  /** The play account's balance, the reference for the risk-based size. */
+  balance?: string | null
+  /** Saves the risk per trade from the track record line. */
+  onRiskChange?: (riskPercent: string) => Promise<void>
 }) {
   const leverageLimit = maxLeverage ?? defaultMaxLeverage
   const leverage = leverageOf(draft.leverage)
@@ -110,6 +120,17 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   const liquidation = estimatedLiquidation(draft.entries, draft.direction, leverage, maxLeverage)
   const overBudget = checkBudget ? marginOverBudget(draft, leverage, availableBudget) : null
   const budgetSize = overBudget ? sizeForBudget(draft, leverage, overBudget.budget.value, units) : null
+  // Suggestions only show; each applies through the same paths as typing when the owner accepts it.
+  const balanceAmount = balance != null && Number(balance) > 0 ? Number(balance) : null
+  const heldBudget = checkBudget ? playBudget(draft, availableBudget)?.amount ?? null : null
+  const sizeSuggestion = sizing ? suggestSize(draft, leverage, balanceAmount, sizing, units, heldBudget) : null
+  const risked = sizing ? riskSize(draft, leverage, balanceAmount, sizing, units) : null
+  const leverageSuggestion = sizing && leverageDraft === null
+    ? suggestLeverage(draft, leverage, maxLeverage, heldBudget, sizing, risked?.notional ?? null, defaultMaxLeverage) : null
+  const limits = sizing ? { maxStopPercent: Number(sizing.limits.maxStopPercent), minRewardRisk: Number(sizing.limits.minRewardRisk),
+    maxStopSource: sizing.limits.maxStopSource, minRewardRiskSource: sizing.limits.minRewardRiskSource } : null
+  const exposure = sizing && sizing.exposure.level !== 'full' ? ` · ${exposureLabels[sizing.exposure.level]}` : ''
+  const formatSize = (value: string) => draft.sizingMode === 'margin' ? formatMoney(Number(value), units) : formatQuantity(Number(value), units)
   // One entry takes the whole position, so its share and the split are fixed.
   const single = draft.entries.length === 1
 
@@ -168,6 +189,13 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
             {budgetSize !== null && <Button type="button" variant="outline" size="sm" onClick={() => onChange({ ...draft, size: budgetSize })}>
               Use {draft.sizingMode === 'margin' ? formatMoney(overBudget.budget.amount, units) : formatQuantity(Number(budgetSize), units)}</Button>}
           </p>}
+          {sizeSuggestion && (sizeSuggestion.overBudget === null
+            ? <SuggestionLine testId="size-suggestion" label="Accept suggested size" onAccept={() => onChange({ ...draft, size: sizeSuggestion.value })}
+              title={`${sizeSuggestion.effectiveRiskPercent}% of the account balance lost if the stops fill, before fees`}>
+              Size for {formatMoney(sizeSuggestion.risk, units)} risk{exposure}: <strong>{formatSize(sizeSuggestion.value)}</strong></SuggestionLine>
+            : <SuggestionLine testId="size-suggestion" label="Accept suggested size"
+              title={`${sizeSuggestion.effectiveRiskPercent}% of the account balance lost if the stops fill, before fees`}>
+              {formatMoney(sizeSuggestion.risk, units)} risk{exposure} needs {formatMoney(sizeSuggestion.margin, units)} margin, above the budget{leverageSuggestion ? '; raise leverage.' : ` at ${leverage}×.`}</SuggestionLine>)}
         </div>
         <div className="leverage-controls">
           <label htmlFor={`${prefix}-leverage-slider`}>Leverage {maxLeverage && <small>Max {maxLeverage}×</small>}</label>
@@ -187,6 +215,11 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
               onClick={() => needsConfirmation ? commitLeverage(String(preset)) : updateLeverage(String(preset))}>{preset}×</button>)}
           </div>
         </div>
+        {leverageSuggestion && <SuggestionLine testId="leverage-suggestion" label="Accept suggested leverage"
+          title="Lowest whole leverage that fits the margin in the budget with the estimated liquidation beyond the farthest stop"
+          onAccept={() => needsConfirmation ? commitLeverage(String(leverageSuggestion.leverage)) : updateLeverage(String(leverageSuggestion.leverage))}>
+          Leverage <strong>{leverageSuggestion.leverage}×</strong> fits the budget, liq. past the stops</SuggestionLine>}
+        {sizing && onRiskChange && <TrackRecord sizing={sizing} onRiskChange={onRiskChange} />}
         {leverage > leverageLimit && <p className="leverage-warning" role="alert">{leverage}× is above the {leverageLimit}× venue maximum for {instrumentName || 'this contract'}.</p>}
         {pendingLeverage !== null && <LeverageChangeDialog draft={draft} from={leverage} to={pendingLeverage} units={units}
           onKeepPrices={() => finishLeverage('prices')} onKeepPercentages={() => finishLeverage('percentages')} onCancel={() => finishLeverage()} />}
@@ -221,7 +254,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
                   {draft.entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
                 </select>
               </label>
-              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation} />}
+              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation} limits={limits} />}
             </DialogContent>
           </Dialog>
         </div>
@@ -241,7 +274,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
               {draft.entries.length > 1 && <Button type="button" variant="ghost" size="icon-sm" className="remove-entry" aria-label={`Remove ${entry.name}`}
                 title={`Remove ${entry.name}`} onClick={() => removeEntry(entry.id)}><Trash2 size={13} aria-hidden="true" /></Button>}
             </div>
-            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation} />}
+            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation} limits={limits} />}
             {expanded && selected?.id === entry.id && <p className="muted expanded-placeholder">Editing in the expanded view.</p>}
           </article>)}
         </div>

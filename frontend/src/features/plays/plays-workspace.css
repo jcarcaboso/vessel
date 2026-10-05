@@ -673,3 +673,20 @@
 .plays-page .plays-notification-body ul { margin: 2px 0 0; padding: 0; list-style: none; color: var(--muted-foreground); }
 .plays-page .plays-notification-actions { display: flex; flex-wrap: wrap; gap: 6px; align-self: center; }
 .plays-page .plays-notification-actions button { gap: 6px; }
+
+/* Sizing suggestions: one warning line each with Accept, like the over-budget line. */
+.plays-page .sizing-suggestion, .plays-entry-dialog .sizing-suggestion { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; grid-column: 1 / -1; margin: 0; color: var(--warning); font-size: 10px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.plays-page .sizing-suggestion strong, .plays-entry-dialog .sizing-suggestion strong { font-weight: 600; }
+.plays-page .sizing-suggestion button, .plays-entry-dialog .sizing-suggestion button { height: 22px; padding: 0 8px; font-size: 10px; }
+.plays-page .leverage-controls + .sizing-suggestion { margin-top: -8px; }
+.plays-page .track-record { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--muted-foreground); font-size: 10px; font-variant-numeric: tabular-nums; }
+.plays-page .track-record-summary { cursor: help; }
+.plays-page .track-record-exposure { color: var(--warning); font-weight: 600; }
+.plays-page .track-record-edit { margin-left: auto; padding: 2px 6px; border: 1px dashed var(--border); border-radius: 4px; background: transparent; color: var(--foreground); font-size: 10px; cursor: pointer; }
+.plays-page .track-record-edit:hover { border-color: var(--ring); }
+.plays-page .track-record-edit[data-warning="true"] { border-color: var(--warning); color: var(--warning); }
+.plays-page .track-record-risk { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: auto; }
+.plays-page .track-record-risk label { display: inline; font-size: 10px; font-weight: 500; }
+.plays-page .track-record-risk input { width: 64px; height: 26px; padding: 3px 6px; font-size: 11px; }
+.plays-page .track-record-note { flex-basis: 100%; color: var(--warning); text-align: right; }
+.plays-page .track-record-note[role="alert"] { color: var(--negative); }

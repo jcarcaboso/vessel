@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
+import type { SizingDocument } from '@/api/sizing'
 import { ExternalLink, Info, PencilLine, RefreshCw } from 'lucide-react'
 import { statusLabels, venueTradeUrl, type PlayStatus } from '@/api/plays'
 import { Input } from '@/components/ui/input'
@@ -18,7 +19,7 @@ import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
 import './plays-workspace.css'
 
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, notice,
-  lockInstrument = false, readOnly = false, execution }: {
+  lockInstrument = false, readOnly = false, execution, sizing = null, onRiskChange }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -36,6 +37,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   readOnly?: boolean
   /** Execution tab content for a saved play. */
   execution?: ReactNode
+  /** Risk settings and record for sizing suggestions, which only apply to editable plays. */
+  sizing?: SizingDocument | null
+  onRiskChange?: (riskPercent: string) => Promise<void>
 }) {
   const fieldId = useId()
   const [selectedId, setSelectedId] = useState(draft.entries[0]!.id)
@@ -177,7 +181,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       {readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
         <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} units={units} availableBudget={account?.availableStablecoinNominalUsd ?? null} checkBudget={false} />
       </fieldset> : <PositionEditor draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId}
-        maxLeverage={maxLeverage} instrumentName={instrumentName} units={units} availableBudget={account?.availableStablecoinNominalUsd ?? null} checkBudget={status === 'draft'} />}
+        maxLeverage={maxLeverage} instrumentName={instrumentName} units={units} availableBudget={account?.availableStablecoinNominalUsd ?? null} checkBudget={status === 'draft'}
+        sizing={sizing} balance={account?.balanceUsd ?? null} {...(onRiskChange ? { onRiskChange } : {})} />}
     </div>
     <PositionSummary draft={draft} units={units} instrumentName={instrumentName} />
   </section>

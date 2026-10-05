@@ -110,15 +110,24 @@ export function sizeForBudget(draft: Pick<PlayDraft, 'sizingMode' | 'entries'>, 
  * Share-weighted distance from the entry price to its stops or targets, on their correct side.
  * Shares are normalized over the levels with a price; blank shares count equally when none is set.
  */
-function averageDistance(entry: DraftEntry, entryPrice: number, kind: ExitKind, direction: PlayDraft['direction'], leverage: number) {
+export function averageDistance(entry: DraftEntry, entryPrice: number, kind: ExitKind, direction: PlayDraft['direction'], leverage: number) {
+  const levels = weightedLevels(entry, entryPrice, kind, direction, leverage)
+  if (!levels.length) return null
+  const total = levels.reduce((sum, level) => sum + level.weight, 0)
+  return total > 0 ? levels.reduce((sum, level) => sum + level.distance * level.weight, 0) / total : null
+}
+
+/**
+ * Stops or targets with a price, their distance from the entry and their weight in the average:
+ * their share, or 1 each when no share is set. Levels without a price are left out.
+ */
+export function weightedLevels(entry: DraftEntry, entryPrice: number, kind: ExitKind, direction: PlayDraft['direction'], leverage: number) {
   const levels = exitsOf(entry, kind).flatMap(exit => {
     const price = levelPrice(entryPrice, exit, kind, direction, leverage)
-    return price === null ? [] : [{ distance: Math.abs(price - entryPrice), share: positive(exit.share) }]
+    return price === null ? [] : [{ exit, price, distance: Math.abs(price - entryPrice), share: positive(exit.share) }]
   })
-  if (!levels.length) return null
   const weighted = levels.some(level => level.share !== null)
-  const total = levels.reduce((sum, level) => sum + (weighted ? level.share ?? 0 : 1), 0)
-  return levels.reduce((sum, level) => sum + level.distance * (weighted ? level.share ?? 0 : 1), 0) / total
+  return levels.map(({ share, ...level }) => ({ ...level, weight: weighted ? share ?? 0 : 1 }))
 }
 
 /**
