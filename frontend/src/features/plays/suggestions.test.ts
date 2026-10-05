@@ -163,9 +163,9 @@ describe('leverage suggestion', () => {
 
   it('is the lowest leverage that fits the risk-based position in the budget', () => {
     // 2,400 notional in a 1,000 budget needs 3×.
-    expect(suggestLeverage(plan(), 2, 50, 1000, sizing(), 2400)).toEqual({ leverage: 3 })
+    expect(suggestLeverage(plan(), 2, 50, 1000, sizing(), 2400)).toMatchObject({ leverage: 3 })
     // At 10× the liquidation is inside the stops, so it comes down to the lowest that fits.
-    expect(suggestLeverage(plan(), 10, 50, 1000, sizing(), 2400)).toEqual({ leverage: 3 })
+    expect(suggestLeverage(plan(), 10, 50, 1000, sizing(), 2400)).toMatchObject({ leverage: 3 })
     expect(suggestLeverage(plan(), 3, 50, 1000, sizing(), 2400)).toBeNull()
   })
 
@@ -174,11 +174,11 @@ describe('leverage suggestion', () => {
     const tight = { ...draft([entry('100', '100', [['98']])]), leverage: '5' }
     expect(suggestLeverage(tight, 5, 50, 1000, sizing(), 2400)).toBeNull()
     // While exposure is reduced it still suggests coming down.
-    expect(suggestLeverage(tight, 5, 50, 1000, sizing({ multiplier: '0.5' }), 2400)).toEqual({ leverage: 3 })
+    expect(suggestLeverage(tight, 5, 50, 1000, sizing({ multiplier: '0.5' }), 2400)).toMatchObject({ leverage: 3 })
   })
 
   it('falls back to an entered quantity, but not an entered margin', () => {
-    expect(suggestLeverage(plan({ sizingMode: 'quantity', size: '25' }), 1, 50, 1000, sizing(), null)).toEqual({ leverage: 3 })
+    expect(suggestLeverage(plan({ sizingMode: 'quantity', size: '25' }), 1, 50, 1000, sizing(), null)).toMatchObject({ leverage: 3 })
     expect(suggestLeverage(plan({ size: '1200' }), 1, 50, 1000, sizing(), null)).toBeNull()
   })
 
@@ -188,7 +188,7 @@ describe('leverage suggestion', () => {
     // A long at 120.5 with a stop at 114 on a 20× contract: 20× liquidates near 117.4, inside the stop;
     // 13× (about 114.08) is still inside; 12× (about 113.3) is the highest that clears it.
     const sol = { ...draft([entry('120.5', '100', [['114']])]), leverage: '20' }
-    expect(suggestLeverage(sol, 20, 20, null, sizing(), null)).toEqual({ leverage: 12 })
+    expect(suggestLeverage(sol, 20, 20, null, sizing(), null)).toMatchObject({ leverage: 12 })
     expect(suggestLeverage(sol, 12, 20, null, sizing(), null)).toBeNull()
   })
 
@@ -196,18 +196,18 @@ describe('leverage suggestion', () => {
     // At 3× on a 50× contract a long at 100 liquidates near 67.3, above a stop at 60.
     const deep = { ...draft([entry('100', '100', [['60']])]), leverage: '1' }
     expect(suggestLeverage(deep, 1, 50, 1000, sizing(), 2400)).toBeNull()
-    expect(suggestLeverage(deep, 1, 50, 1500, sizing(), 2400)).toEqual({ leverage: 2 })
+    expect(suggestLeverage(deep, 1, 50, 1500, sizing(), 2400)).toMatchObject({ leverage: 2 })
     // Short: at 3× liquidation is near 132; a stop at 140 is past it.
     const short = { ...draft([entry('100', '100', [['140']])], { direction: 'short' }), leverage: '1' }
     expect(suggestLeverage(short, 1, 50, 1000, sizing(), 2400)).toBeNull()
     // Without the venue maximum the liquidation is unknown, so only the budget decides.
-    expect(suggestLeverage(deep, 1, null, 1000, sizing(), 2400)).toEqual({ leverage: 3 })
+    expect(suggestLeverage(deep, 1, null, 1000, sizing(), 2400)).toMatchObject({ leverage: 3 })
   })
 
   it('is capped at the venue maximum and, while exposure is reduced, at the current leverage', () => {
     expect(suggestLeverage(plan(), 1, 2, 1000, sizing(), 2400)).toBeNull()
     expect(suggestLeverage(plan(), 2, 50, 1000, sizing({ multiplier: '0.5' }), 2400)).toBeNull()
-    expect(suggestLeverage(plan(), 5, 50, 1000, sizing({ multiplier: '0.25' }), 2400)).toEqual({ leverage: 3 })
+    expect(suggestLeverage(plan(), 5, 50, 1000, sizing({ multiplier: '0.25' }), 2400)).toMatchObject({ leverage: 3 })
   })
 })
 

@@ -167,7 +167,7 @@ export function suggestMinTarget(entry: DraftEntry, direction: Direction, levera
 }
 
 /** Highest stop price of a short, lowest of a long: the stop furthest from the entries. */
-function farthestStop(entries: readonly DraftEntry[], direction: Direction, leverage: number) {
+export function farthestStop(entries: readonly DraftEntry[], direction: Direction, leverage: number) {
   const prices = entries.flatMap(entry => entry.stops.flatMap(stop => {
     const price = levelPrice(positive(entry.price), stop, 'stop', direction, leverage)
     return price === null ? [] : [price]
@@ -194,7 +194,7 @@ export function suggestLeverage(draft: SizedDraft & Pick<PlayDraft, 'leverage'>,
   }
   if (budget === null || budget <= 0 || position === null || position <= 0) {
     if (clear(leverage)) return null
-    for (let candidate = leverage - 1; candidate >= 1; candidate--) if (clear(candidate)) return { leverage: candidate }
+    for (let candidate = leverage - 1; candidate >= 1; candidate--) if (clear(candidate)) return { leverage: candidate, reason: 'liquidation' as const }
     return null
   }
   const reduced = (amount(sizing.exposure.multiplier) ?? 1) < 1
@@ -206,5 +206,79 @@ export function suggestLeverage(draft: SizedDraft & Pick<PlayDraft, 'leverage'>,
   if (!(lowest > leverage || !clear(leverage) || reduced)) return null
   // A higher leverage only brings the liquidation closer, so the lowest that fits the budget decides.
   if (lowest > cap || !clear(lowest) || lowest === leverage) return null
-  return { leverage: lowest }
+  const reason: LeverageReason = lowest > leverage ? 'budget' : !clear(leverage) ? 'liquidation' : 'exposure'
+  return { leverage: lowest, reason }
 }
+
+/** Why the current leverage is a problem: the margin does not fit, the liquidation is inside a stop, or exposure is reduced. */
+export type LeverageReason = 'budget' | 'liquidation' | 'exposure'
+
+export interface LevelChange extends LevelSuggestion {
+  entryId: string
+  entryName: string
+  levelId: string
+  /** "stop", "stop 2" or "target 1", as the entry form names the level. */
+  label: string
+  unit: DraftExit['unit']
+  /** The level's current value in its own unit. */
+  current: string
+}
+
+/** Every suggestion for a draft, for the suggestions panel and the markers on the fields. */
+export interface PlanSuggestions {
+  size: SizeSuggestion | null
+  leverage: { leverage: number; reason: LeverageReason } | null
+  stops: Array<LevelChange & { distancePercent: number }>
+  targets: Array<LevelChange & { ratio: number }>
+  /** The risk reference and loss per unit behind the size, for its explanation. */
+  balance: number | null
+  lossPerUnit: number | null
+  /** The budget the margin is held to, or null when it is not checked. */
+  budget: number | null
+}
+
+export interface SuggestionInputs {
+  draft: SizedDraft & Pick<PlayDraft, 'leverage'>
+  leverage: number
+  maxLeverage: number | null
+  sizing: SizingDocument
+  units: SizeUnits
+  balance: number | null
+  budget: number | null
+  defaultMaximum?: number
+}
+
+const levelLabel = (exits: readonly DraftExit[], kind: 'stop' | 'target', index: number) =>
+  exits.length > 1 || kind === 'target' ? `${kind} ${index + 1}` : kind
+
+export function planSuggestions({ draft, leverage, maxLeverage, sizing, units, balance, budget, defaultMaximum = 100 }: SuggestionInputs): PlanSuggestions {
+  const maxStop = amount(sizing.limits.maxStopPercent)
+  const minRewardRisk = amount(sizing.limits.minRewardRisk)
+  const size = suggestSize(draft, leverage, balance, sizing, units, budget)
+  const risked = riskSize(draft, leverage, balance, sizing, units)
+  const stops: PlanSuggestions['stops'] = []
+  const targets: PlanSuggestions['targets'] = []
+  for (const entry of draft.entries) {
+    const entryPrice = positive(entry.price)
+    if (entryPrice === null) continue
+    if (maxStop !== null) entry.stops.forEach((stop, index) => {
+      const suggestion = suggestMaxStop(entry, stop, draft.direction, leverage, maxStop)
+      const price = levelPrice(entryPrice, stop, 'stop', draft.direction, leverage)
+      if (suggestion && price !== null) stops.push({ ...suggestion, entryId: entry.id, entryName: entry.name, levelId: stop.id,
+        label: levelLabel(entry.stops, 'stop', index), unit: stop.unit, current: stop.value, distancePercent: Math.abs(price - entryPrice) / entryPrice * 100 })
+    })
+    const target = minRewardRisk === null ? null : suggestMinTarget(entry, draft.direction, leverage, minRewardRisk)
+    const index = target ? entry.targets.findIndex(exit => exit.id === target.levelId) : -1
+    if (target && index >= 0) targets.push({ ...target, entryId: entry.id, entryName: entry.name, label: levelLabel(entry.targets, 'target', index),
+      unit: entry.targets[index]!.unit, current: entry.targets[index]!.value, ratio: rewardToRisk(entry, draft.direction, leverage)! })
+  }
+  return {
+    size, stops, targets, balance, budget,
+    leverage: suggestLeverage(draft, leverage, maxLeverage, budget, sizing, risked?.notional ?? null, defaultMaximum),
+    lossPerUnit: lossPerUnit(draft.entries, draft.direction, leverage),
+  }
+}
+
+/** How many suggestions there are to review. An over-budget size only informs, so it is not counted. */
+export const suggestionCount = (plan: PlanSuggestions) =>
+  (plan.size && plan.size.overBudget === null ? 1 : 0) + (plan.leverage ? 1 : 0) + plan.stops.length + plan.targets.length

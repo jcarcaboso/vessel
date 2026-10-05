@@ -10,10 +10,13 @@ import { captureFileName, createEvidence, evidenceLimits } from './evidence'
 import { DirectionToggle } from './DirectionToggle'
 import { InstrumentPicker } from './InstrumentPicker'
 import { pairLabel, useInstrumentCatalog } from './instruments'
-import { leverageOf } from './levels'
-import { defaultSizeUnits, estimatedLiquidation, type SizeUnits } from './sizing'
+import { keepPercentLevelPrices, leverageOf, percentLevels } from './levels'
+import { LeverageChangeDialog } from './LeverageChangeDialog'
+import { defaultSizeUnits, estimatedLiquidation, playBudget, type SizeUnits } from './sizing'
+import { planSuggestions } from './suggestions'
+import { SuggestionsPanel } from './Suggestions'
 import { PlanNotices } from './PlanNotices'
-import { PositionEditor } from './PositionEditor'
+import { PositionEditor, defaultMaxLeverage, type SuggestionMarks } from './PositionEditor'
 import { ChartPanel } from './PlayChart'
 import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
 import './plays-workspace.css'
@@ -100,6 +103,33 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const showEvidence = () => requestAnimationFrame(() =>
     leftColumn.current?.querySelector('[data-testid="journal-panel"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 
+  // Suggestions sit in their own panel above the workspace; the fields only carry a marker.
+  const leverage = leverageOf(draft.leverage)
+  // An accepted leverage applies like a preset: with percent levels it first asks how they follow.
+  const [pendingLeverage, setPendingLeverage] = useState<number | null>(null)
+  function acceptLeverage(next: number) {
+    if (percentLevels(draft.entries).length) setPendingLeverage(next)
+    else onChange({ ...draft, leverage: String(next) })
+  }
+  function finishLeverage(keep?: 'prices' | 'percentages') {
+    if (keep && pendingLeverage !== null) onChange({ ...draft, leverage: String(pendingLeverage),
+      entries: keep === 'prices' ? keepPercentLevelPrices(draft.entries, leverage, pendingLeverage) : draft.entries })
+    setPendingLeverage(null)
+  }
+  const balance = account?.balanceUsd != null && Number(account.balanceUsd) > 0 ? Number(account.balanceUsd) : null
+  const available = account?.availableStablecoinNominalUsd ?? null
+  const suggestions = sizing && !readOnly ? planSuggestions({ draft, leverage, maxLeverage, sizing, units, balance,
+    budget: status === 'draft' ? playBudget(draft, available)?.amount ?? null : null, defaultMaximum: defaultMaxLeverage }) : null
+  const marks: SuggestionMarks | null = suggestions ? {
+    size: !!suggestions.size, leverage: !!suggestions.leverage,
+    levels: new Set([...suggestions.stops, ...suggestions.targets].map(level => level.levelId)),
+  } : null
+  function acceptLevel(entryId: string, kind: 'stop' | 'target', levelId: string, value: string) {
+    onChange({ ...draft, entries: draft.entries.map(entry => entry.id !== entryId ? entry : kind === 'stop'
+      ? { ...entry, stops: entry.stops.map(stop => stop.id === levelId ? { ...stop, value } : stop) }
+      : { ...entry, targets: entry.targets.map(target => target.id === levelId ? { ...target, value } : target) }) })
+  }
+
   function chooseAccount(id: string) {
     const next = enabledAccounts.find(account => account.id === id)
     onChange({ ...draft, accountId: id, instrument: '',
@@ -162,6 +192,11 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
     <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} maxLeverage={maxLeverage} />
     {!loading && !enabledAccounts.length && <p className="plays-context-note">No enabled accounts yet. You can outline the play and add an account later.</p>}
     <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} />
+    {suggestions && sizing && onRiskChange && <SuggestionsPanel plan={suggestions} sizing={sizing} draft={draft} leverage={leverage} units={units}
+      onSize={size => onChange({ ...draft, size })} onLevel={acceptLevel} onRiskChange={onRiskChange}
+      onLeverage={acceptLeverage} />}
+    {pendingLeverage !== null && <LeverageChangeDialog draft={draft} from={leverage} to={pendingLeverage} units={units}
+      onKeepPrices={() => finishLeverage('prices')} onKeepPercentages={() => finishLeverage('percentages')} onCancel={() => finishLeverage()} />}
     <div className="workspace" data-testid="workspace">
       <div ref={leftColumn} className="left-column" data-testid="left-column">
         <ChartPanel entries={draft.entries} selectedId={selectedId} onSelect={id => {
@@ -179,10 +214,10 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} />
       </div>
       {readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
-        <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} units={units} availableBudget={account?.availableStablecoinNominalUsd ?? null} checkBudget={false} />
+        <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} units={units} availableBudget={available} checkBudget={false} />
       </fieldset> : <PositionEditor draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId}
-        maxLeverage={maxLeverage} instrumentName={instrumentName} units={units} availableBudget={account?.availableStablecoinNominalUsd ?? null} checkBudget={status === 'draft'}
-        sizing={sizing} balance={account?.balanceUsd ?? null} {...(onRiskChange ? { onRiskChange } : {})} />}
+        maxLeverage={maxLeverage} instrumentName={instrumentName} units={units} availableBudget={available} checkBudget={status === 'draft'}
+        marks={marks} />}
     </div>
     <PositionSummary draft={draft} units={units} instrumentName={instrumentName} />
   </section>
