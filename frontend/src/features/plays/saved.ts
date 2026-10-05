@@ -23,6 +23,12 @@ export interface PlaysSession {
 }
 export const createPlaysSession = (): PlaysSession => ({ view: 'list', draft: createDraft(), saved: null })
 
+export function hasDraftContent(draft: PlayDraft) {
+  return !!(draft.title.trim() || draft.accountId || draft.instrument || draft.size || draft.evidence.length ||
+    Object.values(draft.drawings).some(items => items.length) || Object.values(draft.notes).some(note => note.trim()) ||
+    draft.entries.some(entry => entry.price || entry.stops.some(stop => stop.value) || entry.targets.some(target => target.value)))
+}
+
 export function planFromDraft(draft: PlayDraft): PlayPlan {
   return {
     direction: draft.direction, sizingMode: draft.sizingMode, size: draft.size, leverage: draft.leverage,

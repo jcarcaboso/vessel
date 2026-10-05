@@ -178,7 +178,8 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
 
     private static PlaySummaryDto Summary(Play play) => new(play.Id, play.Title, StatusName(play.Status), play.AccountId, play.VenueId,
         play.ContractId, SourceName(play.InstrumentSource), PlayDocuments.Read(play.Plan).Direction, play.PlanRevision, play.Version,
-        play.CancelReason is { } reason ? ReasonName(reason) : null, play.CreatedAtUtc, play.UpdatedAtUtc, play.PlannedAtUtc, play.EndedAtUtc);
+        play.CancelReason is { } reason ? ReasonName(reason) : null, play.CreatedAtUtc, play.UpdatedAtUtc, play.PlannedAtUtc, play.EndedAtUtc,
+        !string.IsNullOrWhiteSpace(play.Review));
 
     private static PlayDto ToDto(Play play) =>
         new(Summary(play), PlayDocuments.Read(play.Plan), PlayDocuments.ReadDrawings(play.Drawings), play.Review);

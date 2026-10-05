@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
 import { systemFixture } from '@/test/system-fixture'
-import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, playApiStubs, portfolioFixture } from '@/test/workspace-fixture'
+import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, playApiStubs, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { ApplicationShell } from './ApplicationShell'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
@@ -23,6 +23,57 @@ function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
 }
 beforeEach(() => { window.history.replaceState(null, '', '/') })
 describe('Main application shell', () => {
+  it('opens a saved play from Overview and preserves edits when reopening that same play', async () => {
+    const client = api({
+      overview: vi.fn().mockResolvedValue(overviewFixture),
+      plays: vi.fn().mockResolvedValue([savedPlayFixture.summary]),
+      play: vi.fn().mockResolvedValue(savedPlayFixture), evidence: vi.fn().mockResolvedValue([]),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Saved idea' }))
+    const title = await screen.findByRole('textbox', { name: 'Play title' })
+    expect(title).toHaveValue('Saved idea')
+    await userEvent.clear(title)
+    await userEvent.type(title, 'Unsaved revision')
+    await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Saved idea' }))
+    expect(await screen.findByRole('textbox', { name: 'Play title' })).toHaveValue('Unsaved revision')
+    expect(client.play).toHaveBeenCalledOnce()
+    expect(client.createPlay).not.toHaveBeenCalled()
+    expect(client.updatePlay).not.toHaveBeenCalled()
+  })
+  it('does not overwrite a local draft when a different saved play is opened from Overview', async () => {
+    const client = api({
+      overview: vi.fn().mockResolvedValue(overviewFixture),
+      plays: vi.fn().mockResolvedValue([savedPlayFixture.summary]),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await screen.findByRole('button', { name: 'Open Saved idea' })
+    await userEvent.click(screen.getByRole('link', { name: 'Plays' }))
+    await userEvent.click(screen.getByRole('button', { name: 'New play' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Play title' }), 'Keep this draft')
+    await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Saved idea' }))
+    expect(await screen.findByText('Keep this draft')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Saved idea' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: 'Continue editing' }))
+    expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Keep this draft')
+    expect(client.play).not.toHaveBeenCalled()
+  })
+  it('reloads the Overview play list independently and keeps the rest of Overview visible on failure', async () => {
+    const client = api({
+      overview: vi.fn().mockResolvedValue(overviewFixture),
+      plays: vi.fn().mockRejectedValueOnce(new ApiError('unavailable', 'Plays temporarily unavailable.'))
+        .mockResolvedValue([savedPlayFixture.summary]),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Plays temporarily unavailable.')
+    expect(screen.getByRole('button', { name: 'View Main account' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    expect(await screen.findByRole('button', { name: 'Open Saved idea' })).toBeInTheDocument()
+    expect(client.plays).toHaveBeenCalledTimes(2)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
   it('opens Overview, not the sample Play page, and has honest empty states', async () => {
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api()} />)
     await screen.findByText('Start with your accounts.')

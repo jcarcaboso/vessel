@@ -43,7 +43,7 @@ function fakeServer() {
       const play: SavedPlay = {
         summary: { id, title: fields.title.trim(), status: 'draft', accountId: fields.accountId, venueId: 'manual', instrument: fields.instrument,
           instrumentSource: fields.instrumentSource, direction: fields.plan.direction, planRevision: 0, version: 1, cancelReason: null,
-          createdAtUtc: now(), updatedAtUtc: now(), plannedAtUtc: null, endedAtUtc: null },
+          createdAtUtc: now(), updatedAtUtc: now(), plannedAtUtc: null, endedAtUtc: null, hasReview: !!fields.review.trim() },
         plan: fields.plan, drawings: fields.drawings, review: fields.review,
       }
       plays.set(id, play)
@@ -60,7 +60,7 @@ function fakeServer() {
         revision += 1
         history.get(id)!.revisions.push({ number: revision, status: play.summary.status, reason: fields.revisionReason, createdAtUtc: now(), plan: fields.plan })
       }
-      const updated = { ...bump(play, { title: fields.title.trim(), instrument: fields.instrument, planRevision: revision }),
+      const updated = { ...bump(play, { title: fields.title.trim(), instrument: fields.instrument, planRevision: revision, hasReview: !!fields.review.trim() }),
         plan: fields.plan, drawings: fields.drawings, review: fields.review }
       plays.set(id, updated)
       return Promise.resolve(updated)
