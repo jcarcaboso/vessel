@@ -673,3 +673,59 @@
 .plays-page .plays-notification-body ul { margin: 2px 0 0; padding: 0; list-style: none; color: var(--muted-foreground); }
 .plays-page .plays-notification-actions { display: flex; flex-wrap: wrap; gap: 6px; align-self: center; }
 .plays-page .plays-notification-actions button { gap: 6px; }
+
+/* Sizing suggestions: one warning line each with Accept, like the over-budget line. */
+/* Suggestions: one yellow block above the workspace, apart from the entered plan; fields only carry a marker. */
+.plays-page .sizing-suggestions { margin: 0 0 14px; border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--warning) 6%, var(--card)); color: var(--foreground); }
+.plays-page .sizing-suggestions-summary { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 16px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.plays-page .sizing-suggestions-summary:focus-visible { outline: 2px solid var(--warning); outline-offset: -3px; border-radius: 8px; }
+.plays-page .sizing-suggestions-summary > svg { flex: none; color: var(--warning); }
+.plays-page .sizing-suggestions-title { display: grid; gap: 2px; min-width: 0; }
+.plays-page .sizing-suggestions-title strong { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+.plays-page .sizing-suggestions-title small { color: var(--muted-foreground); font-size: 10px; }
+.plays-page .sizing-suggestions-count { min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--warning); color: var(--background); font-size: 10px; line-height: 16px; text-align: center; }
+.plays-page .sizing-suggestions-exposure { flex: none; padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--warning) 55%, transparent); border-radius: 4px; color: var(--warning); font-size: 10px; font-weight: 600; }
+.plays-page .sizing-suggestions-headline { margin-left: auto; overflow: hidden; color: var(--warning); font-size: 11px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.plays-page .sizing-suggestions-chevron { flex: none; color: var(--warning); transition: transform .15s; }
+.plays-page .sizing-suggestions[data-open="true"] .sizing-suggestions-chevron { transform: rotate(180deg); }
+.plays-page .sizing-suggestions-body { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr); gap: 20px; padding: 4px 16px 16px; border-top: 1px solid color-mix(in srgb, var(--warning) 20%, var(--border)); }
+.plays-page .sizing-suggestions-body h3 { margin: 12px 0 8px; color: var(--muted-foreground); font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.plays-page .sizing-suggestions-list ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.plays-page .suggestion-row { padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--warning) 25%, var(--border)); border-left: 2px solid var(--warning); border-radius: 6px; background: color-mix(in srgb, var(--warning) 4%, var(--card)); }
+.plays-page .suggestion-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.plays-page .suggestion-row-title { min-width: 110px; color: var(--muted-foreground); font-size: 11px; }
+.plays-page .suggestion-row-value { color: var(--warning); font-size: 13px; font-variant-numeric: tabular-nums; }
+.plays-page .suggestion-row-value s { color: var(--muted-foreground); font-size: 11px; }
+.plays-page .suggestion-row-value strong { font-weight: 600; }
+.plays-page .suggestion-row button { height: 24px; margin-left: auto; padding: 0 10px; border-color: color-mix(in srgb, var(--warning) 50%, var(--border)); color: var(--warning); font-size: 11px; }
+.plays-page .suggestion-row-why { margin: 6px 0 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.55; }
+.plays-page .suggestion-row-why strong { color: var(--foreground); font-weight: 600; }
+.plays-page .suggestion-empty { margin: 0 0 8px; color: var(--muted-foreground); font-size: 11px; line-height: 1.5; }
+.plays-page .sizing-suggestions-record { font-size: 11px; }
+.plays-page .record-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0 0 10px; }
+.plays-page .record-figures dt { color: var(--muted-foreground); font-size: 10px; }
+.plays-page .record-figures dd { display: grid; margin: 2px 0 0; font-size: 15px; font-variant-numeric: tabular-nums; }
+.plays-page .record-figures dd small { color: var(--muted-foreground); font-size: 10px; }
+.plays-page .record-exposure { margin: 0 0 10px; color: var(--muted-foreground); line-height: 1.5; }
+.plays-page .record-exposure[data-reduced="true"] strong { color: var(--warning); }
+.plays-page .record-limits { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; color: var(--muted-foreground); font-size: 10px; font-variant-numeric: tabular-nums; }
+.plays-page .record-limits strong { color: var(--foreground); font-weight: 600; }
+.plays-page .record-rules { margin-top: 12px; color: var(--muted-foreground); font-size: 11px; line-height: 1.55; }
+.plays-page .record-rules summary { color: var(--warning); cursor: pointer; }
+.plays-page .record-rules ul { margin: 8px 0; padding-left: 16px; }
+.plays-page .record-rules li + li { margin-top: 4px; }
+.plays-page .record-rules strong { color: var(--foreground); }
+.plays-page .record-rules p { margin: 0; font-size: 10px; }
+@media (max-width: 900px) {
+  .plays-page .sizing-suggestions-body { grid-template-columns: 1fr; }
+  .plays-page .sizing-suggestions-headline { display: none; }
+}
+.plays-page input[data-suggested="true"], .plays-entry-dialog input[data-suggested="true"] { border-style: dashed; border-color: var(--warning); }
+.plays-page .track-record-edit { padding: 2px 6px; border: 1px dashed var(--border); border-radius: 4px; background: transparent; color: var(--foreground); font-size: 10px; cursor: pointer; }
+.plays-page .track-record-edit:hover { border-color: var(--ring); }
+.plays-page .track-record-edit[data-warning="true"] { border-color: var(--warning); color: var(--warning); }
+.plays-page .track-record-risk { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.plays-page .track-record-risk label { display: inline; font-size: 10px; font-weight: 500; }
+.plays-page .track-record-risk input { width: 64px; height: 26px; padding: 3px 6px; font-size: 11px; }
+.plays-page .track-record-note { flex-basis: 100%; color: var(--warning); text-align: right; }
+.plays-page .track-record-note[role="alert"] { color: var(--negative); }

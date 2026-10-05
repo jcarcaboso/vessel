@@ -13,7 +13,16 @@ import { Equal, Expand, Plus, Trash2 } from 'lucide-react'
 
 const leveragePresets = [1, 5, 10, 25, 50]
 /** Control range when the venue maximum is unknown, e.g. manual instruments. Saved plans accept up to 100×. */
-const defaultMaxLeverage = 100
+export const defaultMaxLeverage = 100
+
+/** Fields with a suggestion waiting in the suggestions panel; they get a yellow marker. */
+export interface SuggestionMarks {
+  size: boolean
+  leverage: boolean
+  /** Stop and target IDs. */
+  levels: ReadonlySet<string>
+}
+const markTitle = 'A suggestion for this field is in Suggestions above the chart.'
 
 function allocatedShare(entries: DraftEntry[]) {
   const shares = entries.map(entry => entry.share.trim()).filter(Boolean).map(Number)
@@ -22,7 +31,8 @@ function allocatedShare(entries: DraftEntry[]) {
 }
 import { AvailableBudget } from './WorkspacePanels'
 
-export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null, checkBudget = true }: {
+export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null, checkBudget = true,
+  marks = null }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
   selectedId: string
@@ -37,6 +47,8 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   availableBudget?: string | null
   /** Holds the margin to the budget. Off once orders may rest, since the venue then counts their margin as used. */
   checkBudget?: boolean
+  /** Fields with a waiting suggestion; null marks none (read-only plays, or the record did not load). */
+  marks?: SuggestionMarks | null
 }) {
   const leverageLimit = maxLeverage ?? defaultMaxLeverage
   const leverage = leverageOf(draft.leverage)
@@ -140,6 +152,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
             <span>{draft.sizingMode === 'margin' ? 'Margin' : 'Quantity'}</span>
             <Input id={`${prefix}-size`} type="number" min={0} step="any" value={draft.size} placeholder="0"
               aria-invalid={overBudget ? true : undefined} aria-describedby={overBudget ? `${prefix}-over-budget` : undefined}
+              data-suggested={marks?.size || undefined} title={marks?.size ? markTitle : undefined}
             aria-label={draft.sizingMode === 'margin' ? `Whole-position margin (${units.quote})` : `Whole-position quantity (${units.base})`}
               onChange={event => onChange({ ...draft, size: event.target.value })} />
           </label>
@@ -178,7 +191,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
               onChange={event => updateLeverage(event.target.value)}
               onPointerUp={event => commitLeverage(clampLeverage(event.currentTarget.value))} onBlur={() => commitLeverage()} />
             <Input id={`${prefix}-leverage`} type="number" min={1} max={leverageLimit} step={1} value={shownLeverage}
-              aria-label="Leverage (×)" onChange={event => updateLeverage(event.target.value)} onBlur={() => commitLeverage()}
+              aria-label="Leverage (×)" data-suggested={marks?.leverage || undefined} title={marks?.leverage ? markTitle : undefined} onChange={event => updateLeverage(event.target.value)} onBlur={() => commitLeverage()}
               onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commitLeverage() } }} />
             <span aria-hidden="true">×</span>
           </div>
@@ -221,7 +234,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
                   {draft.entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
                 </select>
               </label>
-              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation} />}
+              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation} suggested={marks?.levels ?? null} />}
             </DialogContent>
           </Dialog>
         </div>
@@ -241,7 +254,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
               {draft.entries.length > 1 && <Button type="button" variant="ghost" size="icon-sm" className="remove-entry" aria-label={`Remove ${entry.name}`}
                 title={`Remove ${entry.name}`} onClick={() => removeEntry(entry.id)}><Trash2 size={13} aria-hidden="true" /></Button>}
             </div>
-            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation} />}
+            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation} suggested={marks?.levels ?? null} />}
             {expanded && selected?.id === entry.id && <p className="muted expanded-placeholder">Editing in the expanded view.</p>}
           </article>)}
         </div>

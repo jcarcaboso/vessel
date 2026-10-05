@@ -3,6 +3,7 @@ using Vessel.Application.Ownership;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Evidence;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Sizing;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence;
@@ -23,6 +24,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<PlayStatusChange> StatusChanges => Set<PlayStatusChange>();
     public DbSet<ImportedOrder> Orders => Set<ImportedOrder>();
     public DbSet<PlayOrderLink> OrderLinks => Set<PlayOrderLink>();
+    public DbSet<SizingSettings> SizingSettings => Set<SizingSettings>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -203,6 +205,13 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         evidence.Property(x => x.Source).HasConversion<string>().HasMaxLength(16);
         evidence.Property(x => x.Note).HasMaxLength(PlayEvidence.MaxNoteLength);
         evidence.Property(x => x.Markup).HasColumnType("jsonb");
+
+        var sizing = modelBuilder.Entity<SizingSettings>();
+        sizing.ToTable("sizing_settings", table => table.HasCheckConstraint("CK_sizing_settings_risk",
+            "\"RiskPercent\" >= 0.1 AND \"RiskPercent\" <= 5"));
+        sizing.HasKey(x => x.OwnerId);
+        sizing.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
+        sizing.Property(x => x.RiskPercent).HasPrecision(5, 2);
     }
 
     private void ValidateOwnership()
@@ -224,6 +233,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
                 PlayStatusChange change => change.OwnerId,
                 ImportedOrder importedOrder => importedOrder.OwnerId,
                 PlayOrderLink orderLink => orderLink.OwnerId,
+                SizingSettings sizing => sizing.OwnerId,
                 _ => (Guid?)null
             };
             if (ownerId.HasValue && (ownerId != CurrentOwnerId ||

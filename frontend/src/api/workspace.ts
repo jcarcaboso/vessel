@@ -4,6 +4,7 @@ import {
   isPlayExecution, isPlayHistory, isPlaySummary, isSavedEvidence, isSavedPlay,
   type LinkOrder, type PlayExecution, type PlayFields, type PlayHistory, type PlaySummary, type SavedEvidence, type SavedPlay, type StatusRequest,
 } from './plays'
+import { isSizingDocument, type SizingDocument } from './sizing'
 import type { ImageMarkup } from '@/features/plays/markup'
 
 export interface Portfolio {
@@ -219,6 +220,10 @@ export interface WorkspaceApi {
   updateEvidenceNote(id: string, note: string): Promise<SavedEvidence>
   updateEvidenceMarkup(id: string, markup: ImageMarkup | null): Promise<SavedEvidence>
   deleteEvidence(id: string): Promise<void>
+  /** The owner's risk setting, closed-play record and suggestion limits. */
+  sizing(signal?: AbortSignal): Promise<SizingDocument>
+  /** Saves the risk per trade (0.1 to 5 percent, a decimal string) and returns the new sizing document. */
+  updateSizingSettings(settings: { riskPercent: string }): Promise<SizingDocument>
 }
 
 const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
@@ -486,6 +491,9 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     updateEvidenceMarkup: (id, markup) => json(`${evidencePath(id)}/markup`, isSavedEvidence,
       markup ? { method: 'PUT', body: JSON.stringify(markup) } : { method: 'DELETE' }),
     deleteEvidence: id => json(evidencePath(id), none, { method: 'DELETE' }),
+    sizing: signal => json('/api/sizing', isSizingDocument, withSignal(signal)),
+    updateSizingSettings: settings => json('/api/sizing/settings', isSizingDocument,
+      { method: 'PUT', body: JSON.stringify({ riskPercent: settings.riskPercent }) }),
     overview: signal => request('/api/overview', overview, signal ? { signal } : {}),
     portfolios: signal => request('/api/portfolios', (v): v is Portfolio[] => Array.isArray(v) && v.every(portfolio), signal ? { signal } : {}),
     accounts: signal => request('/api/accounts', (v): v is BrokerAccount[] => Array.isArray(v) && v.every(account), signal ? { signal } : {}),

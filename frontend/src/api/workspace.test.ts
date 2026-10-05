@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
-import { accountFixture, candleSeriesFixture, emptyOverview, marketContextFixture, portfolioFixture } from '@/test/workspace-fixture'
+import { accountFixture, candleSeriesFixture, emptyOverview, marketContextFixture, portfolioFixture, sizingFixture } from '@/test/workspace-fixture'
 
 function response(body: unknown, status = 200) {
   const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }))
@@ -324,5 +324,27 @@ describe('Market stream', () => {
     await expect(createWorkspaceApi('token').marketStream(accountFixture.id, query, new AbortController().signal, vi.fn())).rejects.toMatchObject({ kind: 'unavailable' })
     stream([`data: ${'x'.repeat(1024 * 1024)}`], { close: false })
     await expect(createWorkspaceApi('token').marketStream(accountFixture.id, query, new AbortController().signal, vi.fn())).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+})
+
+describe('Sizing API', () => {
+  it('reads the sizing document with exact decimal strings and nulls', async () => {
+    const fetch = response(sizingFixture)
+    await expect(createWorkspaceApi('token').sizing()).resolves.toEqual(sizingFixture)
+    expect(fetch).toHaveBeenCalledWith('/api/sizing', expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer token' }) }))
+  })
+  it('saves the risk setting as a decimal string and returns the new document', async () => {
+    const updated = { ...sizingFixture, settings: { riskPercent: '1.5' }, limits: { ...sizingFixture.limits, effectiveRiskPercent: '1.5' } }
+    const fetch = response(updated)
+    await expect(createWorkspaceApi('token').updateSizingSettings({ riskPercent: '1.5' })).resolves.toEqual(updated)
+    expect(fetch).toHaveBeenCalledWith('/api/sizing/settings', expect.objectContaining({ method: 'PUT', body: '{"riskPercent":"1.5"}' }))
+  })
+  it('rejects numbers where decimal strings are expected', async () => {
+    response({ ...sizingFixture, limits: { ...sizingFixture.limits, maxStopPercent: 10 } })
+    await expect(createWorkspaceApi('token').sizing()).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+  it('shows the server reason for an out-of-range risk', async () => {
+    response({ detail: 'Risk per trade must be between 0.1% and 5%.' }, 400)
+    await expect(createWorkspaceApi('token').updateSizingSettings({ riskPercent: '9' })).rejects.toThrow('between 0.1% and 5%')
   })
 })
