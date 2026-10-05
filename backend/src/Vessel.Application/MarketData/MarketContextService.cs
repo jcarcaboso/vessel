@@ -37,7 +37,7 @@ public sealed class MarketContextCache(TimeProvider time)
     }
 }
 
-public sealed class MarketContextService(IWorkspaceStore store, IMarketContextReader reader, MarketContextCache cache, TimeProvider time)
+public sealed class MarketContextService(IWorkspaceStore store, IVenueRegistry venues, MarketContextCache cache, TimeProvider time)
 {
     public const string Notice =
         "Venue market context for the primary perpetual DEX. Funding is the current hourly rate; open interest is in base units. Not a fill or valuation.";
@@ -47,7 +47,7 @@ public sealed class MarketContextService(IWorkspaceStore store, IMarketContextRe
     {
         var account = await MarketDataGuard.AccountAsync(store, accountId, ct);
         instrument = MarketDataGuard.Instrument(instrument);
-        if (reader.VenueId != account.VenueId)
+        if (venues.MarketContext(account.VenueId) is not { } reader)
             throw new WorkspaceException(502, VenueFailure);
 
         var snapshot = cache.Get(account.VenueId);

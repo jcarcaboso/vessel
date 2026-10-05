@@ -42,8 +42,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
-app.MapGet("/api/system", (ClaimsPrincipal user) => SystemMetadata.ForOwner(new JournalOwner(
-    Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!), user.FindFirstValue(ClaimTypes.Name)!)))
+app.MapGet("/api/system", (ClaimsPrincipal user, Vessel.Application.Venues.IVenueRegistry venues) => SystemMetadata.ForOwner(new JournalOwner(
+    Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!), user.FindFirstValue(ClaimTypes.Name)!), venues))
     .RequireAuthorization();
 app.MapWorkspace();
 app.MapEvidence();

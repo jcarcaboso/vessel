@@ -1,17 +1,14 @@
 import { useEffect, useState } from 'react'
 import type { BrokerAccount, InstrumentCatalog, VenueInstrument, WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
+import { useVenues } from '@/api/venues'
 
 /** Trading pair label, e.g. BTC/USDC. */
 export const pairLabel = (instrument: Pick<VenueInstrument, 'contractId' | 'quoteAsset'>) => `${instrument.contractId}/${instrument.quoteAsset}`
 
-/** Quote asset of each venue's primary perpetual catalogue, for lists that do not load the catalogue. */
-const primaryQuote: Record<string, string> = { hyperliquid: 'USDC' }
-
-/** BTC/USDC for a venue contract; manual labels stay as entered. */
-export function instrumentLabel(venueId: string, instrument: string, source: 'venue' | 'manual') {
-  const quote = source === 'venue' ? primaryQuote[venueId] : undefined
-  return quote && instrument ? pairLabel({ contractId: instrument, quoteAsset: quote }) : instrument
+/** BTC/USDC for a venue contract, given the venue's quote asset; manual labels stay as entered. */
+export function instrumentLabel(quote: string | null, instrument: string, source: 'venue' | 'manual') {
+  return source === 'venue' && quote && instrument ? pairLabel({ contractId: instrument, quoteAsset: quote }) : instrument
 }
 
 export interface InstrumentCatalogState {
@@ -25,12 +22,15 @@ export interface InstrumentCatalogState {
 
 /** Venue catalogue of the account's primary perpetuals, read once per account and on retry. */
 export function useInstrumentCatalog(api: WorkspaceApi, account: BrokerAccount | undefined): InstrumentCatalogState {
+  const venues = useVenues()
   const [generation, setGeneration] = useState(0)
   const [result, setResult] = useState<{
     api: WorkspaceApi; accountId: string; generation: number
     catalog: InstrumentCatalog | null; error: string | null
   } | null>(null)
-  const accountId = account?.isEnabled !== false && account?.venueId === 'hyperliquid' ? account.id : null
+  const venueId = account?.venueId ?? ''
+  const hasCatalogue = venues.can(venueId, 'instruments')
+  const accountId = account?.isEnabled !== false && hasCatalogue ? account!.id : null
   const current = result?.api === api && result.accountId === accountId && result.generation === generation ? result : null
 
   useEffect(() => {
@@ -39,7 +39,7 @@ export function useInstrumentCatalog(api: WorkspaceApi, account: BrokerAccount |
     let active = true
     api.instruments(accountId, controller.signal).then(catalog => {
       if (!active) return
-      const matches = catalog.venueId === 'hyperliquid' && catalog.scope === 'primary-perpetual-dex'
+      const matches = catalog.venueId === venueId && catalog.scope === 'primary-perpetual-dex'
       setResult({ api, accountId, generation, catalog: matches ? catalog : null,
         error: matches ? null : 'The catalogue does not match the selected venue.' })
     }).catch(cause => {
@@ -47,7 +47,7 @@ export function useInstrumentCatalog(api: WorkspaceApi, account: BrokerAccount |
         error: cause instanceof ApiError ? cause.message : 'The venue catalogue could not be loaded.' })
     })
     return () => { active = false; controller.abort() }
-  }, [api, accountId, generation])
+  }, [api, accountId, generation, venueId])
 
   return {
     accountId, catalog: current?.catalog ?? null, error: current?.error ?? null,

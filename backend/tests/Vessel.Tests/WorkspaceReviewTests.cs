@@ -13,7 +13,7 @@ public sealed class WorkspaceReviewTests
     public async Task Portfolio_and_overview_sums_preserve_accepted_decimal_values(string value, int count, string expected)
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var service = new WorkspaceService(store, new CoreOwner(owner), new FixtureReader());
+        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()));
         var portfolio = await service.CreatePortfolioAsync(new("Exact"), default);
         for (var i = 0; i < count; i++)
             await service.CreateAccountAsync(new(portfolio.Id, $"Account {i}", "manual", ManualAccountValueUsd: value), default);
@@ -26,7 +26,7 @@ public sealed class WorkspaceReviewTests
     [Fact]
     public async Task Maximum_decimal_plus_one_is_not_an_overflow_or_unknown_total()
     {
-        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), new FixtureReader());
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()));
         var portfolio = await service.CreatePortfolioAsync(new("Exact"), default);
         var first = await service.CreateAccountAsync(new(portfolio.Id, "Max", "manual", ManualAccountValueUsd: decimal.MaxValue.ToString(CultureInfo.InvariantCulture)), default);
         await service.CreateAccountAsync(new(portfolio.Id, "One", "manual", ManualAccountValueUsd: "1"), default);
@@ -38,7 +38,7 @@ public sealed class WorkspaceReviewTests
     [Fact]
     public async Task Exact_totals_handle_negative_equity_mixed_scales_and_disabled_records()
     {
-        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), new FixtureReader());
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()));
         var portfolio = await service.CreatePortfolioAsync(new("Exact"), default);
         await service.CreateAccountAsync(new(portfolio.Id, "Manual", "manual", ManualAccountValueUsd: "79228162514264337593543950335"), default);
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Negative"); account.Configure(portfolio.Id, null, null); store.Accounts.Add(account);
@@ -54,7 +54,7 @@ public sealed class WorkspaceReviewTests
     public async Task Detail_and_settings_use_targeted_snapshot_query_not_overview()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var service = new WorkspaceService(store, new CoreOwner(owner), new FixtureReader());
+        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()));
         var dto = await service.CreateAccountAsync(new(null, "Manual", "manual"), default);
         store.RejectOwnerWideReads = true;
         Assert.Equal(dto.Id, (await service.AccountAsync(dto.Id, default)).Id);
@@ -66,7 +66,7 @@ public sealed class WorkspaceReviewTests
     [Fact]
     public async Task Revision_rejects_stale_settings_without_changing_source_or_sync_time()
     {
-        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), new FixtureReader());
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()));
         var original = await service.CreateAccountAsync(new(null, "Manual", "manual"), default);
         Assert.Equal(1, original.SettingsRevision);
         var disabled = await service.UpdateAccountAsync(original.Id, new("Manual", null, false, original.SettingsRevision), default);

@@ -37,7 +37,7 @@ public sealed class MarketStreamLimiter
     }
 }
 
-public sealed class MarketStreamService(IWorkspaceStore store, IMarketStream stream, MarketStreamLimiter limiter, TimeProvider time)
+public sealed class MarketStreamService(IWorkspaceStore store, IVenueRegistry venues, MarketStreamLimiter limiter, TimeProvider time)
 {
     public static readonly TimeSpan MaxLifetime = TimeSpan.FromHours(1);
     public static readonly TimeSpan KeepaliveInterval = TimeSpan.FromSeconds(15);
@@ -50,7 +50,7 @@ public sealed class MarketStreamService(IWorkspaceStore store, IMarketStream str
         var account = await MarketDataGuard.AccountAsync(store, accountId, ct);
         instrument = MarketDataGuard.Instrument(instrument);
         var (validInterval, _) = MarketDataGuard.Interval(interval);
-        if (stream.VenueId != account.VenueId)
+        if (venues.Stream(account.VenueId) is not { } stream)
             throw new WorkspaceException(502, VenueFailure);
         ct.ThrowIfCancellationRequested();
 

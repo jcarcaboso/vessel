@@ -38,7 +38,13 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         ["0x54e00a5988577cb0b0c9ab0cb6ef7f4b"] = "USDH"
     };
 
-    public string VenueId => "hyperliquid";
+    public const string Id = "hyperliquid";
+
+    public static readonly VenueDescriptor Descriptor = new(Id, "Hyperliquid", "read-only", VenueSources.EvmAddress,
+        new VenueCapabilities(Sync: true, Instruments: true, Orders: true, Candles: true, MarketContext: true, Stream: true, StablecoinWallet: true),
+        QuoteAsset: PrimaryQuoteAsset, TradeUrlTemplate: "https://app.hyperliquid.xyz/trade/{instrument}");
+
+    public string VenueId => Id;
 
     public Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken cancellationToken) =>
         ReadBoundedAsync<IReadOnlyList<VenueInstrument>>(async token =>

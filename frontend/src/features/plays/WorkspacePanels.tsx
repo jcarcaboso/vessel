@@ -1,4 +1,5 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react'
+import { useVenues } from '@/api/venues'
 import { NotebookPen, Pencil, Plus, RotateCcw } from 'lucide-react'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
@@ -80,7 +81,8 @@ export function CapitalContext({ accounts, portfolios, draft }: {
 }) {
   const account = accounts.find(item => item.id === draft.accountId && item.isEnabled !== false)
   const portfolio = portfolios.find(item => item.id === account?.portfolioId)
-  const hyperliquid = account?.venueId === 'hyperliquid'
+  const venues = useVenues()
+  const wallet = !!account && venues.can(account.venueId, 'stablecoinWallet')
   // Unified and portfolio-margin accounts keep all balances in the wallet; their perps state is not meaningful.
   const unified = account?.accountMode === 'unifiedAccount' || account?.accountMode === 'portfolioMargin'
   const sized = positionSize(draft, leverageOf(draft.leverage))
@@ -98,11 +100,11 @@ export function CapitalContext({ accounts, portfolios, draft }: {
       <dl className="capital-metrics">
         {metric(portfolio ? `${portfolio.name} balance` : 'Account balance', balance,
           `Nominal USD${coverage ? `; coverage ${coverage}` : ''}. Perps equity plus supported stablecoins, or the wallet alone in unified accounts.`)}
-        {hyperliquid && metric('Wallet total', account.totalStablecoinNominalUsd,
+        {wallet && metric('Wallet total', account.totalStablecoinNominalUsd,
           `${account.stablecoinScope ?? 'Supported stablecoin wallet'}${account.accountMode ? ` · ${account.accountMode}` : ''}. Nominal 1 token = 1 USD.`)}
-        {hyperliquid && metric('Available', account.availableStablecoinNominalUsd, 'Wallet total minus amounts held by open orders.')}
-        {hyperliquid && !unified && metric('Perps equity', account.accountValueUsd, 'Primary perpetual account value.')}
-        {!hyperliquid && account && metric('Account value', account.accountValueUsd)}
+        {wallet && metric('Available', account.availableStablecoinNominalUsd, 'Wallet total minus amounts held by open orders.')}
+        {wallet && !unified && metric('Perps equity', account.accountValueUsd, 'Primary perpetual account value.')}
+        {!wallet && account && metric('Account value', account.accountValueUsd)}
         <div title="Committed margin as a share of the balance"><dt>Margin / balance</dt><dd data-placeholder={share(sized.margin) === '—'}>{share(sized.margin)}</dd></div>
         <div title="Position size (notional) as a share of the balance"><dt>Exposure / balance</dt><dd data-placeholder={share(sized.notional) === '—'}>{share(sized.notional)}</dd></div>
       </dl>

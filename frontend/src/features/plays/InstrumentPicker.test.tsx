@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
+import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type BrokerAccount, type InstrumentCatalog, type WorkspaceApi } from '@/api/workspace'
@@ -72,9 +73,10 @@ describe('Venue instrument picker', () => {
     expect(field()).toHaveValue('')
   })
   it('labels venue contracts as pairs in lists and keeps manual labels as entered', () => {
-    expect(instrumentLabel('hyperliquid', 'BTC', 'venue')).toBe('BTC/USDC')
-    expect(instrumentLabel('hyperliquid', 'BTC-PERP', 'manual')).toBe('BTC-PERP')
-    expect(instrumentLabel('manual', 'ES', 'manual')).toBe('ES')
+    expect(instrumentLabel('USDC', 'BTC', 'venue')).toBe('BTC/USDC')
+    expect(instrumentLabel('USDC', 'BTC-PERP', 'manual')).toBe('BTC-PERP')
+    expect(instrumentLabel(null, 'ES', 'manual')).toBe('ES')
+    expect(instrumentLabel(null, 'ES', 'venue')).toBe('ES')
   })
   it('ranks exact and prefix matches before other matches, keeping catalogue order', () => {
     const list = ['ETHFI', 'ETH', 'METH', 'BTC'].map(contractId => ({ contractId, quantityDecimals: 2, maxLeverage: 5, quoteAsset: 'USDC' }))

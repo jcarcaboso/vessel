@@ -59,6 +59,13 @@ describe('GET /api/system', () => {
     { ...systemFixture, allowsConcurrentPlays: false },
     { ...systemFixture, marketScope: 'spot' },
     { ...systemFixture, venues: [{ id: 'hyperliquid', name: 'Hyperliquid', status: 'connected' }] },
+    { ...systemFixture, venues: [{ id: 'hyperliquid', name: 'Hyperliquid', status: 'connected' }] },
+    // Every venue states what it can do, and manual accounts must remain possible.
+    { ...systemFixture, venues: systemFixture.venues.map(venue => venue.id === 'hyperliquid' ? { ...venue, capabilities: { sync: true } } : venue) },
+    { ...systemFixture, venues: systemFixture.venues.filter(venue => venue.id !== 'manual') },
+    { ...systemFixture, venues: [...systemFixture.venues, systemFixture.venues[0]] },
+    { ...systemFixture, venues: systemFixture.venues.map(venue => venue.id === 'hyperliquid' ? { ...venue, tradeUrlTemplate: 'http://example.test/{instrument}' } : venue) },
+    { ...systemFixture, venues: systemFixture.venues.map(venue => venue.id === 'hyperliquid' ? { ...venue, tradeUrlTemplate: 'https://example.test/trade' } : venue) },
   ])('rejects incompatible system data %#', async (body) => {
     mockResponse(body)
     await expect(getSystem('token')).rejects.toMatchObject({ kind: 'invalid-response' })
@@ -68,6 +75,13 @@ describe('GET /api/system', () => {
     const custom = { ...systemFixture, owner: { id: '22222222-2222-2222-2222-222222222222', displayName: 'Configured owner' } }
     mockResponse(custom)
     await expect(getSystem('token')).resolves.toEqual(custom)
+  })
+  it('accepts any number of venues with their own capabilities', async () => {
+    const other = { id: 'other-venue', name: 'Other', status: 'read-only', source: 'evm-address', quoteAsset: 'USDC', tradeUrlTemplate: null,
+      capabilities: { sync: true, instruments: true, orders: false, candles: false, marketContext: false, stream: false, stablecoinWallet: false } }
+    const body = { ...systemFixture, venues: [...systemFixture.venues, other] }
+    mockResponse(body)
+    await expect(getSystem('token')).resolves.toEqual(body)
   })
   it('accepts the current core stage with a read-only Hyperliquid capability', async () => {
     const core = { ...systemFixture, stage: 'core', venues: systemFixture.venues.map(venue => venue.id === 'hyperliquid' ? { ...venue, status: 'read-only' } : venue) }

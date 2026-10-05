@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -219,7 +221,10 @@ public sealed class CandleApiTests
             "high-below-close" => ReaderFor(new Handler($"[{Candle(End, h: "100", c: "105")}]")),
             _ => ReaderFor(new Handler("{\"secret\":1}"))
         };
-        await using var factory = new CoreApiFactory(owner, store, candles: reader);
+        // "mismatch": the account's venue has no candle adapter, only another venue's.
+        var mismatch = failure == "mismatch";
+        await using var factory = new CoreApiFactory(owner, store, candles: mismatch ? null : reader,
+            configure: mismatch ? (Action<IServiceCollection>)(services => { services.RemoveAll<ICandleReader>(); services.AddSingleton(reader); }) : null);
         using var client = factory.AuthorizedClient();
         var response = await client.GetAsync(Url(account.Id, $"instrument=BTC&interval=1h&endTime={End}"));
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
@@ -248,7 +253,7 @@ public sealed class CandleApiTests
     {
         var (owner, store, account) = Setup(); var reader = new Candles();
         var time = new FixedTime(DateTimeOffset.FromUnixTimeMilliseconds(1_790_000_003_000L));
-        var service = new CandleService(store, reader, new CandleCache(time), time);
+        var service = new CandleService(store, TestVenues.With(reader), new CandleCache(time), time);
         var first = await service.CandlesAsync(account.Id, "BTC", "1h", null, default);
         time.Now = time.Now.AddSeconds(4);
         await service.CandlesAsync(account.Id, "BTC", "1h", null, default);

@@ -16,7 +16,7 @@ namespace Vessel.Tests;
 public sealed class WorkspaceReviewPostgresTests
 {
     private static WorkspaceService Service(VesselDbContext db, Guid owner, FixtureReader? reader = null) =>
-        new(new WorkspaceStore(db), new CoreOwner(owner), reader ?? new FixtureReader());
+        new(new WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(reader ?? new FixtureReader()));
 
     [PostgresFact]
     public async Task Account_inserted_disabled_is_not_stored_as_enabled_by_the_column_default()
