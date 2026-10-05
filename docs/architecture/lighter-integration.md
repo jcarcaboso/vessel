@@ -115,6 +115,8 @@ The matcher, lifecycle and sizing read only the normalized fields.
 
 ## Tasks
 
+**Sequence update (October 5, 2026):** the owner chose to build RISEx first. L0 is therefore delivered in slices as RISEx needs them (see [risex-integration.md](risex-integration.md#revised-sequence-risex-first)): L0.3 and L0.9 (S1), L0.5 (S2), L0.6, L0.7 and L0.8 (S3) and L0.1 (start of S4). **L0.2 (stream relay), L0.4 (source identity) and the Hyperliquid `k…` data migration move to the start of the Lighter phase**, since RISEx does not need them. The task definitions below are unchanged.
+
 Each task is one reviewable change with its own tests. Every task keeps `scripts/check.sh` green, keeps behaviour unchanged where marked *neutral*, and updates the relevant contract/state doc. Phases follow the earlier recommendation: **L0** is a Hyperliquid-only PR with no visible change, **L1** adds Lighter on public data, and **L2** adds the token and orders.
 
 ### L0: generalize (neutral; one PR)

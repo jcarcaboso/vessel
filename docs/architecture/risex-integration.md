@@ -88,7 +88,7 @@ Applied to [lighter-integration.md](lighter-integration.md) in the same change:
 
 ## Tasks
 
-RISEx follows L0 and needs nothing from L1 or L2. Because it needs no credential and no vault, it can be built **before or in parallel with Lighter**, and doing it first validates the generalization with a third venue cheaply. Each task is one reviewable change that keeps `scripts/check.sh` green.
+RISEx follows L0 and needs nothing from L1 or L2. Because it needs no credential and no vault, the owner chose to build it **before Lighter**: see the revised sequence above, which folds the L0 dependencies into slices S1 to S3. Each task is one reviewable change that keeps `scripts/check.sh` green.
 
 | ID | Task | Scope | Done when | Depends |
 | --- | --- | --- | --- | --- |
@@ -107,11 +107,25 @@ RISEx follows L0 and needs nothing from L1 or L2. Because it needs no credential
 - Private streams: not possible without a session key, so polling stays the model.
 - Depth/orderbook features: `getorderbooklevels` exists but is outside current scope.
 
-## Open decisions for the owner
+## Owner decisions (October 5, 2026)
 
-1. **Equity perpetuals:** include RISEx stock, commodity and index/ETF perpetuals now (recommended, with a category tag), or crypto only until their liquidation behaviour is verified?
-2. **Live chart:** accept manual refresh for RISEx at first (recommended), or build the trades-channel candle aggregation as part of R1?
-3. **Sequence:** build RISEx right after L0 and before Lighter (recommended, it is cheaper and needs no vault), or keep Lighter first?
+1. **Categories:** include every RISEx perpetual (crypto, stocks, commodities, index/ETFs), each with a visible **category tag** in the instrument picker. Liquidation estimates for non-crypto markets stay labelled as estimates and are verified in R1.8.
+2. **Live chart:** manual refresh first, for testing; automatic updates (candles assembled from the public `trades` channel) follow once R1 works.
+3. **Sequence:** RISEx first, **generalizing and refactoring as it makes sense** rather than as a separate neutral L0 phase. See [Revised sequence](#revised-sequence-risex-first).
+
+## Revised sequence (RISEx first)
+
+Doing RISEx first changes the order of the shared L0 work in [lighter-integration.md](lighter-integration.md). Each slice is a PR that is neutral for Hyperliquid and keeps `scripts/check.sh` green. A task moves to Lighter's phase when RISEx does not need it, so nothing is generalized before a second venue needs it.
+
+| Slice | Contents | Why now |
+| --- | --- | --- |
+| **S1** | Venue registry and descriptor, services resolve adapters by `account.VenueId`, `/api/system` capabilities, frontend checks capabilities (L0.3, L0.9) | A second adapter cannot be injected without it. |
+| **S2** | Normalized execution facts: `buy`/`sell`, `PositionEffect`, `FeeBasis`, `PnlBasis`; sizing reads `PnlBasis` (L0.5) | RISEx `realized_pnl` is net of fees. |
+| **S3** | Canonical instrument and venue contract ID (RISEx `BTC/USDC` and numeric `market_id`), `PriceStep` and `Category` on `VenueInstrument`, loosened market-data contracts and descriptor-driven intervals (L0.6 core, L0.7, L0.8) | RISEx names, ticks, intervals and categories. |
+| **S4** | RISEx module (R1.1 to R1.7). The strict JSON and bounded-HTTP helpers are extracted from the Hyperliquid adapter at the start (L0.1), because this is their second user. | The venue itself. |
+| Deferred to Lighter | Generic stream relay (L0.2), generic `SourceId` instead of `Address` (L0.4), the Hyperliquid `k…` data migration and drawing-key rewrite, request budget tuning | RISEx uses an address and manual refresh, so it needs none of them. |
+
+R1.8 (verification with the owner's account and docs) follows S4. Automatic chart updates for RISEx are a later task after that.
 
 ## Open questions to verify with a real account (R1.8)
 
