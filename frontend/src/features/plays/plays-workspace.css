@@ -621,6 +621,7 @@
 .plays-page .exit-row input, .plays-entry-dialog .exit-row input { height: 32px; }
 .plays-page .exit-row .remove-target, .plays-entry-dialog .exit-row .remove-target { width: 24px; height: 32px; padding: 0; color: var(--muted-foreground); }
 .plays-page .exit-row .level-resolved, .plays-entry-dialog .exit-row .level-resolved { grid-column: 2 / -1; margin: -2px 0 0; color: var(--muted-foreground); font-size: 9px; font-variant-numeric: tabular-nums; }
+.level-resolved > span { display: block; }
 
 /* Header actions: one outline style, the status step filled, destructive actions red and last. */
 .plays-page .play-actions .play-save { min-width: 82px; justify-content: center; }

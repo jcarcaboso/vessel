@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
 import { exitsOf, formatDraggedPrice, levelPrice, priceMovePercent, type ExitKind } from './levels'
 import { wrongSide } from './planChecks'
-import { estimatedLiquidation } from './sizing'
+import { defaultSizeUnits, estimatedLiquidation, exitEstimate, formatMoney, type SizeUnits } from './sizing'
 
 function LevelUnits({ value, label, onChange }: {
   value: DraftExit['unit']
@@ -29,7 +29,7 @@ const copy = {
 } as const
 
 /** Stops or targets of one entry. Each closes a share of the entry; percentages are returns at the play's leverage. */
-function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidation, suggested }: {
+function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidation, suggested, quantity, units }: {
   entry: DraftEntry
   kind: ExitKind
   direction: PlayDraft['direction']
@@ -40,6 +40,8 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
   liquidation: number | null
   /** Levels with a suggestion waiting in the suggestions panel. */
   suggested: ReadonlySet<string> | null
+  quantity: number | null
+  units: SizeUnits
 }) {
   const exits = exitsOf(entry, kind)
   const text = copy[kind]
@@ -57,8 +59,10 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
         onClick={() => set([...exits, createExit(exits.length ? '' : '100')])}><Plus size={13} aria-hidden="true" /></Button>
     </div>
     {exits.map((exit, index) => {
+      const estimate = exitEstimate(entry, exit, kind, direction, leverage, quantity)
       const resolved = exit.unit === 'percent' ? levelPrice(entryPrice, exit, kind, direction, leverage) : null
-      const move = exit.unit === 'percent' && Number(exit.value) > 0 ? priceMovePercent(Number(exit.value), leverage) : null
+      const move = estimate?.move ?? (exit.unit === 'percent' && Number(exit.value) > 0 ? priceMovePercent(Number(exit.value), leverage) : null)
+      const outcome = kind === 'stop' ? 'loss' : 'gain'
       const wrong = wrongSide(entryPrice, exit, kind, direction)
       const stopPrice = kind === 'stop' ? levelPrice(entryPrice, exit, kind, direction, leverage) : null
       const marked = suggested?.has(exit.id) ?? false
@@ -82,14 +86,18 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
           <X aria-hidden="true" size={14} />
         </Button>
         {move !== null && <p className="level-resolved">
-          {resolved === null ? `${formatDraggedPrice(move)}% price move` : `≈ ${formatDraggedPrice(resolved)} · ${formatDraggedPrice(move)}% move at ${leverage}×`}
+          <span>{resolved === null ? `${formatDraggedPrice(move)}% price move (1×)` : `≈ ${formatDraggedPrice(resolved)} · ${formatDraggedPrice(move)}% price move (1×)`}</span>
+          {estimate && <span title="Estimated if this exit fills at its planned price, for its share of the entry; before fees, funding and slippage.">
+            {formatDraggedPrice(estimate.returnPercent)}% {outcome} at {leverage}×
+            {estimate.amount !== null && <> · Est. {outcome} {formatMoney(estimate.amount, units)}</>}
+          </span>}
         </p>}
       </div>
     })}
   </fieldset>
 }
 
-export function EntryForm({ entry, onChange, idPrefix, direction = 'long', leverage = 1, shareLocked = false, maxLeverage = null, liquidation = null, suggested = null }: {
+export function EntryForm({ entry, onChange, idPrefix, direction = 'long', leverage = 1, shareLocked = false, maxLeverage = null, liquidation = null, suggested = null, quantity = null, units = defaultSizeUnits }: {
   entry: DraftEntry
   onChange: (entry: DraftEntry) => void
   idPrefix?: string
@@ -104,6 +112,9 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
   liquidation?: number | null
   /** Stops and targets with a suggestion waiting in the suggestions panel; they get a yellow marker. */
   suggested?: ReadonlySet<string> | null
+  /** Full-position quantity, already including leverage; null until the size and average entry are known. */
+  quantity?: number | null
+  units?: SizeUnits
 }) {
   const generatedId = useId()
   const prefix = idPrefix ?? generatedId
@@ -130,7 +141,7 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
       Liq. ≈ <strong>{formatDraggedPrice(own)}</strong>
       {' '}<span>{percent.format(Math.abs(own - entryPrice) / entryPrice * 100)}% {direction === 'long' ? 'below' : 'above'} entry{shareLocked ? '' : ' · this entry alone'}</span>
     </p>}
-    <ExitList entry={entry} kind="stop" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={liquidation ?? own} suggested={suggested} />
-    <ExitList entry={entry} kind="target" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={null} suggested={suggested} />
+    <ExitList entry={entry} kind="stop" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={liquidation ?? own} suggested={suggested} quantity={quantity} units={units} />
+    <ExitList entry={entry} kind="target" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={null} suggested={suggested} quantity={quantity} units={units} />
   </div>
 }

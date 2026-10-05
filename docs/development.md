@@ -147,6 +147,14 @@ To remove it, use the same match with `iptables -D nixos-fw`. This does not chan
 
 Verification included actual LAN page/liveness HTTP 200, missing/wrong bearer API 401, authenticated system/overview with mounted database 200, and a real T3 browser login into the Overview without synthetic responses. No wallet refresh or order request was made.
 
+### October 5 SL/TP frontend comparison preview
+
+The original `10.1.0.219:5180` frontend still served an October 4 revision when checked on October 5. The current agent host (`10.1.0.230`) has no authorized SSH access to update that service.
+
+An additional transient user service, `vessel-sl-tp-preview.service`, serves the latest-main frontend plus the SL/TP display correction at **`http://10.1.0.230:5180/`** from the `t3code-dcce987b` worktree. Its server-only `VESSEL_API_TARGET=http://10.1.0.219:5180` forwards protected API requests through the existing preview. Connect with the existing API token; no token, database configuration or private environment was copied. Stop it with `systemctl --user stop vessel-sl-tp-preview.service`.
+
+This is a frontend comparison preview, **not an upgrade of the original backend**. Newer API capabilities such as sizing suggestions still require updating and migrating the original backend with authorized access. The database, original service and firewall were left unchanged. SL/TP controls were browser-verified separately with a disposable, clearly labeled fixture that made no account/API requests.
+
 ## Checks
 
 ```sh

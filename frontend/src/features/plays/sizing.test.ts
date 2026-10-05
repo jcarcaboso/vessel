@@ -1,8 +1,56 @@
 import { describe, expect, it } from 'vitest'
-import { createEntry, type DraftEntry } from './draft'
-import { estimatedLiquidation, marginOverBudget, rewardToRisk, sizeForBudget } from './sizing'
+import { createEntry, type DraftEntry, type DraftExit } from './draft'
+import { estimatedLiquidation, exitEstimate, marginOverBudget, positionSize, rewardToRisk, sizeForBudget } from './sizing'
 
 const entry = (price: string, share = '100'): DraftEntry => ({ ...createEntry(0), price, share })
+
+describe('exit estimates', () => {
+  const planned = entry('3.75')
+  const exit: DraftExit = { ...planned.stops[0]!, unit: 'percent', value: '10', share: '100' }
+  const sized = positionSize({ size: '130', sizingMode: 'margin', entries: [planned] }, 3)
+
+  it.each([
+    ['long', 'stop', '10', 3.625, 13],
+    ['long', 'target', '50', 4.375, 65],
+    ['short', 'stop', '10', 3.875, 13],
+    ['short', 'target', '50', 3.125, 65],
+  ] as const)('separates a %s %s price move from its leveraged return without applying leverage twice', (direction, kind, value, price, amount) => {
+    const estimate = exitEstimate(planned, { ...exit, value }, kind, direction, 3, sized.quantity)!
+    expect(estimate.price).toBeCloseTo(price)
+    expect(estimate.move).toBeCloseTo(Number(value) / 3)
+    expect(estimate.returnPercent).toBeCloseTo(Number(value))
+    expect(estimate.amount).toBeCloseTo(amount)
+  })
+
+  it('resolves price levels and respects both entry and exit quantity shares without normalizing them', () => {
+    const estimate = exitEstimate({ ...planned, share: '40' }, { ...exit, unit: 'price', value: '3.375', share: '50' }, 'stop', 'long', 3, sized.quantity)!
+    expect(estimate.move).toBeCloseTo(10)
+    expect(estimate.returnPercent).toBeCloseTo(30)
+    expect(estimate.amount).toBeCloseTo(7.8)
+    expect(exitEstimate(planned, { ...exit, share: '0' }, 'stop', 'long', 3, sized.quantity)?.amount).toBe(0)
+  })
+
+  it('uses quantity sizing and 1× without adding another leverage multiplier', () => {
+    const quantity = positionSize({ size: '104', sizingMode: 'quantity', entries: [planned] }, 3).quantity
+    expect(exitEstimate(planned, exit, 'stop', 'long', 3, quantity)?.amount).toBeCloseTo(13)
+    const unlevered = positionSize({ size: '130', sizingMode: 'margin', entries: [planned] }, 1).quantity
+    expect(exitEstimate(planned, exit, 'stop', 'long', 1, unlevered)).toMatchObject({ price: 3.375, move: 10, returnPercent: 10 })
+    expect(exitEstimate(planned, exit, 'stop', 'long', 1, unlevered)?.amount).toBeCloseTo(13)
+  })
+
+  it('does not invent amounts from missing or invalid size and shares, or outcomes for invalid prices', () => {
+    expect(exitEstimate(planned, exit, 'stop', 'long', 3, null)?.amount).toBeNull()
+    expect(exitEstimate(planned, exit, 'stop', 'long', 3, Infinity)?.amount).toBeNull()
+    expect(exitEstimate(entry('10000000000'), exit, 'stop', 'long', 3, 1e308)?.amount).toBeNull()
+    for (const share of ['', '-1', '101', 'invalid']) {
+      expect(exitEstimate({ ...planned, share }, exit, 'stop', 'long', 3, 104)?.amount).toBeNull()
+      expect(exitEstimate(planned, { ...exit, share }, 'stop', 'long', 3, 104)?.amount).toBeNull()
+    }
+    expect(exitEstimate(entry(''), exit, 'stop', 'long', 3, 104)).toBeNull()
+    expect(exitEstimate(planned, { ...exit, unit: 'price', value: '4' }, 'stop', 'long', 3, 104)).toBeNull()
+    expect(exitEstimate(planned, { ...exit, value: '400' }, 'stop', 'long', 3, 104)).toBeNull()
+  })
+})
 
 describe('estimated liquidation', () => {
   it('is where the isolated margin falls to the maintenance margin', () => {
