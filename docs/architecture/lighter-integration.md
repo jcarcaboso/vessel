@@ -2,7 +2,7 @@
 
 Research checked October 5, 2026 against the official docs ([apidocs.lighter.xyz](https://apidocs.lighter.xyz/llms.txt), OpenAPI `zklighter-perps@1.0.240`) and live unauthenticated reads of public mainnet endpoints. Owner decisions were recorded the same day. Implementation is not yet authorized: this document is the plan to fit Lighter in. Secure token storage is specified separately in [venue-credentials.md](venue-credentials.md).
 
-Lighter is "planned" in `SystemMetadata` and "next after Hyperliquid" in the MVP alignment. Perpetuals-first still applies: Lighter now also lists spot markets (`market_type: "spot"`, e.g. `rhSPY/USDC`), which are excluded.
+Lighter is "planned" in `SystemMetadata` and "next after Hyperliquid" in the MVP alignment. A third venue, [RISEx](risex-integration.md), was investigated the same day and shares the L0 phase below; its findings changed L0.2, L0.3, L0.5, L0.6 and L0.7. Perpetuals-first still applies: Lighter now also lists spot markets (`market_type: "spot"`, e.g. `rhSPY/USDC`), which are excluded.
 
 ## Owner decisions (October 5, 2026)
 
@@ -99,16 +99,17 @@ Application                       Infrastructure
 
 `VenueDescriptor` contains:
 - `Id`, `Name`, `Status`;
-- `Source` (`evm-address` | `account-index`) with its validator;
-- `Credential` (`none` | `optional-read-token`);
+- `Source` (`evm-address` for Hyperliquid and RISEx, `account-index` for Lighter) with its validator;
+- `Credential` (`none` for Hyperliquid and RISEx, `optional-read-token` for Lighter);
 - capabilities: `sync`, `orders` (may need the credential), `candles`, `context`, `stream`, `stablecoinWallet`;
-- `Intervals`, `QuoteAsset`, `PriceRule` (`significant-figures:5` | `instrument-decimals`), `TradeUrlTemplate` and notices (history, candle limit, fees).
+- `Intervals`, `QuoteAsset`, `PriceRule` (`significant-figures:5` | `tick-size`), `TradeUrlTemplate` and notices (history, candle limit, fees).
 
 Normalized execution facts:
 - `Side` is `buy`/`sell`;
 - `PositionEffect` is `open`/`close`/`flip`/`unknown`;
 - the venue's own `Direction` text is kept for display;
-- `FeeBasis` is `reported` (Hyperliquid) or `standard-account-free` (Lighter).
+- `FeeBasis` is `reported` (Hyperliquid, RISEx) or `standard-account-free` (Lighter);
+- `PnlBasis` is `gross` (Hyperliquid closed PnL) or `net-of-fee` (RISEx `realized_pnl` already includes the fee, so the sizing service must not subtract the fee again).
 
 The matcher, lifecycle and sizing read only the normalized fields.
 
@@ -121,12 +122,12 @@ Each task is one reviewable change with its own tests. Every task keeps `scripts
 | ID | Task | Scope | Done when | Depends |
 | --- | --- | --- | --- | --- |
 | L0.1 | **Shared adapter kit.** Move strict JSON/decimal helpers and the bounded HTTP read out of `HyperliquidPerpetualReader` into `Venues/Common` (`StrictJson`, `BoundedJsonHttp` with GET and POST); venue name parameterizes messages. | Infrastructure | Hyperliquid tests unchanged and passing; helpers have direct tests (duplicate keys, exact decimals, raw-number text). | — |
-| L0.2 | **Generic stream relay.** Split `HyperliquidMarketStream` into `SharedMarketStream` + `IMarketStreamProtocol` (frames per key, ping frame/interval, parse → ack/candles/context/control) and `HyperliquidStreamProtocol`. | Infrastructure | `HyperliquidMarketStreamTests` pass against the relay unchanged; a fake-protocol test covers ref-counting and reconnect. | L0.1 |
+| L0.2 | **Generic stream relay.** Split `HyperliquidMarketStream` into `SharedMarketStream` + `IMarketStreamProtocol` (frames per key, ping frame/interval, declared capabilities `candles`/`context` so a venue without a candle channel is allowed (RISEx has none), parse → ack/candles/context/control) and `HyperliquidStreamProtocol`. | Infrastructure | `HyperliquidMarketStreamTests` pass against the relay unchanged; a fake-protocol test covers ref-counting and reconnect. | L0.1 |
 | L0.3 | **Venue registry + descriptor.** `IVenueRegistry` and `VenueDescriptor` in Application; registration per module; services (`WorkspaceService`, `CandleService`, `MarketContextService`, `MarketStreamService`, `PlayExecutionService`) resolve by `account.VenueId`; remove `"hyperliquid"` literals from use cases; `SystemMetadata.Venues` built from the registry (Lighter still `planned`, so not creatable). | Application, Infrastructure, Api | `rg '"hyperliquid"' backend/src/Vessel.Application` finds nothing; `/api/system` includes capabilities; tests cover "no adapter for venue". | — |
 | L0.4 | **Generic source identity.** `Account.Address` → `SourceId` (string ≤ 128, venue-normalized), with the unique index renamed; the descriptor validates it; API keeps accepting `address` for Hyperliquid and adds `sourceId`. | Domain, Persistence (migration), Application, API | Migration preserves existing rows; duplicate-source 409 still works. | L0.3 |
-| L0.5 | **Normalized execution facts.** Add `Side` (`buy`/`sell`) and `PositionEffect` to fills and orders, plus `FeeBasis` on fills; migrate `B`→`buy`, `A`→`sell` and derive the effect from Hyperliquid `dir`; matcher and execution service use only normalized fields; DTOs keep the venue text for display. | Domain, Persistence (migration), Application, Hyperliquid adapter | Matcher/lifecycle tests pass with normalized data; no `"A"`/`"B"`/`"Close"` literals outside the Hyperliquid module. | L0.3 |
-| L0.6 | **Canonical instruments.** `PerpetualInstrument` gains asset/multiplier/quote and its key; `IInstrumentMap` per adapter (Hyperliquid `k`-prefix rule); facts store canonical `ContractId` + `VenueContractId`; migration rewrites `k…` rows and drawing keys; the catalogue DTO returns canonical key, display name and venue contract. | Domain, Persistence (migration), Application, Hyperliquid adapter, frontend `instruments.ts` | Existing BTC plays unchanged; a `kPEPE` fixture round-trips as `1000PEPE` through catalogue, play, order link and chart. | L0.3 |
-| L0.7 | **Per-instrument price rule and margin data.** `VenueInstrument` gains optional `PriceDecimals` and `MaintenanceMarginFraction`; `ExecutionMatcher.Near` uses the descriptor's `PriceRule`; the frontend's dragged-price formatter and liquidation estimate take the instrument's rule and reported maintenance fraction when present. | Application, frontend `levels.ts`, `sizing.ts` | Hyperliquid tolerance tests unchanged; new fixed-decimals tests. | L0.3 |
+| L0.5 | **Normalized execution facts.** Add `Side` (`buy`/`sell`) and `PositionEffect` to fills and orders, plus `FeeBasis` and `PnlBasis` on fills (sizing reads `PnlBasis` so a net-of-fee PnL is not reduced by the fee twice); migrate `B`→`buy`, `A`→`sell` and derive the effect from Hyperliquid `dir`; matcher and execution service use only normalized fields; DTOs keep the venue text for display. | Domain, Persistence (migration), Application, Hyperliquid adapter | Matcher/lifecycle tests pass with normalized data; no `"A"`/`"B"`/`"Close"` literals outside the Hyperliquid module. | L0.3 |
+| L0.6 | **Canonical instruments.** `PerpetualInstrument` gains asset/multiplier/quote and its key; `IInstrumentMap` per adapter, keyed by the venue's own contract identifier (Hyperliquid coin, Lighter and RISEx `market_id`), with the Hyperliquid `k`-prefix rule, the Lighter `1000X` rule, the RISEx `X/USDC` rule and retired markets (one-to-one is required among active markets only; RISEx has a deprecated `DOGE/USDC` beside the live one); facts store canonical `ContractId` + `VenueContractId`; migration rewrites `k…` rows and drawing keys; the catalogue DTO returns canonical key, display name and venue contract. | Domain, Persistence (migration), Application, Hyperliquid adapter, frontend `instruments.ts` | Existing BTC plays unchanged; a `kPEPE` fixture round-trips as `1000PEPE` through catalogue, play, order link and chart. | L0.3 |
+| L0.7 | **Per-instrument price rule and margin data.** `VenueInstrument` gains an optional `PriceStep` tick (Lighter `price_decimals` → `10^-d`, RISEx `step_price` directly; Hyperliquid keeps its five-significant-figure rule), a `Category` label (RISEx lists crypto, stock, commodity and index perpetuals) and `MaintenanceMarginFraction`; `ExecutionMatcher.Near` uses the descriptor's `PriceRule`; the frontend's dragged-price formatter and liquidation estimate take the instrument's rule and reported maintenance fraction when present. | Application, frontend `levels.ts`, `sizing.ts` | Hyperliquid tolerance tests unchanged; new fixed-decimals tests. | L0.3 |
 | L0.8 | **Loosen market-data contracts.** `VenueCandle.Trades` nullable; `VenueMarketContext.OraclePrice` → `IndexPrice`, and `PreviousDayPrice` and `Premium` nullable; funding carries `interval` and `unit`; `MarketDataGuard` intervals and the service notices come from the descriptor; the frontend interval picker shows only supported intervals. | Application, frontend chart | Hyperliquid chart behaviour and tests unchanged. | L0.3 |
 | L0.9 | **Frontend capabilities.** Replace every `venueId === 'hyperliquid'` with descriptor capabilities (`sync`, `stablecoinWallet`, `credential`, `tradeUrlTemplate`, `quoteAsset`); the account dialog renders the source field from the descriptor; copy becomes venue-neutral where it named Hyperliquid generically. | frontend | `rg "'hyperliquid'" frontend/src --glob '!*.test.*'` finds only fixtures/format names; existing tests pass. | L0.3–L0.8 |
 
