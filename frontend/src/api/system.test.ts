@@ -66,6 +66,8 @@ describe('GET /api/system', () => {
     { ...systemFixture, venues: [...systemFixture.venues, systemFixture.venues[0]] },
     { ...systemFixture, venues: systemFixture.venues.map(venue => venue.id === 'hyperliquid' ? { ...venue, tradeUrlTemplate: 'http://example.test/{instrument}' } : venue) },
     { ...systemFixture, venues: systemFixture.venues.map(venue => venue.id === 'hyperliquid' ? { ...venue, tradeUrlTemplate: 'https://example.test/trade' } : venue) },
+    { ...systemFixture, venues: systemFixture.venues.map(venue => venue.id === 'hyperliquid' ? { ...venue, intervals: ['2M'] } : venue) },
+    { ...systemFixture, venues: systemFixture.venues.map(venue => venue.id === 'hyperliquid' ? { ...venue, priceRule: 'rounded' } : venue) },
   ])('rejects incompatible system data %#', async (body) => {
     mockResponse(body)
     await expect(getSystem('token')).rejects.toMatchObject({ kind: 'invalid-response' })
@@ -78,6 +80,7 @@ describe('GET /api/system', () => {
   })
   it('accepts any number of venues with their own capabilities', async () => {
     const other = { id: 'other-venue', name: 'Other', status: 'read-only', source: 'evm-address', quoteAsset: 'USDC', tradeUrlTemplate: null,
+      intervals: ['1m', '1h', '1d'], priceRule: 'tick-size',
       capabilities: { sync: true, instruments: true, orders: false, candles: false, marketContext: false, stream: false, stablecoinWallet: false } }
     const body = { ...systemFixture, venues: [...systemFixture.venues, other] }
     mockResponse(body)

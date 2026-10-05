@@ -4,15 +4,18 @@ import { Popover } from 'radix-ui'
 import { candleIntervals, type CandleInterval } from '@/api/workspace'
 import { intervalLabel, intervalName } from './intervals'
 
-export function TimeframeBar({ value, favorites, onChange, onFavoritesChange }: {
+export function TimeframeBar({ value, favorites, onChange, onFavoritesChange, available = candleIntervals }: {
   value: CandleInterval
   favorites: readonly CandleInterval[]
+  /** Intervals the venue serves natively; others are not offered. */
+  available?: readonly CandleInterval[]
   onChange: (interval: CandleInterval) => void
   onFavoritesChange: (favorites: CandleInterval[]) => void
 }) {
   const [open, setOpen] = useState(false)
   // The active interval stays visible even when it is not a favorite.
-  const shown = candleIntervals.filter(interval => favorites.includes(interval) || interval === value)
+  const offered = candleIntervals.filter(interval => available.includes(interval))
+  const shown = offered.filter(interval => favorites.includes(interval) || interval === value)
   const toggleFavorite = (interval: CandleInterval) => onFavoritesChange(favorites.includes(interval)
     ? favorites.filter(favorite => favorite !== interval) : [...favorites, interval])
 
@@ -27,7 +30,7 @@ export function TimeframeBar({ value, favorites, onChange, onFavoritesChange }: 
         <Popover.Content className="chart-popover timeframe-menu" align="start" sideOffset={6}>
           <p>Star a timeframe to keep it on the bar.</p>
           <ul>
-            {candleIntervals.map(interval => {
+            {offered.map(interval => {
               const favorite = favorites.includes(interval)
               return <li key={interval}>
                 <button type="button" className="chart-popover-choice" aria-current={interval === value} onClick={() => { onChange(interval); setOpen(false) }}>

@@ -1,3 +1,4 @@
+using Vessel.Application.Venues;
 using System.Text.RegularExpressions;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
@@ -8,9 +9,6 @@ namespace Vessel.Application.MarketData;
 // Order matters for clients: account (404), disabled/manual (409), instrument and interval (400).
 internal static partial class MarketDataGuard
 {
-    public const string IntervalMessage =
-        "Interval must be one of 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 8h, 12h, 1d, 3d, 1w, 1M.";
-
     public static readonly IReadOnlyDictionary<string, long> IntervalMs = new Dictionary<string, long>(StringComparer.Ordinal)
     {
         ["1m"] = 60_000L, ["3m"] = 3 * 60_000L, ["5m"] = 5 * 60_000L, ["15m"] = 15 * 60_000L,
@@ -38,8 +36,14 @@ internal static partial class MarketDataGuard
             ? instrument
             : throw new WorkspaceException(400, "Instrument must be 1 to 32 letters, digits, hyphens or underscores.");
 
-    public static (string Interval, long Step) Interval(string? interval) =>
-        interval is not null && IntervalMs.TryGetValue(interval, out var step)
+    /// <summary>An interval the venue serves natively. Others are refused rather than approximated.</summary>
+    public static (string Interval, long Step) Interval(string? interval, VenueDescriptor? venue)
+    {
+        var supported = IntervalMs.Keys.Where(known => venue?.CandleIntervals.Contains(known) == true).ToList();
+        return interval is not null && supported.Contains(interval) && IntervalMs.TryGetValue(interval, out var step)
             ? (interval, step)
-            : throw new WorkspaceException(400, IntervalMessage);
+            : throw new WorkspaceException(400, supported.Count == 0
+                ? "This venue has no candle intervals."
+                : $"Interval must be one of {string.Join(", ", supported)}.");
+    }
 }

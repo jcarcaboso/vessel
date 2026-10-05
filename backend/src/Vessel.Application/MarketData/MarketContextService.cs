@@ -12,11 +12,11 @@ public interface IMarketContextReader
 }
 
 public sealed record VenueMarketContext(
-    string ContractId, string MarkPrice, string OraclePrice, string? MidPrice, string PreviousDayPrice,
+    string ContractId, string MarkPrice, string OraclePrice, string? MidPrice, string? PreviousDayPrice,
     string DayNotionalVolume, string OpenInterest, string FundingRate, string? Premium);
 
 public sealed record MarketContextDto(string VenueId, string Instrument, string MarkPrice, string OraclePrice,
-    string? MidPrice, string PreviousDayPrice, string DayNotionalVolume, string OpenInterest, string FundingRate,
+    string? MidPrice, string? PreviousDayPrice, string DayNotionalVolume, string OpenInterest, string FundingRate,
     string? Premium, DateTimeOffset ObservedAt, string Notice);
 
 /// <summary>Bounded short-lived cache of one whole upstream snapshot per venue. Register as a singleton.</summary>
@@ -39,6 +39,7 @@ public sealed class MarketContextCache(TimeProvider time)
 
 public sealed class MarketContextService(IWorkspaceStore store, IVenueRegistry venues, MarketContextCache cache, TimeProvider time)
 {
+    /// <summary>Used when the venue's descriptor has no notice of its own.</summary>
     public const string Notice =
         "Venue market context for the primary perpetual DEX. Funding is the current hourly rate; open interest is in base units. Not a fill or valuation.";
     private const string VenueFailure = "The venue market read failed. Try again later.";
@@ -47,6 +48,7 @@ public sealed class MarketContextService(IWorkspaceStore store, IVenueRegistry v
     {
         var account = await MarketDataGuard.AccountAsync(store, accountId, ct);
         instrument = MarketDataGuard.Instrument(instrument);
+        var notice = venues.Descriptor(account.VenueId)?.MarketContextNotice ?? Notice;
         if (venues.MarketContext(account.VenueId) is not { } reader)
             throw new WorkspaceException(502, VenueFailure);
 
@@ -73,6 +75,6 @@ public sealed class MarketContextService(IWorkspaceStore store, IVenueRegistry v
             ?? throw new WorkspaceException(400, "The instrument is not in the venue's primary perpetual catalogue.");
         return new MarketContextDto(account.VenueId, instrument, match.MarkPrice, match.OraclePrice, match.MidPrice,
             match.PreviousDayPrice, match.DayNotionalVolume, match.OpenInterest, match.FundingRate, match.Premium,
-            snapshot.Value.Observed, Notice);
+            snapshot.Value.Observed, notice);
     }
 }

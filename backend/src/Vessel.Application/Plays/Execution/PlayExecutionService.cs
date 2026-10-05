@@ -37,7 +37,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         {
             throw new WorkspaceException(502, "Venue orders could not be read. Try again later.");
         }
-        await store.WithAccountLockAsync(account.Id, async () => { await ReconcileAsync(account, read, ct); return true; }, ct);
+        var ticks = await TicksAsync(account, ct);
+        await store.WithAccountLockAsync(account.Id, async () => { await ReconcileAsync(account, read, ticks, ct); return true; }, ct);
         return await GetAsync(playId, ct);
     }
 
@@ -138,7 +139,26 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         return await GetAsync(playId, ct);
     }
 
-    private async Task ReconcileAsync(Account account, VenueOrderReadResult read, CancellationToken ct)
+    /// <summary>
+    /// Price ticks by instrument for venues that round to a tick. Unavailable metadata leaves the five-significant-figure
+    /// tolerance in place rather than failing the check.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, decimal>> TicksAsync(Account account, CancellationToken ct)
+    {
+        if (venues.Descriptor(account.VenueId) is not { PriceRule: PriceRules.TickSize } || venues.Reader(account.VenueId) is not { } reader)
+            return new Dictionary<string, decimal>();
+        try
+        {
+            return (await reader.ReadInstrumentsAsync(ct)).Where(i => i.PriceStep is > 0)
+                .GroupBy(i => i.ContractId, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First().PriceStep!.Value, StringComparer.Ordinal);
+        }
+        catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            return new Dictionary<string, decimal>();
+        }
+    }
+
+    private async Task ReconcileAsync(Account account, VenueOrderReadResult read, IReadOnlyDictionary<string, decimal> ticks, CancellationToken ct)
     {
         var active = (await store.ActivePlaysAsync(account.Id, ct))
             .Where(p => p.InstrumentSource == InstrumentSource.Venue && p.ContractId is not null).ToList();
@@ -151,14 +171,14 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         for (var pass = 0; pass < 3; pass++)
         {
             var before = active.Select(p => p.Status).ToList();
-            await MatchAsync(account, active, ct);
+            await MatchAsync(account, active, ticks, ct);
             await ApplyTransitionsAsync(account.Id, active, ct);
             await store.SaveAsync(ct);
             if (before.SequenceEqual(active.Select(p => p.Status))) break;
         }
     }
 
-    private async Task MatchAsync(Account account, List<Play> active, CancellationToken ct)
+    private async Task MatchAsync(Account account, List<Play> active, IReadOnlyDictionary<string, decimal> ticks, CancellationToken ct)
     {
         var orders = await store.OrdersAsync(account.Id, ct);
         var links = await store.LinksAsync(account.Id, ct);
@@ -176,7 +196,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             var closes = fills[order.OrderId].Any(f => ExecutionFacts.Closes(f.PositionEffect));
             var candidates = ExecutionMatcher.Candidates(order, candidatesPlays,
                 (play, key) => links.Any(l => l.PlayId == play.Id && l.OrderId == order.OrderId && l.LevelKey == key && l.State == OrderLinkState.Dismissed),
-                closes, play => firstEntryFill.GetValueOrDefault(play.Id));
+                closes, play => firstEntryFill.GetValueOrDefault(play.Id),
+                ticks.TryGetValue(order.ContractId, out var tick) ? tick : null);
             if (candidates.Count == 1)
             {
                 var (play, level) = (candidates[0].Play, candidates[0].Level);

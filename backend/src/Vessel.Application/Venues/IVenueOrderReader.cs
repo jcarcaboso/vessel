@@ -28,7 +28,8 @@ public sealed record VenueOrder(
     DateTimeOffset PlacedAtUtc,
     VenueOrderStatus Status,
     string VenueStatus,
-    DateTimeOffset StatusAtUtc)
+    DateTimeOffset StatusAtUtc,
+    string? VenueContractId = null)
 {
     public bool IsTrigger => TriggerPrice is not null;
     /// <summary>The price the order is meant to act at.</summary>

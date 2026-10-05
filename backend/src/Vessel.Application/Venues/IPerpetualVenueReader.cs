@@ -11,8 +11,14 @@ public interface IPerpetualVenueReader
     Task<PerpetualVenueReadResult> ReadAsync(string publicAddress, CancellationToken cancellationToken);
 }
 
-/// <summary>A selectable perpetual. Prices are quoted and margined in <paramref name="QuoteAsset"/>, e.g. BTC/USDC.</summary>
-public sealed record VenueInstrument(string ContractId, int QuantityDecimals, int MaxLeverage, string QuoteAsset);
+/// <summary>
+/// A selectable perpetual. <paramref name="ContractId"/> is Vessel's instrument key (the canonical asset, e.g. BTC);
+/// <paramref name="VenueContractId"/> is the venue's own identifier when it differs (e.g. a numeric market ID).
+/// Prices are quoted and margined in <paramref name="QuoteAsset"/>, e.g. BTC/USDC. <paramref name="PriceStep"/> is the
+/// tick when the venue has one; <paramref name="Category"/> labels non-crypto markets (stocks, commodities, indices).
+/// </summary>
+public sealed record VenueInstrument(string ContractId, int QuantityDecimals, int MaxLeverage, string QuoteAsset,
+    decimal? PriceStep = null, string? Category = null, string? VenueContractId = null);
 
 public sealed record VenuePosition(
     string ContractId,
@@ -59,8 +65,10 @@ public sealed record VenueFill(
     string TransactionHash,
     string RawJson,
     string PositionEffect = ExecutionFacts.Unknown,
+    // Defaults keep older adapters compiling; venues whose identifier differs from the key set VenueContractId.
     string FeeBasis = ExecutionFacts.FeeReported,
-    string PnlBasis = ExecutionFacts.PnlGross);
+    string PnlBasis = ExecutionFacts.PnlGross,
+    string? VenueContractId = null);
 
 /// <summary>Rejects adapter output that does not use Vessel's execution vocabulary, before anything is stored.</summary>
 public static class VenueFactChecks

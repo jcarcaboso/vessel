@@ -188,6 +188,7 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
                 OwnerId = account.OwnerId,
                 AccountId = account.Id,
                 ContractId = f.ContractId,
+                VenueContractId = f.VenueContractId,
                 SourceFillId = f.SourceFillId,
                 Side = f.Side,
                 Direction = f.Direction,

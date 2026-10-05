@@ -72,7 +72,10 @@ public sealed class ImportedFill
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }
     public Guid AccountId { get; set; }
+    /// <summary>Vessel's instrument key.</summary>
     public string ContractId { get; set; } = null!;
+    /// <summary>The venue's own identifier when it differs from the key, e.g. a numeric market ID.</summary>
+    public string? VenueContractId { get; set; }
     public string SourceFillId { get; set; } = null!;
     /// <summary><see cref="ExecutionFacts.Buy"/> or <see cref="ExecutionFacts.Sell"/>.</summary>
     public string Side { get; set; } = null!;
@@ -97,7 +100,10 @@ public sealed class ImportedOrder
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }
     public Guid AccountId { get; set; }
+    /// <summary>Vessel's instrument key.</summary>
     public string ContractId { get; set; } = null!;
+    /// <summary>The venue's own identifier when it differs from the key, e.g. a numeric market ID.</summary>
+    public string? VenueContractId { get; set; }
     public string OrderId { get; set; } = null!;
     /// <summary><see cref="ExecutionFacts.Buy"/> or <see cref="ExecutionFacts.Sell"/>.</summary>
     public string Side { get; set; } = null!;

@@ -48,7 +48,7 @@ public static class ExecutionMatcher
     /// open Play when the order reduces a position and was placed after the Play's first entry fill.
     /// </summary>
     public static List<MatchCandidate> Candidates(ImportedOrder order, IEnumerable<(Play Play, PlayPlanDocument Plan)> plays,
-        Func<Play, string, bool> dismissed, bool closesPosition, Func<Play, DateTimeOffset?>? firstEntryFill = null)
+        Func<Play, string, bool> dismissed, bool closesPosition, Func<Play, DateTimeOffset?>? firstEntryFill = null, decimal? tick = null)
     {
         var planned = new List<MatchCandidate>();
         var exits = new List<MatchCandidate>();
@@ -61,7 +61,7 @@ public static class ExecutionMatcher
             var kind = order.OrderType.ToLowerInvariant();
             foreach (var level in Levels(plan))
             {
-                if (level.Side != order.Side || level.Price is not { } price || !Near(acting, price) || dismissed(play, level.Key)) continue;
+                if (level.Side != order.Side || level.Price is not { } price || !Near(acting, price, tick) || dismissed(play, level.Key)) continue;
                 var fits = level.Role switch
                 {
                     OrderLinkRole.Entry => !order.ReduceOnly && !order.IsPositionTpsl,
@@ -82,14 +82,16 @@ public static class ExecutionMatcher
     }
 
     /// <summary>
-    /// Same price within one step of the fifth significant figure, the precision Hyperliquid accepts for prices:
-    /// 1 at 84,541, 0.01 at 100. A planned 82,850.18 from a percentage still matches an order at 82,850.
+    /// Same price within one step of the fifth significant figure (1 at 84,541, 0.01 at 100), or within one tick when
+    /// the instrument's tick is coarser (RISEx DOGE trades in 0.00001 at 0.09). A planned 82,850.18 from a percentage
+    /// still matches an order at 82,850.
     /// </summary>
-    public static bool Near(decimal actual, decimal planned)
+    public static bool Near(decimal actual, decimal planned, decimal? tick = null)
     {
         if (planned <= 0) return false;
         var magnitude = (int)Math.Floor(Math.Log10((double)planned));
         var step = magnitude >= 4 ? Pow10(magnitude - 4) : 1m / Pow10(4 - magnitude);
+        if (tick is > 0 && tick > step) step = tick.Value;
         return Math.Abs(actual - planned) <= step;
     }
 

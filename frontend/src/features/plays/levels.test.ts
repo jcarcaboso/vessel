@@ -65,6 +65,13 @@ describe('dragging planned levels', () => {
     expect(formatDraggedPrice(1.234567)).toBe('1.2346')
     expect(formatDraggedPrice(0.0000123456)).toBe('0.00001235')
   })
+  it('rounds chart prices to the instrument tick when the venue has one', () => {
+    expect(formatDraggedPrice(0.094607, 0.00001)).toBe('0.09461')
+    expect(formatDraggedPrice(83.3423, 0.01)).toBe('83.34')
+    expect(formatDraggedPrice(101.26, 0.5)).toBe('101.5')
+    expect(formatDraggedPrice(86331.27, 0.1)).toBe('86331.3')
+    expect(formatDraggedPrice(65432.123, null)).toBe('65432')
+  })
 
   it('stores dragged stops and targets as prices and leaves other entries untouched', () => {
     const first = entry(0, {
