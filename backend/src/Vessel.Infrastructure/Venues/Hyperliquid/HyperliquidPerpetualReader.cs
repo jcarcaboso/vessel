@@ -4,6 +4,7 @@ using System.Numerics;
 using System.Text.Json;
 using Vessel.Application.MarketData;
 using Vessel.Application.Venues;
+using Vessel.Domain.Workspace;
 
 namespace Vessel.Infrastructure.Venues.Hyperliquid;
 
@@ -236,16 +237,34 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
             var side = Text(Property(fill, "side"));
             if (side is not ("A" or "B"))
                 throw new VenueReadException(InvalidResponse);
+            var direction = Text(Property(fill, "dir"));
             fills.Add(new(
-                Identity(Property(fill, "tid")), name, side,
-                Text(Property(fill, "dir")), Positive(Property(fill, "px")), Positive(Property(fill, "sz")),
+                Identity(Property(fill, "tid")), name, SideOf(side),
+                direction, Positive(Property(fill, "px")), Positive(Property(fill, "sz")),
                 Number(Property(fill, "fee")), Text(Property(fill, "feeToken"), FeeTokenLength),
                 Number(Property(fill, "closedPnl")), Timestamp(Property(fill, "time"), latestTimestamp),
-                Identity(Property(fill, "oid")), Text(Property(fill, "hash")), fill.GetRawText()));
+                Identity(Property(fill, "oid")), Text(Property(fill, "hash")), fill.GetRawText(),
+                // closedPnl excludes the fee, which is reported separately.
+                EffectOf(direction), ExecutionFacts.FeeReported, ExecutionFacts.PnlGross));
         }
         // Preserve venue side/direction as facts; they do not identify a journal play.
         return fills.OrderByDescending(fill => fill.OccurredAtUtc).ToList();
     }
+
+    /// <summary>Hyperliquid's B (bid) buys and A (ask) sells.</summary>
+    public static string SideOf(string side) => side == "B" ? ExecutionFacts.Buy : ExecutionFacts.Sell;
+
+    /// <summary>
+    /// From Hyperliquid's <c>dir</c>: "Open Long", "Close Short", "Long &gt; Short" (a flip). Anything else, such as
+    /// a liquidation or settlement wording, stays unknown rather than guessed.
+    /// </summary>
+    public static string EffectOf(string direction) => direction switch
+    {
+        "Open Long" or "Open Short" => ExecutionFacts.Open,
+        "Close Long" or "Close Short" => ExecutionFacts.Close,
+        "Long > Short" or "Short > Long" => ExecutionFacts.Flip,
+        _ => ExecutionFacts.Unknown
+    };
 
     internal static bool IsPrimaryContract(string name) =>
         !name.StartsWith('@') && !name.Contains('/') && !name.Contains(':');

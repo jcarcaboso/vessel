@@ -233,7 +233,12 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             if (account.Address is null) throw new WorkspaceException(400, "A public address is required before refresh.");
             if (venues.Reader(account.VenueId) is not { } reader) throw new WorkspaceException(503, "Venue reader is unavailable.");
             PerpetualVenueReadResult result;
-            try { result = await reader.ReadAsync(account.Address, ct); }
+            try
+            {
+                result = await reader.ReadAsync(account.Address, ct);
+                if (!result.Fills.All(VenueFactChecks.Valid))
+                    throw new VenueReadException("The venue adapter returned fills outside Vessel's execution vocabulary.");
+            }
             catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
             {
                 account.RecordSyncFailure();
@@ -287,7 +292,8 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
                 balance.Symbol, balance.TokenIndex, balance.TokenId, Money(balance.Total)!, Money(balance.Held)!, Money(balance.Available)!)).ToList(),
             "HyperCore spot/unified wallet only: supported stablecoin token identities, nominal USD-pegged units, no FX/depeg adjustment. Available is total minus held; it is not guaranteed withdrawal capacity or perpetual free margin. Other assets, EVM wallets and lending/borrow accounting are excluded. Primary perpetual margin is not added again.");
     private static FillDto ToDto(ImportedFill f) => new(f.Id, f.AccountId, f.ContractId, f.Side, f.Direction, Money(f.Price)!,
-        Money(f.Quantity)!, Money(f.Fee)!, f.FeeToken, Money(f.ClosedPnlUsd)!, f.OccurredAtUtc, f.OrderId, f.SourceFillId, f.TransactionHash);
+        Money(f.Quantity)!, Money(f.Fee)!, f.FeeToken, Money(f.ClosedPnlUsd)!, f.OccurredAtUtc, f.OrderId, f.SourceFillId, f.TransactionHash,
+        f.PositionEffect, f.FeeBasis, f.PnlBasis);
 }
 
 file static class HexValidation

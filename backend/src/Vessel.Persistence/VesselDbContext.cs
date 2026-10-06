@@ -96,6 +96,16 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         fill.Property(x => x.SourceFillId).HasMaxLength(128);
         fill.Property(x => x.Side).HasMaxLength(32);
         fill.Property(x => x.Direction).HasMaxLength(128);
+        fill.Property(x => x.PositionEffect).HasMaxLength(16);
+        fill.Property(x => x.FeeBasis).HasMaxLength(32);
+        fill.Property(x => x.PnlBasis).HasMaxLength(16);
+        fill.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_imported_fills_side", "\"Side\" IN ('buy', 'sell')");
+            table.HasCheckConstraint("CK_imported_fills_position_effect", "\"PositionEffect\" IN ('open', 'close', 'flip', 'unknown')");
+            table.HasCheckConstraint("CK_imported_fills_fee_basis", "\"FeeBasis\" IN ('reported', 'standard-account-free')");
+            table.HasCheckConstraint("CK_imported_fills_pnl_basis", "\"PnlBasis\" IN ('gross', 'net-of-fee')");
+        });
         fill.Property(x => x.FeeToken).HasMaxLength(64);
         fill.Property(x => x.OrderId).HasMaxLength(128);
         fill.Property(x => x.TransactionHash).HasMaxLength(256);
@@ -163,6 +173,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         order.Property(x => x.ContractId).HasMaxLength(128);
         order.Property(x => x.OrderId).HasMaxLength(128);
         order.Property(x => x.Side).HasMaxLength(8);
+        order.ToTable(table => table.HasCheckConstraint("CK_imported_orders_side", "\"Side\" IN ('buy', 'sell')"));
         order.Property(x => x.OrderType).HasMaxLength(32);
         order.Property(x => x.Status).HasMaxLength(16);
         order.Property(x => x.VenueStatus).HasMaxLength(64);

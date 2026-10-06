@@ -112,7 +112,7 @@ export const cancelReasonLabels: Record<CancelReason, string> = {
 /** A venue order as last seen. Prices and sizes keep the venue's exact decimals. */
 export interface ExecutionOrder {
   orderId: string
-  side: 'A' | 'B'
+  side: 'buy' | 'sell'
   orderType: string
   limitPrice: string
   triggerPrice: string | null
@@ -134,7 +134,14 @@ export interface ExecutionFill {
   feeToken: string
   closedPnlUsd: string
   occurredAtUtc: string
+  side: 'buy' | 'sell'
+  positionEffect: PositionEffect
+  pnlBasis: PnlBasis
 }
+/** What a fill did to the position. Unknown when the venue's wording does not say. */
+export type PositionEffect = 'open' | 'close' | 'flip' | 'unknown'
+/** Gross: fees are reported separately. Net-of-fee: the venue already took the fee off the closed PnL. */
+export type PnlBasis = 'gross' | 'net-of-fee'
 export type LinkRole = 'entry' | 'stop' | 'target' | 'exit'
 export interface OrderLink {
   id: string
@@ -154,7 +161,7 @@ export interface PlayExecution {
   tracked: boolean
   reason: string | null
   checkedAtUtc: string | null
-  totals: { enteredQuantity: string; exitedQuantity: string; openQuantity: string; closedPnlUsd: string; fees: Array<{ token: string; amount: string }> }
+  totals: { enteredQuantity: string; exitedQuantity: string; openQuantity: string; closedPnlUsd: string; closedPnlBasis: PnlBasis | 'mixed'; fees: Array<{ token: string; amount: string }> }
   entries: Array<{ entryId: string; filledQuantity: string; averageFillPrice: string | null; restingOrders: number }>
   links: OrderLink[]
   suggestions: OrderLink[]
@@ -164,13 +171,15 @@ export interface PlayExecution {
 export interface LinkOrder { orderId: string; role: LinkRole; entryId?: string; levelId?: string }
 
 const decimalText = (v: unknown) => text(v, 100) && /^-?\d+(\.\d+)?$/.test(v)
-const executionOrder = (v: unknown): v is ExecutionOrder => object(v) && text(v.orderId, 128) && (v.side === 'A' || v.side === 'B') &&
+const executionOrder = (v: unknown): v is ExecutionOrder => object(v) && text(v.orderId, 128) && (v.side === 'buy' || v.side === 'sell') &&
   text(v.orderType, 32) && decimalText(v.limitPrice) && (v.triggerPrice === null || decimalText(v.triggerPrice)) &&
   typeof v.reduceOnly === 'boolean' && typeof v.isPositionTpsl === 'boolean' && decimalText(v.originalSize) && decimalText(v.remainingSize) &&
   date(v.placedAtUtc) && ['open', 'filled', 'triggered', 'canceled', 'rejected', 'other'].includes(v.status as string) &&
   text(v.venueStatus, 64) && date(v.statusAtUtc)
 const executionFill = (v: unknown): v is ExecutionFill => object(v) && text(v.sourceFillId, 128) && text(v.direction, 128) &&
-  decimalText(v.price) && decimalText(v.quantity) && decimalText(v.fee) && text(v.feeToken, 64) && decimalText(v.closedPnlUsd) && date(v.occurredAtUtc)
+  decimalText(v.price) && decimalText(v.quantity) && decimalText(v.fee) && text(v.feeToken, 64) && decimalText(v.closedPnlUsd) && date(v.occurredAtUtc) &&
+  (v.side === 'buy' || v.side === 'sell') && ['open', 'close', 'flip', 'unknown'].includes(v.positionEffect as string) &&
+  (v.pnlBasis === 'gross' || v.pnlBasis === 'net-of-fee')
 const orderLink = (v: unknown): v is OrderLink => object(v) && guid(v.id) && ['entry', 'stop', 'target', 'exit'].includes(v.role as string) &&
   nullable(x => text(x, 64))(v.entryId) && nullable(x => text(x, 64))(v.levelId) && (v.state === 'linked' || v.state === 'suggested') &&
   (v.source === 'automatic' || v.source === 'owner') && (v.order === null || executionOrder(v.order)) && decimalText(v.filledQuantity) &&
@@ -178,6 +187,7 @@ const orderLink = (v: unknown): v is OrderLink => object(v) && guid(v.id) && ['e
 export const isPlayExecution = (v: unknown): v is PlayExecution => object(v) && guid(v.playId) && playStatuses.includes(v.status as PlayStatus) &&
   typeof v.tracked === 'boolean' && nullable(x => text(x, 500))(v.reason) && nullable(date)(v.checkedAtUtc) &&
   object(v.totals) && ['enteredQuantity', 'exitedQuantity', 'openQuantity', 'closedPnlUsd'].every(k => decimalText((v.totals as Record<string, unknown>)[k])) &&
+  ['gross', 'net-of-fee', 'mixed'].includes(v.totals.closedPnlBasis as string) &&
   Array.isArray(v.totals.fees) && v.totals.fees.every(f => object(f) && text(f.token, 64) && decimalText(f.amount)) &&
   Array.isArray(v.entries) && v.entries.every(e => object(e) && text(e.entryId, 64) && decimalText(e.filledQuantity) &&
     nullable(decimalText)(e.averageFillPrice) && count(e.restingOrders)) &&

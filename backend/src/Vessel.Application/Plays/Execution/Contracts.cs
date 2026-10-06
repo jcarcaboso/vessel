@@ -18,7 +18,7 @@ public sealed record ExecutionOrderDto(string OrderId, string Side, string Order
     string Status, string VenueStatus, DateTimeOffset StatusAtUtc);
 
 public sealed record ExecutionFillDto(string SourceFillId, string Direction, string Price, string Quantity, string Fee,
-    string FeeToken, string ClosedPnlUsd, DateTimeOffset OccurredAtUtc);
+    string FeeToken, string ClosedPnlUsd, DateTimeOffset OccurredAtUtc, string Side, string PositionEffect, string PnlBasis);
 
 public sealed record OrderLinkDto(Guid Id, string Role, string? EntryId, string? LevelId, string State, string Source,
     ExecutionOrderDto? Order, string FilledQuantity, IReadOnlyList<ExecutionFillDto> Fills);
@@ -27,9 +27,12 @@ public sealed record EntryProgressDto(string EntryId, string FilledQuantity, str
 
 public sealed record FeeTotalDto(string Token, string Amount);
 
-/// <summary>Quantities are base units summed from linked fills; closed PnL and fees are venue-reported.</summary>
+/// <summary>
+/// Quantities are base units summed from linked fills; closed PnL and fees are venue-reported.
+/// <paramref name="ClosedPnlBasis"/> is gross (fees separate), net-of-fee (fees already taken off) or mixed.
+/// </summary>
 public sealed record ExecutionTotalsDto(string EnteredQuantity, string ExitedQuantity, string OpenQuantity,
-    string ClosedPnlUsd, IReadOnlyList<FeeTotalDto> Fees);
+    string ClosedPnlUsd, string ClosedPnlBasis, IReadOnlyList<FeeTotalDto> Fees);
 
 public sealed record PlayExecutionDto(Guid PlayId, string Status, bool Tracked, string? Reason, DateTimeOffset? CheckedAtUtc,
     ExecutionTotalsDto Totals, IReadOnlyList<EntryProgressDto> Entries, IReadOnlyList<OrderLinkDto> Links,

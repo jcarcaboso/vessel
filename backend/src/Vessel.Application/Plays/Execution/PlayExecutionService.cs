@@ -27,7 +27,12 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         if (venues.Orders(account!.VenueId) is not { } orderReader) throw new WorkspaceException(503, "Venue reader is unavailable.");
         await workspace.SyncAsync(account.Id, ct);
         VenueOrderReadResult read;
-        try { read = await orderReader.ReadOrdersAsync(account.Address!, ct); }
+        try
+        {
+            read = await orderReader.ReadOrdersAsync(account.Address!, ct);
+            if (!read.Orders.All(VenueFactChecks.Valid))
+                throw new VenueReadException("The venue adapter returned orders outside Vessel's execution vocabulary.");
+        }
         catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
         {
             throw new WorkspaceException(502, "Venue orders could not be read. Try again later.");
@@ -60,7 +65,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         decimal entered = entryFills.Sum(f => f.Quantity), exited = exitFills.Sum(f => f.Quantity);
         var all = entryFills.Concat(exitFills).ToList();
         var totals = new ExecutionTotalsDto(Money(entered), Money(exited), Money(Math.Max(0, entered - exited)),
-            Money(all.Sum(f => f.ClosedPnlUsd)),
+            Money(all.Sum(f => f.ClosedPnlUsd)), PnlBasis(all),
             all.GroupBy(f => f.FeeToken).OrderBy(g => g.Key).Select(g => new FeeTotalDto(g.Key, Money(g.Sum(f => f.Fee)))).ToList());
         var entries = plan.Entries.Select(entry =>
         {
@@ -168,7 +173,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             if (links.Any(l => l.OrderId == order.OrderId && l.State == OrderLinkState.Linked)) continue;
             // A cancelled order that never filled cannot affect a play.
             if (order.Status == "canceled" && !fills[order.OrderId].Any()) continue;
-            var closes = fills[order.OrderId].Any(f => f.Direction.StartsWith("Close", StringComparison.Ordinal));
+            var closes = fills[order.OrderId].Any(f => ExecutionFacts.Closes(f.PositionEffect));
             var candidates = ExecutionMatcher.Candidates(order, candidatesPlays,
                 (play, key) => links.Any(l => l.PlayId == play.Id && l.OrderId == order.OrderId && l.LevelKey == key && l.State == OrderLinkState.Dismissed),
                 closes, play => firstEntryFill.GetValueOrDefault(play.Id));
@@ -231,6 +236,10 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         : account.Address is null ? "The account needs a public address to track its orders."
         : null;
 
+    /// <summary>The basis shared by every fill, "mixed" if they differ, or gross when there are none.</summary>
+    private static string PnlBasis(IReadOnlyCollection<ImportedFill> fills) =>
+        fills.Select(f => f.PnlBasis).Distinct().ToList() is [var only] ? only : fills.Count == 0 ? ExecutionFacts.PnlGross : "mixed";
+
     private static string Money(decimal value) => value.ToString("0.############################", CultureInfo.InvariantCulture);
     private static string Name<T>(T value) where T : Enum => value.ToString().ToLowerInvariant();
 
@@ -239,5 +248,5 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         o.PlacedAtUtc, o.Status, o.VenueStatus, o.StatusAtUtc);
 
     private static ExecutionFillDto FillDto(ImportedFill f) => new(f.SourceFillId, f.Direction, Money(f.Price), Money(f.Quantity),
-        Money(f.Fee), f.FeeToken, Money(f.ClosedPnlUsd), f.OccurredAtUtc);
+        Money(f.Fee), f.FeeToken, Money(f.ClosedPnlUsd), f.OccurredAtUtc, f.Side, f.PositionEffect, f.PnlBasis);
 }

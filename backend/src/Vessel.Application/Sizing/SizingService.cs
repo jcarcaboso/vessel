@@ -1,3 +1,4 @@
+using Vessel.Domain.Workspace;
 using System.Globalization;
 using Vessel.Application.Ownership;
 using Vessel.Application.Plays;
@@ -74,8 +75,10 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
         var notional = entries.Sum(f => f.Quantity * f.Price);
         if (notional <= 0) return null;
         var fills = facts.Fills.Select(f => f.Fill).ToList();
-        var net = fills.Sum(f => f.ClosedPnlUsd) - fills.Where(f => f.FeeToken == FeeToken).Sum(f => f.Fee);
-        var feesComplete = fills.All(f => f.FeeToken == FeeToken || f.Fee == 0);
+        // A net-of-fee closed PnL already has its fee taken off; only gross PnL needs the fee subtracted.
+        var gross = fills.Where(f => f.PnlBasis == ExecutionFacts.PnlGross).ToList();
+        var net = fills.Sum(f => f.ClosedPnlUsd) - gross.Where(f => f.FeeToken == FeeToken).Sum(f => f.Fee);
+        var feesComplete = gross.All(f => f.FeeToken == FeeToken || f.Fee == 0);
         var firstEntry = entries.Min(f => f.OccurredAtUtc);
         var revisions = facts.Revisions.OrderBy(r => r.Number).ToList();
         var plan = (revisions.LastOrDefault(r => r.CreatedAtUtc <= firstEntry) ?? revisions.FirstOrDefault())?.Plan ?? facts.Play.Plan;

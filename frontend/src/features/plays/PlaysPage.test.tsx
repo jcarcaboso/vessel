@@ -32,7 +32,7 @@ function fakeServer() {
   const execution = (play: SavedPlay): PlayExecution => ({
     playId: play.summary.id, status: play.summary.status, tracked: play.summary.instrumentSource === 'venue', checkedAtUtc: null,
     reason: play.summary.instrumentSource === 'venue' ? null : 'Manual instruments are not tracked at a venue.',
-    totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', fees: [] },
+    totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
     entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Venue facts.',
   })
   const api = {

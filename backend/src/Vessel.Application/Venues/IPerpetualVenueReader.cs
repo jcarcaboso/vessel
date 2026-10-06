@@ -1,3 +1,5 @@
+using Vessel.Domain.Workspace;
+
 namespace Vessel.Application.Venues;
 
 // External adapters supply read-only, normalized perpetual facts. These types
@@ -37,6 +39,11 @@ public sealed record VenueStablecoinWallet(
     DateTimeOffset ObservedAtUtc, string AccountMode, string Scope,
     IReadOnlyList<VenueStablecoinBalance> Balances);
 
+/// <summary>
+/// One execution. <paramref name="Side"/> and <paramref name="PositionEffect"/> use <see cref="ExecutionFacts"/>;
+/// <paramref name="Direction"/> keeps the venue's wording. <paramref name="PnlBasis"/> says whether
+/// <paramref name="ClosedPnlUsd"/> already has the fee taken off.
+/// </summary>
 public sealed record VenueFill(
     string SourceFillId,
     string ContractId,
@@ -50,7 +57,20 @@ public sealed record VenueFill(
     DateTimeOffset OccurredAtUtc,
     string OrderId,
     string TransactionHash,
-    string RawJson);
+    string RawJson,
+    string PositionEffect = ExecutionFacts.Unknown,
+    string FeeBasis = ExecutionFacts.FeeReported,
+    string PnlBasis = ExecutionFacts.PnlGross);
+
+/// <summary>Rejects adapter output that does not use Vessel's execution vocabulary, before anything is stored.</summary>
+public static class VenueFactChecks
+{
+    public static bool Valid(VenueFill fill) => ExecutionFacts.IsSide(fill.Side) && ExecutionFacts.IsEffect(fill.PositionEffect) &&
+        ExecutionFacts.IsFeeBasis(fill.FeeBasis) && ExecutionFacts.IsPnlBasis(fill.PnlBasis) &&
+        (fill.FeeBasis != ExecutionFacts.FeeStandardAccountFree || fill.Fee == 0);
+
+    public static bool Valid(VenueOrder order) => ExecutionFacts.IsSide(order.Side);
+}
 
 public sealed record PerpetualVenueReadResult(
     VenueSnapshot Snapshot,

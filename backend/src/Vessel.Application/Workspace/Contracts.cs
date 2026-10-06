@@ -38,7 +38,8 @@ public sealed record StablecoinWalletDto(DateTimeOffset ObservedAtUtc, string Ac
     IReadOnlyList<StablecoinBalanceDto> Balances, string Notice);
 public sealed record FillDto(Guid Id, Guid AccountId, string ContractId, string Side, string Direction,
     string Price, string Quantity, string Fee, string FeeToken, string ClosedPnlUsd, DateTimeOffset OccurredAtUtc,
-    string OrderId, string SourceFillId, string TransactionHash, Guid? PlayId = null);
+    string OrderId, string SourceFillId, string TransactionHash, string PositionEffect, string FeeBasis, string PnlBasis,
+    Guid? PlayId = null);
 public sealed record OverviewTotals(int PortfolioCount, int AccountCount, string? TotalAccountValueUsd,
     int ValuedAccountCount, int OpenPositionCount, int ImportedFillCount,
     string? AvailableStablecoinNominalUsd = null, int StablecoinAccountCount = 0);

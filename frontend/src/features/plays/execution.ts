@@ -2,7 +2,7 @@ import type { ExecutionFill, ExecutionOrder, LinkOrder, OrderLink } from '@/api/
 import type { DraftEntry } from './draft'
 
 export function describeOrder(order: ExecutionOrder) {
-  const side = order.side === 'B' ? 'Buy' : 'Sell'
+  const side = order.side === 'buy' ? 'Buy' : 'Sell'
   const price = order.triggerPrice ? `trigger ${order.triggerPrice}` : `at ${order.limitPrice}`
   const size = order.isPositionTpsl ? 'whole position' : order.originalSize
   return `${side} ${order.orderType.toLowerCase()} ${price} · ${size}`

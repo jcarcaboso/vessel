@@ -70,7 +70,7 @@ describe('Core workspace API', () => {
   it('accepts imported fills that a later Play links to', async () => {
     const linked = { id: accountFixture.id, accountId: accountFixture.id, contractId: 'BTC', side: 'buy', direction: 'Open Long', price: '1',
       quantity: '1', fee: '0', feeToken: 'USDC', closedPnlUsd: '0', occurredAtUtc: '2026-10-01T10:00:00Z', orderId: '1', sourceFillId: '1',
-      transactionHash: '0x1', playId: portfolioFixture.id }
+      transactionHash: '0x1', positionEffect: 'open', feeBasis: 'reported', pnlBasis: 'gross', playId: portfolioFixture.id }
     response([linked])
     await expect(createWorkspaceApi('token').fills(accountFixture.id)).resolves.toEqual([linked])
   })

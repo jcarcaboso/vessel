@@ -129,6 +129,12 @@ export interface ImportedFill {
   orderId: string
   sourceFillId: string
   transactionHash: string
+  /** open, close, flip or unknown. */
+  positionEffect: string
+  /** reported, or standard-account-free when the account tier trades without fees. */
+  feeBasis: string
+  /** gross (fee separate) or net-of-fee (already taken off the closed PnL). */
+  pnlBasis: string
   playId: string | null
 }
 export interface AccountSnapshot {
@@ -283,7 +289,9 @@ const account = (v: unknown): v is BrokerAccount => object(v) && guid(v.id) &&
   (v.balanceUsd === undefined || nullableDecimal(v.balanceUsd)) &&
   (v.settingsRevision === undefined || typeof v.settingsRevision === 'number' && count(v.settingsRevision) && v.settingsRevision > 0)
 const fill = (v: unknown): v is ImportedFill => object(v) && guid(v.id) && guid(v.accountId) &&
-  ['contractId', 'side', 'direction', 'feeToken', 'orderId', 'sourceFillId', 'transactionHash'].every(k => text(v[k])) &&
+  ['contractId', 'direction', 'feeToken', 'orderId', 'sourceFillId', 'transactionHash'].every(k => text(v[k])) &&
+  (v.side === 'buy' || v.side === 'sell') && ['open', 'close', 'flip', 'unknown'].includes(v.positionEffect as string) &&
+  ['reported', 'standard-account-free'].includes(v.feeBasis as string) && ['gross', 'net-of-fee'].includes(v.pnlBasis as string) &&
   ['price', 'quantity', 'fee', 'closedPnlUsd'].every(k => decimal(v[k])) && date(v.occurredAtUtc) && (v.playId === null || guid(v.playId))
 const wallet = (v: unknown): v is StablecoinWallet | null => v === null || object(v) &&
   date(v.observedAtUtc) && text(v.accountMode) && text(v.scope) && decimal(v.totalNominalUsd) &&
