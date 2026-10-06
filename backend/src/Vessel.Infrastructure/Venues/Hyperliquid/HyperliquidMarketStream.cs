@@ -143,6 +143,8 @@ public sealed class HyperliquidMarketStream : IMarketStream, IAsyncDisposable
 
                 lock (gate)
                 {
+                    // Disposal that raced the connect found no connection to cancel; close this one instead.
+                    if (disposed) throw new OperationCanceledException(shutdown.Token);
                     var now = time.GetUtcNow();
                     connection = conn;
                     down = false; stale = false;

@@ -4,7 +4,9 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Vessel.Application.Evidence;
@@ -13,6 +15,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Evidence;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
+using Vessel.Infrastructure;
 using Vessel.Infrastructure.Evidence;
 
 namespace Vessel.Tests;
@@ -344,8 +347,12 @@ public sealed class EvidenceApiTests : IDisposable
     [Fact]
     public async Task Unknown_storage_provider_fails_at_startup()
     {
-        await using var factory = Factory(new() { ["Vessel:Evidence:Storage:Provider"] = "S3" });
-        var error = Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
+        // A plain host: WebApplicationFactory's deferred host can dispose its services before the startup error surfaces.
+        var builder = Host.CreateApplicationBuilder();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Vessel:Evidence:Storage:Provider"] = "S3" });
+        builder.Services.AddVesselInfrastructure(builder.Configuration);
+        using var host = builder.Build();
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
         Assert.Contains("Provider must be Local", error.Message);
     }
 
