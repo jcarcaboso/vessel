@@ -307,6 +307,8 @@ public sealed class HyperliquidMarketStreamTests
         await using var events = listener.ReadAllAsync(default).GetAsyncEnumerator();
         var socket = await Connected(sockets);
         await Handled(socket, message);
+        // The socket counts a read before the stream has parsed it.
+        await Eventually.True(() => stream.Dropped == 1, "malformed message dropped");
         Assert.Equal(1, stream.Dropped);
         // The next valid message is the first thing the listener sees.
         await Handled(socket, CandleMessage(Candle(close: "85900.0")));
@@ -360,6 +362,20 @@ public sealed class HyperliquidMarketStreamTests
         Assert.Equal(MarketStreamState.Live, Assert.IsType<MarketStatusEvent>(await Eventually.Next(events)).State);
         Assert.IsType<MarketCandleEvent>(await Eventually.Next(events));
         Assert.IsType<MarketContextEvent>(await Eventually.Next(events));
+    }
+
+    [Fact]
+    public async Task Disposing_while_connecting_does_not_wait_forever_for_the_late_connection()
+    {
+        var (stream, sockets, _) = Create();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        sockets.ConnectGate = gate;
+        using var listener = stream.Subscribe("BTC", "1m");
+        await Eventually.True(() => sockets.Sockets.Count == 1 && sockets.Sockets[0].Connecting, "socket starts connecting");
+        var disposing = stream.DisposeAsync().AsTask();
+        gate.SetResult();
+        await disposing.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(sockets.Sockets[0].Disposed);
     }
 
     [Fact]
