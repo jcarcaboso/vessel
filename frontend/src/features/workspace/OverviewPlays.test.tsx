@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
+import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { isPlaySummary, type PlaySummary } from '@/api/plays'
@@ -31,6 +32,12 @@ describe('Overview plays', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'All 7' }))
     expect(screen.getByRole('button', { name: 'Open Reviewed idea' })).toBeInTheDocument()
     expect(screen.getAllByRole('listitem')).toHaveLength(7)
+  })
+  it('labels venue instruments with the venue quote asset and keeps manual labels', async () => {
+    const venue = { ...summary('open'), venueId: 'hyperliquid', instrumentSource: 'venue' as const }
+    render(<OverviewPlays {...props} api={api(vi.fn().mockResolvedValue([venue, summary('draft')]))} />)
+    expect(within(await screen.findByRole('button', { name: 'Open open idea' })).getByText(/^BTC\/USDC · /)).toBeInTheDocument()
+    expect(within(screen.getByRole('button', { name: 'Open draft idea' })).getByText(/^BTC · /)).toBeInTheDocument()
   })
   it('orders by actual update time and supports keyboard tab navigation', async () => {
     const newer = { ...summary('open'), updatedAtUtc: '2026-10-05T12:00:00Z' }
