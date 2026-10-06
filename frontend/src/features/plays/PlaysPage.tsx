@@ -16,7 +16,7 @@ import { formatMoney, marginOverBudget } from './sizing'
 import { leverageOf } from './levels'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
 import {
-  createPlaysSession, draftFromSaved, failure, fieldsFromDraft, isDirty, loadSavedPlay, planChanged, savedState, syncEvidence,
+  createPlaysSession, draftFromSaved, failure, fieldsFromDraft, hasDraftContent, isDirty, loadSavedPlay, planChanged, savedState, syncEvidence,
   type PlaysSession, type SavedState,
 } from './saved'
 
@@ -24,12 +24,6 @@ import {
 const ended: PlayStatus[] = ['closed', 'cancelled']
 const filters = [['active', 'In progress'], ['ended', 'Closed and cancelled'], ['all', 'All']] as const
 type Filter = typeof filters[number][0]
-
-function hasContent(draft: PlayDraft) {
-  return !!(draft.title.trim() || draft.accountId || draft.instrument || draft.size || draft.evidence.length ||
-    Object.values(draft.drawings).some(items => items.length) || Object.values(draft.notes).some(note => note.trim()) ||
-    draft.entries.some(entry => entry.price || entry.stops.some(stop => stop.value) || entry.targets.some(target => target.value)))
-}
 
 export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false }: {
   accounts: BrokerAccount[]
@@ -73,7 +67,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     }).catch(cause => { if (active) setError(failure(cause)) })
     return () => { active = false }
   }, [api, venueStatus, update, setError])
-  const dirty = saved ? isDirty(draft, saved) : hasContent(draft)
+  const dirty = saved ? isDirty(draft, saved) : hasDraftContent(draft)
   // A blocked save says why until the plan is fixed.
   const status = saved?.summary.status ?? 'draft'
   const fixed = !planProblem(draft, status)

@@ -34,6 +34,8 @@ export interface PlaySummary {
   updatedAtUtc: string
   plannedAtUtc: string | null
   endedAtUtc: string | null
+  /** Whether a nonblank review note has been saved, independently of lifecycle status. */
+  hasReview: boolean
 }
 export interface SavedPlay {
   summary: PlaySummary
@@ -88,7 +90,8 @@ export const isPlaySummary = (v: unknown): v is PlaySummary => object(v) && guid
   playStatuses.includes(v.status as PlayStatus) && guid(v.accountId) && text(v.venueId, 64) && nullable(x => text(x, 128))(v.instrument) &&
   (v.instrumentSource === 'venue' || v.instrumentSource === 'manual') && (v.direction === 'long' || v.direction === 'short') &&
   count(v.planRevision) && count(v.version) && nullable(x => cancelReasons.includes(x as CancelReason))(v.cancelReason) &&
-  date(v.createdAtUtc) && date(v.updatedAtUtc) && nullable(date)(v.plannedAtUtc) && nullable(date)(v.endedAtUtc)
+  date(v.createdAtUtc) && date(v.updatedAtUtc) && nullable(date)(v.plannedAtUtc) && nullable(date)(v.endedAtUtc) &&
+  typeof v.hasReview === 'boolean'
 export const isSavedPlay = (v: unknown): v is SavedPlay => object(v) && isPlaySummary(v.summary) && isPlayPlan(v.plan) &&
   object(v.drawings) && Object.values(v.drawings).every(Array.isArray) && text(v.review)
 export const isPlayHistory = (v: unknown): v is PlayHistory => object(v) && Array.isArray(v.revisions) && Array.isArray(v.statusChanges) &&

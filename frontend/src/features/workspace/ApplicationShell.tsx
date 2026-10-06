@@ -5,16 +5,17 @@ import { Button } from '@/components/ui/button'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { useNotifications } from '@/components/notifications/notifications'
 import { PlaysPage } from '@/features/plays/PlaysPage'
-import { createPlaysSession } from '@/features/plays/saved'
+import { createPlaysSession, hasDraftContent, isDirty, loadSavedPlay } from '@/features/plays/saved'
 import { AccountDetail } from './AccountDetail'
 import { ActivityTable } from './ActivityTable'
 import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
+import { OverviewPlays } from './OverviewPlays'
 import { money, shortAddress, time } from './format'
 import { VenuesProvider, useVenues } from '@/api/venues'
 import {
   Activity, ArrowRight, ArrowUpRight, CircleHelp, Database, Folder, LayoutDashboard,
-  LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, ShieldCheck, Wallet, BookOpen, Pencil,
+  LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, ShieldCheck, Wallet, BookOpen, Pencil, ChevronDown,
 } from 'lucide-react'
 import './application-shell.css'
 
@@ -129,6 +130,27 @@ function Shell({ system, disconnect, api }: ShellProps) {
     setSelectedAccountId(id); setMenuOpen(false)
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
   }
+  function browsePlays() {
+    setPlaysSession(session => ({ ...session, view: 'list' }))
+    navigate('plays')
+  }
+  async function viewPlay(id: string, signal: AbortSignal) {
+    if (playsSession.saved?.summary.id === id) {
+      setPlaysSession(session => ({ ...session, view: 'editor' }))
+      navigate('plays')
+      return
+    }
+    if (playsSession.saved ? isDirty(playsSession.draft, playsSession.saved) : hasDraftContent(playsSession.draft)) {
+      browsePlays()
+      notify({ tone: 'info', message: 'Save or discard your unsaved changes before opening another play.' })
+      return
+    }
+    const loaded = await loadSavedPlay(api, id, signal)
+    if (!signal.aborted) {
+      setPlaysSession({ view: 'editor', ...loaded })
+      navigate('plays')
+    }
+  }
   async function sync(id: string) {
     if (refreshing) return
     setRefreshing(id)
@@ -193,7 +215,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
           </section>
           {!accounts.length ? <section className="shell-panel workspace-start"><span className="start-icon"><Folder size={26} /></span><div className="eyebrow">SET UP YOUR DIARY</div><h2>Start with your accounts.</h2><p>Create a portfolio, then add a read-only exchange account or a manual record. Your trades and decisions will have a place to belong.</p><div className="start-steps"><span><i>1</i>Create a portfolio</span><span><i>2</i>Add an account</span><span><i>3</i>Review recent executions</span></div><Button onClick={() => portfolios.length ? setAccountDialog(true) : setPortfolioDialog(true)}>{portfolios.length ? 'Add your first account' : 'Create your first portfolio'}<ArrowRight size={15} /></Button></section> :
             <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Your enabled accounts</h2><p>Disabled records stay in account management; their imported activity is hidden.</p></div><button className="text-action" onClick={() => navigate('accounts')}>View all<ArrowRight size={14} /></button></header>{enabledAccounts.length ? <AccountRows accounts={enabledAccounts.slice(0, 4)} portfolioNames={portfolioNames} refreshing={refreshing} onDetail={viewAccount} onSync={id => { void sync(id) }} onManage={setManagedAccount} /> : <div className="workspace-empty small-empty"><strong>All accounts are disabled</strong><p>Open All accounts to enable a record again. Retained imports have not been deleted.</p><Button variant="outline" onClick={() => navigate('accounts')}>Manage accounts</Button></div>}</section>}
-          <div className="overview-bottom-grid"><section className="shell-panel"><header className="shell-panel-heading"><div><h2>Recent activity</h2><p>Venue-reported executions</p></div><button className="text-action" onClick={() => navigate('activity')}>View activity<ArrowRight size={14} /></button></header><ActivityTable fills={data.recentActivity.slice(0, 5)} accounts={accounts} compact /></section><section className="shell-panel next-workflow"><div className="eyebrow">COMING NEXT</div><BookOpen size={27} /><h2>The Play workspace</h2><p>The approved layout stays separate while we build the account and history foundation. Imported fills will not create a thesis or be silently assigned to a play.</p><span className="workspace-badge">Not enabled yet</span></section></div>
+          <div className="overview-bottom-grid"><section className="shell-panel"><header className="shell-panel-heading"><div><h2>Recent activity</h2><p>Venue-reported executions</p></div><button className="text-action" onClick={() => navigate('activity')}>View activity<ArrowRight size={14} /></button></header><ActivityTable fills={data.recentActivity.slice(0, 5)} accounts={accounts} compact /></section><OverviewPlays api={api} accounts={accounts} reloadGeneration={reloadKey} onBrowse={browsePlays} onOpen={viewPlay} /></div>
           <p className="workspace-scope-note">{data.scopeNote}</p>
         </>}
 
@@ -206,7 +228,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
         </section>}
 
         {page === 'accounts' && data && (selectedAccount ? <AccountDetail key={selectedAccount.id} account={selectedAccount} api={api} refreshing={refreshing === selectedAccount.id} reloadGeneration={reloadKey} onSync={id => { void sync(id) }} onManage={() => setManagedAccount(selectedAccount)} onBack={() => { setSelectedAccountId(null); window.scrollTo({ top: 0, left: 0, behavior: 'auto' }) }} /> :
-          <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Account records</h2><p>Automatic venues and manual accounts use the same portfolio context.</p></div><label className="account-filter"><span className="sr-only">Filter by portfolio</span><select aria-label="Filter by portfolio" value={portfolioFilter} onChange={event => setPortfolioFilter(event.target.value)}><option value="">All accounts</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label></header>
+          <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Account records</h2><p>Automatic venues and manual accounts use the same portfolio context.</p></div><label className="account-filter"><span className="sr-only">Filter by portfolio</span><select aria-label="Filter by portfolio" value={portfolioFilter} onChange={event => setPortfolioFilter(event.target.value)}><option value="">All accounts</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select><ChevronDown className="account-filter-chevron" size={14} aria-hidden="true" /></label></header>
             <p className="workspace-scope-note in-panel">Unassigned accounts appear only in All accounts. Disabled records are shown here so they can be enabled again; their imports and positions remain hidden.</p>
             {!filteredAccounts.length ? <div className="workspace-empty"><Wallet size={30} /><strong>No accounts in this view</strong><p>Add an exchange account by public address, or a manual account. A portfolio is optional.</p><Button onClick={() => setAccountDialog(true)}>Add account</Button></div> : <AccountRows accounts={filteredAccounts} portfolioNames={portfolioNames} refreshing={refreshing} onDetail={viewAccount} onSync={id => { void sync(id) }} onManage={setManagedAccount} />}
           </section>)}

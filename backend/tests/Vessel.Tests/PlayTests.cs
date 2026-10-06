@@ -219,6 +219,25 @@ public sealed class PlayServiceTests
         Assert.Single(await service.ListAsync(default));
     }
 
+    [Theory]
+    [InlineData("", false)]
+    [InlineData(" \n\t ", false)]
+    [InlineData("Waited for confirmation.", true)]
+    public async Task Summaries_report_saved_review_presence_independently_of_status(string review, bool hasReview)
+    {
+        var play = await Create();
+        play = await service.UpdateAsync(play.Summary.Id, Update(play) with { Review = review }, default);
+        Assert.Equal(hasReview, play.Summary.HasReview);
+        Assert.Equal("draft", play.Summary.Status);
+        play = await service.ChangeStatusAsync(play.Summary.Id,
+            new ChangePlayStatusRequest(play.Summary.Version, "cancelled", "missed"), default);
+        Assert.Equal(hasReview, Assert.Single(await service.ListAsync(default)).HasReview);
+        Assert.Equal(hasReview, (await service.GetAsync(play.Summary.Id, default)).Summary.HasReview);
+        play = await service.UpdateAsync(play.Summary.Id, Update(play) with { Review = "" }, default);
+        Assert.False(play.Summary.HasReview);
+        Assert.Equal("cancelled", play.Summary.Status);
+    }
+
     [Fact]
     public async Task Validates_accounts_and_instruments()
     {
