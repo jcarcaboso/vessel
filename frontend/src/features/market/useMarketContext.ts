@@ -43,14 +43,15 @@ const groupedPrecise = new Intl.NumberFormat(undefined, { maximumFractionDigits:
 /** Display-only statistics derived from venue strings; not valuation or performance figures. */
 export function describeMarket(context: MarketContext) {
   const mark = Number(context.markPrice)
-  const previous = Number(context.previousDayPrice)
-  const difference = mark - previous
-  const places = Math.max(decimals(context.markPrice), decimals(context.previousDayPrice))
+  // Without a previous-day price there is no 24-hour change to show.
+  const previous = context.previousDayPrice === null ? null : Number(context.previousDayPrice)
+  const difference = previous === null ? 0 : mark - previous
+  const places = Math.max(decimals(context.markPrice), decimals(context.previousDayPrice ?? '0'))
   const sign = difference > 0 ? '+' : difference < 0 ? '−' : ''
-  const percent = previous > 0 ? Math.abs(difference / previous * 100).toFixed(2) : null
+  const percent = previous !== null && previous > 0 ? Math.abs(difference / previous * 100).toFixed(2) : null
   return {
     direction: difference > 0 ? 'up' as const : difference < 0 ? 'down' as const : 'flat' as const,
-    change: `${sign}${Math.abs(difference).toFixed(places)}${percent === null ? '' : ` / ${sign}${percent}%`}`,
+    change: previous === null ? '—' : `${sign}${Math.abs(difference).toFixed(places)}${percent === null ? '' : ` / ${sign}${percent}%`}`,
     volume: grouped.format(Number(context.dayNotionalVolume)),
     openInterest: groupedPrecise.format(Number(context.openInterest)),
     funding: `${Number(context.fundingRate) < 0 ? '−' : ''}${Math.abs(Number(context.fundingRate) * 100).toFixed(4)}%`,

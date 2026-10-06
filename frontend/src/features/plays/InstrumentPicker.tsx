@@ -5,6 +5,9 @@ import { Input } from '@/components/ui/input'
 import type { PlayDraft } from './draft'
 import { pairLabel, searchInstruments, type InstrumentCatalogState } from './instruments'
 
+/** Tags for non-crypto perpetuals, so a stock or commodity is never mistaken for a token. */
+const categoryLabels: Record<string, string> = { stocks: 'Stock', commodity: 'Commodity', index_etf: 'Index/ETF' }
+
 export function InstrumentPicker({ catalog: state, value, source, onChange }: {
   catalog: InstrumentCatalogState
   value: string
@@ -99,7 +102,8 @@ function InstrumentSearch({ id, choices, value, selected, disabled, loading, onS
         aria-selected={instrument === highlighted} data-current={instrument.contractId === value}
         // Pointer down keeps focus in the input, so blur does not close the list before the click lands.
         onPointerDown={event => event.preventDefault()} onClick={() => choose(instrument)}>
-        <span>{pairLabel(instrument)}</span><small>{instrument.maxLeverage}×</small>
+        <span>{pairLabel(instrument)}{instrument.category && instrument.category !== 'crypto' &&
+          <em className="instrument-category">{categoryLabels[instrument.category] ?? instrument.category}</em>}</span><small>{instrument.maxLeverage}×</small>
       </li>)}
       {results.length === 0 && <li className="instrument-empty" role="presentation">No perpetual matches “{query}”.</li>}
     </ul>}

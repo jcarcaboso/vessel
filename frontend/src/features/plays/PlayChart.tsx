@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { ArrowRightToLine, Camera, ChartNoAxesCombined, Layers, Maximize2, OctagonX, RefreshCw, Star, Target } from 'lucide-react'
 import { Popover } from 'radix-ui'
-import type { CandleInterval, WorkspaceApi } from '@/api/workspace'
+import { candleIntervals, type CandleInterval, type WorkspaceApi } from '@/api/workspace'
 import { CandleChart, type CandleChartControl } from '@/components/chart/CandleChart'
 import { ChartHeader, type ChartStat } from '@/components/chart/ChartHeader'
 import { ChartIconButton, ChartToolbar, ChartToolbarDivider } from '@/components/chart/ChartToolbar'
@@ -56,6 +56,10 @@ interface ChartPanelProps {
   /** Adds a chart capture to the draft evidence; returns why it was not added, or null. */
   onCapture?: (image: Blob, context: string) => string | null
   createAdapter?: ChartAdapterFactory
+  /** Intervals the venue serves; the timeframe bar offers only these. Defaults to all. */
+  intervals?: readonly CandleInterval[] | undefined
+  /** The instrument's price tick; levels placed or dragged on the chart round to it. */
+  priceStep?: number | null
 }
 
 const noDrawings: readonly ChartDrawing[] = []
@@ -70,7 +74,8 @@ const planToolIcon = { size: 16, strokeWidth: 1.6, 'aria-hidden': true } as cons
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'UTC', hour12: false })
 
 export function ChartPanel({ entries, selectedId, onSelect, instrument, instrumentName = instrument, venue = null, direction = 'long', leverage = 1, liquidation = null,
-  editable = true, source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, onCapture, onShowEvidence, createAdapter }: ChartPanelProps) {
+  editable = true, source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, onCapture, onShowEvidence, createAdapter,
+  intervals = candleIntervals, priceStep = null }: ChartPanelProps) {
   const [view, setView] = useState<ChartView>('aggregate')
   const [planTool, setPlanTool] = useState<PlanTool | null>(null)
   const [preferences, setPreferences] = useChartPreferences()
@@ -103,7 +108,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
       const entry = ref && current.find(item => item.id === ref.entryId)
       if (!ref || !entry) return
       dragStart.current ??= entry
-      const next = applyLevelDrag(current, id, price)
+      const next = applyLevelDrag(current, id, price, priceStep)
       onEntriesChange?.(next)
       if (phase === 'end') {
         const after = next.find(item => item.id === ref.entryId)!
@@ -132,7 +137,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
     if (!planTool || !entry) return
     setPlanTool(null)
     if (planTool === 'entry' && Number(entry.price) > 0) {
-      const added = placeLevel(createNextEntry(current), 'entry', price)
+      const added = placeLevel(createNextEntry(current), 'entry', price, priceStep)
       const change = (next: DraftEntry[]) => latest.current.onEntriesChange?.(next)
       change(addEntry(current, added))
       history.push({ label: `Add ${added.name}`,
@@ -141,7 +146,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
       onSelect(added.id)
       return
     }
-    applyEntry(placeLevel(entry, planTool, price), planTool === 'entry' ? `Set ${selectedTag} entry price` : `Add ${selectedTag} ${planTool}`)
+    applyEntry(placeLevel(entry, planTool, price, priceStep), planTool === 'entry' ? `Set ${selectedTag} entry price` : `Add ${selectedTag} ${planTool}`)
   }
   const onChartKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const key = event.key.toLowerCase()
@@ -150,7 +155,9 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
     else if ((event.metaKey || event.ctrlKey) && key === 'z') { event.preventDefault(); history.undo() }
     else editor.onKeyDown(event)
   }
-  const interval = preferences.interval
+  // A preferred interval the venue does not serve falls back to the hour, or the venue's first interval.
+  const interval = intervals.includes(preferences.interval) ? preferences.interval
+    : intervals.includes('1h') ? '1h' : intervals[0] ?? preferences.interval
   const [expanded, setExpanded] = useState(false)
   const expandButton = useRef<HTMLButtonElement>(null)
   const live = source !== null && instrument !== ''
@@ -251,7 +258,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   return <section className="panel chart-panel" aria-label="Chart" data-testid="chart-panel">
     {live ? <LiveChart key={`${source.accountId}|${instrument}`} source={source} instrument={instrument} interval={interval}
       instrumentName={instrumentName} caption={`${instrumentName} · ${venue ? `${venue} ` : ''}trade candles`} venue={venue} onCapture={onCapture} onShowEvidence={onShowEvidence}
-      timeframes={<TimeframeBar value={interval} favorites={preferences.favorites}
+      timeframes={<TimeframeBar value={interval} favorites={preferences.favorites} available={intervals}
         onChange={next => setPreferences({ interval: next })} onFavoritesChange={favorites => setPreferences({ favorites })} />}
       liveUpdates={preferences.live} onLiveUpdatesChange={on => setPreferences({ live: on })}
       viewMenu={favoriteTools} rail={rail} drawingBar={<>{drawingBar}{levelEditor}</>} drawingProps={drawingProps} overlays={overlays} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}

@@ -204,6 +204,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           setSelectedId(id)
           setSelectionRequest(current => current + 1)
         }} instrument={draft.instrument} instrumentName={instrumentName} venue={account ? venues.name(account.venueId) : null} direction={draft.direction}
+        intervals={account ? venues.find(account.venueId)?.intervals : undefined} priceStep={instrumentInfo?.priceStep ?? null}
         leverage={leverageOf(draft.leverage)} liquidation={estimatedLiquidation(draft.entries, draft.direction, leverageOf(draft.leverage), maxLeverage)}
         source={account && venues.can(account.venueId, 'candles') && draft.instrumentSource === 'venue' ? { api, accountId: account.id } : null}
         onEntriesChange={entries => planChange({ ...draft, entries })}

@@ -112,21 +112,35 @@ export function planOverlays(entries: readonly DraftEntry[], selectedId: string,
 
 const trim = (text: string) => text.includes('.') ? text.replace(/\.?0+$/, '') : text
 
-/** Five significant figures (Hyperliquid's perpetual price rule), at most eight decimals, no exponent. */
-export function formatDraggedPrice(price: number) {
+/** Decimal places of a tick such as 0.5 or 0.00001, at most twelve. */
+function stepDecimals(step: number) {
+  let places = 0
+  while (places < 12 && Math.abs(Math.round(step * 10 ** places) - step * 10 ** places) > 1e-9) places++
+  return places
+}
+
+/**
+ * A chart price as the venue would accept it: rounded to the instrument's tick when there is one, otherwise to
+ * five significant figures (Hyperliquid's perpetual rule), at most eight decimals, no exponent.
+ */
+export function formatDraggedPrice(price: number, step?: number | null) {
+  if (step != null && step > 0) {
+    const places = stepDecimals(step)
+    return trim((Math.round(price / step) * step).toFixed(places))
+  }
   const decimals = Math.min(8, Math.max(0, 4 - Math.floor(Math.log10(price))))
   return trim(price.toFixed(decimals))
 }
 
 /** A chart drag chooses a fixed price, switching percentage stops and targets to price units. */
-export function applyLevelDrag(entries: readonly DraftEntry[], id: string, price: number): DraftEntry[] {
+export function applyLevelDrag(entries: readonly DraftEntry[], id: string, price: number, step?: number | null): DraftEntry[] {
   const ref = parseOverlayId(id)
   if (!ref || !Number.isFinite(price) || price <= 0) return [...entries]
   return entries.map(entry => {
     if (entry.id !== ref.entryId) return entry
-    if (ref.kind === 'entry') return { ...entry, price: formatDraggedPrice(price) }
+    if (ref.kind === 'entry') return { ...entry, price: formatDraggedPrice(price, step) }
     return withExits(entry, ref.kind, exitsOf(entry, ref.kind).map(exit =>
-      exit.id === ref.levelId ? { ...exit, unit: 'price', value: formatDraggedPrice(price) } : exit))
+      exit.id === ref.levelId ? { ...exit, unit: 'price', value: formatDraggedPrice(price, step) } : exit))
   })
 }
 
@@ -147,18 +161,18 @@ export function overlayPrice(entry: DraftEntry, id: string, direction: PlayDraft
  * Puts a stop or target at `price`: fills the first blank one of that kind, or adds another. A new
  * level is in price units; the first one of its kind closes the whole entry.
  */
-export function placeExit(entry: DraftEntry, kind: ExitKind, price: number): DraftEntry {
+export function placeExit(entry: DraftEntry, kind: ExitKind, price: number, step?: number | null): DraftEntry {
   const exits = exitsOf(entry, kind)
-  const value = formatDraggedPrice(price)
+  const value = formatDraggedPrice(price, step)
   const blank = exits.find(exit => exit.value.trim() === '')
   if (blank) return withExits(entry, kind, exits.map(exit => exit.id === blank.id ? { ...exit, unit: 'price', value } : exit))
   return withExits(entry, kind, [...exits, { ...createExit(exits.length ? '' : '100'), value }])
 }
 
 /** Sets an entry price, or a stop or target as `placeExit` does, from a price picked on the chart. */
-export function placeLevel(entry: DraftEntry, kind: 'entry' | ExitKind, price: number): DraftEntry {
+export function placeLevel(entry: DraftEntry, kind: 'entry' | ExitKind, price: number, step?: number | null): DraftEntry {
   if (!Number.isFinite(price) || price <= 0) return entry
-  return kind === 'entry' ? { ...entry, price: formatDraggedPrice(price) } : placeExit(entry, kind, price)
+  return kind === 'entry' ? { ...entry, price: formatDraggedPrice(price, step) } : placeExit(entry, kind, price, step)
 }
 
 /** Adds a stop or target a step beyond the last one, or null without an entry price. */

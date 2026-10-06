@@ -62,6 +62,7 @@
 .plays-page .instrument-search { position: relative; }
 .plays-page .instrument-options { position: absolute; z-index: 40; top: calc(100% + 4px); left: -8px; right: -8px; min-width: 190px; max-height: min(340px, 55dvh); overflow-y: auto; margin: 0; padding: 5px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); box-shadow: 0 12px 34px #0007; list-style: none; }
 .plays-page .instrument-options [role="option"] { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 30px; padding: 5px 8px; border-radius: 5px; font-size: 11px; font-weight: 600; cursor: pointer; }
+.plays-page .instrument-options .instrument-category { margin-left: 6px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted-foreground); font-size: 9px; font-style: normal; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .plays-page .instrument-options [role="option"] small { color: var(--muted-foreground); font-size: 9px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .plays-page .instrument-options [role="option"][aria-selected="true"] { background: var(--accent); }
 .plays-page .instrument-options [role="option"][data-current="true"] span { color: var(--ring); }

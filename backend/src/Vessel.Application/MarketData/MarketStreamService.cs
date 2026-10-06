@@ -49,7 +49,8 @@ public sealed class MarketStreamService(IWorkspaceStore store, IVenueRegistry ve
     {
         var account = await MarketDataGuard.AccountAsync(store, accountId, ct);
         instrument = MarketDataGuard.Instrument(instrument);
-        var (validInterval, _) = MarketDataGuard.Interval(interval);
+        var venue = venues.Descriptor(account.VenueId);
+        var (validInterval, _) = MarketDataGuard.Interval(interval, venue);
         if (venues.Stream(account.VenueId) is not { } stream)
             throw new WorkspaceException(502, VenueFailure);
         ct.ThrowIfCancellationRequested();
@@ -58,7 +59,8 @@ public sealed class MarketStreamService(IWorkspaceStore store, IVenueRegistry ve
         try
         {
             var subscription = stream.Subscribe(instrument, validInterval);
-            return new MarketStreamSession(account.VenueId, instrument, subscription, lease, time);
+            return new MarketStreamSession(account.VenueId, instrument, subscription, lease, time,
+                venue?.MarketContextNotice ?? MarketContextService.Notice);
         }
         catch (MarketStreamCapacityException)
         {
@@ -81,6 +83,7 @@ public sealed class MarketStreamService(IWorkspaceStore store, IVenueRegistry ve
 public sealed class MarketStreamSession : IDisposable
 {
     private readonly string venueId;
+    private readonly string contextNotice;
     private readonly string instrument;
     private readonly IMarketStreamSubscription subscription;
     private readonly IDisposable lease;
@@ -88,10 +91,10 @@ public sealed class MarketStreamSession : IDisposable
     private int disposed;
 
     internal MarketStreamSession(string venueId, string instrument, IMarketStreamSubscription subscription,
-        IDisposable lease, TimeProvider time)
+        IDisposable lease, TimeProvider time, string contextNotice)
     {
         this.venueId = venueId; this.instrument = instrument; this.subscription = subscription;
-        this.lease = lease; this.time = time;
+        this.lease = lease; this.time = time; this.contextNotice = contextNotice;
     }
 
     /// <summary>
@@ -148,7 +151,7 @@ public sealed class MarketStreamSession : IDisposable
         MarketContextEvent { Context: var c, ObservedAt: var observed } when c.ContractId == instrument =>
             new("context", new MarketContextDto(venueId, instrument, c.MarkPrice, c.OraclePrice, c.MidPrice,
                 c.PreviousDayPrice, c.DayNotionalVolume, c.OpenInterest, c.FundingRate, c.Premium, observed,
-                MarketContextService.Notice)),
+                contextNotice)),
         MarketStatusEvent { State: var state, ObservedAt: var observed } =>
             new("status", new MarketStreamStatusDto(state switch
             {

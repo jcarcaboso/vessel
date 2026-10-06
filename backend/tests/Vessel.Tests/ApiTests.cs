@@ -95,6 +95,10 @@ public sealed class ApiTests
         foreach (var id in new[] { "lighter", "quantfury", "manual" })
             Assert.All(venues[id].GetProperty("capabilities").EnumerateObject(), capability => Assert.False(capability.Value.GetBoolean(), $"{id}.{capability.Name}"));
         Assert.Equal("none", venues["manual"].GetProperty("source").GetString());
+        Assert.Equal("significant-figures", hyperliquid.GetProperty("priceRule").GetString());
+        Assert.Equal(["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M"],
+            hyperliquid.GetProperty("intervals").EnumerateArray().Select(i => i.GetString()));
+        Assert.Empty(venues["manual"].GetProperty("intervals").EnumerateArray());
         Assert.DoesNotContain(TestToken, body);
         Assert.DoesNotContain(TestToken, string.Join(Environment.NewLine, factory.Logs));
     }

@@ -1,3 +1,5 @@
+import { candleIntervals, type CandleInterval } from './workspace'
+
 export interface VenueCapabilities {
   sync: boolean; instruments: boolean; orders: boolean; candles: boolean
   marketContext: boolean; stream: boolean; stablecoinWallet: boolean
@@ -14,6 +16,10 @@ export interface VenueInfo {
   quoteAsset: string | null
   /** Contains an `{instrument}` placeholder. */
   tradeUrlTemplate: string | null
+  /** Candle intervals the venue serves natively. */
+  intervals: CandleInterval[]
+  /** Five significant figures (Hyperliquid) or each instrument's tick. */
+  priceRule: 'significant-figures' | 'tick-size'
 }
 
 export interface SystemInfo {
@@ -48,7 +54,9 @@ function isVenue(value: unknown): value is VenueInfo {
     isRecord(value.capabilities) && capabilityNames.every(name => typeof (value.capabilities as Record<string, unknown>)[name] === 'boolean') &&
     (value.quoteAsset === null || typeof value.quoteAsset === 'string') &&
     (value.tradeUrlTemplate === null || (typeof value.tradeUrlTemplate === 'string' && value.tradeUrlTemplate.startsWith('https://') &&
-      value.tradeUrlTemplate.includes('{instrument}')))
+      value.tradeUrlTemplate.includes('{instrument}'))) &&
+    Array.isArray(value.intervals) && value.intervals.every(interval => candleIntervals.includes(interval as CandleInterval)) &&
+    ['significant-figures', 'tick-size'].includes(String(value.priceRule))
 }
 
 function isSystemInfo(value: unknown): value is SystemInfo {

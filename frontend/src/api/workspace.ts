@@ -23,6 +23,12 @@ export interface VenueInstrument {
   maxLeverage: number
   /** Asset prices are quoted and margined in, e.g. USDC for BTC/USDC. */
   quoteAsset: string
+  /** Price tick when the venue has one; prices placed on the chart round to it. */
+  priceStep?: number | null
+  /** Market category such as stocks or commodity; absent for venues that do not label markets. */
+  category?: string | null
+  /** The venue's own identifier when it differs from the contract key, e.g. a numeric market ID. */
+  venueContractId?: string | null
 }
 export interface InstrumentCatalog {
   venueId: string
@@ -42,7 +48,8 @@ export interface VenueCandle {
   low: string
   close: string
   volume: string
-  trades: number
+  /** Null when the venue reports no trade count. */
+  trades: number | null
 }
 export interface CandleSeries {
   venueId: string
@@ -68,7 +75,8 @@ export interface MarketContext {
   markPrice: string
   oraclePrice: string
   midPrice: string | null
-  previousDayPrice: string
+  /** Null when the venue does not report it; the 24-hour change is then not shown. */
+  previousDayPrice: string | null
   dayNotionalVolume: string
   openInterest: string
   fundingRate: string
@@ -247,13 +255,17 @@ const instrumentCatalog = (v: unknown): v is InstrumentCatalog => object(v) &&
   v.instruments.every((i: unknown) => object(i) && text(i.contractId) && i.contractId.trim() === i.contractId &&
     i.contractId.length > 0 && i.contractId.length <= 128 && count(i.quantityDecimals) &&
     (i.quantityDecimals as number) <= 28 && count(i.maxLeverage) && (i.maxLeverage as number) > 0 &&
-    text(i.quoteAsset) && /^[A-Za-z0-9]{1,16}$/.test(i.quoteAsset)) &&
+    text(i.quoteAsset) && /^[A-Za-z0-9]{1,16}$/.test(i.quoteAsset) &&
+    (i.priceStep == null || typeof i.priceStep === 'number' && Number.isFinite(i.priceStep) && i.priceStep > 0) &&
+    (i.category == null || text(i.category) && i.category.length <= 32) &&
+    (i.venueContractId == null || text(i.venueContractId) && i.venueContractId.length <= 128)) &&
   new Set(v.instruments.map((i: VenueInstrument) => i.contractId)).size === v.instruments.length &&
   (v.scope !== 'manual' || v.instruments.length === 0) && text(v.notice) && v.notice.length <= 1000
 const epoch = (v: unknown): v is number => count(v) && (v as number) > 0
 const unsignedDecimal = (v: unknown): v is string => decimal(v) && !v.startsWith('-')
 const candle = (v: unknown): v is VenueCandle => object(v) && epoch(v.openTime) && epoch(v.closeTime) &&
-  v.closeTime >= v.openTime && ['open', 'high', 'low', 'close', 'volume'].every(k => unsignedDecimal(v[k])) && count(v.trades)
+  v.closeTime >= v.openTime && ['open', 'high', 'low', 'close', 'volume'].every(k => unsignedDecimal(v[k])) &&
+  (v.trades === null || count(v.trades))
 const candleSeries = (query: CandleQuery) => (v: unknown): v is CandleSeries => object(v) &&
   text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 &&
   v.instrument === query.instrument && v.interval === query.interval && v.priceSource === 'trades' &&
@@ -263,7 +275,8 @@ const candleSeries = (query: CandleQuery) => (v: unknown): v is CandleSeries => 
   typeof v.historyExhausted === 'boolean' && text(v.notice) && v.notice.length <= 1000
 const marketContext = (instrument: string) => (v: unknown): v is MarketContext => object(v) &&
   text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 && v.instrument === instrument &&
-  ['markPrice', 'oraclePrice', 'previousDayPrice', 'dayNotionalVolume', 'openInterest'].every(k => unsignedDecimal(v[k])) &&
+  ['markPrice', 'oraclePrice', 'dayNotionalVolume', 'openInterest'].every(k => unsignedDecimal(v[k])) &&
+  (v.previousDayPrice === null || unsignedDecimal(v.previousDayPrice)) &&
   (v.midPrice === null || unsignedDecimal(v.midPrice)) && decimal(v.fundingRate) && nullableDecimal(v.premium) &&
   date(v.observedAt) && text(v.notice) && v.notice.length <= 1000
 const streamStatus = (v: unknown): v is MarketStreamStatus => object(v) &&

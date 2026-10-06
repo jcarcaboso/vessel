@@ -94,6 +94,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         fill.HasIndex(x => new { x.OwnerId, x.OccurredAtUtc });
         fill.Property(x => x.ContractId).HasMaxLength(128);
         fill.Property(x => x.SourceFillId).HasMaxLength(128);
+        fill.Property(x => x.VenueContractId).HasMaxLength(128);
         fill.Property(x => x.Side).HasMaxLength(32);
         fill.Property(x => x.Direction).HasMaxLength(128);
         fill.Property(x => x.PositionEffect).HasMaxLength(16);
@@ -172,6 +173,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         order.HasIndex(x => new { x.OwnerId, x.AccountId, x.OrderId }).IsUnique();
         order.Property(x => x.ContractId).HasMaxLength(128);
         order.Property(x => x.OrderId).HasMaxLength(128);
+        order.Property(x => x.VenueContractId).HasMaxLength(128);
         order.Property(x => x.Side).HasMaxLength(8);
         order.ToTable(table => table.HasCheckConstraint("CK_imported_orders_side", "\"Side\" IN ('buy', 'sell')"));
         order.Property(x => x.OrderType).HasMaxLength(32);
