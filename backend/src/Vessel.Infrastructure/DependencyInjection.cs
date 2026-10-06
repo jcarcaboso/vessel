@@ -11,6 +11,7 @@ using Vessel.Infrastructure.Auth;
 using Vessel.Infrastructure.Evidence;
 using Vessel.Application.Venues;
 using Vessel.Infrastructure.Venues.Hyperliquid;
+using Vessel.Infrastructure.Venues.Risex;
 
 namespace Vessel.Infrastructure;
 
@@ -43,6 +44,7 @@ public static class DependencyInjection
         // Venue modules register their descriptor and adapters; use cases find them by venue ID.
         services.AddSingleton(VenueDescriptor.Manual);
         services.AddSingleton(HyperliquidPerpetualReader.Descriptor);
+        AddRisex(services);
         services.AddScoped<IVenueRegistry, VenueRegistry>();
         services.AddSingleton<CandleCache>();
         services.AddSingleton<MarketContextCache>();
@@ -62,6 +64,26 @@ public static class DependencyInjection
                 .Build();
         });
         return services;
+    }
+
+    /// <summary>
+    /// RISEx: public reads by address, no credential. The API's firewall rejects some default user agents. Clients are
+    /// named per venue: a typed client's default name is its interface, so sharing it would mix base addresses.
+    /// </summary>
+    private static void AddRisex(IServiceCollection services)
+    {
+        services.AddSingleton(RisexReader.Descriptor);
+        services.AddSingleton<RisexCatalogueCache>();
+        static void Configure(HttpClient client)
+        {
+            client.BaseAddress = new Uri("https://api.rise.trade/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Vessel/1.0 (self-hosted trading journal; read-only)");
+        }
+        services.AddHttpClient<IPerpetualVenueReader, RisexReader>("risex-IPerpetualVenueReader", Configure).RemoveAllLoggers();
+        services.AddHttpClient<IVenueOrderReader, RisexReader>("risex-IVenueOrderReader", Configure).RemoveAllLoggers();
+        services.AddHttpClient<ICandleReader, RisexReader>("risex-ICandleReader", Configure).RemoveAllLoggers();
+        services.AddHttpClient<IMarketContextReader, RisexReader>("risex-IMarketContextReader", Configure).RemoveAllLoggers();
     }
 
     private static void AddEvidenceStorage(IServiceCollection services, IConfiguration config)

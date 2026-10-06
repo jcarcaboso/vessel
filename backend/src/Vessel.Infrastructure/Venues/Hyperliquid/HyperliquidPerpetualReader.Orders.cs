@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Vessel.Application.Venues;
+using Vessel.Infrastructure.Venues.Common;
 
 namespace Vessel.Infrastructure.Venues.Hyperliquid;
 
@@ -13,9 +14,7 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
 
     public Task<VenueOrderReadResult> ReadOrdersAsync(string publicAddress, CancellationToken cancellationToken)
     {
-        if (publicAddress is null || publicAddress.Length != 42 || !publicAddress.StartsWith("0x", StringComparison.Ordinal) ||
-            !publicAddress.Skip(2).All(char.IsAsciiHexDigit))
-            throw new VenueReadException("A valid 42-character hexadecimal public address is required.");
+        EvmAddress.Require(publicAddress);
         var latestTimestamp = Math.Min(253402300799999L, timeProvider.GetUtcNow().ToUnixTimeMilliseconds() + 300000);
         return ReadBoundedAsync(async token =>
         {

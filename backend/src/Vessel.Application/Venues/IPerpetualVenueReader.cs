@@ -32,7 +32,7 @@ public sealed record VenueSnapshot(
     DateTimeOffset ObservedAtUtc,
     string ValueScope,
     decimal AccountValueUsd,
-    decimal WithdrawableUsd,
+    decimal? WithdrawableUsd,
     decimal MarginUsedUsd,
     IReadOnlyList<VenuePosition> Positions,
     VenueStablecoinWallet? StablecoinWallet = null);

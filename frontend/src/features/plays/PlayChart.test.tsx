@@ -89,6 +89,18 @@ describe('Chart panel', () => {
     expect(onSelect).toHaveBeenCalledWith(list[1]!.id)
   })
 
+  it('refreshes on request only for a venue without a live stream, offering its own intervals', async () => {
+    const list = entries()
+    const candles = vi.fn().mockResolvedValue(candleSeriesFixture)
+    const { factory } = fakeAdapter()
+    render(<ChartPanel entries={list} selectedId={list[0]!.id} instrument="BTC" venue="RISEx" onSelect={vi.fn()} streamable={false}
+      intervals={['1m', '5m', '15m', '1h', '4h', '1d', '1w']} source={{ api: chartApi(candles), accountId: accountFixture.id }} createAdapter={factory} />)
+    expect(await screen.findByText(/Updated .* UTC/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Live updates' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '3 minutes' })).not.toBeInTheDocument()
+  })
+
   it('writes dragged levels back to the draft entries', async () => {
     const list = entries()
     const onEntriesChange = vi.fn()
