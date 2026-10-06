@@ -34,7 +34,7 @@ public sealed class CandleCache(TimeProvider time)
     }
 }
 
-public sealed class CandleService(IWorkspaceStore store, ICandleReader reader, CandleCache cache, TimeProvider time)
+public sealed class CandleService(IWorkspaceStore store, IVenueRegistry venues, CandleCache cache, TimeProvider time)
 {
     public const int MaxCandles = 500;
     public const string Notice =
@@ -50,7 +50,7 @@ public sealed class CandleService(IWorkspaceStore store, ICandleReader reader, C
         var now = time.GetUtcNow();
         if (endTime is <= 0 || endTime > now.Add(MaxFuture).ToUnixTimeMilliseconds())
             throw new WorkspaceException(400, "endTime must be a positive UTC millisecond timestamp, at most one day ahead.");
-        if (reader.VenueId != account.VenueId)
+        if (venues.Candles(account.VenueId) is not { } reader)
             throw new WorkspaceException(502, VenueFailure);
 
         var to = endTime ?? now.ToUnixTimeMilliseconds() / CacheBucketMs * CacheBucketMs;

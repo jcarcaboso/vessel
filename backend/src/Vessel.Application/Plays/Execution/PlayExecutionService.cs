@@ -12,7 +12,7 @@ namespace Vessel.Application.Plays.Execution;
 /// Unambiguous orders link automatically; ambiguous ones become suggestions for the owner. Read-only at the venue.
 /// </summary>
 public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore store, WorkspaceService workspace,
-    IVenueOrderReader orderReader, TimeProvider time)
+    IVenueRegistry venues, TimeProvider time)
 {
     private const int MaxUnlinkedOrders = 20;
     private const string Notice = "Orders and fills come from the venue and link to this play by order ID. " +
@@ -23,8 +23,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     {
         var play = await plays.FindAsync(playId, ct) ?? throw new WorkspaceException(404, "Play not found.");
         var account = await store.AccountAsync(play.AccountId, ct);
-        if (UntrackedReason(play, account) is { } reason) throw new WorkspaceException(409, reason);
-        if (orderReader.VenueId != account!.VenueId) throw new WorkspaceException(503, "Venue reader is unavailable.");
+        if (UntrackedReason(play, account, account is null ? null : venues.Descriptor(account.VenueId)) is { } reason) throw new WorkspaceException(409, reason);
+        if (venues.Orders(account!.VenueId) is not { } orderReader) throw new WorkspaceException(503, "Venue reader is unavailable.");
         await workspace.SyncAsync(account.Id, ct);
         VenueOrderReadResult read;
         try { read = await orderReader.ReadOrdersAsync(account.Address!, ct); }
@@ -73,7 +73,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         OrderLinkDto Link(PlayOrderLink link) => new(link.Id, Name(link.Role), link.EntryId, link.LevelId, Name(link.State), Name(link.Source),
             orders.TryGetValue(link.OrderId, out var order) ? OrderDto(order) : null, Money(fills[link.OrderId].Sum(f => f.Quantity)),
             fills[link.OrderId].OrderBy(f => f.OccurredAtUtc).Select(FillDto).ToList());
-        var reason = UntrackedReason(play, account);
+        var reason = UntrackedReason(play, account, account is null ? null : venues.Descriptor(account.VenueId));
         return new PlayExecutionDto(play.Id, PlayService.StatusName(play.Status), reason is null, reason, account?.LastSyncedAtUtc,
             totals, entries, linked.Select(Link).ToList(), suggestions.Select(Link).ToList(), unlinked, Notice);
     }
@@ -222,11 +222,11 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     }
 
     /// <summary>Why the play cannot be tracked at the venue, or null when it can.</summary>
-    public static string? UntrackedReason(Play play, Account? account) =>
+    public static string? UntrackedReason(Play play, Account? account, VenueDescriptor? venue) =>
         play.Status == PlayStatus.Draft ? "Plan the play to start tracking venue orders."
         : play.Status is PlayStatus.Closed or PlayStatus.Cancelled ? null
         : play.InstrumentSource != InstrumentSource.Venue || play.ContractId is null ? "Manual instruments are not tracked at a venue."
-        : account is null || account.VenueId != "hyperliquid" ? "Only Hyperliquid accounts are tracked."
+        : account is null || venue is not { Capabilities.Orders: true } ? "Orders are only tracked at venues that provide them."
         : !account.IsEnabled ? "Enable the account to track its orders."
         : account.Address is null ? "The account needs a public address to track its orders."
         : null;

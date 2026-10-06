@@ -2,9 +2,9 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import type { SizingDocument } from '@/api/sizing'
 import { ExternalLink, Info, PencilLine, RefreshCw } from 'lucide-react'
-import { statusLabels, venueTradeUrl, type PlayStatus } from '@/api/plays'
+import { statusLabels, type PlayStatus } from '@/api/plays'
+import { useVenues } from '@/api/venues'
 import { Input } from '@/components/ui/input'
-import { venueName } from '@/features/workspace/format'
 import type { DraftEvidence, PlayDraft } from './draft'
 import { captureFileName, createEvidence, evidenceLimits } from './evidence'
 import { DirectionToggle } from './DirectionToggle'
@@ -70,6 +70,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   // Drawings follow the venue instrument, so switching away and back keeps them.
   const drawingKey = account && draft.instrument && draft.instrumentSource === 'venue' ? `${account.venueId}:${draft.instrument}` : ''
 
+  const venues = useVenues()
   const catalog = useInstrumentCatalog(api, account)
   const instrumentInfo = draft.instrumentSource === 'venue' ? catalog.catalog?.instruments.find(item => item.contractId === draft.instrument) : undefined
   const instrumentName = instrumentInfo ? pairLabel(instrumentInfo) : draft.instrument
@@ -78,7 +79,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
     ? { quote: instrumentInfo.quoteAsset, base: instrumentInfo.contractId, quantityDecimals: instrumentInfo.quantityDecimals }
     : defaultSizeUnits
 
-  const tradeUrl = account ? venueTradeUrl(account.venueId, draft.instrument, draft.instrumentSource) : null
+  const tradeUrl = account ? venues.tradeUrl(account.venueId, draft.instrument, draft.instrumentSource) : null
   // In a read-only Play, the chart can still be viewed but not edited.
   const planChange = readOnly ? () => {} : onChange
 
@@ -133,7 +134,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   function chooseAccount(id: string) {
     const next = enabledAccounts.find(account => account.id === id)
     onChange({ ...draft, accountId: id, instrument: '',
-      instrumentSource: next?.venueId === 'hyperliquid' ? 'venue' : 'manual', budgetOverride: null })
+      instrumentSource: next && venues.can(next.venueId, 'instruments') ? 'venue' : 'manual', budgetOverride: null })
   }
 
   return <section className="plays-page" aria-label="Play draft workspace">
@@ -146,7 +147,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       <div className="plays-heading-actions">
         {tradeUrl && <a className="plays-venue-link" href={tradeUrl} target="_blank" rel="noopener noreferrer"
           title="Place the planned orders on the venue. Vessel never sends orders.">
-          <ExternalLink size={14} aria-hidden="true" />Open {instrumentName} on {venueName(account!.venueId)}</a>}
+          <ExternalLink size={14} aria-hidden="true" />Open {instrumentName} on {venues.name(account!.venueId)}</a>}
         {actions ?? <span className="workspace-badge"><PencilLine size={13} />Local draft</span>}
       </div>
     </div>
@@ -167,7 +168,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           <select id={`${fieldId}-account`} value={lockInstrument ? draft.accountId : accountId} disabled={lockInstrument || (loading && !accounts.length)} onChange={event => chooseAccount(event.target.value)}>
             <option value="">Choose an account</option>
             {lockInstrument && !account && <option value={draft.accountId}>Unavailable or disabled account</option>}
-            {filteredAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {venueName(account.venueId)}</option>)}
+            {filteredAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {venues.name(account.venueId)}</option>)}
           </select>
           {onReload && <button type="button" className="plays-reload-accounts" aria-label="Reload accounts" title="Reload accounts"
             onClick={onReload} disabled={loading} aria-busy={loading}>
@@ -202,9 +203,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         <ChartPanel entries={draft.entries} selectedId={selectedId} onSelect={id => {
           setSelectedId(id)
           setSelectionRequest(current => current + 1)
-        }} instrument={draft.instrument} instrumentName={instrumentName} venue={account ? venueName(account.venueId) : null} direction={draft.direction}
+        }} instrument={draft.instrument} instrumentName={instrumentName} venue={account ? venues.name(account.venueId) : null} direction={draft.direction}
         leverage={leverageOf(draft.leverage)} liquidation={estimatedLiquidation(draft.entries, draft.direction, leverageOf(draft.leverage), maxLeverage)}
-        source={account?.venueId === 'hyperliquid' && draft.instrumentSource === 'venue' ? { api, accountId: account.id } : null}
+        source={account && venues.can(account.venueId, 'candles') && draft.instrumentSource === 'venue' ? { api, accountId: account.id } : null}
         onEntriesChange={entries => planChange({ ...draft, entries })}
         drawings={drawingKey ? draft.drawings[drawingKey] : undefined}
         onDrawingsChange={drawings => { if (drawingKey) planChange({ ...draft, drawings: { ...draft.drawings, [drawingKey]: drawings } }) }}

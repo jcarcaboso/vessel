@@ -40,6 +40,10 @@ public static class DependencyInjection
             client.BaseAddress = new Uri("https://api.hyperliquid.xyz/");
             client.Timeout = TimeSpan.FromSeconds(20);
         }).RemoveAllLoggers();
+        // Venue modules register their descriptor and adapters; use cases find them by venue ID.
+        services.AddSingleton(VenueDescriptor.Manual);
+        services.AddSingleton(HyperliquidPerpetualReader.Descriptor);
+        services.AddScoped<IVenueRegistry, VenueRegistry>();
         services.AddSingleton<CandleCache>();
         services.AddSingleton<MarketContextCache>();
         services.AddSingleton<MarketStreamLimiter>();

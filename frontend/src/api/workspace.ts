@@ -175,7 +175,7 @@ export interface Overview {
 export interface CreateAccount {
   portfolioId: string | null
   name: string
-  venueId: 'manual' | 'hyperliquid'
+  venueId: string
   address?: string
   manualAccountValueUsd?: string
 }

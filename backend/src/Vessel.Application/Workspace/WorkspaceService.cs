@@ -6,7 +6,7 @@ using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Workspace;
 
-public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext owner, IPerpetualVenueReader reader)
+public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext owner, IVenueRegistry venues)
 {
     private static string? Money(decimal? value) => value?.ToString("0.############################", CultureInfo.InvariantCulture);
     private static void ValidateName(string? name)
@@ -26,12 +26,12 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     public async Task<AccountDto> CreateAccountAsync(CreateAccountRequest request, CancellationToken ct)
     {
         ValidateName(request.Name);
-        if (request.VenueId is not ("manual" or "hyperliquid"))
-            throw new WorkspaceException(400, "Choose manual or hyperliquid.");
+        var descriptor = venues.Descriptor(request.VenueId)
+            ?? throw new WorkspaceException(400, $"Choose {OrList(venues.Descriptors.Select(d => d.Id))}.");
 
         if (request.PortfolioId == Guid.Empty) throw new WorkspaceException(404, "Portfolio not found.");
         decimal? value = null;
-        if (request.VenueId == "manual")
+        if (descriptor.Id == VenueDescriptor.ManualId)
         {
             if (request.Address is not null) throw new WorkspaceException(400, "Manual accounts do not use a public address.");
             if (request.ManualAccountValueUsd is { } text)
@@ -44,9 +44,10 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         else
         {
             if (request.ManualAccountValueUsd is not null) throw new WorkspaceException(400, "Venue balances cannot be supplied manually.");
-            if (request.Address is not { Length: 42 } address || !address.StartsWith("0x", StringComparison.Ordinal) ||
-                !address.AsSpan(2).ContainsOnlyHex())
-                throw new WorkspaceException(400, "Hyperliquid requires a 42-character public hexadecimal address.");
+            if (descriptor.Source == VenueSources.EvmAddress &&
+                (request.Address is not { Length: 42 } address || !address.StartsWith("0x", StringComparison.Ordinal) ||
+                !address.AsSpan(2).ContainsOnlyHex()))
+                throw new WorkspaceException(400, $"{descriptor.Name} requires a 42-character public hexadecimal address.");
         }
         var account = new Account(Guid.NewGuid(), owner.OwnerId, request.VenueId, request.Name);
         account.Configure(request.PortfolioId, request.Address?.ToLowerInvariant(), value);
@@ -204,7 +205,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         if (account.VenueId == "manual")
             return new(account.VenueId, "perpetuals", "manual", [],
                 "Manual catalogue: enter a perpetual contract manually. No venue metadata is available.");
-        if (reader.VenueId != account.VenueId)
+        if (venues.Reader(account.VenueId) is not { } reader)
             throw new WorkspaceException(502, "The venue instrument read failed. Try again later.");
 
         IReadOnlyList<VenueInstrument> instruments;
@@ -227,9 +228,10 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         var failed = await store.WithAccountLockAsync(id, async account =>
         {
             if (!account.IsEnabled) throw new WorkspaceException(400, "Enable the account before refreshing it.");
-            if (account.VenueId != "hyperliquid") throw new WorkspaceException(400, "Only Hyperliquid accounts can be refreshed.");
+            if (venues.Descriptor(account.VenueId) is not { Capabilities.Sync: true })
+                throw new WorkspaceException(400, $"Only {OrList(venues.Descriptors.Where(d => d.Capabilities.Sync).Select(d => d.Name), "and")} accounts can be refreshed.");
             if (account.Address is null) throw new WorkspaceException(400, "A public address is required before refresh.");
-            if (reader.VenueId != account.VenueId) throw new WorkspaceException(503, "Venue reader is unavailable.");
+            if (venues.Reader(account.VenueId) is not { } reader) throw new WorkspaceException(503, "Venue reader is unavailable.");
             PerpetualVenueReadResult result;
             try { result = await reader.ReadAsync(account.Address, ct); }
             catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
@@ -244,6 +246,13 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         if (failed) throw new WorkspaceException(502, "The venue refresh failed. Try again later.");
         var updated = await RequireAccount(id, ct);
         return ToDto(updated, await store.SnapshotAsync(id, ct));
+    }
+
+    /// <summary>"a", "a or b", "a, b or c".</summary>
+    private static string OrList(IEnumerable<string> items, string joiner = "or")
+    {
+        var list = items.ToList();
+        return list.Count <= 1 ? string.Concat(list) : $"{string.Join(", ", list[..^1])} {joiner} {list[^1]}";
     }
 
     private async Task<Account> RequireAccount(Guid id, CancellationToken ct) =>

@@ -3,7 +3,7 @@ import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { statusLabels, type PlayStatus, type PlaySummary, type StatusRequest } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { useNotifications } from '@/components/notifications/notifications'
-import { venueName } from '@/features/workspace/format'
+import { useVenues } from '@/api/venues'
 import { ArrowLeft, History, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import { createDraft, type PlayDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
@@ -256,6 +256,7 @@ function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onD
   onContinue: () => void
   onDiscard: () => void
 }) {
+  const venues = useVenues()
   const [filter, setFilter] = useState<Filter>('active')
   const [result, setResult] = useState<{ plays: PlaySummary[] } | { error: string } | null>(null)
   const [generation, setGeneration] = useState(0)
@@ -289,7 +290,7 @@ function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onD
       {shown.map(play => <li key={play.id}>
         <button type="button" className="plays-list-item" disabled={!!unsaved || busy} onClick={() => onOpen(play.id)} aria-label={`Open ${play.title || 'Untitled play'}`}>
           <span className="plays-list-title"><strong>{play.title || 'Untitled play'}</strong>
-            <small>{play.instrument ? instrumentLabel(play.venueId, play.instrument, play.instrumentSource) : 'No instrument'} · {venueName(play.venueId)} · {accountName(play.accountId)}</small></span>
+            <small>{play.instrument ? instrumentLabel(venues.quote(play.venueId), play.instrument, play.instrumentSource) : 'No instrument'} · {venues.name(play.venueId)} · {accountName(play.accountId)}</small></span>
           <span className={`direction-chip ${play.direction}`}>{play.direction === 'long' ? 'Long' : 'Short'}</span>
           <span className={`badge play-status-${play.status}`}>{statusLabels[play.status]}</span>
           <small className="plays-list-meta">{play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated {new Date(play.updatedAtUtc).toLocaleDateString()}</small>

@@ -84,6 +84,17 @@ public sealed class ApiTests
         Assert.Equal(new[] { "hyperliquid:Hyperliquid:read-only", "lighter:Lighter:planned", "quantfury:Quantfury:candidate", "manual:Manual:manual" },
             root.GetProperty("venues").EnumerateArray().Select(v =>
                 $"{v.GetProperty("id").GetString()}:{v.GetProperty("name").GetString()}:{v.GetProperty("status").GetString()}"));
+        // Capabilities tell the browser what each venue can do; planned venues can do nothing yet.
+        var venues = root.GetProperty("venues").EnumerateArray().ToDictionary(v => v.GetProperty("id").GetString()!);
+        var hyperliquid = venues["hyperliquid"];
+        Assert.Equal("evm-address", hyperliquid.GetProperty("source").GetString());
+        Assert.Equal("USDC", hyperliquid.GetProperty("quoteAsset").GetString());
+        Assert.Equal("https://app.hyperliquid.xyz/trade/{instrument}", hyperliquid.GetProperty("tradeUrlTemplate").GetString());
+        Assert.All(new[] { "sync", "instruments", "orders", "candles", "marketContext", "stream", "stablecoinWallet" },
+            name => Assert.True(hyperliquid.GetProperty("capabilities").GetProperty(name).GetBoolean(), name));
+        foreach (var id in new[] { "lighter", "quantfury", "manual" })
+            Assert.All(venues[id].GetProperty("capabilities").EnumerateObject(), capability => Assert.False(capability.Value.GetBoolean(), $"{id}.{capability.Name}"));
+        Assert.Equal("none", venues["manual"].GetProperty("source").GetString());
         Assert.DoesNotContain(TestToken, body);
         Assert.DoesNotContain(TestToken, string.Join(Environment.NewLine, factory.Logs));
     }

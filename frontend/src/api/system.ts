@@ -1,14 +1,28 @@
+export interface VenueCapabilities {
+  sync: boolean; instruments: boolean; orders: boolean; candles: boolean
+  marketContext: boolean; stream: boolean; stablecoinWallet: boolean
+}
+
+/** One venue and what Vessel can do there. The browser checks capabilities, never venue names. */
+export interface VenueInfo {
+  id: string
+  name: string
+  status: 'planned' | 'candidate' | 'manual' | 'read-only'
+  /** How an account is identified: `evm-address`, or `none` for manual and planned venues. */
+  source: 'none' | 'evm-address'
+  capabilities: VenueCapabilities
+  quoteAsset: string | null
+  /** Contains an `{instrument}` placeholder. */
+  tradeUrlTemplate: string | null
+}
+
 export interface SystemInfo {
   application: 'Vessel'
   stage: 'foundation' | 'core'
   owner: { id: string; displayName: string }
   marketScope: 'perpetuals'
   allowsConcurrentPlays: true
-  venues: Array<{
-    id: 'hyperliquid' | 'lighter' | 'quantfury' | 'manual'
-    name: string
-    status: 'planned' | 'candidate' | 'manual' | 'read-only'
-  }>
+  venues: VenueInfo[]
 }
 
 export type ApiErrorKind = 'missing-token' | 'unauthorized' | 'unavailable' | 'invalid-response' | 'http'
@@ -24,19 +38,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+const capabilityNames = ['sync', 'instruments', 'orders', 'candles', 'marketContext', 'stream', 'stablecoinWallet']
+
+function isVenue(value: unknown): value is VenueInfo {
+  return isRecord(value) && typeof value.id === 'string' && /^[a-z][a-z\d-]{0,63}$/.test(value.id) &&
+    typeof value.name === 'string' && value.name.trim().length > 0 &&
+    ['planned', 'candidate', 'manual', 'read-only'].includes(String(value.status)) &&
+    ['none', 'evm-address'].includes(String(value.source)) &&
+    isRecord(value.capabilities) && capabilityNames.every(name => typeof (value.capabilities as Record<string, unknown>)[name] === 'boolean') &&
+    (value.quoteAsset === null || typeof value.quoteAsset === 'string') &&
+    (value.tradeUrlTemplate === null || (typeof value.tradeUrlTemplate === 'string' && value.tradeUrlTemplate.startsWith('https://') &&
+      value.tradeUrlTemplate.includes('{instrument}')))
+}
+
 function isSystemInfo(value: unknown): value is SystemInfo {
   if (!isRecord(value) || !isRecord(value.owner) || !Array.isArray(value.venues)) return false
   const venues: unknown[] = value.venues
-  const expectedVenues: Record<string, string[]> = {
-    hyperliquid: ['planned', 'read-only'], lighter: ['planned'], quantfury: ['candidate'], manual: ['manual'],
-  }
+  const ids = venues.map(venue => isRecord(venue) ? venue.id : null)
   return value.application === 'Vessel' && ['foundation', 'core'].includes(String(value.stage)) &&
     value.marketScope === 'perpetuals' && value.allowsConcurrentPlays === true &&
     typeof value.owner.id === 'string' && /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(value.owner.id) &&
     typeof value.owner.displayName === 'string' && value.owner.displayName.trim().length > 0 &&
-    venues.length === 4 && Object.entries(expectedVenues).every(([id, statuses]) =>
-      venues.filter((venue) => isRecord(venue) && venue.id === id &&
-        statuses.includes(String(venue.status)) && typeof venue.name === 'string' && venue.name.trim().length > 0).length === 1)
+    venues.every(isVenue) && new Set(ids).size === ids.length && ids.includes('manual')
 }
 
 /** Token stays in the caller's runtime memory; never put it in an environment variable or URL. */

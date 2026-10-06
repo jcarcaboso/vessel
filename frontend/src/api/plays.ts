@@ -101,13 +101,6 @@ export const isSavedEvidence = (v: unknown): v is SavedEvidence => object(v) && 
   (v.source === 'capture' || v.source === 'upload') && text(v.contentType, 64) && count(v.sizeBytes) && text(v.sha256, 64) &&
   text(v.note, 4000) && date(v.createdAtUtc) && date(v.updatedAtUtc) && (v.markup === null || object(v.markup))
 
-/** Where the owner places the planned orders. Vessel itself never sends orders. */
-export function venueTradeUrl(venueId: string, instrument: string | null, source: 'venue' | 'manual') {
-  if (!instrument || source !== 'venue') return null
-  if (venueId === 'hyperliquid' && /^[A-Za-z0-9_-]{1,32}$/.test(instrument)) return `https://app.hyperliquid.xyz/trade/${encodeURIComponent(instrument)}`
-  return null
-}
-
 export const statusLabels: Record<PlayStatus, string> = {
   draft: 'Draft', planned: 'Planned', paused: 'Paused', open: 'Open', closed: 'Closed', cancelled: 'Cancelled',
 }

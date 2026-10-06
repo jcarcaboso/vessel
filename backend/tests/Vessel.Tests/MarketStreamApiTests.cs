@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Vessel.Application.MarketData;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
@@ -25,7 +26,7 @@ public sealed class MarketStreamApiTests
     }
 
     private static MarketStreamService Service(IWorkspaceStore store, IMarketStream stream, MarketStreamLimiter? limiter = null, TimeProvider? time = null) =>
-        new(store, stream, limiter ?? new MarketStreamLimiter(), time ?? TimeProvider.System);
+        new(store, TestVenues.With(stream), limiter ?? new MarketStreamLimiter(), time ?? TimeProvider.System);
 
     [Theory]
     [InlineData("manual", false, false, "instrument=BTC&interval=1m", 409)]
@@ -62,9 +63,23 @@ public sealed class MarketStreamApiTests
     public async Task Venue_mismatch_and_upstream_failures_return_problem_details()
     {
         var (owner, store, account) = Setup();
+        // The account's venue has no stream adapter, only another venue's.
+        var other = new FakeMarketStream { VenueId = "other" };
+        await using (var factory = new CoreApiFactory(owner, store, configure: services =>
+        {
+            services.RemoveAll<IMarketStream>();
+            services.AddSingleton<IMarketStream>(other);
+        }))
+        {
+            using var client = factory.AuthorizedClient();
+            var response = await client.GetAsync(Url(account.Id, "instrument=BTC&interval=1m"));
+            Assert.Equal(502, (int)response.StatusCode);
+            Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+            Assert.Empty(other.Subscriptions);
+            Assert.Equal(0, factory.Services.GetRequiredService<MarketStreamLimiter>().Active);
+        }
         foreach (var (stream, status) in new[]
         {
-            (new FakeMarketStream { VenueId = "other" }, 502),
             (new FakeMarketStream { Failure = new VenueReadException("secret") }, 502),
             (new FakeMarketStream { Failure = new MarketStreamCapacityException("secret") }, 429)
         })

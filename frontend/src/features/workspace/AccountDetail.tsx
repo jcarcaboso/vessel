@@ -3,12 +3,14 @@ import type { AccountSnapshot, BrokerAccount, ImportedFill, WorkspaceApi } from 
 import { ApiError } from '@/api/system'
 import { Button } from '@/components/ui/button'
 import { ActivityTable } from './ActivityTable'
-import { amount, money, time, venueName } from './format'
+import { amount, money, time } from './format'
+import { useVenues } from '@/api/venues'
 import { ArrowLeft, RefreshCw, Wallet } from 'lucide-react'
 
 export function AccountDetail({ account, api, refreshing, onSync, onBack, onManage, reloadGeneration = 0 }: {
   account: BrokerAccount; api: WorkspaceApi; refreshing: boolean; onSync: (id: string) => void; onBack: () => void; onManage: () => void; reloadGeneration?: number
 }) {
+  const venues = useVenues()
   const [snapshot, setSnapshot] = useState<AccountSnapshot | null>(null)
   const [fills, setFills] = useState<ImportedFill[]>([])
   const [completed, setCompleted] = useState<{ api: WorkspaceApi; key: string } | null>(null)
@@ -30,16 +32,16 @@ export function AccountDetail({ account, api, refreshing, onSync, onBack, onMana
     return () => { active = false; controller.abort() }
   }, [api, account.id, requestKey])
   return <div className="workspace-page-content">
-    <div className="detail-actions"><Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft size={15} />All accounts</Button><div className="detail-management"><Button variant="outline" onClick={onManage}>Manage account</Button>{account.venueId === 'hyperliquid' && <Button variant="outline" onClick={() => onSync(account.id)} disabled={refreshing || account.isEnabled === false}><RefreshCw size={15} className={refreshing ? 'is-spinning' : ''} />{refreshing ? 'Refreshing…' : 'Refresh account'}</Button>}</div></div>
-    <section className="shell-panel account-detail-heading"><Wallet size={24} /><div><h2>{account.name}</h2><p>{venueName(account.venueId)} · {account.venueId === 'hyperliquid' ? 'read-only perpetuals' : account.venueId === 'manual' ? 'manual record' : 'reader not enabled'} · {time(account.lastSyncedAtUtc)}</p></div><span className="workspace-badge">{account.syncStatus}</span></section>
+    <div className="detail-actions"><Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft size={15} />All accounts</Button><div className="detail-management"><Button variant="outline" onClick={onManage}>Manage account</Button>{venues.can(account.venueId, 'sync') && <Button variant="outline" onClick={() => onSync(account.id)} disabled={refreshing || account.isEnabled === false}><RefreshCw size={15} className={refreshing ? 'is-spinning' : ''} />{refreshing ? 'Refreshing…' : 'Refresh account'}</Button>}</div></div>
+    <section className="shell-panel account-detail-heading"><Wallet size={24} /><div><h2>{account.name}</h2><p>{venues.name(account.venueId)} · {venues.can(account.venueId, 'sync') ? 'read-only perpetuals' : account.venueId === 'manual' ? 'manual record' : 'reader not enabled'} · {time(account.lastSyncedAtUtc)}</p></div><span className="workspace-badge">{account.syncStatus}</span></section>
     {error && <div className="workspace-alert" role="alert">{error}</div>}
     {account.isEnabled === false && <div className="workspace-alert" role="status">This account is disabled. Retained imports and positions are hidden and excluded from workspace totals. Use Manage account to enable it again.</div>}
     <div className="workspace-stat-grid three">
-      <div className="shell-panel metric"><span>{account.venueId === 'hyperliquid' ? 'Wallet stablecoins available' : 'Known manual value'}</span><strong>{money(account.venueId === 'hyperliquid' ? account.availableStablecoinNominalUsd ?? null : account.accountValueUsd)}</strong><small>{account.isEnabled === false ? 'Hidden while disabled' : snapshot?.stablecoinWallet ? `${snapshot.stablecoinWallet.accountMode} · nominal total minus held` : 'Refresh to read the stablecoin wallet'}</small></div>
+      <div className="shell-panel metric"><span>{venues.can(account.venueId, 'stablecoinWallet') ? 'Wallet stablecoins available' : 'Known manual value'}</span><strong>{money(venues.can(account.venueId, 'stablecoinWallet') ? account.availableStablecoinNominalUsd ?? null : account.accountValueUsd)}</strong><small>{account.isEnabled === false ? 'Hidden while disabled' : snapshot?.stablecoinWallet ? `${snapshot.stablecoinWallet.accountMode} · nominal total minus held` : 'Refresh to read the stablecoin wallet'}</small></div>
       <div className="shell-panel metric"><span>Primary perps withdrawable</span><strong>{money(snapshot?.withdrawableUsd ?? null)}</strong><small>Separate venue field · not added to wallet funds</small></div>
       <div className="shell-panel metric"><span>Margin used · reported</span><strong>{money(snapshot?.marginUsedUsd ?? null)}</strong><small>{snapshot?.positions.length ?? 0} positions in last snapshot</small></div>
     </div>
-    {account.venueId === 'hyperliquid' && <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Stablecoin wallet</h2><p>HyperCore spot/unified balances. Other assets are excluded.</p></div><span className="workspace-badge">{snapshot?.stablecoinWallet?.accountMode ?? 'Not observed'}</span></header>
+    {venues.can(account.venueId, 'stablecoinWallet') && <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Stablecoin wallet</h2><p>HyperCore spot/unified balances. Other assets are excluded.</p></div><span className="workspace-badge">{snapshot?.stablecoinWallet?.accountMode ?? 'Not observed'}</span></header>
       {account.isEnabled === false ? <div className="workspace-empty small-empty"><strong>Wallet balances hidden while disabled</strong></div> :
         !snapshot?.stablecoinWallet ? <div className="workspace-empty small-empty"><strong>Stablecoin wallet not retrieved yet</strong><p>Use Refresh account to read it. A prior perpetual snapshot alone does not describe a unified wallet.</p></div> :
         <><div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Stablecoin</th><th>Total token units</th><th>Held token units</th><th>Available token units</th></tr></thead><tbody>{snapshot.stablecoinWallet.balances.map(b => <tr key={b.tokenId}><td><strong>{b.symbol}</strong></td><td>{amount(b.total)}</td><td>{amount(b.held)}</td><td><strong>{amount(b.available)}</strong></td></tr>)}</tbody></table></div><p className="workspace-scope-note in-panel">{snapshot.stablecoinWallet.notice}</p></>}

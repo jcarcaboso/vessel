@@ -28,7 +28,7 @@ public sealed class WorkspaceTests
     {
         var owner = Guid.NewGuid();
         var store = new MemoryWorkspaceStore(owner);
-        var service = new WorkspaceService(store, new CoreOwner(owner), new FixtureReader());
+        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()));
         var complete = await service.CreatePortfolioAsync(new("Complete"), default);
         var partial = await service.CreatePortfolioAsync(new("Partial"), default);
         var empty = await service.CreatePortfolioAsync(new("Unavailable"), default);
@@ -54,7 +54,7 @@ public sealed class WorkspaceTests
     public async Task Empty_overview_and_unknown_balances_are_not_zero()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var service = new WorkspaceService(store, new CoreOwner(owner), new FixtureReader());
+        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()));
         Assert.Null((await service.OverviewAsync(default)).Totals.TotalAccountValueUsd);
         var portfolio = await service.CreatePortfolioAsync(new("Unknown"), default);
         await service.CreateAccountAsync(new(portfolio.Id, "Manual", "manual"), default);
@@ -68,7 +68,7 @@ public sealed class WorkspaceTests
     public async Task All_foreign_account_operations_return_not_found()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var service = new WorkspaceService(store, new CoreOwner(owner), new FixtureReader());
+        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()));
         var foreign = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Foreign"); store.Accounts.Add(foreign);
         Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.SnapshotAsync(foreign.Id, default))).StatusCode);
         Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.FillsAsync(foreign.Id, default))).StatusCode);

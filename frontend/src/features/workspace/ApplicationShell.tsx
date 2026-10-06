@@ -10,7 +10,8 @@ import { AccountDetail } from './AccountDetail'
 import { ActivityTable } from './ActivityTable'
 import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
-import { money, shortAddress, time, venueName } from './format'
+import { money, shortAddress, time } from './format'
+import { VenuesProvider, useVenues } from '@/api/venues'
 import {
   Activity, ArrowRight, ArrowUpRight, CircleHelp, Database, Folder, LayoutDashboard,
   LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, ShieldCheck, Wallet, BookOpen, Pencil,
@@ -32,28 +33,30 @@ function AccountRows({ accounts, portfolioNames, refreshing, onDetail, onSync, o
   accounts: BrokerAccount[]; portfolioNames: Record<string, string>; refreshing: string | null
   onDetail: (id: string) => void; onSync: (id: string) => void; onManage: (account: BrokerAccount) => void
 }) {
+  const venues = useVenues()
   return <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Account</th><th>Known value</th><th>Latest update</th><th>Connection</th><th><span className="sr-only">Actions</span></th></tr></thead>
     <tbody>{accounts.map(account => <tr key={account.id}>
-      <td><button className="account-row-name" onClick={() => onDetail(account.id)}><span className={`venue-mark ${account.venueId}`}><Wallet size={17} /></span><span><strong>{account.name}</strong><small>{venueName(account.venueId)} · {account.portfolioId ? portfolioNames[account.portfolioId] ?? 'Portfolio' : 'Unassigned'}</small></span></button></td>
-      <td className="numeric">{account.venueId === 'hyperliquid' ?
+      <td><button className="account-row-name" onClick={() => onDetail(account.id)}><span className={`venue-mark ${account.venueId}`}><Wallet size={17} /></span><span><strong>{account.name}</strong><small>{venues.name(account.venueId)} · {account.portfolioId ? portfolioNames[account.portfolioId] ?? 'Portfolio' : 'Unassigned'}</small></span></button></td>
+      <td className="numeric">{venues.can(account.venueId, 'stablecoinWallet') ?
         <><strong>{money(account.availableStablecoinNominalUsd ?? null)}</strong><small>Wallet stablecoins available · nominal</small><small>Primary perps equity {money(account.accountValueUsd)}</small></> :
         <><strong>{money(account.accountValueUsd)}</strong><small>{account.accountValueUsd === null ? 'No value recorded' : 'USD · manual value'}</small></>}</td>
       <td><strong>{time(account.lastSyncedAtUtc)}</strong><small>{account.positionCount} reported positions</small></td>
       <td><span className={`workspace-badge ${account.isEnabled === false || account.syncStatus === 'error' ? 'warning-badge' : ''}`}>{account.isEnabled === false ? 'Disabled' : account.syncStatus === 'manual' ? 'Manual' : account.syncStatus === 'synced' ? 'Read-only' : account.syncStatus === 'error' ? 'Refresh failed' : 'Not refreshed'}</span></td>
       <td><div className="row-actions"><Button variant="ghost" size="sm" onClick={() => onDetail(account.id)} aria-label={`View ${account.name}`}>View<ArrowUpRight size={14} /></Button>
         <button className="icon-button" onClick={() => onManage(account)} aria-label={`Manage ${account.name}`} title="Rename, move, disable or delete"><Pencil size={14} /></button>
-        {account.venueId === 'hyperliquid' && <button className="icon-button" disabled={refreshing !== null || account.isEnabled === false} onClick={() => onSync(account.id)} aria-label={`Refresh ${account.name}`} title={account.isEnabled === false ? 'Enable this account before refreshing' : 'Refresh current state and recent executions'}><RefreshCw size={15} className={refreshing === account.id ? 'is-spinning' : ''} /></button>}</div></td>
+        {venues.can(account.venueId, 'sync') && <button className="icon-button" disabled={refreshing !== null || account.isEnabled === false} onClick={() => onSync(account.id)} aria-label={`Refresh ${account.name}`} title={account.isEnabled === false ? 'Enable this account before refreshing' : 'Refresh current state and recent executions'}><RefreshCw size={15} className={refreshing === account.id ? 'is-spinning' : ''} /></button>}</div></td>
     </tr>)}</tbody></table></div>
 }
 
 type ShellProps = { system: SystemInfo; disconnect: () => void; api: WorkspaceApi }
 
 export function ApplicationShell(props: ShellProps) {
-  return <NotificationProvider><Shell {...props} /></NotificationProvider>
+  return <NotificationProvider><VenuesProvider venues={props.system.venues}><Shell {...props} /></VenuesProvider></NotificationProvider>
 }
 
 function Shell({ system, disconnect, api }: ShellProps) {
   const { notify } = useNotifications()
+  const venues = useVenues()
   const [page, setPage] = useState<Page>(pageFromHash)
   const [playsSession, setPlaysSession] = useState(createPlaysSession)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -137,7 +140,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
   }
   const portfolios = data?.portfolios ?? [], accounts = data?.accounts ?? []
   const enabledAccounts = accounts.filter(account => account.isEnabled !== false)
-  const readOnlyAccountCount = enabledAccounts.filter(a => a.venueId === 'hyperliquid').length
+  const readOnlyAccountCount = enabledAccounts.filter(a => venues.can(a.venueId, 'sync')).length
   const portfolioNames = Object.fromEntries(portfolios.map(p => [p.id, p.name]))
   const filteredAccounts = portfolioFilter ? accounts.filter(a => a.portfolioId === portfolioFilter) : accounts
   const selectedAccount = accounts.find(a => a.id === selectedAccountId)
@@ -181,7 +184,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
 
         {page === 'overview' && data && <>
           <section className="workspace-stat-grid">
-            <div className="shell-panel metric">{enabledAccounts.some(a => a.venueId === 'hyperliquid') ?
+            <div className="shell-panel metric">{enabledAccounts.some(a => venues.can(a.venueId, 'stablecoinWallet')) ?
               <><span>Available wallet stablecoins</span><strong>{money(data.totals.availableStablecoinNominalUsd ?? null)}</strong><small>{data.totals.stablecoinAccountCount ?? 0} observed enabled accounts · nominal only</small></> :
               <><span>Known nominal value</span><strong>{money(data.totals.totalAccountValueUsd)}</strong><small>{data.totals.valuedAccountCount} of {enabledAccounts.length} enabled accounts have a value · no FX adjustment</small></>}</div>
             <div className="shell-panel metric"><span>Enabled accounts</span><strong>{enabledAccounts.length}</strong><small>{accounts.length - enabledAccounts.length} disabled · {data.totals.portfolioCount} portfolios</small></div>
@@ -212,7 +215,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
 
         {page === 'settings' && <div className="settings-grid">
           <section className="shell-panel settings-panel"><ShieldCheck size={23} /><h2>Private session</h2><p>Connected as {system.owner.displayName}. The token lives only in this browser session's memory and is released on disconnect.</p><dl><div><dt>Authentication</dt><dd>Bearer token</dd></div><div><dt>Market scope</dt><dd>Perpetuals only</dd></div><div><dt>Orders and signing</dt><dd>Not enabled</dd></div><div><dt>Theme</dt><dd>Graphite</dd></div></dl><Button variant="outline" onClick={disconnect}><LogOut size={15} />Disconnect session</Button></section>
-          <section className="shell-panel settings-panel"><Database size={23} /><h2>Venue capabilities</h2><p>Only Hyperliquid and manual accounts can be added in this step. A refresh is explicitly requested, not a background job.</p><div className="venue-capability-list">{system.venues.map(v => <div key={v.id}><span>{v.name}</span><span className="workspace-badge">{v.status}</span></div>)}</div><p className="field-help">No venue credential, private key, full-history promise or automatic Play matching is involved.</p></section>
+          <section className="shell-panel settings-panel"><Database size={23} /><h2>Venue capabilities</h2><p>Accounts can be added at {venues.creatable().map(v => v.name).join(', ')}. A refresh is explicitly requested, not a background job.</p><div className="venue-capability-list">{system.venues.map(v => <div key={v.id}><span>{v.name}</span><span className="workspace-badge">{v.status}</span></div>)}</div><p className="field-help">No venue credential, private key, full-history promise or automatic Play matching is involved.</p></section>
         </div>}
 
         <footer className="shell-footer"><span>VESSEL / PRIVATE TRADING DIARY</span><span>{readOnlyAccountCount} enabled read-only {readOnlyAccountCount === 1 ? 'account' : 'accounts'} · <span className="address-note">{selectedAccount ? shortAddress(selectedAccount.address) : 'No order execution'}</span></span></footer>
