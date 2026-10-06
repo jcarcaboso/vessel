@@ -118,10 +118,7 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
 
     // ---- Account ----
 
-    private static string Address(string? publicAddress) =>
-        publicAddress is { Length: 42 } && publicAddress.StartsWith("0x", StringComparison.Ordinal) && publicAddress.Skip(2).All(char.IsAsciiHexDigit)
-            ? publicAddress.ToLowerInvariant()
-            : throw new VenueReadException("A valid 42-character hexadecimal public address is required.");
+    private static string Address(string? publicAddress) => EvmAddress.Require(publicAddress).ToLowerInvariant();
 
     public Task<PerpetualVenueReadResult> ReadAsync(string publicAddress, CancellationToken cancellationToken)
     {
