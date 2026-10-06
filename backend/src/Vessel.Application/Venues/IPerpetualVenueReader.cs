@@ -65,9 +65,9 @@ public sealed record VenueFill(
     string TransactionHash,
     string RawJson,
     string PositionEffect = ExecutionFacts.Unknown,
-    // Defaults keep older adapters compiling; venues whose identifier differs from the key set VenueContractId.
     string FeeBasis = ExecutionFacts.FeeReported,
     string PnlBasis = ExecutionFacts.PnlGross,
+    // Set by venues whose own identifier differs from Vessel's instrument key.
     string? VenueContractId = null);
 
 /// <summary>Rejects adapter output that does not use Vessel's execution vocabulary, before anything is stored.</summary>
