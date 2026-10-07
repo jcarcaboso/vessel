@@ -63,6 +63,7 @@ public sealed partial class LighterReader
             var cursors = new HashSet<string>(StringComparer.Ordinal);
             var missingPnl = 0;
             var fees = 0;
+            var selfTrades = 0;
             string? cursor = null;
             if (fillsAllowed)
                 for (var page = 0; page < MaxPages; page++)
@@ -95,6 +96,7 @@ public sealed partial class LighterReader
                             if (ids.Add(fill.SourceFillId)) fills.Add(fill);
                         missingPnl += result.MissingPnl;
                         fees += result.Fees;
+                        selfTrades += result.SelfTrades;
                         cursor = Cursor(trades.RootElement);
                     }
                     if (cursor is null) break;
@@ -103,6 +105,7 @@ public sealed partial class LighterReader
             if (cursor is not null) notices.Add("The five-page history limit was reached; older executions remain unimported.");
             if (missingPnl > 0) notices.Add($"{missingPnl} executions omitted because realized PnL was not reported.");
             if (fees > 0) notices.Add($"{fees} fee-bearing or unverified-fee executions omitted.");
+            if (selfTrades > 0) notices.Add($"{selfTrades} self-trade executions omitted.");
             return new PerpetualVenueReadResult(snapshot,
                 catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument!).ToArray(), fills, string.Join(" ", notices));
         }, cancellationToken);
@@ -160,7 +163,7 @@ public sealed partial class LighterReader
         return result;
     }
 
-    internal sealed record FillPage(IReadOnlyList<VenueFill> Fills, int MissingPnl, int Fees);
+    internal sealed record FillPage(IReadOnlyList<VenueFill> Fills, int MissingPnl, int Fees, int SelfTrades = 0);
 
     internal static string Effect(string side, decimal before, decimal quantity) =>
         before == 0 || (before > 0) == (side == ExecutionFacts.Buy) ? ExecutionFacts.Open
@@ -174,6 +177,7 @@ public sealed partial class LighterReader
         var fills = new List<VenueFill>();
         var missingPnl = 0;
         var fees = 0;
+        var selfTrades = 0;
         foreach (var row in Rows(root, "trades", PageSize).EnumerateArray())
         {
             var marketId = Identity(Json.Property(row, "market_id"));
@@ -183,7 +187,8 @@ public sealed partial class LighterReader
             var bid = Identity(Json.Property(row, "bid_account_id")) == source;
             if (!ask && !bid) throw Json.Invalid();
             // A self-trade has two account roles and cannot become a single execution fact without inventing semantics.
-            if (ask && bid) throw new VenueReadException("Lighter self-trade execution normalization is unsupported.");
+            // Omit it like other unsupported records; failing would block every refresh while it stays in recent history.
+            if (ask && bid) { selfTrades++; continue; }
             var side = ask ? ExecutionFacts.Sell : ExecutionFacts.Buy;
             var maker = Json.Boolean(Json.Property(row, "is_maker_ask")) == ask;
             var role = maker ? "maker" : "taker";
@@ -233,6 +238,6 @@ public sealed partial class LighterReader
                 effect, standardTier ? ExecutionFacts.FeeStandardAccountFree : ExecutionFacts.FeeReported,
                 ExecutionFacts.PnlGross, marketId));
         }
-        return new(fills, missingPnl, fees);
+        return new(fills, missingPnl, fees, selfTrades);
     }
 }

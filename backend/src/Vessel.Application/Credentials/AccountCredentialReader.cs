@@ -1,5 +1,6 @@
 using Vessel.Application.Ownership;
 using Vessel.Application.Workspace;
+using Vessel.Domain.Accounts;
 
 namespace Vessel.Application.Credentials;
 
@@ -19,4 +20,14 @@ public sealed class AccountCredentialReader(IWorkspaceStore accounts, IAccountCr
             try { return vault.Open(owner.OwnerId, accountId, purpose, credential.Sealed()); }
             catch (CredentialStorageException) { return null; }
         }, cancellationToken);
+
+    // Play execution status is polled while a play is open. Taking the account row lock here would queue
+    // every poll behind a running refresh, and decrypting would expose the token for no reason.
+    public async Task<bool> IsUsableAsync(Account account, CancellationToken cancellationToken)
+    {
+        if (account.OwnerId != owner.OwnerId || !account.IsEnabled) return false;
+        var credential = await credentials.FindAsync(account.Id, account.VenueId + "-read-token", cancellationToken);
+        return credential is not null && credential.ExpiresAt > time.GetUtcNow() && credential.LastError is null &&
+            vault.HasKey(credential.KeyId);
+    }
 }

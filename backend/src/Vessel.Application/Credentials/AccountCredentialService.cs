@@ -10,13 +10,14 @@ public sealed class AccountCredentialService(
     IWorkspaceStore accounts, IAccountCredentialStore credentials, IJournalOwnerContext owner,
     IVenueRegistry venues, IEnumerable<IVenueCredentialVerifier> verifiers, ICredentialVault vault, TimeProvider time)
 {
-    public Task<AccountCredentialDto> GetAsync(Guid id, CancellationToken ct) =>
-        accounts.WithAccountLockAsync(id, async account =>
-        {
-            Guard(account, requireEnabled: false);
-            var credential = await credentials.FindAsync(id, Purpose(account), ct);
-            return Metadata(account, credential);
-        }, ct);
+    // Read-only: no row lock, so opening Manage account does not wait behind a running refresh.
+    public async Task<AccountCredentialDto> GetAsync(Guid id, CancellationToken ct)
+    {
+        var account = await accounts.AccountAsync(id, ct) ?? throw new WorkspaceException(404, "Account not found.");
+        Guard(account, requireEnabled: false);
+        var credential = await credentials.FindAsync(id, Purpose(account), ct);
+        return Metadata(account, credential);
+    }
 
     public Task<AccountCredentialDto> PutAsync(Guid id, SaveAccountCredentialRequest request, CancellationToken ct) =>
         accounts.WithAccountLockAsync(id, async account =>

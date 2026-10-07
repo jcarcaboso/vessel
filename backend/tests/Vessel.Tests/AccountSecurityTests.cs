@@ -195,6 +195,24 @@ public sealed class AccountSecurityTests
         Assert.NotNull((await service.GetAsync(account.Id, default)).Credential);
         Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.GetAsync(Guid.NewGuid(), default))).StatusCode);
     }
+
+    [Fact]
+    public async Task Usable_status_reads_metadata_only_and_matches_reader_rules()
+    {
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var account = SecurityFixture.Account(owner); store.Accounts.Add(account);
+        var credentials = new SecurityCredentialStore(); using var vault = SecurityFixture.Vault();
+        await SecurityFixture.Service(owner, store, credentials, vault).PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
+        var reader = new AccountCredentialReader(store, credentials, new CoreOwner(owner), vault, SecurityFixture.Clock);
+        Assert.True(await reader.IsUsableAsync(account, default));
+        using var rotated = new Vessel.Infrastructure.Credentials.AesGcmCredentialVault(new() { ActiveKeyId = "v2", Keys = new() { ["v2"] = SecurityFixture.Key } });
+        Assert.False(await new AccountCredentialReader(store, credentials, new CoreOwner(owner), rotated, SecurityFixture.Clock).IsUsableAsync(account, default));
+        Assert.False(await new AccountCredentialReader(store, credentials, new CoreOwner(Guid.NewGuid()), vault, SecurityFixture.Clock).IsUsableAsync(account, default));
+        credentials.Stored!.ExpiresAt = SecurityFixture.Now;
+        Assert.False(await reader.IsUsableAsync(account, default));
+        credentials.Stored.ExpiresAt = SecurityFixture.Now.AddDays(1);
+        account.UpdateSettings(account.Name, null, false);
+        Assert.False(await reader.IsUsableAsync(account, default));
+    }
 }
 
 internal static class SecurityFixture

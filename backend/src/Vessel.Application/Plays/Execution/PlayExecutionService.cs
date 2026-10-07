@@ -30,7 +30,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         await workspace.WithAccountLockAsync(account.Id, async lockedAccount =>
         {
             if (!lockedAccount.IsEnabled) throw new WorkspaceException(409, "Enable the account to track its orders.");
-            if (await CredentialReasonAsync(lockedAccount, ct) is { } credentialReason)
+            if (await CredentialReasonAsync(lockedAccount, usableOnly: false, ct) is { } credentialReason)
                 throw new WorkspaceException(409, credentialReason);
             VenueOrderReadResult read;
             try
@@ -89,7 +89,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             fills[link.OrderId].OrderBy(f => f.OccurredAtUtc).Select(FillDto).ToList());
         var reason = UntrackedReason(play, account, account is null ? null : venues.Descriptor(account.VenueId));
         if (reason is null && account is { IsEnabled: true } && play.Status is not (PlayStatus.Closed or PlayStatus.Cancelled))
-            reason = await CredentialReasonAsync(account, ct);
+            reason = await CredentialReasonAsync(account, usableOnly: true, ct);
         return new PlayExecutionDto(play.Id, PlayService.StatusName(play.Status), reason is null, reason, account?.LastSyncedAtUtc,
             totals, entries, linked.Select(Link).ToList(), suggestions.Select(Link).ToList(), unlinked, Notice);
     }
@@ -267,9 +267,12 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         : account.SourceId is null ? "The account needs a source identity to track its orders."
         : null;
 
-    private async Task<string?> CredentialReasonAsync(Account account, CancellationToken ct) =>
+    /// <summary>The status path checks metadata only; the refresh path, already under the lock, opens the token.</summary>
+    private async Task<string?> CredentialReasonAsync(Account account, bool usableOnly, CancellationToken ct) =>
         venues.Descriptor(account.VenueId)?.Capabilities.ReadOnlyCredential == true &&
-        (credentials is null || await credentials.ReadAsync(account.Id, ct) is null)
+        (credentials is null || !(usableOnly
+            ? await credentials.IsUsableAsync(account, ct)
+            : await credentials.ReadAsync(account.Id, ct) is not null))
             ? "Add or renew a read-only token to track orders." : null;
 
     /// <summary>The basis shared by every fill, "mixed" if they differ, or gross when there are none.</summary>

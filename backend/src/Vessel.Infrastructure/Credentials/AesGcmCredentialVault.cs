@@ -10,6 +10,7 @@ public sealed class AesGcmCredentialVault : ICredentialVault, IDisposable
     private readonly CredentialKeyRing ring;
     public AesGcmCredentialVault(CredentialSettings settings) => ring = CredentialKeyRing.Load(settings);
     public bool IsConfigured => ring.ActiveKeyId is { } id && ring.Keys.ContainsKey(id);
+    public bool HasKey(string keyId) => IsConfigured && ring.Keys.ContainsKey(keyId);
 
     public SealedCredential Seal(Guid ownerId, Guid accountId, string purpose, string plaintext)
     {

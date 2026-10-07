@@ -256,6 +256,15 @@ public sealed class LighterAdapterTests
         Assert.Single(Fills(Change(Trade, "maker_fee", null), standard: true).Fills);
     }
 
+    [Fact]
+    public void Self_trade_is_omitted_and_counted_instead_of_failing_the_page()
+    {
+        var page = Fills(Trade + "," + Change(Change(Trade, "bid_account_id", JsonValue.Create(long.Parse(Source))),
+            "trade_id", JsonValue.Create(5)).Replace("\"trade_id_str\":\"9223372036854775806\"", "\"trade_id_str\":\"5\""));
+        Assert.Single(page.Fills);
+        Assert.Equal(1, page.SelfTrades);
+    }
+
     [Theory]
     [InlineData("ask_id_str", "\"9007199254740994\"")]
     [InlineData("price", "\"0.12345678901234567890123456789\"")]
