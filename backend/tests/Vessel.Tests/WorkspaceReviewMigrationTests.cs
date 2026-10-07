@@ -40,9 +40,9 @@ public sealed class WorkspaceReviewMigrationTests
         Assert.All(accounts.Where(a => a.VenueId == "manual"), a => Assert.Null(a.Address));
         Assert.False(db.Database.HasPendingModelChanges());
         var duplicate = Guid.NewGuid(); var lower = address.ToLowerInvariant();
-        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO accounts (\"Id\", \"OwnerId\", \"Name\", \"VenueId\", \"Address\", \"SyncStatus\") VALUES ({duplicate}, {owner}, 'Alias', 'hyperliquid', {lower}, 'not-synced')"));
-        Assert.Equal(PostgresErrorCodes.UniqueViolation, error.SqlState); Assert.Equal("UX_accounts_owner_venue_address", error.ConstraintName);
-        var badNormalization = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO accounts (\"Id\", \"OwnerId\", \"Name\", \"VenueId\", \"Address\", \"SyncStatus\") VALUES ({duplicate}, {owner}, 'Mixed case', 'hyperliquid', {address}, 'not-synced')"));
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO accounts (\"Id\", \"OwnerId\", \"Name\", \"VenueId\", \"Address\", \"SourceId\", \"SyncStatus\") VALUES ({duplicate}, {owner}, 'Alias', 'hyperliquid', {lower}, {lower}, 'not-synced')"));
+        Assert.Equal(PostgresErrorCodes.UniqueViolation, error.SqlState); Assert.Equal("UX_accounts_owner_venue_source", error.ConstraintName);
+        var badNormalization = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO accounts (\"Id\", \"OwnerId\", \"Name\", \"VenueId\", \"Address\", \"SourceId\", \"SyncStatus\") VALUES ({duplicate}, {owner}, 'Mixed case', 'hyperliquid', {address}, {address}, 'not-synced')"));
         Assert.Equal(PostgresErrorCodes.CheckViolation, badNormalization.SqlState); Assert.Equal("CK_accounts_normalized_address", badNormalization.ConstraintName);
     }
 

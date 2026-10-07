@@ -36,6 +36,7 @@ export function AccountDetail({ account, api, refreshing, onSync, onBack, onMana
   return <div className="workspace-page-content">
     <div className="detail-actions"><Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft size={15} />All accounts</Button><div className="detail-management"><Button variant="outline" onClick={onManage}>Manage account</Button>{synced && <Button variant="outline" onClick={() => onSync(account.id)} disabled={refreshing || account.isEnabled === false}><RefreshCw size={15} className={refreshing ? 'is-spinning' : ''} />{refreshing ? 'Refreshing…' : 'Refresh account'}</Button>}</div></div>
     <section className="shell-panel account-detail-heading"><Wallet size={24} /><div><h2>{account.name}</h2><p>{venues.name(account.venueId)} · {synced ? 'read-only perpetuals' : account.venueId === 'manual' ? 'manual record' : 'reader not enabled'} · {time(account.lastSyncedAtUtc)}</p></div><span className="workspace-badge">{account.syncStatus}</span></section>
+    {(account.sourceId ?? account.address) && <p className="account-source"><span>Source</span> {account.sourceId ?? account.address}</p>}
     {error && <div className="workspace-alert" role="alert">{error}</div>}
     {account.isEnabled === false && <div className="workspace-alert" role="status">This account is disabled. Retained imports and positions are hidden and excluded from workspace totals. Use Manage account to enable it again.</div>}
     <div className="workspace-stat-grid three">

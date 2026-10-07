@@ -67,6 +67,10 @@ namespace Vessel.Persistence.Migrations
                         .HasColumnType("bigint")
                         .HasDefaultValue(1L);
 
+                    b.Property<string>("SourceId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<string>("SyncStatus")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -81,16 +85,75 @@ namespace Vessel.Persistence.Migrations
 
                     b.HasIndex("OwnerId", "PortfolioId");
 
-                    b.HasIndex("OwnerId", "VenueId", "Address")
+                    b.HasIndex("OwnerId", "VenueId", "SourceId")
                         .IsUnique()
-                        .HasDatabaseName("UX_accounts_owner_venue_address")
-                        .HasFilter("\"Address\" IS NOT NULL");
+                        .HasDatabaseName("UX_accounts_owner_venue_source")
+                        .HasFilter("\"SourceId\" IS NOT NULL");
 
                     b.ToTable("accounts", null, t =>
                         {
                             t.HasCheckConstraint("CK_accounts_normalized_address", "\"Address\" IS NULL OR \"Address\" = lower(\"Address\")");
 
                             t.HasCheckConstraint("CK_accounts_settings_revision", "\"SettingsRevision\" >= 1");
+
+                            t.HasCheckConstraint("CK_accounts_source_identity", "(\"Address\" IS NULL OR \"SourceId\" IS NOT NULL AND \"SourceId\" = \"Address\") AND CASE WHEN \"SourceId\" IS NULL OR \"Address\" IS NOT NULL THEN true WHEN \"SourceId\" ~ '^(0|[1-9][0-9]{0,18})$' THEN \"SourceId\"::numeric <= 9223372036854775807 ELSE false END");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Credentials.AccountCredential", b =>
+                {
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Purpose")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<byte[]>("Ciphertext")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("KeyId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("LastVerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<byte[]>("Nonce")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<byte[]>("Tag")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.HasKey("OwnerId", "AccountId", "Purpose");
+
+                    b.ToTable("account_credentials", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_account_credentials_envelope", "octet_length(\"Nonce\") = 12 AND octet_length(\"Tag\") = 16 AND octet_length(\"Ciphertext\") BETWEEN 1 AND 2048");
+
+                            t.HasCheckConstraint("CK_account_credentials_scope", "\"Scope\" IN ('single', 'all')");
                         });
                 });
 
@@ -439,6 +502,10 @@ namespace Vessel.Persistence.Migrations
                     b.Property<decimal>("UnrealizedPnlUsd")
                         .HasColumnType("numeric");
 
+                    b.Property<string>("VenueContractId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.HasKey("OwnerId", "AccountId", "ContractId");
 
                     b.ToTable("account_positions", (string)null);
@@ -729,6 +796,16 @@ namespace Vessel.Persistence.Migrations
                         .HasForeignKey("OwnerId", "PortfolioId")
                         .HasPrincipalKey("OwnerId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Credentials.AccountCredential", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Vessel.Domain.Evidence.PlayEvidence", b =>

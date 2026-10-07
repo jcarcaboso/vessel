@@ -19,7 +19,8 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
         return ReadBoundedAsync(async token =>
         {
             using var meta = await ReadJsonAsync(new { type = "meta", dex = "" }, token);
-            var contracts = ReadInstruments(meta.RootElement).Select(i => i.ContractId).ToHashSet(StringComparer.Ordinal);
+            var contracts = ReadInstruments(meta.RootElement).Select(i => i.VenueContractId ?? i.ContractId)
+                .ToHashSet(StringComparer.Ordinal);
             using var history = await ReadJsonAsync(new { type = "historicalOrders", user = publicAddress }, token);
             using var open = await ReadJsonAsync(new { type = "frontendOpenOrders", user = publicAddress, dex = "" }, token);
             var orders = new Dictionary<string, VenueOrder>(StringComparer.Ordinal);
@@ -56,10 +57,11 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
         var isTrigger = Property(order, "isTrigger");
         if (isTrigger.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw new VenueReadException(InvalidResponse);
         var trigger = isTrigger.GetBoolean() ? Positive(Property(order, "triggerPx")) : (decimal?)null;
-        return new VenueOrder(Identity(Property(order, "oid")), coin, SideOf(side), Text(Property(order, "orderType"), 32),
+        return new VenueOrder(Identity(Property(order, "oid")), HyperliquidInstruments.Canonical(coin), SideOf(side), Text(Property(order, "orderType"), 32),
             Nonnegative(Property(order, "limitPx")), trigger, Flag(order, "reduceOnly"), Flag(order, "isPositionTpsl"),
             Nonnegative(Property(order, "origSz")), Nonnegative(Property(order, "sz")),
-            Timestamp(Property(order, "timestamp"), latestTimestamp), status, venueStatus, statusAt);
+            Timestamp(Property(order, "timestamp"), latestTimestamp), status, venueStatus, statusAt,
+            VenueContractId: HyperliquidInstruments.Canonical(coin) == coin ? null : coin);
     }
 
     private static bool Flag(JsonElement order, string name) =>

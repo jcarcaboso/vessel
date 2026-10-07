@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+python3 -m unittest discover -s scripts -p 'test_*.py'
 pnpm test:prototype
 dotnet restore backend/Vessel.slnx --locked-mode
 dotnet build backend/Vessel.slnx --no-restore --configuration Release

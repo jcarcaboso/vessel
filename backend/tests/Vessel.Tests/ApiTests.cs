@@ -81,7 +81,7 @@ public sealed class ApiTests
         Assert.True(root.GetProperty("allowsConcurrentPlays").GetBoolean());
         Assert.Equal("11111111-1111-1111-1111-111111111111", root.GetProperty("owner").GetProperty("id").GetString());
         Assert.Equal("Owner", root.GetProperty("owner").GetProperty("displayName").GetString());
-        Assert.Equal(new[] { "hyperliquid:Hyperliquid:read-only", "risex:RISEx:read-only", "lighter:Lighter:planned", "quantfury:Quantfury:candidate", "manual:Manual:manual" },
+        Assert.Equal(new[] { "hyperliquid:Hyperliquid:read-only", "risex:RISEx:read-only", "lighter:Lighter:read-only", "quantfury:Quantfury:candidate", "manual:Manual:manual" },
             root.GetProperty("venues").EnumerateArray().Select(v =>
                 $"{v.GetProperty("id").GetString()}:{v.GetProperty("name").GetString()}:{v.GetProperty("status").GetString()}"));
         // Capabilities tell the browser what each venue can do; planned venues can do nothing yet.
@@ -89,10 +89,10 @@ public sealed class ApiTests
         var hyperliquid = venues["hyperliquid"];
         Assert.Equal("evm-address", hyperliquid.GetProperty("source").GetString());
         Assert.Equal("USDC", hyperliquid.GetProperty("quoteAsset").GetString());
-        Assert.Equal("https://app.hyperliquid.xyz/trade/{instrument}", hyperliquid.GetProperty("tradeUrlTemplate").GetString());
+        Assert.Equal("https://app.hyperliquid.xyz/trade/{venueContractId}", hyperliquid.GetProperty("tradeUrlTemplate").GetString());
         Assert.All(new[] { "sync", "instruments", "orders", "candles", "marketContext", "stream", "stablecoinWallet" },
             name => Assert.True(hyperliquid.GetProperty("capabilities").GetProperty(name).GetBoolean(), name));
-        foreach (var id in new[] { "lighter", "quantfury", "manual" })
+        foreach (var id in new[] { "quantfury", "manual" })
             Assert.All(venues[id].GetProperty("capabilities").EnumerateObject(), capability => Assert.False(capability.Value.GetBoolean(), $"{id}.{capability.Name}"));
         Assert.Equal("none", venues["manual"].GetProperty("source").GetString());
         Assert.Equal("significant-figures", hyperliquid.GetProperty("priceRule").GetString());
@@ -107,6 +107,16 @@ public sealed class ApiTests
         Assert.False(risex.GetProperty("capabilities").GetProperty("stream").GetBoolean());
         Assert.False(risex.GetProperty("capabilities").GetProperty("stablecoinWallet").GetBoolean());
         Assert.True(risex.GetProperty("capabilities").GetProperty("orders").GetBoolean());
+        var lighter = venues["lighter"];
+        Assert.Equal("account-index", lighter.GetProperty("source").GetString());
+        Assert.Equal("https://app.lighter.xyz/read-only-tokens", lighter.GetProperty("credentialSetupUrl").GetString());
+        Assert.Equal("tick-size", lighter.GetProperty("priceRule").GetString());
+        Assert.All(new[] { "sync", "instruments", "orders", "candles", "accountDiscovery", "readOnlyCredential" },
+            name => Assert.True(lighter.GetProperty("capabilities").GetProperty(name).GetBoolean(), name));
+        Assert.All(new[] { "marketContext", "stream", "stablecoinWallet" },
+            name => Assert.False(lighter.GetProperty("capabilities").GetProperty(name).GetBoolean(), name));
+        Assert.Equal(["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d"],
+            lighter.GetProperty("intervals").EnumerateArray().Select(i => i.GetString()));
         Assert.DoesNotContain(TestToken, body);
         Assert.DoesNotContain(TestToken, string.Join(Environment.NewLine, factory.Logs));
     }

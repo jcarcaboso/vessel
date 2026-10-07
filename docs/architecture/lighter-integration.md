@@ -1,8 +1,10 @@
 # Lighter integration: research, decisions, plan and tasks
 
-Research checked October 5, 2026 against the official docs ([apidocs.lighter.xyz](https://apidocs.lighter.xyz/llms.txt), OpenAPI `zklighter-perps@1.0.240`) and live unauthenticated reads of public mainnet endpoints. Owner decisions were recorded the same day. Implementation is not yet authorized: this document is the plan to fit Lighter in. Secure token storage is specified separately in [venue-credentials.md](venue-credentials.md).
+Research checked October 5, 2026 against the official docs ([apidocs.lighter.xyz](https://apidocs.lighter.xyz/llms.txt), OpenAPI `zklighter-perps@1.0.240`) and live unauthenticated reads of public mainnet endpoints. Owner decisions were recorded the same day. On October 7 the owner authorized implementation after RISEx, including secure credential entry and main/subaccount import management. The [delivery contract](lighter-delivery-contract.md) bounds that implementation; the phase table below remains the original investigation plan. Secure token storage is specified separately in [venue-credentials.md](venue-credentials.md).
 
 Lighter is "planned" in `SystemMetadata` and "next after Hyperliquid" in the MVP alignment. A third venue, [RISEx](risex-integration.md), was investigated the same day and shares the L0 phase below; its findings changed L0.2, L0.3, L0.5, L0.6 and L0.7. Perpetuals-first still applies: Lighter now also lists spot markets (`market_type: "spot"`, e.g. `rhSPY/USDC`), which are excluded.
+
+For the implemented October 7 behavior, verification and operational limits, read [Lighter implementation](lighter-state.md). It supersedes older endpoint assumptions below, including the interval list, fee-free assumptions and whether a read needs authentication.
 
 ## Owner decisions (October 5, 2026)
 

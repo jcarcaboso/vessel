@@ -60,6 +60,7 @@ public sealed class AccountPosition
     public Guid OwnerId { get; set; }
     public Guid AccountId { get; set; }
     public string ContractId { get; set; } = null!;
+    public string? VenueContractId { get; set; }
     public decimal SignedQuantity { get; set; }
     public decimal EntryPrice { get; set; }
     public decimal UnrealizedPnlUsd { get; set; }

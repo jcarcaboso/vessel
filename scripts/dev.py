@@ -32,6 +32,9 @@ def configuration():
     for key in ["Vessel__Auth__Token", "Vessel__Auth__OwnerId", "Vessel__Auth__OwnerName"]:
         if key in values:
             env[key] = values[key]
+    for key, value in values.items():
+        if configuration_key(key).startswith("vessel:credentials:"):
+            env[key] = value
     if values.get("ConnectionStrings__Vessel"):
         env["ConnectionStrings__Vessel"] = values["ConnectionStrings__Vessel"]
     else:
@@ -43,6 +46,19 @@ def configuration():
             'Host=127.0.0.1;Port=55432;Database=vessel;Username=vessel;Password="' + quoted + '"'
         )
     return env
+
+
+def configuration_key(key):
+    # .NET accepts both separators and compares configuration keys without case.
+    return key.replace("__", ":").casefold()
+
+
+def frontend_environment():
+    # This process loads Vite plugins as well as the client build. Keep server
+    # credentials out of it, even when they came from the caller's environment.
+    return {key: value for key, value in os.environ.items()
+            if not configuration_key(key).startswith(("vessel:", "connectionstrings:"))
+            and key not in ["POSTGRES_PASSWORD", "Vessel_TEST_POSTGRES"]}
 
 
 def main():
@@ -85,12 +101,9 @@ def main():
         ))
         if mode in ["run", "lan"]:
             # Do not give the frontend process database credentials or the API token.
-            web_env = {k: v for k, v in os.environ.items() if
-                       not k.startswith(("Vessel__Auth__", "ConnectionStrings__")) and
-                       k not in ["POSTGRES_PASSWORD", "Vessel_TEST_POSTGRES"]}
             processes.append(subprocess.Popen(
                 ["pnpm", "--filter", "vessel-frontend", "dev", "--host", host],
-                cwd=ROOT, env=web_env, start_new_session=True,
+                cwd=ROOT, env=frontend_environment(), start_new_session=True,
             ))
             print(f"Frontend: http://{host}:5180 · API: http://127.0.0.1:5080", flush=True)
             print("Token is read privately from root .env. Stop with Ctrl+C; PostgreSQL remains mounted.", flush=True)

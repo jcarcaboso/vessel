@@ -1,5 +1,6 @@
 using System.Globalization;
 using Vessel.Application.Venues;
+using Vessel.Application.Credentials;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
@@ -12,7 +13,7 @@ namespace Vessel.Application.Plays.Execution;
 /// Unambiguous orders link automatically; ambiguous ones become suggestions for the owner. Read-only at the venue.
 /// </summary>
 public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore store, WorkspaceService workspace,
-    IVenueRegistry venues, TimeProvider time)
+    IVenueRegistry venues, TimeProvider time, IAccountCredentialReader? credentials = null)
 {
     private const int MaxUnlinkedOrders = 20;
     private const string Notice = "Orders and fills come from the venue and link to this play by order ID. " +
@@ -26,19 +27,26 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         if (UntrackedReason(play, account, account is null ? null : venues.Descriptor(account.VenueId)) is { } reason) throw new WorkspaceException(409, reason);
         if (venues.Orders(account!.VenueId) is not { } orderReader) throw new WorkspaceException(503, "Venue reader is unavailable.");
         await workspace.SyncAsync(account.Id, ct);
-        VenueOrderReadResult read;
-        try
+        await workspace.WithAccountLockAsync(account.Id, async lockedAccount =>
         {
-            read = await orderReader.ReadOrdersAsync(account.Address!, ct);
-            if (!read.Orders.All(VenueFactChecks.Valid))
-                throw new VenueReadException("The venue adapter returned orders outside Vessel's execution vocabulary.");
-        }
-        catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
-        {
-            throw new WorkspaceException(502, "Venue orders could not be read. Try again later.");
-        }
-        var ticks = await TicksAsync(account, ct);
-        await store.WithAccountLockAsync(account.Id, async () => { await ReconcileAsync(account, read, ticks, ct); return true; }, ct);
+            if (!lockedAccount.IsEnabled) throw new WorkspaceException(409, "Enable the account to track its orders.");
+            if (await CredentialReasonAsync(lockedAccount, ct) is { } credentialReason)
+                throw new WorkspaceException(409, credentialReason);
+            VenueOrderReadResult read;
+            try
+            {
+                read = await orderReader.ReadOrdersAsync(lockedAccount, ct);
+                if (!read.Orders.All(VenueFactChecks.Valid))
+                    throw new VenueReadException("The venue adapter returned orders outside Vessel's execution vocabulary.");
+            }
+            catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
+            {
+                throw new WorkspaceException(502, "Venue orders could not be read. Try again later.");
+            }
+            var ticks = await TicksAsync(lockedAccount, ct);
+            await store.WithAccountLockAsync(lockedAccount.Id, async () => { await ReconcileAsync(lockedAccount, read, ticks, ct); return true; }, ct);
+            return true;
+        }, ct);
         return await GetAsync(playId, ct);
     }
 
@@ -80,6 +88,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             orders.TryGetValue(link.OrderId, out var order) ? OrderDto(order) : null, Money(fills[link.OrderId].Sum(f => f.Quantity)),
             fills[link.OrderId].OrderBy(f => f.OccurredAtUtc).Select(FillDto).ToList());
         var reason = UntrackedReason(play, account, account is null ? null : venues.Descriptor(account.VenueId));
+        if (reason is null && account is { IsEnabled: true } && play.Status is not (PlayStatus.Closed or PlayStatus.Cancelled))
+            reason = await CredentialReasonAsync(account, ct);
         return new PlayExecutionDto(play.Id, PlayService.StatusName(play.Status), reason is null, reason, account?.LastSyncedAtUtc,
             totals, entries, linked.Select(Link).ToList(), suggestions.Select(Link).ToList(), unlinked, Notice);
     }
@@ -254,8 +264,13 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         : play.InstrumentSource != InstrumentSource.Venue || play.ContractId is null ? "Manual instruments are not tracked at a venue."
         : account is null || venue is not { Capabilities.Orders: true } ? "Orders are only tracked at venues that provide them."
         : !account.IsEnabled ? "Enable the account to track its orders."
-        : account.Address is null ? "The account needs a public address to track its orders."
+        : account.SourceId is null ? "The account needs a source identity to track its orders."
         : null;
+
+    private async Task<string?> CredentialReasonAsync(Account account, CancellationToken ct) =>
+        venues.Descriptor(account.VenueId)?.Capabilities.ReadOnlyCredential == true &&
+        (credentials is null || await credentials.ReadAsync(account.Id, ct) is null)
+            ? "Add or renew a read-only token to track orders." : null;
 
     /// <summary>The basis shared by every fill, "mixed" if they differ, or gross when there are none.</summary>
     private static string PnlBasis(IReadOnlyCollection<ImportedFill> fills) =>

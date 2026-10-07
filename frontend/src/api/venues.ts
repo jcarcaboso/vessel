@@ -1,5 +1,5 @@
 import { createContext, createElement, useContext, useMemo, type ReactNode } from 'react'
-import type { VenueCapabilities, VenueInfo } from './system'
+import { isTradeUrlTemplate, type VenueCapabilities, type VenueInfo } from './system'
 
 const instrumentPattern = /^[A-Za-z0-9_-]{1,32}$/
 
@@ -16,10 +16,12 @@ export class Venues {
   creatable() { return this.list.filter(venue => venue.id === 'manual' || venue.capabilities.sync) }
 
   /** Where the owner places the planned orders. Vessel itself never sends orders. */
-  tradeUrl(venueId: string, instrument: string | null, source: 'venue' | 'manual') {
+  tradeUrl(venueId: string, instrument: string | null, source: 'venue' | 'manual', venueContractId?: string | null) {
     const template = this.find(venueId)?.tradeUrlTemplate
-    if (!template || !instrument || source !== 'venue' || !instrumentPattern.test(instrument)) return null
-    return template.replace('{instrument}', encodeURIComponent(instrument))
+    if (!isTradeUrlTemplate(template) || !instrument || source !== 'venue' || !instrumentPattern.test(instrument)) return null
+    const native = venueContractId ?? instrument
+    if (template.includes('{venueContractId}') && !instrumentPattern.test(native)) return null
+    return template.replaceAll('{instrument}', encodeURIComponent(instrument)).replaceAll('{venueContractId}', encodeURIComponent(native))
   }
 }
 

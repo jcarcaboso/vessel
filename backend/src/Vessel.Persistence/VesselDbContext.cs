@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Ownership;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Credentials;
 using Vessel.Domain.Evidence;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
@@ -13,6 +14,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
 {
     public Guid CurrentOwnerId => owner.OwnerId;
     public DbSet<Account> Accounts => Set<Account>();
+    public DbSet<AccountCredential> AccountCredentials => Set<AccountCredential>();
     public DbSet<Play> Plays => Set<Play>();
     public DbSet<Portfolio> Portfolios => Set<Portfolio>();
     public DbSet<AccountSnapshot> Snapshots => Set<AccountSnapshot>();
@@ -33,6 +35,8 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         {
             table.HasCheckConstraint("CK_accounts_normalized_address", "\"Address\" IS NULL OR \"Address\" = lower(\"Address\")");
             table.HasCheckConstraint("CK_accounts_settings_revision", "\"SettingsRevision\" >= 1");
+            table.HasCheckConstraint("CK_accounts_source_identity",
+                """("Address" IS NULL OR "SourceId" IS NOT NULL AND "SourceId" = "Address") AND CASE WHEN "SourceId" IS NULL OR "Address" IS NOT NULL THEN true WHEN "SourceId" ~ '^(0|[1-9][0-9]{0,18})$' THEN "SourceId"::numeric <= 9223372036854775807 ELSE false END""");
         });
         account.HasKey(x => x.Id);
         account.HasAlternateKey(x => new { x.OwnerId, x.Id });
@@ -48,16 +52,33 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         portfolio.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         account.HasOne<Portfolio>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PortfolioId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
-        account.HasIndex(x => new { x.OwnerId, x.VenueId, x.Address }).IsUnique()
-            .HasDatabaseName("UX_accounts_owner_venue_address").HasFilter("\"Address\" IS NOT NULL");
+        account.HasIndex(x => new { x.OwnerId, x.VenueId, x.SourceId }).IsUnique()
+            .HasDatabaseName("UX_accounts_owner_venue_source").HasFilter("\"SourceId\" IS NOT NULL");
         account.Property(x => x.SettingsRevision).HasDefaultValue(1L);
         // With a database default, EF omits a property equal to its sentinel. A true
         // sentinel keeps an explicitly disabled new account from being stored as enabled.
         account.Property(x => x.IsEnabled).HasDefaultValue(true).HasSentinel(true);
         account.Property(x => x.Address).HasMaxLength(42);
+        account.Property(x => x.SourceId).HasMaxLength(128);
         account.Property(x => x.SyncStatus).HasMaxLength(32);
         account.Property(x => x.LastSyncError).HasMaxLength(200);
         account.Property(x => x.HistoryNotice).HasMaxLength(1000);
+
+        var credential = modelBuilder.Entity<AccountCredential>();
+        credential.ToTable("account_credentials", table =>
+        {
+            table.HasCheckConstraint("CK_account_credentials_envelope",
+                """octet_length("Nonce") = 12 AND octet_length("Tag") = 16 AND octet_length("Ciphertext") BETWEEN 1 AND 2048""");
+            table.HasCheckConstraint("CK_account_credentials_scope", "\"Scope\" IN ('single', 'all')");
+        });
+        credential.HasKey(x => new { x.OwnerId, x.AccountId, x.Purpose });
+        credential.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
+        credential.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
+            .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+        credential.Property(x => x.Purpose).HasMaxLength(128);
+        credential.Property(x => x.KeyId).HasMaxLength(64);
+        credential.Property(x => x.Scope).HasMaxLength(16);
+        credential.Property(x => x.LastError).HasMaxLength(32);
 
         var snapshot = modelBuilder.Entity<AccountSnapshot>();
         snapshot.ToTable("account_snapshots");
@@ -80,6 +101,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         position.ToTable("account_positions");
         position.HasKey(x => new { x.OwnerId, x.AccountId, x.ContractId });
         position.Property(x => x.ContractId).HasMaxLength(128);
+        position.Property(x => x.VenueContractId).HasMaxLength(128);
         snapshot.HasMany(x => x.Positions).WithOne().HasForeignKey(x => new { x.OwnerId, x.AccountId })
             .OnDelete(DeleteBehavior.Cascade);
         position.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
@@ -235,6 +257,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
             var ownerId = entry.Entity switch
             {
                 Account account => account.OwnerId,
+                AccountCredential credential => credential.OwnerId,
                 Play play => play.OwnerId,
                 Portfolio portfolio => portfolio.OwnerId,
                 AccountSnapshot snapshot => snapshot.OwnerId,

@@ -4,6 +4,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Vessel.Infrastructure.Credentials;
+using Vessel.Infrastructure.Venues.Lighter;
 using Vessel.Application.Evidence;
 using Vessel.Application.MarketData;
 using Vessel.Application.Ownership;
@@ -45,6 +47,7 @@ public static class DependencyInjection
         services.AddSingleton(VenueDescriptor.Manual);
         services.AddSingleton(HyperliquidPerpetualReader.Descriptor);
         AddRisex(services);
+        AddLighter(services);
         services.AddScoped<IVenueRegistry, VenueRegistry>();
         services.AddSingleton<CandleCache>();
         services.AddSingleton<MarketContextCache>();
@@ -52,6 +55,7 @@ public static class DependencyInjection
         services.AddSingleton<IWebSocketTransportFactory, ClientWebSocketTransportFactory>();
         services.AddSingleton<IMarketStream, HyperliquidMarketStream>();
         AddEvidenceStorage(services, config);
+        services.AddVesselCredentials(config);
         services.AddHttpContextAccessor();
         services.AddScoped<IJournalOwnerContext, HttpJournalOwnerContext>();
         services.AddAuthentication(BearerTokenHandler.SchemeName)
@@ -84,6 +88,23 @@ public static class DependencyInjection
         services.AddHttpClient<IVenueOrderReader, RisexReader>("risex-IVenueOrderReader", Configure).RemoveAllLoggers();
         services.AddHttpClient<ICandleReader, RisexReader>("risex-ICandleReader", Configure).RemoveAllLoggers();
         services.AddHttpClient<IMarketContextReader, RisexReader>("risex-IMarketContextReader", Configure).RemoveAllLoggers();
+    }
+
+    private static void AddLighter(IServiceCollection services)
+    {
+        services.AddSingleton(LighterReader.Descriptor);
+        services.AddHttpClient<LighterReader>("lighter", client =>
+        {
+            client.BaseAddress = new Uri("https://mainnet.zklighter.elliot.ai/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        }).AddHttpMessageHandler(() => new LighterAuthenticationHandler())
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+            .RemoveAllLoggers();
+        services.AddScoped<IPerpetualVenueReader>(sp => sp.GetRequiredService<LighterReader>());
+        services.AddScoped<IVenueOrderReader>(sp => sp.GetRequiredService<LighterReader>());
+        services.AddScoped<ICandleReader>(sp => sp.GetRequiredService<LighterReader>());
+        services.AddScoped<IVenueAccountDiscovery>(sp => sp.GetRequiredService<LighterReader>());
+        services.AddScoped<IVenueCredentialVerifier>(sp => sp.GetRequiredService<LighterReader>());
     }
 
     private static void AddEvidenceStorage(IServiceCollection services, IConfiguration config)

@@ -49,7 +49,7 @@ public sealed class VenueRegistryTests
         const string address = "0x0123456789abcdef0123456789abcdef01234567";
 
         var bad = await Assert.ThrowsAsync<WorkspaceException>(() => service.CreateAccountAsync(new(null, "Bad", "other", "0x12"), default));
-        Assert.Equal((400, "Other requires a 42-character public hexadecimal address."), (bad.StatusCode, bad.Message));
+        Assert.Equal((400, "A matching 42-character public hexadecimal address is required."), (bad.StatusCode, bad.Message));
         var unknown = await Assert.ThrowsAsync<WorkspaceException>(() => service.CreateAccountAsync(new(null, "Nope", "lighter", address), default));
         Assert.Equal((400, "Choose manual, hyperliquid or other."), (unknown.StatusCode, unknown.Message));
 

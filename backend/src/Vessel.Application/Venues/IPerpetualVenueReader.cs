@@ -1,4 +1,5 @@
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Accounts;
 
 namespace Vessel.Application.Venues;
 
@@ -9,6 +10,8 @@ public interface IPerpetualVenueReader
     string VenueId { get; }
     Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken cancellationToken);
     Task<PerpetualVenueReadResult> ReadAsync(string publicAddress, CancellationToken cancellationToken);
+    Task<PerpetualVenueReadResult> ReadAsync(Account account, CancellationToken cancellationToken) =>
+        ReadAsync(account.SourceId ?? throw new VenueReadException("Account source is unavailable."), cancellationToken);
 }
 
 /// <summary>
@@ -28,7 +31,8 @@ public sealed record VenuePosition(
     decimal EntryPrice,
     decimal UnrealizedPnlUsd,
     decimal MarginUsedUsd,
-    int? Leverage);
+    int? Leverage,
+    string? VenueContractId = null);
 
 public sealed record VenueSnapshot(
     DateTimeOffset ObservedAtUtc,

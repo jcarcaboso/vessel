@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError, getSystem } from './system'
 import { systemFixture } from '@/test/system-fixture'
+import { indexVenue } from '@/test/account-access-fixture'
 
 function mockResponse(body: unknown, status = 200) {
   const request = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }))
@@ -9,6 +10,34 @@ function mockResponse(body: unknown, status = 200) {
 }
 
 describe('GET /api/system', () => {
+  it('accepts account-index sources and optional discovery/credential capabilities', async () => {
+    const body = { ...systemFixture, venues: [indexVenue, ...systemFixture.venues.filter(v => v.id !== indexVenue.id)] }
+    mockResponse(body)
+    await expect(getSystem('token')).resolves.toEqual(body)
+  })
+  it.each(['accountDiscovery', 'readOnlyCredential'])('rejects a non-boolean %s capability', async name => {
+    mockResponse({ ...systemFixture, venues: [
+      { ...indexVenue, capabilities: { ...indexVenue.capabilities, [name]: 'yes' } },
+      ...systemFixture.venues.filter(v => v.id !== indexVenue.id),
+    ] })
+    await expect(getSystem('token')).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+  it('accepts the native trade placeholder and HTTPS read-only credential setup link', async () => {
+    const body = { ...systemFixture, venues: [
+      { ...indexVenue, tradeUrlTemplate: 'https://trade.example/{venueContractId}' },
+      ...systemFixture.venues.filter(v => v.id !== indexVenue.id),
+    ] }
+    mockResponse(body)
+    await expect(getSystem('token')).resolves.toEqual(body)
+  })
+  it.each(['https://trade.example/{unknown}', 'https://trade.example/{instrument}/{unknown}', 'https://{venueContractId', 'https://user:pass@trade.example/{instrument}'])('rejects unsafe or unresolved trade template %s', async tradeUrlTemplate => {
+    mockResponse({ ...systemFixture, venues: [{ ...indexVenue, tradeUrlTemplate }, ...systemFixture.venues.filter(v => v.id !== indexVenue.id)] })
+    await expect(getSystem('token')).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+  it.each(['http://venue.example/tokens', 'javascript:alert(1)', 'https://user:pass@venue.example/tokens', 'https://'])('rejects unsafe credential setup URL %s', async credentialSetupUrl => {
+    mockResponse({ ...systemFixture, venues: [{ ...indexVenue, credentialSetupUrl }, ...systemFixture.venues.filter(v => v.id !== indexVenue.id)] })
+    await expect(getSystem('token')).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
   it('uses the exact path and a plain Bearer header, without cookies or token URLs', async () => {
     const request = mockResponse(systemFixture)
     await expect(getSystem(' runtime-token ')).resolves.toEqual(systemFixture)

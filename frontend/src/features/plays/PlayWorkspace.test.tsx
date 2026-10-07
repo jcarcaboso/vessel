@@ -8,6 +8,8 @@ import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api
 import { accountFixture, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { PlayWorkspace } from './PlayWorkspace'
 import { createDraft, type PlayDraft } from './draft'
+import { VenuesProvider } from '@/api/venues'
+import { systemFixture } from '@/test/system-fixture'
 
 function Workspace({ disabled = false }: { disabled?: boolean }) {
   const [draft, setDraft] = useState(createDraft)
@@ -32,6 +34,17 @@ function ReloadedWorkspace({ accounts, onDraft }: { accounts: BrokerAccount[]; o
 }
 
 describe('Play draft workspace', () => {
+  it('passes the catalogue native identifier to a descriptor-driven venue link', async () => {
+    const nativeVenue = { ...systemFixture.venues[0]!, tradeUrlTemplate: 'https://trade.example/{venueContractId}' }
+    const api = { ...catalogueApi, instruments: vi.fn().mockResolvedValue({
+      ...instrumentCatalogFixture, instruments: [{ ...instrumentCatalogFixture.instruments[1]!, venueContractId: 'kPEPE' }],
+    }) }
+    render(<VenuesProvider venues={[nativeVenue]}>
+      <PlayWorkspace accounts={[{ ...accountFixture, venueId: nativeVenue.id }]} portfolios={[]} api={api}
+        draft={{ ...createDraft(), accountId: accountFixture.id, instrument: '1000PEPE', instrumentSource: 'venue' }} onChange={vi.fn()} />
+    </VenuesProvider>)
+    await waitFor(() => expect(screen.getByRole('link', { name: /Open 1000PEPE/ })).toHaveAttribute('href', 'https://trade.example/kPEPE'))
+  })
   it('clears venue context when a reload disables or removes the chosen account', async () => {
     const venue = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}` }
     const onDraft = vi.fn<(draft: PlayDraft) => void>()
@@ -204,4 +217,3 @@ describe('Play draft workspace', () => {
     expect(onDraft.mock.lastCall?.[0].evidence).toEqual([])
   })
 })
-

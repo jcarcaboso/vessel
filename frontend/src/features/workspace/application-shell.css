@@ -82,6 +82,32 @@
 .settings-panel>button{font-size:11px}.venue-capability-list{display:flex;flex-direction:column;gap:12px;padding:20px 0}.venue-capability-list>div{display:flex;align-items:center;justify-content:space-between;font-size:11px}
 .workspace-dialog{font-family:var(--app-font);max-width:500px}.workspace-form{display:flex;flex-direction:column;gap:9px}.workspace-form>label{font-size:11px;font-weight:500;margin-top:9px}.workspace-form>input,.workspace-form>select{font-size:13px}.workspace-form>button{margin-top:13px}.workspace-form .error{font-size:11px;line-height:1.75;color:var(--negative)}
 .optional{font-size:9px;color:var(--muted-foreground);font-weight:400;margin-left:5px}.field-help{font-size:9px!important;line-height:1.8!important;color:var(--muted-foreground);margin:0}
+.workspace-dialog{max-height:calc(100dvh - 2rem);min-height:0;min-width:0;grid-template-columns:minmax(0,1fr);overflow-y:auto;overscroll-behavior:contain}
+.workspace-dialog.account-import-dialog{width:min(620px,calc(100vw - 2rem));max-width:min(620px,calc(100vw - 2rem));max-height:calc(100dvh - 2rem);overflow-x:hidden}
+.account-import-dialog :is(.wallet-import,.workspace-form,.credential-panel,.discovered-accounts){min-width:0;min-height:0}
+.account-source{font-size:11px;color:var(--muted-foreground);overflow-wrap:anywhere;margin:0}.account-source>span{color:var(--foreground);margin-right:8px}
+.wallet-import{display:grid;gap:18px}.wallet-search{display:flex;gap:8px}.wallet-search>input{min-width:0;flex:1}
+.import-heading,.credential-panel>header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.import-heading h3,.credential-panel h3{font-size:13px;font-weight:550;margin:0}.import-heading>span{font-size:11px}
+.discovered-accounts{display:grid;gap:8px;max-height:320px;overflow-y:auto;overscroll-behavior:contain;padding:2px}
+.discovered-account{padding:12px;border:1px solid var(--border);border-radius:6px;background:var(--field);min-width:0}
+.discovered-account.selected{border-color:var(--ring)}
+.discovered-choice{display:flex;align-items:center;gap:10px;cursor:pointer;font-size:12px}
+.discovered-choice input{flex-shrink:0;accent-color:var(--ring);width:16px;height:16px}
+.discovered-choice>span{min-width:0}.discovered-choice>span:first-of-type{flex:1}.discovered-choice strong,.discovered-choice small{display:block;overflow-wrap:anywhere;word-break:break-word}
+.discovered-choice small{font-size:10px;color:var(--muted-foreground);margin-top:4px}
+.discovered-value{margin-left:auto;font-size:11px;flex-shrink:0;max-width:40%;overflow-wrap:anywhere;text-align:right}
+.discovered-account>.field-help,.discovered-account>.import-result{margin-top:8px}
+.credential-fieldset{border:0;padding:0;margin:0;min-width:0}
+.credential-panel{display:grid;gap:12px;border-top:1px solid var(--border);padding-top:18px;margin-top:8px}
+.credential-panel .field-help,.wallet-import .field-help{font-size:11px!important;line-height:1.6!important}
+.credential-panel .workspace-badge{flex-shrink:0}
+.credential-metadata{display:grid;gap:7px;margin:0;font-size:11px}.credential-metadata>div{display:flex;justify-content:space-between;gap:15px}.credential-metadata dt{color:var(--muted-foreground)}.credential-metadata dd{margin:0;text-align:right;overflow-wrap:anywhere}
+.credential-notice,.import-result{font-size:11px;line-height:1.7;margin:0;overflow-wrap:anywhere}
+.credential-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:8px}
+.credential-setup-link{font-size:12px;color:var(--primary);text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere}
+.credential-panel>.error,.wallet-import>.error{font-size:11px;line-height:1.7;color:var(--negative)}
+@media(max-width:550px){.wallet-search{flex-wrap:wrap}.wallet-search>input{flex-basis:100%;font-size:16px}.wallet-search>button{margin-left:auto}.discovered-choice{flex-wrap:wrap}.discovered-value{flex-basis:100%;max-width:none;text-align:left;margin-left:26px}.credential-panel>header{flex-wrap:wrap}.credential-actions>button{flex:1}.credential-metadata>div{flex-wrap:wrap;gap:4px}.credential-metadata dd{text-align:left}.token-field input{font-size:16px}}
 .shell-footer{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:37px;font-size:7px;letter-spacing:1.5px;color:var(--muted-foreground);line-height:1.7}.shell-footer>span:last-child{font-size:8px;letter-spacing:0}
 .mobile-menu{display:none}.sidebar-backdrop{display:none}
 .sidebar-toggle{flex-shrink:0;align-self:flex-end;width:36px;height:36px;margin-bottom:16px}

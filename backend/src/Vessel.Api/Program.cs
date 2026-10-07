@@ -25,6 +25,7 @@ app.Use(async (context, next) =>
         var (status, detail) = ex switch
         {
             WorkspaceException error => (error.StatusCode, error.Message),
+            BadHttpRequestException { StatusCode: 413 } => (413, "The request body is too large."),
             BadHttpRequestException => (400, "The request body or parameters are invalid."),
             _ when SafeExceptionDiagnostics.IsDependencyOutage(ex) => (503, "The service is unavailable. Try again later."),
             _ => (500, "An unexpected error occurred.")
@@ -33,6 +34,8 @@ app.Use(async (context, next) =>
             SafeExceptionDiagnostics.Log(app.Logger, context, ex, traceId, status);
         if (context.Response.HasStarted) throw;
         context.Response.Clear();
+        if (context.Request.Path.Value?.TrimEnd('/').EndsWith("/credential", StringComparison.OrdinalIgnoreCase) == true)
+            context.Response.Headers.CacheControl = "no-store";
         context.Response.Headers["X-Correlation-ID"] = traceId;
         await Results.Problem(statusCode: status, detail: detail,
             extensions: new Dictionary<string, object?> { ["traceId"] = traceId }).ExecuteAsync(context);
@@ -40,6 +43,19 @@ app.Use(async (context, next) =>
 });
 app.UseAuthentication();
 app.UseAuthorization();
+// Bound credential JSON before model binding, including chunked requests. Never log its body.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.Value?.TrimEnd('/').EndsWith("/credential", StringComparison.OrdinalIgnoreCase) == true)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+        if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = 4096;
+        if (context.Request.ContentLength > 4096)
+            throw new WorkspaceException(413, "Credential request is too large.");
+    }
+    await next(context);
+});
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
 app.MapGet("/api/system", (ClaimsPrincipal user, Vessel.Application.Venues.IVenueRegistry venues) => SystemMetadata.ForOwner(new JournalOwner(

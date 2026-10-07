@@ -14,7 +14,7 @@ internal sealed record HyperliquidStreamAck(string Type, string Coin, string? In
 internal sealed record HyperliquidStreamCandles(IReadOnlyList<(string Coin, string Interval, VenueCandle Candle)> Candles)
     : HyperliquidStreamMessage;
 
-internal sealed record HyperliquidStreamContext(VenueMarketContext Context) : HyperliquidStreamMessage;
+internal sealed record HyperliquidStreamContext(string Coin, VenueMarketContext Context) : HyperliquidStreamMessage;
 
 public sealed partial class HyperliquidPerpetualReader
 {
@@ -60,7 +60,7 @@ public sealed partial class HyperliquidPerpetualReader
             {
                 var data = Property(root, "data");
                 var coin = Text(Property(data, "coin"));
-                return new HyperliquidStreamContext(ReadMarketContext(coin, Property(data, "ctx"), numbers: true));
+                return new HyperliquidStreamContext(coin, ReadMarketContext(coin, Property(data, "ctx"), numbers: true));
             }
             default:
                 return new HyperliquidStreamControl(channel);

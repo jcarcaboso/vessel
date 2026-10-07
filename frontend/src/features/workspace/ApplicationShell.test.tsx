@@ -9,6 +9,10 @@ import { ApplicationShell } from './ApplicationShell'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
+    discoverAccounts: vi.fn().mockRejectedValue(new Error('Unexpected discovery')),
+    accountCredential: vi.fn().mockResolvedValue({ storageConfigured: true, credential: null }),
+    saveAccountCredential: vi.fn().mockRejectedValue(new Error('Unexpected credential write')),
+    deleteAccountCredential: vi.fn().mockResolvedValue(undefined),
     overview: vi.fn().mockResolvedValue(emptyOverview),
     portfolios: vi.fn().mockResolvedValue([]), accounts: vi.fn().mockResolvedValue([]),
     account: vi.fn().mockResolvedValue(accountFixture),

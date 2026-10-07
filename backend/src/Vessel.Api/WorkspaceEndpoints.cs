@@ -1,5 +1,6 @@
 using Vessel.Application.MarketData;
 using Vessel.Application.Workspace;
+using Vessel.Application.Credentials;
 
 namespace Vessel.Api;
 
@@ -8,6 +9,23 @@ public static class WorkspaceEndpoints
     public static void MapWorkspace(this WebApplication app)
     {
         var api = app.MapGroup("/api").RequireAuthorization();
+        api.MapGet("/venues/{venueId}/accounts", async (string venueId, string? address, AccountDiscoveryService service, CancellationToken ct) =>
+            Results.Ok(await service.DiscoverAsync(venueId, address, ct)));
+        var credential = api.MapGroup("/accounts/{id:guid}/credential");
+        credential.AddEndpointFilter(async (context, next) =>
+        {
+            context.HttpContext.Response.Headers.CacheControl = "no-store";
+            return await next(context);
+        });
+        credential.MapGet("", async (Guid id, AccountCredentialService service, CancellationToken ct) =>
+            Results.Ok(await service.GetAsync(id, ct)));
+        credential.MapPut("", async (Guid id, SaveAccountCredentialRequest request, AccountCredentialService service, CancellationToken ct) =>
+            Results.Ok(await service.PutAsync(id, request, ct)));
+        credential.MapDelete("", async (Guid id, AccountCredentialService service, CancellationToken ct) =>
+        {
+            await service.DeleteAsync(id, ct);
+            return Results.NoContent();
+        });
         api.MapGet("/portfolios", async (WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.PortfoliosAsync(ct)));
         api.MapGet("/portfolios/{id:guid}", async (Guid id, WorkspaceService service, CancellationToken ct) =>
