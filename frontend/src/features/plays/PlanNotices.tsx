@@ -6,18 +6,20 @@ import { leverageOf } from './levels'
 import { estimatedLiquidation } from './sizing'
 
 /** Problems in the plan, with the corrections that clear them. Shown between the play fields and the workspace. */
-export function PlanNotices({ draft, onChange, readOnly = false, maxLeverage = null }: {
+export function PlanNotices({ draft, onChange, readOnly = false, maxLeverage = null, maintenanceMargin = null }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
   readOnly?: boolean
   /** Venue maximum for the contract, for the liquidation estimate. */
   maxLeverage?: number | null
+  /** Maintenance margin fraction the venue states for the contract, or null. */
+  maintenanceMargin?: number | null
 }) {
   const issues = planIssues(draft.entries, draft.direction)
   const leverage = leverageOf(draft.leverage)
   // Wrong-side stops are already errors; the liquidation warning only applies to a consistent plan.
   const pastLiquidation = issues.length ? [] : stopsPastLiquidation(draft.entries, draft.direction, leverage,
-    estimatedLiquidation(draft.entries, draft.direction, leverage, maxLeverage))
+    estimatedLiquidation(draft.entries, draft.direction, leverage, maxLeverage, maintenanceMargin))
   if (!issues.length && !pastLiquidation.length) return null
   if (!issues.length) return <section className="plays-notifications" aria-label="Plan notifications">
     <div className="plays-notification is-warning" role="status">

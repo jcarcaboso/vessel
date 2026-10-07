@@ -18,7 +18,7 @@ export interface VenueInfo {
   tradeUrlTemplate: string | null
   /** Candle intervals the venue serves natively. */
   intervals: CandleInterval[]
-  /** Five significant figures (Hyperliquid) or each instrument's tick. */
+  /** Five significant figures, or each instrument's tick. */
   priceRule: 'significant-figures' | 'tick-size'
 }
 

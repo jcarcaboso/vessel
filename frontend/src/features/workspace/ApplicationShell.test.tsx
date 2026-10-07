@@ -405,7 +405,7 @@ describe('Main application shell', () => {
     })
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
     expect(await screen.findByText('Available wallet stablecoins')).toBeInTheDocument()
-    expect(screen.getByText('Primary perps equity $0.00')).toBeInTheDocument()
+    expect(screen.getByText('Perps equity $0.00')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'View Main account' }))
     expect(await screen.findByRole('heading', { name: 'Stablecoin wallet' })).toBeInTheDocument()
     expect(await screen.findByText('USDC')).toBeInTheDocument()

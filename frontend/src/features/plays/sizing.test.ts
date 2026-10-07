@@ -59,6 +59,12 @@ describe('estimated liquidation', () => {
     expect(estimatedLiquidation([entry('121.54')], 'short', 10, 20)).toBeCloseTo(121.54 * 1.1 / 1.025, 6)
   })
 
+  it('uses the maintenance margin the venue states for the contract over the assumed one', () => {
+    expect(estimatedLiquidation([entry('100')], 'long', 10, 20, 0.05)).toBeCloseTo(100 * 0.9 / 0.95, 6)
+    expect(estimatedLiquidation([entry('100')], 'short', 10, null, 0.05)).toBeCloseTo(100 * 1.1 / 1.05, 6)
+    expect(estimatedLiquidation([entry('100')], 'long', 10, 20, 1)).toBeCloseTo(100 * 0.9 / 0.975, 6)
+  })
+
   it('uses the share-weighted average entry of the whole plan', () => {
     const entries = [entry('100', '50'), entry('90', '50')]
     expect(estimatedLiquidation(entries, 'long', 5, 50)).toBeCloseTo(95 * 0.8 / 0.99, 6)

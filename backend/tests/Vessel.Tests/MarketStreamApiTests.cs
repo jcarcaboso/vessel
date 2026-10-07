@@ -7,6 +7,7 @@ using Vessel.Application.MarketData;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
+using Vessel.Infrastructure.Venues.Hyperliquid;
 
 namespace Vessel.Tests;
 
@@ -148,7 +149,7 @@ public sealed class MarketStreamApiTests
         Assert.Equal("85896.40", json.RootElement.GetProperty("markPrice").GetString());
         Assert.Equal("34715.04450", json.RootElement.GetProperty("openInterest").GetString());
         Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("midPrice").ValueKind);
-        Assert.Equal(MarketContextService.Notice, json.RootElement.GetProperty("notice").GetString());
+        Assert.Equal(HyperliquidPerpetualReader.Descriptor.MarketContextNotice, json.RootElement.GetProperty("notice").GetString());
 
         subscription.Complete();
         Assert.Equal("", await new StreamReader(body).ReadToEndAsync());

@@ -146,7 +146,7 @@ public sealed class MarketContextApiTests
         using var client = factory.AuthorizedClient();
         var response = await client.GetAsync(Url(account.Id, "instrument=DOGE"));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("The instrument is not in the venue's primary perpetual catalogue.", await response.Content.ReadAsStringAsync());
+        Assert.Contains("The instrument is not in the venue's perpetual catalogue.", await response.Content.ReadAsStringAsync());
     }
 
     [Theory]

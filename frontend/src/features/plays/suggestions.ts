@@ -1,6 +1,6 @@
 import type { ExposureLevel, SizingDocument } from '@/api/sizing'
 import type { DraftEntry, DraftExit, PlayDraft } from './draft'
-import { averageEntryPrice, levelPrice } from './levels'
+import { averageEntryPrice, levelPrice, stepDecimals } from './levels'
 import { wrongSide } from './planChecks'
 import { averageDistance, estimatedLiquidation, positionSize, rewardToRisk, weightedLevels, type SizeUnits } from './sizing'
 
@@ -27,10 +27,14 @@ const trim = (text: string) => text.includes('.') ? text.replace(/\.?0+$/, '') :
 const tolerance = 1e-9
 
 /**
- * Rounds a price to five significant figures (the venue's perpetual price rule) in one direction,
- * so a suggestion still meets its limit after rounding.
+ * Rounds a price the way the venue accepts it, in one direction, so a suggestion still meets its
+ * limit after rounding: to the instrument's tick when there is one, otherwise to five significant figures.
  */
-export function roundPrice(price: number, way: 'up' | 'down') {
+export function roundPrice(price: number, way: 'up' | 'down', step: number | null = null) {
+  if (step !== null && step > 0) {
+    const ticks = way === 'up' ? Math.ceil(price / step - tolerance) : Math.floor(price / step + tolerance)
+    return trim((ticks * step).toFixed(stepDecimals(step)))
+  }
   const decimals = Math.min(8, Math.max(0, 4 - Math.floor(Math.log10(price))))
   const factor = 10 ** decimals
   const rounded = way === 'up' ? Math.ceil(price * factor - tolerance) / factor : Math.floor(price * factor + tolerance) / factor
@@ -121,8 +125,9 @@ export interface LevelSuggestion {
 }
 
 /** The value of a stop or target at `price`: the price itself, or the % return at the leverage. */
-function levelValue(exit: DraftExit, entryPrice: number, price: number, leverage: number, way: 'up' | 'down', percentWay: 'up' | 'down') {
-  if (exit.unit === 'price') return roundPrice(price, way)
+function levelValue(exit: DraftExit, entryPrice: number, price: number, leverage: number, way: 'up' | 'down', percentWay: 'up' | 'down',
+  step: number | null) {
+  if (exit.unit === 'price') return roundPrice(price, way, step)
   return roundDecimals(Math.abs(price - entryPrice) / entryPrice * 100 * Math.max(1, leverage), 2, percentWay)
 }
 
@@ -131,7 +136,8 @@ function levelValue(exit: DraftExit, entryPrice: number, price: number, leverage
  * a return on margin): the stop at that distance. Percent stops keep their unit. Null when the stop
  * is within the limit, blank or on the wrong side.
  */
-export function suggestMaxStop(entry: DraftEntry, exit: DraftExit, direction: Direction, leverage: number, maxStopPercent: number): LevelSuggestion | null {
+export function suggestMaxStop(entry: DraftEntry, exit: DraftExit, direction: Direction, leverage: number, maxStopPercent: number,
+  step: number | null = null): LevelSuggestion | null {
   const entryPrice = positive(entry.price)
   if (entryPrice === null || !(maxStopPercent > 0) || wrongSide(entryPrice, exit, 'stop', direction)) return null
   const price = levelPrice(entryPrice, exit, 'stop', direction, leverage)
@@ -139,7 +145,7 @@ export function suggestMaxStop(entry: DraftEntry, exit: DraftExit, direction: Di
   const limit = entryPrice * (direction === 'long' ? 1 - maxStopPercent / 100 : 1 + maxStopPercent / 100)
   if (limit <= 0) return null
   // Rounded toward the entry so the accepted stop is within the limit.
-  const value = levelValue(exit, entryPrice, limit, leverage, direction === 'long' ? 'up' : 'down', 'down')
+  const value = levelValue(exit, entryPrice, limit, leverage, direction === 'long' ? 'up' : 'down', 'down', step)
   return { value, price: levelPrice(entryPrice, { ...exit, value }, 'stop', direction, leverage)! }
 }
 
@@ -148,7 +154,8 @@ export function suggestMaxStop(entry: DraftEntry, exit: DraftExit, direction: Di
  * share-weighted R:R reaches it. Percent targets keep their unit. Null when the R:R is unknown or
  * already enough, or when a short target would need a price at or below zero.
  */
-export function suggestMinTarget(entry: DraftEntry, direction: Direction, leverage: number, minRewardRisk: number): (LevelSuggestion & { levelId: string }) | null {
+export function suggestMinTarget(entry: DraftEntry, direction: Direction, leverage: number, minRewardRisk: number,
+  step: number | null = null): (LevelSuggestion & { levelId: string }) | null {
   const ratio = rewardToRisk(entry, direction, leverage)
   const entryPrice = positive(entry.price)
   if (ratio === null || entryPrice === null || !(minRewardRisk > 0) || ratio >= minRewardRisk * (1 - tolerance)) return null
@@ -162,7 +169,7 @@ export function suggestMinTarget(entry: DraftEntry, direction: Direction, levera
   const price = direction === 'long' ? entryPrice + distance : entryPrice - distance
   if (price <= 0) return null
   // Rounded away from the entry so the accepted target reaches the minimum.
-  const value = levelValue(farthest.exit, entryPrice, price, leverage, direction === 'long' ? 'up' : 'down', 'up')
+  const value = levelValue(farthest.exit, entryPrice, price, leverage, direction === 'long' ? 'up' : 'down', 'up', step)
   return { levelId: farthest.exit.id, value, price: levelPrice(entryPrice, { ...farthest.exit, value }, 'target', direction, leverage)! }
 }
 
@@ -185,11 +192,11 @@ export function farthestStop(entries: readonly DraftEntry[], direction: Directio
  * current one that clears the stops. Null when nothing fits or when it is the current leverage.
  */
 export function suggestLeverage(draft: SizedDraft & Pick<PlayDraft, 'leverage'>, leverage: number, maxLeverage: number | null, budget: number | null,
-  sizing: SizingDocument, notional: number | null, defaultMaximum = 100) {
+  sizing: SizingDocument, notional: number | null, defaultMaximum = 100, maintenanceMargin: number | null = null) {
   const position = notional ?? (draft.sizingMode === 'quantity' ? positionSize(draft, leverage).notional : null)
   const stop = farthestStop(draft.entries, draft.direction, leverage)
   const clear = (candidate: number) => {
-    const liquidation = estimatedLiquidation(draft.entries, draft.direction, candidate, maxLeverage)
+    const liquidation = estimatedLiquidation(draft.entries, draft.direction, candidate, maxLeverage, maintenanceMargin)
     return liquidation === null || stop === null || (draft.direction === 'long' ? liquidation < stop : liquidation > stop)
   }
   if (budget === null || budget <= 0 || position === null || position <= 0) {
@@ -241,6 +248,10 @@ export interface SuggestionInputs {
   draft: SizedDraft & Pick<PlayDraft, 'leverage'>
   leverage: number
   maxLeverage: number | null
+  /** Maintenance margin fraction the venue states for the contract, or null. */
+  maintenanceMargin?: number | null
+  /** The instrument's price tick; suggested prices round to it. */
+  priceStep?: number | null
   sizing: SizingDocument
   units: SizeUnits
   balance: number | null
@@ -251,7 +262,8 @@ export interface SuggestionInputs {
 const levelLabel = (exits: readonly DraftExit[], kind: 'stop' | 'target', index: number) =>
   exits.length > 1 || kind === 'target' ? `${kind} ${index + 1}` : kind
 
-export function planSuggestions({ draft, leverage, maxLeverage, sizing, units, balance, budget, defaultMaximum = 100 }: SuggestionInputs): PlanSuggestions {
+export function planSuggestions({ draft, leverage, maxLeverage, maintenanceMargin = null, priceStep = null, sizing, units, balance, budget,
+  defaultMaximum = 100 }: SuggestionInputs): PlanSuggestions {
   const maxStop = amount(sizing.limits.maxStopPercent)
   const minRewardRisk = amount(sizing.limits.minRewardRisk)
   const size = suggestSize(draft, leverage, balance, sizing, units, budget)
@@ -262,19 +274,19 @@ export function planSuggestions({ draft, leverage, maxLeverage, sizing, units, b
     const entryPrice = positive(entry.price)
     if (entryPrice === null) continue
     if (maxStop !== null) entry.stops.forEach((stop, index) => {
-      const suggestion = suggestMaxStop(entry, stop, draft.direction, leverage, maxStop)
+      const suggestion = suggestMaxStop(entry, stop, draft.direction, leverage, maxStop, priceStep)
       const price = levelPrice(entryPrice, stop, 'stop', draft.direction, leverage)
       if (suggestion && price !== null) stops.push({ ...suggestion, entryId: entry.id, entryName: entry.name, levelId: stop.id,
         label: levelLabel(entry.stops, 'stop', index), unit: stop.unit, current: stop.value, distancePercent: Math.abs(price - entryPrice) / entryPrice * 100 })
     })
-    const target = minRewardRisk === null ? null : suggestMinTarget(entry, draft.direction, leverage, minRewardRisk)
+    const target = minRewardRisk === null ? null : suggestMinTarget(entry, draft.direction, leverage, minRewardRisk, priceStep)
     const index = target ? entry.targets.findIndex(exit => exit.id === target.levelId) : -1
     if (target && index >= 0) targets.push({ ...target, entryId: entry.id, entryName: entry.name, label: levelLabel(entry.targets, 'target', index),
       unit: entry.targets[index]!.unit, current: entry.targets[index]!.value, ratio: rewardToRisk(entry, draft.direction, leverage)! })
   }
   return {
     size, stops, targets, balance, budget,
-    leverage: suggestLeverage(draft, leverage, maxLeverage, budget, sizing, risked?.notional ?? null, defaultMaximum),
+    leverage: suggestLeverage(draft, leverage, maxLeverage, budget, sizing, risked?.notional ?? null, defaultMaximum, maintenanceMargin),
     lossPerUnit: lossPerUnit(draft.entries, draft.direction, leverage),
   }
 }

@@ -16,9 +16,11 @@ public interface IPerpetualVenueReader
 /// <paramref name="VenueContractId"/> is the venue's own identifier when it differs (e.g. a numeric market ID).
 /// Prices are quoted and margined in <paramref name="QuoteAsset"/>, e.g. BTC/USDC. <paramref name="PriceStep"/> is the
 /// tick when the venue has one; <paramref name="Category"/> labels non-crypto markets (stocks, commodities, indices).
+/// <paramref name="MaintenanceMarginFraction"/> is the maintenance margin as a fraction of notional (0.0125 at 40×
+/// on Hyperliquid) when the venue states it; liquidation estimates otherwise assume one.
 /// </summary>
 public sealed record VenueInstrument(string ContractId, int QuantityDecimals, int MaxLeverage, string QuoteAsset,
-    decimal? PriceStep = null, string? Category = null, string? VenueContractId = null);
+    decimal? PriceStep = null, string? Category = null, string? VenueContractId = null, decimal? MaintenanceMarginFraction = null);
 
 public sealed record VenuePosition(
     string ContractId,

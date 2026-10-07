@@ -31,7 +31,7 @@ function allocatedShare(entries: DraftEntry[]) {
 }
 import { AvailableBudget } from './WorkspacePanels'
 
-export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null, checkBudget = true,
+export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, maintenanceMargin = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null, checkBudget = true,
   marks = null }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
@@ -40,6 +40,8 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   onSelect: (id: string) => void
   /** Venue maximum for the chosen contract, or null when unknown. */
   maxLeverage?: number | null
+  /** Maintenance margin fraction the venue states for the contract, or null. */
+  maintenanceMargin?: number | null
   instrumentName?: string
   /** Quote asset and contract for the size readout. */
   units?: SizeUnits
@@ -119,7 +121,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   }
 
   const sized = positionSize(draft, leverage)
-  const liquidation = estimatedLiquidation(draft.entries, draft.direction, leverage, maxLeverage)
+  const liquidation = estimatedLiquidation(draft.entries, draft.direction, leverage, maxLeverage, maintenanceMargin)
   const overBudget = checkBudget ? marginOverBudget(draft, leverage, availableBudget) : null
   const budgetSize = overBudget ? sizeForBudget(draft, leverage, overBudget.budget.value, units) : null
   // One entry takes the whole position, so its share and the split are fixed.
@@ -234,7 +236,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
                   {draft.entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
                 </select>
               </label>
-              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation} suggested={marks?.levels ?? null} quantity={sized.quantity} units={units} />}
+              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} liquidation={liquidation} suggested={marks?.levels ?? null} quantity={sized.quantity} units={units} />}
             </DialogContent>
           </Dialog>
         </div>
@@ -254,7 +256,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
               {draft.entries.length > 1 && <Button type="button" variant="ghost" size="icon-sm" className="remove-entry" aria-label={`Remove ${entry.name}`}
                 title={`Remove ${entry.name}`} onClick={() => removeEntry(entry.id)}><Trash2 size={13} aria-hidden="true" /></Button>}
             </div>
-            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} liquidation={liquidation} suggested={marks?.levels ?? null} quantity={sized.quantity} units={units} />}
+            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} liquidation={liquidation} suggested={marks?.levels ?? null} quantity={sized.quantity} units={units} />}
             {expanded && selected?.id === entry.id && <p className="muted expanded-placeholder">Editing in the expanded view.</p>}
           </article>)}
         </div>

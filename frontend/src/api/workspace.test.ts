@@ -162,9 +162,14 @@ describe('Core workspace API', () => {
 
 describe('Instrument catalogue requests', () => {
   const catalogue = {
-    venueId: 'hyperliquid', marketScope: 'perpetuals', scope: 'primary-perpetual-dex',
+    venueId: 'hyperliquid', marketScope: 'perpetuals', scope: 'venue-perpetuals',
     instruments: [{ contractId: '1000PEPE', quantityDecimals: 0, maxLeverage: 10, quoteAsset: 'USDC' }], notice: 'Primary perpetual DEX only.',
   }
+  it('accepts a maintenance margin fraction stated by the venue', async () => {
+    const stated = { ...catalogue, instruments: [{ ...catalogue.instruments[0]!, maintenanceMarginFraction: 0.05 }] }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(stated))))
+    await expect(createWorkspaceApi('session-token').instruments(accountFixture.id, new AbortController().signal)).resolves.toEqual(stated)
+  })
   it('uses the authenticated metadata route with cancellation and preserves exact contract IDs', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(catalogue))))
     const controller = new AbortController()
@@ -176,6 +181,8 @@ describe('Instrument catalogue requests', () => {
   })
   it.each([
     { ...catalogue, marketScope: 'spot' },
+    { ...catalogue, scope: 'primary-perpetual-dex' },
+    { ...catalogue, instruments: [{ contractId: 'BTC', quantityDecimals: 2, maxLeverage: 10, quoteAsset: 'USDC', maintenanceMarginFraction: 1 }] },
     { ...catalogue, instruments: [{ contractId: 'BTC', quantityDecimals: -1, maxLeverage: 10, quoteAsset: 'USDC' }] },
     { ...catalogue, instruments: [{ contractId: 'BTC', quantityDecimals: 2, maxLeverage: 1.5, quoteAsset: 'USDC' }] },
     { ...catalogue, instruments: [catalogue.instruments[0], catalogue.instruments[0]] },

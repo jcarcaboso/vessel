@@ -26,6 +26,11 @@ public sealed record AccountDto(Guid Id, Guid? PortfolioId, string Name, string 
     string? TotalStablecoinNominalUsd = null, string? BalanceUsd = null);
 public sealed record AccountInstrumentsDto(string VenueId, string MarketScope, string Scope,
     IReadOnlyList<VenueInstrument> Instruments, string Notice);
+/// <summary>Where a catalogue comes from: the venue's selectable perpetuals, or none for a manual account.</summary>
+public static class InstrumentCatalogScopes
+{
+    public const string Venue = "venue-perpetuals", Manual = "manual";
+}
 public sealed record PositionDto(string ContractId, string SignedQuantity, string EntryPrice,
     string UnrealizedPnlUsd, string MarginUsedUsd, int? Leverage);
 public sealed record SnapshotDto(DateTimeOffset ObservedAtUtc, string ValueScope, string? AccountValueUsd,

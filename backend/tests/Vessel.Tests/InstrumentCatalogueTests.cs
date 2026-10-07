@@ -38,9 +38,9 @@ public sealed class InstrumentCatalogueTests
             var result = await service.InstrumentsAsync(account.Id, caller.Token);
             Assert.Equal("hyperliquid", result.VenueId);
             Assert.Equal("perpetuals", result.MarketScope);
-            Assert.Equal("primary-perpetual-dex", result.Scope);
+            Assert.Equal("venue-perpetuals", result.Scope);
             Assert.Same(reader.Result.Instruments, result.Instruments);
-            Assert.Equal("Primary perpetual DEX metadata only. No orders, balances or execution refresh.", result.Notice);
+            Assert.Equal("Venue perpetual contract metadata only. No orders, balances or execution refresh.", result.Notice);
         }
         Assert.Equal(1, reader.InstrumentReads);
         Assert.Equal(caller.Token, reader.InstrumentCancellationToken);
