@@ -143,7 +143,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
                 throw new VenueReadException(InvalidResponse);
             // Delisted contracts still identify historical positions and fills during refresh.
             if (!selectableOnly || delisted.ValueKind != JsonValueKind.True)
-                result.Add(new(name, decimals, leverage, PrimaryQuoteAsset));
+                // Hyperliquid's maintenance margin is half the initial margin at the contract's maximum leverage.
+                result.Add(new(name, decimals, leverage, PrimaryQuoteAsset, MaintenanceMarginFraction: 1m / (2 * leverage)));
         }
         return result;
     }

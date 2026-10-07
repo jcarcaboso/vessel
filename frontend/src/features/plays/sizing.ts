@@ -177,16 +177,19 @@ export const formatRewardToRisk = (ratio: number) => `1:${new Intl.NumberFormat(
 /**
  * Estimated liquidation price of the whole plan, assuming every entry fills at its planned price
  * and the position uses isolated margin. The margin is the notional ÷ leverage, so the price is
- * where that margin plus the unrealized result falls to Hyperliquid's maintenance margin, half the
- * initial margin at the venue maximum leverage. Fees, funding, margin tiers of large positions and
- * the mark price are ignored; cross margin liquidates further away, since the account backs it.
- * Null without an average entry or venue maximum, or when there is no liquidation price (1× long).
+ * where that margin plus the unrealized result falls to the maintenance margin: the fraction the
+ * venue states for the contract, otherwise assumed to be half the initial margin at the venue
+ * maximum leverage. Fees, funding, margin tiers of large positions and the mark price are ignored;
+ * cross margin liquidates further away, since the account backs it.
+ * Null without an average entry or maintenance margin, or when there is no liquidation price (1× long).
  */
-export function estimatedLiquidation(entries: PlayDraft['entries'], direction: PlayDraft['direction'], leverage: number, maxLeverage: number | null) {
+export function estimatedLiquidation(entries: PlayDraft['entries'], direction: PlayDraft['direction'], leverage: number, maxLeverage: number | null,
+  maintenanceMargin: number | null = null) {
   const averageEntry = averageEntryPrice(entries, 1)
-  if (averageEntry === null || maxLeverage === null || maxLeverage < 1) return null
+  const maintenance = maintenanceMargin !== null && maintenanceMargin > 0 && maintenanceMargin < 1 ? maintenanceMargin
+    : maxLeverage !== null && maxLeverage >= 1 ? 1 / (2 * maxLeverage) : null
+  if (averageEntry === null || maintenance === null) return null
   const margin = 1 / Math.max(1, leverage)
-  const maintenance = 1 / (2 * maxLeverage)
   const price = direction === 'long'
     ? averageEntry * (1 - margin) / (1 - maintenance)
     : averageEntry * (1 + margin) / (1 + maintenance)

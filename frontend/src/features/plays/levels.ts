@@ -113,7 +113,7 @@ export function planOverlays(entries: readonly DraftEntry[], selectedId: string,
 const trim = (text: string) => text.includes('.') ? text.replace(/\.?0+$/, '') : text
 
 /** Decimal places of a tick such as 0.5 or 0.00001, at most twelve. */
-function stepDecimals(step: number) {
+export function stepDecimals(step: number) {
   let places = 0
   while (places < 12 && Math.abs(Math.round(step * 10 ** places) - step * 10 ** places) > 1e-9) places++
   return places
@@ -121,7 +121,7 @@ function stepDecimals(step: number) {
 
 /**
  * A chart price as the venue would accept it: rounded to the instrument's tick when there is one, otherwise to
- * five significant figures (Hyperliquid's perpetual rule), at most eight decimals, no exponent.
+ * five significant figures (the rule of venues without ticks), at most eight decimals, no exponent.
  */
 export function formatDraggedPrice(price: number, step?: number | null) {
   if (step != null && step > 0) {

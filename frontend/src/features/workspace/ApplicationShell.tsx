@@ -37,9 +37,9 @@ function AccountRows({ accounts, portfolioNames, refreshing, onDetail, onSync, o
   const venues = useVenues()
   return <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Account</th><th>Known value</th><th>Latest update</th><th>Connection</th><th><span className="sr-only">Actions</span></th></tr></thead>
     <tbody>{accounts.map(account => <tr key={account.id}>
-      <td><button className="account-row-name" onClick={() => onDetail(account.id)}><span className={`venue-mark ${account.venueId}`}><Wallet size={17} /></span><span><strong>{account.name}</strong><small>{venues.name(account.venueId)} · {account.portfolioId ? portfolioNames[account.portfolioId] ?? 'Portfolio' : 'Unassigned'}</small></span></button></td>
+      <td><button className="account-row-name" onClick={() => onDetail(account.id)}><span className={`venue-mark${venues.can(account.venueId, 'sync') ? ' synced' : ''}`}><Wallet size={17} /></span><span><strong>{account.name}</strong><small>{venues.name(account.venueId)} · {account.portfolioId ? portfolioNames[account.portfolioId] ?? 'Portfolio' : 'Unassigned'}</small></span></button></td>
       <td className="numeric">{venues.can(account.venueId, 'stablecoinWallet') ?
-        <><strong>{money(account.availableStablecoinNominalUsd ?? null)}</strong><small>Wallet stablecoins available · nominal</small><small>Primary perps equity {money(account.accountValueUsd)}</small></> :
+        <><strong>{money(account.availableStablecoinNominalUsd ?? null)}</strong><small>Wallet stablecoins available · nominal</small><small>Perps equity {money(account.accountValueUsd)}</small></> :
         <><strong>{money(account.accountValueUsd)}</strong><small>{account.accountValueUsd === null ? 'No value recorded' : venues.can(account.venueId, 'sync') ? 'USD · venue-reported account value' : 'USD · manual value'}</small></>}</td>
       <td><strong>{time(account.lastSyncedAtUtc)}</strong><small>{account.positionCount} reported positions</small></td>
       <td><span className={`workspace-badge ${account.isEnabled === false || account.syncStatus === 'error' ? 'warning-badge' : ''}`}>{account.isEnabled === false ? 'Disabled' : account.syncStatus === 'manual' ? 'Manual' : account.syncStatus === 'synced' ? 'Read-only' : account.syncStatus === 'error' ? 'Refresh failed' : 'Not refreshed'}</span></td>

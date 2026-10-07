@@ -97,7 +97,7 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
   </fieldset>
 }
 
-export function EntryForm({ entry, onChange, idPrefix, direction = 'long', leverage = 1, shareLocked = false, maxLeverage = null, liquidation = null, suggested = null, quantity = null, units = defaultSizeUnits }: {
+export function EntryForm({ entry, onChange, idPrefix, direction = 'long', leverage = 1, shareLocked = false, maxLeverage = null, maintenanceMargin = null, liquidation = null, suggested = null, quantity = null, units = defaultSizeUnits }: {
   entry: DraftEntry
   onChange: (entry: DraftEntry) => void
   idPrefix?: string
@@ -108,6 +108,8 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
   shareLocked?: boolean
   /** Venue maximum for the contract, for the liquidation estimate; null when unknown. */
   maxLeverage?: number | null
+  /** Maintenance margin fraction the venue states for the contract; null assumes one from the maximum leverage. */
+  maintenanceMargin?: number | null
   /** The whole plan's estimated liquidation price, which stops are checked against. */
   liquidation?: number | null
   /** Stops and targets with a suggestion waiting in the suggestions panel; they get a yellow marker. */
@@ -119,7 +121,7 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
   const generatedId = useId()
   const prefix = idPrefix ?? generatedId
   // With several entries this is the entry on its own; a single entry is the whole plan.
-  const own = estimatedLiquidation([{ ...entry, share: '100' }], direction, leverage, maxLeverage)
+  const own = estimatedLiquidation([{ ...entry, share: '100' }], direction, leverage, maxLeverage, maintenanceMargin)
   const entryPrice = Number(entry.price) > 0 ? Number(entry.price) : null
 
   return <div className="entry-fields">

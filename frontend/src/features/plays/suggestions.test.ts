@@ -219,4 +219,15 @@ describe('price rounding', () => {
     expect(roundPrice(0.000123456, 'down')).toBe('0.00012345')
     expect(roundPrice(123456.7, 'up')).toBe('123457')
   })
+  it("rounds to the instrument's tick when the venue has one", () => {
+    expect(roundPrice(0.094607, 'up', 0.00001)).toBe('0.09461')
+    expect(roundPrice(0.094607, 'down', 0.00001)).toBe('0.0946')
+    expect(roundPrice(101.26, 'up', 0.5)).toBe('101.5')
+    expect(roundPrice(101.26, 'down', 0.5)).toBe('101')
+    expect(roundPrice(101.5, 'up', 0.5)).toBe('101.5')
+  })
+  it('keeps suggested stops on the tick and within the limit', () => {
+    const stop = suggestMaxStop(entry('100', '100', [['90']]), level(['90']), 'long', 1, 3.33, 0.5)
+    expect(stop).toMatchObject({ value: '97', price: 97 })
+  })
 })

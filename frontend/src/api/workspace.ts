@@ -29,11 +29,13 @@ export interface VenueInstrument {
   category?: string | null
   /** The venue's own identifier when it differs from the contract key, e.g. a numeric market ID. */
   venueContractId?: string | null
+  /** Maintenance margin as a fraction of notional when the venue states it; liquidation estimates otherwise assume one. */
+  maintenanceMarginFraction?: number | null
 }
 export interface InstrumentCatalog {
   venueId: string
   marketScope: 'perpetuals'
-  scope: 'primary-perpetual-dex' | 'manual'
+  scope: 'venue-perpetuals' | 'manual'
   instruments: VenueInstrument[]
   notice: string
 }
@@ -250,7 +252,7 @@ const date = (v: unknown) => text(v) && Number.isFinite(Date.parse(v))
 const count = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
 const instrumentCatalog = (v: unknown): v is InstrumentCatalog => object(v) &&
   text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 &&
-  v.marketScope === 'perpetuals' && ['primary-perpetual-dex', 'manual'].includes(String(v.scope)) &&
+  v.marketScope === 'perpetuals' && ['venue-perpetuals', 'manual'].includes(String(v.scope)) &&
   Array.isArray(v.instruments) && v.instruments.length <= 10_000 &&
   v.instruments.every((i: unknown) => object(i) && text(i.contractId) && i.contractId.trim() === i.contractId &&
     i.contractId.length > 0 && i.contractId.length <= 128 && count(i.quantityDecimals) &&
@@ -258,7 +260,9 @@ const instrumentCatalog = (v: unknown): v is InstrumentCatalog => object(v) &&
     text(i.quoteAsset) && /^[A-Za-z0-9]{1,16}$/.test(i.quoteAsset) &&
     (i.priceStep == null || typeof i.priceStep === 'number' && Number.isFinite(i.priceStep) && i.priceStep > 0) &&
     (i.category == null || text(i.category) && i.category.length <= 32) &&
-    (i.venueContractId == null || text(i.venueContractId) && i.venueContractId.length <= 128)) &&
+    (i.venueContractId == null || text(i.venueContractId) && i.venueContractId.length <= 128) &&
+    (i.maintenanceMarginFraction == null || typeof i.maintenanceMarginFraction === 'number' && i.maintenanceMarginFraction > 0 &&
+      i.maintenanceMarginFraction < 1)) &&
   new Set(v.instruments.map((i: VenueInstrument) => i.contractId)).size === v.instruments.length &&
   (v.scope !== 'manual' || v.instruments.length === 0) && text(v.notice) && v.notice.length <= 1000
 const epoch = (v: unknown): v is number => count(v) && (v as number) > 0

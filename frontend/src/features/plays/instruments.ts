@@ -20,7 +20,7 @@ export interface InstrumentCatalogState {
   retry: () => void
 }
 
-/** Venue catalogue of the account's primary perpetuals, read once per account and on retry. */
+/** Venue catalogue of the account's perpetuals, read once per account and on retry. */
 export function useInstrumentCatalog(api: WorkspaceApi, account: BrokerAccount | undefined): InstrumentCatalogState {
   const venues = useVenues()
   const [generation, setGeneration] = useState(0)
@@ -39,7 +39,7 @@ export function useInstrumentCatalog(api: WorkspaceApi, account: BrokerAccount |
     let active = true
     api.instruments(accountId, controller.signal).then(catalog => {
       if (!active) return
-      const matches = catalog.venueId === venueId && catalog.scope === 'primary-perpetual-dex'
+      const matches = catalog.venueId === venueId && catalog.scope === 'venue-perpetuals'
       setResult({ api, accountId, generation, catalog: matches ? catalog : null,
         error: matches ? null : 'The catalogue does not match the selected venue.' })
     }).catch(cause => {

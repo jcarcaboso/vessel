@@ -103,7 +103,7 @@ export function CapitalContext({ accounts, portfolios, draft }: {
         {wallet && metric('Wallet total', account.totalStablecoinNominalUsd,
           `${account.stablecoinScope ?? 'Supported stablecoin wallet'}${account.accountMode ? ` · ${account.accountMode}` : ''}. Nominal 1 token = 1 USD.`)}
         {wallet && metric('Available', account.availableStablecoinNominalUsd, 'Wallet total minus amounts held by open orders.')}
-        {wallet && !unified && metric('Perps equity', account.accountValueUsd, 'Primary perpetual account value.')}
+        {wallet && !unified && metric('Perps equity', account.accountValueUsd, 'Perpetual account value at the venue.')}
         {!wallet && account && metric('Account value', account.accountValueUsd)}
         <div title="Committed margin as a share of the balance"><dt>Margin / balance</dt><dd data-placeholder={share(sized.margin) === '—'}>{share(sized.margin)}</dd></div>
         <div title="Position size (notional) as a share of the balance"><dt>Exposure / balance</dt><dd data-placeholder={share(sized.notional) === '—'}>{share(sized.notional)}</dd></div>

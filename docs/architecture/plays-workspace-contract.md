@@ -55,15 +55,16 @@ Shared authenticated API contract: `GET /api/accounts/{id}/instruments` returns:
 {
   "venueId": "hyperliquid",
   "marketScope": "perpetuals",
-  "scope": "primary-perpetual-dex",
+  "scope": "venue-perpetuals",
   "instruments": [
-    { "contractId": "BTC", "quantityDecimals": 5, "maxLeverage": 40 }
+    { "contractId": "BTC", "quantityDecimals": 5, "maxLeverage": 40, "quoteAsset": "USDC",
+      "priceStep": null, "category": null, "venueContractId": null, "maintenanceMarginFraction": 0.0125 }
   ],
-  "notice": "Primary perpetual DEX metadata only. No orders, balances or execution refresh."
+  "notice": "Venue perpetual contract metadata only. No orders, balances or execution refresh."
 }
 ```
 
-The numbers above illustrate the shape, not current venue limits. Manual accounts return the same shape with `scope: "manual"`, their venue ID, an empty instrument list and a manual-catalogue notice. Missing/foreign accounts return 404; disabled accounts return 409 without a venue read; safe venue failures return 502. The application owns the contract and reuses the existing adapter's fixed `/info` request, cancellation, deadline and response bounds. No new persistence, account refresh or source credentials.
+The numbers above illustrate the shape, not current venue limits. The scope was `primary-perpetual-dex` until October 7, 2026; it now names any venue's selectable perpetuals (see [venue-instruments.md](venue-instruments.md) for the instrument fields). Manual accounts return the same shape with `scope: "manual"`, their venue ID, an empty instrument list and a manual-catalogue notice. Missing/foreign accounts return 404; disabled accounts return 409 without a venue read; safe venue failures return 502. The application owns the contract and reuses the existing adapter's fixed `/info` request, cancellation, deadline and response bounds. No new persistence, account refresh or source credentials.
 
 Hyperliquid choices come from a metadata-only read of the primary perpetual DEX. Preserve exact contract IDs and exclude delisted contracts from selectable choices without changing historical-fill recognition. The UI loads when an enabled Hyperliquid account is selected, cancels stale reads, offers retry, and clearly labels an explicit manual fallback when unavailable. Account changes clear the prior instrument and local budget rather than carry a venue contract into another account.
 

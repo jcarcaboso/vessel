@@ -75,6 +75,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const instrumentInfo = draft.instrumentSource === 'venue' ? catalog.catalog?.instruments.find(item => item.contractId === draft.instrument) : undefined
   const instrumentName = instrumentInfo ? pairLabel(instrumentInfo) : draft.instrument
   const maxLeverage = instrumentInfo?.maxLeverage ?? null
+  const maintenanceMargin = instrumentInfo?.maintenanceMarginFraction ?? null
+  const priceStep = instrumentInfo?.priceStep ?? null
   const units: SizeUnits = instrumentInfo
     ? { quote: instrumentInfo.quoteAsset, base: instrumentInfo.contractId, quantityDecimals: instrumentInfo.quantityDecimals }
     : defaultSizeUnits
@@ -119,7 +121,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   }
   const balance = account?.balanceUsd != null && Number(account.balanceUsd) > 0 ? Number(account.balanceUsd) : null
   const available = account?.availableStablecoinNominalUsd ?? null
-  const suggestions = sizing && !readOnly ? planSuggestions({ draft, leverage, maxLeverage, sizing, units, balance,
+  const suggestions = sizing && !readOnly ? planSuggestions({ draft, leverage, maxLeverage, maintenanceMargin, priceStep, sizing, units, balance,
     budget: status === 'draft' ? playBudget(draft, available)?.amount ?? null : null, defaultMaximum: defaultMaxLeverage }) : null
   const marks: SuggestionMarks | null = suggestions ? {
     size: !!suggestions.size, leverage: !!suggestions.leverage,
@@ -190,7 +192,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       </div>
       <div className="plays-context-status"><span className="field-label">Status</span><span className={`badge play-status-${status}`}>{statusLabels[status]}</span></div>
     </fieldset>
-    <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} maxLeverage={maxLeverage} />
+    <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} />
     {!loading && !enabledAccounts.length && <p className="plays-context-note">No enabled accounts yet. You can outline the play and add an account later.</p>}
     <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} />
     {suggestions && sizing && onRiskChange && <SuggestionsPanel plan={suggestions} sizing={sizing} draft={draft} leverage={leverage} units={units}
@@ -204,9 +206,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           setSelectedId(id)
           setSelectionRequest(current => current + 1)
         }} instrument={draft.instrument} instrumentName={instrumentName} venue={account ? venues.name(account.venueId) : null} direction={draft.direction}
-        intervals={account ? venues.find(account.venueId)?.intervals : undefined} priceStep={instrumentInfo?.priceStep ?? null}
+        intervals={account ? venues.find(account.venueId)?.intervals : undefined} priceStep={priceStep}
         streamable={account ? venues.can(account.venueId, 'stream') : false}
-        leverage={leverageOf(draft.leverage)} liquidation={estimatedLiquidation(draft.entries, draft.direction, leverageOf(draft.leverage), maxLeverage)}
+        leverage={leverageOf(draft.leverage)} liquidation={estimatedLiquidation(draft.entries, draft.direction, leverageOf(draft.leverage), maxLeverage, maintenanceMargin)}
         source={account && venues.can(account.venueId, 'candles') && draft.instrumentSource === 'venue' ? { api, accountId: account.id } : null}
         onEntriesChange={entries => planChange({ ...draft, entries })}
         drawings={drawingKey ? draft.drawings[drawingKey] : undefined}
@@ -217,9 +219,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} />
       </div>
       {readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
-        <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} units={units} availableBudget={available} checkBudget={false} />
+        <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} units={units} availableBudget={available} checkBudget={false} />
       </fieldset> : <PositionEditor draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId}
-        maxLeverage={maxLeverage} instrumentName={instrumentName} units={units} availableBudget={available} checkBudget={status === 'draft'}
+        maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} instrumentName={instrumentName} units={units} availableBudget={available} checkBudget={status === 'draft'}
         marks={marks} />}
     </div>
     <PositionSummary draft={draft} units={units} instrumentName={instrumentName} />

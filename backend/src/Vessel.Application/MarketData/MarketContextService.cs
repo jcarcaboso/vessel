@@ -41,7 +41,7 @@ public sealed class MarketContextService(IWorkspaceStore store, IVenueRegistry v
 {
     /// <summary>Used when the venue's descriptor has no notice of its own.</summary>
     public const string Notice =
-        "Venue market context for the primary perpetual DEX. Funding is the current hourly rate; open interest is in base units. Not a fill or valuation.";
+        "Venue market context. Open interest is in base units. Not a fill or valuation.";
     private const string VenueFailure = "The venue market read failed. Try again later.";
 
     public async Task<MarketContextDto> ContextAsync(Guid accountId, string? instrument, CancellationToken ct)
@@ -72,7 +72,7 @@ public sealed class MarketContextService(IWorkspaceStore store, IVenueRegistry v
         }
 
         var match = snapshot.Value.Value.FirstOrDefault(c => c.ContractId == instrument)
-            ?? throw new WorkspaceException(400, "The instrument is not in the venue's primary perpetual catalogue.");
+            ?? throw new WorkspaceException(400, "The instrument is not in the venue's perpetual catalogue.");
         return new MarketContextDto(account.VenueId, instrument, match.MarkPrice, match.OraclePrice, match.MidPrice,
             match.PreviousDayPrice, match.DayNotionalVolume, match.OpenInterest, match.FundingRate, match.Premium,
             snapshot.Value.Observed, notice);

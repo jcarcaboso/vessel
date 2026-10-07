@@ -167,7 +167,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             known.Count, dtos.Sum(a => a.PositionCount), await store.FillCountAsync(ct),
             wallets.Count == 0 ? null : StablecoinTotals.Sum(wallets.SelectMany(s => s.Stablecoins).Select(b => b.Available)), wallets.Count),
             (await store.FillsAsync(null, 100, ct)).Select(ToDto).ToList(),
-            "Known enabled-account values only. Primary perpetual margin and HyperCore stablecoin wallet are separate ledgers and are never summed as total equity. Stablecoin summaries are nominal at 1 per supported USD-pegged token; no FX, depeg, lending, EVM or risk adjustment is applied. Wallet available means total minus held, not guaranteed free perpetual margin or withdrawal. Imported fills are recent, not complete lifetime history.");
+            "Known enabled-account values only. Perpetual margin and venue stablecoin wallets are separate ledgers and are never summed as total equity. Stablecoin summaries are nominal at 1 per supported USD-pegged token; no FX, depeg, lending, EVM or risk adjustment is applied. Wallet available means total minus held, not guaranteed free perpetual margin or withdrawal. Imported fills are recent, not complete lifetime history.");
     }
 
     public async Task<SnapshotDto?> SnapshotAsync(Guid id, CancellationToken ct)
@@ -203,7 +203,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         if (!account.IsEnabled)
             throw new WorkspaceException(409, "Enable the account before reading its instrument catalogue.");
         if (account.VenueId == "manual")
-            return new(account.VenueId, "perpetuals", "manual", [],
+            return new(account.VenueId, "perpetuals", InstrumentCatalogScopes.Manual, [],
                 "Manual catalogue: enter a perpetual contract manually. No venue metadata is available.");
         if (venues.Reader(account.VenueId) is not { } reader)
             throw new WorkspaceException(502, "The venue instrument read failed. Try again later.");
@@ -219,8 +219,8 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         {
             throw new WorkspaceException(502, "The venue instrument read failed. Try again later.");
         }
-        return new(account.VenueId, "perpetuals", "primary-perpetual-dex", instruments,
-            "Primary perpetual DEX metadata only. No orders, balances or execution refresh.");
+        return new(account.VenueId, "perpetuals", InstrumentCatalogScopes.Venue, instruments,
+            "Venue perpetual contract metadata only. No orders, balances or execution refresh.");
     }
 
     public async Task<AccountDto> SyncAsync(Guid id, CancellationToken ct)
@@ -290,7 +290,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             StablecoinTotals.Sum(snapshot.Stablecoins.Select(balance => balance.Available)),
             snapshot.Stablecoins.OrderBy(balance => balance.TokenIndex).Select(balance => new StablecoinBalanceDto(
                 balance.Symbol, balance.TokenIndex, balance.TokenId, Money(balance.Total)!, Money(balance.Held)!, Money(balance.Available)!)).ToList(),
-            "HyperCore spot/unified wallet only: supported stablecoin token identities, nominal USD-pegged units, no FX/depeg adjustment. Available is total minus held; it is not guaranteed withdrawal capacity or perpetual free margin. Other assets, EVM wallets and lending/borrow accounting are excluded. Primary perpetual margin is not added again.");
+            "Venue stablecoin wallet only: supported stablecoin token identities, nominal USD-pegged units, no FX/depeg adjustment. Available is total minus held; it is not guaranteed withdrawal capacity or perpetual free margin. Other assets, EVM wallets and lending/borrow accounting are excluded. Perpetual margin is not added again.");
     private static FillDto ToDto(ImportedFill f) => new(f.Id, f.AccountId, f.ContractId, f.Side, f.Direction, Money(f.Price)!,
         Money(f.Quantity)!, Money(f.Fee)!, f.FeeToken, Money(f.ClosedPnlUsd)!, f.OccurredAtUtc, f.OrderId, f.SourceFillId, f.TransactionHash,
         f.PositionEffect, f.FeeBasis, f.PnlBasis);
