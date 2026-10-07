@@ -412,6 +412,27 @@ describe('Main application shell', () => {
     expect(screen.getByText('Available token units')).toBeInTheDocument()
     expect(screen.getByText('10.123456')).toBeInTheDocument()
     expect(screen.getByText('Wallet funds, not guaranteed trading margin.')).toBeInTheDocument()
+    expect(screen.getByText(/^Separate Hyperliquid perpetuals equity: \$0\.00\./)).toBeInTheDocument()
+    expect(screen.getByText('Separate venue field · not added to wallet funds')).toBeInTheDocument()
+  })
+  it('names an unreported withdrawable amount and shows no wallet note for a venue without a wallet', async () => {
+    const venue = { ...systemFixture.venues[0]!, id: 'risex', name: 'RISEx', tradeUrlTemplate: 'https://www.rise.trade/trade/{instrument}',
+      priceRule: 'tick-size' as const, capabilities: { ...systemFixture.venues[0]!.capabilities, stream: false, stablecoinWallet: false } }
+    const system = { ...systemFixture, venues: [venue, ...systemFixture.venues] }
+    const risex = { ...accountFixture, venueId: 'risex', address: '0x1111111111111111111111111111111111111111', accountValueUsd: '12480.55',
+      syncStatus: 'synced' as const, lastSyncedAtUtc: '2026-10-06T09:12:00Z' }
+    const client = api({
+      overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [risex] }),
+      snapshot: vi.fn().mockResolvedValue({ observedAtUtc: '2026-10-06T09:12:00Z', valueScope: 'risex-perps-account',
+        accountValueUsd: '12480.55', withdrawableUsd: null, marginUsedUsd: '1830.2', positions: [] }),
+      fills: vi.fn().mockResolvedValue([]),
+    })
+    render(<ApplicationShell system={system} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'View Main account' }))
+    expect(await screen.findByText('Not reported by this venue')).toBeInTheDocument()
+    expect(screen.getByText('Account value · reported')).toBeInTheDocument()
+    expect(screen.queryByText(/perpetuals equity:/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/risex-perps-account/)).not.toBeInTheDocument()
   })
   it('Reload retries failed detail reads when Overview metadata remains unchanged', async () => {
     const client = api({
