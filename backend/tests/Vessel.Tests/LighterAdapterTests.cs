@@ -6,7 +6,9 @@ using Vessel.Application.Credentials;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Microsoft.EntityFrameworkCore;
 using Vessel.Infrastructure.Venues.Lighter;
+using Vessel.Persistence;
 
 namespace Vessel.Tests;
 
@@ -186,7 +188,7 @@ public sealed class LighterAdapterTests
         Assert.Equal(4m, position.MarginUsedUsd);
         Assert.Equal(20, position.Leverage);
         Assert.Equal("1", position.VenueContractId);
-        Assert.Contains("Only verified fee-free", result.HistoryNotice);
+        Assert.Contains("Only fee-free", result.HistoryNotice);
     }
 
     [Fact]
@@ -254,6 +256,21 @@ public sealed class LighterAdapterTests
         Assert.Equal(1, Fills(Change(Trade, "integrator_maker_fee", JsonValue.Create(1)), standard: true).Fees);
         Assert.Equal(1, Fills(Change(Trade, "maker_fee", null)).Fees);
         Assert.Single(Fills(Change(Trade, "maker_fee", null), standard: true).Fills);
+    }
+
+    [Fact]
+    public void History_notice_fits_its_column_even_with_every_sentence_at_the_largest_count()
+    {
+        // Conservative: no single refresh adds every sentence, and the omitted counts share at most 500 executions.
+        var notice = string.Join(" ", LighterReader.HistoryNotice, LighterReader.NonzeroRateNotice,
+            LighterReader.CredentialRefusedNotice, LighterReader.HistoryRetryNotice, LighterReader.HistoryUnavailableNotice,
+            LighterReader.PageLimitNotice, LighterReader.MissingPnlNotice(500), LighterReader.FeeNotice(500),
+            LighterReader.SelfTradeNotice(500));
+        var options = new DbContextOptionsBuilder<VesselDbContext>().UseNpgsql("Host=model-only").Options;
+        using var db = new VesselDbContext(options, new CoreOwner(Guid.NewGuid()));
+        var limit = db.Model.FindEntityType(typeof(Vessel.Domain.Accounts.Account))!.FindProperty(nameof(Vessel.Domain.Accounts.Account.HistoryNotice))!.GetMaxLength();
+        Assert.NotNull(limit);
+        Assert.True(notice.Length <= limit, $"{notice.Length} characters exceed the {limit}-character HistoryNotice column.");
     }
 
     [Fact]

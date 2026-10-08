@@ -9,13 +9,20 @@ namespace Vessel.Infrastructure.Venues.Lighter;
 
 public sealed partial class LighterReader
 {
-    private const string HistoryNotice =
-        "Incomplete Lighter history: at most 500 recent perpetual executions in five pages; no backfill. " +
-        "Only verified fee-free executions; fee-bearing history is not imported. " +
-        "Executions without reported realized PnL are unsupported and are not imported. " +
-        "Liquidation, deleverage and settlement records are unsupported. " +
-        "USDC perpetual equity only; spot wallets are not added. Margin shows initial-margin requirements, " +
-        "with position requirements calculated from the venue's notional and initial-margin fraction. Withdrawal availability is unknown.";
+    // Stored in the account's 1,000-character HistoryNotice column; the coverage table in
+    // docs/architecture/lighter-state.md carries the detail. A test keeps every sentence combined below that limit.
+    internal const string HistoryNotice =
+        "Incomplete Lighter history: at most the latest 500 perpetual executions, no backfill. " +
+        "Only fee-free executions with reported realized PnL are imported; liquidation, deleverage, settlement and self-trade records are not. " +
+        "USDC perpetual equity only, no spot wallets. Margin is the initial-margin requirement. Withdrawal availability is unknown.";
+    internal const string NonzeroRateNotice = "The account reports a nonzero maker or taker rate. No fills were imported.";
+    internal const string CredentialRefusedNotice = "The optional read-only credential could not be verified. Public reads only; verify or replace the token.";
+    internal const string HistoryRetryNotice = "The history credential was refused. Retrying this page once as a public read.";
+    internal const string HistoryUnavailableNotice = "Recent execution history is unavailable without a usable read-only token. The public snapshot was refreshed; retained fills were not replaced.";
+    internal const string PageLimitNotice = "The five-page history limit was reached; older executions remain unimported.";
+    internal static string MissingPnlNotice(int count) => $"{count} executions omitted because realized PnL was not reported.";
+    internal static string FeeNotice(int count) => $"{count} fee-bearing or unverified-fee executions omitted.";
+    internal static string SelfTradeNotice(int count) => $"{count} self-trade executions omitted.";
 
     public Task<PerpetualVenueReadResult> ReadAsync(string sourceId, CancellationToken cancellationToken) =>
         ReadCoreAsync(Index(sourceId), null, cancellationToken);
@@ -48,13 +55,13 @@ public sealed partial class LighterReader
                     fillsAllowed = maker == 0 && taker == 0;
                     // accountLimits uses tier codes; "standard" is user_tier_name, not user_tier.
                     feeFreeTier = fillsAllowed && Text(root, "user_tier") == "std";
-                    if (!fillsAllowed) notices.Add("The account reports a nonzero maker or taker rate. No fills were imported.");
+                    if (!fillsAllowed) notices.Add(NonzeroRateNotice);
                 }
                 catch (LighterAuthenticationException)
                 {
                     // A refused or expired optional credential must not block the public snapshot and public fills.
                     credential = null;
-                    notices.Add("The optional read-only credential could not be verified. Public reads only; verify or replace the token.");
+                    notices.Add(CredentialRefusedNotice);
                 }
             }
 
@@ -79,13 +86,13 @@ public sealed partial class LighterReader
                         {
                             credential = null;
                             feeFreeTier = false;
-                            notices.Add("The history credential was refused. Retrying this page once as a public read.");
+                            notices.Add(HistoryRetryNotice);
                             trades = await GetAsync(query, ct);
                         }
                     }
                     catch (LighterAuthenticationException)
                     {
-                        notices.Add("Recent execution history is unavailable without a usable read-only token. The public snapshot was refreshed; retained fills were not replaced.");
+                        notices.Add(HistoryUnavailableNotice);
                         cursor = null;
                         break;
                     }
@@ -102,10 +109,10 @@ public sealed partial class LighterReader
                     if (cursor is null) break;
                     if (!cursors.Add(cursor)) throw Json.Invalid();
                 }
-            if (cursor is not null) notices.Add("The five-page history limit was reached; older executions remain unimported.");
-            if (missingPnl > 0) notices.Add($"{missingPnl} executions omitted because realized PnL was not reported.");
-            if (fees > 0) notices.Add($"{fees} fee-bearing or unverified-fee executions omitted.");
-            if (selfTrades > 0) notices.Add($"{selfTrades} self-trade executions omitted.");
+            if (cursor is not null) notices.Add(PageLimitNotice);
+            if (missingPnl > 0) notices.Add(MissingPnlNotice(missingPnl));
+            if (fees > 0) notices.Add(FeeNotice(fees));
+            if (selfTrades > 0) notices.Add(SelfTradeNotice(selfTrades));
             return new PerpetualVenueReadResult(snapshot,
                 catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument!).ToArray(), fills, string.Join(" ", notices));
         }, cancellationToken);
