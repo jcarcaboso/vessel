@@ -133,12 +133,59 @@ public sealed class AccountSecurityApiTests
         Assert.True(lighter.GetProperty("capabilities").GetProperty("accountDiscovery").GetBoolean());
     }
 
+    [Fact]
+    public async Task Name_preview_is_no_store_and_does_not_require_vault_or_import_accounts()
+    {
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
+        var credentials = new SecurityCredentialStore(); using var vault = new AesGcmCredentialVault(new());
+        var discovery = new SecurityDiscovery([new("9223372036854775807", "Swing ETH", "main", CollateralUsd: "42.000", AvailableBalanceUsd: "0")]);
+        await using var factory = Factory(owner, store, credentials, vault, discovery: discovery);
+        using var client = factory.AuthorizedClient();
+        using var response = await client.PostAsJsonAsync($"/api/venues/{SecurityFixture.Venue.Id}/accounts/credential",
+            new { address = SecurityFixture.Address, token = SecurityFixture.Token });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.CacheControl!.NoStore);
+        Assert.Equal(SecurityFixture.Token, discovery.ReceivedToken);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Swing ETH", body); Assert.Contains("\"collateralUsd\":\"42.000\"", body);
+        Assert.DoesNotContain(SecurityFixture.Token, body);
+        Assert.Null(credentials.Stored); Assert.Empty(store.Accounts);
+    }
+
+    [Fact]
+    public async Task Name_preview_refusals_and_bad_bodies_never_echo_tokens_to_responses_or_logs()
+    {
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
+        using var vault = new AesGcmCredentialVault(new()); var logs = new SecurityLogs();
+        await using var factory = Factory(owner, store, new(), vault, logs: logs,
+            discovery: new SecurityDiscovery([]) { Error = new InvalidOperationException(SecurityFixture.Token) });
+        using var client = factory.AuthorizedClient();
+        var path = $"/api/venues/{SecurityFixture.Venue.Id}/accounts/credential";
+        foreach (var (body, expected) in new[]
+        {
+            (JsonSerializer.Serialize(new { address = SecurityFixture.Address, token = SecurityFixture.Token }), HttpStatusCode.BadGateway),
+            (JsonSerializer.Serialize(new { address = SecurityFixture.Address, token = new string('x', 513) }), HttpStatusCode.BadRequest),
+            (JsonSerializer.Serialize(new { address = SecurityFixture.Address, token = new string('x', 4200) }), HttpStatusCode.RequestEntityTooLarge),
+            ("{\"token\":\"" + SecurityFixture.Token, HttpStatusCode.BadRequest)
+        })
+        {
+            using var response = await client.PostAsync(path, new StringContent(body, Encoding.UTF8, "application/json"));
+            Assert.Equal(expected, response.StatusCode);
+            Assert.True(response.Headers.CacheControl!.NoStore);
+            Assert.DoesNotContain(SecurityFixture.Token, await response.Content.ReadAsStringAsync());
+        }
+        Assert.DoesNotContain(logs.Messages, message => message.Contains(SecurityFixture.Token, StringComparison.Ordinal));
+        using var anonymous = factory.CreateClient();
+        using var denied = await anonymous.PostAsJsonAsync(path, new { address = SecurityFixture.Address, token = SecurityFixture.Token });
+        Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+    }
+
     private static CoreApiFactory Factory(Guid owner, MemoryWorkspaceStore accounts, SecurityCredentialStore credentials, ICredentialVault vault,
-        SecurityVerifier? verifier = null, SecurityLogs? logs = null) => new(owner, accounts, configure: services =>
+        SecurityVerifier? verifier = null, SecurityLogs? logs = null, SecurityDiscovery? discovery = null) => new(owner, accounts, configure: services =>
     {
         services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry()); services.AddSingleton<ICredentialVault>(vault);
         services.AddSingleton<IAccountCredentialStore>(credentials); services.AddSingleton<IVenueCredentialVerifier>(verifier ?? new());
-        services.AddSingleton<IVenueAccountDiscovery>(new SecurityDiscovery([new("9223372036854775807", "Main", "main")]));
+        services.AddSingleton<IVenueAccountDiscovery>(discovery ?? new SecurityDiscovery([new("9223372036854775807", "Main", "main")]));
         services.AddSingleton(SecurityFixture.Clock);
         if (logs is not null) services.AddLogging(b => b.AddProvider(logs));
     });

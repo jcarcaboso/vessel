@@ -70,7 +70,8 @@ public sealed partial class LighterReader
                 var isMain = type == 0;
                 if (isMain != (candidates.Count == 0 && page == 0)) throw Json.Invalid();
                 candidates.Add(new(id, isMain ? "Main account" : "Subaccount " + id,
-                    isMain ? "main" : "subaccount"));
+                    isMain ? "main" : "subaccount", CollateralUsd: DiscoveryAmount(row, "collateral"),
+                    AvailableBalanceUsd: DiscoveryAmount(row, "available_balance")));
                 // Discovery reports collateral/available balance, not equity. Do not label either account value.
             }
             cursor = Cursor(root);
@@ -82,6 +83,55 @@ public sealed partial class LighterReader
 
     public Task<IReadOnlyList<VenueAccountCandidate>> DiscoverAsync(string address, CancellationToken cancellationToken) =>
         BoundedAsync(ct => DiscoverCoreAsync(Address(address), ct), cancellationToken);
+
+    private static string? DiscoveryAmount(JsonElement row, string field)
+    {
+        if (!row.TryGetProperty(field, out var value) || value.ValueKind == JsonValueKind.Null) return null;
+        var text = Json.Text(value);
+        _ = Json.ParseDecimal(text);
+        return text;
+    }
+
+    // accountMetadata requires authorization even though discovery balances are public.
+    // Read-only token stays in the header; join by exact account index, never response order.
+    public Task<IReadOnlyList<VenueAccountCandidate>> DiscoverAsync(string address, string token, CancellationToken cancellationToken) =>
+        BoundedAsync<IReadOnlyList<VenueAccountCandidate>>(async ct =>
+        {
+            var wallet = Address(address);
+            var parsed = Token(token);
+            var accounts = await DiscoverCoreAsync(wallet, ct);
+            if (!accounts.Any(a => a.SourceId == parsed.Index) ||
+                parsed.Scope == "all" && accounts[0].SourceId != parsed.Index)
+                throw new VenueReadException("The read-only token belongs to a different wallet or main account.");
+            var names = new Dictionary<string, string>(StringComparer.Ordinal);
+            var ids = accounts.Select(a => a.SourceId).ToHashSet(StringComparer.Ordinal);
+            var cursors = new HashSet<string>(StringComparer.Ordinal);
+            string? cursor = null;
+            for (var page = 0; page < MaxPages; page++)
+            {
+                Token(token);
+                var query = parsed.Scope == "all" ? "by=l1_address&value=" + wallet : "by=index&value=" + parsed.Index;
+                using var document = await GetAsync("accountMetadata?" + query +
+                    (cursor is null ? "" : "&cursor=" + Uri.EscapeDataString(cursor)), ct, token);
+                foreach (var row in Rows(document.RootElement, "account_metadatas", 200).EnumerateArray())
+                {
+                    var id = Identity(Json.Property(row, "account_index"));
+                    // Wallet metadata can include pools that public discovery deliberately excludes.
+                    // Never add candidates or names for indices outside the authoritative personal list.
+                    if (parsed.Scope == "all" && !ids.Contains(id)) continue;
+                    var name = Json.TextOrEmpty(Json.Property(row, "name"), 200);
+                    if (!ids.Contains(id) || parsed.Scope == "single" && id != parsed.Index ||
+                        name.Contains(token, StringComparison.Ordinal) || !names.TryAdd(id, name))
+                        throw Json.Invalid();
+                }
+                cursor = Cursor(document.RootElement);
+                if (cursor is null)
+                    return accounts.Select(a => names.TryGetValue(a.SourceId, out var name) && !string.IsNullOrWhiteSpace(name)
+                        ? a with { Name = name } : a).ToList();
+                if (!cursors.Add(cursor)) throw Json.Invalid();
+            }
+            throw new VenueReadException("Lighter account names exceeded five pages. No partial names were accepted.");
+        }, cancellationToken);
 
     private async Task<ReadToken> BindAsync(string sourceId, string token, CancellationToken ct)
     {

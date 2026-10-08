@@ -146,11 +146,14 @@ public sealed class AccountSecurityTests
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
         var added = SecurityFixture.Account(owner, "9223372036854775807"); added.UpdateSettings(added.Name, null, false); store.Accounts.Add(added);
         store.Accounts.Add(SecurityFixture.Account(Guid.NewGuid(), "2"));
-        var discovery = new SecurityDiscovery([new("9223372036854775807", "Main", "main", "-12.000000000000000000001"), new("2", "Sub", "subaccount")]);
+        var discovery = new SecurityDiscovery([new("9223372036854775807", "Main", "main", "-12.000000000000000000001",
+            "15.000000000000000001", "-0.01"), new("2", "Sub", "subaccount")]);
         var service = new AccountDiscoveryService(store, new CoreOwner(owner), SecurityFixture.Registry(), [discovery]);
         var result = await service.DiscoverAsync(SecurityFixture.Venue.Id, SecurityFixture.Address, default);
         Assert.Equal(added.Id, result.Accounts[0].ExistingAccountId); Assert.False(result.Accounts[0].IsEnabled);
         Assert.Equal("-12.000000000000000000001", result.Accounts[0].AccountValueUsd);
+        Assert.Equal("15.000000000000000001", result.Accounts[0].CollateralUsd);
+        Assert.Equal("-0.01", result.Accounts[0].AvailableBalanceUsd);
         Assert.Null(result.Accounts[1].ExistingAccountId); Assert.Null(result.Accounts[1].IsEnabled);
         Assert.Equal(2, store.Accounts.Count);
     }
@@ -248,7 +251,14 @@ internal sealed class SecurityVerifier : IVenueCredentialVerifier
 internal sealed class SecurityDiscovery(IReadOnlyList<VenueAccountCandidate> candidates) : IVenueAccountDiscovery
 {
     public string VenueId => SecurityFixture.Venue.Id;
+    public string? ReceivedToken { get; private set; }
+    public Exception? Error { get; init; }
     public Task<IReadOnlyList<VenueAccountCandidate>> DiscoverAsync(string address, CancellationToken cancellationToken) => Task.FromResult(candidates);
+    public Task<IReadOnlyList<VenueAccountCandidate>> DiscoverAsync(string address, string token, CancellationToken cancellationToken)
+    {
+        ReceivedToken = token;
+        return Error is { } error ? Task.FromException<IReadOnlyList<VenueAccountCandidate>>(error) : Task.FromResult(candidates);
+    }
 }
 
 internal sealed class SecurityCredentialStore : IAccountCredentialStore

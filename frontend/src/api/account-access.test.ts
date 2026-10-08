@@ -11,6 +11,23 @@ function respond(body: unknown, status = 200) {
 }
 
 describe('Account discovery contract', () => {
+  it('loads names with the token in a POST body only and disables caching', async () => {
+    const fetch = respond(discoveryFixture)
+    const token = 'ro:fixture-only'
+    await expect(api().discoverAccounts('lighter', discoveryFixture.address, undefined, token)).resolves.toEqual(discoveryFixture)
+    expect(fetch).toHaveBeenCalledWith('/api/venues/lighter/accounts/credential', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ address: discoveryFixture.address, token }),
+      cache: 'no-store', credentials: 'omit', redirect: 'error',
+    }))
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(0)
+  })
+  it('blocks authenticated name lookup on plaintext LAN origins', async () => {
+    vi.stubGlobal('location', { protocol: 'http:', hostname: '192.168.1.20' })
+    const fetch = respond(discoveryFixture)
+    await expect(api().discoverAccounts('lighter', discoveryFixture.address, undefined, 'ro:test')).rejects.toThrow(credentialTransportMessage)
+    expect(fetch).not.toHaveBeenCalled()
+  })
   it('keeps int64 indices and decimal balances as exact strings', async () => {
     const fetch = respond(discoveryFixture)
     await expect(api().discoverAccounts('lighter', discoveryFixture.address)).resolves.toEqual(discoveryFixture)
@@ -22,7 +39,7 @@ describe('Account discovery contract', () => {
   })
   it.each([
     { sourceId: 9007199254740992 }, { sourceId: '9223372036854775808' }, { sourceId: '01' },
-    { sourceId: '-1' }, { accountValueUsd: 123 }, { accountType: 'unknown' },
+    { sourceId: '-1' }, { accountValueUsd: 123 }, { collateralUsd: 123 }, { availableBalanceUsd: 'NaN' }, { accountType: 'unknown' },
     { existingAccountId: 'bad-id' }, { isEnabled: 'false' },
   ])('rejects malformed candidates %j', async patch => {
     respond({ ...discoveryFixture, accounts: [{ ...discoveryFixture.accounts[0], ...patch }] })

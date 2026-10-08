@@ -5,10 +5,11 @@ October 7, 2026. The owner authorized this work after RISEx, including the accou
 ## Account workflow
 
 1. Choose Lighter in **Add account** and enter a public wallet address.
-2. **Find wallet** lists its main account and personal subaccounts. Select the accounts to import, edit their names and optionally choose a portfolio.
-3. Already imported accounts cannot be selected again. Disabled accounts are identified and remain manageable instead of being duplicated.
-4. Optionally follow the token-creation link and enter an all-scope read-only token issued for the main account. Vessel verifies each selected account separately.
-5. Import creates records, not a history backfill. Open an account and choose **Refresh account** to fetch its current state and bounded recent fills.
+2. **Find wallet** lists its main account and personal subaccounts with venue-reported collateral and available balance. These are not total equity. Missing balances stay unavailable, and zero is shown as zero.
+3. Optionally enter a read-only token and choose **Load Lighter names** before selecting. Lighter requires authentication for account metadata. An all-scope token from the main account loads wallet account names; single scope loads only its own name. Unnamed accounts keep their index labels. The lookup saves nothing and clears the token input. Select accounts, edit their Vessel names and optionally choose a portfolio.
+4. Already imported accounts cannot be selected again. Disabled accounts are identified and remain manageable instead of being duplicated.
+5. Optionally follow the token-creation link and enter an all-scope read-only token issued for the main account. Re-enter it if a name lookup cleared it. Vessel verifies each selected account separately before saving order access.
+6. Import creates records, not a history backfill. Open an account and choose **Refresh account** to fetch its current state and bounded recent fills.
 
 One concrete Lighter account index corresponds to one Vessel account. Indices stay strings, including values beyond JavaScript's safe integer range. A failed token save does not remove a successfully imported account. The dialog reports individual outcomes and explains how to retry through account management.
 
@@ -44,6 +45,10 @@ The refreshed checks used the official [trade schema](https://apidocs.lighter.xy
 Apply migrations explicitly during deployment. Testing used a disposable PostgreSQL instance, not the mounted application database.
 
 ## Verification
+
+October 8 follow-up: the public [discovery schema](https://apidocs.lighter.xyz/reference/accountsbyl1address.md) supplies `collateral` and `available_balance`; the separate [metadata schema](https://apidocs.lighter.xyz/reference/accountmetadata.md) supplies `account_index` and `name`. A bounded unauthenticated metadata probe returned HTTP 400 with the missing-authorization error. Authenticated name lookup is fixture-tested; no real user token was supplied.
+
+The follow-up passed 755 backend tests with 63 opt-in database/live tests skipped, all 510 frontend tests, type checking, lint and production build. The existing Vite chunk-size warning remains. Desktop and mobile fixture flows passed with no page errors, no horizontal overflow, no token in browser storage, and no scoped axe WCAG A/AA violations. The import recording and screenshots now show names and separate balances.
 
 - The final `pnpm check` passed 2 Python, 76 prototype, 800 backend and 503 frontend tests, plus types, lint and production build. PostgreSQL and the Lighter public mainnet test were enabled. The separate opt-in RISEx live test was skipped. Vite reported its existing non-failing chunk-size warning.
 - Credential coverage includes tamper rejection, owner/account/purpose binding, key rotation, key-file permissions, safe errors, owner isolation, deletion cascades and credential-versus-sync/disable locking. System metadata remains available without a database connection.

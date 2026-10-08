@@ -38,8 +38,8 @@ public sealed class LighterAdapterTests
         """;
     private static readonly string Discovery = $$"""
         {"code":200,"l1_address":"{{Address}}","sub_accounts":[
-         {"index":{{Source}},"account_type":0,"l1_address":"{{Address}}","collateral":"998.0"},
-         {"index":9007199254740994,"account_type":1,"l1_address":"{{Address}}","collateral":"400.0"}]}
+         {"index":{{Source}},"account_type":0,"l1_address":"{{Address}}","collateral":"998.0","available_balance":"-0.000000000000000000001"},
+         {"index":9007199254740994,"account_type":1,"l1_address":"{{Address}}","collateral":"400.0","available_balance":"0.00"}]}
         """;
     private static readonly string Trade = $$"""
         {"trade_id":9223372036854775806,"trade_id_str":"9223372036854775806","market_id":1,
@@ -301,6 +301,99 @@ public sealed class LighterAdapterTests
         Assert.Equal("9007199254740994", accounts[1].SourceId);
         Assert.Equal("subaccount", accounts[1].AccountType);
         Assert.All(accounts, a => Assert.Null(a.AccountValueUsd));
+        Assert.Equal("998.0", accounts[0].CollateralUsd);
+        Assert.Equal("-0.000000000000000000001", accounts[0].AvailableBalanceUsd);
+        Assert.Equal("400.0", accounts[1].CollateralUsd);
+        Assert.Equal("0.00", accounts[1].AvailableBalanceUsd);
+    }
+
+    [Fact]
+    public async Task Discovery_names_use_exact_index_join_across_pages_and_header_only_token()
+    {
+        var all = Token.Replace(":single:", ":all:");
+        var handler = new Handler { Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/accountMetadata", StringComparison.Ordinal)
+            ? Response(request.RequestUri.Query.Contains("cursor=", StringComparison.Ordinal)
+                ? $$"""{"code":200,"account_metadatas":[{"account_index":{{Source}},"name":"Long term"}]}"""
+                : """{"code":200,"account_metadatas":[{"account_index":2,"name":"Excluded pool"},{"account_index":9007199254740994,"name":"Swing / ETH"}],"next_cursor":"next"}""")
+            : null };
+        var result = await Reader(handler).DiscoverAsync(Address, all, default);
+        Assert.Equal(["Long term", "Swing / ETH"], result.Select(a => a.Name));
+        Assert.Equal("400.0", result[1].CollateralUsd);
+        Assert.Null(handler.Requests[0].Token);
+        Assert.All(handler.Requests.Skip(1), r =>
+        {
+            Assert.Equal(all, r.Token);
+            Assert.Contains("by=l1_address", r.Url);
+            Assert.DoesNotContain(all, r.Url);
+        });
+    }
+
+    [Fact]
+    public async Task Single_scope_names_leave_other_accounts_and_blank_names_as_index_labels()
+    {
+        var handler = new Handler { Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/accountMetadata", StringComparison.Ordinal)
+            ? Response($$"""{"code":200,"account_metadatas":[{"account_index":{{Source}},"name":""}]}""") : null };
+        var result = await Reader(handler).DiscoverAsync(Address, Token, default);
+        Assert.Equal("Main account", result[0].Name);
+        Assert.Equal("Subaccount 9007199254740994", result[1].Name);
+        Assert.Contains("by=index&value=" + Source, handler.Requests[1].Url);
+    }
+
+    [Theory]
+    [InlineData("ro:1:all:9999999999:abcdef")]
+    [InlineData("ro:9007199254740994:all:9999999999:abcdef")]
+    [InlineData("trading-key")]
+    public async Task Names_reject_foreign_wallet_nonmaster_all_scope_and_non_read_only_tokens(string token)
+    {
+        var handler = new Handler();
+        await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).DiscoverAsync(Address, token, default));
+        Assert.DoesNotContain(handler.Requests, r => r.Token is not null);
+    }
+
+    [Theory]
+    [InlineData("""[{"account_index":2,"name":"Wrong account"}]""")]
+    [InlineData("""[{"account_index":9007199254740993,"name":"A"},{"account_index":9007199254740993,"name":"B"}]""")]
+    [InlineData("""[{"account_index":9007199254740993,"name":123}]""")]
+    public async Task Names_fail_closed_for_foreign_duplicate_or_malformed_metadata(string rows)
+    {
+        var handler = new Handler { Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/accountMetadata", StringComparison.Ordinal)
+            ? Response($$"""{"code":200,"account_metadatas":{{rows}}}""") : null };
+        await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).DiscoverAsync(Address, Token, default));
+    }
+
+    [Fact]
+    public async Task Names_refusal_or_secret_echo_never_returns_the_secret()
+    {
+        foreach (var body in new[]
+        {
+            $$"""{"code":20013,"message":"{{Token}}"}""",
+            $$"""{"code":200,"account_metadatas":[{"account_index":{{Source}},"name":"{{Token}}"}]}"""
+        })
+        {
+            var handler = new Handler { Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/accountMetadata", StringComparison.Ordinal)
+                ? Response(body) : null };
+            var error = await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).DiscoverAsync(Address, Token, default));
+            Assert.DoesNotContain(Token, error.ToString());
+        }
+    }
+
+    [Fact]
+    public async Task Names_pagination_stops_after_five_pages_without_partial_results()
+    {
+        var pages = 0;
+        var handler = new Handler { Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/accountMetadata", StringComparison.Ordinal)
+            ? Response($$"""{"code":200,"account_metadatas":[],"next_cursor":"page{{++pages}}"}""") : null };
+        await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).DiscoverAsync(Address, Token, default));
+        Assert.Equal(5, pages);
+    }
+
+    [Theory]
+    [InlineData("\"NaN\"")]
+    [InlineData("123")]
+    public async Task Malformed_discovery_balances_are_not_silently_zeroed(string value)
+    {
+        var handler = new Handler { Reply = _ => Response(Discovery.Replace("\"400.0\"", value, StringComparison.Ordinal)) };
+        await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).DiscoverAsync(Address, default));
     }
 
     [Theory]

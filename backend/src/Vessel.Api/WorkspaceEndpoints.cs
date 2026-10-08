@@ -11,6 +11,11 @@ public static class WorkspaceEndpoints
         var api = app.MapGroup("/api").RequireAuthorization();
         api.MapGet("/venues/{venueId}/accounts", async (string venueId, string? address, AccountDiscoveryService service, CancellationToken ct) =>
             Results.Ok(await service.DiscoverAsync(venueId, address, ct)));
+        // This read-only preview never stores the token. The credential suffix applies the same
+        // no-store and bounded-body middleware as credential saves; tokens never enter a URL.
+        api.MapPost("/venues/{venueId}/accounts/credential",
+            async (string venueId, CredentialDiscoveryRequest request, AccountDiscoveryService service, CancellationToken ct) =>
+                Results.Ok(await service.DiscoverAsync(venueId, request, ct)));
         var credential = api.MapGroup("/accounts/{id:guid}/credential");
         credential.AddEndpointFilter(async (context, next) =>
         {

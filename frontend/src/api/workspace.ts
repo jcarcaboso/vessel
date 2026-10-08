@@ -217,7 +217,7 @@ export interface WorkspaceApi {
   marketStream(id: string, query: MarketStreamQuery, signal: AbortSignal, onEvent: (event: MarketStreamEvent) => void): Promise<void>
   createPortfolio(name: string): Promise<Portfolio>
   createAccount(account: CreateAccount): Promise<BrokerAccount>
-  discoverAccounts(venueId: string, address: string, signal?: AbortSignal): Promise<AccountDiscovery>
+  discoverAccounts(venueId: string, address: string, signal?: AbortSignal, token?: string): Promise<AccountDiscovery>
   accountCredential(id: string, signal?: AbortSignal): Promise<AccountCredential>
   saveAccountCredential(id: string, token: string): Promise<AccountCredential>
   deleteAccountCredential(id: string): Promise<void>
@@ -327,6 +327,8 @@ const discovery = (venueId: string, address: string) => (v: unknown): v is Accou
   text(v.notice) && v.notice.length <= 2000 && Array.isArray(v.accounts) && v.accounts.length <= 1000 &&
   v.accounts.every((a: unknown) => object(a) && accountIndex(a.sourceId) && text(a.name) && a.name.length <= 200 &&
     ['main', 'subaccount'].includes(String(a.accountType)) && nullableDecimal(a.accountValueUsd) &&
+    (a.collateralUsd === undefined || nullableDecimal(a.collateralUsd)) &&
+    (a.availableBalanceUsd === undefined || nullableDecimal(a.availableBalanceUsd)) &&
     (a.existingAccountId === null || guid(a.existingAccountId)) && (a.isEnabled === null || typeof a.isEnabled === 'boolean')) &&
   new Set(v.accounts.map(a => a.sourceId)).size === v.accounts.length
 const credential = (v: unknown): v is AccountCredential => object(v) && typeof v.storageConfigured === 'boolean' &&
@@ -570,9 +572,16 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     marketStream,
     createPortfolio: name => request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name }) }),
     createAccount: body => request('/api/accounts', account, { method: 'POST', body: JSON.stringify(body) }),
-    discoverAccounts: (venueId, address, signal) => {
+    discoverAccounts: (venueId, address, signal, token) => {
       if (!/^[a-z][a-z\d-]{0,63}$/.test(venueId) || !/^0x[\da-f]{40}$/i.test(address)) {
         return Promise.reject(new ApiError('invalid-response', 'Use a valid venue and public wallet address.'))
+      }
+      if (token !== undefined) {
+        if (!credentialTransportAllowed()) return Promise.reject(new ApiError('http', credentialTransportMessage))
+        if (!token.trim() || token.length > 512) return Promise.reject(new ApiError('http', credentialSaveMessage))
+        return request(`/api/venues/${venueId}/accounts/credential`, discovery(venueId, address),
+          { ...withSignal(signal), method: 'POST', body: JSON.stringify({ address, token }) }, 30_000, undefined,
+          'Could not load venue names. Check the read-only token’s wallet, scope and expiry.')
       }
       return request(`/api/venues/${venueId}/accounts?${new URLSearchParams({ address })}`, discovery(venueId, address),
         withSignal(signal), 30_000, undefined, 'Could not find accounts for this wallet. Check the address and try again.')

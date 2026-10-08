@@ -39,12 +39,66 @@ async function selectMain() {
 }
 
 describe('Wallet account import', () => {
+  it('shows collateral and available balance separately, including zero and exact signed values', async () => {
+    const api = client({ discoverAccounts: vi.fn().mockResolvedValue({ ...discoveryFixture, accounts: [
+      { ...discoveryFixture.accounts[0], collateralUsd: '400.123456789', availableBalanceUsd: '-12.5000' },
+      { ...discoveryFixture.accounts[1], collateralUsd: '0.00', availableBalanceUsd: null },
+    ] }) })
+    render(<Fixture api={api} />)
+    await discover()
+    expect(screen.getByText('Collateral · $400.12')).toHaveAttribute('title', '400.123456789')
+    expect(screen.getByText('Available · -$12.50')).toHaveAttribute('title', '-12.5000')
+    expect(screen.getByText('Collateral · $0.00')).toBeInTheDocument()
+    expect(screen.getByText('Available · Unavailable')).toBeInTheDocument()
+    expect(screen.getByText(/not total equity/)).toBeInTheDocument()
+  })
+  it('loads venue names before selection, clears the token and imports with the venue name', async () => {
+    const api = client({ discoverAccounts: vi.fn().mockResolvedValueOnce(discoveryFixture).mockResolvedValueOnce({
+      ...discoveryFixture, accounts: discoveryFixture.accounts.map(a => ({ ...a, name: a.accountType === 'main' ? 'Core holdings' : 'Swing / ETH' })),
+    }) })
+    render(<Fixture api={api} />)
+    await discover()
+    await userEvent.type(screen.getByLabelText('Read-only token'), 'ro:test-only')
+    await userEvent.click(screen.getByRole('button', { name: 'Load Lighter names' }))
+    await screen.findByText('Swing / ETH')
+    expect(api.discoverAccounts).toHaveBeenLastCalledWith('lighter', discoveryFixture.address, undefined, 'ro:test-only')
+    expect(screen.getByLabelText('Read-only token')).toHaveValue('')
+    expect(api.saveAccountCredential).not.toHaveBeenCalled()
+    expect(api.createAccount).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('checkbox', { name: /Swing \/ ETH/ }))
+    expect(screen.getByLabelText('Account name · 9223372036854775807')).toHaveValue('Swing / ETH')
+    await userEvent.click(screen.getByRole('button', { name: 'Import selected (1)' }))
+    await screen.findByText(/Imported. Public reads/)
+    expect(api.createAccount).toHaveBeenCalledWith(expect.objectContaining({ sourceId: '9223372036854775807', name: 'Swing / ETH' }))
+    expect(api.sync).not.toHaveBeenCalled()
+  })
+  it('preserves edited names and selections across name lookup, and keeps them on failure', async () => {
+    const api = client({ discoverAccounts: vi.fn().mockResolvedValueOnce(discoveryFixture).mockResolvedValueOnce({
+      ...discoveryFixture, accounts: discoveryFixture.accounts.map(a => ({ ...a, name: 'Venue label ' + a.sourceId })),
+    }).mockRejectedValueOnce(new Error('ro:must-not-echo')) })
+    render(<Fixture api={api} />)
+    await discover(); await selectMain()
+    const input = screen.getByLabelText('Account name · 9007199254740993')
+    await userEvent.clear(input); await userEvent.type(input, 'My custom name')
+    await userEvent.type(screen.getByLabelText('Read-only token'), 'ro:test-only')
+    await userEvent.click(screen.getByRole('button', { name: 'Load Lighter names' }))
+    await screen.findByText(/Venue names loaded/)
+    expect(input).toHaveValue('My custom name')
+    expect(screen.getAllByRole('checkbox')[0]).toBeChecked()
+    await userEvent.type(screen.getByLabelText('Read-only token'), 'ro:must-not-echo')
+    await userEvent.click(screen.getByRole('button', { name: 'Load Lighter names' }))
+    await screen.findByRole('alert')
+    expect(input).toHaveValue('My custom name')
+    expect(screen.getByLabelText('Read-only token')).toHaveValue('')
+    expect(screen.queryByText(/ro:must-not-echo/)).not.toBeInTheDocument()
+    expect(screen.getAllByRole('checkbox')[0]).toBeChecked()
+  })
   it('discovers concrete indices, names selected accounts, assigns a portfolio and imports without refreshing history', async () => {
     const api = client()
     render(<Fixture api={api} />)
     await discover()
     expect(api.discoverAccounts).toHaveBeenCalledWith('lighter', discoveryFixture.address)
-    expect(screen.getByText('Value unavailable')).toBeInTheDocument()
+    expect(screen.getByText('Balance unavailable')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Import selected' })).toBeDisabled()
     await selectMain()
     const name = screen.getByLabelText(`Account name · ${indexAccount.sourceId}`)
