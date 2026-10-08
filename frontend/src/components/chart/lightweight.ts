@@ -1,11 +1,12 @@
 import {
-  CandlestickSeries, ColorType, CrosshairMode, createChart,
-  type AutoscaleInfo, type IChartApi, type IPrimitivePaneRenderer, type IPrimitivePaneView, type ISeriesApi,
+  CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart,
+  type AutoscaleInfo, type IChartApi, type IPrimitivePaneRenderer, type MouseEventParams, type IPrimitivePaneView, type PriceFormat, type ISeriesApi,
   type ISeriesPrimitive, type ISeriesPrimitiveAxisView, type Logical, type LogicalRange, type PrimitiveHoveredItem,
   type SeriesAttachedParameter, type Time, type UTCTimestamp,
 } from 'lightweight-charts'
 import { DrawingController, type DrawingSpace, type DrawingTheme } from './drawingController'
 import { TimeIndex, snapPrice } from './drawings'
+import type { IndicatorPaneId, IndicatorView, PaneLayout, PaneSize } from './indicators'
 import type { ChartAdapter, ChartAdapterFactory, ChartCandle, PriceOverlay } from './types'
 
 type DrawTarget = Parameters<IPrimitivePaneRenderer['draw']>[0]
@@ -146,6 +147,8 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
 
   /** Latest close; levels far from it are left out of autoscaling so a mismatched plan cannot flatten the candles. */
   reference: number | null = null
+  /** The attribution logo sits in the bottom pane, so tags avoid it only while the price pane is the only one. */
+  avoidLogo = true
 
   autoscaleInfo(): AutoscaleInfo | null {
     const reference = this.reference
@@ -196,7 +199,7 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
         const tagWidth = Math.ceil(context.measureText(overlay.label).width + padding * 2 + marker)
         const tagY = Math.round(lineY - tagHeight / 2)
         // Keep tags clear of the required TradingView attribution in the bottom-left corner.
-        const inLogoZone = tagY + tagHeight > bitmapSize.height - logoZone.height * v
+        const inLogoZone = this.avoidLogo && tagY + tagHeight > bitmapSize.height - logoZone.height * v
         const tagX = Math.round((inLogoZone ? logoZone.width : 8) * h)
         context.fillStyle = overlay.color
         context.fillRect(tagX, tagY, tagWidth, tagHeight)
@@ -255,6 +258,22 @@ const timeLabel = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'num
 /** Bars of space right of the last candle when a chart opens. */
 const openingRightOffset = 12
 
+/** Height of a minimized indicator pane: just its control bar. */
+const minimizedPaneHeight = 26
+/** Space kept above indicator values for the pane's control bar. */
+const barRoom = minimizedPaneHeight + 4
+/** Pane heights relative to the price pane (1). */
+const paneStretch: Record<IndicatorPaneId, Record<Exclude<PaneSize, 'minimized'>, number>> = {
+  volume: { normal: 0.18, maximized: 2.4 },
+  rsi: { normal: 0.24, maximized: 2.4 },
+}
+const toTime = (ms: number) => Math.floor(ms / 1000) as UTCTimestamp
+/** Indicator values with gaps as whitespace, so lines start where the indicator is defined. */
+const lineData = (times: readonly number[], values: readonly (number | null)[]) =>
+  values.map((value, index) => value === null ? { time: toTime(times[index]!) } : { time: toTime(times[index]!), value })
+const withAlpha = (color: string, alpha: number) => /^#[0-9a-f]{6}$/i.test(color)
+  ? `${color}${Math.round(alpha * 255).toString(16).padStart(2, '0')}` : color
+
 export const createLightweightAdapter: ChartAdapterFactory = (container, callbacks) => {
   const theme = readTheme(container)
   const chart: IChartApi = createChart(container, {
@@ -262,6 +281,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     layout: {
       background: { type: ColorType.Solid, color: theme.background }, textColor: theme.muted,
       fontFamily: theme.font, fontSize: 11, attributionLogo: true,
+      panes: { separatorColor: theme.border, separatorHoverColor: withAlpha(theme.muted, 0.22) },
     },
     grid: { vertLines: { color: theme.grid }, horzLines: { color: theme.grid } },
     rightPriceScale: { borderColor: theme.border },
@@ -338,6 +358,154 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   }, () => drawingsLayer.requestUpdate())
   drawingsLayer.controller = drawings
 
+  // Indicators: moving averages share the price pane; volume and RSI each get a pane below it.
+  const averages = new Map<string, ISeriesApi<'Line'>>()
+  /** Averages use the candles' precision. */
+  let priceFormat: PriceFormat = { type: 'price', precision: 2, minMove: 0.01 }
+  const indicatorPanes: { id: IndicatorPaneId; series: ISeriesApi<'Histogram'> | ISeriesApi<'Line'>; size: PaneSize }[] = []
+  let shownPanes = ''
+  let reportedLayout = ''
+  /** Averages far from the latest close stay off the scale, like distant plan levels. */
+  const nearPrice = (base: () => AutoscaleInfo | null) => {
+    const info = base()
+    const reference = levels.reference
+    if (!info?.priceRange || reference === null) return info
+    const { minValue, maxValue } = info.priceRange
+    return Math.abs(minValue / reference - 1) <= autoscaleReach && Math.abs(maxValue / reference - 1) <= autoscaleReach ? info : null
+  }
+  const paneHeights = () => chart.panes().map((_, index) => chart.paneSize(index).height)
+  /** Applies each pane's size. Minimized panes are sized in pixels, so this runs again when the chart resizes. */
+  const layoutPanes = () => {
+    const panes = chart.panes()
+    if (panes.length < 2) return
+    const total = paneHeights().reduce((sum, height) => sum + height, 0)
+    const minimized = indicatorPanes.filter(pane => pane.size === 'minimized').length
+    const open = 1 + indicatorPanes.reduce((sum, pane) => sum + (pane.size === 'minimized' ? 0 : paneStretch[pane.id][pane.size]), 0)
+    const room = total - minimized * minimizedPaneHeight
+    const small = total > 0 && room > 0 ? minimizedPaneHeight * open / room : 0.08
+    panes[0]!.setStretchFactor(1)
+    indicatorPanes.forEach((pane, index) => panes[index + 1]?.setStretchFactor(pane.size === 'minimized' ? small : paneStretch[pane.id][pane.size]))
+  }
+  // New panes are measured only after the chart has laid them out, so sizing waits for the next frame.
+  let layoutPending = false
+  /** Corrections left for minimized panes whose pixel height drifted, e.g. after the chart resized. */
+  let corrections = 0
+  /** Reports where indicator panes are, for their control bars; re-sizes minimized panes after a resize. */
+  const reportLayout = () => {
+    if (layoutPending) {
+      layoutPending = false
+      layoutPanes()
+      scheduleLayoutReport()
+      return
+    }
+    if (!indicatorPanes.length) {
+      if (reportedLayout !== '[]') callbacks.onPaneLayout([])
+      reportedLayout = '[]'
+      return
+    }
+    const heights = paneHeights()
+    if (corrections > 0 && indicatorPanes.some((pane, index) => pane.size === 'minimized' && Math.abs((heights[index + 1] ?? 0) - minimizedPaneHeight) > 2)) {
+      corrections--
+      layoutPending = true
+      scheduleLayoutReport()
+      return
+    }
+    const width = chart.timeScale().width()
+    let top = 0
+    const layout: PaneLayout[] = indicatorPanes.map((pane, index) => {
+      // Panes are separated by one-pixel dividers.
+      top += heights[index]! + 1
+      return { id: pane.id, top, height: heights[index + 1] ?? 0, width }
+    })
+    const key = JSON.stringify(layout)
+    if (key === reportedLayout) return
+    reportedLayout = key
+    callbacks.onPaneLayout(layout)
+  }
+  let layoutFrame = 0
+  const scheduleLayoutReport = () => {
+    cancelAnimationFrame(layoutFrame)
+    layoutFrame = requestAnimationFrame(reportLayout)
+  }
+  const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => { corrections = 2; scheduleLayoutReport() })
+  resizeObserver?.observe(container)
+  const setIndicators = (view: IndicatorView) => {
+    const times = view.times
+    for (const [id, series] of averages) {
+      if (view.lines.some(line => line.id === id)) continue
+      chart.removeSeries(series)
+      averages.delete(id)
+    }
+    for (const line of view.lines) {
+      let series = averages.get(line.id)
+      if (!series) {
+        series = chart.addSeries(LineSeries, {
+          lineWidth: 1, priceLineVisible: false, crosshairMarkerRadius: 3, autoscaleInfoProvider: nearPrice,
+        })
+        averages.set(line.id, series)
+      }
+      series.applyOptions({ color: line.color, priceFormat })
+      series.setData(lineData(times, line.values))
+    }
+
+    // Panes are rebuilt in a fixed order (volume above RSI) when one is shown or hidden.
+    const wanted = [view.volume && 'volume', view.rsi && 'rsi'].filter(Boolean).join('|')
+    const rebuilt = wanted !== shownPanes
+    if (rebuilt) {
+      for (const pane of indicatorPanes.splice(0)) chart.removeSeries(pane.series)
+      if (view.volume) {
+        const series = chart.addSeries(HistogramSeries, {
+          priceFormat: { type: 'volume' }, priceLineVisible: false,
+          // Pixel room above keeps the bars clear of the pane's control bar.
+          autoscaleInfoProvider: (base: () => AutoscaleInfo | null) => {
+            const info = base()
+            return info ? { ...info, margins: { above: barRoom, below: 0 } } : null
+          },
+        }, chart.panes().length)
+        series.priceScale().applyOptions({ scaleMargins: { top: 0, bottom: 0 } })
+        indicatorPanes.push({ id: 'volume', size: view.volume.size, series })
+      }
+      if (view.rsi) {
+        const series = chart.addSeries(LineSeries, {
+          lineWidth: 1, priceLineVisible: false, crosshairMarkerRadius: 3,
+          priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+          autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 }, margins: { above: barRoom, below: 6 } }),
+        }, chart.panes().length)
+        series.priceScale().applyOptions({ scaleMargins: { top: 0, bottom: 0 } })
+        for (const price of view.rsi.guides) series.createPriceLine({ price, color: theme.muted, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: '' })
+        indicatorPanes.push({ id: 'rsi', size: view.rsi.size, series })
+      }
+      shownPanes = wanted
+      levels.avoidLogo = indicatorPanes.length === 0
+    }
+    let resized = false
+    for (const pane of indicatorPanes) {
+      const size = pane.id === 'volume' ? view.volume!.size : view.rsi!.size
+      if (size !== pane.size) resized = true
+      pane.size = size
+      // A minimized pane keeps only its bar; its values stay in the bar's label.
+      pane.series.applyOptions({ visible: size !== 'minimized' })
+    }
+    const volume = indicatorPanes.find(pane => pane.id === 'volume')
+    if (volume && view.volume) {
+      const { values, up } = view.volume
+      volume.series.setData(values.map((value, index) => ({
+        time: toTime(times[index]!), value, color: withAlpha(up[index] ? theme.candleUp : theme.candleDownEdge, 0.42),
+      })))
+    }
+    const rsiPane = indicatorPanes.find(pane => pane.id === 'rsi')
+    if (rsiPane && view.rsi) {
+      rsiPane.series.applyOptions({ color: view.rsi.color })
+      rsiPane.series.setData(lineData(times, view.rsi.values))
+    }
+    // Separator drags are kept until a pane is shown, hidden or resized from its bar.
+    if (rebuilt || resized) {
+      layoutPending = true
+      corrections = 2
+    }
+    scheduleLayoutReport()
+  }
+
   chart.subscribeClick(event => {
     if (typeof event.hoveredObjectId === 'string' && levels.find(event.hoveredObjectId)) callbacks.onLevelSelect(event.hoveredObjectId)
   })
@@ -345,6 +513,14 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     if (range && candleCount > 0 && range.from < 15) callbacks.onNeedOlder()
   }
   chart.timeScale().subscribeVisibleLogicalRangeChange(onRange)
+  let crosshairTime: number | null = null
+  const onCrosshair = (event: MouseEventParams<Time>) => {
+    const time = typeof event.time === 'number' ? event.time * 1000 : null
+    if (time === crosshairTime) return
+    crosshairTime = time
+    callbacks.onCrosshairMove(time)
+  }
+  chart.subscribeCrosshairMove(onCrosshair)
 
   // Drawings and level drags are handled before the chart sees the pointer, so panning stays off while they move.
   let drag: { id: string; pointerId: number; price: number; moved: boolean } | null = null
@@ -360,7 +536,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   const onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0 || drag) return
     const { x, y } = pane(event)
-    if (x > chart.timeScale().width()) return
+    // Drawings, levels and picking belong to the price pane; indicator panes and the axes keep the chart's own handling.
+    if (x > chart.timeScale().width() || y > chart.paneSize(0).height) return
     container.focus({ preventScroll: true })
     if (picking) {
       consume(event)
@@ -398,6 +575,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     if (!active) drawings.setGuide(null)
   }
   const onPointerMove = (event: PointerEvent) => {
+    // A pane separator drag resizes panes without an event; follow it while a button is held.
+    if (event.buttons && indicatorPanes.length) scheduleLayoutReport()
     if (guiding) drawings.setGuide(pane(event).x)
     if (drawings.busy) {
       const { x, y } = pane(event)
@@ -437,7 +616,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     const rect = container.getBoundingClientRect()
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
-    if (x > chart.timeScale().width() || picking || drawings.tool || drawings.drawingAt(x, y)) return
+    if (x > chart.timeScale().width() || y > chart.paneSize(0).height || picking || drawings.tool || drawings.drawingAt(x, y)) return
     const hit = levels.levelAt(y)
     if (!hit || hit.overlay.kind === 'reference') return
     event.preventDefault()
@@ -458,7 +637,9 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       index = new TimeIndex(candles)
       levels.reference = candles.at(-1)?.close ?? null
       const precision = pricePrecision(candles)
-      series.applyOptions({ priceFormat: { type: 'price', precision, minMove: 10 ** -precision } })
+      priceFormat = { type: 'price', precision, minMove: 10 ** -precision }
+      series.applyOptions({ priceFormat })
+      for (const average of averages.values()) average.applyOptions({ priceFormat })
       series.setData(candles.map(candle => ({
         time: Math.floor(candle.time / 1000) as UTCTimestamp,
         open: candle.open, high: candle.high, low: candle.low, close: candle.close,
@@ -485,6 +666,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       }
       updateGuide()
     },
+    setIndicators,
     setPricePicker(active) {
       picking = active
       container.style.cursor = active ? 'crosshair' : ''
@@ -524,6 +706,9 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       container.removeEventListener('pointercancel', endDrag, true)
       container.removeEventListener('pointerleave', onPointerLeave)
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
+      chart.unsubscribeCrosshairMove(onCrosshair)
+      resizeObserver?.disconnect()
+      cancelAnimationFrame(layoutFrame)
       chart.remove()
     },
   }
