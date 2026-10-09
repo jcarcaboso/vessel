@@ -924,7 +924,10 @@ describe('Chart indicators', () => {
 
   it('minimizes, maximizes and hides indicator panes from their bars', async () => {
     const state = await renderChart()
-    act(() => state.callbacks!.onPaneLayout([{ id: 'volume', top: 300, height: 80, width: 600 }, { id: 'rsi', top: 381, height: 100, width: 600 }]))
+    act(() => state.callbacks!.onPaneLayout([
+      { id: 'volume', top: 300, height: 80, left: 0, width: 600, effectiveSize: 'normal', compacted: false },
+      { id: 'rsi', top: 381, height: 100, left: 0, width: 600, effectiveSize: 'normal', compacted: false },
+    ]))
     const rsiBar = screen.getByRole('group', { name: 'RSI 14 pane' })
     await userEvent.click(within(rsiBar).getByRole('button', { name: 'Maximize RSI 14' }))
     expect(state.indicators!.rsi!.size).toBe('maximized')
@@ -936,6 +939,8 @@ describe('Chart indicators', () => {
     expect(state.indicators!.volume!.size).toBe('minimized')
     await userEvent.click(within(volumeBar).getByRole('button', { name: 'Hide Volume' }))
     expect(state.indicators!.volume).toBeNull()
+    // Focus moves to the legend button that brings the pane back.
+    expect(screen.getByRole('button', { name: 'Show Volume pane' })).toHaveFocus()
     // A hidden pane comes back from the legend with the size it had.
     await userEvent.click(screen.getByRole('button', { name: 'Show Volume pane' }))
     expect(state.indicators!.volume!.size).toBe('minimized')
@@ -962,5 +967,26 @@ describe('Chart indicators', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }))
     expect(state.indicators!.lines[0]).toMatchObject({ label: 'EMA 9', color: '#b388ff' })
     expect(state.indicators!.rsi).not.toBeNull()
+  })
+
+  it('marks a pane minimized for lack of room and names it in captures', async () => {
+    const list = entries()
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={list} selectedId={list[0]!.id} instrument="BTC" venue="Hyperliquid" onSelect={vi.fn()} onCapture={vi.fn().mockReturnValue(null)}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onPaneLayout([
+      { id: 'volume', top: 150, height: 26, left: 0, width: 600, effectiveSize: 'minimized', compacted: true },
+      { id: 'rsi', top: 177, height: 72, left: 0, width: 600, effectiveSize: 'normal', compacted: false },
+    ]))
+    const volumeBar = screen.getByRole('group', { name: 'Volume pane' })
+    expect(volumeBar).toHaveTextContent('Too short to plot')
+    // Nothing to minimize or restore; maximize can make room, and hide still works.
+    expect(within(volumeBar).queryByRole('button', { name: /Minimize Volume|Restore Volume/ })).toBeNull()
+    expect(within(volumeBar).getByRole('button', { name: 'Maximize Volume' })).toBeInTheDocument()
+    expect(state.indicators!.volume!.size).toBe('normal')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Capture chart' }))
+    expect(state.captions[0]).toContain('EMA 9/21/50/200 · Volume minimized, not plotted · RSI 14 · Planned levels are not fills')
   })
 })

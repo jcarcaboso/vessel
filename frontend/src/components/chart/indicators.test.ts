@@ -61,3 +61,10 @@ describe('indicator settings', () => {
     expect(describeIndicators(defaultIndicators)).toBe('EMA 9/21/50/200 · Volume · RSI 14')
   })
 })
+
+describe('indicator caption', () => {
+  it('says which panes are minimized and therefore not plotted', () => {
+    expect(describeIndicators({ ...defaultIndicators, rsi: { ...defaultIndicators.rsi, size: 'minimized' } })).toBe('EMA 9/21/50/200 · Volume · RSI 14 minimized, not plotted')
+    expect(describeIndicators(defaultIndicators, { volume: 'minimized' })).toBe('EMA 9/21/50/200 · Volume minimized, not plotted · RSI 14')
+  })
+})

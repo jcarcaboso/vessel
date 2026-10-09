@@ -7,6 +7,7 @@ import {
 import { DrawingController, type DrawingSpace, type DrawingTheme } from './drawingController'
 import { TimeIndex, snapPrice } from './drawings'
 import type { IndicatorPaneId, IndicatorView, PaneLayout, PaneSize } from './indicators'
+import { barHeight, solvePaneLayout, type SolvedLayout } from './paneLayout'
 import type { ChartAdapter, ChartAdapterFactory, ChartCandle, PriceOverlay } from './types'
 
 type DrawTarget = Parameters<IPrimitivePaneRenderer['draw']>[0]
@@ -258,15 +259,8 @@ const timeLabel = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'num
 /** Bars of space right of the last candle when a chart opens. */
 const openingRightOffset = 12
 
-/** Height of a minimized indicator pane: just its control bar. */
-const minimizedPaneHeight = 26
 /** Space kept above indicator values for the pane's control bar. */
-const barRoom = minimizedPaneHeight + 4
-/** Pane heights relative to the price pane (1). */
-const paneStretch: Record<IndicatorPaneId, Record<Exclude<PaneSize, 'minimized'>, number>> = {
-  volume: { normal: 0.18, maximized: 2.4 },
-  rsi: { normal: 0.24, maximized: 2.4 },
-}
+const barRoom = barHeight + 4
 const toTime = (ms: number) => Math.floor(ms / 1000) as UTCTimestamp
 /** Indicator values with gaps as whitespace, so lines start where the indicator is defined. */
 const lineData = (times: readonly number[], values: readonly (number | null)[]) =>
@@ -364,7 +358,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   let priceFormat: PriceFormat = { type: 'price', precision: 2, minMove: 0.01 }
   const indicatorPanes: { id: IndicatorPaneId; series: ISeriesApi<'Histogram'> | ISeriesApi<'Line'>; size: PaneSize }[] = []
   let shownPanes = ''
-  let reportedLayout = ''
+  let destroyed = false
   /** Averages far from the latest close stay off the scale, like distant plan levels. */
   const nearPrice = (base: () => AutoscaleInfo | null) => {
     const info = base()
@@ -373,62 +367,118 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     const { minValue, maxValue } = info.priceRange
     return Math.abs(minValue / reference - 1) <= autoscaleReach && Math.abs(maxValue / reference - 1) <= autoscaleReach ? info : null
   }
-  const paneHeights = () => chart.panes().map((_, index) => chart.paneSize(index).height)
-  /** Applies each pane's size. Minimized panes are sized in pixels, so this runs again when the chart resizes. */
-  const layoutPanes = () => {
-    const panes = chart.panes()
-    if (panes.length < 2) return
-    const total = paneHeights().reduce((sum, height) => sum + height, 0)
-    const minimized = indicatorPanes.filter(pane => pane.size === 'minimized').length
-    const open = 1 + indicatorPanes.reduce((sum, pane) => sum + (pane.size === 'minimized' ? 0 : paneStretch[pane.id][pane.size]), 0)
-    const room = total - minimized * minimizedPaneHeight
-    const small = total > 0 && room > 0 ? minimizedPaneHeight * open / room : 0.08
-    panes[0]!.setStretchFactor(1)
-    indicatorPanes.forEach((pane, index) => panes[index + 1]?.setStretchFactor(pane.size === 'minimized' ? small : paneStretch[pane.id][pane.size]))
+
+  // Pane layout. New panes have no element or size until the chart draws them, so layout and
+  // measurement wait for frames; heights are applied as stretch factors and read back from the DOM.
+  const frames = new Set<number>()
+  const nextFrame = (run: () => void) => {
+    const id = requestAnimationFrame(() => { frames.delete(id); if (!destroyed) run() })
+    frames.add(id)
   }
-  // New panes are measured only after the chart has laid them out, so sizing waits for the next frame.
-  let layoutPending = false
-  /** Corrections left for minimized panes whose pixel height drifted, e.g. after the chart resized. */
-  let corrections = 0
-  /** Reports where indicator panes are, for their control bars; re-sizes minimized panes after a resize. */
-  const reportLayout = () => {
-    if (layoutPending) {
-      layoutPending = false
-      layoutPanes()
-      scheduleLayoutReport()
-      return
-    }
-    if (!indicatorPanes.length) {
-      if (reportedLayout !== '[]') callbacks.onPaneLayout([])
-      reportedLayout = '[]'
-      return
-    }
-    const heights = paneHeights()
-    if (corrections > 0 && indicatorPanes.some((pane, index) => pane.size === 'minimized' && Math.abs((heights[index + 1] ?? 0) - minimizedPaneHeight) > 2)) {
-      corrections--
-      layoutPending = true
-      scheduleLayoutReport()
-      return
-    }
-    const width = chart.timeScale().width()
-    let top = 0
-    const layout: PaneLayout[] = indicatorPanes.map((pane, index) => {
-      // Panes are separated by one-pixel dividers.
-      top += heights[index]! + 1
-      return { id: pane.id, top, height: heights[index + 1] ?? 0, width }
-    })
+  /** Last solved layout for the current panes; null until they have been laid out. */
+  let solved: SolvedLayout | null = null
+  /** Pane heights the owner dragged to; kept across resizes, dropped when panes change from a bar or are shown or hidden. */
+  let dragged: number[] | null = null
+  let appliedFactors = ''
+  /** No factors are written while a pointer is down, so the library's separator drag is not fought. */
+  let pressed: number[] | null | false = false
+  const paneRows = () => chart.panes().map(pane => pane.getHTMLElement())
+  const drawn = () => {
+    const rows = paneRows()
+    return rows.length === indicatorPanes.length + 1 && rows.every(row => row !== null)
+  }
+  const paneHeights = () => chart.panes().map((_, index) => chart.paneSize(index).height)
+  let reported = ''
+  const emit = (layout: PaneLayout[]) => {
     const key = JSON.stringify(layout)
-    if (key === reportedLayout) return
-    reportedLayout = key
+    if (key === reported) return
+    reported = key
     callbacks.onPaneLayout(layout)
   }
-  let layoutFrame = 0
-  const scheduleLayoutReport = () => {
-    cancelAnimationFrame(layoutFrame)
-    layoutFrame = requestAnimationFrame(reportLayout)
+  /** Reports where indicator panes are drawn, for their control bars. */
+  const report = () => {
+    if (destroyed) return
+    if (!indicatorPanes.length) return emit([])
+    if (!solved || !drawn()) return
+    const origin = container.getBoundingClientRect()
+    const rows = paneRows() as HTMLElement[]
+    emit(indicatorPanes.map((pane, index) => {
+      const row = rows[index + 1]!
+      // The row holds the left axis, the plot and the right axis; bars span the plot.
+      const plot = (row as HTMLTableRowElement).cells?.[1] ?? row
+      const rowBox = row.getBoundingClientRect()
+      const plotBox = plot.getBoundingClientRect()
+      const { effectiveSize, compacted } = solved!.panes[index]!
+      return { id: pane.id, top: rowBox.top - origin.top, height: rowBox.height, left: plotBox.left - origin.left, width: plotBox.width, effectiveSize, compacted }
+    }))
   }
-  const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => { corrections = 2; scheduleLayoutReport() })
-  resizeObserver?.observe(container)
+  // Rows are reused by position when panes change, so the observed set is refreshed after each layout.
+  const observed = new Set<HTMLElement>()
+  const rowObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(report)
+  const observeRows = () => {
+    const rows = new Set(paneRows().filter((row): row is HTMLElement => row !== null))
+    for (const row of observed) if (!rows.has(row)) { rowObserver?.unobserve(row); observed.delete(row) }
+    for (const row of rows) if (!observed.has(row)) { rowObserver?.observe(row); observed.add(row) }
+  }
+  let settling = false
+  /** A report two frames on, after the chart has drawn any change; covers rows that moved without resizing. */
+  const settle = () => {
+    if (settling) return
+    settling = true
+    nextFrame(() => nextFrame(() => { settling = false; report() }))
+  }
+  let queued = false
+  let attempts = 0
+  const queueLayout = () => {
+    if (queued) return
+    queued = true
+    nextFrame(() => { queued = false; layout() })
+  }
+  /** Solves pane heights for the space available and applies them. */
+  const layout = () => {
+    if (pressed !== false) return
+    if (!indicatorPanes.length) { solved = null; appliedFactors = ''; observeRows(); report(); return }
+    if (!drawn()) {
+      if (attempts++ < 30) queueLayout()
+      return
+    }
+    attempts = 0
+    // The chart divides its height, less the time axis and one-pixel separators, between panes.
+    const available = container.clientHeight - chart.timeScale().height() - (chart.panes().length - 1)
+    if (available <= 0) return
+    solved = solvePaneLayout(available, indicatorPanes.map(({ id, size }) => ({ id, size })), dragged)
+    indicatorPanes.forEach((pane, index) => pane.series.applyOptions({ visible: solved!.panes[index]!.effectiveSize !== 'minimized' }))
+    const factors = [solved.price, ...solved.panes.map(pane => pane.height)]
+    const key = factors.map(value => value.toFixed(1)).join('|')
+    if (key !== appliedFactors) {
+      appliedFactors = key
+      chart.panes().forEach((pane, index) => pane.setStretchFactor(Math.max(factors[index]!, 1)))
+    }
+    observeRows()
+    settle()
+  }
+  const containerObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(queueLayout)
+  containerObserver?.observe(container)
+  const onPress = () => {
+    if (indicatorPanes.length) pressed = drawn() ? paneHeights() : null
+  }
+  /** After a separator drag, keeps the dragged heights as preferences (floors still apply) and lays out again. */
+  const onRelease = () => {
+    if (pressed === false) return
+    const before = pressed
+    pressed = false
+    const after = drawn() ? paneHeights() : null
+    if (before && after && after.length === before.length && after.some((height, index) => Math.abs(height - before[index]!) > 1)) {
+      dragged = after
+      appliedFactors = ''
+    }
+    queueLayout()
+    settle()
+  }
+  container.addEventListener('pointerdown', onPress, true)
+  document.addEventListener('pointerup', onRelease, true)
+  document.addEventListener('pointercancel', onRelease, true)
+
   const setIndicators = (view: IndicatorView) => {
     const times = view.times
     for (const [id, series] of averages) {
@@ -477,14 +527,13 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       }
       shownPanes = wanted
       levels.avoidLogo = indicatorPanes.length === 0
+      solved = null
     }
     let resized = false
     for (const pane of indicatorPanes) {
       const size = pane.id === 'volume' ? view.volume!.size : view.rsi!.size
       if (size !== pane.size) resized = true
       pane.size = size
-      // A minimized pane keeps only its bar; its values stay in the bar's label.
-      pane.series.applyOptions({ visible: size !== 'minimized' })
     }
     const volume = indicatorPanes.find(pane => pane.id === 'volume')
     if (volume && view.volume) {
@@ -498,12 +547,12 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       rsiPane.series.applyOptions({ color: view.rsi.color })
       rsiPane.series.setData(lineData(times, view.rsi.values))
     }
-    // Separator drags are kept until a pane is shown, hidden or resized from its bar.
+    // Dragged heights last until panes are shown, hidden or resized from a bar; candle updates keep them.
     if (rebuilt || resized) {
-      layoutPending = true
-      corrections = 2
+      dragged = null
+      appliedFactors = ''
+      queueLayout()
     }
-    scheduleLayoutReport()
   }
 
   chart.subscribeClick(event => {
@@ -575,8 +624,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     if (!active) drawings.setGuide(null)
   }
   const onPointerMove = (event: PointerEvent) => {
-    // A pane separator drag resizes panes without an event; follow it while a button is held.
-    if (event.buttons && indicatorPanes.length) scheduleLayoutReport()
+    // A release outside the window can be missed; a move with no button down ends the press.
+    if (pressed !== false && event.buttons === 0) onRelease()
     if (guiding) drawings.setGuide(pane(event).x)
     if (drawings.busy) {
       const { x, y } = pane(event)
@@ -678,7 +727,20 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       try {
         const shot = chart.takeScreenshot(true, false)
         const ratio = shot.width / Math.max(1, container.clientWidth)
-        const footer = Math.round(26 * ratio)
+        const font = `500 ${Math.round(11 * ratio)}px ${theme.font}`
+        const padding = Math.round(10 * ratio)
+        const lineHeight = Math.round(16 * ratio)
+        // The caption wraps between its parts so a narrow chart still shows all of it.
+        const measure = document.createElement('canvas').getContext('2d')
+        if (measure) measure.font = font
+        const lines: string[] = []
+        for (const part of caption.split(' · ')) {
+          const last = lines.at(-1)
+          const joined = last === undefined ? part : `${last} · ${part}`
+          if (last !== undefined && measure && measure.measureText(joined).width > shot.width - padding * 2) lines.push(part)
+          else lines[Math.max(0, lines.length - 1)] = joined
+        }
+        const footer = Math.round(10 * ratio) + lines.length * lineHeight
         const canvas = document.createElement('canvas')
         canvas.width = shot.width
         canvas.height = shot.height + footer
@@ -689,10 +751,10 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
         context.fillRect(0, shot.height, canvas.width, footer)
         context.fillStyle = theme.border
         context.fillRect(0, shot.height, canvas.width, Math.max(1, Math.round(ratio)))
-        context.font = `500 ${Math.round(11 * ratio)}px ${theme.font}`
+        context.font = font
         context.fillStyle = theme.muted
         context.textBaseline = 'middle'
-        context.fillText(caption, Math.round(10 * ratio), shot.height + footer / 2)
+        lines.forEach((line, index) => context.fillText(line, padding, shot.height + Math.round(5 * ratio) + lineHeight * (index + 0.5)))
         return await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
       } catch {
         return null
@@ -707,8 +769,13 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       container.removeEventListener('pointerleave', onPointerLeave)
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
       chart.unsubscribeCrosshairMove(onCrosshair)
-      resizeObserver?.disconnect()
-      cancelAnimationFrame(layoutFrame)
+      destroyed = true
+      for (const frame of frames) cancelAnimationFrame(frame)
+      rowObserver?.disconnect()
+      containerObserver?.disconnect()
+      container.removeEventListener('pointerdown', onPress, true)
+      document.removeEventListener('pointerup', onRelease, true)
+      document.removeEventListener('pointercancel', onRelease, true)
       chart.remove()
     },
   }

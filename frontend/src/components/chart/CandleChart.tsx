@@ -1,7 +1,7 @@
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent, type Ref } from 'react'
 import type { ChartDrawing, DrawingKind } from './drawings'
 import { IndicatorOverlay } from './IndicatorControls'
-import { computeIndicators, type IndicatorSettings, type PaneLayout } from './indicators'
+import { computeIndicators, describeIndicators, type IndicatorSettings, type PaneLayout } from './indicators'
 import { createLazyLightweightAdapter } from './lazy'
 import type { ChartAdapter, ChartAdapterFactory, ChartCallbacks, ChartCandle, PriceOverlay } from './types'
 import './chart.css'
@@ -11,6 +11,8 @@ const noDrawings: readonly ChartDrawing[] = []
 /** Imperative actions for the feature that owns the chart. */
 export interface CandleChartControl {
   capture(caption: string): Promise<Blob | null>
+  /** The indicators as shown, for a caption; empty without indicators. */
+  indicatorSummary(): string
 }
 
 /**
@@ -46,8 +48,14 @@ export function CandleChart({
   useEffect(() => { callbacks.current = handlers })
   const [panes, setPanes] = useState<PaneLayout[]>([])
   const [hoverTime, setHoverTime] = useState<number | null>(null)
+  const shown = useRef({ indicators, panes })
+  useEffect(() => { shown.current = { indicators, panes } })
   useImperativeHandle(controlRef, () => ({
     capture: caption => adapter.current?.capture(caption) ?? Promise.resolve(null),
+    indicatorSummary: () => {
+      const { indicators: settings, panes: layout } = shown.current
+      return settings ? describeIndicators(settings, Object.fromEntries(layout.map(pane => [pane.id, pane.effectiveSize]))) : ''
+    },
   }), [])
 
   useEffect(() => {

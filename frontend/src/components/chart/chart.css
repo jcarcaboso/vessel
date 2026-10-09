@@ -172,3 +172,9 @@
 .indicator-colors .chart-color-grid { grid-template-columns: repeat(5, 26px); }
 .indicator-custom-color { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px 6px; color: var(--muted-foreground); font-size: 11px; }
 .indicator-custom-color input { width: 34px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: transparent; cursor: pointer; }
+.indicator-pane-name small { color: var(--warning); font-size: 10px; }
+@media (max-width: 640px) {
+  .indicator-pane-actions .chart-icon-button { width: 24px; height: 24px; }
+}
+/* A minimized bottom pane is as short as its bar; keep the label clear of the attribution logo. */
+.indicator-pane-bar[data-last][data-size="minimized"] { padding-left: 58px; }

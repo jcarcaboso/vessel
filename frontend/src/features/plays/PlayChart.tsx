@@ -10,7 +10,6 @@ import { drawingColors, type ChartDrawing } from '@/components/chart/drawings'
 import { DrawingEditBar } from '@/components/chart/DrawingEditBar'
 import { crosshairTool, drawingToolGroups, drawingToolHints, drawingToolLabels, drawingToolsByKind, drawingUtilityIcons, isDrawingKind } from '@/components/chart/drawingTools'
 import { IndicatorSettingsPopover } from '@/components/chart/IndicatorControls'
-import { describeIndicators } from '@/components/chart/indicators'
 import { intervalName } from '@/components/chart/intervals'
 import { LiveIndicator } from '@/components/chart/LiveIndicator'
 import { TimeframeBar } from '@/components/chart/TimeframeBar'
@@ -269,7 +268,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
       timeframes={<TimeframeBar value={interval} favorites={preferences.favorites} available={intervals}
         onChange={next => setPreferences({ interval: next })} onFavoritesChange={favorites => setPreferences({ favorites })} />}
       liveUpdates={preferences.live && streamable} streamable={streamable} onLiveUpdatesChange={on => setPreferences({ live: on })}
-      viewMenu={<>{favoriteTools}<ChartToolbarDivider />{indicatorMenu}</>} indicatorSummary={describeIndicators(preferences.indicators)} rail={rail} drawingBar={<>{drawingBar}{levelEditor}</>} drawingProps={drawingProps} overlays={overlays} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}
+      viewMenu={<>{favoriteTools}<ChartToolbarDivider />{indicatorMenu}</>} rail={rail} drawingBar={<>{drawingBar}{levelEditor}</>} drawingProps={drawingProps} overlays={overlays} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}
       onExpandedChange={setExpanded} onDialogClosed={() => expandButton.current?.focus({ preventScroll: true })} />
       : <>
         <ChartToolbar label="Chart controls" end={<>
@@ -301,15 +300,13 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   </section>
 }
 
-function LiveChart({ source, instrument, instrumentName, interval, caption, venue, indicatorSummary, onCapture, onShowEvidence, liveUpdates, streamable, onLiveUpdatesChange, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
+function LiveChart({ source, instrument, instrumentName, interval, caption, venue, onCapture, onShowEvidence, liveUpdates, streamable, onLiveUpdatesChange, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
   source: ChartSource
   instrument: string
   instrumentName: string
   interval: CandleInterval
   caption: string
   venue: string | null
-  /** Visible indicators, named in captures. */
-  indicatorSummary: string
   onCapture?: ((image: Blob, context: string) => string | null) | undefined
   onShowEvidence?: (() => void) | undefined
   liveUpdates: boolean
@@ -351,8 +348,10 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
     setCapture({ busy: true, message: '', failed: false })
     let image: Blob | null
     try {
-      image = await chart.current?.capture([context, `${now.toISOString().slice(0, 16).replace('T', ' ')} UTC`, indicatorSummary, 'Planned levels are not fills']
-        .filter(Boolean).join(' · ')) ?? null
+      // The canvas has no legend, so the caption names the indicators as shown.
+      const control = chart.current
+      image = control ? await control.capture([context, `${now.toISOString().slice(0, 16).replace('T', ' ')} UTC`, control.indicatorSummary(), 'Planned levels are not fills']
+        .filter(Boolean).join(' · ')) : null
     } catch {
       image = null
     }

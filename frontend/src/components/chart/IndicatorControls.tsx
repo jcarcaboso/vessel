@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, Maximize2, Minimize2, RotateCcw, Settings2 } from 'lucide-react'
 import { Popover } from 'radix-ui'
 import { ChartIconButton } from './ChartToolbar'
@@ -126,14 +126,28 @@ export function IndicatorOverlay({ settings, view, panes, hoverIndex, onChange }
   onChange: (next: IndicatorSettings) => void
 }) {
   const [collapsed, setCollapsed] = useState(false)
+  const legend = useRef<HTMLDivElement>(null)
+  // Hiding a pane removes its bar, so focus moves to the legend button that shows it again.
+  const refocus = useRef<IndicatorPaneId | null>(null)
+  useEffect(() => {
+    const button = refocus.current && legend.current?.querySelector<HTMLElement>(`[data-show-pane="${refocus.current}"]`)
+    if (!button) return
+    refocus.current = null
+    button.focus()
+  })
   const toggleEma = (index: number) => onChange({ ...settings, emas: settings.emas.map((ema, at) => at === index ? { ...ema, enabled: !ema.enabled } : ema) })
   const setPane = (id: IndicatorPaneId, patch: Partial<IndicatorSettings[IndicatorPaneId]>) => onChange({ ...settings, [id]: { ...settings[id], ...patch } })
   const resize = (id: IndicatorPaneId, size: PaneSize) => onChange(resizePane(settings, id, size))
+  const hide = (id: IndicatorPaneId) => {
+    setCollapsed(false)
+    setPane(id, { enabled: false })
+    refocus.current = id
+  }
   const hidden = (['volume', 'rsi'] as const).filter(id => !settings[id].enabled)
   const paneName = (id: IndicatorPaneId) => id === 'volume' ? 'Volume' : rsiLabel(settings.rsi)
 
   return <>
-    <div className="indicator-legend" role="group" aria-label="Indicators">
+    <div ref={legend} className="indicator-legend" role="group" aria-label="Indicators">
       {!collapsed && <>
         {settings.emas.map((ema, index) => {
           const line = view.lines.find(item => item.id === ema.id)
@@ -146,7 +160,7 @@ export function IndicatorOverlay({ settings, view, panes, hoverIndex, onChange }
             {ema.enabled ? <strong>{value === null ? '—' : priceValue.format(value)}</strong> : <EyeOff {...icon} />}
           </button>
         })}
-        {hidden.map(id => <button key={id} type="button" className="indicator-chip" aria-pressed="false"
+        {hidden.map(id => <button key={id} type="button" className="indicator-chip" aria-pressed="false" data-show-pane={id}
           aria-label={`Show ${paneName(id)} pane`} title={`Show ${paneName(id)} pane`} onClick={() => setPane(id, { enabled: true })}>
           <span>{paneName(id)}</span><Eye {...icon} />
         </button>)}
@@ -158,30 +172,33 @@ export function IndicatorOverlay({ settings, view, panes, hoverIndex, onChange }
         aria-label={collapsed ? 'Show indicator legend' : 'Collapse indicator legend'} title={collapsed ? 'Show indicator legend' : 'Collapse indicator legend'}
         onClick={() => setCollapsed(!collapsed)}>{collapsed ? <ChevronRight {...icon} /> : <ChevronLeft {...icon} />}</button>
     </div>
-    {panes.map(pane => {
-      const size = settings[pane.id].size
+    {panes.map((pane, index) => {
+      const chosen = settings[pane.id].size
       const value = pane.id === 'volume'
         ? view.volume && valueAt(view.volume.values, hoverIndex)
         : view.rsi && valueAt(view.rsi.values, hoverIndex)
       const name = paneName(pane.id)
-      return <div key={pane.id} className="indicator-pane-bar" data-size={size} role="group" aria-label={`${name} pane`}
-        style={{ top: pane.top, width: pane.width } as CSSProperties}>
+      // The required attribution logo sits in the bottom pane's lower-left corner.
+      return <div key={pane.id} className="indicator-pane-bar" data-size={pane.effectiveSize} data-last={index === panes.length - 1 || undefined} role="group" aria-label={`${name} pane`}
+        style={{ top: pane.top, left: pane.left, width: pane.width } as CSSProperties}>
         <span className="indicator-pane-name">
           {pane.id === 'rsi' && <i className="chart-swatch" style={{ '--swatch': settings.rsi.color } as CSSProperties} aria-hidden="true" />}
           {name}
           <strong>{value === null || value === undefined ? '—' : pane.id === 'volume' ? volumeValue.format(value) : rsiValue.format(value)}</strong>
+          {pane.compacted && <small title="The chart is too short to plot this pane. Enlarge the window, expand the chart or minimize another pane.">Too short to plot</small>}
         </span>
         <span className="indicator-pane-actions">
           {pane.id === 'rsi' && <IndicatorSettingsPopover settings={settings} onChange={onChange}>
             <ChartIconButton label="RSI settings" icon={<Settings2 {...icon} />} />
           </IndicatorSettingsPopover>}
-          <ChartIconButton label={size === 'minimized' ? `Restore ${name}` : `Minimize ${name}`}
-            icon={size === 'minimized' ? <ChevronsUpDown {...icon} /> : <ChevronsDownUp {...icon} />}
-            onClick={() => resize(pane.id, size === 'minimized' ? 'normal' : 'minimized')} />
-          <ChartIconButton label={size === 'maximized' ? `Restore ${name}` : `Maximize ${name}`}
-            icon={size === 'maximized' ? <Minimize2 {...icon} /> : <Maximize2 {...icon} />}
-            onClick={() => resize(pane.id, size === 'maximized' ? 'normal' : 'maximized')} />
-          <ChartIconButton label={`Hide ${name}`} icon={<EyeOff {...icon} />} onClick={() => setPane(pane.id, { enabled: false })} />
+          {/* A pane minimized for lack of room has nothing to minimize or restore. */}
+          {!pane.compacted && <ChartIconButton label={chosen === 'minimized' ? `Restore ${name}` : `Minimize ${name}`}
+            icon={chosen === 'minimized' ? <ChevronsUpDown {...icon} /> : <ChevronsDownUp {...icon} />}
+            onClick={() => resize(pane.id, chosen === 'minimized' ? 'normal' : 'minimized')} />}
+          <ChartIconButton label={chosen === 'maximized' ? `Restore ${name}` : `Maximize ${name}`}
+            icon={chosen === 'maximized' ? <Minimize2 {...icon} /> : <Maximize2 {...icon} />}
+            onClick={() => resize(pane.id, chosen === 'maximized' ? 'normal' : 'maximized')} />
+          <ChartIconButton label={`Hide ${name}`} icon={<EyeOff {...icon} />} onClick={() => hide(pane.id)} />
         </span>
       </div>
     })}

@@ -171,13 +171,18 @@ export function computeIndicators(candles: readonly ChartCandle[], settings: Ind
   }
 }
 
-/** Short description of the visible indicators, e.g. for a capture caption. */
-export function describeIndicators(settings: IndicatorSettings) {
+/**
+ * Short description of the indicators, e.g. for a capture caption. `shown` gives each pane's size on
+ * screen when it differs from the chosen one (a short chart minimizes panes).
+ */
+export function describeIndicators(settings: IndicatorSettings, shown: Partial<Record<IndicatorPaneId, PaneSize>> = {}) {
   const emas = settings.emas.filter(setting => setting.enabled).map(setting => setting.period)
+  const pane = (id: IndicatorPaneId, label: string) => !settings[id].enabled ? ''
+    : (shown[id] ?? settings[id].size) === 'minimized' ? `${label} minimized, not plotted` : label
   return [
     emas.length ? `EMA ${emas.join('/')}` : '',
-    settings.volume.enabled ? 'Volume' : '',
-    settings.rsi.enabled ? rsiLabel(settings.rsi) : '',
+    pane('volume', 'Volume'),
+    pane('rsi', rsiLabel(settings.rsi)),
   ].filter(Boolean).join(' · ')
 }
 
@@ -186,6 +191,11 @@ export interface PaneLayout {
   id: IndicatorPaneId
   top: number
   height: number
-  /** Width of the plotting area, left of the price scale. */
+  /** Left edge and width of the plotting area, between the price scales. */
+  left: number
   width: number
+  /** What is shown, which can differ from the chosen size when the chart is too short. */
+  effectiveSize: PaneSize
+  /** Minimized only because the chart is too short to plot it. */
+  compacted: boolean
 }
