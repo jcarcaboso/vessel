@@ -46,7 +46,12 @@ export interface SolvedLayout {
  * with floors for the price pane and open indicator panes. Panes that cannot fit at their floor are
  * shown minimized, Volume first, then RSI, keeping a maximized pane open longest.
  */
-export function solvePaneLayout(available: number, requests: readonly PaneRequest[], preferred?: readonly number[] | null): SolvedLayout {
+/** Smallest price pane kept when every indicator pane is shown as a bar. */
+const minPriceSliver = 20
+
+/** Returns null when the chart is too short even for the bars and a sliver of price. */
+export function solvePaneLayout(available: number, requests: readonly PaneRequest[], preferred?: readonly number[] | null): SolvedLayout | null {
+  if (!(available >= requests.length * barHeight + minPriceSliver)) return requests.length ? null : { price: Math.max(0, available), panes: [] }
   const effective = requests.map(request => request.size)
   const open = (index: number) => effective[index] !== 'minimized'
   const needed = () => minPriceHeight + effective.reduce((sum, size) => sum + (size === 'minimized' ? barHeight : minOpenHeight), 0)

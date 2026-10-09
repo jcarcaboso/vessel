@@ -408,7 +408,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
   const stage = (testId: string) => <div className="chart-stage">
     {rail}
     <div className="chart-body" data-testid={testId}>
-      <CandleChart {...chartProps} />
+      <CandleChart {...chartProps} {...(testId === 'chart-body' ? { onExpand: () => onExpandedChange(true) } : {})} />
       {drawingBar}
       {data.status === 'loading' && <p className="chart-state">Loading {instrument} candles…</p>}
       {data.status === 'error' && <div className="chart-state" role="alert"><p>{data.error}</p><Button type="button" size="sm" variant="outline" onClick={data.refresh}>Try again</Button></div>}

@@ -901,6 +901,23 @@ describe('Chart captures', () => {
 })
 
 describe('Chart indicators', () => {
+  it('offers no restore on a maximized pane that is too short to plot', async () => {
+    localStorage.setItem('vessel.chart.preferences.v1', JSON.stringify({ indicators: { volume: { enabled: true, size: 'maximized' } } }))
+    const list = entries()
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={list} selectedId={list[0]!.id} instrument="BTC" venue="Hyperliquid" onSelect={vi.fn()}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onPaneLayout([
+      { id: 'volume', top: 150, height: 26, left: 0, width: 600, effectiveSize: 'minimized', compacted: true },
+      { id: 'rsi', top: 177, height: 26, left: 0, width: 600, effectiveSize: 'minimized', compacted: true },
+    ]))
+    const volumeBar = screen.getByRole('group', { name: 'Volume pane' })
+    expect(within(volumeBar).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Expand chart', 'Hide Volume'])
+    const rsiBar = screen.getByRole('group', { name: 'RSI 14 pane' })
+    expect(within(rsiBar).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Maximize RSI 14', 'Expand chart', 'Hide RSI 14'])
+  })
+
   const renderChart = async () => {
     const list = entries()
     const { state, factory } = fakeAdapter()
@@ -988,5 +1005,8 @@ describe('Chart indicators', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Capture chart' }))
     expect(state.captions[0]).toContain('EMA 9/21/50/200 · Volume minimized, not plotted · RSI 14 · Planned levels are not fills')
+    // A larger chart can make room.
+    await userEvent.click(within(volumeBar).getByRole('button', { name: 'Expand chart' }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
   })
 })

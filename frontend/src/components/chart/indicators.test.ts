@@ -44,6 +44,10 @@ describe('indicator settings', () => {
     expect(stored.rsi).toEqual({ ...defaultIndicators.rsi, period: 7, size: 'minimized' })
     expect(normalizeIndicators('nonsense')).toEqual(defaultIndicators)
   })
+  it('keeps only one stored pane maximized', () => {
+    const stored = normalizeIndicators({ volume: { size: 'maximized' }, rsi: { size: 'maximized' } })
+    expect([stored.volume.size, stored.rsi.size]).toEqual(['maximized', 'normal'])
+  })
   it('maximizes one pane at a time', () => {
     const rsiBig = resizePane(defaultIndicators, 'rsi', 'maximized')
     const volumeBig = resizePane(rsiBig, 'volume', 'maximized')

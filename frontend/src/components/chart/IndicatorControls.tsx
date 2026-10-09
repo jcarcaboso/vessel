@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
-import { ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, Maximize2, Minimize2, RotateCcw, Settings2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Expand, Eye, EyeOff, Maximize2, Minimize2, RotateCcw, Settings2 } from 'lucide-react'
 import { Popover } from 'radix-ui'
 import { ChartIconButton } from './ChartToolbar'
 import {
@@ -117,13 +117,15 @@ function valueAt(values: readonly (number | null)[], index: number | null) {
  * On-chart indicator controls: a legend on the price pane that shows and hides each average, and a
  * bar at the top of each indicator pane to minimize, maximize or hide it.
  */
-export function IndicatorOverlay({ settings, view, panes, hoverIndex, onChange }: {
+export function IndicatorOverlay({ settings, view, panes, hoverIndex, onChange, onExpand }: {
   settings: IndicatorSettings
   view: IndicatorView
   panes: readonly PaneLayout[]
   /** Candle under the crosshair, or null for the latest. */
   hoverIndex: number | null
   onChange: (next: IndicatorSettings) => void
+  /** Opens a larger chart, offered when a pane is too short to plot. */
+  onExpand?: (() => void) | undefined
 }) {
   const [collapsed, setCollapsed] = useState(false)
   const legend = useRef<HTMLDivElement>(null)
@@ -188,16 +190,21 @@ export function IndicatorOverlay({ settings, view, panes, hoverIndex, onChange }
           {pane.compacted && <small title="The chart is too short to plot this pane. Enlarge the window, expand the chart or minimize another pane.">Too short to plot</small>}
         </span>
         <span className="indicator-pane-actions">
-          {pane.id === 'rsi' && <IndicatorSettingsPopover settings={settings} onChange={onChange}>
-            <ChartIconButton label="RSI settings" icon={<Settings2 {...icon} />} />
-          </IndicatorSettingsPopover>}
-          {/* A pane minimized for lack of room has nothing to minimize or restore. */}
-          {!pane.compacted && <ChartIconButton label={chosen === 'minimized' ? `Restore ${name}` : `Minimize ${name}`}
-            icon={chosen === 'minimized' ? <ChevronsUpDown {...icon} /> : <ChevronsDownUp {...icon} />}
-            onClick={() => resize(pane.id, chosen === 'minimized' ? 'normal' : 'minimized')} />}
-          <ChartIconButton label={chosen === 'maximized' ? `Restore ${name}` : `Maximize ${name}`}
-            icon={chosen === 'maximized' ? <Minimize2 {...icon} /> : <Maximize2 {...icon} />}
-            onClick={() => resize(pane.id, chosen === 'maximized' ? 'normal' : 'maximized')} />
+          {pane.compacted ? <>
+            {/* Minimized for lack of room: only actions that can make room, or hide it. */}
+            {chosen !== 'maximized' && <ChartIconButton label={`Maximize ${name}`} icon={<Maximize2 {...icon} />} onClick={() => resize(pane.id, 'maximized')} />}
+            {onExpand && <ChartIconButton label="Expand chart" icon={<Expand {...icon} />} onClick={onExpand} />}
+          </> : <>
+            {pane.id === 'rsi' && <IndicatorSettingsPopover settings={settings} onChange={onChange}>
+              <ChartIconButton label="RSI settings" icon={<Settings2 {...icon} />} />
+            </IndicatorSettingsPopover>}
+            <ChartIconButton label={chosen === 'minimized' ? `Restore ${name}` : `Minimize ${name}`}
+              icon={chosen === 'minimized' ? <ChevronsUpDown {...icon} /> : <ChevronsDownUp {...icon} />}
+              onClick={() => resize(pane.id, chosen === 'minimized' ? 'normal' : 'minimized')} />
+            <ChartIconButton label={chosen === 'maximized' ? `Restore ${name}` : `Maximize ${name}`}
+              icon={chosen === 'maximized' ? <Minimize2 {...icon} /> : <Maximize2 {...icon} />}
+              onClick={() => resize(pane.id, chosen === 'maximized' ? 'normal' : 'maximized')} />
+          </>}
           <ChartIconButton label={`Hide ${name}`} icon={<EyeOff {...icon} />} onClick={() => hide(pane.id)} />
         </span>
       </div>

@@ -383,6 +383,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   /** No factors are written while a pointer is down, so the library's separator drag is not fought. */
   let pressed: number[] | null | false = false
   const paneRows = () => chart.panes().map(pane => pane.getHTMLElement())
+  /** The row holds the left axis, the plot and the right axis; bars span the plot. */
+  const plotCell = (row: HTMLElement) => (row as HTMLTableRowElement).cells?.[1] ?? row
   const drawn = () => {
     const rows = paneRows()
     return rows.length === indicatorPanes.length + 1 && rows.every(row => row !== null)
@@ -399,24 +401,31 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   const report = () => {
     if (destroyed) return
     if (!indicatorPanes.length) return emit([])
-    if (!solved || !drawn()) return
+    if (!solved) return emit([])
+    if (!drawn()) return
     const origin = container.getBoundingClientRect()
+    // Rectangles include CSS transforms (e.g. a dialog opening); dividing by the scale gives layout pixels.
+    const scaleX = origin.width / (container.offsetWidth || 1) || 1
+    const scaleY = origin.height / (container.offsetHeight || 1) || 1
     const rows = paneRows() as HTMLElement[]
     emit(indicatorPanes.map((pane, index) => {
       const row = rows[index + 1]!
-      // The row holds the left axis, the plot and the right axis; bars span the plot.
-      const plot = (row as HTMLTableRowElement).cells?.[1] ?? row
+      const plot = plotCell(row)
       const rowBox = row.getBoundingClientRect()
       const plotBox = plot.getBoundingClientRect()
       const { effectiveSize, compacted } = solved!.panes[index]!
-      return { id: pane.id, top: rowBox.top - origin.top, height: rowBox.height, left: plotBox.left - origin.left, width: plotBox.width, effectiveSize, compacted }
+      return {
+        id: pane.id, top: (rowBox.top - origin.top) / scaleY, height: rowBox.height / scaleY,
+        left: (plotBox.left - origin.left) / scaleX, width: plotBox.width / scaleX, effectiveSize, compacted,
+      }
     }))
   }
   // Rows are reused by position when panes change, so the observed set is refreshed after each layout.
+  // Plot cells are observed too: a wider price scale narrows the plot without resizing the row.
   const observed = new Set<HTMLElement>()
   const rowObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(report)
   const observeRows = () => {
-    const rows = new Set(paneRows().filter((row): row is HTMLElement => row !== null))
+    const rows = new Set(paneRows().filter((row): row is HTMLElement => row !== null).flatMap(row => [row, plotCell(row)]))
     for (const row of observed) if (!rows.has(row)) { rowObserver?.unobserve(row); observed.delete(row) }
     for (const row of rows) if (!observed.has(row)) { rowObserver?.observe(row); observed.add(row) }
   }
@@ -436,7 +445,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   }
   /** Solves pane heights for the space available and applies them. */
   const layout = () => {
-    if (pressed !== false) return
+    if (pressed !== false || releasing) return
     if (!indicatorPanes.length) { solved = null; appliedFactors = ''; observeRows(); report(); return }
     if (!drawn()) {
       if (attempts++ < 30) queueLayout()
@@ -447,6 +456,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     const available = container.clientHeight - chart.timeScale().height() - (chart.panes().length - 1)
     if (available <= 0) return
     solved = solvePaneLayout(available, indicatorPanes.map(({ id, size }) => ({ id, size })), dragged)
+    // Too short even for the bars: leave the chart's own layout and show no bars.
+    if (!solved) { report(); return }
     indicatorPanes.forEach((pane, index) => pane.series.applyOptions({ visible: solved!.panes[index]!.effectiveSize !== 'minimized' }))
     const factors = [solved.price, ...solved.panes.map(pane => pane.height)]
     const key = factors.map(value => value.toFixed(1)).join('|')
@@ -457,27 +468,41 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     observeRows()
     settle()
   }
-  const containerObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(queueLayout)
+  // A resize ends any press: a release outside the window may never arrive (seen in Firefox).
+  const containerObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => { onRelease(); queueLayout() })
   containerObserver?.observe(container)
+  /** The latest release still waiting for the chart to draw; layout waits for it. */
+  let releasing = 0
   const onPress = () => {
     if (indicatorPanes.length) pressed = drawn() ? paneHeights() : null
   }
-  /** After a separator drag, keeps the dragged heights as preferences (floors still apply) and lays out again. */
+  /**
+   * After a separator drag, keeps the dragged heights as preferences (floors still apply) and lays out
+   * again. Heights are read after the chart has drawn the last move, so a quick release is not missed.
+   */
   const onRelease = () => {
     if (pressed === false) return
     const before = pressed
     pressed = false
-    const after = drawn() ? paneHeights() : null
-    if (before && after && after.length === before.length && after.some((height, index) => Math.abs(height - before[index]!) > 1)) {
-      dragged = after
-      appliedFactors = ''
-    }
-    queueLayout()
-    settle()
+    const release = ++releasing
+    nextFrame(() => nextFrame(() => {
+      if (release !== releasing || pressed !== false) return
+      releasing = 0
+      const after = drawn() ? paneHeights() : null
+      if (before && after && after.length === before.length && after.some((height, index) => Math.abs(height - before[index]!) > 1)) {
+        dragged = after
+        appliedFactors = ''
+      }
+      queueLayout()
+    }))
   }
+  // A move with no button down also ends a press whose release was lost.
+  const onDocumentMove = (event: PointerEvent) => { if (pressed !== false && event.buttons === 0) onRelease() }
   container.addEventListener('pointerdown', onPress, true)
   document.addEventListener('pointerup', onRelease, true)
   document.addEventListener('pointercancel', onRelease, true)
+  document.addEventListener('pointermove', onDocumentMove, true)
+  window.addEventListener('blur', onRelease)
 
   const setIndicators = (view: IndicatorView) => {
     const times = view.times
@@ -553,6 +578,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       appliedFactors = ''
       queueLayout()
     }
+    // New values can widen the price scale, moving the plot without resizing anything observed.
+    settle()
   }
 
   chart.subscribeClick(event => {
@@ -624,8 +651,6 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     if (!active) drawings.setGuide(null)
   }
   const onPointerMove = (event: PointerEvent) => {
-    // A release outside the window can be missed; a move with no button down ends the press.
-    if (pressed !== false && event.buttons === 0) onRelease()
     if (guiding) drawings.setGuide(pane(event).x)
     if (drawings.busy) {
       const { x, y } = pane(event)
@@ -733,13 +758,17 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
         // The caption wraps between its parts so a narrow chart still shows all of it.
         const measure = document.createElement('canvas').getContext('2d')
         if (measure) measure.font = font
+        const fits = (text: string) => !measure || measure.measureText(text).width <= shot.width - padding * 2
         const lines: string[] = []
-        for (const part of caption.split(' · ')) {
-          const last = lines.at(-1)
-          const joined = last === undefined ? part : `${last} · ${part}`
-          if (last !== undefined && measure && measure.measureText(joined).width > shot.width - padding * 2) lines.push(part)
-          else lines[Math.max(0, lines.length - 1)] = joined
-        }
+        // Parts join with " · " and wrap between parts; a part too long for a line wraps between words.
+        caption.split(' · ').forEach((part, index) => {
+          part.split(' ').forEach((word, at) => {
+            const last = lines.at(-1)
+            const glue = at > 0 ? ' ' : index > 0 ? ' · ' : ''
+            if (last !== undefined && fits(last + glue + word)) lines[lines.length - 1] = last + glue + word
+            else lines.push(word)
+          })
+        })
         const footer = Math.round(10 * ratio) + lines.length * lineHeight
         const canvas = document.createElement('canvas')
         canvas.width = shot.width
@@ -776,6 +805,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       container.removeEventListener('pointerdown', onPress, true)
       document.removeEventListener('pointerup', onRelease, true)
       document.removeEventListener('pointercancel', onRelease, true)
+      document.removeEventListener('pointermove', onDocumentMove, true)
+      window.removeEventListener('blur', onRelease)
       chart.remove()
     },
   }

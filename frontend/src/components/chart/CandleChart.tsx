@@ -21,7 +21,7 @@ export interface CandleChartControl {
  */
 export function CandleChart({
   candles, overlays, viewKey, label, drawings = noDrawings, selectedDrawingId = null, tool = null, magnet = false, pricePicker = false,
-  onKeyDown, createAdapter = createLazyLightweightAdapter, controlRef, indicators, onIndicatorsChange, ...handlers
+  onKeyDown, createAdapter = createLazyLightweightAdapter, controlRef, indicators, onIndicatorsChange, onExpand, ...handlers
 }: {
   candles: readonly ChartCandle[]
   overlays: readonly PriceOverlay[]
@@ -40,6 +40,8 @@ export function CandleChart({
   /** Moving averages, volume and RSI; omitted, the chart shows candles only. */
   indicators?: IndicatorSettings | undefined
   onIndicatorsChange?: ((next: IndicatorSettings) => void) | undefined
+  /** Opens a larger chart; offered on panes too short to plot. */
+  onExpand?: (() => void) | undefined
 } & { [K in keyof Omit<ChartCallbacks, 'onCrosshairMove' | 'onPaneLayout'>]?: ChartCallbacks[K] | undefined }) {
   const container = useRef<HTMLDivElement>(null)
   const adapter = useRef<ChartAdapter | null>(null)
@@ -99,6 +101,6 @@ export function CandleChart({
     <div ref={container} className="candle-chart" role="application" aria-roledescription="chart" aria-label={label}
       tabIndex={0} onKeyDown={onKeyDown} />
     {indicators && indicatorView && onIndicatorsChange && candles.length > 0 &&
-      <IndicatorOverlay settings={indicators} view={indicatorView} panes={panes} hoverIndex={hoverIndex} onChange={onIndicatorsChange} />}
+      <IndicatorOverlay settings={indicators} view={indicatorView} panes={panes} hoverIndex={hoverIndex} onChange={onIndicatorsChange} onExpand={onExpand} />}
   </div>
 }

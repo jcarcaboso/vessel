@@ -63,6 +63,10 @@ export function normalizeIndicators(value: unknown): IndicatorSettings {
     return { enabled: typeof enabled === 'boolean' ? enabled : fallback.enabled, size: isSize(size) ? size : fallback.size }
   }
   const rsi = record(stored.rsi)
+  const volume = pane(stored.volume, defaultIndicators.volume)
+  const rsiPane = pane(rsi, defaultIndicators.rsi)
+  // Only one pane is maximized at a time; Volume keeps it if both were stored maximized.
+  if (volume.size === 'maximized' && rsiPane.size === 'maximized') rsiPane.size = 'normal'
   return {
     emas: defaultIndicators.emas.map((fallback, index) => {
       const { enabled, period: length, color } = record(emas[index])
@@ -73,9 +77,9 @@ export function normalizeIndicators(value: unknown): IndicatorSettings {
         color: isColor(color) ? color.toLowerCase() : fallback.color,
       }
     }),
-    volume: pane(stored.volume, defaultIndicators.volume),
+    volume,
     rsi: {
-      ...pane(rsi, defaultIndicators.rsi),
+      ...rsiPane,
       period: period(rsi.period, rsiPeriodLimits, defaultIndicators.rsi.period),
       color: isColor(rsi.color) ? rsi.color.toLowerCase() : defaultIndicators.rsi.color,
     },
