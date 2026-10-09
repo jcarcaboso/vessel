@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
 import { systemFixture } from '@/test/system-fixture'
+import { reviewFixture } from '@/test/review-fixture'
 import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, playApiStubs, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { ApplicationShell } from './ApplicationShell'
 
@@ -23,6 +24,30 @@ function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
 }
 beforeEach(() => { window.history.replaceState(null, '', '/') })
 describe('Main application shell', () => {
+  it('opens contributing Plays from Review through the existing saved editor', async () => {
+    const client = api({ review: vi.fn().mockResolvedValue(reviewFixture), play: vi.fn().mockResolvedValue(savedPlayFixture) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(screen.getByRole('link', { name: 'Review' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Inspect Swing trading' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Play BTC breakout' }))
+    expect(await screen.findByRole('textbox', { name: 'Play title' })).toHaveValue(savedPlayFixture.summary.title)
+    expect(client.play).toHaveBeenCalledWith(reviewFixture.plays[0]!.id, expect.any(AbortSignal))
+  })
+  it('protects plan-only draft edits when opening a contributing Play from Review', async () => {
+    const client = api({ review: vi.fn().mockResolvedValue(reviewFixture) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await screen.findByText('Start with your accounts.')
+    await userEvent.click(screen.getByRole('link', { name: 'Plays' }))
+    await userEvent.click(screen.getByRole('button', { name: 'New play' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Add entry' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Review' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Inspect Swing trading' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Play BTC breakout' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue editing' }))
+    expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('')
+    expect(screen.getByRole('article', { name: 'Entry 2 editor' })).toBeInTheDocument()
+    expect(client.play).not.toHaveBeenCalled()
+  })
   it('opens a saved play from Overview and preserves edits when reopening that same play', async () => {
     const client = api({
       overview: vi.fn().mockResolvedValue(overviewFixture),

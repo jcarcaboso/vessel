@@ -11,10 +11,11 @@ import { ActivityTable } from './ActivityTable'
 import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
 import { OverviewPlays } from './OverviewPlays'
+import { ReviewPage } from '@/features/review/ReviewPage'
 import { money, shortAddress, time } from './format'
 import { VenuesProvider, useVenues } from '@/api/venues'
 import {
-  Activity, ArrowRight, ArrowUpRight, CircleHelp, Database, Folder, LayoutDashboard,
+  Activity, ArrowRight, ArrowUpRight, BarChart3, CircleHelp, Database, Folder, LayoutDashboard,
   LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, ShieldCheck, Wallet, BookOpen, Pencil, ChevronDown,
 } from 'lucide-react'
 import './application-shell.css'
@@ -22,6 +23,7 @@ import './application-shell.css'
 const pages = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, description: 'Your accounts and recent execution history, in one place.' },
   { id: 'plays', label: 'Plays', icon: BookOpen, description: 'Document the idea, define the position and keep your reasoning separate from execution.' },
+  { id: 'review', label: 'Review', icon: BarChart3, description: 'Portfolio performance from closed Plays.' },
   { id: 'portfolios', label: 'Portfolios', icon: Folder, description: 'Group accounts around the way you trade.' },
   { id: 'accounts', label: 'Accounts', icon: Wallet, description: 'Read-only venue connections and manual account records.' },
   { id: 'activity', label: 'Activity', icon: Activity, description: 'Imported executions, separate from trading intent.' },
@@ -194,7 +196,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
     <div className="shell-main" inert={menuOpen}>
       <header className="shell-header"><div><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" title="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} aria-hidden="true" /></button><span className="shell-breadcrumb">Workspace <span>/</span> <strong>{currentPage.label}</strong></span></div><div><span className="connection-indicator"><i />Private session</span><span className="workspace-badge">Perpetuals</span></div></header>
       <main className="shell-content">
-        {page !== 'plays' && <section className="shell-page-heading"><div><div className="eyebrow">YOUR PRIVATE WORKSPACE</div><h1>{selectedAccount ? selectedAccount.name : currentPage.label}</h1><p>{currentPage.description}</p></div><div className="shell-heading-actions">
+        {page !== 'plays' && page !== 'review' && <section className="shell-page-heading"><div><div className="eyebrow">YOUR PRIVATE WORKSPACE</div><h1>{selectedAccount ? selectedAccount.name : currentPage.label}</h1><p>{currentPage.description}</p></div><div className="shell-heading-actions">
           {page !== 'settings' && <Button variant="outline" onClick={reload} disabled={loading} aria-busy={loading}><RefreshCw size={14} className={loading ? 'is-spinning' : ''} />Reload</Button>}
           {page === 'portfolios' ? <Button onClick={() => setPortfolioDialog(true)}><Plus size={15} />New portfolio</Button> : page !== 'settings' && page !== 'activity' && <Button onClick={() => setAccountDialog(true)} disabled={pending || !data}><Plus size={15} />Add account</Button>}
         </div></section>}
@@ -203,6 +205,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
         {!pending && !data && !error && <div className="workspace-alert">No workspace data is available.</div>}
 
         {page === 'plays' && <PlaysPage accounts={accounts} portfolios={portfolios} api={api} session={playsSession} onSession={setPlaysSession} onReload={reload} loading={loading} />}
+        {page === 'review' && <ReviewPage api={api} reloadGeneration={reloadKey} onOpenPlay={viewPlay} />}
 
         {page === 'overview' && data && <>
           <section className="workspace-stat-grid">

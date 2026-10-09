@@ -1,4 +1,5 @@
 import { vi } from 'vitest'
+import { emptyReview } from './review-fixture'
 import type { SizingDocument } from '@/api/sizing'
 import type { SavedPlay } from '@/api/plays'
 import type { BrokerAccount, CandleSeries, InstrumentCatalog, MarketContext, Overview, Portfolio, WorkspaceApi } from '@/api/workspace'
@@ -70,7 +71,7 @@ export const idleMarketStream: WorkspaceApi['marketStream'] = (_id, _query, sign
 
 /** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
 export function playApiStubs(): Pick<WorkspaceApi, 'plays' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' |
-  'deletePlay' | 'playExecution' | 'checkPlayExecution' | 'linkOrder' | 'unlinkOrder' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings'> {
+  'deletePlay' | 'playExecution' | 'checkPlayExecution' | 'linkOrder' | 'unlinkOrder' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'review'> {
   const unexpected = () => Promise.reject(new Error('Unexpected play API call in this test.'))
   return {
     plays: vi.fn().mockResolvedValue([]), play: vi.fn(unexpected), createPlay: vi.fn(unexpected), updatePlay: vi.fn(unexpected),
@@ -79,6 +80,7 @@ export function playApiStubs(): Pick<WorkspaceApi, 'plays' | 'play' | 'createPla
     linkOrder: vi.fn(unexpected), unlinkOrder: vi.fn(unexpected), evidence: vi.fn().mockResolvedValue([]), evidenceImage: vi.fn(unexpected),
     uploadEvidence: vi.fn(unexpected), updateEvidenceNote: vi.fn(unexpected), updateEvidenceMarkup: vi.fn(unexpected), deleteEvidence: vi.fn(unexpected),
     sizing: vi.fn().mockResolvedValue(sizingFixture), updateSizingSettings: vi.fn(unexpected),
+    review: vi.fn().mockResolvedValue(emptyReview),
   }
 }
 

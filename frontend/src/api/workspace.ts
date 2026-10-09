@@ -5,6 +5,7 @@ import {
   type LinkOrder, type PlayExecution, type PlayFields, type PlayHistory, type PlaySummary, type SavedEvidence, type SavedPlay, type StatusRequest,
 } from './plays'
 import { isSizingDocument, type SizingDocument } from './sizing'
+import { isReviewDocument, reviewPath, type ReviewDocument, type ReviewQuery } from './review'
 import type { ImageMarkup } from '@/features/plays/markup'
 
 export interface Portfolio {
@@ -196,6 +197,7 @@ export interface CreateAccount {
   manualAccountValueUsd?: string
 }
 export interface WorkspaceApi {
+  review(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewDocument>
   overview(signal?: AbortSignal): Promise<Overview>
   portfolios(signal?: AbortSignal): Promise<Portfolio[]>
   accounts(signal?: AbortSignal): Promise<BrokerAccount[]>
@@ -517,6 +519,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       markup ? { method: 'PUT', body: JSON.stringify(markup) } : { method: 'DELETE' }),
     deleteEvidence: id => json(evidencePath(id), none, { method: 'DELETE' }),
     sizing: signal => json('/api/sizing', isSizingDocument, withSignal(signal)),
+    review: (query, signal) => json(reviewPath(query), isReviewDocument, withSignal(signal)),
     updateSizingSettings: settings => json('/api/sizing/settings', isSizingDocument,
       { method: 'PUT', body: JSON.stringify({ riskPercent: settings.riskPercent }) }),
     overview: signal => request('/api/overview', overview, signal ? { signal } : {}),
