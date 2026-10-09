@@ -1,0 +1,25 @@
+{
+  "passed": true,
+  "widths": [
+    320,
+    390,
+    540,
+    768,
+    1024,
+    1280,
+    1512
+  ],
+  "errors": [],
+  "accessibility": [
+    {
+      "width": 390,
+      "violations": []
+    },
+    {
+      "width": 1512,
+      "violations": []
+    }
+  ],
+  "fixture": "525 synthetic saved closed Plays in isolated PostgreSQL; production API/UI, no demo fallback",
+  "captures": "/home/ops/.local/share/t3/worktrees/vessel/t3code-19fc64a7/docs/design/portfolio-review/implementation"
+}

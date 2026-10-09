@@ -49,6 +49,7 @@ app.MapWorkspace();
 app.MapEvidence();
 app.MapPlays();
 app.MapSizing();
+app.MapReview();
 if (app.Environment.IsDevelopment()) app.MapOpenApi().RequireAuthorization();
 
 app.Run();
