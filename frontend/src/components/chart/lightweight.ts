@@ -436,6 +436,10 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     settling = true
     nextFrame(() => nextFrame(() => { settling = false; report() }))
   }
+  /** The chart divides its height, less the time axis and one-pixel separators, between panes. */
+  const availableHeight = () => container.clientHeight - chart.timeScale().height() - (chart.panes().length - 1)
+  /** Space the last layout was solved for; a release after a resize is not mistaken for a drag. */
+  let solvedFor = 0
   let queued = false
   let attempts = 0
   const queueLayout = () => {
@@ -452,9 +456,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       return
     }
     attempts = 0
-    // The chart divides its height, less the time axis and one-pixel separators, between panes.
-    const available = container.clientHeight - chart.timeScale().height() - (chart.panes().length - 1)
-    if (available <= 0) return
+    const available = availableHeight()
+    solvedFor = available
     solved = solvePaneLayout(available, indicatorPanes.map(({ id, size }) => ({ id, size })), dragged)
     // Too short even for the bars: leave the chart's own layout and show no bars.
     if (!solved) { report(); return }
@@ -469,7 +472,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     settle()
   }
   // A resize ends any press: a release outside the window may never arrive (seen in Firefox).
-  const containerObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => { onRelease(); queueLayout() })
+  const containerObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => { if (pressed !== false) onRelease(); queueLayout() })
   containerObserver?.observe(container)
   /** The latest release still waiting for the chart to draw; layout waits for it. */
   let releasing = 0
@@ -477,19 +480,22 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     if (indicatorPanes.length) pressed = drawn() ? paneHeights() : null
   }
   /**
-   * After a separator drag, keeps the dragged heights as preferences (floors still apply) and lays out
-   * again. Heights are read after the chart has drawn the last move, so a quick release is not missed.
+   * After any release, reconciles the layout once the chart has drawn: heights that differ from the
+   * pressed (or last solved) ones came from a separator drag and are kept as preferences, floors
+   * still applying. Every release runs this, so a drag the library finishes after a forced release
+   * (blur, resize, lost pointer-up) is still reconciled.
    */
   const onRelease = () => {
-    if (pressed === false) return
-    const before = pressed
+    const before = pressed === false ? null : pressed
     pressed = false
     const release = ++releasing
     nextFrame(() => nextFrame(() => {
       if (release !== releasing || pressed !== false) return
       releasing = 0
-      const after = drawn() ? paneHeights() : null
-      if (before && after && after.length === before.length && after.some((height, index) => Math.abs(height - before[index]!) > 1)) {
+      if (!indicatorPanes.length || !drawn()) return queueLayout()
+      const after = paneHeights()
+      const reference = before ?? (solved && Math.abs(availableHeight() - solvedFor) <= 1 ? [solved.price, ...solved.panes.map(pane => pane.height)] : null)
+      if (reference && after.length === reference.length && after.some((height, index) => Math.abs(height - reference[index]!) > 2)) {
         dragged = after
         appliedFactors = ''
       }
@@ -498,11 +504,14 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   }
   // A move with no button down also ends a press whose release was lost.
   const onDocumentMove = (event: PointerEvent) => { if (pressed !== false && event.buttons === 0) onRelease() }
+  const onBlur = () => { if (pressed !== false) onRelease() }
   container.addEventListener('pointerdown', onPress, true)
   document.addEventListener('pointerup', onRelease, true)
   document.addEventListener('pointercancel', onRelease, true)
+  // The library drags separators with mouse events, so their release is followed too.
+  document.addEventListener('mouseup', onRelease, true)
   document.addEventListener('pointermove', onDocumentMove, true)
-  window.addEventListener('blur', onRelease)
+  window.addEventListener('blur', onBlur)
 
   const setIndicators = (view: IndicatorView) => {
     const times = view.times
@@ -805,8 +814,9 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       container.removeEventListener('pointerdown', onPress, true)
       document.removeEventListener('pointerup', onRelease, true)
       document.removeEventListener('pointercancel', onRelease, true)
+      document.removeEventListener('mouseup', onRelease, true)
       document.removeEventListener('pointermove', onDocumentMove, true)
-      window.removeEventListener('blur', onRelease)
+      window.removeEventListener('blur', onBlur)
       chart.remove()
     },
   }
