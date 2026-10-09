@@ -12,6 +12,7 @@ import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
 import { OverviewPlays } from './OverviewPlays'
 import { ReviewPage } from '@/features/review/ReviewPage'
+import { AppearanceSettings, CurrentThemeName } from '@/features/settings/AppearanceSettings'
 import { money, shortAddress, time } from './format'
 import { VenuesProvider, useVenues } from '@/api/venues'
 import {
@@ -27,7 +28,7 @@ const pages = [
   { id: 'portfolios', label: 'Portfolios', icon: Folder, description: 'Group accounts around the way you trade.' },
   { id: 'accounts', label: 'Accounts', icon: Wallet, description: 'Read-only venue connections and manual account records.' },
   { id: 'activity', label: 'Activity', icon: Activity, description: 'Imported executions, separate from trading intent.' },
-  { id: 'settings', label: 'Settings', icon: Settings2, description: 'Your self-hosted workspace and available capabilities.' },
+  { id: 'settings', label: 'Settings', icon: Settings2, description: 'Appearance, your self-hosted workspace and available capabilities.' },
 ] as const
 type Page = typeof pages[number]['id']
 const pageFromHash = (): Page => pages.find(p => p.id === window.location.hash.slice(1))?.id ?? 'overview'
@@ -239,7 +240,8 @@ function Shell({ system, disconnect, api }: ShellProps) {
         {page === 'activity' && data && <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Imported execution history</h2><p>Recent records only. Full-history backfills and retrospective review are later work.</p></div><span className="workspace-badge">Read-only facts</span></header><ActivityTable fills={data.recentActivity} accounts={accounts} /><p className="workspace-scope-note in-panel">Price touches are not fills. The same account and instrument can have multiple plays; these executions remain unassigned.</p></section>}
 
         {page === 'settings' && <div className="settings-grid">
-          <section className="shell-panel settings-panel"><ShieldCheck size={23} /><h2>Private session</h2><p>Connected as {system.owner.displayName}. The token lives only in this browser session's memory and is released on disconnect.</p><dl><div><dt>Authentication</dt><dd>Bearer token</dd></div><div><dt>Market scope</dt><dd>Perpetuals only</dd></div><div><dt>Orders and signing</dt><dd>Not enabled</dd></div><div><dt>Theme</dt><dd>Graphite</dd></div></dl><Button variant="outline" onClick={disconnect}><LogOut size={15} />Disconnect session</Button></section>
+          <AppearanceSettings />
+          <section className="shell-panel settings-panel"><ShieldCheck size={23} /><h2>Private session</h2><p>Connected as {system.owner.displayName}. The token lives only in this browser session's memory and is released on disconnect.</p><dl><div><dt>Authentication</dt><dd>Bearer token</dd></div><div><dt>Market scope</dt><dd>Perpetuals only</dd></div><div><dt>Orders and signing</dt><dd>Not enabled</dd></div><div><dt>Theme</dt><dd><CurrentThemeName /></dd></div></dl><Button variant="outline" onClick={disconnect}><LogOut size={15} />Disconnect session</Button></section>
           <section className="shell-panel settings-panel"><Database size={23} /><h2>Venue capabilities</h2><p>Accounts can be added at {venues.creatable().map(v => v.name).join(', ')}. A refresh is explicitly requested, not a background job.</p><div className="venue-capability-list">{system.venues.map(v => <div key={v.id}><span>{v.name}</span><span className="workspace-badge">{v.status}</span></div>)}</div><p className="field-help">No venue credential, private key, full-history promise or automatic Play matching is involved.</p></section>
         </div>}
 

@@ -7,6 +7,7 @@ import {
 import { DrawingController, type DrawingSpace, type DrawingTheme } from './drawingController'
 import { TimeIndex, snapPrice } from './drawings'
 import type { IndicatorPaneId, IndicatorView, PaneLayout, PaneSize } from './indicators'
+import { readableInk } from './ink'
 import { barHeight, solvePaneLayout, type SolvedLayout } from './paneLayout'
 import type { ChartAdapter, ChartAdapterFactory, ChartCandle, PriceOverlay } from './types'
 
@@ -18,9 +19,9 @@ interface ChartTheme {
   muted: string
   border: string
   grid: string
-  labelInk: string
   font: string
   candleUp: string
+  candleUpEdge: string
   candleDown: string
   candleDownEdge: string
   drawing: string
@@ -44,10 +45,10 @@ function readTheme(element: HTMLElement): ChartTheme {
     muted: token('--muted-foreground', '#abb3c0'),
     border: token('--border', '#394350'),
     grid: token('--secondary', '#1e2229'),
-    labelInk: '#151c20',
     font: style.fontFamily || 'system-ui, sans-serif',
     // Monochrome candles keep red and green free for stops and targets.
     candleUp: token('--chart-candle-up', '#e9edf2'),
+    candleUpEdge: token('--chart-candle-up-edge', '#e9edf2'),
     candleDown: token('--chart-candle-down', '#050607'),
     candleDownEdge: token('--chart-candle-down-edge', '#9aa3b0'),
     drawing: token('--chart-drawing', '#8fb8ff'),
@@ -57,15 +58,16 @@ function readTheme(element: HTMLElement): ChartTheme {
   }
 }
 
-/** Resolves `var(--token)` colors against the chart container. */
+/** Resolves `var(--token)` colors against the chart container; `clear` forgets them after a theme change. */
 function colorResolver(element: HTMLElement) {
   const cache = new Map<string, string>()
-  return (color: string) => {
+  const resolve = (color: string) => {
     const name = /^var\((--[\w-]+)\)$/.exec(color.trim())?.[1]
     if (!name) return color
     if (!cache.has(name)) cache.set(name, getComputedStyle(element).getPropertyValue(name).trim() || '#abb3c0')
     return cache.get(name)!
   }
+  return Object.assign(resolve, { clear: () => cache.clear() })
 }
 
 /** Decimal places needed to show the loaded prices without rounding them away. */
@@ -84,6 +86,7 @@ export function pricePrecision(candles: readonly ChartCandle[]) {
 /** Draws planned levels on the main pane and price axis, and reports hits for selection and dragging. */
 class LevelsPrimitive implements ISeriesPrimitive<Time> {
   private overlays: readonly PriceOverlay[] = []
+  private raw: readonly PriceOverlay[] = []
   private axisViews: readonly ISeriesPrimitiveAxisView[] = []
   private series: ISeriesApi<'Candlestick'> | null = null
   private requestUpdate: (() => void) | null = null
@@ -91,7 +94,7 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
   /** Last drawn label tags in pane pixels, for click-to-edit. */
   private tags: { id: string; left: number; right: number; top: number; bottom: number }[] = []
 
-  constructor(private readonly theme: ChartTheme, private readonly resolve: (color: string) => string) {
+  constructor(private readonly theme: ChartTheme, private readonly resolve: ReturnType<typeof colorResolver>) {
     this.views = [{ zOrder: () => 'top', renderer: () => ({ draw: target => this.draw(target) }) }]
   }
 
@@ -106,6 +109,7 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
   }
 
   set(overlays: readonly PriceOverlay[]) {
+    this.raw = overlays
     // Selected levels are drawn last so they stay on top of overlapping aggregate levels.
     this.overlays = [...overlays]
       .sort((a, b) => Number(a.emphasis === 'selected') - Number(b.emphasis === 'selected'))
@@ -113,10 +117,16 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
     this.axisViews = this.overlays.map(overlay => ({
       coordinate: () => this.y(overlay.price) ?? -1000,
       text: () => this.series?.priceFormatter().format(overlay.price) ?? String(overlay.price),
-      textColor: () => this.theme.labelInk,
+      textColor: () => readableInk(overlay.color),
       backColor: () => overlay.color,
     }))
     this.requestUpdate?.()
+  }
+
+  /** Re-reads token colors after the theme changes. */
+  retheme() {
+    this.resolve.clear()
+    this.set(this.raw)
   }
 
   find(id: string) {
@@ -208,7 +218,7 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
           context.fillStyle = overlay.accent!
           context.fillRect(tagX, tagY, marker, tagHeight)
         }
-        context.fillStyle = this.theme.labelInk
+        context.fillStyle = readableInk(overlay.color)
         context.fillText(overlay.label, tagX + marker + padding, lineY)
         if (overlay.kind !== 'reference') tags.push({ id: overlay.id, left: tagX / h, right: (tagX + tagWidth) / h, top: tagY / v, bottom: (tagY + tagHeight) / v })
 
@@ -270,25 +280,29 @@ const withAlpha = (color: string, alpha: number) => /^#[0-9a-f]{6}$/i.test(color
 
 export const createLightweightAdapter: ChartAdapterFactory = (container, callbacks) => {
   const theme = readTheme(container)
-  const chart: IChartApi = createChart(container, {
-    autoSize: true,
+  const chartColors = () => ({
     layout: {
       background: { type: ColorType.Solid, color: theme.background }, textColor: theme.muted,
-      fontFamily: theme.font, fontSize: 11, attributionLogo: true,
       panes: { separatorColor: theme.border, separatorHoverColor: withAlpha(theme.muted, 0.22) },
     },
     grid: { vertLines: { color: theme.grid }, horzLines: { color: theme.grid } },
     rightPriceScale: { borderColor: theme.border },
+    timeScale: { borderColor: theme.border },
+  } as const)
+  const candleColors = () => ({
+    upColor: theme.candleUp, downColor: theme.candleDown,
+    borderUpColor: theme.candleUpEdge, borderDownColor: theme.candleDownEdge,
+    wickUpColor: theme.candleUpEdge, wickDownColor: theme.candleDownEdge,
+  })
+  const chart: IChartApi = createChart(container, {
+    autoSize: true,
+    ...chartColors(),
+    layout: { ...chartColors().layout, fontFamily: theme.font, fontSize: 11, attributionLogo: true },
     // Room right of the last candle keeps it clear of the price scale labels and level tags when the chart opens.
-    timeScale: { borderColor: theme.border, timeVisible: true, secondsVisible: false, rightOffset: openingRightOffset },
+    timeScale: { ...chartColors().timeScale, timeVisible: true, secondsVisible: false, rightOffset: openingRightOffset },
     crosshair: { mode: CrosshairMode.Normal },
   })
-  const series = chart.addSeries(CandlestickSeries, {
-    upColor: theme.candleUp, downColor: theme.candleDown,
-    borderUpColor: theme.candleUp, borderDownColor: theme.candleDownEdge,
-    wickUpColor: theme.candleUp, wickDownColor: theme.candleDownEdge,
-    borderVisible: true,
-  })
+  const series = chart.addSeries(CandlestickSeries, { ...candleColors(), borderVisible: true })
   const levels = new LevelsPrimitive(theme, colorResolver(container))
   series.attachPrimitive(levels)
   let candleCount = 0
@@ -340,10 +354,12 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       return start === null || end === null ? null : end - start
     },
   }
-  const drawingsLayer = new DrawingsPrimitive({
+  const drawingTheme = (): DrawingTheme => ({
     line: theme.drawing, text: theme.foreground, muted: theme.muted, background: theme.card,
     positive: theme.positive, negative: theme.negative, font: theme.font,
   })
+  const drawingsTheme = drawingTheme()
+  const drawingsLayer = new DrawingsPrimitive(drawingsTheme)
   series.attachPrimitive(drawingsLayer)
   const drawings = new DrawingController(space, {
     onDrawingCreate: drawing => callbacks.onDrawingCreate(drawing),
@@ -721,6 +737,21 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   const onPointerLeave = () => drawings.setGuide(null)
   container.addEventListener('pointerleave', onPointerLeave)
 
+  // The owner can switch or customize the theme while a chart is open; tokens live on the root element.
+  let rethemeFrame = 0
+  const themeObserver = new MutationObserver(() => {
+    cancelAnimationFrame(rethemeFrame)
+    rethemeFrame = requestAnimationFrame(() => {
+      Object.assign(theme, readTheme(container))
+      Object.assign(drawingsTheme, drawingTheme())
+      chart.applyOptions(chartColors())
+      series.applyOptions(candleColors())
+      levels.retheme()
+      drawingsLayer.requestUpdate()
+    })
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'data-theme'] })
+
   const adapter: ChartAdapter = {
     setCandles(candles, reset) {
       candleCount = candles.length
@@ -807,6 +838,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       }
     },
     destroy() {
+      themeObserver.disconnect()
+      cancelAnimationFrame(rethemeFrame)
       container.removeEventListener('dblclick', onDoubleClick)
       container.removeEventListener('pointerdown', onPointerDown, true)
       container.removeEventListener('pointermove', onPointerMove, true)

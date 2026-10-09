@@ -5,7 +5,8 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Approved Graphite palette. Controls and domain sections share these tokens. */
+/* Approved Graphite palette, the fallback before a theme applies. The selected theme sets these tokens on <html>
+   (features/settings/appearance.ts); controls and domain sections only read them. */
 :root {
   color-scheme: dark;
   --background: #0f1114;
@@ -29,6 +30,11 @@
   --input: #394350;
   --ring: #b9c9e4;
   --field: #111419;
+  --sidebar: #13161a;
+  --chart-candle-up: #e9edf2;
+  --chart-candle-up-edge: #e9edf2;
+  --chart-candle-down: #050607;
+  --chart-candle-down-edge: #9aa3b0;
   --positive: #a9d6b6;
   --negative: #f2b3ac;
   --warning: #edd49e;
@@ -55,8 +61,8 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 3px);
-  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: max(0px, calc(var(--radius) - 3px));
+  --radius-md: max(0px, calc(var(--radius) - 2px));
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 }
