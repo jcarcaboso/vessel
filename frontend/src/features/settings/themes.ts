@@ -103,10 +103,6 @@ export const themes: readonly Theme[] = [
   }, 7, '#2f6fbf'),
 ]
 
-export function themeById(id: string | null | undefined): Theme {
-  return themes.find(theme => theme.id === id) ?? themes.find(theme => theme.id === defaultThemeId)!
-}
-
 export const isHexColor = (value: unknown): value is string => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)
 
 function channels(hex: string) { return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)) }

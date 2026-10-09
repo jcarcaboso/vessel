@@ -1,8 +1,9 @@
-import { useState } from 'react'
-import { Check, Moon, Palette, RotateCcw, Sun, TriangleAlert } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
+import { Bookmark, Check, Dices, Moon, Palette, RotateCcw, Save, Sun, Trash2, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { appearanceStore, radiusRange, resolveTheme, useAppearance, type Appearance } from './appearance'
-import { contrastChecks, isHexColor, themes, type Theme, type ThemeColorKey } from './themes'
+import { appearanceStore, draftThemeId, maxThemeNameLength, radiusRange, resolveTheme, useAppearance, type Appearance } from './appearance'
+import { suggestThemeName } from './generator'
+import { contrastChecks, isHexColor, themes, type Theme, type ThemeColorKey, type ThemeScheme } from './themes'
 import './appearance.css'
 
 const colorGroups: { label: string; colors: { key: ThemeColorKey; label: string }[] }[] = [
@@ -32,13 +33,23 @@ export function AppearanceSettings() {
       {(['dark', 'light'] as const).map(scheme => <div key={scheme} className="theme-group">
         <h3>{scheme === 'dark' ? <Moon size={13} aria-hidden="true" /> : <Sun size={13} aria-hidden="true" />}{scheme === 'dark' ? 'Dark themes' : 'Light themes'}</h3>
         <div className="theme-gallery">{themes.filter(theme => theme.scheme === scheme).map(theme =>
-          <ThemeCard key={theme.id} theme={theme} selected={theme.id === resolved.theme.id} custom={appearance.custom} />)}
+          <ThemeCard key={theme.id} theme={theme} selected={theme.id === resolved.theme.id} appearance={appearance} />)}
         </div>
       </div>)}
+      {appearance.saved.length > 0 && <div className="theme-group">
+        <h3><Bookmark size={13} aria-hidden="true" />My themes</h3>
+        <div className="theme-gallery">{appearance.saved.map(saved =>
+          <ThemeCard key={saved.id} theme={{ ...saved, description: `Your ${saved.scheme} theme.` }} selected={saved.id === resolved.theme.id} appearance={appearance} />)}
+        </div>
+      </div>}
+      <ThemeBuilder appearance={appearance} selected={resolved.theme} />
       <div className="theme-customizer">
         <div className="customizer-heading">
           <div><h3>Customize {resolved.theme.name}</h3><p>Overrides are kept per theme, so switching back restores them.</p></div>
-          <Button variant="outline" size="sm" disabled={!resolved.customized} onClick={() => appearanceStore.resetTheme(resolved.theme.id)}><RotateCcw size={13} />Reset {resolved.theme.name}</Button>
+          <div className="customizer-actions">
+            <Button variant="outline" size="sm" disabled={!resolved.customized} onClick={() => appearanceStore.resetTheme(resolved.theme.id)}><RotateCcw size={13} />Reset {resolved.theme.name}</Button>
+            {appearance.saved.some(saved => saved.id === resolved.theme.id) && <DeleteThemeButton key={resolved.theme.id} theme={resolved.theme} />}
+          </div>
         </div>
         <div className="color-groups">{colorGroups.map(group => <fieldset key={group.label} className="color-group">
           <legend>{group.label}</legend>
@@ -64,8 +75,8 @@ export function AppearanceSettings() {
   </section>
 }
 
-function ThemeCard({ theme, selected, custom }: { theme: Theme; selected: boolean; custom: Appearance['custom'] }) {
-  const { colors, radius, customized } = resolveTheme({ themeId: theme.id, custom })
+function ThemeCard({ theme, selected, appearance }: { theme: Theme; selected: boolean; appearance: Appearance }) {
+  const { colors, radius, customized } = resolveTheme({ ...appearance, themeId: theme.id })
   return <button type="button" className="theme-card" aria-pressed={selected} onClick={() => appearanceStore.selectTheme(theme.id)}>
     <span className="theme-preview" aria-hidden="true" style={{ background: colors.background, borderColor: colors.border }}>
       <span className="theme-preview-panel" style={{ background: colors.card, borderColor: colors.border, borderRadius: radius / 2 }}>
@@ -81,6 +92,59 @@ function ThemeCard({ theme, selected, custom }: { theme: Theme; selected: boolea
       {customized && <span className="workspace-badge">Customized</span>}
     </span>
   </button>
+}
+
+const schemeOptions: { value: ThemeScheme | 'either'; label: string }[] = [{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }, { value: 'either', label: 'Either' }]
+
+/** Rolls random readable palettes and saves what is on screen under a name. */
+function ThemeBuilder({ appearance, selected }: { appearance: Appearance; selected: Theme }) {
+  const [scheme, setScheme] = useState<ThemeScheme | 'either'>('dark')
+  const [name, setName] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const randomize = () => {
+    appearanceStore.randomize(scheme === 'either' ? (Math.random() < 0.5 ? 'dark' : 'light') : scheme)
+    setName(suggestThemeName())
+    setError(null)
+  }
+  const save = (event: FormEvent) => {
+    event.preventDefault()
+    const reason = appearanceStore.saveCurrent(name)
+    setError(reason)
+    if (!reason) setName('')
+  }
+  return <div className="theme-builder">
+    <div className="customizer-heading">
+      <div><h3>Theme builder</h3><p>Roll random colour combinations; every roll passes the readability checks. Fine-tune below, then save it with your own name.</p></div>
+    </div>
+    <div className="builder-controls">
+      <div className="builder-schemes" role="group" aria-label="Random scheme">{schemeOptions.map(option =>
+        <button key={option.value} type="button" aria-pressed={scheme === option.value} onClick={() => setScheme(option.value)}>{option.label}</button>)}
+      </div>
+      <Button size="sm" onClick={randomize}><Dices size={14} />Randomize</Button>
+    </div>
+    {appearance.draft && <div className="theme-gallery builder-draft">
+      <ThemeCard theme={{ ...appearance.draft, name: 'Random draft', description: 'Random combination, not saved yet.' }} selected={selected.id === draftThemeId} appearance={appearance} />
+    </div>}
+    <form className="builder-save" onSubmit={save}>
+      <label>
+        <span>Save the current colours ({selected.id === draftThemeId ? 'random draft' : selected.name}{resolveTheme(appearance).customized ? ', customized' : ''}) as</span>
+        <input value={name} maxLength={maxThemeNameLength} placeholder="Theme name" aria-label="Theme name" aria-invalid={error ? true : undefined}
+          aria-describedby={error ? 'theme-name-error' : undefined} onChange={event => { setName(event.target.value); setError(null) }} />
+      </label>
+      <Button type="submit" size="sm" variant="outline"><Save size={14} />Save theme</Button>
+      {error && <p id="theme-name-error" className="builder-error" role="alert">{error}</p>}
+    </form>
+  </div>
+}
+
+function DeleteThemeButton({ theme }: { theme: Theme }) {
+  const [confirming, setConfirming] = useState(false)
+  return confirming
+    ? <>
+      <Button variant="destructive" size="sm" onClick={() => appearanceStore.deleteSaved(theme.id)}><Trash2 size={13} />Delete {theme.name}</Button>
+      <Button variant="outline" size="sm" onClick={() => setConfirming(false)}>Keep</Button>
+    </>
+    : <Button variant="outline" size="sm" onClick={() => setConfirming(true)}><Trash2 size={13} />Delete theme</Button>
 }
 
 function ColorField({ label, value, changed, onChange }: { label: string; value: string; changed: boolean; onChange: (color: string) => void }) {
