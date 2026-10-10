@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
-import { Bookmark, Check, Dices, Moon, Palette, RotateCcw, Save, Sun, Trash2, TriangleAlert } from 'lucide-react'
+import { Bookmark, Check, Dices, Moon, Palette, RotateCcw, Save, SlidersHorizontal, Sun, Trash2, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { appearanceStore, draftThemeId, maxThemeNameLength, radiusRange, resolveTheme, useAppearance, type Appearance } from './appearance'
+import { appearanceStore, draftThemeId, showAppearanceSection, maxThemeNameLength, radiusRange, resolveTheme, useAppearance, type Appearance } from './appearance'
 import { suggestThemeName } from './generator'
 import { contrastChecks, isHexColor, themes, type Theme, type ThemeColorKey, type ThemeScheme } from './themes'
 import './appearance.css'
@@ -26,8 +26,12 @@ export function AppearanceSettings() {
   const failing = contrastChecks(resolved.colors).filter(check => check.ratio < check.minimum)
   return <section className="shell-panel appearance-panel" aria-labelledby="appearance-heading">
     <header className="shell-panel-heading">
-      <div><h2 id="appearance-heading">Appearance</h2><p>Choose a theme and adjust its colours. Saved in this browser only; layout never changes between themes.</p></div>
-      <span className="workspace-badge"><Palette size={11} aria-hidden="true" /> {resolved.theme.name}{resolved.customized ? ' · customized' : ''}</span>
+      <div><h2 id="appearance-heading" tabIndex={-1}>Appearance</h2><p>Choose a theme and adjust its colours. Saved in this browser only; layout never changes between themes.</p></div>
+      <div className="appearance-jumps">
+        <span className="workspace-badge"><Palette size={11} aria-hidden="true" /> {resolved.theme.name}{resolved.customized ? ' · customized' : ''}</span>
+        <Button variant="outline" size="sm" onClick={() => showAppearanceSection('theme-builder')}><Dices size={13} />Theme builder</Button>
+        <Button variant="outline" size="sm" onClick={() => showAppearanceSection('theme-customizer')}><SlidersHorizontal size={13} />Customize colours</Button>
+      </div>
     </header>
     <div className="appearance-body">
       {(['dark', 'light'] as const).map(scheme => <div key={scheme} className="theme-group">
@@ -45,7 +49,7 @@ export function AppearanceSettings() {
       <ThemeBuilder appearance={appearance} selected={resolved.theme} />
       <div className="theme-customizer">
         <div className="customizer-heading">
-          <div><h3>Customize {resolved.theme.name}</h3><p>Overrides are kept per theme, so switching back restores them.</p></div>
+          <div><h3 id="theme-customizer-heading" tabIndex={-1}>Customize {resolved.theme.name}</h3><p>Overrides are kept per theme, so switching back restores them.</p></div>
           <div className="customizer-actions">
             <Button variant="outline" size="sm" disabled={!resolved.customized} onClick={() => appearanceStore.resetTheme(resolved.theme.id)}><RotateCcw size={13} />Reset {resolved.theme.name}</Button>
             {appearance.saved.some(saved => saved.id === resolved.theme.id) && <DeleteThemeButton key={resolved.theme.id} theme={resolved.theme} />}
@@ -114,7 +118,7 @@ function ThemeBuilder({ appearance, selected }: { appearance: Appearance; select
   }
   return <div className="theme-builder">
     <div className="customizer-heading">
-      <div><h3>Theme builder</h3><p>Roll random colour combinations; every roll passes the readability checks. Fine-tune below, then save it with your own name.</p></div>
+      <div><h3 id="theme-builder-heading" tabIndex={-1}>Theme builder</h3><p>Roll random colour combinations; every roll passes the readability checks. Fine-tune below, then save it with your own name.</p></div>
     </div>
     <div className="builder-controls">
       <div className="builder-schemes" role="group" aria-label="Random scheme">{schemeOptions.map(option =>

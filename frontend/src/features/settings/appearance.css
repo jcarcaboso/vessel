@@ -32,7 +32,7 @@
 .contrast-report.has-issues{color:var(--warning);border-color:color-mix(in srgb,var(--warning) 40%,transparent);background:color-mix(in srgb,var(--warning) 7%,var(--card))}
 .contrast-report svg{flex-shrink:0;margin-top:2px}.contrast-report ul{margin:6px 0 0;padding-left:16px;color:var(--foreground)}
 @media(max-width:800px){.appearance-body{padding:16px}.theme-gallery{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
-.appearance-panel .shell-panel-heading>.workspace-badge{display:inline-flex;align-items:center;gap:5px}
+.appearance-jumps>.workspace-badge{display:inline-flex;align-items:center;gap:5px}
 .customizer-heading button,.theme-sample button{font-size:11px}
 .theme-builder{display:grid;gap:14px;padding-top:22px;border-top:1px solid var(--border)}
 .builder-controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
@@ -48,3 +48,5 @@
 .builder-error{flex-basis:100%;font-size:11px;color:var(--negative)}
 .customizer-actions{display:flex;flex-wrap:wrap;gap:8px}
 .builder-controls>button,.builder-save button{font-size:11px}
+.appearance-jumps{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}.appearance-jumps button{font-size:11px}
+.appearance-panel [tabindex="-1"]{scroll-margin-top:24px;outline:none}

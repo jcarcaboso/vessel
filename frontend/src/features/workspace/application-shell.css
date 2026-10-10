@@ -151,3 +151,4 @@
 .detail-management{display:flex;align-items:center;gap:8px}
 @media(max-width:550px){.management-actions>button{font-size:11px}.detail-management{flex-wrap:wrap;justify-content:flex-end}.portfolio-open{padding:21px}}
 @media(max-width:550px){.account-filter{flex-basis:100%;margin-top:2px}.shell-content .account-filter select{max-width:100%;min-height:40px}.overview-play-row{padding:14px 16px}.overview-play-tabs>[data-slot="tabs-list"]{width:calc(100% - 32px);margin:0 16px}.overview-play-description{padding:12px 16px}}
+.settings-panel dd.settings-theme{display:flex;align-items:center;gap:10px}.settings-theme button{height:24px;padding:0 9px;font-size:10px}

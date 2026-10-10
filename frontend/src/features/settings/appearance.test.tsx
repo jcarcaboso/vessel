@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readableInk } from '@/components/chart/ink'
 import { AppearanceSettings, CurrentThemeName } from './AppearanceSettings'
 import { appearanceStore, initAppearance, parseAppearance, storageKey } from './appearance'
@@ -80,6 +80,17 @@ describe('Appearance settings', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Reset Daylight' }))
     expect(token('--muted-foreground')).toBe('#46566c')
     expect(screen.getByRole('status', { name: 'Readability' })).toHaveTextContent(/All \d+ readability checks pass/)
+  })
+
+  it('jumps to the theme builder and the customizer from the panel header', async () => {
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    render(<AppearanceSettings />)
+    await userEvent.click(screen.getByRole('button', { name: 'Theme builder' }))
+    expect(screen.getByRole('heading', { name: 'Theme builder' })).toHaveFocus()
+    await userEvent.click(screen.getByRole('button', { name: 'Customize colours' }))
+    expect(screen.getByRole('heading', { name: 'Customize Graphite' })).toHaveFocus()
+    expect(scroll).toHaveBeenCalledTimes(2)
   })
 
   it('ignores an incomplete hex value', async () => {

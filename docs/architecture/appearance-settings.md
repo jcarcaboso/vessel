@@ -6,6 +6,7 @@ October 9, 2026: the owner asked for a Settings page with a theme customizer and
 
 - Settings › Appearance offers ten built-in themes: seven dark (Graphite default, Carbon, Midnight, Forest, Petrol, Espresso, Aubergine, taken from the prototype design studies) and three light (Paper, Daylight, Sand).
 - The customizer overrides sixteen colours (surfaces, text, actions, signals, chart candles) and the corner radius of the selected theme. Overrides are kept per theme and can be reset.
+- October 10: the Appearance header has Theme builder and Customize colours buttons, and the Theme row of the Private session panel has a Customize button. They scroll to the section and focus its heading; they do not change the hash route.
 - A theme only changes colours and radius. It never moves sections; the approved layout is shared by all themes.
 - Every built-in theme passes WCAG AA (4.5:1) for text, secondary text, positive, negative and warning on all surfaces, and for the primary button (3:1 for the focus ring). The customizer reports failing pairs but does not block them. A test enforces this for the built-ins.
 

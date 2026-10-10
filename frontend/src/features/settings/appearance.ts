@@ -245,3 +245,12 @@ function withOverrides(appearance: Appearance, themeId: string, overrides: Theme
 export function useAppearance() {
   return useSyncExternalStore(appearanceStore.subscribe, appearanceStore.get, appearanceStore.get)
 }
+
+/** Section anchors inside Appearance. The app routes by hash, so these scroll instead of changing the URL. */
+export type AppearanceSection = 'appearance' | 'theme-builder' | 'theme-customizer'
+
+export function showAppearanceSection(section: AppearanceSection) {
+  const target = document.getElementById(`${section}-heading`)
+  target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  target?.focus({ preventScroll: true })
+}

@@ -13,6 +13,7 @@ import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
 import { OverviewPlays } from './OverviewPlays'
 import { ReviewPage } from '@/features/review/ReviewPage'
 import { AppearanceSettings, CurrentThemeName } from '@/features/settings/AppearanceSettings'
+import { showAppearanceSection } from '@/features/settings/appearance'
 import { money, shortAddress, time } from './format'
 import { VenuesProvider, useVenues } from '@/api/venues'
 import {
@@ -241,7 +242,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
 
         {page === 'settings' && <div className="settings-grid">
           <AppearanceSettings />
-          <section className="shell-panel settings-panel"><ShieldCheck size={23} /><h2>Private session</h2><p>Connected as {system.owner.displayName}. The token lives only in this browser session's memory and is released on disconnect.</p><dl><div><dt>Authentication</dt><dd>Bearer token</dd></div><div><dt>Market scope</dt><dd>Perpetuals only</dd></div><div><dt>Orders and signing</dt><dd>Not enabled</dd></div><div><dt>Theme</dt><dd><CurrentThemeName /></dd></div></dl><Button variant="outline" onClick={disconnect}><LogOut size={15} />Disconnect session</Button></section>
+          <section className="shell-panel settings-panel"><ShieldCheck size={23} /><h2>Private session</h2><p>Connected as {system.owner.displayName}. The token lives only in this browser session's memory and is released on disconnect.</p><dl><div><dt>Authentication</dt><dd>Bearer token</dd></div><div><dt>Market scope</dt><dd>Perpetuals only</dd></div><div><dt>Orders and signing</dt><dd>Not enabled</dd></div><div><dt>Theme</dt><dd className="settings-theme"><CurrentThemeName /><Button variant="outline" size="sm" onClick={() => showAppearanceSection('theme-customizer')}>Customize</Button></dd></div></dl><Button variant="outline" onClick={disconnect}><LogOut size={15} />Disconnect session</Button></section>
           <section className="shell-panel settings-panel"><Database size={23} /><h2>Venue capabilities</h2><p>Accounts can be added at {venues.creatable().map(v => v.name).join(', ')}. A refresh is explicitly requested, not a background job.</p><div className="venue-capability-list">{system.venues.map(v => <div key={v.id}><span>{v.name}</span><span className="workspace-badge">{v.status}</span></div>)}</div><p className="field-help">No venue credential, private key, full-history promise or automatic Play matching is involved.</p></section>
         </div>}
 
