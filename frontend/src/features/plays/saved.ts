@@ -24,9 +24,8 @@ export interface PlaysSession {
 export const createPlaysSession = (): PlaysSession => ({ view: 'list', draft: createDraft(), saved: null })
 
 export function hasDraftContent(draft: PlayDraft) {
-  return !!(draft.title.trim() || draft.accountId || draft.instrument || draft.size || draft.evidence.length ||
-    Object.values(draft.drawings).some(items => items.length) || Object.values(draft.notes).some(note => note.trim()) ||
-    draft.entries.some(entry => entry.price || entry.stops.some(stop => stop.value) || entry.targets.some(target => target.value)))
+  return !!(draft.title.trim() || draft.accountId || draft.instrument || draft.evidence.length || draft.notes.review.trim() ||
+    Object.values(draft.drawings).some(items => items.length) || planContent(draft) !== blankPlanContent)
 }
 
 export function planFromDraft(draft: PlayDraft): PlayPlan {
@@ -39,6 +38,10 @@ export function planFromDraft(draft: PlayDraft): PlayPlan {
     notes: { thesis: draft.notes.thesis, invalidation: draft.notes.invalidation, strategy: draft.notes.strategy, evidence: draft.notes.evidence },
   }
 }
+
+// Generated IDs are not edits; every plan value and its entry/exit structure is.
+const planContent = (draft: PlayDraft) => JSON.stringify(planFromDraft(draft), (key, value: unknown) => key === 'id' ? undefined : value)
+const blankPlanContent = planContent(createDraft())
 
 export function fieldsFromDraft(draft: PlayDraft): PlayFields {
   return {
