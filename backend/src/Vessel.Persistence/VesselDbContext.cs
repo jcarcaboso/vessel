@@ -49,6 +49,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         portfolio.HasKey(x => x.Id);
         portfolio.HasAlternateKey(x => new { x.OwnerId, x.Id });
         portfolio.Property(x => x.Name).HasMaxLength(200);
+        portfolio.Property(x => x.Icon).HasMaxLength(PortfolioIcons.MaxLength).HasDefaultValue(PortfolioIcons.Default);
         portfolio.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         account.HasOne<Portfolio>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PortfolioId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);

@@ -16,7 +16,7 @@ October 1, 2026. The owner requested rename/delete portfolios and accounts, disa
 
 All routes remain owner-scoped. Unknown/foreign IDs return 404 without revealing another owner's data.
 
-- `PATCH /api/portfolios/{id}`, `{ "name": "New name" }`, returns updated `PortfolioDto`.
+- `PATCH /api/portfolios/{id}`, `{ "name": "New name" }` (optionally with `"icon"`, see Portfolio icons), returns updated `PortfolioDto`.
 - `DELETE /api/portfolios/{id}`, returns 204 after unlinking accounts.
 - `PUT /api/accounts/{id}`, full settings body `{ "name": "New name", "portfolioId": null, "isEnabled": true, "expectedRevision": 1 }`, returns updated `AccountDto`.
 - `DELETE /api/accounts/{id}`, returns 204 or 409 when Plays prevent deletion.
@@ -27,6 +27,15 @@ All routes remain owner-scoped. Unknown/foreign IDs return 404 without revealing
 Existing account DTOs may be accepted temporarily by the frontend during the dev-server rollout with missing `isEnabled` treated as enabled. New API output always includes it.
 
 Disabled account GET detail metadata remains available for management. Snapshot GET returns literal JSON null and fills GET returns an empty list while disabled. No hidden fills should leak through activity limit/count routes. Re-enabling makes retained imported facts visible again.
+
+## Portfolio icons
+
+October 10, 2026. The owner asked for custom portfolio icons.
+
+- Each portfolio has an icon chosen from a fixed set of drawn icons (folder, briefcase, wallet, piggy-bank, landmark, coins, bitcoin, gem, trending-up, chart-line, chart-candlestick, chart-column, target, compass, rocket, zap, flame, timer, hourglass, shield, anchor, mountain, sprout, crown). The default is `folder`, which existing portfolios receive through the `PortfolioIcons` migration.
+- Icons are keys, not uploaded images or markup. The server accepts only keys in `PortfolioIcons` (`Vessel.Domain/Workspace/Portfolio.cs`) and returns 400 without changes for anything else; the browser list lives in `frontend/src/features/workspace/portfolio-icons.ts` and must stay in step.
+- `POST /api/portfolios` accepts an optional `icon`. `PATCH /api/portfolios/{id}` takes `{ "name": "…", "icon": "…" }`; an omitted or null icon keeps the stored one, so a rename-only client cannot reset it. `PortfolioDto.icon` is always present.
+- The new-portfolio and manage-portfolio dialogs show the icons as a radio group; the portfolio tile shows the chosen icon. A key the browser does not know shows the folder. The picker uses theme tokens only, so every theme restyles it without layout changes.
 
 ## Concurrency and ownership
 

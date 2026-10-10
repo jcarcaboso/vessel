@@ -40,8 +40,8 @@ public static class WorkspaceEndpoints
             var result = await service.CreatePortfolioAsync(request, ct);
             return Results.Created($"/api/portfolios/{result.Id}", result);
         });
-        api.MapPatch("/portfolios/{id:guid}", async (Guid id, RenamePortfolioRequest request, WorkspaceService service, CancellationToken ct) =>
-            Results.Ok(await service.RenamePortfolioAsync(id, request, ct)));
+        api.MapPatch("/portfolios/{id:guid}", async (Guid id, UpdatePortfolioRequest request, WorkspaceService service, CancellationToken ct) =>
+            Results.Ok(await service.UpdatePortfolioAsync(id, request, ct)));
         api.MapDelete("/portfolios/{id:guid}", async (Guid id, WorkspaceService service, CancellationToken ct) =>
         {
             await service.DeletePortfolioAsync(id, ct);

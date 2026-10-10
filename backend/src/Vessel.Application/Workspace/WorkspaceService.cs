@@ -17,12 +17,19 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             throw new WorkspaceException(400, "Name is required and must be at most 200 characters.");
     }
 
+    private static void ValidateIcon(string? icon)
+    {
+        if (icon is not null && !PortfolioIcons.IsKnown(icon))
+            throw new WorkspaceException(400, "Choose one of the available portfolio icons.");
+    }
+
     public async Task<PortfolioDto> CreatePortfolioAsync(CreatePortfolioRequest request, CancellationToken ct)
     {
         ValidateName(request.Name);
-        var portfolio = new Portfolio(Guid.NewGuid(), owner.OwnerId, request.Name);
+        ValidateIcon(request.Icon);
+        var portfolio = new Portfolio(Guid.NewGuid(), owner.OwnerId, request.Name, request.Icon ?? PortfolioIcons.Default);
         await store.AddPortfolioAsync(portfolio, ct);
-        return new(portfolio.Id, portfolio.Name, 0, null, "unavailable");
+        return new(portfolio.Id, portfolio.Name, 0, null, "unavailable", Icon: portfolio.Icon);
     }
 
     public async Task<AccountDto> CreateAccountAsync(CreateAccountRequest request, CancellationToken ct)
@@ -83,14 +90,16 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             throw new WorkspaceException(404, "Portfolio not found.");
     }
 
-    public async Task<PortfolioDto> RenamePortfolioAsync(Guid id, RenamePortfolioRequest request, CancellationToken ct)
+    public async Task<PortfolioDto> UpdatePortfolioAsync(Guid id, UpdatePortfolioRequest request, CancellationToken ct)
     {
         ValidateName(request.Name);
+        ValidateIcon(request.Icon);
         await store.WithManagementLockAsync(async () =>
         {
             var portfolio = (await store.PortfoliosAsync(ct)).SingleOrDefault(p => p.Id == id)
                 ?? throw new WorkspaceException(404, "Portfolio not found.");
             portfolio.Rename(request.Name);
+            if (request.Icon is not null) portfolio.ChangeIcon(request.Icon);
             await store.SaveAsync(ct);
             return true;
         }, ct);
@@ -165,7 +174,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             return new PortfolioDto(p.Id, p.Name, members.Count, values.Count == 0 ? null : StablecoinTotals.Sum(values.Select(v => v!.Value)),
                 values.Count == 0 ? "unavailable" : values.Count == enabledMembers.Count ? "complete" : "partial",
                 balances.Count == 0 ? null : StablecoinTotals.Sum(balances.Select(v => v!.Value)),
-                balances.Count == 0 ? "unavailable" : balances.Count == enabledMembers.Count ? "complete" : "partial");
+                balances.Count == 0 ? "unavailable" : balances.Count == enabledMembers.Count ? "complete" : "partial", p.Icon);
         }).ToList();
     }
 

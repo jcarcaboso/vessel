@@ -54,6 +54,42 @@ public sealed class AccountManagementApiTests
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode); Assert.Equal("Original", portfolio.Name);
     }
 
+    [Fact]
+    public async Task Portfolio_icon_defaults_is_chosen_on_creation_and_survives_a_rename_that_omits_it()
+    {
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
+        await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
+        var plain = (await (await client.PostAsJsonAsync("/api/portfolios", new { name = "Plain" })).Content.ReadFromJsonAsync<PortfolioDto>())!;
+        Assert.Equal("folder", plain.Icon);
+        var created = await client.PostAsJsonAsync("/api/portfolios", new { name = "Swing", icon = "rocket" });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode); var swing = (await created.Content.ReadFromJsonAsync<PortfolioDto>())!;
+        Assert.Equal("rocket", swing.Icon); Assert.Equal("rocket", store.Portfolios.Single(p => p.Id == swing.Id).Icon);
+        var renamed = await client.PatchAsJsonAsync($"/api/portfolios/{swing.Id}", new { name = "Swing renamed" });
+        Assert.Equal(HttpStatusCode.OK, renamed.StatusCode); Assert.Equal("rocket", (await renamed.Content.ReadFromJsonAsync<PortfolioDto>())!.Icon);
+        var changed = await client.PatchAsJsonAsync($"/api/portfolios/{swing.Id}", new { name = "Swing renamed", icon = "chart-candlestick" });
+        Assert.Equal("chart-candlestick", (await changed.Content.ReadFromJsonAsync<PortfolioDto>())!.Icon);
+        var listed = (await client.GetFromJsonAsync<PortfolioDto[]>("/api/portfolios"))!;
+        Assert.Equal("chart-candlestick", listed.Single(p => p.Id == swing.Id).Icon); Assert.Equal("folder", listed.Single(p => p.Id == plain.Id).Icon);
+        Assert.Equal("chart-candlestick", (await client.GetFromJsonAsync<OverviewDto>("/api/overview"))!.Portfolios.Single(p => p.Id == swing.Id).Icon);
+    }
+
+    [Theory]
+    [InlineData("{\"name\":\"New\",\"icon\":\"skull\"}")]
+    [InlineData("{\"name\":\"New\",\"icon\":\"\"}")]
+    [InlineData("{\"name\":\"New\",\"icon\":\"Rocket\"}")]
+    [InlineData("{\"name\":\"New\",\"icon\":\"<svg onload=alert(1)>\"}")]
+    [InlineData("{\"name\":\"New\",\"icon\":7}")]
+    [InlineData("{\"name\":\" \",\"icon\":\"rocket\"}")]
+    public async Task Unknown_portfolio_icons_are_rejected_without_mutation(string body)
+    {
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var portfolio = new Portfolio(Guid.NewGuid(), owner, "Original", "gem"); store.Portfolios.Add(portfolio);
+        await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
+        var patch = await client.PatchAsync($"/api/portfolios/{portfolio.Id}", new StringContent(body, Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, patch.StatusCode); Assert.Equal("Original", portfolio.Name); Assert.Equal("gem", portfolio.Icon);
+        var create = await client.PostAsync("/api/portfolios", new StringContent(body, Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, create.StatusCode); Assert.Single(store.Portfolios);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
