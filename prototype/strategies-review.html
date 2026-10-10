@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark"><title>Vessel · How a strategy behaved</title>
+<link rel="stylesheet" href="strategies-shape.css">
+<style>
+.picker{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}.picker button{display:inline-flex;gap:8px;align-items:center;font-weight:500}.picker button[aria-pressed=true]{background:#2a313c;border-color:#7c8da7}.picker small{color:var(--muted-fg);font-size:9px}
+.filters{display:flex;gap:8px 14px;flex-wrap:wrap;align-items:center;margin-bottom:14px;font-size:10px;color:var(--muted-fg)}.filters .grp{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px}.kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}.kpi .l{font-size:10px;color:var(--muted-fg)}.kpi .v{font-size:24px;font-weight:600;letter-spacing:-.6px;margin:4px 0 2px}.kpi small{color:var(--faint);display:block}
+.g2{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:16px;margin-bottom:16px;align-items:start}.g2.even{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.chart{width:100%;min-height:40px}.chart svg{display:block;overflow:visible}.chart text{font-family:inherit}
+svg .ax{font-size:9px;fill:#8f99a8}svg .axs{font-size:9px;fill:#cfd6e0;font-weight:600}svg .m{cursor:default;outline:none}svg .m .hit{fill:transparent}svg .m:hover .hit,svg .m:focus .hit{fill:#ffffff0d}svg .m:focus-visible .hit{stroke:#b9c9e4;stroke-width:1.5}
+.legend{display:flex;gap:6px 14px;flex-wrap:wrap;font-size:10px;color:var(--muted-fg);align-items:center;margin-top:10px}.legend span{display:inline-flex;gap:6px;align-items:center}.legend svg{flex:none}
+.matrix{display:grid;grid-template-columns:72px repeat(5,minmax(0,1fr));gap:4px;font-size:10px}.matrix .h{color:var(--muted-fg);font-size:9px;padding:4px 2px;align-self:end}.matrix .rh{color:var(--muted-fg);font-size:10px;align-self:center}
+.cell{min-height:58px;border-radius:5px;border:1px solid #2b323c;background:#14181e;padding:6px 7px;text-align:left;font-weight:400;display:flex;flex-direction:column;justify-content:space-between;gap:4px}.cell b{font-size:17px;font-weight:550}.cell small{font-size:8px;line-height:1.35;color:var(--muted-fg)}.cell[aria-pressed=true]{border-color:var(--primary);background:#232a35}.cell.zero{opacity:.42}.cell.luck{border-color:#5b4c34}
+.glyph{display:inline-block;vertical-align:-1px;flex:none}
+.picker .badge.idea{display:inline-flex;padding:2px 7px;border-radius:4px;text-align:center;font-weight:400}
+.ck{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:3px;vertical-align:middle;position:relative}.ck.met{background:#8a95a5}.ck.broken{background:none;border:1.5px solid var(--negative)}.ck.broken:after{content:'';position:absolute;inset:3px 1px;border-top:1.5px solid var(--negative);transform:rotate(45deg)}.ck.na{border:1.5px solid #5c6675}.ck.unset{border:1px dashed #5c6675}.ck.out{background:repeating-linear-gradient(135deg,#232830 0 2px,transparent 2px 4px)}
+.ckrow{display:flex;flex-wrap:wrap;gap:3px 0;align-items:center}.ckrow .vsep{display:inline-block;width:1px;height:14px;background:#5a6576;margin:0 6px 0 3px}
+.rules-sum{list-style:none;margin:0;padding:0}.rules-sum li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-top:1px solid #2b323c;font-size:11px;line-height:1.55}.rules-sum li:first-child{border-top:0}.rules-sum .t{display:flex;gap:8px;align-items:baseline}.rules-sum .n{font-size:10px;color:var(--muted-fg);white-space:nowrap;text-align:right}.rules-sum .ckrow{grid-column:1/-1}
+.meter{height:8px;border-radius:4px;background:#232a33;overflow:hidden;margin:8px 0 6px;display:flex;gap:2px}.meter i{display:block;height:100%;background:#8a95a5}.meter i.dev{background:none;border:1.5px solid #8a95a5;border-radius:0 4px 4px 0}
+.pred{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;align-items:center;padding:10px 0;border-top:1px solid #2b323c;font-size:11px;line-height:1.6}.seg button[aria-pressed=true].sup{background:#1c2433;color:var(--info)}.seg button[aria-pressed=true].con{background:#302a20;color:var(--warning)}
+.stoprule{font-size:11px;line-height:1.7;color:#cfd6e0;border-left:2px solid #695940;padding:4px 10px;margin-top:12px}
+.pid{font-size:10px;color:var(--muted-fg);font-weight:600;letter-spacing:.2px}.rv{font-variant-numeric:tabular-nums;white-space:nowrap}
+/* journal */
+.feed{display:grid;gap:10px;max-width:880px}.vdiv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;align-items:start;padding:14px 4px 10px;border-top:1px solid #4c596b;margin-top:6px;font-size:11px}.vdiv b{font-size:11px;font-weight:650;background:#232933;border:1px solid #4c596b;border-radius:4px;padding:2px 8px;white-space:nowrap}.vdiv p{color:#cfd6e0;line-height:1.7}.vdiv small{color:var(--muted-fg);grid-column:2}
+.jcard{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:13px 15px;display:grid;gap:9px}.jcard.dev{box-shadow:inset 3px 0 0 #695940}.jcard.pinned{border-color:#7c8da7}
+.jc-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.jc-head strong{font-size:12px;font-weight:600}.jc-head small{display:block;color:var(--muted-fg);margin-top:2px}.jc-head .rv{font-size:15px;font-weight:600}
+.tags{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:10px}.tag{display:inline-flex;gap:5px;align-items:center;border:1px solid #3a4350;border-radius:4px;padding:2px 7px;color:#cfd6e0;background:#1b1f25}.tag.dev{border-color:#695940;color:var(--warning)}
+.jc-note{font-size:11px;line-height:1.7;color:#cfd6e0}.jc-note.none{color:var(--faint)}.jc-broken{font-size:10px;color:var(--warning);line-height:1.6}
+.jc-foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center}.jc-foot .acts{display:flex;gap:6px;flex-wrap:wrap}.jc-foot button{font-size:10px;padding:5px 9px}
+.pinbox{background:var(--card-2);border:1px solid #4c596b;border-radius:5px;padding:7px 10px;font-size:10px;line-height:1.6;color:#cfd6e0}.pinbox b{font-weight:650;color:var(--foreground)}
+.pins{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-bottom:16px;max-width:880px}
+/* diagnostics */
+.qs{list-style:none;margin:0;padding:0;font-size:11px;line-height:1.7}.qs li{padding:8px 0;border-top:1px solid #2b323c;display:flex;gap:10px}.qs li:first-child{border-top:0}.qs .qk{flex:none;font-size:8px;letter-spacing:1px;text-transform:uppercase;font-weight:650;color:var(--muted-fg);width:92px;padding-top:3px}
+.kgroup{margin-bottom:16px}.kgroup>h3{font-size:10px;font-weight:600;color:var(--muted-fg);margin:0 0 8px;display:flex;gap:8px;align-items:center}
+.rcard{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) minmax(0,1fr);gap:14px;padding:14px 18px;border-top:1px solid #2b323c}.rcard:first-child{border-top:0}.rcard h4{font-size:12px;font-weight:550;line-height:1.55;margin-bottom:6px}.rcard .meta{font-size:10px;color:var(--muted-fg);line-height:1.7}.rcard .side h5{margin:0 0 6px;font-size:9px;font-weight:600;color:var(--muted-fg);letter-spacing:.4px}.rcard .side p{font-size:10px;color:#cfd6e0;line-height:1.6;margin-bottom:6px}
+.pchips{display:flex;gap:4px;flex-wrap:wrap}.pchip{display:inline-flex;gap:5px;align-items:center;font-size:10px;border:1px solid #333b46;border-radius:4px;padding:1px 6px;background:#14181e;color:#cfd6e0}
+.flag{font-size:10px;line-height:1.6;color:#d3dbe8;background:#1c2433;border:1px solid #3e5378;border-radius:5px;padding:5px 9px;margin-top:8px}
+.ledger th.rule{white-space:normal;min-width:120px;max-width:160px;vertical-align:bottom;line-height:1.45;font-size:9px}.ledger td.c{text-align:center;padding:6px}.ledger tfoot td{background:var(--card-2);font-size:9px;color:var(--muted-fg);text-align:center}.ledger td.c .ck{margin:0}.ledger tbody tr:hover td{background:#1b1f25}
+/* compare */
+.cmp-pick{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:10px;color:var(--muted-fg)}
+.diff{list-style:none;margin:0;padding:0}.diff li{display:grid;grid-template-columns:80px minmax(0,1fr);gap:10px;padding:9px 0;border-top:1px solid #2b323c;font-size:12px;line-height:1.6}.diff li:first-child{border-top:0}.diff .lab{font-size:9px;letter-spacing:.6px;text-transform:uppercase;font-weight:650;padding-top:3px}.diff .add .lab{color:var(--positive)}.diff .rem .lab{color:var(--negative)}.diff .rew .lab{color:var(--info)}.diff .same .lab{color:var(--faint)}
+ins{text-decoration:none;background:#1e3326;color:#c6ead0;border-radius:3px;padding:0 3px}del{color:#e3a69f;background:#3a2321;border-radius:3px;padding:0 3px}
+.reasons{display:grid;gap:8px;margin-top:14px}.reasons div{font-size:11px;line-height:1.7;color:#cfd6e0;background:var(--card-2);border:1px solid #333b46;border-radius:5px;padding:8px 11px}.reasons b{font-weight:650;color:var(--foreground)}
+.vstats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:12px}.vstats div{background:var(--card-2);border:1px solid #2b323c;border-radius:5px;padding:7px 9px;font-size:9px;color:var(--muted-fg)}.vstats b{display:block;font-size:16px;color:var(--foreground);font-weight:600;margin-top:2px}
+.devs{list-style:none;margin:10px 0 0;padding:0;font-size:10px;line-height:1.6}.devs li{padding:6px 0;border-top:1px solid #2b323c;color:#cfd6e0}.devs li:first-child{border-top:0}
+.empty{padding:28px 20px;text-align:center;color:var(--muted-fg);font-size:12px;line-height:1.8}
+#tip{position:fixed;z-index:20;pointer-events:none;background:#232933;border:1px solid #4c596b;border-radius:6px;padding:8px 10px;font-size:10px;line-height:1.55;color:var(--muted-fg);max-width:260px;box-shadow:0 6px 18px #0008}#tip strong{display:block;color:var(--foreground);font-size:12px;font-weight:600}#tip[hidden]{display:none}
+details.sec summary{cursor:pointer;font-size:10px;color:var(--muted-fg);padding:10px 0 4px}
+@media(max-width:1100px){.g2,.g2.even{grid-template-columns:1fr}.rcard{grid-template-columns:1fr 1fr}.rcard>div:first-child{grid-column:1/-1}}
+@media(max-width:520px){.matrix{grid-template-columns:58px repeat(5,minmax(0,1fr));gap:3px}.cell{min-height:42px;padding:4px 5px}.cell small{display:none}.cell b{font-size:14px}.matrix .h{font-size:8px}.rcard{grid-template-columns:1fr;padding:12px 14px}.vstats{grid-template-columns:1fr 1fr 1fr}.diff li{grid-template-columns:1fr;gap:2px}.qs li{flex-direction:column;gap:2px}.kpi .v{font-size:20px}.scroll-x table.ledger{min-width:0}}
+</style>
+</head>
+<body>
+<aside class="sidebar">
+ <div class="brand"><span class="mono">V</span>Vessel</div>
+ <div class="nav-label">WORKSPACE</div>
+ <nav class="nav" aria-label="Workspace (mock)"><a href="#"><i></i>Overview</a><a href="#"><i></i>Plays</a><a href="#" class="active" aria-current="page"><i></i>Strategies</a><a href="#"><i></i>Portfolios</a><a href="#"><i></i>Accounts</a><a href="#"><i></i>Activity</a></nav>
+ <p class="note">Disposable prototype. Shell links are inert. Strategies and plays are sample data in browser memory; reload resets pins and judgements. Creating a strategy is a separate prototype.</p>
+</aside>
+<div class="main">
+ <header class="top"><div>Workspace <span class="muted">&nbsp;/&nbsp;</span> Strategies <span class="muted">&nbsp;/&nbsp;</span> <strong id="crumb">Behaviour</strong></div><span class="badge sample">SAMPLE DATA · NO PERFORMANCE CLAIMS</span></header>
+ <div class="content">
+  <div class="heading"><div><div class="eyebrow">Evidence, not verdicts</div><h1>How a strategy behaved</h1><p>Every view reads the Plays that referenced a version of the strategy, including missed and cancelled ones. What happened (outcome) and whether the rules were followed (process) stay separate. Vessel never decides whether a strategy works; that judgement is yours.</p></div></div>
+  <div class="picker" id="picker" role="group" aria-label="Strategy"></div>
+  <div class="ideas" id="ideas" role="group" aria-label="Presentation idea">
+   <button class="idea" data-idea="score" aria-pressed="true"><strong>1 · Scorecard</strong><span>One screen: counts, outcome × process, R strip, review plan.</span></button>
+   <button class="idea" data-idea="journal" aria-pressed="false"><strong>2 · Evidence journal</strong><span>The strategy's diary: plays and version freezes in order.</span></button>
+   <button class="idea" data-idea="rules" aria-pressed="false"><strong>3 · Rule diagnostics</strong><span>Per rule: met, broken, n/a, and what happened each way.</span></button>
+   <button class="idea" data-idea="compare" aria-pressed="false"><strong>4 · Version comparison</strong><span>Two versions: rule diff, then their plays side by side.</span></button>
+  </div>
+  <section id="view"></section>
+ </div>
+</div>
+<div id="tip" role="tooltip" hidden></div>
+<dialog id="pin-dlg"><form method="dialog" id="pin-form"><h2 id="pin-title">Pin play</h2><p class="muted" style="font-size:11px;line-height:1.7;margin-bottom:10px" id="pin-sub"></p><label class="field">Caption: what should future you see in it?<textarea id="pin-cap" rows="3" maxlength="200" required></textarea></label><div class="actions"><button value="cancel" formnovalidate>Cancel</button><button class="primary" value="ok" id="pin-ok">Pin</button></div></form></dialog>
+<div id="toast" role="status"></div>
+<script type="module">
+import { KINDS, STAGES, clone, latest, versionOf, outcomeOf, processOf, sampleNote, esc } from './strategies-shape-data.mjs';
+
+const data = clone();
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const st = { sid: 'reclaim', idea: 'score', ver: 'all', cell: null, jf: 'all', jver: 'all', jinst: 'all', jpinned: false, jorder: 'old', dver: 'all', dsub: 'questions', cA: null, cB: null, preds: {} };
+const COL = { Positive: '#20a090', Negative: '#d96a4a', Flat: '#6c7584', neutral: '#9aa3b0' };
+const OUTCOMES = ['Positive', 'Flat', 'Negative', 'No trade', 'In progress'];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const fd = d => { const [, m, dd] = d.split('-'); return `${+dd} ${MON[+m - 1]}`; };
+const fr = r => r == null ? '—' : (r > 0 ? '+' : r < 0 ? '−' : '±') + Math.abs(r).toFixed(1) + 'R';
+const S = () => data.strategies.find(s => s.id === st.sid);
+const playsOf = s => data.plays.filter(p => p.s === s.id).sort((a, b) => a.date.localeCompare(b.date));
+const scoped = (ps, v) => v === 'all' ? ps : ps.filter(p => p.v === +v);
+const group = p => p.status === 'Closed' ? 'taken' : p.status === 'Cancelled' ? (p.cancel === 'Missed' ? 'missed' : 'cancelled') : 'open';
+const GROUP_LABEL = { taken: 'Taken', open: 'Open or planned', missed: 'Missed', cancelled: 'Cancelled' };
+const brokenOf = (p, s) => (versionOf(s, p.v)?.rules ?? []).filter(r => p.checks[r.id] === 'broken');
+const short = t => { const w = t.split(' '); return w.length > 7 ? w.slice(0, 7).join(' ') + '…' : t; };
+const GSVG = { Positive: '<path d="M5,1.5L9,8.5H1Z" fill="#20a090"/>', Negative: '<path d="M5,8.5L9,1.5H1Z" fill="#d96a4a"/>', Flat: '<rect x="2" y="2" width="6" height="6" rx="1" fill="#6c7584"/>',
+  'No trade': '<path d="M5,1L9,5L5,9L1,5Z" fill="none" stroke="#9aa3b0" stroke-width="1.4"/>', 'In progress': '<circle cx="5" cy="5" r="3.3" fill="none" stroke="#9aa3b0" stroke-width="1.4" stroke-dasharray="2 1.6"/>' };
+const glyph = o => `<svg class="glyph" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">${GSVG[o]}</svg>`;
+const domainOf = ps => { const rs = ps.filter(p => p.r != null).map(p => p.r); return [Math.min(-2, Math.floor(Math.min(0, ...rs))), Math.max(2, Math.ceil(Math.max(0, ...rs)))]; };
+const tipOf = (p, s) => {
+  const o = outcomeOf(p), pr = processOf(p, s), b = brokenOf(p, s);
+  return [p.r != null ? `${fr(p.r)} · ${o}` : (p.status === 'Cancelled' ? `No trade · ${p.cancel || 'Cancelled'}` : `${p.status} · not finished`),
+    `${p.id} ${p.title}`, `${p.dir} ${p.inst} · ${fd(p.date)} · v${p.v}`, `Process: ${pr}${b.length ? ' (broke: ' + b.map(r => short(r.text)).join('; ') + ')' : ''}`].join('\n');
+};
+
+/* ---------- charts: drawn at measured width, re-drawn on resize ---------- */
+const CH = {};
+let chartSeq = 0;
+const chart = (fn, h) => { const k = 'c' + (++chartSeq); CH[k] = fn; return `<div class="chart" data-chart="${k}" style="min-height:${h}px"></div>`; };
+function drawCharts() { $$('[data-chart]').forEach(el => { const f = CH[el.dataset.chart]; if (f) el.innerHTML = f(Math.max(200, el.clientWidth)); }); }
+let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(drawCharts, 120); });
+
+function bar(x, yt, w, h, up) {
+  const rx = Math.min(4, h / 2, w / 2), yb = yt + h;
+  return up ? `M${x},${yb}V${yt + rx}Q${x},${yt} ${x + rx},${yt}H${x + w - rx}Q${x + w},${yt} ${x + w},${yt + rx}V${yb}Z`
+            : `M${x},${yt}V${yb - rx}Q${x},${yb} ${x + rx},${yb}H${x + w - rx}Q${x + w},${yb} ${x + w},${yb - rx}V${yt}Z`;
+}
+function markFor(p, s, cx, y0, bw, y) {
+  const o = outcomeOf(p), dev = processOf(p, s) === 'Deviated';
+  if (p.r != null) {
+    const top = y(Math.max(p.r, 0)), h = Math.max(2, Math.abs(y(p.r) - y0)), up = p.r >= 0, yt = up ? y0 - h : y0;
+    return dev ? `<path d="${bar(cx - bw / 2 + .75, yt + (up ? .75 : 0), bw - 1.5, h - .75, up)}" fill="#171a1f" stroke="${COL[o]}" stroke-width="1.5"/>`
+               : `<path d="${bar(cx - bw / 2, up ? top : y0, bw, h, up)}" fill="${COL[o]}"/>`;
+  }
+  if (p.status === 'Cancelled') return `<path d="M${cx},${y0 - 5}L${cx + 5},${y0}L${cx},${y0 + 5}L${cx - 5},${y0}Z" fill="#171a1f" stroke="${COL.neutral}" stroke-width="1.5"/>`;
+  return `<circle cx="${cx}" cy="${y0}" r="4" fill="#171a1f" stroke="${COL.neutral}" stroke-width="1.5" stroke-dasharray="2 1.6"/>`;
+}
+// Per-play R strip in time order. x is play order (not calendar), so gaps in time don't read as gaps in evidence.
+function rStrip(ps, s, w, dom, { h = 190, versions = true } = {}) {
+  const n = ps.length; if (!n) return `<p class="empty">No plays in this scope.</p>`;
+  const L = 38, R = 8, T = versions ? 26 : 10, B = 24, iw = w - L - R, cw = iw / n, bw = Math.max(5, Math.min(14, cw * .6));
+  const [y0d, y1d] = dom, y = v => T + (y1d - v) / (y1d - y0d) * (h - T - B), y0 = y(0);
+  let g = '';
+  for (let t = y0d; t <= y1d; t++) g += `<line x1="${L}" x2="${w - R}" y1="${y(t)}" y2="${y(t)}" stroke="${t === 0 ? '#56606e' : '#252b33'}" stroke-width="1"/><text class="ax" x="${L - 7}" y="${y(t) + 3}" text-anchor="end">${t > 0 ? '+' : t < 0 ? '−' : ''}${Math.abs(t)}R</text>`;
+  ps.forEach((p, i) => {
+    if (versions && (i === 0 || p.v !== ps[i - 1].v)) {
+      const x = L + i * cw, v = versionOf(s, p.v);
+      if (i > 0) g += `<line x1="${x}" x2="${x}" y1="${T - 18}" y2="${h - B}" stroke="#6a7585" stroke-width="1"/>`;
+      g += `<text class="axs" x="${x + 4}" y="${T - 10}">v${p.v}</text><text class="ax" x="${x + 20}" y="${T - 10}">${cw * countRun(ps, i) > 90 && v ? 'from ' + fd(v.date) : ''}</text>`;
+    }
+  });
+  ps.forEach((p, i) => {
+    const cx = L + (i + .5) * cw;
+    g += `<g class="m" tabindex="0" data-tip="${esc(tipOf(p, s))}" aria-label="${esc(tipOf(p, s).replace(/\n/g, '. '))}"><rect class="hit" x="${L + i * cw}" y="${T - 4}" width="${cw}" height="${h - T - B + 8}" rx="3"/>${markFor(p, s, cx, y0, bw, y)}</g>`;
+  });
+  const lab = cw >= 30 ? ps.map((p, i) => `<text class="ax" x="${L + (i + .5) * cw}" y="${h - 7}" text-anchor="middle">${esc(p.id.slice(2))}</text>`).join('')
+    : `<text class="ax" x="${L}" y="${h - 7}">${esc(ps[0].id)} · ${fd(ps[0].date)}</text><text class="ax" x="${w - R}" y="${h - 7}" text-anchor="end">${esc(ps.at(-1).id)} · ${fd(ps.at(-1).date)}</text>`;
+  return `<svg width="${w}" height="${h}" role="img" aria-label="Result per play in R, in date order">${g}${lab}</svg>`;
+}
+const countRun = (ps, i) => { let k = i; while (k < ps.length && ps[k].v === ps[i].v) k++; return k - i; };
+function runningSum(ps, s, w) {
+  const c = ps.filter(p => p.r != null); if (c.length < 2) return '<p class="empty">Fewer than two closed plays.</p>';
+  let acc = 0; const pts = c.map(p => (acc += p.r, { p, v: +acc.toFixed(2) }));
+  const h = 120, L = 38, R = 8, T = 10, B = 18, lo = Math.min(0, ...pts.map(d => d.v)), hi = Math.max(0, ...pts.map(d => d.v));
+  const y0d = Math.floor(lo), y1d = Math.ceil(hi), y = v => T + (y1d - v) / ((y1d - y0d) || 1) * (h - T - B), cw = (w - L - R) / pts.length, x = i => L + (i + .5) * cw;
+  let g = ''; const step = y1d - y0d > 6 ? 2 : 1;
+  for (let t = y0d; t <= y1d; t += step) g += `<line x1="${L}" x2="${w - R}" y1="${y(t)}" y2="${y(t)}" stroke="${t === 0 ? '#56606e' : '#252b33'}"/><text class="ax" x="${L - 7}" y="${y(t) + 3}" text-anchor="end">${t > 0 ? '+' : t < 0 ? '−' : ''}${Math.abs(t)}R</text>`;
+  g += `<path d="${pts.map((d, i) => (i ? 'L' : 'M') + x(i) + ',' + y(d.v)).join('')}" fill="none" stroke="#8a95a5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  pts.forEach((d, i) => { const dev = processOf(d.p, s) === 'Deviated'; g += `<g class="m" tabindex="0" data-tip="${esc(`Running sum ${fr(d.v)}\nafter ${d.p.id} (${fr(d.p.r)})${dev ? '\nThis play deviated from the rules' : ''}`)}"><rect class="hit" x="${x(i) - cw / 2}" y="${T}" width="${cw}" height="${h - T - B}"/><circle cx="${x(i)}" cy="${y(d.v)}" r="4" fill="${dev ? '#171a1f' : '#8a95a5'}" stroke="${dev ? '#8a95a5' : '#171a1f'}" stroke-width="2"/></g>`; });
+  return `<svg width="${w}" height="${h}" role="img" aria-label="Running sum of R, secondary">${g}</svg>`;
+}
+const LEGEND = `<div class="legend" aria-label="Legend">
+ <span><svg width="10" height="12"><path d="${bar(1, 1, 8, 11, true)}" fill="${COL.Positive}"/></svg>Above zero</span>
+ <span><svg width="10" height="12"><path d="${bar(1, 0, 8, 11, false)}" fill="${COL.Negative}"/></svg>Below zero</span>
+ <span><svg width="10" height="12"><path d="${bar(1.75, 1.75, 6.5, 10, true)}" fill="none" stroke="${COL.Positive}" stroke-width="1.5"/></svg>Hollow = a rule was broken</span>
+ <span><svg width="12" height="12"><path d="M6,1L11,6L6,11L1,6Z" fill="none" stroke="${COL.neutral}" stroke-width="1.5"/></svg>No trade (missed, cancelled)</span>
+ <span><svg width="12" height="12"><circle cx="6" cy="6" r="4" fill="none" stroke="${COL.neutral}" stroke-width="1.5" stroke-dasharray="2 1.6"/></svg>Open or planned</span></div>`;
+
+/* ---------- tooltip ---------- */
+const tip = $('#tip');
+function showTip(el) {
+  const lines = el.getAttribute('data-tip').split('\n'); tip.replaceChildren();
+  const s = document.createElement('strong'); s.textContent = lines[0]; tip.append(s);
+  lines.slice(1).forEach(l => { const d = document.createElement('div'); d.textContent = l; tip.append(d); });
+  tip.hidden = false; const r = el.getBoundingClientRect(), t = tip.getBoundingClientRect();
+  let x = r.left + r.width / 2 - t.width / 2, yy = r.top - t.height - 8; if (yy < 6) yy = r.bottom + 8;
+  tip.style.left = Math.max(6, Math.min(innerWidth - t.width - 6, x)) + 'px'; tip.style.top = yy + 'px';
+}
+document.addEventListener('pointerover', e => { const t = e.target.closest?.('[data-tip]'); t ? showTip(t) : (tip.hidden = true); });
+document.addEventListener('focusin', e => { const t = e.target.closest?.('[data-tip]'); t ? showTip(t) : (tip.hidden = true); });
+document.addEventListener('focusout', () => { tip.hidden = true; });
+addEventListener('scroll', () => { tip.hidden = true; }, { passive: true });
+document.addEventListener('toggle', e => { if (e.target.matches?.('details')) drawCharts(); }, true);
+
+/* ---------- shared bits ---------- */
+const ckClass = c => c || 'unset';
+const ckWord = c => ({ met: 'met', broken: 'broken', na: 'n/a' }[c] || 'not checked');
+function ckRow(variant, ps, s) {
+  let out = '', last = null;
+  ps.forEach(p => {
+    if (last != null && p.v !== last) out += '<i class="vsep" aria-hidden="true"></i>';
+    last = p.v;
+    if (!variant.versions.includes(p.v)) { out += `<i class="ck out" tabindex="0" data-tip="${esc(`Not in v${p.v}\n${p.id} ${p.title}`)}"></i>`; return; }
+    const c = p.checks[variant.id];
+    out += `<i class="ck ${ckClass(c)}" tabindex="0" data-tip="${esc(`${ckWord(c)} · ${p.id}\n${p.title} · ${fd(p.date)} · v${p.v}\n${p.r != null ? fr(p.r) + ' · ' : ''}${outcomeOf(p)}`)}" aria-label="${esc(p.id + ': ' + ckWord(c))}"></i>`;
+  });
+  return `<div class="ckrow">${out}</div>`;
+}
+const CK_LEGEND = `<div class="legend"><span><i class="ck met"></i>Met</span><span><i class="ck broken"></i>Broken</span><span><i class="ck na"></i>n/a</span><span><i class="ck unset"></i>Not checked</span><span><i class="ck out"></i>Rule not in that version</span></div>`;
+function variants(s, ver) {
+  const vs = ver === 'all' ? s.versions : s.versions.filter(v => v.n === +ver), m = new Map();
+  vs.forEach(v => v.rules.forEach(r => { const k = `${r.id}|${r.kind}|${r.text}`; if (!m.has(k)) m.set(k, { ...r, key: k, versions: [] }); m.get(k).versions.push(v.n); }));
+  return [...m.values()].sort((a, b) => Object.keys(KINDS).indexOf(a.kind) - Object.keys(KINDS).indexOf(b.kind));
+}
+function tally(vr, ps) {
+  const rel = ps.filter(p => vr.versions.includes(p.v)), t = { met: [], broken: [], na: [], unset: [], rel };
+  rel.forEach(p => t[p.checks[vr.id] || 'unset'].push(p)); return t;
+}
+const vRange = v => v.versions.length === 1 ? `v${v.versions[0]}` : `v${v.versions[0]}–v${v.versions.at(-1)}`;
+const verSeg = (s, cur, attr) => `<div class="seg" role="group" aria-label="Version">${['all', ...s.versions.map(v => String(v.n))].map(v => `<button data-${attr}="${v}" aria-pressed="${String(cur) === v}">${v === 'all' ? 'All versions' : 'v' + v}</button>`).join('')}</div>`;
+function emptyStrategy(s) {
+  return `<div class="panel"><div class="empty"><strong style="color:var(--foreground)">${esc(s.name)}</strong> is an ${esc(STAGES[s.stage].label.toLowerCase())} with no frozen version, so no Play can reference it yet.<br>Behaviour appears here once v1 is frozen and Plays use it. Nothing is shown rather than an empty chart.</div></div>`;
+}
+function toast(m) { const t = $('#toast'); t.textContent = m; clearTimeout(toast.t); toast.t = setTimeout(() => t.textContent = '', 2600); }
+
+/* ---------- 1 · Scorecard ---------- */
+const CELL_NOTE = {
+  'Followed|Positive': 'Followed; went their way', 'Followed|Flat': 'Followed; scratch', 'Followed|Negative': 'Valid loss. The rules allow it',
+  'Followed|No trade': 'Not taken. Still evidence', 'Deviated|Positive': 'Lucky. Does not validate the break', 'Deviated|Flat': 'Broke a rule; scratch',
+  'Deviated|Negative': 'Execution lesson', 'Deviated|No trade': 'A condition failed; stood aside', 'In progress|In progress': 'Not finished yet',
+};
+function scorecard(s) {
+  const all = playsOf(s), ps = scoped(all, st.ver), dom = domainOf(all), L = latest(s);
+  const g = { taken: 0, open: 0, missed: 0, cancelled: 0 }; ps.forEach(p => g[group(p)]++);
+  const fin = ps.filter(p => p.status === 'Closed' || p.status === 'Cancelled'), dev = fin.filter(p => processOf(p, s) === 'Deviated');
+  const rows = ['Followed', 'Deviated', 'Not reviewed', 'In progress'].filter((r, i) => i < 2 || ps.some(p => processOf(p, s) === r));
+  const key = p => processOf(p, s) + '|' + outcomeOf(p);
+  const list = ps.filter(p => !st.cell || key(p) === st.cell);
+  const onL = all.filter(p => p.v === L.n), finL = onL.filter(p => p.status === 'Closed' || p.status === 'Cancelled'), folL = finL.filter(p => processOf(p, s) === 'Followed');
+  const every = s.reviewPlan.checkEvery, vrs = variants(s, st.ver);
+  return `<p class="why"><strong>Question:</strong> "how is it going, honestly?" Counts first, then the outcome × process matrix so a lucky deviation never reads as support, then each play as one mark in date order. <strong>Trade-off:</strong> a single screen invites a single verdict. Nothing here is one: there is no score, no win rate and no pass badge, and the review plan's predictions are judged by you.</p>
+  <div class="filters"><div class="grp"><span>Scope</span>${verSeg(s, st.ver, 'ver')}</div><span class="faint">Filters everything below.</span></div>
+  <div class="kpis">${['taken', 'open', 'missed', 'cancelled'].map(k => `<div class="kpi"><div class="l">${GROUP_LABEL[k]}</div><div class="v">${g[k]}</div><small>${k === 'taken' ? 'Closed plays with a result' : k === 'open' ? 'No outcome yet' : k === 'missed' ? 'Valid setup, no fill' : 'Invalidated or chose not to'}</small></div>`).join('')}
+   <div class="kpi"><div class="l">Deviated from the rules</div><div class="v">${dev.length}<span class="faint" style="font-size:13px;font-weight:500"> of ${fin.length}</span></div><small>Finished plays with a broken rule</small></div></div>
+  <div class="caveat" style="margin-bottom:16px">${esc(sampleNote(fin.length))}${st.ver === 'all' && s.versions.length > 1 ? ' Versions have different rules, so "All versions" mixes different hypotheses.' : ''}</div>
+  <div class="g2">
+   <div class="panel"><div class="panel-head"><div><h2>Each play, in date order</h2><p>Bar = result in R (multiples of planned risk). Hover or focus a mark for the play.</p></div></div>
+    <div class="pad">${chart(w => rStrip(ps, s, w, dom, { versions: st.ver === 'all' }), 190)}${LEGEND}
+     <details class="sec"><summary>Running sum of R (secondary, read the caveat)</summary><p class="muted" style="font-size:10px;line-height:1.7;margin:4px 0 8px">A running sum mixes versions, deviations and different market periods, and its shape is mostly the order plays happened in. It describes this sample; it is not an estimate of an edge.</p>${chart(w => runningSum(ps, s, w), 120)}</details></div></div>
+   <div class="panel"><div class="panel-head"><div><h2>Outcome × process</h2><p>Process comes from the rule checks inside each Play. Click a cell to filter the list.</p></div>${st.cell ? '<button class="ghost" data-cell="">Clear</button>' : ''}</div>
+    <div class="pad"><div class="matrix" role="group" aria-label="Plays by process and outcome"><span></span>${OUTCOMES.map(o => `<span class="h">${glyph(o)} ${o}</span>`).join('')}
+     ${rows.map(r => `<span class="rh">${r}</span>${OUTCOMES.map(o => { const k = r + '|' + o, n = ps.filter(p => key(p) === k).length; return `<button class="cell ${n ? '' : 'zero'} ${k === 'Deviated|Positive' ? 'luck' : ''}" data-cell="${k}" aria-pressed="${st.cell === k}" aria-label="${r}, ${o}: ${n}"><b>${n}</b><small>${CELL_NOTE[k] || ''}</small></button>`; }).join('')}`).join('')}</div>
+     <p class="muted" style="font-size:10px;line-height:1.7;margin-top:12px">Positive / Negative / Flat use ±0.2R as the scratch band. "Deviated · Positive" is outlined: a result there argues nothing for the broken rule.</p></div></div>
+  </div>
+  <div class="panel" style="margin-bottom:16px"><div class="panel-head"><div><h2>Plays ${st.cell ? `· ${esc(st.cell.replace('|', ' · '))}` : ''}</h2><p>${list.length} of ${ps.length} in scope. This table is also the text view of the chart above.</p></div></div>
+   <div class="scroll-x"><table><thead><tr><th>Play</th><th>Version</th><th>Status</th><th>Outcome</th><th>R</th><th>Process</th><th>Review note</th></tr></thead><tbody>
+   ${list.map(p => { const b = brokenOf(p, s), o = outcomeOf(p); return `<tr><td><strong>${esc(p.id)}</strong> ${esc(p.title)}<small>${esc(p.dir)} ${esc(p.inst)} · ${fd(p.date)}</small></td><td><span class="badge">v${p.v}</span></td><td>${esc(p.status)}${p.cancel ? `<small>${esc(p.cancel)}</small>` : ''}</td><td>${glyph(o)} ${o}</td><td class="rv">${fr(p.r)}</td><td class="${b.length ? 'warn' : ''}">${processOf(p, s)}${b.length ? `<small>Broke: ${b.map(r => esc(short(r.text))).join('; ')}</small>` : ''}</td><td><small style="margin:0">${esc(p.note || '—')}</small></td></tr>`; }).join('') || '<tr><td colspan="7" class="muted">No plays in this cell.</td></tr>'}</tbody></table></div></div>
+  <div class="g2 even">
+   <div class="panel"><div class="panel-head"><div><h2>Rule adherence</h2><p>One square per play that used the rule, in date order. Counts, not rates.</p></div></div><div class="pad"><ul class="rules-sum">
+    ${vrs.map(vr => { const t = tally(vr, ps); return `<li><div class="t"><span class="kind ${vr.kind}">${KINDS[vr.kind].label}</span><span>${esc(vr.text)}</span></div><div class="n">${t.broken.length ? `<span class="warn">broken ${t.broken.length}</span> of ${t.rel.length}` : `broken 0 of ${t.rel.length}`}${t.na.length ? ` · n/a ${t.na.length}` : ''}<br><span class="faint">${vRange(vr)}</span></div>${ckRow(vr, ps, s)}</li>`; }).join('')}
+   </ul>${CK_LEGEND}</div></div>
+   <div class="panel"><div class="panel-head"><div><h2>Review plan</h2><p>Written before the evidence. Statuses are your judgement; Vessel does not compute them.</p></div></div><div class="pad">
+    <div style="font-size:12px"><strong>${finL.length} of ${every}</strong> finished plays on v${L.n} before the planned check</div>
+    <div class="meter" role="img" aria-label="${finL.length} of ${every} plays, ${folL.length} followed the rules">${folL.length ? `<i style="width:${Math.min(100, folL.length / every * 100)}%"></i>` : ''}${finL.length - folL.length ? `<i class="dev" style="width:${Math.min(100, (finL.length - folL.length) / every * 100)}%"></i>` : ''}</div>
+    <small class="muted">${folL.length} followed the rules, ${finL.length - folL.length} did not (outlined) · ${onL.length - finL.length} still open or planned</small>
+    <div style="margin-top:14px">${s.reviewPlan.predictions.map((pr, i) => { const k = s.id + i, v = st.preds[k] || 'unclear'; return `<div class="pred"><span>${esc(pr)}</span><div class="seg" role="group" aria-label="Your judgement">${[['unclear', 'Unclear', ''], ['supported', 'Supported', 'sup'], ['contradicted', 'Contradicted', 'con']].map(([id, lab, c]) => `<button class="${c}" data-pred="${k}" data-val="${id}" aria-pressed="${v === id}">${lab}</button>`).join('')}</div></div>`; }).join('') || '<p class="muted" style="font-size:11px">No predictions written.</p>'}</div>
+    ${s.reviewPlan.stopRule ? `<p class="stoprule"><span class="eyebrow" style="display:block;margin-bottom:3px">Stop rule, in your words</span>${esc(s.reviewPlan.stopRule)}</p>` : ''}
+   </div></div>
+  </div>`;
+}
+
+/* ---------- 2 · Evidence journal ---------- */
+function journal(s) {
+  const all = playsOf(s), insts = [...new Set(all.map(p => p.inst))];
+  const pin = id => s.examples.find(e => e.playId === id);
+  const ok = p => (st.jver === 'all' || p.v === +st.jver) && (st.jinst === 'all' || p.inst === st.jinst) && (!st.jpinned || pin(p.id)) &&
+    (st.jf === 'all' || (st.jf === 'followed' && processOf(p, s) === 'Followed') || (st.jf === 'deviated' && processOf(p, s) === 'Deviated') ||
+     (st.jf === 'nottaken' && p.status === 'Cancelled') || (st.jf === 'open' && group(p) === 'open'));
+  const ps = all.filter(ok);
+  const items = [{ date: s.created, kind: 'created' }, ...s.versions.filter(v => st.jver === 'all' || v.n === +st.jver).map(v => ({ date: v.date, kind: 'ver', v })), ...ps.map(p => ({ date: p.date, kind: 'play', p }))]
+    .sort((a, b) => a.date.localeCompare(b.date) || (a.kind === 'play') - (b.kind === 'play'));
+  if (st.jorder === 'new') items.reverse();
+  const card = p => {
+    const o = outcomeOf(p), pr = processOf(p, s), b = brokenOf(p, s), pn = pin(p.id), v = versionOf(s, p.v);
+    return `<article class="jcard ${pr === 'Deviated' ? 'dev' : ''} ${pn ? 'pinned' : ''}" id="j-${esc(p.id)}">
+     <div class="jc-head"><div><span class="pid">${esc(p.id)}</span> <strong>${esc(p.title)}</strong><small>${esc(p.dir)} ${esc(p.inst)} · ${fd(p.date)} · v${p.v}</small></div><span class="rv">${fr(p.r)}</span></div>
+     <div class="tags"><span class="tag">${esc(p.status)}${p.cancel ? ' · ' + esc(p.cancel) : ''}</span><span class="tag">${glyph(o)} ${o}</span><span class="tag ${pr === 'Deviated' ? 'dev' : ''}">${pr === 'Deviated' ? '✕' : pr === 'Followed' ? '✓' : '·'} ${pr}</span></div>
+     ${b.length ? `<div class="jc-broken">Broke ${b.length > 1 ? b.length + ' rules' : 'a rule'}: ${b.map(r => `<span class="kind ${r.kind}">${KINDS[r.kind].label}</span> ${esc(r.text)}`).join('<br>')}</div>` : ''}
+     <p class="jc-note ${p.note ? '' : 'none'}">${p.note ? esc(p.note) : 'No review note yet.'}</p>
+     ${pn ? `<div class="pinbox"><b>${pn.kind === 'setup' ? 'Pinned example' : 'Pinned counterexample'}.</b> ${esc(pn.caption)}</div>` : ''}
+     <div class="jc-foot">${v ? `<div class="ckrow" aria-label="Rule checks">${v.rules.map(r => `<i class="ck ${ckClass(p.checks[r.id])}" tabindex="0" data-tip="${esc(ckWord(p.checks[r.id]) + '\n' + KINDS[r.kind].label + ': ' + r.text)}" aria-label="${esc(r.text + ': ' + ckWord(p.checks[r.id]))}"></i>`).join('')}</div>` : ''}
+      <div class="acts">${pn ? `<button data-unpin="${esc(p.id)}">Unpin</button>` : `<button data-pin="${esc(p.id)}" data-kind="setup">Pin as example</button><button data-pin="${esc(p.id)}" data-kind="counterexample">Pin as counterexample</button>`}</div></div></article>`;
+  };
+  const pins = s.examples.map(e => ({ e, p: all.find(p => p.id === e.playId) })).filter(x => x.p);
+  return `<p class="why"><strong>Question:</strong> "what actually happened, and what did I learn each time?" The strategy reads as a diary: plays, misses and cancellations in order, with version freezes as dividers carrying their reason, so you can see which plays prompted which change. <strong>Trade-off:</strong> the best context per play and the weakest overview; patterns across plays are up to you to notice, and long histories need the filters.</p>
+  <div class="filters"><div class="grp" role="group" aria-label="Show">${[['all', 'All'], ['followed', 'Followed'], ['deviated', 'Deviated'], ['nottaken', 'Missed & cancelled'], ['open', 'Open or planned']].map(([k, l]) => `<button class="chip" data-jf="${k}" aria-pressed="${st.jf === k}">${l}</button>`).join('')}</div>
+   <div class="grp"><select id="jver" aria-label="Version"><option value="all">All versions</option>${s.versions.map(v => `<option value="${v.n}" ${String(st.jver) === String(v.n) ? 'selected' : ''}>v${v.n}</option>`).join('')}</select>
+   <select id="jinst" aria-label="Instrument"><option value="all">All instruments</option>${insts.map(i => `<option ${st.jinst === i ? 'selected' : ''}>${esc(i)}</option>`).join('')}</select>
+   <button class="chip" id="jpinned" aria-pressed="${st.jpinned}">Pinned only</button><button class="chip" id="jorder">${st.jorder === 'old' ? 'Oldest first' : 'Newest first'}</button></div></div>
+  ${pins.length ? `<div class="pins">${pins.map(({ e, p }) => `<a href="#j-${esc(p.id)}" class="pinbox" style="text-decoration:none;display:block"><span class="eyebrow">${e.kind === 'setup' ? 'Example' : 'Counterexample'} · ${esc(p.id)} · v${p.v}</span><div style="margin-top:4px"><b>${esc(p.title)}</b> <span class="rv muted">${fr(p.r)}</span></div><div class="muted">${esc(e.caption)}</div></a>`).join('')}</div>` : ''}
+  <p class="muted" style="font-size:10px;margin-bottom:10px">${ps.length} of ${all.length} plays shown. ${esc(sampleNote(all.filter(p => p.status === 'Closed' || p.status === 'Cancelled').length))}</p>
+  <div class="feed">${items.map(it => it.kind === 'play' ? card(it.p)
+    : it.kind === 'ver' ? `<div class="vdiv"><b>v${it.v.n} frozen</b><p>${esc(it.v.reason)}</p><small>${fd(it.v.date)} · ${it.v.rules.length} rules · plays ${st.jorder === 'old' ? 'below' : 'above'} use v${it.v.n} until the next freeze</small></div>`
+    : `<div class="vdiv"><b>Created</b><p>${esc(s.name)} written down.</p><small>${fd(it.date)}</small></div>`).join('')}
+   ${ps.length ? '' : '<div class="panel"><p class="empty">No plays match these filters.</p></div>'}</div>`;
+}
+
+/* ---------- 3 · Rule diagnostics ---------- */
+function outcomeLine(list) {
+  if (!list.length) return '<p class="faint">None.</p>';
+  const c = {}; list.forEach(p => { const o = outcomeOf(p); c[o] = (c[o] || 0) + 1; });
+  return `<p>${OUTCOMES.filter(o => c[o]).map(o => `${glyph(o)} ${c[o]} ${o.toLowerCase()}`).join(' · ')}</p><div class="pchips">${list.map(p => `<span class="pchip" tabindex="0" data-tip="${esc(tipOf(p, S()))}">${glyph(outcomeOf(p))}${esc(p.id)} <span class="rv">${p.r != null ? fr(p.r) : p.status === 'Cancelled' ? 'no trade' : 'open'}</span></span>`).join('')}</div>`;
+}
+function questionsFor(vr, t) {
+  const q = [], label = `"${short(vr.text)}"`, N = t.rel.length, taken = p => p.status !== 'Cancelled';
+  const vtxt = vRange(vr);
+  if (t.broken.length) q.push(['Broken', `${label} was broken in ${t.broken.length} of ${N} plays on ${vtxt} (${t.broken.map(p => p.id).join(', ')}). What made it hard to follow?`]);
+  const naT = t.na.filter(taken), naC = t.na.filter(p => !taken(p));
+  if (naT.length) q.push(['Often n/a', `${label} was marked n/a in ${naT.length} taken play${naT.length > 1 ? 's' : ''} (${naT.map(p => p.id).join(', ')}). Is it clear when the rule applies?`]);
+  if (naC.length && !naT.length && N) q.push(['n/a on no-trades', `n/a in ${naC.length} cancelled or missed play${naC.length > 1 ? 's' : ''}: expected, no entry happened.`]);
+  if (!t.broken.length && !t.na.length && t.met.length >= 3 && t.met.length === N) q.push(['Never decisive', `${label} was met in all ${N} plays on ${vtxt}. It has not separated one play from another yet; does it filter anything, or describe the setup?`]);
+  if (t.unset.length) q.push(['Unchecked', `Not checked in ${t.unset.length} play${t.unset.length > 1 ? 's' : ''} (${t.unset.map(p => p.id).join(', ')}), mostly not finished.`]);
+  return q;
+}
+function diagnostics(s) {
+  const all = playsOf(s), ps = scoped(all, st.dver), vrs = variants(s, st.dver);
+  const rows = vrs.map(vr => ({ vr, t: tally(vr, ps) })).map(x => ({ ...x, q: questionsFor(x.vr, x.t) }));
+  const ORDER = ['Broken', 'Often n/a'];
+  const top = rows.flatMap(x => x.q.filter(([k]) => ORDER.includes(k)).map(q => ({ ...x, q }))).sort((a, b) => ORDER.indexOf(a.q[0]) - ORDER.indexOf(b.q[0]));
+  const quiet = rows.filter(x => x.q.some(([k]) => k === 'Never decisive'));
+  if (quiet.length) top.push({ q: ['Never decisive', `Met in every play that used ${quiet.length > 1 ? 'them' : 'it'}: ${quiet.map(x => '"' + short(x.vr.text) + '"').join(', ')}. ${quiet.length > 1 ? 'They have' : 'It has'} not separated one play from another yet; do they filter anything, or describe the setup?`] });
+  const head = `<p class="why"><strong>Question:</strong> "which rule needs attention?" Each rule shows how often it was met, broken or n/a, and puts the plays where it was met beside the plays where it was broken. It surfaces questions, not conclusions: three plays on each side say nothing about whether a rule helps. <strong>Trade-off:</strong> good for revising wording and catching habits; it tempts you to read cause into tiny splits, and reworded rules are kept apart, so a rule's history is split across versions.</p>
+  <div class="filters"><div class="grp"><span>Scope</span>${verSeg(s, st.dver, 'dver')}</div><div class="seg" role="tablist" aria-label="Sub-view"><button data-dsub="questions" aria-pressed="${st.dsub === 'questions'}">Rules</button><button data-dsub="ledger" aria-pressed="${st.dsub === 'ledger'}">Plays × rules ledger</button></div></div>`;
+  if (st.dsub === 'ledger') {
+    return head + `<div class="panel"><div class="panel-head"><div><h2>Ledger · ${st.dver === 'all' ? 'all versions' : 'v' + st.dver}</h2><p>Rows are plays in date order; columns are rules. A reworded rule is a separate column. Hatched = the rule did not exist in that play's version.</p></div></div>
+     <div class="scroll-x"><table class="ledger" style="min-width:${260 + vrs.length * 120}px"><thead><tr><th>Play</th>${vrs.map(vr => `<th class="rule"><span class="kind ${vr.kind}">${KINDS[vr.kind].label}</span><br>${esc(vr.text)}<br><span class="faint">${vRange(vr)}</span></th>`).join('')}<th>Process</th><th>Outcome</th></tr></thead>
+     <tbody>${ps.map(p => `<tr><td><strong>${esc(p.id)}</strong> <span class="badge">v${p.v}</span><small>${esc(p.inst)} · ${fd(p.date)} · ${esc(p.status)}</small></td>${vrs.map(vr => { const inV = vr.versions.includes(p.v), c = p.checks[vr.id]; return `<td class="c"><i class="ck ${inV ? ckClass(c) : 'out'}" tabindex="0" data-tip="${esc((inV ? ckWord(c) : 'Not in v' + p.v) + '\n' + p.id + ' · ' + short(vr.text))}" aria-label="${esc(p.id + ', ' + vr.text + ': ' + (inV ? ckWord(c) : 'not in version'))}"></i></td>`; }).join('')}<td class="${processOf(p, s) === 'Deviated' ? 'warn' : ''}">${processOf(p, s)}</td><td>${glyph(outcomeOf(p))} ${outcomeOf(p)} <span class="rv muted">${p.r != null ? fr(p.r) : ''}</span></td></tr>`).join('')}</tbody>
+     <tfoot><tr><td>Broken</td>${rows.map(({ t }) => `<td>${t.broken.length} / ${t.rel.length}</td>`).join('')}<td colspan="2"></td></tr></tfoot></table></div><div class="pad">${CK_LEGEND}</div></div>`;
+  }
+  const byKind = Object.keys(KINDS).map(k => ({ k, rs: rows.filter(x => x.vr.kind === k) })).filter(x => x.rs.length);
+  return head + `<div class="panel" style="margin-bottom:16px"><div class="panel-head"><div><h2>Questions to look at</h2><p>Generated from counts. They point at plays to reread, not at verdicts.</p></div></div><div class="pad"><ul class="qs">${top.map(x => `<li><span class="qk">${x.q[0]}</span><span>${esc(x.q[1])}</span></li>`).join('') || '<li class="muted">Nothing stands out in this scope.</li>'}</ul><div class="caveat" style="margin-top:12px">${esc(sampleNote(ps.filter(p => p.status === 'Closed' || p.status === 'Cancelled').length))} A rule met in a winning play did not make it win.</div></div></div>
+  ${byKind.map(({ k, rs }) => `<div class="kgroup"><h3><span class="kind ${k}">${KINDS[k].label}</span>${esc(KINDS[k].hint)}</h3><div class="panel">${rs.map(({ vr, t, q }) => `<div class="rcard"><div><h4>${esc(vr.text)}</h4><div class="meta">${vRange(vr)}${vr.required ? '' : ' · optional'} · used in ${t.rel.length} play${t.rel.length === 1 ? '' : 's'}<br>met ${t.met.length} · <span class="${t.broken.length ? 'warn' : ''}">broken ${t.broken.length}</span> · n/a ${t.na.length} · unchecked ${t.unset.length}</div><div style="margin-top:8px">${ckRow(vr, ps, s)}</div>${q.filter(([k]) => k !== 'Unchecked').map(([k, txt]) => `<div class="flag"><b>${esc(k)}.</b> ${esc(txt)}</div>`).join('')}</div>
+     <div class="side"><h5>WHEN MET (${t.met.length})</h5>${outcomeLine(t.met)}</div>
+     <div class="side"><h5>WHEN BROKEN (${t.broken.length})</h5>${outcomeLine(t.broken)}${t.na.length ? `<h5 style="margin-top:10px">N/A (${t.na.length})</h5>${outcomeLine(t.na)}` : ''}</div></div>`).join('')}</div></div>`).join('')}${CK_LEGEND}`;
+}
+
+/* ---------- 4 · Version comparison ---------- */
+function compare(s) {
+  if (s.versions.length < 2) return `<p class="why"><strong>Question:</strong> "what changed between versions, and how did the plays on each look?"</p><div class="panel"><p class="empty">${esc(s.name)} has ${s.versions.length} version. Comparison needs two frozen versions.</p></div>`;
+  let a = st.cA ?? s.versions.at(-2).n, b = st.cB ?? latest(s).n; if (a === b) a = s.versions.find(v => v.n !== b).n;
+  if (a > b) [a, b] = [b, a];
+  const A = versionOf(s, a), B = versionOf(s, b), all = playsOf(s), dom = domainOf(all);
+  const diff = [];
+  B.rules.forEach(r => { const o = A.rules.find(x => x.id === r.id); if (!o) diff.push(['add', 'Added', r]); else if (o.text !== r.text || o.kind !== r.kind) diff.push(['rew', 'Reworded', r, o]); else diff.push(['same', 'Same', r]); });
+  A.rules.forEach(r => { if (!B.rules.find(x => x.id === r.id)) diff.push(['rem', 'Removed', r]); });
+  const between = s.versions.filter(v => v.n > a && v.n <= b);
+  const nextDate = n => s.versions.find(v => v.n === n + 1)?.date;
+  const col = V => {
+    const ps = all.filter(p => p.v === V.n), g = { taken: 0, open: 0, missed: 0, cancelled: 0 }; ps.forEach(p => g[group(p)]++);
+    const fin = ps.filter(p => p.status === 'Closed' || p.status === 'Cancelled'), devs = ps.filter(p => processOf(p, s) === 'Deviated');
+    const end = nextDate(V.n), insts = [...new Set(ps.map(p => p.inst))];
+    return `<div class="panel"><div class="panel-head"><div><h2>v${V.n} · ${ps.length} play${ps.length === 1 ? '' : 's'}</h2><p>In use ${fd(V.date)} – ${end ? fd(end) : 'now'} · ${insts.map(esc).join(', ') || 'no instruments'}</p></div></div><div class="pad">
+     <div class="vstats"><div>Taken<b>${g.taken}</b></div><div>Missed / cancelled<b>${g.missed + g.cancelled}</b></div><div>Open or planned<b>${g.open}</b></div><div>Followed<b>${fin.length - fin.filter(p => processOf(p, s) === 'Deviated').length}</b></div><div>Deviated<b>${devs.length}</b></div><div>Finished<b>${fin.length}</b></div></div>
+     ${chart(w => rStrip(ps, s, w, dom, { versions: false, h: 170 }), 170)}
+     <p class="muted" style="font-size:10px;margin-top:8px">Same R scale on both sides.</p>
+     <ul class="devs">${devs.map(p => `<li><strong>${esc(p.id)}</strong> ${esc(p.title)} <span class="rv muted">${fr(p.r)}</span><br><span class="warn">Broke:</span> ${brokenOf(p, s).map(r => esc(r.text)).join('; ')}</li>`).join('') || '<li class="muted">No deviations recorded.</li>'}</ul></div></div>`;
+  };
+  const sel = (id, cur) => `<select id="${id}" aria-label="${id === 'cA' ? 'Earlier version' : 'Later version'}">${s.versions.map(v => `<option value="${v.n}" ${v.n === cur ? 'selected' : ''}>v${v.n} · ${fd(v.date)}</option>`).join('')}</select>`;
+  return `<p class="why"><strong>Question:</strong> "what did I change, why, and how did the plays on each version look?" The rule diff and its reason come first, then each version's plays side by side on one R scale. <strong>Trade-off:</strong> it looks like an A/B test and is not one: the versions ran in different weeks and markets, on a handful of plays each, and later versions were written <em>because of</em> earlier plays.</p>
+  <div class="filters cmp-pick"><span>Compare</span>${sel('cA', a)}<span>with</span>${sel('cB', b)}</div>
+  <div class="panel" style="margin-bottom:16px"><div class="panel-head"><div><h2>Rules: v${a} → v${b}</h2><p>${diff.filter(d => d[0] !== 'same').length} changes, ${diff.filter(d => d[0] === 'same').length} unchanged.</p></div></div><div class="pad">
+   <ul class="diff">${diff.sort((x, y) => ['add', 'rew', 'rem', 'same'].indexOf(x[0]) - ['add', 'rew', 'rem', 'same'].indexOf(y[0])).map(([c, l, r, o]) => `<li class="${c}"><span class="lab">${l}</span><span><span class="kind ${r.kind}">${KINDS[r.kind].label}</span> ${c === 'add' ? `<ins>${esc(r.text)}</ins>` : c === 'rem' ? `<del>${esc(r.text)}</del>` : c === 'rew' ? `<del>${esc(o.text)}</del> → <ins>${esc(r.text)}</ins>${o.kind !== r.kind ? ` <span class="faint">(was ${KINDS[o.kind].label})</span>` : ''}` : `<span class="muted">${esc(r.text)}</span>`}</span></li>`).join('')}</ul>
+   <div class="reasons">${between.map(v => `<div><b>Why v${v.n}</b> (${fd(v.date)}): ${esc(v.reason)}</div>`).join('')}</div></div></div>
+  <div class="caveat" style="margin-bottom:16px">Conditions differ between periods. v${a} and v${b} ran in different weeks${(() => { const ia = new Set(all.filter(p => p.v === a).map(p => p.inst)), ib = new Set(all.filter(p => p.v === b).map(p => p.inst)); return ia.size === ib.size && [...ia].every(i => ib.has(i)) ? ' (same instruments, different market conditions)' : ' on partly different instruments'; })()}, with ${all.filter(p => p.v === a).length} vs ${all.filter(p => p.v === b).length} plays. Differences below describe two small samples; they do not show that the change helped or hurt.</div>
+  <div class="g2 even">${col(A)}${col(B)}</div>`;
+}
+
+/* ---------- render & events ---------- */
+function render() {
+  const s = S(); chartSeq = 0; for (const k in CH) delete CH[k];
+  $('#picker').innerHTML = data.strategies.map(x => `<button data-sid="${x.id}" aria-pressed="${x.id === st.sid}">${esc(x.name)} <span class="badge ${x.stage}">${STAGES[x.stage].label}</span><small>${data.plays.filter(p => p.s === x.id).length} plays · ${x.versions.length ? 'v' + latest(x).n : 'no version'}</small></button>`).join('');
+  $$('#ideas .idea').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.idea === st.idea)));
+  $('#crumb').textContent = s.name;
+  $('#view').innerHTML = !s.versions.length ? emptyStrategy(s) : st.idea === 'score' ? scorecard(s) : st.idea === 'journal' ? journal(s) : st.idea === 'rules' ? diagnostics(s) : compare(s);
+  tip.hidden = true; drawCharts();
+}
+document.addEventListener('click', e => {
+  const t = e.target.closest('button'); if (!t) return; const d = t.dataset;
+  if (d.sid) Object.assign(st, { sid: d.sid, ver: 'all', cell: null, jver: 'all', jinst: 'all', dver: 'all', cA: null, cB: null });
+  else if (d.idea) st.idea = d.idea;
+  else if (d.ver) { st.ver = d.ver; st.cell = null; }
+  else if ('cell' in d) st.cell = !d.cell || st.cell === d.cell ? null : d.cell;
+  else if (d.pred) st.preds[d.pred] = d.val;
+  else if (d.jf) st.jf = d.jf;
+  else if (t.id === 'jpinned') st.jpinned = !st.jpinned;
+  else if (t.id === 'jorder') st.jorder = st.jorder === 'old' ? 'new' : 'old';
+  else if (d.dver) st.dver = d.dver;
+  else if (d.dsub) st.dsub = d.dsub;
+  else if (d.unpin) { const s = S(); s.examples = s.examples.filter(x => x.playId !== d.unpin); toast(`${d.unpin} unpinned.`); }
+  else if (d.pin) { openPin(d.pin, d.kind); return; }
+  else return;
+  render();
+});
+document.addEventListener('change', e => {
+  const id = e.target.id; if (id === 'jver') st.jver = e.target.value; else if (id === 'jinst') st.jinst = e.target.value;
+  else if (id === 'cA') st.cA = +e.target.value; else if (id === 'cB') st.cB = +e.target.value; else return;
+  if ((id === 'cA' || id === 'cB') && st.cA === st.cB) toast('Pick two different versions.');
+  render();
+});
+let pinning = null;
+function openPin(id, kind) {
+  const p = data.plays.find(x => x.id === id); pinning = { id, kind };
+  $('#pin-title').textContent = kind === 'setup' ? 'Pin as example' : 'Pin as counterexample';
+  $('#pin-sub').textContent = `${p.id} ${p.title}. ${kind === 'setup' ? 'An example shows the setup as written.' : 'A counterexample shows where the hypothesis did not hold, or where the rules let a bad trade through.'}`;
+  $('#pin-cap').value = p.note || ''; $('#pin-dlg').showModal();
+}
+$('#pin-dlg').addEventListener('close', () => {
+  if ($('#pin-dlg').returnValue !== 'ok' || !pinning) return;
+  const cap = $('#pin-cap').value.trim(); if (!cap) return;
+  const s = S(); s.examples = s.examples.filter(x => x.playId !== pinning.id); s.examples.push({ playId: pinning.id, kind: pinning.kind, caption: cap });
+  toast(`${pinning.id} pinned.`); pinning = null; render();
+});
+render();
+</script>
+</body>
+</html>

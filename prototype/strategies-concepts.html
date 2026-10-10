@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark"><title>Vessel · Strategies concepts</title>
+<style>
+:root{--background:#0f1114;--foreground:#e9edf2;--card:#171a1f;--primary:#c5cfdd;--primary-fg:#11161d;--muted:#1e2229;--muted-fg:#abb3c0;--accent:#242932;--border:#394350;--field:#111419;--positive:#a9d6b6;--negative:#f2b3ac;--warning:#edd49e;--info:#8fb8ff;--radius:7px;font-family:Manrope,system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--foreground);background:var(--background)}
+*{box-sizing:border-box}body{margin:0;min-height:100dvh}h1,h2,h3,h4,p{margin:0}button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;background:var(--muted);border:1px solid var(--border);border-radius:5px;padding:7px 11px;font-size:11px;font-weight:500}button:hover{background:var(--accent)}button.primary{background:var(--primary);color:var(--primary-fg);border-color:var(--primary);font-weight:600}button.ghost{background:none;border-color:transparent;color:var(--muted-fg)}button.ghost:hover{color:var(--foreground)}button:disabled{opacity:.45;cursor:default}
+:focus-visible{outline:2px solid #b9c9e4;outline-offset:2px}
+input,select,textarea{background:var(--field);border:1px solid var(--border);border-radius:5px;padding:7px 9px;font-size:12px;max-width:100%}textarea{width:100%;line-height:1.7;resize:vertical}
+.muted{color:var(--muted-fg)}small{font-size:10px;line-height:1.6}.eyebrow{font-size:8px;letter-spacing:1.8px;text-transform:uppercase;color:var(--muted-fg);font-weight:600}
+.badge{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;background:#232933;border:1px solid #424d5e;border-radius:4px;padding:2px 7px;font-size:9px;color:#c5d1e3;line-height:1.7}
+.badge.testing{color:var(--info);border-color:#3e5378;background:#1c2433}.badge.idea{color:#c9c2e8;border-color:#4d4766;background:#221f2d}.badge.paused{color:var(--warning);border-color:#695940;background:#302a20}.badge.retired{color:#8f99a8;border-color:#363d48;background:#191c21}.badge.sample{color:var(--warning);border-color:#695940;background:#302a20}
+.pos{color:var(--positive)}.neg{color:var(--negative)}.warn{color:var(--warning)}
+.row{display:flex;align-items:center;gap:10px}.between{justify-content:space-between}.wrap{flex-wrap:wrap}
+/* shell */
+.sidebar{position:fixed;inset:0 auto 0 0;width:236px;padding:29px 17px 18px;border-right:1px solid var(--border);background:#13161a;display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:11px;padding:0 12px;margin-bottom:22px;font-size:25px;letter-spacing:-1.3px;font-weight:650}.mono{display:grid;place-items:center;width:34px;height:36px;color:var(--primary);border:1px solid #414b58;border-radius:8px;font-size:22px;font-weight:500}
+.nav-label{font-size:8px;letter-spacing:1.7px;color:var(--muted-fg);margin:0 13px 8px;font-weight:550}
+.nav a{display:flex;align-items:center;gap:11px;min-height:40px;padding:9px 13px;border:1px solid transparent;border-radius:6px;color:var(--muted-fg);font-size:12px;text-decoration:none;margin:2px 0}.nav a.active{background:#222832;border-color:#394554;color:#eaf0fa}.nav a i{width:16px;height:16px;border:1.5px solid currentColor;border-radius:4px;opacity:.75}
+.sidebar .note{margin-top:auto;font-size:9px;line-height:1.8;color:var(--muted-fg);border-top:1px solid var(--border);padding-top:14px}
+.main{margin-left:236px;min-width:0}
+.top{height:66px;padding:0 34px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:10px;color:var(--muted-fg)}.top strong{color:var(--foreground);font-weight:500}
+.content{max-width:1480px;margin:auto;padding:28px 34px 40px}
+.heading{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;margin-bottom:20px}.heading h1{font-size:28px;font-weight:650;letter-spacing:-1px;margin:6px 0 4px}.heading p{font-size:11px;color:var(--muted-fg);max-width:640px;line-height:1.8}
+.concepts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:22px}
+.concept{display:block;text-align:left;padding:13px 15px;background:var(--card);border-color:var(--border);border-radius:var(--radius)}.concept strong{display:block;font-size:12px;margin-bottom:4px}.concept span{display:block;font-size:10px;color:var(--muted-fg);font-weight:400;line-height:1.6}.concept[aria-pressed=true]{border-color:#7c8da7;background:#1f252e;box-shadow:inset 0 0 0 1px #7c8da733}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);min-width:0;overflow:hidden}.panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid var(--border)}.panel-head h2{font-size:13px;font-weight:600;letter-spacing:-.2px}.panel-head p{font-size:10px;color:var(--muted-fg);margin-top:4px}.pad{padding:16px 18px}
+.why{font-size:10px;line-height:1.8;color:var(--muted-fg);border-left:2px solid #4c596b;padding:6px 12px;margin:0 0 18px;background:#14181e;border-radius:0 5px 5px 0}.why strong{color:#d3dbe8;font-weight:600}
+table{width:100%;border-collapse:collapse;text-align:left;font-size:11px}th{font-size:8px;font-weight:500;color:var(--muted-fg);padding:10px 14px;background:#14181e;white-space:nowrap;letter-spacing:.3px}td{padding:12px 14px;border-top:1px solid #303944;vertical-align:middle}td small{display:block;color:var(--muted-fg);margin-top:3px}.scroll-x{overflow-x:auto}
+.caveat{font-size:10px;line-height:1.7;color:var(--warning);background:#241f17;border:1px solid #5b4c34;border-radius:5px;padding:8px 11px}
+/* A: library */
+.lib{display:grid;grid-template-columns:330px minmax(0,1fr);gap:18px;align-items:start}
+.lib-list .filters{display:flex;gap:4px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid var(--border)}.lib-list .filters button{font-size:10px;padding:5px 9px}.lib-list .filters button[aria-pressed=true]{background:#2a313c;border-color:#7c8da7}
+.s-item{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #2b323c;border-radius:0;background:none;padding:14px 16px;font-weight:400}.s-item:hover{background:#1c2128}.s-item[aria-current=true]{background:#1f252e;box-shadow:inset 3px 0 0 var(--primary)}.s-item strong{font-size:12px;font-weight:600;display:block;margin-bottom:6px}.s-item .meta{font-size:10px;color:var(--muted-fg);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.spark{display:flex;gap:3px;margin-top:8px}.spark i{width:9px;height:9px;border-radius:2px;background:#2e3540}.spark i.Positive{background:#5f8a6c}.spark i.Negative{background:#a26b64}.spark i.Flat{background:#6c7685}.spark i.No.trade,.spark i.Notrade{background:none;border:1px dashed #6c7685}.spark i.dev{outline:1.5px solid var(--warning);outline-offset:-1.5px}
+.detail{display:grid;gap:18px}.d-head{padding:20px 22px;display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.d-head h2{font-size:20px;font-weight:600;letter-spacing:-.5px;margin:6px 0 6px}.d-head p{font-size:12px;line-height:1.8;color:#cfd6e0;max-width:680px}
+.d-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:18px}
+.rules{list-style:none;padding:0;margin:0;counter-reset:r}.rules li{counter-increment:r;display:flex;gap:10px;padding:9px 0;border-top:1px solid #2b323c;font-size:12px;line-height:1.6}.rules li:first-child{border-top:0}.rules li:before{content:counter(r);flex:none;width:20px;height:20px;border-radius:50%;border:1px solid #4c596b;display:grid;place-items:center;font-size:9px;color:var(--muted-fg)}
+.matrix{display:grid;grid-template-columns:96px repeat(5,minmax(0,1fr));gap:4px;font-size:10px}.matrix .h{color:var(--muted-fg);font-size:9px;padding:4px;align-self:end}.matrix .rh{color:var(--muted-fg);font-size:10px;align-self:center}
+.cell{min-height:54px;border-radius:5px;border:1px solid #2b323c;background:#14181e;padding:6px 7px;text-align:left;font-weight:400;display:flex;flex-direction:column;justify-content:space-between}.cell b{font-size:17px;font-weight:550}.cell small{font-size:8px;line-height:1.35;color:var(--muted-fg)}.cell[aria-pressed=true]{border-color:var(--primary);background:#232a35}.cell.zero{opacity:.45}
+.cell.q-good{border-color:#3d5a47}.cell.q-valid{border-color:#5b4c34}.cell.q-luck{border-color:#6a4d48}.cell.q-lesson{border-color:#4c596b}
+.timeline{display:flex;gap:0;overflow-x:auto;padding:4px 0 2px}.tl{flex:1;min-width:150px;border-top:2px solid #3b4553;padding:10px 12px 0 0;position:relative;font-size:10px}.tl:before{content:'';position:absolute;top:-6px;left:0;width:10px;height:10px;border-radius:50%;background:var(--card);border:2px solid #7c8da7}.tl.cur:before{background:var(--primary)}.tl strong{font-size:11px}.tl p{color:var(--muted-fg);line-height:1.6;margin-top:4px}
+/* B: rulebook */
+.book{display:grid;grid-template-columns:250px minmax(0,1fr);gap:18px;align-items:start}
+.vrail{padding:10px 0}.vnode{display:block;width:100%;text-align:left;border:0;border-left:2px solid #3b4553;border-radius:0;background:none;margin-left:18px;width:calc(100% - 18px);padding:8px 14px 14px;position:relative;font-weight:400}.vnode:before{content:'';position:absolute;left:-7px;top:11px;width:10px;height:10px;border-radius:50%;background:var(--card);border:2px solid #7c8da7}.vnode[aria-current=true]{background:#1f252e}.vnode[aria-current=true]:before{background:var(--primary)}.vnode.wc:before{border-style:dashed;border-color:var(--warning)}.vnode strong{font-size:12px;display:block}.vnode small{display:block;color:var(--muted-fg)}.vnode .reason{font-size:10px;color:#c3cbd7;line-height:1.55;margin-top:5px}
+.doc{padding:26px 30px;max-width:860px}.doc h3{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted-fg);font-weight:600;margin:24px 0 9px}.doc h3:first-of-type{margin-top:0}.doc p.body{font-size:14px;line-height:1.85}.doc ol{margin:0;padding-left:22px;font-size:13px;line-height:1.75}.doc ol li{padding:3px 0}
+ins{text-decoration:none;background:#1e3326;color:#c6ead0;border-radius:3px;padding:0 3px}del{color:#e3a69f;background:#3a2321;border-radius:3px;padding:0 3px}.chg{display:block;font-size:10px;color:var(--muted-fg)}
+.doc-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 18px;border-bottom:1px solid var(--border)}.doc-tools label{font-size:10px;color:var(--muted-fg);display:flex;align-items:center;gap:6px}
+.edit-rule{display:flex;gap:6px;margin:5px 0}.edit-rule input{flex:1;min-width:0}
+.pinned{font-size:10px;color:var(--muted-fg);border-top:1px solid var(--border);padding:12px 30px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+/* C: ledger */
+.ledger td.c{text-align:center;padding:6px}.mark{width:30px;height:30px;padding:0;display:inline-grid;place-items:center;border-radius:5px;font-size:13px;font-weight:600}.mark.met{color:var(--positive);border-color:#3d5a47;background:#18241c}.mark.broken{color:var(--negative);border-color:#6a4d48;background:#2a1b1a}.mark.na{color:var(--muted-fg)}.mark.unset{color:#5c6675;border-style:dashed;background:none}
+.ledger th.rule{white-space:normal;min-width:110px;max-width:150px;vertical-align:bottom;line-height:1.5;font-size:9px}.ledger tfoot td{background:#14181e;font-size:9px;color:var(--muted-fg);text-align:center}
+.legend{display:flex;gap:6px 8px;flex-wrap:wrap;font-size:10px;color:var(--muted-fg);align-items:center}
+/* D: inside play */
+.play-mock{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:18px;align-items:start}.chart-ph{height:250px;border:1px dashed #3b4553;border-radius:6px;display:grid;place-items:center;color:#5c6675;font-size:11px;background:repeating-linear-gradient(0deg,#14181e 0 49px,#1a1e24 49px 50px)}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);padding:0 14px}.tabs span{padding:10px 12px;font-size:11px;color:var(--muted-fg)}.tabs span.on{color:var(--foreground);box-shadow:inset 0 -2px 0 var(--primary)}
+.cond{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 0;border-top:1px solid #2b323c;font-size:12px}.seg{display:inline-flex;border:1px solid var(--border);border-radius:5px;overflow:hidden}.seg button{border:0;border-radius:0;padding:5px 9px;font-size:10px;background:none}.seg button+button{border-left:1px solid var(--border)}.seg button[aria-pressed=true].met{background:#18241c;color:var(--positive)}.seg button[aria-pressed=true].broken{background:#2a1b1a;color:var(--negative)}.seg button[aria-pressed=true].na{background:#232933}
+.newer{font-size:10px;line-height:1.7;background:#1c2433;border:1px solid #3e5378;color:#c9d9f5;border-radius:5px;padding:8px 11px;margin-bottom:12px}
+dialog{background:var(--card);color:var(--foreground);border:1px solid #4c596b;border-radius:10px;padding:20px;width:min(520px,94vw)}dialog::backdrop{background:#05070acc}dialog h2{font-size:16px;margin-bottom:10px}dialog .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#dfe6f0;color:#11161d;padding:10px 16px;border-radius:6px;font-size:11px;z-index:9;max-width:90vw}#toast:empty{display:none}
+[hidden]{display:none!important}
+@media(max-width:1180px){.lib{grid-template-columns:280px minmax(0,1fr)}.d-grid{grid-template-columns:1fr}.play-mock{grid-template-columns:1fr}}
+@media(max-width:900px){.sidebar{position:static;width:auto;flex-direction:row;align-items:center;padding:10px 14px;gap:10px;overflow-x:auto;border-right:0;border-bottom:1px solid var(--border)}.sidebar .nav-label,.sidebar .note{display:none}.brand{margin:0;font-size:18px;padding:0}.mono{width:28px;height:30px;font-size:17px}.nav{display:flex;gap:2px}.nav a{min-height:34px;padding:6px 9px;font-size:11px;white-space:nowrap}.nav a i{display:none}.main{margin-left:0}.top{padding:0 16px;height:52px}.content{padding:20px 16px 32px}.lib,.book{grid-template-columns:1fr}.concepts{grid-template-columns:repeat(2,minmax(0,1fr))}.heading{flex-direction:column;align-items:flex-start}}
+@media(max-width:520px){.scroll-x table{min-width:640px}.concepts{grid-template-columns:1fr 1fr;gap:6px}.concept{padding:10px}.concept span{display:none}.matrix{grid-template-columns:64px repeat(5,minmax(0,1fr));gap:3px}.cell{min-height:44px;padding:4px}.cell small{display:none}.cell b{font-size:14px}.doc{padding:18px 16px}.pinned{padding:12px 16px}.d-head{flex-direction:column;padding:16px}.top .hide-sm{display:none}.heading h1{font-size:23px}}
+</style>
+</head>
+<body>
+<aside class="sidebar">
+ <div class="brand"><span class="mono">V</span>Vessel</div>
+ <div class="nav-label">WORKSPACE</div>
+ <nav class="nav" aria-label="Workspace (mock)"><a href="#"><i></i>Overview</a><a href="#"><i></i>Plays</a><a href="#" class="active" aria-current="page"><i></i>Strategies</a><a href="#"><i></i>Portfolios</a><a href="#"><i></i>Accounts</a><a href="#"><i></i>Activity</a></nav>
+ <p class="note">Disposable prototype. Shell links are inert. All strategies and plays are sample data in browser memory; reload resets them.</p>
+</aside>
+<div class="main">
+ <header class="top"><div>Workspace <span class="muted">&nbsp;/&nbsp;</span> <strong>Strategies</strong></div><span class="badge sample">SAMPLE DATA · NO PERFORMANCE CLAIMS</span></header>
+ <div class="content">
+  <div class="heading"><div><div class="eyebrow">Hypotheses, not promises</div><h1>Strategies</h1><p>Four alternative concepts sharing one sample state. A strategy's evidence comes from the Plays that used one of its versions, so changes made in "Inside a play" also appear in the library and the ledger.</p></div><button class="primary" id="new-strategy">+ New strategy</button></div>
+  <nav class="concepts" aria-label="Concepts">
+   <button class="concept" data-view="library" aria-pressed="true"><strong>A · Library</strong><span>Index and detail. Plays cross-tabulated by outcome and process.</span></button>
+   <button class="concept" data-view="rulebook" aria-pressed="false"><strong>B · Rulebook</strong><span>The strategy as a versioned document with a readable diff.</span></button>
+   <button class="concept" data-view="ledger" aria-pressed="false"><strong>C · Rule ledger</strong><span>Plays × rules: which conditions were met or broken.</span></button>
+   <button class="concept" data-view="inplay" aria-pressed="false"><strong>D · Inside a play</strong><span>How a Play picks a version and checks its conditions.</span></button>
+  </nav>
+  <section id="view-library"></section>
+  <section id="view-rulebook" hidden></section>
+  <section id="view-ledger" hidden></section>
+  <section id="view-inplay" hidden></section>
+ </div>
+</div>
+<dialog id="revision-dialog"><form method="dialog" id="revision-form"><h2>Create revision <span id="rev-num"></span></h2><p class="muted" style="font-size:11px;line-height:1.8;margin-bottom:12px">Freezes the working copy. Plays already linked keep the version they used.</p><label style="font-size:11px">Why is the strategy changing?<textarea id="rev-reason" rows="3" required maxlength="800" placeholder="What did the plays show?" style="margin-top:6px"></textarea></label><div class="actions"><button type="button" value="cancel" id="rev-cancel">Cancel</button><button class="primary" id="rev-save">Create revision</button></div></form></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+'use strict';
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let tt;const toast=m=>{$('#toast').textContent=m;clearTimeout(tt);tt=setTimeout(()=>$('#toast').textContent='',3500)};
+
+/* ---------- Sample state ---------- */
+const R=(id,text)=>({id,text});
+const strategies=[
+ {id:'reclaim',name:'Range reclaim after a sweep',state:'testing',tags:['Perps','4H'],versions:[
+  {n:1,date:'2026-08-12',reason:'First write-up after watching failed range breaks.',hypothesis:'A failed break below an established range tends to return into the range.',invalidation:'Acceptance below the range low.',rules:[R('a','Range has at least two touches on each side'),R('b','Price sweeps below the range low'),R('c','Enter on the close back inside')]},
+  {n:2,date:'2026-09-03',reason:'Two entries on the reclaim candle were stopped before any retest. Wait for it.',hypothesis:'A failed break below an established range, followed by a reclaim, offers a repeatable long setup.',invalidation:'Acceptance below the swept low. Do not widen the stop to justify an entry.',rules:[R('a','Range has at least two touches on each side'),R('b','Price sweeps below the range low'),R('c','Wait for a 4H close back inside the range'),R('d','Enter on the retest of the range low, not the reclaim candle'),R('e','Stop below the swept low')]},
+  {n:3,date:'2026-10-01',reason:'Sweeps into a daily level behaved differently. Exclude them and keep deep sweeps out.',hypothesis:'A failed break below an established range, followed by a reclaim, offers a repeatable long setup.',invalidation:'Acceptance below the swept low. Do not widen the stop to justify an entry.',rules:[R('a','Range has at least two touches on each side'),R('b','Sweep is shallower than 1.5× the 4H ATR'),R('c','Wait for a 4H close back inside the range'),R('d','Enter on the retest of the range low, not the reclaim candle'),R('e','Stop below the swept low'),R('f','Skip if the sweep runs into a daily level')]}]},
+ {id:'funding',name:'Funding-skew fade',state:'testing',tags:['Perps','1H'],versions:[
+  {n:1,date:'2026-08-20',reason:'Initial idea from crowded-long funding spikes.',hypothesis:'Extreme positive funding with stalling price precedes short-term mean reversion.',invalidation:'Price makes a new high with funding still rising.',rules:[R('a','Funding in the top 5% of the last 30 days'),R('b','Price fails to make a new 1H high'),R('c','Short with a stop above the local high')]},
+  {n:2,date:'2026-09-18',reason:'Added an open-interest condition after a squeeze ran through the stop.',hypothesis:'Extreme positive funding with stalling price and flat open interest precedes short-term mean reversion.',invalidation:'Price makes a new high with funding still rising.',rules:[R('a','Funding in the top 5% of the last 30 days'),R('b','Price fails to make a new 1H high'),R('d','Open interest flat or falling over 4H'),R('c','Short with a stop above the local high')]}]},
+ {id:'breakout',name:'Breakout retest of a weekly level',state:'paused',tags:['Perps','1D'],versions:[
+  {n:1,date:'2026-07-30',reason:'First version.',hypothesis:'Clean daily closes above a weekly level that retest it hold more often than they fail.',invalidation:'Daily close back below the level.',rules:[R('a','Weekly level touched at least three times'),R('b','Daily close above the level'),R('c','Enter on the first retest')]}]},
+ {id:'ema',name:'Trend pullback to the 20 EMA',state:'retired',tags:['Perps','4H'],retiredReason:'Too discretionary to review honestly: "trend" was never defined.',versions:[
+  {n:1,date:'2026-06-02',reason:'First version.',hypothesis:'In a trend, pullbacks to the 20 EMA continue the trend.',invalidation:'Close below the EMA.',rules:[R('a','Price is trending'),R('b','Enter at the 20 EMA')]},
+  {n:2,date:'2026-06-30',reason:'Tried to define trend with higher highs.',hypothesis:'In a trend, pullbacks to the 20 EMA continue the trend.',invalidation:'4H close below the EMA.',rules:[R('c','Two higher highs and higher lows on 4H'),R('b','Enter at the 20 EMA')]}]},
+ {id:'news',name:'Fade the first CPI spike',state:'idea',tags:['Perps'],versions:[],working:{hypothesis:'The first 5-minute move after CPI overshoots and partly retraces.',invalidation:'',rules:[R('a','Wait for the first 5m candle to close')]}}
+];
+// Plays reference a strategy version. checks: rule id -> met | broken | na | (missing = not checked)
+const plays=[
+ {id:'P-031',title:'BTC range low reclaim',inst:'BTC',dir:'Long',status:'Open',s:'reclaim',v:3,outcome:'Open',date:'2026-10-03',checks:{a:'met',b:'met',c:'met',d:'met',e:'met'}},
+ {id:'P-033',title:'ETH reclaim watch',inst:'ETH',dir:'Long',status:'Planned',s:'reclaim',v:3,outcome:'Open',date:'2026-10-04',checks:{a:'met',b:'met'}},
+ {id:'P-029',title:'ETH sweep and reclaim',inst:'ETH',dir:'Long',status:'Closed',s:'reclaim',v:2,outcome:'Positive',date:'2026-09-27',checks:{a:'met',b:'met',c:'met',d:'broken',e:'met'},note:'Entered on the reclaim candle. Worked, but the rule was broken.'},
+ {id:'P-027',title:'SOL range reclaim',inst:'SOL',dir:'Long',status:'Closed',s:'reclaim',v:2,outcome:'Negative',date:'2026-09-22',checks:{a:'met',b:'met',c:'met',d:'met',e:'met'},note:'Valid setup that failed. Swept into a daily level.'},
+ {id:'P-024',title:'BTC reclaim, no retest',inst:'BTC',dir:'Long',status:'Cancelled',s:'reclaim',v:2,outcome:'No trade',date:'2026-09-15',checks:{a:'met',b:'met',c:'met',d:'na',e:'na'},note:'Missed: no retest came. Price ran without me.'},
+ {id:'P-022',title:'HYPE range reclaim',inst:'HYPE',dir:'Long',status:'Closed',s:'reclaim',v:2,outcome:'Positive',date:'2026-09-09',checks:{a:'met',b:'met',c:'met',d:'met',e:'met'}},
+ {id:'P-019',title:'ETH reclaim close',inst:'ETH',dir:'Long',status:'Closed',s:'reclaim',v:1,outcome:'Negative',date:'2026-08-28',checks:{a:'met',b:'met',c:'met'}},
+ {id:'P-017',title:'BTC early reclaim',inst:'BTC',dir:'Long',status:'Closed',s:'reclaim',v:1,outcome:'Negative',date:'2026-08-19',checks:{a:'broken',b:'met',c:'met'},note:'The range was not really a range.'},
+ {id:'P-030',title:'ETH funding fade',inst:'ETH',dir:'Short',status:'Closed',s:'funding',v:2,outcome:'Positive',date:'2026-09-29',checks:{a:'met',b:'met',d:'met',c:'met'}},
+ {id:'P-026',title:'SOL funding fade',inst:'SOL',dir:'Short',status:'Cancelled',s:'funding',v:2,outcome:'No trade',date:'2026-09-21',checks:{a:'met',b:'broken'},note:'Invalidated: new high before entry.'},
+ {id:'P-023',title:'BTC funding fade',inst:'BTC',dir:'Short',status:'Closed',s:'funding',v:1,outcome:'Negative',date:'2026-09-02',checks:{a:'met',b:'broken',c:'met'},note:'Shorted into strength; squeezed.'},
+ {id:'P-020',title:'BTC weekly breakout',inst:'BTC',dir:'Long',status:'Closed',s:'breakout',v:1,outcome:'Flat',date:'2026-08-24',checks:{a:'met',b:'met',c:'met'}},
+ {id:'P-014',title:'ETH EMA pullback',inst:'ETH',dir:'Long',status:'Closed',s:'ema',v:2,outcome:'Negative',date:'2026-07-08',checks:{c:'met',b:'met'}},
+ {id:'P-011',title:'SOL EMA pullback',inst:'SOL',dir:'Long',status:'Closed',s:'ema',v:1,outcome:'Positive',date:'2026-06-14',checks:{a:'na',b:'broken'},note:'Bought well above the EMA.'}
+];
+const STATES={idea:'Idea',testing:'Testing',paused:'Paused',retired:'Retired'};
+const OUTCOMES=['Positive','Flat','Negative','No trade','Open'];
+let view='library',sel='reclaim',libFilter='all',cellFilter=null,libVersion='all',bookVersion=null,compare=true,editing=false,ledgerVersion=null,playSel='P-033';
+const S=id=>strategies.find(s=>s.id===id),cur=s=>s.versions.at(-1);
+const ver=(s,n)=>s.versions.find(v=>v.n===n);
+const playsOf=(sid,v)=>plays.filter(p=>p.s===sid&&(v==null||v==='all'||p.v===+v));
+// Process is derived from the play's rule checks, so it can never contradict them.
+function processOf(p){const v=ver(S(p.s),p.v),vals=v.rules.map(r=>p.checks[r.id]);if(vals.includes('broken'))return 'Deviated';if(vals.some(x=>!x))return 'Not reviewed';return 'Followed'}
+const sampleNote=n=>n<10?`n = ${n}. Too few plays to say anything about the hypothesis; read individual reviews instead.`:`n = ${n}. Descriptive counts only. Market conditions differ between plays.`;
+
+/* ---------- A: Library ---------- */
+function renderLibrary(){
+ const list=strategies.filter(s=>libFilter==='all'||s.state===libFilter);
+ const s=S(sel),v=cur(s),ps=playsOf(s.id,libVersion);
+ const counts={},cell=(proc,out)=>ps.filter(p=>processOf(p)===proc&&p.outcome===out);
+ const quad={'Followed|Positive':['q-good','Process and outcome agree'],'Followed|Negative':['q-valid','Valid loss. Keep the rule honest'],'Deviated|Positive':['q-luck','Outcome does not validate the deviation'],'Deviated|Negative':['q-lesson','Execution lesson'],'Followed|No trade':['','Staying out was the rule'],'Deviated|No trade':['','Broke a rule, then stood aside']};
+ $('#view-library').innerHTML=`<p class="why"><strong>Idea:</strong> start from the index. Each strategy shows its state, current version and a strip of the plays that used it (border = rule broken). The detail separates <em>what happened</em> from <em>whether the rules were followed</em>, so a lucky deviation never reads as validation.</p>
+ <div class="lib"><div class="panel lib-list"><div class="filters" role="group" aria-label="Filter by state">${['all','testing','idea','paused','retired'].map(f=>`<button data-libf="${f}" aria-pressed="${libFilter===f}">${f==='all'?'All':STATES[f]} <span class="muted">${f==='all'?strategies.length:strategies.filter(x=>x.state===f).length}</span></button>`).join('')}</div>
+ ${list.map(x=>{const xp=playsOf(x.id).slice().sort((a,b)=>a.date.localeCompare(b.date));return `<button class="s-item" data-sel="${x.id}" aria-current="${x.id===sel}"><strong>${esc(x.name)}</strong><span class="meta"><span class="badge ${x.state}">${STATES[x.state]}</span>${x.versions.length?`v${cur(x).n}`:'not versioned'} · ${xp.length} play${xp.length===1?'':'s'}${xp.length?` · last ${esc(xp.at(-1).date)}`:''}</span><span class="spark" aria-hidden="true">${xp.map(p=>`<i class="${p.outcome.replace(' ','')} ${processOf(p)==='Deviated'?'dev':''}" title="${esc(p.id+' '+p.outcome)}"></i>`).join('')}</span></button>`}).join('')||'<p class="pad muted" style="font-size:11px">No strategies in this state.</p>'}</div>
+ <div class="detail">
+  <div class="panel"><div class="d-head"><div><div class="row wrap"><span class="badge ${s.state}">${STATES[s.state]}</span>${s.tags.map(t=>`<span class="badge">${esc(t)}</span>`).join('')}</div><h2>${esc(s.name)}</h2><p>${esc(v?v.hypothesis:s.working.hypothesis)}</p>${s.retiredReason?`<p class="muted" style="font-size:11px;margin-top:8px">Retired: ${esc(s.retiredReason)}</p>`:''}</div>
+  <div class="row" style="flex:none"><label class="muted" style="font-size:10px">State <select id="state-sel">${Object.entries(STATES).map(([k,l])=>`<option value="${k}" ${k===s.state?'selected':''} ${k!=='idea'&&!s.versions.length?'disabled':''}>${l}</option>`).join('')}</select></label><button data-goto="rulebook">Open rulebook</button></div></div></div>
+  <div class="d-grid">
+   <div class="panel"><div class="panel-head"><div><h2>Rules${v?` · v${v.n}`:''}</h2><p>${v?`Since ${esc(v.date)}. Plays check these at planning time.`:'Working copy only. Create v1 to use it in a Play.'}</p></div></div><div class="pad"><ol class="rules">${(v?v.rules:s.working.rules).map(r=>`<li>${esc(r.text)}</li>`).join('')}</ol>${v?`<p class="muted" style="font-size:11px;margin-top:12px;line-height:1.7"><strong style="color:#cfd6e0;font-weight:600">Invalidation.</strong> ${esc(v.invalidation)}</p>`:''}</div></div>
+   <div class="panel"><div class="panel-head"><div><h2>Plays: outcome × process</h2><p>Process is derived from each play's rule checks.</p></div><select id="lib-version" aria-label="Version">${['all',...s.versions.map(x=>x.n)].map(n=>`<option value="${n}" ${String(n)===String(libVersion)?'selected':''}>${n==='all'?'All versions':'v'+n}</option>`).join('')}</select></div>
+   <div class="pad">${ps.length?`<div class="matrix" role="group" aria-label="Plays by outcome and process"><span></span>${OUTCOMES.map(o=>`<span class="h">${o}</span>`).join('')}
+   ${['Followed','Deviated','Not reviewed'].map(proc=>`<span class="rh">${proc}</span>${OUTCOMES.map(o=>{const n=cell(proc,o).length,k=proc+'|'+o,[q,label]=quad[k]||['',''];return `<button class="cell ${q} ${n?'':'zero'}" data-cell="${k}" aria-pressed="${cellFilter===k}" aria-label="${proc}, ${o}: ${n}"><b>${n}</b><small>${n?esc(label):''}</small></button>`}).join('')}`).join('')}</div>
+   <p class="caveat" style="margin-top:12px">${esc(sampleNote(ps.length))}</p>`:'<p class="muted" style="font-size:11px">No plays have used this strategy yet.</p>'}</div></div>
+  </div>
+  <div class="panel"><div class="panel-head"><div><h2>${cellFilter?`Plays · ${esc(cellFilter.replace('|',' · '))}`:'Plays using this strategy'}</h2><p>Each play keeps the version it was planned with.</p></div>${cellFilter?'<button data-clearcell>Show all</button>':''}</div><div class="scroll-x"><table><thead><tr><th>Play</th><th>Version</th><th>Status</th><th>Outcome</th><th>Process</th><th>Review note</th></tr></thead><tbody>
+  ${ps.filter(p=>!cellFilter||cellFilter===processOf(p)+'|'+p.outcome).map(p=>`<tr><td><strong>${esc(p.id)}</strong> ${esc(p.title)}<small>${esc(p.dir)} ${esc(p.inst)} · ${esc(p.date)}</small></td><td><span class="badge">v${p.v}</span></td><td>${esc(p.status)}</td><td class="${p.outcome==='Positive'?'pos':p.outcome==='Negative'?'neg':''}">${esc(p.outcome)}</td><td class="${processOf(p)==='Deviated'?'warn':''}">${processOf(p)}</td><td><small style="margin:0">${esc(p.note||'—')}</small></td></tr>`).join('')||'<tr><td colspan="6" class="muted">No plays.</td></tr>'}</tbody></table></div></div>
+  ${s.versions.length?`<div class="panel"><div class="panel-head"><h2>How it evolved</h2></div><div class="pad timeline">${s.versions.map(x=>`<div class="tl ${x===v?'cur':''}"><strong>v${x.n}</strong> <span class="muted">${esc(x.date)} · ${playsOf(s.id,x.n).length} plays</span><p>${esc(x.reason)}</p></div>`).join('')}</div></div>`:''}
+ </div></div>`;
+}
+$('#view-library').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+ if(b.dataset.libf){libFilter=b.dataset.libf;render()}
+ if(b.dataset.sel){selectStrategy(b.dataset.sel)}
+ if(b.dataset.cell){cellFilter=cellFilter===b.dataset.cell?null:b.dataset.cell;render()}
+ if('clearcell' in b.dataset){cellFilter=null;render()}
+ if(b.dataset.goto)setView(b.dataset.goto)});
+$('#view-library').addEventListener('change',e=>{if(e.target.id==='lib-version'){libVersion=e.target.value;cellFilter=null;render()}if(e.target.id==='state-sel'){S(sel).state=e.target.value;toast(`State changed to ${STATES[e.target.value]}. A state change is not a revision.`);render()}});
+function selectStrategy(id){sel=id;cellFilter=null;libVersion='all';bookVersion=null;ledgerVersion=null;editing=false;render()}
+
+/* ---------- B: Rulebook ---------- */
+function workingOf(s){if(!s.working){const v=cur(s);s.working=structuredClone({hypothesis:v.hypothesis,invalidation:v.invalidation,rules:v.rules})}return s.working}
+function isDirty(s){if(!s.versions.length)return true;const v=cur(s),w=s.working;return !!w&&JSON.stringify({h:w.hypothesis,i:w.invalidation,r:w.rules})!==JSON.stringify({h:v.hypothesis,i:v.invalidation,r:v.rules})}
+function textDiff(a,b){if(a===b)return esc(b);if(!a)return `<ins>${esc(b)}</ins>`;if(!b)return `<del>${esc(a)}</del>`;return `<del>${esc(a)}</del> <ins>${esc(b)}</ins>`}
+function rulesDiff(prev,next){const out=[];const pIds=new Map(prev.map(r=>[r.id,r]));const nIds=new Set(next.map(r=>r.id));
+ next.forEach(r=>{const o=pIds.get(r.id);out.push(!o?`<li><ins>${esc(r.text)}</ins><span class="chg">added</span></li>`:o.text!==r.text?`<li>${textDiff(o.text,r.text)}<span class="chg">reworded</span></li>`:`<li>${esc(r.text)}</li>`)});
+ prev.filter(r=>!nIds.has(r.id)).forEach(r=>out.push(`<li><del>${esc(r.text)}</del><span class="chg">removed</span></li>`));return out.join('')}
+function renderRulebook(){
+ const s=S(sel);const hasV=s.versions.length;if(bookVersion==null)bookVersion=hasV&&!isDirty(s)?cur(s).n:'wc';
+ const wc=bookVersion==='wc';const doc=wc?workingOf(s):ver(s,bookVersion);const prevV=wc?(hasV?cur(s):null):ver(s,bookVersion-1);
+ const showDiff=compare&&prevV&&!(wc&&editing);const pinned=wc?[]:playsOf(s.id,bookVersion);
+ $('#view-rulebook').innerHTML=`<p class="why"><strong>Idea:</strong> a strategy is a document that evolves. Every version is frozen with its reason, and the diff shows exactly which rule changed and why. That makes it obvious which plays tested which wording. The working copy is the only editable thing.</p>
+ <div class="row wrap" style="margin-bottom:12px"><label class="muted" style="font-size:10px">Strategy <select id="book-strategy">${strategies.map(x=>`<option value="${x.id}" ${x.id===sel?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label></div>
+ <div class="book"><nav class="panel vrail" aria-label="Versions">
+  <button class="vnode wc" data-bv="wc" aria-current="${wc}"><strong>Working copy</strong><small>${isDirty(s)?(hasV?`Unrevised changes since v${cur(s).n}`:'Not versioned yet'):'Same as latest'}</small></button>
+  ${[...s.versions].reverse().map(x=>`<button class="vnode" data-bv="${x.n}" aria-current="${bookVersion===x.n}"><strong>v${x.n}${x===cur(s)?' · latest':''}</strong><small>${esc(x.date)} · ${playsOf(s.id,x.n).length} plays</small><div class="reason">${esc(x.reason)}</div></button>`).join('')}
+ </nav>
+ <article class="panel"><div class="doc-tools">${wc?`<button id="toggle-edit">${editing?'Preview changes':'Edit'}</button><button class="primary" id="make-rev" ${isDirty(s)?'':'disabled'}>Create v${hasV?cur(s).n+1:1}</button>`:`<span class="badge">Frozen · read only</span>`}<label><input type="checkbox" id="cmp" ${compare?'checked':''} ${prevV?'':'disabled'}> Compare with ${prevV?`v${prevV.n}`:'previous (none)'}</label></div>
+ <div class="doc">${wc&&editing?`<h3>Hypothesis</h3><textarea data-wf="hypothesis" rows="3">${esc(doc.hypothesis)}</textarea><h3>Rules (each is checked per play)</h3>${doc.rules.map((r,i)=>`<div class="edit-rule"><input data-rule="${i}" value="${esc(r.text)}" maxlength="180" aria-label="Rule ${i+1}"><button class="ghost" data-delrule="${i}" aria-label="Remove rule ${i+1}">×</button></div>`).join('')}<button id="add-rule" style="margin-top:6px">+ Rule</button><h3>Invalidation</h3><textarea data-wf="invalidation" rows="2">${esc(doc.invalidation)}</textarea>`
+ :`<h3>Hypothesis</h3><p class="body">${showDiff?textDiff(prevV.hypothesis,doc.hypothesis):esc(doc.hypothesis)}</p><h3>Rules</h3><ol>${showDiff?rulesDiff(prevV.rules,doc.rules):doc.rules.map(r=>`<li>${esc(r.text)}</li>`).join('')}</ol><h3>Invalidation</h3><p class="body">${showDiff?textDiff(prevV.invalidation,doc.invalidation):esc(doc.invalidation)||'<span class="muted">Not written yet</span>'}</p>${!wc?`<h3>Why v${doc.n}</h3><p class="body muted" style="font-size:13px">${esc(doc.reason)}</p>`:''}`}</div>
+ ${wc?`<div class="pinned">The working copy is not usable in Plays until it becomes a version.</div>`:`<div class="pinned"><span>Plays pinned to v${doc.n}:</span>${pinned.map(p=>`<span class="badge">${esc(p.id)} · ${esc(p.outcome)} · ${processOf(p)}</span>`).join('')||'<span>none</span>'}</div>`}</article></div>`;
+}
+$('#view-rulebook').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const s=S(sel);
+ if(b.dataset.bv){bookVersion=b.dataset.bv==='wc'?'wc':+b.dataset.bv;editing=false;render()}
+ if(b.id==='toggle-edit'){editing=!editing;render()}
+ if(b.id==='add-rule'){workingOf(s).rules.push({id:'n'+Date.now().toString(36),text:''});render();$$('[data-rule]').at(-1)?.focus()}
+ if(b.dataset.delrule){workingOf(s).rules.splice(+b.dataset.delrule,1);render()}
+ if(b.id==='make-rev'){const w=workingOf(s);if(!w.hypothesis.trim()||!w.rules.some(r=>r.text.trim())){toast('Write a hypothesis and at least one rule first.');return}$('#rev-num').textContent='v'+(s.versions.length?cur(s).n+1:1);$('#rev-reason').value='';$('#revision-dialog').showModal()}});
+$('#view-rulebook').addEventListener('input',e=>{const w=workingOf(S(sel));if(e.target.dataset.wf)w[e.target.dataset.wf]=e.target.value;if(e.target.dataset.rule)w.rules[+e.target.dataset.rule].text=e.target.value;
+ const b=$('#make-rev');if(b)b.disabled=!isDirty(S(sel))});
+$('#view-rulebook').addEventListener('change',e=>{if(e.target.id==='cmp'){compare=e.target.checked;render()}if(e.target.id==='book-strategy')selectStrategy(e.target.value)});
+$('#rev-cancel').onclick=()=>$('#revision-dialog').close();
+$('#revision-form').addEventListener('submit',e=>{const reason=$('#rev-reason').value.trim();if(!reason){e.preventDefault();return}const s=S(sel),w=workingOf(s);
+ const n=s.versions.length?cur(s).n+1:1;s.versions.push({n,date:new Date().toISOString().slice(0,10),reason,hypothesis:w.hypothesis.trim(),invalidation:w.invalidation.trim(),rules:w.rules.filter(r=>r.text.trim()).map(r=>({id:r.id,text:r.text.trim()}))});
+ s.working=null;if(s.state==='idea')s.state='testing';bookVersion=n;editing=false;render();toast(`v${n} created. Existing plays keep their versions.`)});
+
+/* ---------- C: Rule ledger ---------- */
+const NEXT={undefined:'met',met:'broken',broken:'na',na:undefined};const ico=d=>`<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const SYM={met:ico('M3 8.5l3.2 3L13 4.5'),broken:ico('M4 4l8 8M12 4l-8 8'),na:ico('M4.5 8h7')};
+function renderLedger(){
+ const s=S(sel);
+ if(!s.versions.length){$('#view-ledger').innerHTML=`${ledgerIntro()}${pickStrategy('ledger')}<div class="panel pad muted" style="font-size:12px">This strategy has no version yet, so no Play can use it.</div>`;return}
+ if(ledgerVersion==null||!ver(s,ledgerVersion))ledgerVersion=cur(s).n;const v=ver(s,ledgerVersion),ps=playsOf(s.id,v.n);
+ $('#view-ledger').innerHTML=`${ledgerIntro()}${pickStrategy('ledger',`<div class="row" role="group" aria-label="Version">${s.versions.map(x=>`<button data-lv="${x.n}" aria-pressed="${x.n===v.n}" style="${x.n===v.n?'border-color:#7c8da7;background:#2a313c':''}">v${x.n} <span class="muted">${playsOf(s.id,x.n).length}</span></button>`).join('')}</div>`)}
+ <div class="panel"><div class="panel-head"><div><h2>v${v.n} · ${ps.length} play${ps.length===1?'':'s'}</h2><p>Click a cell to cycle unchecked → met → broken → n/a. That is what a Play review records.</p></div><div class="legend"><span class="pos">${SYM.met}</span><span>met</span><span class="neg">${SYM.broken}</span><span>broken</span><span>${SYM.na}</span><span>not applicable</span><span>· not checked</span></div></div>
+ <div class="scroll-x"><table class="ledger"><thead><tr><th>Play</th>${v.rules.map((r,i)=>`<th class="rule" title="${esc(r.text)}">${i+1}. ${esc(r.text)}</th>`).join('')}<th>Process</th><th>Outcome</th></tr></thead>
+ <tbody>${ps.map(p=>`<tr><td><strong>${esc(p.id)}</strong><small>${esc(p.dir)} ${esc(p.inst)} · ${esc(p.status)}</small></td>${v.rules.map(r=>{const c=p.checks[r.id];return `<td class="c"><button class="mark ${c||'unset'}" data-play="${p.id}" data-rule="${r.id}" aria-label="${esc(p.id)}, rule: ${esc(r.text)}: ${c||'not checked'}">${SYM[c]||'·'}</button></td>`}).join('')}<td class="${processOf(p)==='Deviated'?'warn':''}">${processOf(p)}</td><td class="${p.outcome==='Positive'?'pos':p.outcome==='Negative'?'neg':''}">${esc(p.outcome)}</td></tr>`).join('')||`<tr><td colspan="${v.rules.length+3}" class="muted">No plays used v${v.n}.</td></tr>`}</tbody>
+ ${ps.length?`<tfoot><tr><td style="text-align:left">Broken in</td>${v.rules.map(r=>{const br=ps.filter(p=>p.checks[r.id]==='broken');return `<td>${br.length}/${ps.length}${br.length?`<br>${br.map(p=>esc(p.outcome)).join(', ')}`:''}</td>`}).join('')}<td></td><td></td></tr></tfoot>`:''}</table></div>
+ <div class="pad"><p class="caveat">${esc(sampleNote(ps.length))} A rule broken in a winning play is still broken.</p></div></div>`;
+}
+const ledgerIntro=()=>`<p class="why"><strong>Idea:</strong> answer the brief's first analysis question, "do I follow my strategy?", rule by rule. Rows are the plays that used a version, columns are that version's rules. A rule that keeps getting broken is either a discipline problem or a bad rule, which is the input to the next revision.</p>`;
+const pickStrategy=(k,extra='')=>`<div class="row wrap between" style="margin-bottom:12px"><label class="muted" style="font-size:10px">Strategy <select data-pick="${k}">${strategies.map(x=>`<option value="${x.id}" ${x.id===sel?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label>${extra}</div>`;
+$('#view-ledger').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.lv){ledgerVersion=+b.dataset.lv;render()}
+ if(b.dataset.play){const p=plays.find(x=>x.id===b.dataset.play),k=b.dataset.rule,nx=NEXT[p.checks[k]];if(nx)p.checks[k]=nx;else delete p.checks[k];render();$(`[data-play="${p.id}"][data-rule="${k}"]`)?.focus()}});
+document.addEventListener('change',e=>{if(e.target.dataset.pick)selectStrategy(e.target.value)});
+
+/* ---------- D: Inside a play ---------- */
+function renderInPlay(){
+ const live=plays.filter(p=>['Planned','Open','Draft'].includes(p.status));const p=plays.find(x=>x.id===playSel)||live[0];
+ const s=S(p.s),v=ver(s,p.v),latest=cur(s);
+ $('#view-inplay').innerHTML=`<p class="why"><strong>Idea:</strong> the Strategies page only works if Plays feed it. In the Play journal's Strategy tab, the trader picks a strategy version, and each of its rules becomes a per-play condition: met, broken or not applicable. Those answers are what concepts A and C read. Planning with a broken rule is allowed but visible.</p>
+ <div class="row wrap" style="margin-bottom:12px"><label class="muted" style="font-size:10px">Sample play <select id="play-pick">${live.map(x=>`<option value="${x.id}" ${x.id===p.id?'selected':''}>${esc(x.id+' · '+x.title+' ('+x.status+')')}</option>`).join('')}</select></label></div>
+ <div class="play-mock"><div class="panel"><div class="panel-head"><div><h2>${esc(p.id)} · ${esc(p.dir)} ${esc(p.inst)}</h2><p>Approved Play workspace, abbreviated. Chart and position editor unchanged.</p></div><span class="badge">${esc(p.status)}</span></div><div class="pad"><div class="chart-ph">chart · position editor (unchanged)</div></div>
+  <div class="tabs" aria-hidden="true"><span>Thesis</span><span>Invalidation</span><span class="on">Strategy</span><span>Evidence</span><span>Review</span></div>
+  <div class="pad"><div class="row wrap" style="margin-bottom:12px"><label class="muted" style="font-size:10px">Strategy <select id="ip-strategy">${strategies.filter(x=>x.id===s.id||x.versions.length&&x.state!=='retired').map(x=>`<option value="${x.id}" ${x.id===s.id?'selected':''}>${esc(x.name)}</option>`).join('')}<option value="" disabled>Retired and unversioned strategies are hidden</option></select></label><label class="muted" style="font-size:10px">Version <select id="ip-version">${s.versions.map(x=>`<option value="${x.n}" ${x.n===v.n?'selected':''}>v${x.n}${x===latest?' (latest)':''}</option>`).join('')}</select></label></div>
+  ${v!==latest?`<div class="newer">This play uses v${v.n}. v${latest.n} exists. A planned play keeps the version it was planned with. Switching is a plan revision with a reason.</div>`:''}
+  ${v.rules.map(r=>{const c=p.checks[r.id];return `<div class="cond"><span>${esc(r.text)}</span><span class="seg" role="group" aria-label="${esc(r.text)}">${['met','broken','na'].map(k=>`<button class="${k}" data-ck="${r.id}" data-val="${k}" aria-pressed="${c===k}">${{met:'Met',broken:'Not met',na:'N/A'}[k]}</button>`).join('')}</span></div>`}).join('')}
+  <p class="muted" style="font-size:10px;margin-top:10px;line-height:1.7">${(()=>{const pr=processOf(p);return pr==='Deviated'?'<span class="warn">At least one rule is not met.</span> You can still plan; the play will count as a deviation from this version.':pr==='Not reviewed'?'Some conditions are unchecked.':'All conditions answered.'})()} Invalidation for this version: ${esc(v.invalidation)}</p></div></div>
+  <div class="panel"><div class="panel-head"><h2>Where this shows up</h2></div><div class="pad" style="font-size:11px;line-height:1.85;color:#cfd6e0"><p>• <strong>Library (A):</strong> this play appears in the ${esc(s.name)} matrix under <em>${processOf(p)} · ${esc(p.outcome)}</em>.</p><p style="margin-top:8px">• <strong>Ledger (C):</strong> one row under v${v.n}; your answers are its cells.</p><p style="margin-top:8px">• <strong>Rulebook (B):</strong> listed as pinned to v${v.n}.</p><p class="muted" style="margin-top:12px;font-size:10px">Imported fills without a Play never get a strategy or thesis invented for them. A retrospective review can attach one, labelled as retrospective.</p></div></div></div>`;
+}
+$('#view-inplay').addEventListener('change',e=>{const p=plays.find(x=>x.id===playSel);if(e.target.id==='play-pick'){playSel=e.target.value;render()}
+ if(e.target.id==='ip-strategy'){p.s=e.target.value;p.v=cur(S(p.s)).n;p.checks={};sel=p.s;render()}
+ if(e.target.id==='ip-version'){p.v=+e.target.value;render()}});
+$('#view-inplay').addEventListener('click',e=>{const b=e.target.closest('[data-ck]');if(!b)return;const p=plays.find(x=>x.id===playSel);if(p.checks[b.dataset.ck]===b.dataset.val)delete p.checks[b.dataset.ck];else p.checks[b.dataset.ck]=b.dataset.val;render();$(`[data-ck="${b.dataset.ck}"][data-val="${b.dataset.val}"]`)?.focus()});
+
+/* ---------- shell ---------- */
+function render(){({library:renderLibrary,rulebook:renderRulebook,ledger:renderLedger,inplay:renderInPlay})[view]()}
+function setView(v){view=v;$$('.concept').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===v)));$$('[id^=view-]').forEach(s=>s.hidden=s.id!=='view-'+v);if(v==='rulebook')bookVersion=null;render()}
+$$('.concept').forEach(b=>b.onclick=()=>setView(b.dataset.view));
+$('#new-strategy').onclick=()=>{const id='s'+Date.now().toString(36);strategies.unshift({id,name:'Untitled strategy',state:'idea',tags:['Perps'],versions:[],working:{hypothesis:'',invalidation:'',rules:[]}});sel=id;editing=true;bookVersion='wc';view='rulebook';$$('.concept').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view==='rulebook')));$$('[id^=view-]').forEach(s=>s.hidden=s.id!=='view-rulebook');render();toast('New idea created as a working copy. Rename is not part of this prototype.')};
+render();
+</script>
+</body>
+</html>
