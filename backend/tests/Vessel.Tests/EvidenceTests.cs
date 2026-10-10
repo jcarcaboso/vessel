@@ -41,11 +41,12 @@ internal sealed class MemoryEvidenceStore(Guid ownerId) : IEvidenceMetadataStore
         Task.FromResult(Items.Where(e => e.PlayId == playId && e.OwnerId == ownerId).OrderBy(e => e.CreatedAtUtc).ToList());
     public Task<int> CountAsync(Guid playId, CancellationToken ct) => Task.FromResult(Items.Count(e => e.PlayId == playId && e.OwnerId == ownerId));
     public Task<PlayEvidence?> FindAsync(Guid id, CancellationToken ct) => Task.FromResult(Items.SingleOrDefault(e => e.Id == id && e.OwnerId == ownerId));
-    public Task AddAsync(PlayEvidence evidence, CancellationToken ct)
+    public Task<bool> AddAsync(PlayEvidence evidence, int maxPerPlay, CancellationToken ct)
     {
-        if (AddFailure is not null) return Task.FromException(AddFailure);
+        if (AddFailure is not null) return Task.FromException<bool>(AddFailure);
+        if (Items.Count(e => e.PlayId == evidence.PlayId) >= maxPerPlay) return Task.FromResult(false);
         Items.Add(evidence);
-        return Task.CompletedTask;
+        return Task.FromResult(true);
     }
     public Task RemoveAsync(PlayEvidence evidence, CancellationToken ct) { Items.Remove(evidence); return Task.CompletedTask; }
     public Task SaveAsync(CancellationToken ct) { Saves++; return Task.CompletedTask; }
@@ -415,6 +416,35 @@ public sealed class EvidencePostgresTests
             var check = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
             Assert.Equal(PostgresErrorCodes.CheckViolation, Assert.IsType<PostgresException>(check.InnerException).SqlState);
         }
+    }
+}
+
+public sealed class EvidenceLimitPostgresTests
+{
+    [PostgresFact]
+    public async Task Concurrent_adds_never_exceed_the_per_play_limit()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        var play = TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC"));
+        await using (var db = database.Context(owner))
+        {
+            db.Accounts.Add(account);
+            db.Plays.Add(play);
+            await db.SaveChangesAsync();
+        }
+        var results = await Task.WhenAll(Enumerable.Range(0, 12).Select(async i =>
+        {
+            await using var db = database.Context(owner);
+            var tracked = await db.Plays.SingleAsync();
+            var evidence = new PlayEvidence(Guid.NewGuid(), tracked, $"{owner:N}/{play.Id:N}/{i}.png", "image/png", 12,
+                new string('a', 64), EvidenceSource.Upload, "", DateTimeOffset.UtcNow);
+            return await new Vessel.Persistence.EvidenceStore(db).AddAsync(evidence, 3, default);
+        }));
+        Assert.Equal(3, results.Count(added => added));
+        await using (var db = database.Context(owner))
+            Assert.Equal(3, await db.Evidence.CountAsync());
     }
 }
 

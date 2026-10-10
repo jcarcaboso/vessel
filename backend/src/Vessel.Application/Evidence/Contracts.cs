@@ -37,7 +37,8 @@ public interface IEvidenceMetadataStore
     Task<List<PlayEvidence>> ListAsync(Guid playId, CancellationToken ct);
     Task<int> CountAsync(Guid playId, CancellationToken ct);
     Task<PlayEvidence?> FindAsync(Guid id, CancellationToken ct);
-    Task AddAsync(PlayEvidence evidence, CancellationToken ct);
+    /// <summary>Adds the record unless the Play already holds <paramref name="maxPerPlay"/>; the count and insert are atomic.</summary>
+    Task<bool> AddAsync(PlayEvidence evidence, int maxPerPlay, CancellationToken ct);
     Task RemoveAsync(PlayEvidence evidence, CancellationToken ct);
     Task SaveAsync(CancellationToken ct);
 }

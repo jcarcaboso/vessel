@@ -47,7 +47,7 @@ export function ConnectionGate({ children }: { children: (system: SystemInfo, di
           {error && <p role="alert" id="connection-error" className="error">{error}</p>}
           <Button type="submit" disabled={pending}>{pending ? 'Connecting…' : 'Connect'}</Button>
         </form>
-        <p className="muted">Self-hosted, read-only venue access. No order placement. Play drafts stay in memory and are not saved yet.</p>
+        <p className="muted">Self-hosted, read-only venue access. No order placement. Unsaved Play drafts are kept in memory until you save them.</p>
       </section>
     </main>
   )

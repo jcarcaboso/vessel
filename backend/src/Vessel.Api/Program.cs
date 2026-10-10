@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.EntityFrameworkCore;
 using Vessel.Api;
 using Vessel.Application.Workspace;
 using Vessel.Application.System;
@@ -7,6 +8,7 @@ using Vessel.Infrastructure;
 using Vessel.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
+if (!builder.Environment.IsDevelopment()) ProductionConfiguration.Validate(builder.Configuration);
 builder.Services.AddVesselInfrastructure(builder.Configuration);
 builder.Services.AddVesselPersistence(builder.Configuration);
 builder.Services.AddOpenApi();
@@ -19,6 +21,23 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 var app = builder.Build();
 app.UseForwardedHeaders();
+// Every response is API data or an image; none should be framed, sniffed or leak the page as a referrer.
+// Applied when the response starts, so error responses rebuilt after Response.Clear() carry them too.
+app.Use((context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        var headers = context.Response.Headers;
+        headers.XContentTypeOptions = "nosniff";
+        headers.XFrameOptions = "DENY";
+        headers["Referrer-Policy"] = "no-referrer";
+        // Owner data must not linger in browser or proxy caches; endpoints may set a stricter policy.
+        if (context.Request.Path.StartsWithSegments("/api") && !headers.ContainsKey("Cache-Control"))
+            headers.CacheControl = "no-store";
+        return Task.CompletedTask;
+    });
+    return next(context);
+});
 // Do not let provider/DB details or development exception pages escape the API.
 app.Use(async (context, next) =>
 {
@@ -69,6 +88,20 @@ app.Use(async (context, next) =>
 });
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
+// Readiness for a proxy or orchestrator: the database answers and every migration is applied. No details.
+app.MapGet("/health/ready", async (IServiceProvider services, CancellationToken ct) =>
+{
+    try
+    {
+        var db = services.GetRequiredService<VesselDbContext>();
+        var ready = await db.Database.CanConnectAsync(ct) && !(await db.Database.GetPendingMigrationsAsync(ct)).Any();
+        return ready ? Results.Ok(new { status = "ready" }) : Results.Json(new { status = "unavailable" }, statusCode: 503);
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+        return Results.Json(new { status = "unavailable" }, statusCode: 503);
+    }
+}).AllowAnonymous();
 app.MapGet("/api/system", (ClaimsPrincipal user, Vessel.Application.Venues.IVenueRegistry venues) => SystemMetadata.ForOwner(new JournalOwner(
     Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!), user.FindFirstValue(ClaimTypes.Name)!), venues))
     .RequireAuthorization();

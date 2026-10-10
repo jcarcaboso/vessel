@@ -41,11 +41,18 @@ public sealed class EvidenceService(IEvidenceMetadataStore store, IEvidenceObjec
             Convert.ToHexStringLower(SHA256.HashData(bytes)), kind, note, time.GetUtcNow());
         if (marks is not null) evidence.UpdateMarkup(EvidenceMarkup.Serialize(marks), evidence.CreatedAtUtc);
         await objects.PutAsync(key, new MemoryStream(bytes, writable: false), ct);
-        try { await store.AddAsync(evidence, ct); }
+        bool added;
+        try { added = await store.AddAsync(evidence, limits.MaxPerPlay, ct); }
         catch
         {
             await DeleteObjectAsync(key);
             throw;
+        }
+        // The early count is a fast path; concurrent uploads are settled by the atomic insert.
+        if (!added)
+        {
+            await DeleteObjectAsync(key);
+            throw new WorkspaceException(409, $"A Play can hold at most {limits.MaxPerPlay} evidence images.");
         }
         return ToDto(evidence);
     }
