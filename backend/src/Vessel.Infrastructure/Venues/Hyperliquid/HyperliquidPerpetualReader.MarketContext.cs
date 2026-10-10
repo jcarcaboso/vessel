@@ -28,7 +28,10 @@ public sealed partial class HyperliquidPerpetualReader : IMarketContextReader
         for (var i = 0; i < universe.GetArrayLength(); i++)
         {
             var name = Text(Property(universe[i], "name"));
-            if (!names.Add(name))
+            if (!IsPrimaryContract(name))
+                continue;
+            var canonical = HyperliquidInstruments.Canonical(name);
+            if (!names.Add(canonical) || HyperliquidInstruments.Native(canonical) != name)
                 throw new VenueReadException(InvalidResponse);
             result.Add(ReadMarketContext(name, contexts[i], numbers: false));
         }
@@ -41,7 +44,7 @@ public sealed partial class HyperliquidPerpetualReader : IMarketContextReader
         var funding = Signed(Property(ctx, "funding"), numbers);
         var premium = Property(ctx, "premium");
         var mid = Property(ctx, "midPx");
-        return new(name, Price(Property(ctx, "markPx"), numbers).Text, Price(Property(ctx, "oraclePx"), numbers).Text,
+        return new(HyperliquidInstruments.Canonical(name), Price(Property(ctx, "markPx"), numbers).Text, Price(Property(ctx, "oraclePx"), numbers).Text,
             mid.ValueKind == JsonValueKind.Null ? null : Price(mid, numbers).Text,
             Price(Property(ctx, "prevDayPx"), numbers).Text, Price(Property(ctx, "dayNtlVlm"), numbers).Text,
             Price(Property(ctx, "openInterest"), numbers).Text, funding,

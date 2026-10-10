@@ -1,3 +1,5 @@
+using Vessel.Domain.Accounts;
+
 namespace Vessel.Application.Venues;
 
 /// <summary>Reads an account's orders: current open orders and recent order history, read-only.</summary>
@@ -5,6 +7,8 @@ public interface IVenueOrderReader
 {
     string VenueId { get; }
     Task<VenueOrderReadResult> ReadOrdersAsync(string publicAddress, CancellationToken cancellationToken);
+    Task<VenueOrderReadResult> ReadOrdersAsync(Account account, CancellationToken cancellationToken) =>
+        ReadOrdersAsync(account.SourceId ?? throw new VenueReadException("Account source is unavailable."), cancellationToken);
 }
 
 /// <summary>Normalized order lifecycle; <see cref="VenueOrder.VenueStatus"/> keeps the venue's own word.</summary>

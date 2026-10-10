@@ -75,6 +75,8 @@ The development launch profile binds `http://127.0.0.1:5080`.
 - Missing/wrong tokens fail closed. New unannotated endpoints have an authenticated fallback policy.
 - Development OpenAPI is also protected.
 
+Lighter read-only tokens are separate from the Vessel API token. Configure a server-only encryption key ring before saving them; public account discovery and reads work without one. See [credential setup, HTTPS and rotation](architecture/venue-credentials.md#operator-setup) and the [implemented import workflow](architecture/lighter-state.md). Never enter a real venue token in the HTTP LAN preview.
+
 Metadata and liveness can run without database connectivity. The protected core endpoints provide portfolio/account create/list/read, overview, snapshots, fills and bounded manual-trigger Hyperliquid refresh. There is no full Play CRUD, job scheduler or full-history backfill.
 
 ## Frontend

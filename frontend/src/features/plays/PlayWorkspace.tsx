@@ -81,7 +81,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
     ? { quote: instrumentInfo.quoteAsset, base: instrumentInfo.contractId, quantityDecimals: instrumentInfo.quantityDecimals }
     : defaultSizeUnits
 
-  const tradeUrl = account ? venues.tradeUrl(account.venueId, draft.instrument, draft.instrumentSource) : null
+  const tradeUrl = account ? venues.tradeUrl(account.venueId, draft.instrument, draft.instrumentSource, instrumentInfo?.venueContractId) : null
   // In a read-only Play, the chart can still be viewed but not edited.
   const planChange = readOnly ? () => {} : onChange
 

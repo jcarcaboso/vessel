@@ -8,6 +8,8 @@ namespace Vessel.Application.Workspace;
 
 public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext owner, IVenueRegistry venues)
 {
+    internal Task<T> WithAccountLockAsync<T>(Guid id, Func<Account, Task<T>> action, CancellationToken ct) =>
+        store.WithAccountLockAsync(id, action, ct);
     private static string? Money(decimal? value) => value?.ToString("0.############################", CultureInfo.InvariantCulture);
     private static void ValidateName(string? name)
     {
@@ -31,9 +33,11 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
 
         if (request.PortfolioId == Guid.Empty) throw new WorkspaceException(404, "Portfolio not found.");
         decimal? value = null;
+        string? sourceId = null, address = null;
         if (descriptor.Id == VenueDescriptor.ManualId)
         {
-            if (request.Address is not null) throw new WorkspaceException(400, "Manual accounts do not use a public address.");
+            if (request.Address is not null || request.SourceId is not null)
+                throw new WorkspaceException(400, "Manual accounts do not use a source identity.");
             if (request.ManualAccountValueUsd is { } text)
             {
                 if (!TryExactNonnegativeDecimal(text, out var parsed))
@@ -44,18 +48,29 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         else
         {
             if (request.ManualAccountValueUsd is not null) throw new WorkspaceException(400, "Venue balances cannot be supplied manually.");
-            if (descriptor.Source == VenueSources.EvmAddress &&
-                (request.Address is not { Length: 42 } address || !address.StartsWith("0x", StringComparison.Ordinal) ||
-                !address.AsSpan(2).ContainsOnlyHex()))
-                throw new WorkspaceException(400, $"{descriptor.Name} requires a 42-character public hexadecimal address.");
+            if (descriptor.Source == VenueSources.EvmAddress)
+            {
+                sourceId = request.SourceId ?? request.Address;
+                if (!AccountSource.IsEvmAddress(sourceId) ||
+                    request.Address is not null && !string.Equals(request.Address, sourceId, StringComparison.OrdinalIgnoreCase))
+                    throw new WorkspaceException(400, "A matching 42-character public hexadecimal address is required.");
+                address = sourceId = sourceId!.ToLowerInvariant();
+            }
+            else if (descriptor.Source == VenueSources.AccountIndex)
+            {
+                if (request.Address is not null || !AccountSource.IsAccountIndex(request.SourceId))
+                    throw new WorkspaceException(400, "Source ID must be a canonical nonnegative int64 account index string, without an address.");
+                sourceId = request.SourceId;
+            }
+            else throw new WorkspaceException(400, "The venue source identity is unsupported.");
         }
         var account = new Account(Guid.NewGuid(), owner.OwnerId, request.VenueId, request.Name);
-        account.Configure(request.PortfolioId, request.Address?.ToLowerInvariant(), value);
+        account.Configure(request.PortfolioId, address, value, sourceId);
         await store.WithManagementLockAsync(async () =>
         {
             await ValidatePortfolio(request.PortfolioId, ct);
-            if (account.Address is { } address && await store.SourceExistsAsync(account.VenueId, address, ct))
-                throw new WorkspaceException(409, "An account for this venue and address already exists. Manage or re-enable that account.");
+            if (account.SourceId is { } source && await store.SourceExistsAsync(account.VenueId, source, ct))
+                throw new WorkspaceException(409, "An account for this venue and source already exists. Manage or re-enable that account.");
             await store.AddAccountAsync(account, ct);
             return true;
         }, ct);
@@ -230,12 +245,12 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             if (!account.IsEnabled) throw new WorkspaceException(400, "Enable the account before refreshing it.");
             if (venues.Descriptor(account.VenueId) is not { Capabilities.Sync: true })
                 throw new WorkspaceException(400, $"Only {OrList(venues.Descriptors.Where(d => d.Capabilities.Sync).Select(d => d.Name), "and")} accounts can be refreshed.");
-            if (account.Address is null) throw new WorkspaceException(400, "A public address is required before refresh.");
+            if (account.SourceId is null) throw new WorkspaceException(400, "A source identity is required before refresh.");
             if (venues.Reader(account.VenueId) is not { } reader) throw new WorkspaceException(503, "Venue reader is unavailable.");
             PerpetualVenueReadResult result;
             try
             {
-                result = await reader.ReadAsync(account.Address, ct);
+                result = await reader.ReadAsync(account, ct);
                 if (!result.Fills.All(VenueFactChecks.Valid))
                     throw new VenueReadException("The venue adapter returned fills outside Vessel's execution vocabulary.");
             }
@@ -268,7 +283,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         s?.StablecoinsObservedAtUtc is null ? null : StablecoinTotals.Sum(s.Stablecoins.Select(balance => balance.Available)),
         s?.StablecoinScope, s?.AccountMode,
         s?.StablecoinsObservedAtUtc is null ? null : StablecoinTotals.Sum(s.Stablecoins.Select(balance => balance.Total)),
-        Balance(a, s) is { } balance ? StablecoinTotals.Sum([balance]) : null);
+        Balance(a, s) is { } balance ? StablecoinTotals.Sum([balance]) : null, a.SourceId);
 
     /// <summary>
     /// What the account holds in nominal USD. Unified and portfolio-margin accounts keep every balance in the spot

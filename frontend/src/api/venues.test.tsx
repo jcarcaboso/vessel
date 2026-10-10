@@ -37,6 +37,25 @@ describe('Venues', () => {
     expect(venues.tradeUrl('manual', 'BTC', 'venue')).toBeNull()
     expect(venues.tradeUrl('lighter', 'BTC', 'venue')).toBeNull()
   })
+  it('uses the native contract only where the descriptor requests it', () => {
+    const native = new Venues([{ ...systemFixture.venues[0]!, tradeUrlTemplate: 'https://trade.example/{venueContractId}' }])
+    expect(native.tradeUrl('hyperliquid', '1000PEPE', 'venue', 'kPEPE')).toBe('https://trade.example/kPEPE')
+    expect(native.tradeUrl('hyperliquid', 'BTC', 'venue')).toBe('https://trade.example/BTC')
+    expect(native.tradeUrl('hyperliquid', '1000PEPE', 'manual', 'kPEPE')).toBeNull()
+    expect(native.tradeUrl('hyperliquid', '1000PEPE', 'venue', '../unsafe')).toBeNull()
+    const canonical = new Venues([{ ...systemFixture.venues[0]!, id: 'risex', tradeUrlTemplate: 'https://trade.example/{instrument}' }])
+    expect(canonical.tradeUrl('risex', '1000PEPE', 'venue', '42')).toBe('https://trade.example/1000PEPE')
+  })
+  it('replaces both known placeholders and refuses unsupported ones', () => {
+    const both = new Venues([{ ...systemFixture.venues[0]!, tradeUrlTemplate: 'https://trade.example/{instrument}/{venueContractId}' }])
+    expect(both.tradeUrl('hyperliquid', '1000PEPE', 'venue', 'kPEPE')).toBe('https://trade.example/1000PEPE/kPEPE')
+    const unsupported = new Venues([{ ...systemFixture.venues[0]!, tradeUrlTemplate: 'https://trade.example/{instrument}/{unknown}' }])
+    expect(unsupported.tradeUrl('hyperliquid', 'BTC', 'venue')).toBeNull()
+  })
+  it('defaults optional discovery and credential capabilities to false', () => {
+    expect(venues.can('hyperliquid', 'accountDiscovery')).toBe(false)
+    expect(venues.can('hyperliquid', 'readOnlyCredential')).toBe(false)
+  })
 
   it('is provided by the application and empty without a provider', () => {
     function Probe() { return <p>{useVenues().name('hyperliquid')}</p> }

@@ -11,6 +11,14 @@ A collection of brokerage accounts grouped by trading purpose, such as swing tra
 A trader's account at a broker or trading venue, with manually recorded or imported activity. Portfolio assignment is optional.
 _Avoid_: User account, portfolio
 
+**Subaccount**:
+A separately identified account under a venue's main account. Each selected Lighter account index is a separate Vessel account, even when several belong to the same wallet.
+_Avoid_: Portfolio, wallet
+
+**Source identity**:
+The venue's identifier for one concrete account. A wallet address can identify an account at one venue and only help discover several accounts at another.
+_Avoid_: Account name, owner identity
+
 **Unassigned accounts**:
 Account records without a portfolio, visible in the all-account view. This is a grouping state rather than another stored portfolio.
 _Avoid_: Default portfolio as a separate entity

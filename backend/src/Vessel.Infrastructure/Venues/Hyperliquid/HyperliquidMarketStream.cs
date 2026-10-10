@@ -64,7 +64,7 @@ public sealed class HyperliquidMarketStream : IMarketStream, IAsyncDisposable
         if (string.IsNullOrWhiteSpace(contractId) || !HyperliquidPerpetualReader.IsPrimaryContract(contractId) ||
             string.IsNullOrWhiteSpace(interval))
             throw new VenueReadException("A primary perpetual contract and interval are required.");
-        var listener = new Listener(this, contractId, interval);
+        var listener = new Listener(this, HyperliquidInstruments.Native(contractId), interval);
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
@@ -324,14 +324,14 @@ public sealed class HyperliquidMarketStream : IMarketStream, IAsyncDisposable
                         }
                     }
                     break;
-                case HyperliquidStreamContext { Context: var context }:
-                    if (upstream.TryGetValue(ContextKey(context.ContractId), out var contextEntry))
+                case HyperliquidStreamContext { Coin: var coin, Context: var context }:
+                    if (upstream.TryGetValue(ContextKey(coin), out var contextEntry))
                     {
                         var update = new MarketContextEvent(context, now);
                         contextEntry.LastContext = update;
                         foreach (var listener in listeners)
                         {
-                            if (listener.Coin != context.ContractId) continue;
+                            if (listener.Coin != coin) continue;
                             listener.Acknowledged = true;
                             RefreshStatus(listener, now); // Status precedes the data it qualifies.
                             listener.Post(update);

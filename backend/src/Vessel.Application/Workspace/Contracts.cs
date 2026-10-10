@@ -6,7 +6,8 @@ using Vessel.Application.Venues;
 namespace Vessel.Application.Workspace;
 
 public sealed record CreatePortfolioRequest(string Name);
-public sealed record CreateAccountRequest(Guid? PortfolioId, string Name, string VenueId, string? Address = null, string? ManualAccountValueUsd = null);
+public sealed record CreateAccountRequest(Guid? PortfolioId, string Name, string VenueId, string? Address = null, string? ManualAccountValueUsd = null,
+    string? SourceId = null);
 public sealed record RenamePortfolioRequest(string Name);
 public sealed record UpdateAccountRequest(
     [property: JsonRequired] string Name,
@@ -23,7 +24,7 @@ public sealed record AccountDto(Guid Id, Guid? PortfolioId, string Name, string 
     string? AccountValueUsd, DateTimeOffset? LastSyncedAtUtc, string SyncStatus, string? LastSyncError,
     int PositionCount, string? HistoryNotice, bool IsEnabled, long SettingsRevision,
     string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null,
-    string? TotalStablecoinNominalUsd = null, string? BalanceUsd = null);
+    string? TotalStablecoinNominalUsd = null, string? BalanceUsd = null, string? SourceId = null);
 public sealed record AccountInstrumentsDto(string VenueId, string MarketScope, string Scope,
     IReadOnlyList<VenueInstrument> Instruments, string Notice);
 /// <summary>Where a catalogue comes from: the venue's selectable perpetuals, or none for a manual account.</summary>

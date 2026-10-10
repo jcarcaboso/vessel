@@ -8,6 +8,7 @@ public sealed class Account
     public string Name { get; private set; } = null!;
     public Guid? PortfolioId { get; private set; }
     public string? Address { get; private set; }
+    public string? SourceId { get; private set; }
     public decimal? ManualAccountValueUsd { get; private set; }
     public DateTimeOffset? LastSyncedAtUtc { get; private set; }
     public string SyncStatus { get; private set; } = "not-synced";
@@ -17,11 +18,12 @@ public sealed class Account
     public long SettingsRevision { get; private set; } = 1;
     private Account() { }
 
-    public void Configure(Guid? portfolioId, string? address, decimal? manualAccountValueUsd)
+    public void Configure(Guid? portfolioId, string? address, decimal? manualAccountValueUsd, string? sourceId = null)
     {
         if (portfolioId == Guid.Empty || manualAccountValueUsd < 0)
             throw new ArgumentException("Invalid account configuration.");
         PortfolioId = portfolioId; Address = address?.ToLowerInvariant(); ManualAccountValueUsd = manualAccountValueUsd;
+        SourceId = sourceId ?? Address;
         SyncStatus = VenueId == "manual" ? "manual" : "not-synced";
     }
 

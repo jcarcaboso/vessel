@@ -16,14 +16,15 @@ public sealed partial class HyperliquidPerpetualReader
     {
         if (!IsPrimaryContract(contractId) || fromMs < 0 || toMs < fromMs)
             throw new VenueReadException("A primary perpetual contract and valid window are required.");
+        var venueContractId = HyperliquidInstruments.Native(contractId);
         return ReadBoundedAsync<IReadOnlyList<VenueCandle>>(async token =>
         {
             using var response = await ReadJsonAsync(new
             {
                 type = "candleSnapshot",
-                req = new { coin = contractId, interval, startTime = fromMs, endTime = toMs }
+                req = new { coin = venueContractId, interval, startTime = fromMs, endTime = toMs }
             }, token);
-            return ReadCandles(response.RootElement, contractId, interval);
+            return ReadCandles(response.RootElement, venueContractId, interval);
         }, cancellationToken);
     }
 

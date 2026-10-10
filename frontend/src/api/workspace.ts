@@ -1,6 +1,10 @@
 import { SseOverflowError, SseParser } from './sse'
 import { ApiError } from './system'
 import {
+  accountIndex, credentialSaveMessage, credentialTransportAllowed, credentialTransportMessage,
+  type AccountCredential, type AccountDiscovery,
+} from './account-access'
+import {
   isPlayExecution, isPlayHistory, isPlaySummary, isSavedEvidence, isSavedPlay,
   type LinkOrder, type PlayExecution, type PlayFields, type PlayHistory, type PlaySummary, type SavedEvidence, type SavedPlay, type StatusRequest,
 } from './plays'
@@ -108,6 +112,8 @@ export interface BrokerAccount {
   name: string
   venueId: string
   address: string | null
+  /** Missing on older servers. Display sourceId ?? address for EVM compatibility. */
+  sourceId?: string | null
   accountValueUsd: string | null
   lastSyncedAtUtc: string | null
   syncStatus: 'manual' | 'not-synced' | 'synced' | 'error'
@@ -194,6 +200,7 @@ export interface CreateAccount {
   name: string
   venueId: string
   address?: string
+  sourceId?: string
   manualAccountValueUsd?: string
 }
 export interface WorkspaceApi {
@@ -212,6 +219,10 @@ export interface WorkspaceApi {
   marketStream(id: string, query: MarketStreamQuery, signal: AbortSignal, onEvent: (event: MarketStreamEvent) => void): Promise<void>
   createPortfolio(name: string): Promise<Portfolio>
   createAccount(account: CreateAccount): Promise<BrokerAccount>
+  discoverAccounts(venueId: string, address: string, signal?: AbortSignal, token?: string): Promise<AccountDiscovery>
+  accountCredential(id: string, signal?: AbortSignal): Promise<AccountCredential>
+  saveAccountCredential(id: string, token: string): Promise<AccountCredential>
+  deleteAccountCredential(id: string): Promise<void>
   renamePortfolio(id: string, name: string): Promise<Portfolio>
   deletePortfolio(id: string): Promise<void>
   updateAccount(id: string, settings: { name: string; portfolioId: string | null; isEnabled: boolean; expectedRevision: number }): Promise<BrokerAccount>
@@ -297,6 +308,7 @@ const portfolio = (v: unknown): v is Portfolio => object(v) && guid(v.id) && tex
 const account = (v: unknown): v is BrokerAccount => object(v) && guid(v.id) &&
   (v.portfolioId === null || guid(v.portfolioId)) && text(v.name) && text(v.venueId) &&
   nullableText(v.address) && nullableDecimal(v.accountValueUsd) &&
+  (v.sourceId === undefined || nullableText(v.sourceId)) &&
   (v.lastSyncedAtUtc === null || date(v.lastSyncedAtUtc)) &&
   ['manual', 'not-synced', 'synced', 'error'].includes(String(v.syncStatus)) &&
   nullableText(v.lastSyncError) && count(v.positionCount) && nullableText(v.historyNotice) &&
@@ -312,6 +324,22 @@ const fill = (v: unknown): v is ImportedFill => object(v) && guid(v.id) && guid(
   (v.side === 'buy' || v.side === 'sell') && ['open', 'close', 'flip', 'unknown'].includes(v.positionEffect as string) &&
   ['reported', 'standard-account-free'].includes(v.feeBasis as string) && ['gross', 'net-of-fee'].includes(v.pnlBasis as string) &&
   ['price', 'quantity', 'fee', 'closedPnlUsd'].every(k => decimal(v[k])) && date(v.occurredAtUtc) && (v.playId === null || guid(v.playId))
+const discovery = (venueId: string, address: string) => (v: unknown): v is AccountDiscovery => object(v) &&
+  v.venueId === venueId && text(v.address) && v.address.toLowerCase() === address.toLowerCase() &&
+  text(v.notice) && v.notice.length <= 2000 && Array.isArray(v.accounts) && v.accounts.length <= 1000 &&
+  v.accounts.every((a: unknown) => object(a) && accountIndex(a.sourceId) && text(a.name) && a.name.length <= 200 &&
+    ['main', 'subaccount'].includes(String(a.accountType)) && nullableDecimal(a.accountValueUsd) &&
+    (a.collateralUsd === undefined || nullableDecimal(a.collateralUsd)) &&
+    (a.availableBalanceUsd === undefined || nullableDecimal(a.availableBalanceUsd)) &&
+    (a.existingAccountId === null || guid(a.existingAccountId)) && (a.isEnabled === null || typeof a.isEnabled === 'boolean')) &&
+  new Set(v.accounts.map(a => a.sourceId)).size === v.accounts.length
+const credential = (v: unknown): v is AccountCredential => object(v) && typeof v.storageConfigured === 'boolean' &&
+  Object.keys(v).every(k => ['storageConfigured', 'credential'].includes(k)) &&
+  (v.credential === null || object(v.credential) &&
+    Object.keys(v.credential).every(k => ['scope', 'expiresAt', 'lastVerifiedAt', 'status'].includes(k)) &&
+    ['single', 'all'].includes(String(v.credential.scope)) && date(v.credential.expiresAt) &&
+    (v.credential.lastVerifiedAt === null || date(v.credential.lastVerifiedAt)) &&
+    ['valid', 'expiring', 'expired', 'unavailable'].includes(String(v.credential.status)))
 const wallet = (v: unknown): v is StablecoinWallet | null => v === null || object(v) &&
   date(v.observedAtUtc) && text(v.accountMode) && text(v.scope) && decimal(v.totalNominalUsd) &&
   decimal(v.availableNominalUsd) && text(v.notice) && Array.isArray(v.balances) &&
@@ -425,7 +453,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       signal.removeEventListener('abort', stop)
     }
   }
-  async function request<T>(path: string, validate: (v: unknown) => v is T, options: RequestInit = {}, timeout = 10_000, badGateway?: string): Promise<T> {
+  async function request<T>(path: string, validate: (v: unknown) => v is T, options: RequestInit = {}, timeout = 10_000, badGateway?: string, safeError?: string): Promise<T> {
     let response: Response
     try {
       const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout)
@@ -434,17 +462,18 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
         credentials: 'omit', redirect: 'error', cache: 'no-store', signal,
       })
     } catch {
-      throw new ApiError('unavailable', 'The request did not complete. Check the API and try again.')
+      throw new ApiError('unavailable', safeError ?? 'The request did not complete. Check the API and try again.')
     }
-    if (!response.ok) throw await httpError(response, badGateway)
+    // Credential failures must never echo provider or proxy response bodies.
+    if (!response.ok) throw safeError ? new ApiError('http', safeError, response.status) : await httpError(response, badGateway)
     if (response.status === 204) {
       const noContent: unknown = undefined
       if (validate(noContent)) return noContent
-      throw new ApiError('invalid-response', 'The API returned no workspace data.')
+      throw new ApiError('invalid-response', safeError ?? 'The API returned no workspace data.')
     }
     let body: unknown
-    try { body = await response.json() } catch { throw new ApiError('invalid-response', 'The API returned invalid data.') }
-    if (!validate(body)) throw new ApiError('invalid-response', 'The API returned incompatible workspace data.')
+    try { body = await response.json() } catch { throw new ApiError('invalid-response', safeError ?? 'The API returned invalid data.') }
+    if (!validate(body)) throw new ApiError('invalid-response', safeError ?? 'The API returned incompatible workspace data.')
     return body
   }
   // Plays and evidence: JSON bodies, multipart uploads and image downloads share auth and error handling.
@@ -546,6 +575,30 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     marketStream,
     createPortfolio: name => request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name }) }),
     createAccount: body => request('/api/accounts', account, { method: 'POST', body: JSON.stringify(body) }),
+    discoverAccounts: (venueId, address, signal, token) => {
+      if (!/^[a-z][a-z\d-]{0,63}$/.test(venueId) || !/^0x[\da-f]{40}$/i.test(address)) {
+        return Promise.reject(new ApiError('invalid-response', 'Use a valid venue and public wallet address.'))
+      }
+      if (token !== undefined) {
+        if (!credentialTransportAllowed()) return Promise.reject(new ApiError('http', credentialTransportMessage))
+        if (!token.trim() || token.length > 512) return Promise.reject(new ApiError('http', credentialSaveMessage))
+        return request(`/api/venues/${venueId}/accounts/credential`, discovery(venueId, address),
+          { ...withSignal(signal), method: 'POST', body: JSON.stringify({ address, token }) }, 30_000, undefined,
+          'Could not load venue names. Check the read-only token’s wallet, scope and expiry.')
+      }
+      return request(`/api/venues/${venueId}/accounts?${new URLSearchParams({ address })}`, discovery(venueId, address),
+        withSignal(signal), 30_000, undefined, 'Could not find accounts for this wallet. Check the address and try again.')
+    },
+    accountCredential: (id, signal) => request(`${accountPath(id)}/credential`, credential, withSignal(signal), 10_000,
+      undefined, 'Credential status is unavailable. Retry or ask the operator to check credential storage.'),
+    saveAccountCredential: (id, token) => {
+      if (!credentialTransportAllowed()) return Promise.reject(new ApiError('http', credentialTransportMessage))
+      if (!token.trim() || token.length > 512) return Promise.reject(new ApiError('http', credentialSaveMessage))
+      return request(`${accountPath(id)}/credential`, credential, { method: 'PUT', body: JSON.stringify({ token }) },
+        30_000, undefined, credentialSaveMessage)
+    },
+    deleteAccountCredential: id => request(`${accountPath(id)}/credential`, none, { method: 'DELETE' }, 10_000,
+      undefined, 'Could not remove the credential. Refresh its status before trying again.'),
     renamePortfolio: (id, name) => request(`/api/portfolios/${resourceId(id)}`, portfolio, { method: 'PATCH', body: JSON.stringify({ name }) }),
     deletePortfolio: id => request(`/api/portfolios/${resourceId(id)}`, (v): v is undefined => v === undefined, { method: 'DELETE' }),
     updateAccount: (id, settings) => request(accountPath(id), account, { method: 'PUT', body: JSON.stringify(settings) }),

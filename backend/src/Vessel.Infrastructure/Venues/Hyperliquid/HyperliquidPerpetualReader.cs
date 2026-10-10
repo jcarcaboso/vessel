@@ -44,7 +44,7 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
 
     public static readonly VenueDescriptor Descriptor = new(Id, "Hyperliquid", "read-only", VenueSources.EvmAddress,
         new VenueCapabilities(Sync: true, Instruments: true, Orders: true, Candles: true, MarketContext: true, Stream: true, StablecoinWallet: true),
-        QuoteAsset: PrimaryQuoteAsset, TradeUrlTemplate: "https://app.hyperliquid.xyz/trade/{instrument}",
+        QuoteAsset: PrimaryQuoteAsset, TradeUrlTemplate: "https://app.hyperliquid.xyz/trade/{venueContractId}",
         Intervals: ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M"],
         PriceRule: PriceRules.SignificantFigures,
         CandleNotice: "Hyperliquid exposes only the latest 5,000 candles per interval. Prices are trade candles, not fills.",
@@ -100,7 +100,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         {
             using var meta = await ReadJsonAsync(new { type = "meta", dex = "" }, token);
             var instruments = ReadInstruments(meta.RootElement);
-            var contracts = instruments.Select(instrument => instrument.ContractId).ToHashSet(StringComparer.Ordinal);
+            var contracts = instruments.Select(instrument => instrument.VenueContractId ?? instrument.ContractId)
+                .ToHashSet(StringComparer.Ordinal);
 
             using var state = await ReadJsonAsync(
                 new { type = "clearinghouseState", user = publicAddress, dex = "" }, token);
@@ -136,7 +137,9 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
                 continue;
             var decimals = Integer(Property(item, "szDecimals"));
             var leverage = Integer(Property(item, "maxLeverage"));
-            if (decimals is < 0 or > 28 || leverage <= 0 || !names.Add(name))
+            var canonical = HyperliquidInstruments.Canonical(name);
+            if (decimals is < 0 or > 28 || leverage <= 0 || !names.Add(canonical) ||
+                HyperliquidInstruments.Native(canonical) != name)
                 throw new VenueReadException(InvalidResponse);
             if (item.TryGetProperty("isDelisted", out var delisted) &&
                 delisted.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
@@ -144,7 +147,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
             // Delisted contracts still identify historical positions and fills during refresh.
             if (!selectableOnly || delisted.ValueKind != JsonValueKind.True)
                 // Hyperliquid's maintenance margin is half the initial margin at the contract's maximum leverage.
-                result.Add(new(name, decimals, leverage, PrimaryQuoteAsset, MaintenanceMarginFraction: 1m / (2 * leverage)));
+                result.Add(new(canonical, decimals, leverage, PrimaryQuoteAsset,
+                    VenueContractId: canonical == name ? null : name, MaintenanceMarginFraction: 1m / (2 * leverage)));
         }
         return result;
     }
@@ -173,8 +177,9 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
                 if (leverage <= 0)
                     throw new VenueReadException(InvalidResponse);
             }
-            positions.Add(new(name, quantity, Positive(Property(position, "entryPx")),
-                Number(Property(position, "unrealizedPnl")), Nonnegative(Property(position, "marginUsed")), leverage));
+            positions.Add(new(HyperliquidInstruments.Canonical(name), quantity, Positive(Property(position, "entryPx")),
+                Number(Property(position, "unrealizedPnl")), Nonnegative(Property(position, "marginUsed")), leverage,
+                VenueContractId: HyperliquidInstruments.Canonical(name) == name ? null : name));
         }
         return new(
             Timestamp(Property(state, "time"), latestTimestamp),
@@ -201,13 +206,14 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
                 throw new VenueReadException(InvalidResponse);
             var direction = Text(Property(fill, "dir"));
             fills.Add(new(
-                Identity(Property(fill, "tid")), name, SideOf(side),
+                Identity(Property(fill, "tid")), HyperliquidInstruments.Canonical(name), SideOf(side),
                 direction, Positive(Property(fill, "px")), Positive(Property(fill, "sz")),
                 Number(Property(fill, "fee")), Text(Property(fill, "feeToken"), FeeTokenLength),
                 Number(Property(fill, "closedPnl")), Timestamp(Property(fill, "time"), latestTimestamp),
                 Identity(Property(fill, "oid")), Text(Property(fill, "hash")), fill.GetRawText(),
                 // closedPnl excludes the fee, which is reported separately.
-                EffectOf(direction), ExecutionFacts.FeeReported, ExecutionFacts.PnlGross));
+                EffectOf(direction), ExecutionFacts.FeeReported, ExecutionFacts.PnlGross,
+                VenueContractId: HyperliquidInstruments.Canonical(name) == name ? null : name));
         }
         // Preserve venue side/direction as facts; they do not identify a journal play.
         return fills.OrderByDescending(fill => fill.OccurredAtUtc).ToList();

@@ -74,7 +74,8 @@ public sealed class CoreApiTests
         Assert.Equal("123.12345678901234567890123456", account.AccountValueUsd);
         Assert.Equal(owner, store.Accounts.Single().OwnerId); Assert.Equal(owner, store.Portfolios.Single().OwnerId);
         using var json = JsonDocument.Parse(await accountResponse.Content.ReadAsStringAsync());
-        Assert.Equal(new[] { "id", "portfolioId", "name", "venueId", "address", "accountValueUsd", "lastSyncedAtUtc", "syncStatus", "lastSyncError", "positionCount", "historyNotice", "isEnabled", "settingsRevision", "availableStablecoinNominalUsd", "stablecoinScope", "accountMode", "totalStablecoinNominalUsd", "balanceUsd" }, json.RootElement.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(new[] { "id", "portfolioId", "name", "venueId", "address", "accountValueUsd", "lastSyncedAtUtc", "syncStatus", "lastSyncError", "positionCount", "historyNotice", "isEnabled", "settingsRevision", "availableStablecoinNominalUsd", "stablecoinScope", "accountMode", "totalStablecoinNominalUsd", "balanceUsd", "sourceId" }, json.RootElement.EnumerateObject().Select(p => p.Name));
+        Assert.Null(account.SourceId);
         Assert.Null(account.AvailableStablecoinNominalUsd);
         Assert.Equal("null", await client.GetStringAsync($"/api/accounts/{account.Id}/snapshot"));
         var sync = await client.PostAsync($"/api/accounts/{account.Id}/sync", null);

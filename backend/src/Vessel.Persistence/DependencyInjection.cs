@@ -27,6 +27,14 @@ public static class DependencyInjection
         });
         services.AddScoped<Vessel.Application.Workspace.IWorkspaceStore, WorkspaceStore>();
         services.AddScoped<Vessel.Application.Workspace.WorkspaceService>();
+        services.AddScoped<Vessel.Application.Workspace.AccountDiscoveryService>();
+        services.AddScoped<Vessel.Application.Credentials.IAccountCredentialStore, AccountCredentialStore>();
+        services.AddScoped<Vessel.Application.Credentials.AccountCredentialService>();
+        services.AddScoped<Vessel.Application.Credentials.AccountCredentialReader>();
+        // The venue registry is also used by database-free system metadata. Delay DB resolution
+        // until an adapter actually reads a credential, retaining the request's scoped context.
+        services.AddScoped<Vessel.Application.Credentials.IAccountCredentialReader>(sp =>
+            new DeferredAccountCredentialReader(() => sp.GetRequiredService<Vessel.Application.Credentials.AccountCredentialReader>()));
         services.AddScoped<Vessel.Application.Evidence.IEvidenceMetadataStore, EvidenceStore>();
         services.AddScoped<Vessel.Application.Evidence.EvidenceService>();
         services.AddScoped<Vessel.Application.Plays.IPlayStore, PlayStore>();
@@ -42,4 +50,17 @@ public static class DependencyInjection
         services.AddScoped<Vessel.Application.MarketData.MarketStreamService>();
         return services;
     }
+}
+
+internal sealed class DeferredAccountCredentialReader(Func<Vessel.Application.Credentials.AccountCredentialReader> reader)
+    : Vessel.Application.Credentials.IAccountCredentialReader
+{
+    public Task<string?> ReadAsync(Guid accountId, CancellationToken cancellationToken) =>
+        reader().ReadAsync(accountId, cancellationToken);
+
+    public Task<bool> IsUsableAsync(Vessel.Domain.Accounts.Account account, CancellationToken cancellationToken) =>
+        reader().IsUsableAsync(account, cancellationToken);
+
+    public Task MarkRefusedAsync(Guid accountId, CancellationToken cancellationToken) =>
+        reader().MarkRefusedAsync(accountId, cancellationToken);
 }
