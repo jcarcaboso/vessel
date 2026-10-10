@@ -208,6 +208,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         }} instrument={draft.instrument} instrumentName={instrumentName} venue={account ? venues.name(account.venueId) : null} direction={draft.direction}
         intervals={account ? venues.find(account.venueId)?.intervals : undefined} priceStep={priceStep}
         streamable={account ? venues.can(account.venueId, 'stream') : false}
+        marketContext={account ? venues.can(account.venueId, 'marketContext') : false}
         leverage={leverageOf(draft.leverage)} liquidation={estimatedLiquidation(draft.entries, draft.direction, leverageOf(draft.leverage), maxLeverage, maintenanceMargin)}
         source={account && venues.can(account.venueId, 'candles') && draft.instrumentSource === 'venue' ? { api, accountId: account.id } : null}
         onEntriesChange={entries => planChange({ ...draft, entries })}

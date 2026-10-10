@@ -1,4 +1,5 @@
 import type { ChartDrawing, DrawingKind } from './drawings'
+import type { IndicatorView, PaneLayout } from './indicators'
 
 /** Renderer inputs are independent of plays, journals and execution matching. */
 
@@ -9,6 +10,8 @@ export interface ChartCandle {
   high: number
   low: number
   close: number
+  /** Traded volume as the venue reports it, for the volume pane. */
+  volume: number
 }
 
 /** A horizontal price level supplied by a feature, e.g. a planned entry, stop or target. */
@@ -41,6 +44,10 @@ export interface ChartCallbacks {
   onLevelEdit(id: string, anchor: { x: number; y: number }): void
   /** A click while the price picker is on, with the price under the pointer (magnet applied). */
   onPricePick(price: number): void
+  /** The crosshair's candle time (UTC ms), or null when the pointer leaves the chart. */
+  onCrosshairMove(time: number | null): void
+  /** Indicator panes moved or resized, e.g. after a layout change or a separator drag. */
+  onPaneLayout(panes: PaneLayout[]): void
 }
 
 /** Boundary that keeps the charting library out of feature code. */
@@ -53,6 +60,8 @@ export interface ChartAdapter {
   setDrawingTool(tool: DrawingKind | null, magnet: boolean): void
   /** While on, clicks report a price through `onPricePick` instead of selecting, drawing or panning. */
   setPricePicker(active: boolean): void
+  /** Moving averages on the price pane; volume and RSI in panes below it, added and removed as needed. */
+  setIndicators(view: IndicatorView): void
   /**
    * PNG of the chart as shown, including planned levels and drawings but not the crosshair, with
    * `caption` in a footer. Null until the renderer is ready.

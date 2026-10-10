@@ -3,7 +3,7 @@ import { DrawingController, buildPoints, type DrawingSpace } from './drawingCont
 import { TimeIndex, fibonacciLevels, fibonacciPrice, formatDuration, goldenPocket, isChartDrawing, positionStats, priceRangeStats, snapPrice, type ChartDrawing } from './drawings'
 
 const hour = 3_600_000
-const candles = [0, 1, 2, 3].map(i => ({ time: 1_000 * hour + i * hour, open: 100 + i, high: 105 + i, low: 95 + i, close: 102 + i }))
+const candles = [0, 1, 2, 3].map(i => ({ time: 1_000 * hour + i * hour, open: 100 + i, high: 105 + i, low: 95 + i, close: 102 + i, volume: 10 }))
 
 describe('time index', () => {
   const index = new TimeIndex(candles)

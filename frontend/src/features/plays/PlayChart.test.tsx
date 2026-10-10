@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/system'
 import { createWorkspaceApi, type CandleSeries, type MarketStreamEvent, type WorkspaceApi } from '@/api/workspace'
 import type { ChartDrawing, DrawingKind } from '@/components/chart/drawings'
+import type { IndicatorView } from '@/components/chart/indicators'
 import type { ChartAdapterFactory, ChartCallbacks, ChartCandle, PriceOverlay } from '@/components/chart/types'
 import { accountFixture, candleSeriesFixture, idleMarketStream, marketContextFixture } from '@/test/workspace-fixture'
 import { createEntry, createExit, type DraftEntry } from './draft'
@@ -15,7 +16,7 @@ function fakeAdapter() {
   const state = {
     candles: [] as readonly ChartCandle[], resets: [] as boolean[], overlays: [] as readonly PriceOverlay[], callbacks: null as ChartCallbacks | null,
     created: 0, destroyed: 0, drawings: [] as readonly ChartDrawing[], selectedDrawingId: null as string | null, tool: null as DrawingKind | null, magnet: false,
-    captions: [] as string[], picking: false,
+    captions: [] as string[], picking: false, indicators: null as IndicatorView | null,
   }
   const factory: ChartAdapterFactory = (_container, callbacks) => {
     state.created++
@@ -26,6 +27,7 @@ function fakeAdapter() {
       setDrawings(drawings, selectedId) { state.drawings = drawings; state.selectedDrawingId = selectedId },
       setDrawingTool(tool, magnet) { state.tool = tool; state.magnet = magnet },
       setPricePicker(active) { state.picking = active },
+      setIndicators(view) { state.indicators = view },
       capture(caption) { state.captions.push(caption); return Promise.resolve(new Blob(['png'], { type: 'image/png' })) },
       destroy() { state.destroyed++ },
     }
@@ -77,8 +79,8 @@ describe('Chart panel', () => {
     expect(await screen.findByText(/Updated .* UTC/)).toBeInTheDocument()
     expect(candles).toHaveBeenCalledWith(accountFixture.id, { instrument: 'BTC', interval: '1h' }, expect.any(AbortSignal))
     expect(state.candles).toEqual([
-      { time: 1_790_000_000_000, open: 100.5, high: 102, low: 99.25, close: 101 },
-      { time: 1_790_003_600_000, open: 101, high: 103.75, low: 100, close: 103 },
+      { time: 1_790_000_000_000, open: 100.5, high: 102, low: 99.25, close: 101, volume: 12.5 },
+      { time: 1_790_003_600_000, open: 101, high: 103.75, low: 100, close: 103, volume: 9 },
     ])
     expect(state.resets.at(-1)).toBe(true)
     expect(state.overlays.map(o => [o.label, o.draggable, o.emphasis])).toEqual([['E1', true, 'selected'], ['E1 SL', true, 'selected'], ['E2', true, 'normal']])
@@ -241,6 +243,19 @@ describe('Chart panel market header and timeframes', () => {
     expect(stats).toHaveTextContent('+3.5 / +3.50%')
     expect(stats).toHaveTextContent('42.5 BTC')
     expect(stats).toHaveTextContent('0.0013%')
+  })
+
+  it('does not request or show statistics for a venue without market context', async () => {
+    const marketContext = vi.fn().mockResolvedValue(marketContextFixture)
+    const { factory } = fakeAdapter()
+    render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()} streamable={false} marketContext={false}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture), marketContext), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await screen.findByText(/Updated/)
+    expect(marketContext).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('BTC market statistics')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('keeps the chart usable when statistics fail', async () => {
@@ -843,11 +858,28 @@ describe('Chart captures', () => {
 
     await userEvent.click(button)
     expect(onCapture).toHaveBeenCalledWith(expect.any(Blob), 'BTC · Hyperliquid · 1 hour')
-    expect(state.captions[0]).toMatch(/^BTC · Hyperliquid · 1 hour · \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · Planned levels are not fills$/)
+    expect(state.captions[0]).toMatch(/^BTC · Hyperliquid · 1 hour · \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · EMA 9\/21\/50\/200 · Volume · RSI 14 · Planned levels are not fills$/)
     expect(await screen.findByText(/Capture added to the Evidence tab/)).toHaveAttribute('role', 'status')
 
     await userEvent.click(button)
     expect(await screen.findByRole('alert')).toHaveTextContent('A play can hold at most 50 images.')
+  })
+
+  it('captures from the expanded chart and again after it closes', async () => {
+    const { state, factory } = fakeAdapter()
+    const onCapture = vi.fn<(image: Blob, context: string) => string | null>().mockReturnValue(null)
+    render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()} onCapture={onCapture}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    await userEvent.click(screen.getByRole('button', { name: 'Expand chart' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Capture chart' }))
+    expect(onCapture).toHaveBeenCalledTimes(1)
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Capture chart' }))
+    expect(onCapture).toHaveBeenCalledTimes(2)
+    expect(state.captions).toHaveLength(2)
+    expect(await screen.findByText(/Capture added to the Evidence tab/)).toBeInTheDocument()
   })
 
   it('keeps capture unavailable without market data and says why in its tooltip', async () => {
@@ -895,5 +927,116 @@ describe('Chart captures', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Choose favorite tools' }))
     await userEvent.click(screen.getByRole('button', { name: 'Add Text note to favorites' }))
     expect(favorites()).toContain('Text note')
+  })
+})
+
+describe('Chart indicators', () => {
+  it('offers no restore on a maximized pane that is too short to plot', async () => {
+    localStorage.setItem('vessel.chart.preferences.v1', JSON.stringify({ indicators: { volume: { enabled: true, size: 'maximized' } } }))
+    const list = entries()
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={list} selectedId={list[0]!.id} instrument="BTC" venue="Hyperliquid" onSelect={vi.fn()}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onPaneLayout([
+      { id: 'volume', top: 150, height: 26, left: 0, width: 600, effectiveSize: 'minimized', compacted: true },
+      { id: 'rsi', top: 177, height: 26, left: 0, width: 600, effectiveSize: 'minimized', compacted: true },
+    ]))
+    const volumeBar = screen.getByRole('group', { name: 'Volume pane' })
+    expect(within(volumeBar).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Expand chart', 'Hide Volume'])
+    const rsiBar = screen.getByRole('group', { name: 'RSI 14 pane' })
+    expect(within(rsiBar).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Maximize RSI 14', 'Expand chart', 'Hide RSI 14'])
+  })
+
+  const renderChart = async () => {
+    const list = entries()
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={list} selectedId={list[0]!.id} instrument="BTC" venue="Hyperliquid" onSelect={vi.fn()}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    return state
+  }
+
+  it('shows the default averages, volume and RSI, and hides an average from the chart legend', async () => {
+    const state = await renderChart()
+    expect(state.indicators!.lines.map(line => [line.label, line.color])).toEqual([['EMA 9', '#b388ff'], ['EMA 21', '#4cbb6c'], ['EMA 50', '#f2c94c'], ['EMA 200', '#ef5350']])
+    expect(state.indicators!.volume!.values).toEqual([12.5, 9])
+    expect(state.indicators!.rsi!.label).toBe('RSI 14')
+
+    await userEvent.click(within(screen.getByRole('group', { name: 'Indicators' })).getByRole('button', { name: 'Hide EMA 21' }))
+    expect(state.indicators!.lines.map(line => line.label)).toEqual(['EMA 9', 'EMA 50', 'EMA 200'])
+    expect(screen.getByRole('button', { name: 'Show EMA 21' })).toHaveAttribute('aria-pressed', 'false')
+    expect(JSON.parse(localStorage.getItem('vessel.chart.preferences.v1')!).indicators.emas[1].enabled).toBe(false)
+  })
+
+  it('minimizes, maximizes and hides indicator panes from their bars', async () => {
+    const state = await renderChart()
+    act(() => state.callbacks!.onPaneLayout([
+      { id: 'volume', top: 300, height: 80, left: 0, width: 600, effectiveSize: 'normal', compacted: false },
+      { id: 'rsi', top: 381, height: 100, left: 0, width: 600, effectiveSize: 'normal', compacted: false },
+    ]))
+    const rsiBar = screen.getByRole('group', { name: 'RSI 14 pane' })
+    await userEvent.click(within(rsiBar).getByRole('button', { name: 'Maximize RSI 14' }))
+    expect(state.indicators!.rsi!.size).toBe('maximized')
+    await userEvent.click(within(rsiBar).getByRole('button', { name: 'Restore RSI 14' }))
+    expect(state.indicators!.rsi!.size).toBe('normal')
+
+    const volumeBar = screen.getByRole('group', { name: 'Volume pane' })
+    await userEvent.click(within(volumeBar).getByRole('button', { name: 'Minimize Volume' }))
+    expect(state.indicators!.volume!.size).toBe('minimized')
+    await userEvent.click(within(volumeBar).getByRole('button', { name: 'Hide Volume' }))
+    expect(state.indicators!.volume).toBeNull()
+    // Focus moves to the legend button that brings the pane back.
+    expect(screen.getByRole('button', { name: 'Show Volume pane' })).toHaveFocus()
+    // A hidden pane comes back from the legend with the size it had.
+    await userEvent.click(screen.getByRole('button', { name: 'Show Volume pane' }))
+    expect(state.indicators!.volume!.size).toBe('minimized')
+  })
+
+  it('changes periods and colors in the settings popup and resets them', async () => {
+    const state = await renderChart()
+    await userEvent.click(screen.getByRole('button', { name: 'Indicators' }))
+    const period = screen.getByRole('spinbutton', { name: 'EMA 1 period' })
+    await userEvent.clear(period)
+    await userEvent.type(period, '12{Enter}')
+    expect(state.indicators!.lines[0]!.label).toBe('EMA 12')
+    // Out-of-range periods are not applied.
+    await userEvent.clear(period)
+    await userEvent.type(period, '0{Enter}')
+    expect(period).toHaveValue(12)
+
+    await userEvent.click(screen.getByRole('button', { name: 'EMA 1 color' }))
+    await userEvent.click(screen.getByRole('button', { name: '#4dd0e1' }))
+    expect(state.indicators!.lines[0]!.color).toBe('#4dd0e1')
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Show RSI' }))
+    expect(state.indicators!.rsi).toBeNull()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }))
+    expect(state.indicators!.lines[0]).toMatchObject({ label: 'EMA 9', color: '#b388ff' })
+    expect(state.indicators!.rsi).not.toBeNull()
+  })
+
+  it('marks a pane minimized for lack of room and names it in captures', async () => {
+    const list = entries()
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={list} selectedId={list[0]!.id} instrument="BTC" venue="Hyperliquid" onSelect={vi.fn()} onCapture={vi.fn().mockReturnValue(null)}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onPaneLayout([
+      { id: 'volume', top: 150, height: 26, left: 0, width: 600, effectiveSize: 'minimized', compacted: true },
+      { id: 'rsi', top: 177, height: 72, left: 0, width: 600, effectiveSize: 'normal', compacted: false },
+    ]))
+    const volumeBar = screen.getByRole('group', { name: 'Volume pane' })
+    expect(volumeBar).toHaveTextContent('Too short to plot')
+    // Nothing to minimize or restore; maximize can make room, and hide still works.
+    expect(within(volumeBar).queryByRole('button', { name: /Minimize Volume|Restore Volume/ })).toBeNull()
+    expect(within(volumeBar).getByRole('button', { name: 'Maximize Volume' })).toBeInTheDocument()
+    expect(state.indicators!.volume!.size).toBe('normal')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Capture chart' }))
+    expect(state.captions[0]).toContain('EMA 9/21/50/200 · Volume minimized, not plotted · RSI 14 · Planned levels are not fills')
+    // A larger chart can make room.
+    await userEvent.click(within(volumeBar).getByRole('button', { name: 'Expand chart' }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
   })
 })
