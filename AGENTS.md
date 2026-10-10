@@ -32,6 +32,8 @@ October 7, 2026: the owner authorized Lighter account integration and a pull req
 
 October 9, 2026: the owner approved the portfolio-review proposal and requested implementation with two Sol verifications. Review now follows Plays in the shell and reads authenticated `/api/review`; see `docs/architecture/portfolio-review.md`. It scores saved closed Plays from linked imported executions, with rolling periods, pooled portfolios/accounts/assets, exact decimal strings and explicit coverage. Unassigned fills are not retrospective Plays; that grouping workflow is still absent. Use actual exit times, reject known missing order executions and incomplete fees, do not infer retrospective initial risk, and do not promise funding-free RISEx P&L. The sizing arithmetic/window remains unchanged. The standalone mock proposal is not a production fallback. Production captures use an isolated synthetic database.
 
+October 9, 2026: the owner asked for a Settings page with a theme customizer and built-in dark and light themes. Follow `docs/architecture/appearance-settings.md`: themes change colours and radius only, never layout; the theme builder rolls random readable palettes that the owner can save by name in the browser; component CSS must read theme tokens rather than hard-coded colours; built-in themes must keep passing the contrast test.
+
 ## Project tracking
 
 - Repository: https://github.com/jcarcaboso/vessel

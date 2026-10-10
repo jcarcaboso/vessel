@@ -408,14 +408,14 @@
 .plays-page .direction-icon { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; background: color-mix(in srgb, currentColor 12%, transparent); }
 .plays-page .direction-indicator { width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: 0; }
 .plays-page .direction-option[aria-pressed="true"] .direction-indicator { opacity: 1; }
-.plays-page .chart-placeholder { position: relative; isolation: isolate; background-image: linear-gradient(#39435020 1px, transparent 1px), linear-gradient(90deg, #39435020 1px, transparent 1px); background-size: 48px 48px; }
+.plays-page .chart-placeholder { position: relative; isolation: isolate; background-image: linear-gradient(color-mix(in srgb, var(--border) 13%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--border) 13%, transparent) 1px, transparent 1px); background-size: 48px 48px; }
 .plays-page .chart-placeholder::before { position: absolute; z-index: -1; inset: 0; content: ''; background: radial-gradient(ellipse at center, var(--background) 15%, transparent 75%); }
 .plays-page .chart-placeholder-icon { display: grid; place-items: center; width: 62px; height: 62px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 16px; color: var(--ring); background: var(--card); box-shadow: 0 8px 30px #0002; }
 .plays-page .journal-heading { display: flex; align-items: center; gap: 10px; }
 .plays-page .journal-icon { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 8px; color: var(--ring); background: var(--secondary); }
 .plays-page .journal-draft-label { flex-shrink: 0; white-space: nowrap; color: var(--muted-foreground); font-size: 10px; padding: 4px 7px; border: 1px solid var(--border); border-radius: 5px; }
-.plays-page .leverage-controls input[type="range"]::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border: 2px solid var(--card); border-radius: 50%; background: var(--ring); box-shadow: 0 0 0 3px #b9c9e41a; }
-.plays-page .leverage-controls input[type="range"]::-moz-range-thumb { width: 11px; height: 11px; border: 2px solid var(--card); border-radius: 50%; background: var(--ring); box-shadow: 0 0 0 3px #b9c9e41a; }
+.plays-page .leverage-controls input[type="range"]::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border: 2px solid var(--card); border-radius: 50%; background: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 10%, transparent); }
+.plays-page .leverage-controls input[type="range"]::-moz-range-thumb { width: 11px; height: 11px; border: 2px solid var(--card); border-radius: 50%; background: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 10%, transparent); }
 
 @media (max-width: 1250px) {
   .plays-page .workspace,
@@ -517,7 +517,7 @@
 .plays-page .plays-venue-link:hover { background: var(--accent); }
 .plays-page .plays-venue-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .plays-page .badge[class*="play-status-"] { display: inline-block; padding: 5px 7px; border-radius: 4px; font-size: 9px; font-weight: 650; letter-spacing: .4px; text-transform: uppercase; color: var(--muted-foreground); background: var(--accent); }
-.plays-page .badge.play-status-planned { color: var(--background); background: #b9c9e4; }
+.plays-page .badge.play-status-planned { color: var(--background); background: var(--ring); }
 .plays-page .badge.play-status-paused { color: var(--background); background: var(--warning); }
 .plays-page .badge.play-status-open { color: var(--background); background: var(--positive); }
 .plays-page .badge.play-status-closed { color: var(--foreground); background: var(--border); }
