@@ -25,6 +25,12 @@ public interface IAccountCredentialReader
     /// </summary>
     async Task<bool> IsUsableAsync(Account account, CancellationToken cancellationToken) =>
         await ReadAsync(account.Id, cancellationToken) is not null;
+
+    /// <summary>
+    /// Records that the venue explicitly refused the stored token, so it is no longer read or reported as usable
+    /// until it is verified again. Not for timeouts or outages.
+    /// </summary>
+    Task MarkRefusedAsync(Guid accountId, CancellationToken cancellationToken);
 }
 
 public interface IAccountCredentialStore

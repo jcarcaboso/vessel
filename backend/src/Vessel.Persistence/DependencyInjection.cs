@@ -60,4 +60,7 @@ internal sealed class DeferredAccountCredentialReader(Func<Vessel.Application.Cr
 
     public Task<bool> IsUsableAsync(Vessel.Domain.Accounts.Account account, CancellationToken cancellationToken) =>
         reader().IsUsableAsync(account, cancellationToken);
+
+    public Task MarkRefusedAsync(Guid accountId, CancellationToken cancellationToken) =>
+        reader().MarkRefusedAsync(accountId, cancellationToken);
 }

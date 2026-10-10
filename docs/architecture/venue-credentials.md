@@ -65,7 +65,7 @@ Owner scope and the account lock apply as for other account writes.
 
 ## Operator setup
 
-Use HTTPS for any non-loopback deployment. The browser blocks venue-token entry on plaintext LAN origins. A reverse proxy must terminate TLS before accepting credentials; do not enable request-body logging on credential routes. The HTTP LAN preview is not a place to enter a real token.
+Use HTTPS for any non-loopback deployment. The browser blocks venue-token entry on plaintext LAN origins, and the API rejects token-bearing credential requests (`PUT` save, `POST` name preview) with 403 unless the request is HTTPS or a direct loopback request to a loopback host. Only loopback proxies may set `X-Forwarded-Proto`/`X-Forwarded-For`, so a same-host TLS-terminating proxy is recognised while a remote client cannot claim HTTPS. Metadata reads and removal carry no token and stay available. When a venue explicitly refuses a stored token during a refresh, the credential is marked `refused`: status reports `unavailable`, order tracking stops using it and saving a verified token clears it. Timeouts and outages do not mark it. A reverse proxy must terminate TLS before accepting credentials; do not enable request-body logging on credential routes. The HTTP LAN preview is not a place to enter a real token.
 
 Generate a master key locally with `openssl rand -base64 32`. Do not send it to the browser, put it in a shell argument or commit it. Configure these server-only settings in the ignored root `.env`, a private systemd environment file, or the container's secret configuration:
 

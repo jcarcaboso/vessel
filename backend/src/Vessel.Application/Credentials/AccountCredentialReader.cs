@@ -21,6 +21,20 @@ public sealed class AccountCredentialReader(IWorkspaceStore accounts, IAccountCr
             catch (CredentialStorageException) { return null; }
         }, cancellationToken);
 
+    public const string RefusedError = "refused";
+
+    public Task MarkRefusedAsync(Guid accountId, CancellationToken cancellationToken) =>
+        accounts.WithAccountLockAsync(accountId, async account =>
+        {
+            if (account.OwnerId != owner.OwnerId) throw new WorkspaceException(404, "Account not found.");
+            var credential = await credentials.FindAsync(accountId, account.VenueId + "-read-token", cancellationToken);
+            if (credential is null || credential.LastError is not null) return false;
+            // A fixed application status; the venue response is never persisted.
+            credential.LastError = RefusedError;
+            await credentials.SaveAsync(credential, cancellationToken);
+            return true;
+        }, cancellationToken);
+
     // Play execution status is polled while a play is open. Taking the account row lock here would queue
     // every poll behind a running refresh, and decrypting would expose the token for no reason.
     public async Task<bool> IsUsableAsync(Account account, CancellationToken cancellationToken)

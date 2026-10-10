@@ -83,7 +83,9 @@ public sealed class LighterAdapterTests
     private sealed class Credentials(string? value) : IAccountCredentialReader
     {
         public List<Guid> Reads { get; } = [];
+        public List<Guid> Refused { get; } = [];
         public Task<string?> ReadAsync(Guid accountId, CancellationToken ct) { Reads.Add(accountId); return Task.FromResult(value); }
+        public Task MarkRefusedAsync(Guid accountId, CancellationToken ct) { Refused.Add(accountId); return Task.CompletedTask; }
     }
     private sealed class Handler : HttpMessageHandler
     {
@@ -716,7 +718,10 @@ public sealed class LighterAdapterTests
         var handler = new Handler { Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/trades", StringComparison.Ordinal)
             && (request.Headers.Contains("Authorization") || !publicAccepted)
                 ? Response($$"""{"message":"{{Token}}"}""", HttpStatusCode.Unauthorized) : null };
-        var result = await Reader(handler, new(Token)).ReadAsync(Account(), default);
+        var credentials = new Credentials(Token);
+        var account = Account();
+        var result = await Reader(handler, credentials).ReadAsync(account, default);
+        Assert.Equal([account.Id], credentials.Refused);
         Assert.Equal(1000.0012345678901234m, result.Snapshot.AccountValueUsd);
         Assert.Equal(publicAccepted ? 1 : 0, result.Fills.Count);
         Assert.DoesNotContain(Token, result.HistoryNotice);
@@ -724,6 +729,21 @@ public sealed class LighterAdapterTests
         Assert.Equal(2, history.Length);
         Assert.Equal(Token, history[0].Token);
         Assert.Null(history[1].Token);
+    }
+
+    [Fact]
+    public async Task Refused_limits_token_is_reported_once_and_accepted_token_is_not()
+    {
+        var handler = new Handler { Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/accountLimits", StringComparison.Ordinal)
+            ? Response("""{"code":401}""", HttpStatusCode.Unauthorized) : null };
+        var refused = new Credentials(Token);
+        var account = Account();
+        var result = await Reader(handler, refused).ReadAsync(account, default);
+        Assert.Contains(LighterReader.CredentialRefusedNotice, result.HistoryNotice);
+        Assert.Equal([account.Id], refused.Refused);
+        var accepted = new Credentials(Token);
+        await Reader(new Handler(), accepted).ReadAsync(account, default);
+        Assert.Empty(accepted.Refused);
     }
 
     [Fact]

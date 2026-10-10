@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.HttpOverrides;
 using Vessel.Api;
 using Vessel.Application.Workspace;
 using Vessel.Application.System;
@@ -11,7 +12,13 @@ builder.Services.AddVesselPersistence(builder.Configuration);
 builder.Services.AddOpenApi();
 builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
 
+// Only loopback proxies (the defaults) may report the original scheme and client, so a TLS-terminating
+// proxy on the same host is recognised and a remote client cannot claim HTTPS with a header.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto);
+
 var app = builder.Build();
+app.UseForwardedHeaders();
 // Do not let provider/DB details or development exception pages escape the API.
 app.Use(async (context, next) =>
 {
@@ -49,6 +56,10 @@ app.Use(async (context, next) =>
     if (context.Request.Path.Value?.TrimEnd('/').EndsWith("/credential", StringComparison.OrdinalIgnoreCase) == true)
     {
         context.Response.Headers.CacheControl = "no-store";
+        // The browser blocks token entry on plaintext LAN origins; enforce it here too for other clients.
+        if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsDelete(context.Request.Method) &&
+            !CredentialTransport.IsAllowed(context))
+            throw new WorkspaceException(403, "Credential entry requires HTTPS outside localhost.");
         var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
         if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = 4096;
         if (context.Request.ContentLength > 4096)

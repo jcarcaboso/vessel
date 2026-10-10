@@ -20,6 +20,8 @@ public sealed class LighterLiveTests
     {
         public Task<string?> ReadAsync(Guid accountId, CancellationToken ct) =>
             throw new InvalidOperationException("The public overload must never look up credentials.");
+        public Task MarkRefusedAsync(Guid accountId, CancellationToken ct) =>
+            throw new InvalidOperationException("The public overload must never change credentials.");
     }
 
     [LighterLiveFact]

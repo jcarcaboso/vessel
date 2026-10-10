@@ -24,19 +24,24 @@ public sealed partial class LighterReader
     internal static string FeeNotice(int count) => $"{count} fee-bearing or unverified-fee executions omitted.";
     internal static string SelfTradeNotice(int count) => $"{count} self-trade executions omitted.";
 
-    public Task<PerpetualVenueReadResult> ReadAsync(string sourceId, CancellationToken cancellationToken) =>
-        ReadCoreAsync(Index(sourceId), null, cancellationToken);
+    public async Task<PerpetualVenueReadResult> ReadAsync(string sourceId, CancellationToken cancellationToken) =>
+        (await ReadCoreAsync(Index(sourceId), null, cancellationToken)).Result;
 
     public async Task<PerpetualVenueReadResult> ReadAsync(Account account, CancellationToken cancellationToken)
     {
         var source = Source(account);
         var token = await credentials.ReadAsync(account.Id, cancellationToken);
-        return await ReadCoreAsync(source, token, cancellationToken);
+        var (result, refused) = await ReadCoreAsync(source, token, cancellationToken);
+        // Recorded after the bounded venue read, in the caller's account-lock transaction, so status and
+        // order tracking stop treating the token as usable until the owner verifies or replaces it.
+        if (refused) await credentials.MarkRefusedAsync(account.Id, cancellationToken);
+        return result;
     }
 
-    private Task<PerpetualVenueReadResult> ReadCoreAsync(string source, string? credential, CancellationToken cancellationToken) =>
+    private Task<(PerpetualVenueReadResult Result, bool CredentialRefused)> ReadCoreAsync(string source, string? credential, CancellationToken cancellationToken) =>
         BoundedAsync(async ct =>
         {
+            var refused = false;
             var catalogue = await CatalogueAsync(ct);
             using var account = await AccountAsync(source, ct);
             var snapshot = ReadSnapshot(account.RootElement.GetProperty("accounts")[0], catalogue, timeProvider.GetUtcNow());
@@ -61,6 +66,7 @@ public sealed partial class LighterReader
                 {
                     // A refused or expired optional credential must not block the public snapshot and public fills.
                     credential = null;
+                    refused = true;
                     notices.Add(CredentialRefusedNotice);
                 }
             }
@@ -85,6 +91,7 @@ public sealed partial class LighterReader
                         catch (LighterAuthenticationException) when (credential is not null)
                         {
                             credential = null;
+                            refused = true;
                             feeFreeTier = false;
                             notices.Add(HistoryRetryNotice);
                             trades = await GetAsync(query, ct);
@@ -113,8 +120,8 @@ public sealed partial class LighterReader
             if (missingPnl > 0) notices.Add(MissingPnlNotice(missingPnl));
             if (fees > 0) notices.Add(FeeNotice(fees));
             if (selfTrades > 0) notices.Add(SelfTradeNotice(selfTrades));
-            return new PerpetualVenueReadResult(snapshot,
-                catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument!).ToArray(), fills, string.Join(" ", notices));
+            return (new PerpetualVenueReadResult(snapshot,
+                catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument!).ToArray(), fills, string.Join(" ", notices)), refused);
         }, cancellationToken);
 
     internal static VenueSnapshot ReadSnapshot(JsonElement account, Catalogue catalogue, DateTimeOffset observed)
