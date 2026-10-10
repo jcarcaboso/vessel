@@ -348,7 +348,7 @@ public sealed class LighterAdapterTests
     public async Task Names_reject_foreign_wallet_nonmaster_all_scope_and_non_read_only_tokens(string token)
     {
         var handler = new Handler();
-        await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).DiscoverAsync(Address, token, default));
+        await Assert.ThrowsAsync<VenueCredentialRejectedException>(() => Reader(handler).DiscoverAsync(Address, token, default));
         Assert.DoesNotContain(handler.Requests, r => r.Token is not null);
     }
 

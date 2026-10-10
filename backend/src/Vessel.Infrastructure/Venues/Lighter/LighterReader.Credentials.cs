@@ -98,11 +98,14 @@ public sealed partial class LighterReader
         BoundedAsync<IReadOnlyList<VenueAccountCandidate>>(async ct =>
         {
             var wallet = Address(address);
-            var parsed = Token(token);
+            ReadToken parsed;
+            // Malformed or expired input is the owner's to fix, not a venue failure.
+            try { parsed = Token(token); }
+            catch (Exception ex) when (ex is VenueReadException or LighterAuthenticationException) { throw new VenueCredentialRejectedException(); }
             var accounts = await DiscoverCoreAsync(wallet, ct);
             if (!accounts.Any(a => a.SourceId == parsed.Index) ||
                 parsed.Scope == "all" && accounts[0].SourceId != parsed.Index)
-                throw new VenueReadException("The read-only token belongs to a different wallet or main account.");
+                throw new VenueCredentialRejectedException();
             var names = new Dictionary<string, string>(StringComparer.Ordinal);
             var ids = accounts.Select(a => a.SourceId).ToHashSet(StringComparer.Ordinal);
             var cursors = new HashSet<string>(StringComparer.Ordinal);

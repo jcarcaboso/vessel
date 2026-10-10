@@ -153,6 +153,20 @@ public sealed class AccountSecurityApiTests
     }
 
     [Fact]
+    public async Task Name_preview_with_an_unusable_token_is_the_owners_error_not_a_venue_outage()
+    {
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
+        using var vault = new AesGcmCredentialVault(new());
+        await using var factory = Factory(owner, store, new(), vault,
+            discovery: new SecurityDiscovery([]) { Error = new VenueCredentialRejectedException() });
+        using var client = factory.AuthorizedClient();
+        using var response = await client.PostAsJsonAsync($"/api/venues/{SecurityFixture.Venue.Id}/accounts/credential",
+            new { address = SecurityFixture.Address, token = "not-read-only" });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("not valid for this wallet", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task Name_preview_refusals_and_bad_bodies_never_echo_tokens_to_responses_or_logs()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);

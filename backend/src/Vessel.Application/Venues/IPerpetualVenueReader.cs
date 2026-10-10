@@ -93,3 +93,6 @@ public sealed record PerpetualVenueReadResult(
     string HistoryNotice);
 
 public sealed class VenueReadException(string message) : Exception(message);
+
+/// <summary>The owner's credential input is unusable (format, expiry or wrong wallet); not a venue outage.</summary>
+public sealed class VenueCredentialRejectedException() : Exception("The read-only token is not valid for this wallet.");

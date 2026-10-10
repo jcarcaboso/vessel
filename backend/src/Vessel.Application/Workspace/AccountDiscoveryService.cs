@@ -49,6 +49,10 @@ public sealed class AccountDiscoveryService(IWorkspaceStore accounts, IJournalOw
                 throw new VenueReadException("Invalid discovery response.");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (VenueCredentialRejectedException) when (token is not null)
+        {
+            throw new WorkspaceException(400, "The read-only token is not valid for this wallet. Check its format, wallet, scope and expiry.");
+        }
         catch (Exception) { throw new WorkspaceException(502, token is null
             ? "Venue accounts could not be discovered. Try again later."
             : "Venue names could not be loaded. Check the read-only token's wallet, scope and expiry."); }
