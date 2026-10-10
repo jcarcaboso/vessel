@@ -20,10 +20,12 @@ This repository contains the approved Graphite prototype and the React/Vite/Type
 - [Account and portfolio management](docs/architecture/account-management-state.md)
 - [Hyperliquid stablecoin wallet](docs/architecture/stablecoin-wallet.md)
 - [First-part PR review safeguards](docs/architecture/pr-review-fixes.md)
+- [Venue credentials](docs/architecture/venue-credentials.md) and [Lighter integration state](docs/architecture/lighter-state.md)
+- [Play lifecycle](docs/architecture/play-lifecycle.md), [chart plan](docs/architecture/chart-plan.md) and [portfolio review](docs/architecture/portfolio-review.md)
 
 The owner authorized foundation scaffolding after confirming perpetuals-first across venues and multiple active plays on the same account/instrument. Frontend and backend work were delegated to separate Sol agents. The confirmed MVP remains self-hosted and single-user with token access, Hyperliquid first and Lighter next, manual accounts, optional history import and in-page notifications.
 
-The app implements protected portfolio/account APIs, exact manual values, latest snapshots and retained fills, a primary Hyperliquid perp reader, explicit migrations and owner isolation. Navigation covers Overview, Plays, Portfolios, Accounts, Activity and Settings. Plays now has an editable in-memory draft workspace with the approved layout and a chart placeholder. Saved Plays, financial calculations, complete backfills, jobs, images, notifications and chart rendering remain later work. The approved prototype is unchanged.
+The app implements protected portfolio/account APIs, exact manual values, latest snapshots and retained fills, read-only Hyperliquid, RISEx and Lighter venue modules (Lighter order tracking through an encrypted read-only token), explicit migrations and owner isolation. Navigation covers Overview, Plays, Review, Portfolios, Accounts, Activity and Settings. Plays are saved with revisions and lifecycle status, link imported orders and fills, and carry venue candle charts with drawings and indicators plus evidence images. Review scores closed Plays from linked executions. Complete backfills, background jobs and notification delivery remain later work. The approved prototype is unchanged.
 
 Portfolios and accounts support rename/delete. Accounts can be moved, unlinked to the virtual unassigned group, or disabled without deleting imported data. Unassigned records appear only in All accounts, not a default tile. Portfolio deletion unlinks accounts; account deletion explicitly removes retained facts and is blocked when a Play references the account.
 

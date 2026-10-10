@@ -58,6 +58,7 @@ public static class DependencyInjection
         services.AddVesselCredentials(config);
         services.AddHttpContextAccessor();
         services.AddScoped<IJournalOwnerContext, HttpJournalOwnerContext>();
+        services.AddSingleton<AuthFailureLimiter>();
         services.AddAuthentication(BearerTokenHandler.SchemeName)
             .AddScheme<AuthenticationSchemeOptions, BearerTokenHandler>(BearerTokenHandler.SchemeName, _ => { });
         services.AddAuthorization(options =>

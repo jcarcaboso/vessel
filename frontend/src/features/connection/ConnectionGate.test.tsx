@@ -35,6 +35,16 @@ describe('runtime connection gate', () => {
     expect(screen.queryByText('Connected to Vessel')).not.toBeInTheDocument()
   })
 
+  it('explains a temporary lockout after too many wrong tokens', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 429, headers: { 'Retry-After': '600' } })))
+    renderGate()
+    await user.type(screen.getByLabelText('API token'), 'guess')
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Too many wrong tokens from this device')
+    expect(screen.getByLabelText('API token')).toHaveValue('')
+  })
+
   it('shows wrong-token errors, clears the rejected token and allows retry', async () => {
     const user = userEvent.setup()
     const request = vi.fn().mockResolvedValueOnce(new Response(null, { status: 401 }))
