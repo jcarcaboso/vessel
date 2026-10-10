@@ -22,17 +22,18 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 var app = builder.Build();
 app.UseForwardedHeaders();
 // Every response is API data or an image; none should be framed, sniffed or leak the page as a referrer.
+// Applied when the response starts, so error responses rebuilt after Response.Clear() carry them too.
 app.Use((context, next) =>
 {
-    var headers = context.Response.Headers;
-    headers.XContentTypeOptions = "nosniff";
-    headers.XFrameOptions = "DENY";
-    headers["Referrer-Policy"] = "no-referrer";
     context.Response.OnStarting(() =>
     {
+        var headers = context.Response.Headers;
+        headers.XContentTypeOptions = "nosniff";
+        headers.XFrameOptions = "DENY";
+        headers["Referrer-Policy"] = "no-referrer";
         // Owner data must not linger in browser or proxy caches; endpoints may set a stricter policy.
-        if (context.Request.Path.StartsWithSegments("/api") && !context.Response.Headers.ContainsKey("Cache-Control"))
-            context.Response.Headers.CacheControl = "no-store";
+        if (context.Request.Path.StartsWithSegments("/api") && !headers.ContainsKey("Cache-Control"))
+            headers.CacheControl = "no-store";
         return Task.CompletedTask;
     });
     return next(context);

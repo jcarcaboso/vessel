@@ -68,6 +68,36 @@ public sealed class ProductionHardeningTests
     }
 
     [Fact]
+    public async Task Error_responses_keep_the_security_headers()
+    {
+        await using var factory = new CoreApiFactory(Guid.NewGuid(), new MemoryWorkspaceStore(Guid.NewGuid()));
+        using var client = factory.AuthorizedClient();
+        using var response = await client.PostAsync("/api/portfolios", new StringContent("{\"name\":", System.Text.Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Equal("DENY", response.Headers.GetValues("X-Frame-Options").Single());
+        Assert.Equal("no-referrer", response.Headers.GetValues("Referrer-Policy").Single());
+        Assert.True(response.Headers.CacheControl!.NoStore);
+    }
+
+    [Fact]
+    public async Task Limiter_pruning_is_safe_under_concurrent_failures_and_stays_bounded()
+    {
+        var limiter = new Vessel.Infrastructure.Auth.AuthFailureLimiter(TimeProvider.System);
+        var total = Vessel.Infrastructure.Auth.AuthFailureLimiter.MaxTracked * 3;
+        await Task.WhenAll(Enumerable.Range(0, 32).Select(worker => Task.Run(() =>
+        {
+            for (var i = worker; i < total; i += 32)
+            {
+                var address = new IPAddress(BitConverter.GetBytes(0x0A000000 + i));
+                limiter.RecordFailure(address);
+                _ = limiter.Blocked(address);
+            }
+        })));
+        Assert.InRange(limiter.Tracked, 1, Vessel.Infrastructure.Auth.AuthFailureLimiter.MaxTracked + 64);
+    }
+
+    [Fact]
     public async Task Readiness_is_anonymous_and_reports_unavailable_without_a_database()
     {
         await using var factory = new CoreApiFactory(Guid.NewGuid());

@@ -12,7 +12,7 @@ public sealed class AuthFailureLimiter(TimeProvider time)
 {
     public const int MaxFailures = 20;
     public static readonly TimeSpan Window = TimeSpan.FromMinutes(10);
-    private const int MaxTracked = 10_000;
+    internal const int MaxTracked = 10_000;
     private readonly ConcurrentDictionary<string, Entry> entries = new(StringComparer.Ordinal);
 
     private sealed record Entry(DateTimeOffset Start, int Failures);
@@ -25,6 +25,8 @@ public sealed class AuthFailureLimiter(TimeProvider time)
         return entry.Failures >= MaxFailures && remaining > TimeSpan.Zero ? remaining : null;
     }
 
+    internal int Tracked => entries.Count;
+
     public void RecordFailure(IPAddress? address)
     {
         var now = time.GetUtcNow();
@@ -35,11 +37,13 @@ public sealed class AuthFailureLimiter(TimeProvider time)
 
     private void Prune(DateTimeOffset now)
     {
-        foreach (var (key, entry) in entries)
+        // ToArray is the dictionary's own atomic snapshot; LINQ over the live dictionary is not safe under writes.
+        var snapshot = entries.ToArray();
+        foreach (var (key, entry) in snapshot)
             if (entry.Start + Window <= now) entries.TryRemove(key, out _);
         // Still full of live entries: forget the oldest windows rather than grow without bound.
         if (entries.Count >= MaxTracked)
-            foreach (var key in entries.OrderBy(e => e.Value.Start).Take(MaxTracked / 10).Select(e => e.Key).ToList())
+            foreach (var (key, _) in snapshot.OrderBy(e => e.Value.Start).Take(MaxTracked / 10))
                 entries.TryRemove(key, out _);
     }
 
