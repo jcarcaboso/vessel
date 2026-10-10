@@ -29,18 +29,16 @@ public sealed class BearerTokenHandler(
             string.IsNullOrEmpty(header.Parameter))
             return Task.FromResult(AuthenticateResult.NoResult());
 
-        if (limiter.Blocked(Context.Connection.RemoteIpAddress) is { } wait)
-        {
-            Context.Items[RetryAfterKey] = wait;
-            return Task.FromResult(AuthenticateResult.Fail("Too many failed attempts."));
-        }
-
         // Hash both values to compare fixed-size buffers without leaking token length.
         var supplied = SHA256.HashData(Encoding.UTF8.GetBytes(header.Parameter));
         var expected = SHA256.HashData(Encoding.UTF8.GetBytes(settings.Token));
         if (!CryptographicOperations.FixedTimeEquals(supplied, expected))
         {
-            limiter.RecordFailure(Context.Connection.RemoteIpAddress);
+            // The right token always works, so a shared or unforwarded proxy address cannot be used to lock the
+            // owner out; repeated wrong tokens are answered with 429 to slow guessing and flag the client.
+            var address = Context.Connection.RemoteIpAddress;
+            if (limiter.Blocked(address) is { } wait) Context.Items[RetryAfterKey] = wait;
+            else limiter.RecordFailure(address);
             return Task.FromResult(AuthenticateResult.Fail("Invalid bearer credentials."));
         }
 

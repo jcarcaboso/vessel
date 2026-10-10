@@ -27,7 +27,7 @@ public sealed class ProductionHardeningTests
     }
 
     [Fact]
-    public async Task Repeated_wrong_tokens_lock_out_the_client_with_retry_after()
+    public async Task Repeated_wrong_tokens_get_429_with_retry_after_but_the_right_token_still_works()
     {
         await using var factory = new CoreApiFactory(Guid.NewGuid());
         using var wrong = factory.CreateClient();
@@ -37,9 +37,10 @@ public sealed class ProductionHardeningTests
         using var locked = await wrong.GetAsync("/api/system");
         Assert.Equal(HttpStatusCode.TooManyRequests, locked.StatusCode);
         Assert.True(locked.Headers.RetryAfter?.Delta > TimeSpan.Zero);
-        // The right token from the same client waits too, so guessing cannot continue in parallel.
+        // The right token still works, so wrong guesses through a shared address cannot lock the owner out.
         using var right = factory.AuthorizedClient();
-        Assert.Equal(HttpStatusCode.TooManyRequests, (await right.GetAsync("/api/system")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await right.GetAsync("/api/system")).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await wrong.GetAsync("/api/system")).StatusCode);
     }
 
     [Fact]

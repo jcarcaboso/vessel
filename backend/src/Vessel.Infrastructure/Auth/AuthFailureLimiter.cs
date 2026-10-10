@@ -4,8 +4,9 @@ using System.Net;
 namespace Vessel.Infrastructure.Auth;
 
 /// <summary>
-/// Bounds wrong-token guessing per client address. After <see cref="MaxFailures"/> wrong tokens within
-/// <see cref="Window"/>, that address is refused until the window ends, even with the right token.
+/// Tracks wrong tokens per client address. After <see cref="MaxFailures"/> within <see cref="Window"/>, further
+/// wrong tokens from that address are answered with 429 until the window ends. The configured token is a
+/// generated 32+ character secret, so this slows and flags guessing rather than being the only defence.
 /// </summary>
 public sealed class AuthFailureLimiter(TimeProvider time)
 {

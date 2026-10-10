@@ -111,7 +111,7 @@ export async function getSystem(token: string): Promise<SystemInfo> {
     throw new ApiError('unauthorized', 'The API rejected this token. Check the configured server token and try again.', response.status)
   }
   if (response.status === 429) {
-    throw new ApiError('unauthorized', 'Too many wrong tokens from this device. Wait a few minutes, then try again.', response.status)
+    throw new ApiError('unauthorized', 'Too many wrong tokens from this device. Check the configured server token; wrong tokens are refused for a few minutes.', response.status)
   }
   if (response.status >= 500) {
     throw new ApiError('unavailable', 'Vessel API is unavailable. Check the server configuration and try again.', response.status)
