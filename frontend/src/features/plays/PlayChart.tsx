@@ -63,6 +63,8 @@ interface ChartPanelProps {
   priceStep?: number | null
   /** False for venues without a live stream: the chart refreshes on request only. */
   streamable?: boolean
+  /** False for venues without market context: the header statistics are not requested. */
+  marketContext?: boolean
 }
 
 const noDrawings: readonly ChartDrawing[] = []
@@ -78,7 +80,7 @@ const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute:
 
 export function ChartPanel({ entries, selectedId, onSelect, instrument, instrumentName = instrument, venue = null, direction = 'long', leverage = 1, liquidation = null,
   editable = true, source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, onCapture, onShowEvidence, createAdapter,
-  intervals = candleIntervals, priceStep = null, streamable = true }: ChartPanelProps) {
+  intervals = candleIntervals, priceStep = null, streamable = true, marketContext = true }: ChartPanelProps) {
   const [view, setView] = useState<ChartView>('aggregate')
   const [planTool, setPlanTool] = useState<PlanTool | null>(null)
   const [preferences, setPreferences] = useChartPreferences()
@@ -267,7 +269,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
       instrumentName={instrumentName} caption={`${instrumentName} · ${venue ? `${venue} ` : ''}trade candles`} venue={venue} onCapture={onCapture} onShowEvidence={onShowEvidence}
       timeframes={<TimeframeBar value={interval} favorites={preferences.favorites} available={intervals}
         onChange={next => setPreferences({ interval: next })} onFavoritesChange={favorites => setPreferences({ favorites })} />}
-      liveUpdates={preferences.live && streamable} streamable={streamable} onLiveUpdatesChange={on => setPreferences({ live: on })}
+      liveUpdates={preferences.live && streamable} streamable={streamable} marketContext={marketContext} onLiveUpdatesChange={on => setPreferences({ live: on })}
       viewMenu={<>{favoriteTools}<ChartToolbarDivider />{indicatorMenu}</>} rail={rail} drawingBar={<>{drawingBar}{levelEditor}</>} drawingProps={drawingProps} overlays={overlays} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}
       onExpandedChange={setExpanded} onDialogClosed={() => expandButton.current?.focus({ preventScroll: true })} />
       : <>
@@ -300,7 +302,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   </section>
 }
 
-function LiveChart({ source, instrument, instrumentName, interval, caption, venue, onCapture, onShowEvidence, liveUpdates, streamable, onLiveUpdatesChange, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
+function LiveChart({ source, instrument, instrumentName, interval, caption, venue, onCapture, onShowEvidence, liveUpdates, streamable, onLiveUpdatesChange, marketContext, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
   source: ChartSource
   instrument: string
   instrumentName: string
@@ -311,6 +313,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
   onShowEvidence?: (() => void) | undefined
   liveUpdates: boolean
   streamable: boolean
+  marketContext: boolean
   onLiveUpdatesChange: (on: boolean) => void
   timeframes: ReactNode
   viewMenu: ReactNode
@@ -325,14 +328,17 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
   onDialogClosed: () => void
 }) {
   const data = useCandles({ ...source, instrument, interval })
-  const market = useMarketContext(source.api, source.accountId, instrument)
+  const market = useMarketContext(source.api, source.accountId, instrument, marketContext)
   const refresh = () => { data.refresh(); market.refresh() }
   // One stream per chart; the expanded dialog renders from the same state.
   const live = useLiveMarket({
     api: source.api, accountId: source.accountId, instrument, interval, enabled: liveUpdates, ready: data.status === 'ready',
     onCandle: data.upsert, onContext: market.apply, refreshCandles: data.refresh, refreshContext: market.refresh,
   })
-  const chart = useRef<CandleChartControl>(null)
+  // The inline and expanded charts each own a control: closing the dialog unmounts its chart after the
+  // inline one has remounted, and a shared ref would then be cleared under the visible chart.
+  const inlineChart = useRef<CandleChartControl>(null)
+  const dialogChart = useRef<CandleChartControl>(null)
   const [capture, setCapture] = useState<{ busy: boolean; message: string; failed: boolean }>({ busy: false, message: '', failed: false })
   useEffect(() => {
     if (!capture.message) return
@@ -349,7 +355,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
     let image: Blob | null
     try {
       // The canvas has no legend, so the caption names the indicators as shown.
-      const control = chart.current
+      const control = expanded ? dialogChart.current : inlineChart.current
       image = control ? await control.capture([context, `${now.toISOString().slice(0, 16).replace('T', ' ')} UTC`, control.indicatorSummary(), 'Planned levels are not fills']
         .filter(Boolean).join(' · ')) : null
     } catch {
@@ -375,7 +381,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
     { label: 'Funding', hint: '1h', value: described?.funding ?? '—' },
   ]
   // The instrument is already chosen and shown in the play fields, so the header carries statistics only.
-  const header = <ChartHeader stats={stats} statsLabel={`${instrument} market statistics`}
+  const header = marketContext && <ChartHeader stats={stats} statsLabel={`${instrument} market statistics`}
     notice={market.error && <p className="chart-header-error" role="alert">{market.error}</p>} />
   const status = data.status === 'loading' ? 'Loading candles…'
     : data.refreshing ? 'Refreshing…'
@@ -399,7 +405,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
     {viewMenu}
   </ChartToolbar>
   const chartProps = {
-    candles: data.candles, overlays, viewKey: `${instrument}|${interval}`, controlRef: chart,
+    candles: data.candles, overlays, viewKey: `${instrument}|${interval}`,
     label: `${instrument} ${intervalName(interval)} trade candles with planned levels. Edit levels in the entry editor.`,
     onNeedOlder: data.loadOlder,
     ...drawingProps,
@@ -408,7 +414,8 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
   const stage = (testId: string) => <div className="chart-stage">
     {rail}
     <div className="chart-body" data-testid={testId}>
-      <CandleChart {...chartProps} {...(testId === 'chart-body' ? { onExpand: () => onExpandedChange(true) } : {})} />
+      <CandleChart {...chartProps} controlRef={testId === 'chart-body' ? inlineChart : dialogChart}
+        {...(testId === 'chart-body' ? { onExpand: () => onExpandedChange(true) } : {})} />
       {drawingBar}
       {data.status === 'loading' && <p className="chart-state">Loading {instrument} candles…</p>}
       {data.status === 'error' && <div className="chart-state" role="alert"><p>{data.error}</p><Button type="button" size="sm" variant="outline" onClick={data.refresh}>Try again</Button></div>}

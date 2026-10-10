@@ -245,6 +245,19 @@ describe('Chart panel market header and timeframes', () => {
     expect(stats).toHaveTextContent('0.0013%')
   })
 
+  it('does not request or show statistics for a venue without market context', async () => {
+    const marketContext = vi.fn().mockResolvedValue(marketContextFixture)
+    const { factory } = fakeAdapter()
+    render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()} streamable={false} marketContext={false}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture), marketContext), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await screen.findByText(/Updated/)
+    expect(marketContext).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('BTC market statistics')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('keeps the chart usable when statistics fail', async () => {
     render4(vi.fn().mockRejectedValue(new ApiError('http', 'Venue market statistics are unavailable.', 502)))
     expect(await screen.findByRole('alert')).toHaveTextContent('Venue market statistics are unavailable.')
@@ -850,6 +863,23 @@ describe('Chart captures', () => {
 
     await userEvent.click(button)
     expect(await screen.findByRole('alert')).toHaveTextContent('A play can hold at most 50 images.')
+  })
+
+  it('captures from the expanded chart and again after it closes', async () => {
+    const { state, factory } = fakeAdapter()
+    const onCapture = vi.fn<(image: Blob, context: string) => string | null>().mockReturnValue(null)
+    render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()} onCapture={onCapture}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    await userEvent.click(screen.getByRole('button', { name: 'Expand chart' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Capture chart' }))
+    expect(onCapture).toHaveBeenCalledTimes(1)
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Capture chart' }))
+    expect(onCapture).toHaveBeenCalledTimes(2)
+    expect(state.captions).toHaveLength(2)
+    expect(await screen.findByText(/Capture added to the Evidence tab/)).toBeInTheDocument()
   })
 
   it('keeps capture unavailable without market data and says why in its tooltip', async () => {

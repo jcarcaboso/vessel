@@ -616,6 +616,14 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     const rect = container.getBoundingClientRect()
     return { x: event.clientX - rect.left, y: event.clientY - rect.top }
   }
+  // A gesture that started on the price pane stays on it: Volume and RSI coordinates are not prices.
+  const pricePane = (event: PointerEvent) => {
+    const { x, y } = pane(event)
+    return {
+      x: Math.min(Math.max(x, 0), chart.timeScale().width()),
+      y: Math.min(Math.max(y, 0), chart.paneSize(0).height),
+    }
+  }
   const lockChart = (locked: boolean) => chart.applyOptions({ handleScroll: !locked, handleScale: !locked })
   const consume = (event: PointerEvent) => { event.preventDefault(); event.stopPropagation() }
   const onPointerDown = (event: PointerEvent) => {
@@ -662,13 +670,13 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   const onPointerMove = (event: PointerEvent) => {
     if (guiding) drawings.setGuide(pane(event).x)
     if (drawings.busy) {
-      const { x, y } = pane(event)
+      const { x, y } = pricePane(event)
       if (drawings.pointerMove(x, y)) consume(event)
       return
     }
     if (!drag || event.pointerId !== drag.pointerId) return
     consume(event)
-    const price = series.coordinateToPrice(pane(event).y)
+    const price = series.coordinateToPrice(pricePane(event).y)
     if (price === null || !Number.isFinite(price) || price <= 0) return
     drag.price = price
     drag.moved = true
@@ -679,7 +687,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       event.stopPropagation()
       drawingPointer = null
       container.releasePointerCapture?.(event.pointerId)
-      const { x, y } = pane(event)
+      const { x, y } = pricePane(event)
       if (event.type === 'pointercancel') drawings.cancel()
       else drawings.pointerUp(x, y)
       // A two-click creation keeps panning off until the second click.
