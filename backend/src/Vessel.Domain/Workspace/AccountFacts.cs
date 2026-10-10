@@ -1,5 +1,31 @@
 namespace Vessel.Domain.Workspace;
 
+/// <summary>
+/// Vessel's own words for execution facts. Venue adapters translate into them, so matching, lifecycle and
+/// results never read a venue's encoding. The venue's own wording stays beside them for display.
+/// </summary>
+public static class ExecutionFacts
+{
+    public const string Buy = "buy", Sell = "sell";
+
+    /// <summary>What a fill did to the position: opened or increased it, reduced or closed it, or flipped it.</summary>
+    public const string Open = "open", Close = "close", Flip = "flip", Unknown = "unknown";
+
+    /// <summary>The fee is the venue's reported amount, or zero because the account tier trades fee-free.</summary>
+    public const string FeeReported = "reported", FeeStandardAccountFree = "standard-account-free";
+
+    /// <summary>Closed PnL before fees (the fee is reported separately) or with the fee already taken off.</summary>
+    public const string PnlGross = "gross", PnlNetOfFee = "net-of-fee";
+
+    public static bool IsSide(string? value) => value is Buy or Sell;
+    public static bool IsEffect(string? value) => value is Open or Close or Flip or Unknown;
+    public static bool IsFeeBasis(string? value) => value is FeeReported or FeeStandardAccountFree;
+    public static bool IsPnlBasis(string? value) => value is PnlGross or PnlNetOfFee;
+
+    /// <summary>The fill reduced, closed or flipped a position.</summary>
+    public static bool Closes(string effect) => effect is Close or Flip;
+}
+
 // Only the latest coherent observation is retained. Unknown balances remain null.
 public sealed class AccountSnapshot
 {
@@ -34,6 +60,7 @@ public sealed class AccountPosition
     public Guid OwnerId { get; set; }
     public Guid AccountId { get; set; }
     public string ContractId { get; set; } = null!;
+    public string? VenueContractId { get; set; }
     public decimal SignedQuantity { get; set; }
     public decimal EntryPrice { get; set; }
     public decimal UnrealizedPnlUsd { get; set; }
@@ -46,15 +73,23 @@ public sealed class ImportedFill
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }
     public Guid AccountId { get; set; }
+    /// <summary>Vessel's instrument key.</summary>
     public string ContractId { get; set; } = null!;
+    /// <summary>The venue's own identifier when it differs from the key, e.g. a numeric market ID.</summary>
+    public string? VenueContractId { get; set; }
     public string SourceFillId { get; set; } = null!;
+    /// <summary><see cref="ExecutionFacts.Buy"/> or <see cref="ExecutionFacts.Sell"/>.</summary>
     public string Side { get; set; } = null!;
+    /// <summary>The venue's own wording, for display.</summary>
     public string Direction { get; set; } = null!;
+    public string PositionEffect { get; set; } = ExecutionFacts.Unknown;
     public decimal Price { get; set; }
     public decimal Quantity { get; set; }
     public decimal Fee { get; set; }
     public string FeeToken { get; set; } = null!;
+    public string FeeBasis { get; set; } = ExecutionFacts.FeeReported;
     public decimal ClosedPnlUsd { get; set; }
+    public string PnlBasis { get; set; } = ExecutionFacts.PnlGross;
     public DateTimeOffset OccurredAtUtc { get; set; }
     public string OrderId { get; set; } = null!;
     public string TransactionHash { get; set; } = null!;
@@ -66,8 +101,12 @@ public sealed class ImportedOrder
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }
     public Guid AccountId { get; set; }
+    /// <summary>Vessel's instrument key.</summary>
     public string ContractId { get; set; } = null!;
+    /// <summary>The venue's own identifier when it differs from the key, e.g. a numeric market ID.</summary>
+    public string? VenueContractId { get; set; }
     public string OrderId { get; set; } = null!;
+    /// <summary><see cref="ExecutionFacts.Buy"/> or <see cref="ExecutionFacts.Sell"/>.</summary>
     public string Side { get; set; } = null!;
     public string OrderType { get; set; } = null!;
     public decimal LimitPrice { get; set; }

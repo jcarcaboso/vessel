@@ -1,5 +1,6 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react'
-import { NotebookPen, Pencil } from 'lucide-react'
+import { useVenues } from '@/api/venues'
+import { NotebookPen, Pencil, Plus, RotateCcw } from 'lucide-react'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,59 +8,69 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { money } from '../workspace/format'
 import type { DraftEvidence, PlayDraft } from './draft'
 import { EvidencePanel } from './EvidencePanel'
-import { averageEntryPrice, formatDraggedPrice } from './levels'
+import { averageEntryPrice, formatDraggedPrice, leverageOf } from './levels'
+import { defaultSizeUnits, formatMoney, formatQuantity, positionSize, type SizeUnits } from './sizing'
 import './plays-workspace.css'
 
 const displayMoney = (value: string | null | undefined) => value == null ? 'Unavailable' : money(value)
 // Placeholder values stay readable but recede, so real figures carry the visual weight.
-const isPlaceholder = (value: string) => ['Unavailable', 'Not calculated', 'Not chosen', 'Not set'].includes(value)
+const isPlaceholder = (value: string) => ['Unavailable', 'Not calculated', 'Not chosen', 'Not set', 'Needs a size', 'Needs an entry price'].includes(value)
 
-export function AvailableBudget({ draft, onChange }: {
+/**
+ * The play's budget: a manual amount when set, otherwise what the account has available. Without
+ * either, only a "Set budget" action shows.
+ */
+export function AvailableBudget({ draft, onChange, available = null }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
+  /** The account's available wallet amount in nominal USD, or null when unknown. */
+  available?: string | null
 }) {
   const [editing, setEditing] = useState(false)
   const [budget, setBudget] = useState('')
   const [error, setError] = useState('')
   const id = useId()
+  const manual = draft.budgetOverride
+  // An empty wallet is not a budget; the owner sets one instead.
+  const usable = available != null && Number(available) > 0 ? available : null
+  const value = manual ?? usable
 
   function saveBudget(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const value = budget.trim()
-    if (value && !/^\d+(\.\d+)?$/.test(value)) {
-      setError('Enter a non-negative USD amount, or leave blank to remove the override.')
+    const text = budget.trim()
+    if (text && !/^\d+(\.\d+)?$/.test(text)) {
+      setError('Enter a non-negative USD amount, or leave it blank to use the available amount.')
       return
     }
-    onChange({ ...draft, budgetOverride: value || null })
+    onChange({ ...draft, budgetOverride: text || null })
     setEditing(false)
     setError('')
   }
+  const edit = () => { setBudget(manual ?? ''); setError(''); setEditing(true) }
 
-  return <div className="available-budget">
-    <label htmlFor={`${id}-budget`}><span>Available budget</span>{' '}<small>Nominal USD</small></label>
-    {editing ? <form onSubmit={saveBudget} noValidate>
-      <Input id={`${id}-budget`} inputMode="decimal" autoFocus value={budget} maxLength={100}
-        aria-invalid={!!error} aria-describedby={`${id}-budget-help${error ? ` ${id}-budget-error` : ''}`}
-        onChange={(event) => { setBudget(event.target.value); setError('') }} />
-      <p id={`${id}-budget-help`} className="muted">Local override only. Leave blank to remove it.</p>
-      {error && <p id={`${id}-budget-error`} className="error" role="alert">{error}</p>}
-      <div className="budget-actions">
-        <Button type="submit" size="sm">Save budget</Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => { setEditing(false); setError('') }}>Cancel</Button>
-      </div>
-    </form> : <>
-      <div className="budget-value-row">
-        <Input id={`${id}-budget`} readOnly value={displayMoney(draft.budgetOverride)} data-placeholder={draft.budgetOverride === null}
-          title={draft.budgetOverride ?? undefined} aria-describedby={`${id}-budget-help`} />
-        <Button type="button" variant="outline" size="icon" aria-label="Edit available budget"
-          onClick={() => { setBudget(draft.budgetOverride ?? ''); setError(''); setEditing(true) }}>
-          <Pencil aria-hidden="true" size={14} />
-        </Button>
-      </div>
-      <p id={`${id}-budget-help`} className="muted">
-        {draft.budgetOverride === null ? 'No automatic budget policy. Use the pencil to set a local override.' : 'Your local override. Account and portfolio values are unchanged.'}
-      </p>
-    </>}
+  if (editing) return <form className="available-budget available-budget-editing" onSubmit={saveBudget} noValidate>
+    <label htmlFor={`${id}-budget`}>Budget <small>$</small></label>
+    <Input id={`${id}-budget`} inputMode="decimal" autoFocus value={budget} maxLength={100} placeholder={usable ?? '0'}
+      aria-invalid={!!error} aria-describedby={error ? `${id}-budget-error` : undefined}
+      onChange={(event) => { setBudget(event.target.value); setError('') }} />
+    {error && <p id={`${id}-budget-error`} className="error" role="alert">{error}</p>}
+    <div className="budget-actions">
+      <Button type="submit" size="sm">Save budget</Button>
+      <Button type="button" variant="ghost" size="sm" onClick={() => { setEditing(false); setError('') }}>Cancel</Button>
+    </div>
+  </form>
+
+  if (value == null) return <div className="available-budget available-budget-empty">
+    <Button type="button" variant="ghost" size="sm" className="set-budget" onClick={edit}><Plus size={13} aria-hidden="true" />Set budget</Button>
+  </div>
+
+  return <div className="available-budget" role="group" aria-label="Budget">
+    <span className="budget-label">Budget</span>
+    <strong title={value}>{displayMoney(value)}</strong>
+    <small>{manual != null ? 'manual' : 'available'}</small>
+    <Button type="button" variant="ghost" size="icon-sm" aria-label="Edit budget" title="Set a budget for this play" onClick={edit}><Pencil aria-hidden="true" size={13} /></Button>
+    {manual != null && usable != null && <Button type="button" variant="ghost" size="icon-sm" aria-label="Use the available amount"
+      title="Use the available amount" onClick={() => onChange({ ...draft, budgetOverride: null })}><RotateCcw aria-hidden="true" size={13} /></Button>}
   </div>
 }
 
@@ -70,45 +81,46 @@ export function CapitalContext({ accounts, portfolios, draft }: {
 }) {
   const account = accounts.find(item => item.id === draft.accountId && item.isEnabled !== false)
   const portfolio = portfolios.find(item => item.id === account?.portfolioId)
-  const hyperliquid = account?.venueId === 'hyperliquid'
+  const venues = useVenues()
+  const wallet = !!account && venues.can(account.venueId, 'stablecoinWallet')
+  // Unified and portfolio-margin accounts keep all balances in the wallet; their perps state is not meaningful.
+  const unified = account?.accountMode === 'unifiedAccount' || account?.accountMode === 'portfolioMargin'
+  const sized = positionSize(draft, leverageOf(draft.leverage))
+  // A portfolio sums its accounts' balances; an unassigned account stands on its own.
+  const balance = portfolio ? portfolio.balanceUsd ?? portfolio.totalValueUsd : account?.balanceUsd ?? account?.accountValueUsd ?? null
+  const balanceValue = balance == null ? null : Number(balance)
+  // Shares of the balance treat the quote asset as USD, like the nominal account values.
+  const share = (value: number | null) => value === null || !balanceValue ? '—' : `${(value / balanceValue * 100).toFixed(1)}%`
+  const coverage = portfolio?.balanceCoverage ?? portfolio?.valueCoverage
+  const metric = (label: string, value: string | null | undefined, title?: string) =>
+    <div title={title}><dt>{label}</dt><dd data-placeholder={value == null}>{displayMoney(value)}</dd></div>
   return <section className="panel capital-context" aria-label="Capital context" data-testid="capital-context">
     <div className="capital-values">
       <h2 className="capital-title sr-only">Capital context</h2>
       <dl className="capital-metrics">
-        <div><dt>Portfolio value · USD</dt>
-          <dd title={portfolio?.totalValueUsd ?? undefined} data-placeholder={portfolio?.totalValueUsd == null}>{displayMoney(portfolio?.totalValueUsd)}</dd>
-          <small>Coverage: {portfolio?.valueCoverage ?? 'unavailable'}. Known account values only.</small>
-        </div>
-        <div><dt>{hyperliquid ? 'Primary perps equity · USD' : 'Known account value · USD'}</dt>
-          <dd title={account?.accountValueUsd ?? undefined} data-placeholder={account?.accountValueUsd == null}>{displayMoney(account?.accountValueUsd)}</dd>
-          <small>{account ? `${account.name} · ${portfolio?.name ?? (account.portfolioId === null ? 'Unassigned account' : 'Portfolio unavailable')}` : 'Select an enabled account above to see its capital context.'}</small>
-        </div>
-        <div><dt>Margin / portfolio</dt><dd data-placeholder="true">Not calculated</dd><small>Committed capital, not exposure</small></div>
-        <div><dt>Exposure / portfolio</dt><dd data-placeholder="true">Not calculated</dd><small>Notional exposure, not margin</small></div>
+        {metric(portfolio ? `${portfolio.name} balance` : 'Account balance', balance,
+          `Nominal USD${coverage ? `; coverage ${coverage}` : ''}. Perps equity plus supported stablecoins, or the wallet alone in unified accounts.`)}
+        {wallet && metric('Wallet total', account.totalStablecoinNominalUsd,
+          `${account.stablecoinScope ?? 'Supported stablecoin wallet'}${account.accountMode ? ` · ${account.accountMode}` : ''}. Nominal 1 token = 1 USD.`)}
+        {wallet && metric('Available', account.availableStablecoinNominalUsd, 'Wallet total minus amounts held by open orders.')}
+        {wallet && !unified && metric('Perps equity', account.accountValueUsd, 'Perpetual account value at the venue.')}
+        {!wallet && account && metric('Account value', account.accountValueUsd)}
+        <div title="Committed margin as a share of the balance"><dt>Margin / balance</dt><dd data-placeholder={share(sized.margin) === '—'}>{share(sized.margin)}</dd></div>
+        <div title="Position size (notional) as a share of the balance"><dt>Exposure / balance</dt><dd data-placeholder={share(sized.notional) === '—'}>{share(sized.notional)}</dd></div>
       </dl>
     </div>
-    {hyperliquid && <p className="capital-wallet-note"><span>Supported-wallet available · nominal USD</span>{' '}
-      <strong title={account.availableStablecoinNominalUsd ?? undefined}>{displayMoney(account.availableStablecoinNominalUsd)}</strong>{' '}
-      <small>{account.stablecoinScope ?? 'Supported stablecoin wallet only'}{account.accountMode ? ` · ${account.accountMode}` : ''}</small>
-    </p>}
-    <p className="capital-scope-note">Account and portfolio values are nominal USD. Coverage may be incomplete.
-      {hyperliquid && ' Wallet availability uses a nominal 1 token = 1 USD basis, not market valuation, verified trading collateral or withdrawal capacity. Wallet funds are not added to primary perps equity or portfolio value.'}
-    </p>
-    <details className="sizing-assistant"><summary><span className="assistant-icon">↗</span><span><strong>Sizing assistant</strong><small>Define entry prices, shares and exits first. Suggestions are deferred.</small></span><span className="assistant-status">Deferred</span></summary>
-      <p>Position suggestions and financial calculations are not available. Enter your own position size and leverage in the editor.</p>
-    </details>
   </section>
 }
 
 const journalSections = [
-  ['thesis', 'Thesis', 'Record the reasoning behind this play.'],
-  ['invalidation', 'Invalidation', 'Describe what would invalidate the thesis.'],
-  ['strategy', 'Strategy', 'Record strategy notes. Strategy versions are not linked in this draft.'],
-  ['evidence', 'Evidence', 'General evidence notes. Each image above keeps its own note.'],
-  ['review', 'Review', 'Reflect on what happened, separately from the original thesis.'],
+  ['thesis', 'Thesis', 'Why this trade?'],
+  ['invalidation', 'Invalidation', 'What would prove it wrong?'],
+  ['strategy', 'Strategy', 'Which setup or rules apply?'],
+  ['evidence', 'Evidence', 'Notes on the evidence'],
+  ['review', 'Review', 'What happened, and what did you learn?'],
 ] as const
 
-export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceRequest = 0, readOnly = false, notesLabel = 'Draft notes', execution }: {
+export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceRequest = 0, readOnly = false, execution }: {
   notes: PlayDraft['notes']
   onChange: (notes: PlayDraft['notes']) => void
   evidence?: DraftEvidence[]
@@ -117,7 +129,6 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   evidenceRequest?: number
   /** Keeps the pre-trade notes fixed; the review stays editable. */
   readOnly?: boolean
-  notesLabel?: string
   /** Linked venue orders and fills of a saved play, shown as an Execution tab before the review. */
   execution?: ReactNode
 }) {
@@ -138,14 +149,11 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
           </TabsTrigger>).flatMap((trigger, index) => execution && journalSections[index]![0] === 'evidence'
             ? [trigger, <TabsTrigger key="execution" value="execution">Execution</TabsTrigger>] : [trigger])}
         </TabsList>
-        <span className="journal-draft-label">{notesLabel}</span>
       </header>
       {journalSections.map(([key, label, help]) => <TabsContent key={key} value={key} className="journal-tab-content">
         {key === 'evidence' && onEvidenceChange && <EvidencePanel evidence={evidence} onChange={onEvidenceChange} />}
         <label className="sr-only" htmlFor={`${id}-${key}`}>{label}</label>
-        <p className="muted" id={`${id}-${key}-help`}>{help}</p>
-        <textarea id={`${id}-${key}`} value={notes[key]} aria-describedby={`${id}-${key}-help`}
-          placeholder={`Write your ${label.toLowerCase()} notes.`} readOnly={readOnly && key !== 'review'}
+        <textarea id={`${id}-${key}`} value={notes[key]} placeholder={help} readOnly={readOnly && key !== 'review'}
           onChange={(event) => onChange({ ...notes, [key]: event.target.value })} />
       </TabsContent>)}
       {execution && <TabsContent value="execution" className="journal-tab-content">{execution}</TabsContent>}
@@ -153,27 +161,26 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   </section>
 }
 
-export function PositionSummary({ draft }: { draft: PlayDraft }) {
-  const size = draft.size ? `${draft.size} ${draft.sizingMode === 'margin' ? 'currency units' : 'instrument units'}` : 'Not chosen'
+export function PositionSummary({ draft, units = defaultSizeUnits, instrumentName }: { draft: PlayDraft; units?: SizeUnits; instrumentName?: string }) {
   const count = draft.entries.length
   // Same quantity-weighted planned average as the chart's AVG line, for one or more priced entries.
   const average = averageEntryPrice(draft.entries, 1)
+  const sized = positionSize(draft, leverageOf(draft.leverage))
+  const missing = draft.size ? 'Needs an entry price' : 'Needs a size'
   const values: Array<[string, string]> = [
-    [draft.sizingMode === 'margin' ? 'Chosen margin' : 'Chosen quantity', size],
-    ['Chosen leverage', draft.leverage ? `${draft.leverage}×` : 'Not chosen'],
-    ...['Committed margin', 'Notional exposure'].map((label): [string, string] => [label, 'Not calculated']),
-    ['Planned average entry', average === null ? 'Not set' : formatDraggedPrice(average)],
-    ...['Reward / risk', 'All-stops loss', 'All-targets profit'].map((label): [string, string] => [label, 'Not calculated']),
+    ['Margin', sized.margin === null ? missing : formatMoney(sized.margin, units)],
+    ['Position size', sized.notional === null ? missing : formatMoney(sized.notional, units)],
+    ['Quantity', sized.quantity === null ? missing : formatQuantity(sized.quantity, units)],
+    ['Average entry', average === null ? 'Not set' : formatDraggedPrice(average)],
   ]
   return <section className="panel summary" aria-label="Full-position summary" data-testid="summary-panel">
     <div className="summary-intro">
-      <h2>Full-position summary</h2>
+      <h2 title="Planned position before fees and funding">Summary</h2>
       <strong>{count} {count === 1 ? 'entry' : 'entries'} · <span data-direction={draft.direction}>{draft.direction === 'long' ? 'Long' : 'Short'}</span></strong>
-      <small>{draft.instrument || 'No instrument'} · Leverage {draft.leverage || '–'}×</small>
+      <small>{instrumentName || draft.instrument || 'No instrument'} · Leverage {draft.leverage || '–'}×</small>
     </div>
     <dl>
       {values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd data-placeholder={isPlaceholder(value)}>{value}</dd></div>)}
     </dl>
-    <p className="summary-note">Planned position only. Financial calculations are deferred, and no execution or realized return is implied.</p>
   </section>
 }

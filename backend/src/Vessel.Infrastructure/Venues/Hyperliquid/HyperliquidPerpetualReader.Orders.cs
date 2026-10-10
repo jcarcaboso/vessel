@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Vessel.Application.Venues;
+using Vessel.Infrastructure.Venues.Common;
 
 namespace Vessel.Infrastructure.Venues.Hyperliquid;
 
@@ -13,14 +14,13 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
 
     public Task<VenueOrderReadResult> ReadOrdersAsync(string publicAddress, CancellationToken cancellationToken)
     {
-        if (publicAddress is null || publicAddress.Length != 42 || !publicAddress.StartsWith("0x", StringComparison.Ordinal) ||
-            !publicAddress.Skip(2).All(char.IsAsciiHexDigit))
-            throw new VenueReadException("A valid 42-character hexadecimal public address is required.");
+        EvmAddress.Require(publicAddress);
         var latestTimestamp = Math.Min(253402300799999L, timeProvider.GetUtcNow().ToUnixTimeMilliseconds() + 300000);
         return ReadBoundedAsync(async token =>
         {
             using var meta = await ReadJsonAsync(new { type = "meta", dex = "" }, token);
-            var contracts = ReadInstruments(meta.RootElement).Select(i => i.ContractId).ToHashSet(StringComparer.Ordinal);
+            var contracts = ReadInstruments(meta.RootElement).Select(i => i.VenueContractId ?? i.ContractId)
+                .ToHashSet(StringComparer.Ordinal);
             using var history = await ReadJsonAsync(new { type = "historicalOrders", user = publicAddress }, token);
             using var open = await ReadJsonAsync(new { type = "frontendOpenOrders", user = publicAddress, dex = "" }, token);
             var orders = new Dictionary<string, VenueOrder>(StringComparer.Ordinal);
@@ -57,10 +57,11 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
         var isTrigger = Property(order, "isTrigger");
         if (isTrigger.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw new VenueReadException(InvalidResponse);
         var trigger = isTrigger.GetBoolean() ? Positive(Property(order, "triggerPx")) : (decimal?)null;
-        return new VenueOrder(Identity(Property(order, "oid")), coin, side, Text(Property(order, "orderType"), 32),
+        return new VenueOrder(Identity(Property(order, "oid")), HyperliquidInstruments.Canonical(coin), SideOf(side), Text(Property(order, "orderType"), 32),
             Nonnegative(Property(order, "limitPx")), trigger, Flag(order, "reduceOnly"), Flag(order, "isPositionTpsl"),
             Nonnegative(Property(order, "origSz")), Nonnegative(Property(order, "sz")),
-            Timestamp(Property(order, "timestamp"), latestTimestamp), status, venueStatus, statusAt);
+            Timestamp(Property(order, "timestamp"), latestTimestamp), status, venueStatus, statusAt,
+            VenueContractId: HyperliquidInstruments.Canonical(coin) == coin ? null : coin);
     }
 
     private static bool Flag(JsonElement order, string name) =>

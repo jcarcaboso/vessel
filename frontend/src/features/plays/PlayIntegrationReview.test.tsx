@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { render, screen, within } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
+import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from '@/api/workspace'

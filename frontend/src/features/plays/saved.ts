@@ -23,16 +23,25 @@ export interface PlaysSession {
 }
 export const createPlaysSession = (): PlaysSession => ({ view: 'list', draft: createDraft(), saved: null })
 
+export function hasDraftContent(draft: PlayDraft) {
+  return !!(draft.title.trim() || draft.accountId || draft.instrument || draft.evidence.length || draft.notes.review.trim() ||
+    Object.values(draft.drawings).some(items => items.length) || planContent(draft) !== blankPlanContent)
+}
+
 export function planFromDraft(draft: PlayDraft): PlayPlan {
   return {
     direction: draft.direction, sizingMode: draft.sizingMode, size: draft.size, leverage: draft.leverage,
     budgetOverride: draft.budgetOverride,
-    entries: draft.entries.map(({ id, name, color, share, price, stop, targets }) => ({
-      id, name, color, share, price, stop: { ...stop }, targets: targets.map(target => ({ ...target })),
+    entries: draft.entries.map(({ id, name, color, share, price, stops, targets }) => ({
+      id, name, color, share, price, stops: stops.map(stop => ({ ...stop })), targets: targets.map(target => ({ ...target })),
     })),
     notes: { thesis: draft.notes.thesis, invalidation: draft.notes.invalidation, strategy: draft.notes.strategy, evidence: draft.notes.evidence },
   }
 }
+
+// Generated IDs are not edits; every plan value and its entry/exit structure is.
+const planContent = (draft: PlayDraft) => JSON.stringify(planFromDraft(draft), (key, value: unknown) => key === 'id' ? undefined : value)
+const blankPlanContent = planContent(createDraft())
 
 export function fieldsFromDraft(draft: PlayDraft): PlayFields {
   return {
@@ -72,7 +81,7 @@ export function draftFromSaved(play: SavedPlay, evidence: DraftEvidence[]): Play
     title: play.summary.title, accountId: play.summary.accountId, instrument: play.summary.instrument ?? '',
     instrumentSource: play.summary.instrumentSource, direction: play.plan.direction, sizingMode: play.plan.sizingMode,
     size: play.plan.size, leverage: play.plan.leverage, budgetOverride: play.plan.budgetOverride,
-    entries: play.plan.entries.map((entry: PlanEntry) => ({ ...entry, stop: { ...entry.stop }, targets: entry.targets.map(target => ({ ...target })) })),
+    entries: play.plan.entries.map((entry: PlanEntry) => ({ ...entry, stops: entry.stops.map(stop => ({ ...stop })), targets: entry.targets.map(target => ({ ...target })) })),
     notes: { ...play.plan.notes, review: play.review },
     drawings, evidence,
   }
@@ -149,17 +158,19 @@ export function describePlanChanges(before: PlayPlan, after: PlayPlan): string[]
     previous.delete(entry.id)
     field(`${entry.name} price`, old.price, entry.price)
     field(`${entry.name} share`, old.share && `${old.share}%`, entry.share && `${entry.share}%`)
-    if (levelText(old.stop) !== levelText(entry.stop)) changes.push(`${entry.name} stop: ${levelText(old.stop)} → ${levelText(entry.stop)}`)
-    const targets = new Map(old.targets.map(target => [target.id, target]))
-    entry.targets.forEach((target, index) => {
-      const was = targets.get(target.id)
-      const name = `${entry.name} target ${index + 1}`
-      if (!was) { changes.push(`${name} added at ${levelText(target)}`); return }
-      targets.delete(target.id)
-      if (levelText(was) !== levelText(target)) changes.push(`${name}: ${levelText(was)} → ${levelText(target)}`)
-      if (was.share !== target.share) changes.push(`${name} share: ${was.share || 'blank'}% → ${target.share || 'blank'}%`)
-    })
-    for (const removed of targets.values()) changes.push(`${entry.name} target at ${levelText(removed)} removed`)
+    for (const kind of ['stop', 'target'] as const) {
+      const list = (plan: PlanEntry) => kind === 'stop' ? plan.stops : plan.targets
+      const exits = new Map(list(old).map(exit => [exit.id, exit]))
+      list(entry).forEach((exit, index) => {
+        const was = exits.get(exit.id)
+        const name = kind === 'target' || list(entry).length > 1 ? `${entry.name} ${kind} ${index + 1}` : `${entry.name} ${kind}`
+        if (!was) { changes.push(`${name} added at ${levelText(exit)}`); return }
+        exits.delete(exit.id)
+        if (levelText(was) !== levelText(exit)) changes.push(`${name}: ${levelText(was)} → ${levelText(exit)}`)
+        if (was.share !== exit.share) changes.push(`${name} share: ${was.share || 'blank'}% → ${exit.share || 'blank'}%`)
+      })
+      for (const removed of exits.values()) changes.push(`${entry.name} ${kind} at ${levelText(removed)} removed`)
+    }
   }
   for (const removed of previous.values()) changes.push(`${removed.name} removed`)
   for (const [key, label] of [['thesis', 'Thesis'], ['invalidation', 'Invalidation'], ['strategy', 'Strategy'], ['evidence', 'Evidence notes']] as const) {

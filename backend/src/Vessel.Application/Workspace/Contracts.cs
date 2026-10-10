@@ -6,20 +6,32 @@ using Vessel.Application.Venues;
 namespace Vessel.Application.Workspace;
 
 public sealed record CreatePortfolioRequest(string Name);
-public sealed record CreateAccountRequest(Guid? PortfolioId, string Name, string VenueId, string? Address = null, string? ManualAccountValueUsd = null);
+public sealed record CreateAccountRequest(Guid? PortfolioId, string Name, string VenueId, string? Address = null, string? ManualAccountValueUsd = null,
+    string? SourceId = null);
 public sealed record RenamePortfolioRequest(string Name);
 public sealed record UpdateAccountRequest(
     [property: JsonRequired] string Name,
     [property: JsonRequired] Guid? PortfolioId,
     [property: JsonRequired] bool IsEnabled,
     [property: JsonRequired] long ExpectedRevision);
-public sealed record PortfolioDto(Guid Id, string Name, int AccountCount, string? TotalValueUsd, string ValueCoverage);
+/// <summary>
+/// TotalValueUsd sums primary perps (or manual) values. BalanceUsd sums account balances: perps plus stablecoin wallet,
+/// or the wallet alone in unified and portfolio-margin modes, so no ledger is counted twice.
+/// </summary>
+public sealed record PortfolioDto(Guid Id, string Name, int AccountCount, string? TotalValueUsd, string ValueCoverage,
+    string? BalanceUsd = null, string BalanceCoverage = "unavailable");
 public sealed record AccountDto(Guid Id, Guid? PortfolioId, string Name, string VenueId, string? Address,
     string? AccountValueUsd, DateTimeOffset? LastSyncedAtUtc, string SyncStatus, string? LastSyncError,
     int PositionCount, string? HistoryNotice, bool IsEnabled, long SettingsRevision,
-    string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null);
+    string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null,
+    string? TotalStablecoinNominalUsd = null, string? BalanceUsd = null, string? SourceId = null);
 public sealed record AccountInstrumentsDto(string VenueId, string MarketScope, string Scope,
     IReadOnlyList<VenueInstrument> Instruments, string Notice);
+/// <summary>Where a catalogue comes from: the venue's selectable perpetuals, or none for a manual account.</summary>
+public static class InstrumentCatalogScopes
+{
+    public const string Venue = "venue-perpetuals", Manual = "manual";
+}
 public sealed record PositionDto(string ContractId, string SignedQuantity, string EntryPrice,
     string UnrealizedPnlUsd, string MarginUsedUsd, int? Leverage);
 public sealed record SnapshotDto(DateTimeOffset ObservedAtUtc, string ValueScope, string? AccountValueUsd,
@@ -32,7 +44,8 @@ public sealed record StablecoinWalletDto(DateTimeOffset ObservedAtUtc, string Ac
     IReadOnlyList<StablecoinBalanceDto> Balances, string Notice);
 public sealed record FillDto(Guid Id, Guid AccountId, string ContractId, string Side, string Direction,
     string Price, string Quantity, string Fee, string FeeToken, string ClosedPnlUsd, DateTimeOffset OccurredAtUtc,
-    string OrderId, string SourceFillId, string TransactionHash, Guid? PlayId = null);
+    string OrderId, string SourceFillId, string TransactionHash, string PositionEffect, string FeeBasis, string PnlBasis,
+    Guid? PlayId = null);
 public sealed record OverviewTotals(int PortfolioCount, int AccountCount, string? TotalAccountValueUsd,
     int ValuedAccountCount, int OpenPositionCount, int ImportedFillCount,
     string? AvailableStablecoinNominalUsd = null, int StablecoinAccountCount = 0);

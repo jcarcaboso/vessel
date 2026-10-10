@@ -13,7 +13,7 @@ namespace Vessel.Tests;
 
 public sealed class CorePostgresTests
 {
-    private static WorkspaceService Service(VesselDbContext db, Guid owner, FixtureReader reader) => new(new WorkspaceStore(db), new CoreOwner(owner), reader);
+    private static WorkspaceService Service(VesselDbContext db, Guid owner, FixtureReader reader) => new(new WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(reader));
     private static async Task<Guid> CreateVenueAccount(WorkspaceService service)
     {
         var portfolio = await service.CreatePortfolioAsync(new("Trading"), default);

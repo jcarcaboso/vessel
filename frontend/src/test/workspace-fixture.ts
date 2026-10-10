@@ -1,4 +1,7 @@
 import { vi } from 'vitest'
+import { emptyReview } from './review-fixture'
+import type { SizingDocument } from '@/api/sizing'
+import type { SavedPlay } from '@/api/plays'
 import type { BrokerAccount, CandleSeries, InstrumentCatalog, MarketContext, Overview, Portfolio, WorkspaceApi } from '@/api/workspace'
 
 export const portfolioFixture: Portfolio = {
@@ -20,11 +23,26 @@ export const overviewFixture: Overview = {
   totals: { ...emptyOverview.totals, portfolioCount: 1, accountCount: 1, totalAccountValueUsd: '1250.123456', valuedAccountCount: 1 },
 }
 
+export const savedPlayFixture: SavedPlay = {
+  summary: {
+    id: '22222222-3333-4444-5555-666666666666', title: 'Saved idea', status: 'draft',
+    accountId: accountFixture.id, venueId: 'manual', instrument: 'BTC', instrumentSource: 'manual', direction: 'long',
+    planRevision: 0, version: 1, cancelReason: null, hasReview: false,
+    createdAtUtc: '2026-10-05T12:00:00Z', updatedAtUtc: '2026-10-05T12:00:00Z', plannedAtUtc: null, endedAtUtc: null,
+  },
+  plan: {
+    direction: 'long', sizingMode: 'margin', size: '', leverage: '1', budgetOverride: null,
+    entries: [{ id: 'entry-1', name: 'Entry 1', color: '#b9c9e4', share: '100', price: '', stops: [], targets: [] }],
+    notes: { thesis: '', invalidation: '', strategy: '', evidence: '' },
+  },
+  drawings: {}, review: '',
+}
+
 export const instrumentCatalogFixture: InstrumentCatalog = {
-  venueId: 'hyperliquid', marketScope: 'perpetuals', scope: 'primary-perpetual-dex',
+  venueId: 'hyperliquid', marketScope: 'perpetuals', scope: 'venue-perpetuals',
   instruments: [
-    { contractId: 'BTC', quantityDecimals: 5, maxLeverage: 40 },
-    { contractId: '1000PEPE', quantityDecimals: 0, maxLeverage: 10 },
+    { contractId: 'BTC', quantityDecimals: 5, maxLeverage: 40, quoteAsset: 'USDC' },
+    { contractId: '1000PEPE', quantityDecimals: 0, maxLeverage: 10, quoteAsset: 'USDC' },
   ],
   notice: 'Primary perpetual DEX metadata only. No orders, balances or execution refresh.',
 }
@@ -53,7 +71,7 @@ export const idleMarketStream: WorkspaceApi['marketStream'] = (_id, _query, sign
 
 /** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
 export function playApiStubs(): Pick<WorkspaceApi, 'plays' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' |
-  'deletePlay' | 'playExecution' | 'checkPlayExecution' | 'linkOrder' | 'unlinkOrder' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence'> {
+  'deletePlay' | 'playExecution' | 'checkPlayExecution' | 'linkOrder' | 'unlinkOrder' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'review'> {
   const unexpected = () => Promise.reject(new Error('Unexpected play API call in this test.'))
   return {
     plays: vi.fn().mockResolvedValue([]), play: vi.fn(unexpected), createPlay: vi.fn(unexpected), updatePlay: vi.fn(unexpected),
@@ -61,5 +79,20 @@ export function playApiStubs(): Pick<WorkspaceApi, 'plays' | 'play' | 'createPla
     deletePlay: vi.fn(unexpected), playExecution: vi.fn(unexpected), checkPlayExecution: vi.fn(unexpected),
     linkOrder: vi.fn(unexpected), unlinkOrder: vi.fn(unexpected), evidence: vi.fn().mockResolvedValue([]), evidenceImage: vi.fn(unexpected),
     uploadEvidence: vi.fn(unexpected), updateEvidenceNote: vi.fn(unexpected), updateEvidenceMarkup: vi.fn(unexpected), deleteEvidence: vi.fn(unexpected),
+    sizing: vi.fn().mockResolvedValue(sizingFixture), updateSizingSettings: vi.fn(unexpected),
+    review: vi.fn().mockResolvedValue(emptyReview),
   }
+}
+
+/** A sizing document with no closed plays, full exposure and the default limits. */
+export const sizingFixture: SizingDocument = {
+  settings: { riskPercent: '1.25' },
+  exposure: { level: 'full', multiplier: '1', reason: 'No losing streak.', lossStreak: 0, winsSinceStepDown: 0 },
+  record: {
+    closedPlays: 0, decidedPlays: 0, window: 20, wins: 0, losses: 0, scratches: 0,
+    battingAverage: null, averageGainPercent: null, averageLossPercent: null, winLossRatio: null, breakEvenRewardRisk: null,
+    averageWinR: null, averageLossR: null, recent: [],
+  },
+  limits: { effectiveRiskPercent: '1.25', maxStopPercent: '10', minRewardRisk: '2', maxStopSource: 'default', minRewardRiskSource: 'default' },
+  notice: 'Mechanical estimates from your settings and record, not investment advice.',
 }

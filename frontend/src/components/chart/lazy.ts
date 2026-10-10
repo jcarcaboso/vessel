@@ -1,4 +1,5 @@
 import type { ChartDrawing, DrawingKind } from './drawings'
+import type { IndicatorView } from './indicators'
 import type { ChartAdapter, ChartAdapterFactory, ChartCandle, PriceOverlay } from './types'
 
 /** Loads the canvas renderer on first use and replays the latest inputs once it is ready. */
@@ -9,13 +10,17 @@ export const createLazyLightweightAdapter: ChartAdapterFactory = (container, cal
   let overlays: readonly PriceOverlay[] | null = null
   let drawings: [readonly ChartDrawing[], string | null] | null = null
   let tool: [DrawingKind | null, boolean] | null = null
+  let picking = false
+  let indicators: IndicatorView | null = null
   void import('./lightweight').then(({ createLightweightAdapter }) => {
     if (destroyed) return
     adapter = createLightweightAdapter(container, callbacks)
     if (candles) adapter.setCandles(candles, true)
+    if (indicators) adapter.setIndicators(indicators)
     if (overlays) adapter.setOverlays(overlays)
     if (drawings) adapter.setDrawings(...drawings)
     if (tool) adapter.setDrawingTool(...tool)
+    if (picking) adapter.setPricePicker(true)
   })
   return {
     setCandles(next, reset) {
@@ -33,6 +38,14 @@ export const createLazyLightweightAdapter: ChartAdapterFactory = (container, cal
     setDrawingTool(next, magnet) {
       if (adapter) adapter.setDrawingTool(next, magnet)
       else tool = [next, magnet]
+    },
+    setPricePicker(active) {
+      if (adapter) adapter.setPricePicker(active)
+      else picking = active
+    },
+    setIndicators(next) {
+      if (adapter) adapter.setIndicators(next)
+      else indicators = next
     },
     capture(caption) {
       return adapter ? adapter.capture(caption) : Promise.resolve(null)

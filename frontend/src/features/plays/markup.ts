@@ -149,7 +149,7 @@ function shapeSvg(shape: MarkupShape) {
       const halo = color(shape.color) === '#111111' ? '#ffffff' : '#000000'
       const lines = shape.text.split('\n').map((line, index) =>
         `<tspan x="${shape.at.x}" dy="${index === 0 ? 0 : round(shape.size * 1.25)}">${escape(line) || ' '}</tspan>`).join('')
-      return `<text x="${shape.at.x}" y="${round(shape.at.y + shape.size)}" font-size="${shape.size}" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-weight="600" fill="${color(shape.color)}" stroke="${halo}" stroke-opacity="0.6" stroke-width="${round(shape.size * 0.14)}" stroke-linejoin="round" paint-order="stroke">${lines}</text>`
+      return `<text x="${shape.at.x}" y="${round(shape.at.y + shape.size)}" font-size="${shape.size}" font-family="'Inter Variable', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif" font-weight="600" fill="${color(shape.color)}" stroke="${halo}" stroke-opacity="0.6" stroke-width="${round(shape.size * 0.14)}" stroke-linejoin="round" paint-order="stroke">${lines}</text>`
     }
   }
 }

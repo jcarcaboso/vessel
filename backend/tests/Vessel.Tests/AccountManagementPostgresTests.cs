@@ -14,7 +14,7 @@ namespace Vessel.Tests;
 public sealed class AccountManagementPostgresTests
 {
     private static WorkspaceService Service(VesselDbContext db, Guid owner, IPerpetualVenueReader? reader = null) =>
-        new(new WorkspaceStore(db), new CoreOwner(owner), reader ?? new FixtureReader());
+        new(new WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(reader ?? new FixtureReader()));
 
     private static async Task<AccountDto> VenueAccount(WorkspaceService service, Guid? portfolio = null) =>
         await service.CreateAccountAsync(new(portfolio, "Venue", "hyperliquid", "0x" + Guid.NewGuid().ToString("N") + "00000000"), default);

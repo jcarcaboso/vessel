@@ -49,30 +49,48 @@ public sealed class ExecutionMatcherTests
     public void Matches_entries_stops_and_targets_by_side_price_and_order_kind()
     {
         var play = Planned();
-        Assert.Equal("entry|entry-1", Assert.Single(Match(Order("B", 100.01m), play)).Level.Key);
-        Assert.Empty(Match(Order("B", 100.02m), play));
-        Assert.Empty(Match(Order("A", 100m), play));
-        Assert.Equal("stop|entry-1", Assert.Single(Match(Order("A", 94m, 95m, "Stop Market", true), play)).Level.Key);
+        Assert.Equal("entry|entry-1", Assert.Single(Match(Order("buy", 100.01m), play)).Level.Key);
+        Assert.Empty(Match(Order("buy", 100.02m), play));
+        Assert.Empty(Match(Order("sell", 100m), play));
+        Assert.Equal("stop|entry-1|stop-1", Assert.Single(Match(Order("sell", 94m, 95m, "Stop Market", true), play)).Level.Key);
         // A resting limit at the stop price is not a stop.
-        Assert.Empty(Match(Order("A", 95m, reduceOnly: true), play));
-        Assert.Equal("target|entry-1|target-1", Assert.Single(Match(Order("A", 110m, reduceOnly: true), play)).Level.Key);
-        Assert.Equal("target|entry-1|target-1", Assert.Single(Match(Order("A", 109m, 110m, "Take Profit Market", true), play)).Level.Key);
+        Assert.Empty(Match(Order("sell", 95m, reduceOnly: true), play));
+        Assert.Equal("target|entry-1|target-1", Assert.Single(Match(Order("sell", 110m, reduceOnly: true), play)).Level.Key);
+        Assert.Equal("target|entry-1|target-1", Assert.Single(Match(Order("sell", 109m, 110m, "Take Profit Market", true), play)).Level.Key);
         // A reduce-only buy is not a long entry.
-        Assert.Empty(Match(Order("B", 100m, reduceOnly: true), play));
+        Assert.Empty(Match(Order("buy", 100m, reduceOnly: true), play));
     }
 
     [Fact]
-    public void Resolves_percent_levels_and_short_sides()
+    public void Resolves_percent_levels_as_returns_at_the_plan_leverage_and_short_sides()
     {
         var plan = TestPlays.Plan() with
         {
-            Direction = "short",
-            Entries = [TestPlays.Plan().Entries[0] with { Stop = new PlanLevel("stop-1", "percent", "5"), Targets = [new PlanTarget("target-1", "percent", "10", "100")] }],
+            Direction = "short", Leverage = "1",
+            Entries = [TestPlays.Plan().Entries[0] with { Stops = [new PlanExit("stop-1", "percent", "5", "100")], Targets = [new PlanExit("target-1", "percent", "10", "100")] }],
         };
         var play = Planned(plan);
-        Assert.Single(Match(Order("A", 100m), play));
-        Assert.Equal("stop|entry-1", Assert.Single(Match(Order("B", 106m, 105m, "Stop Market", true), play)).Level.Key);
-        Assert.Equal("target|entry-1|target-1", Assert.Single(Match(Order("B", 90m, reduceOnly: true), play)).Level.Key);
+        Assert.Single(Match(Order("sell", 100m), play));
+        Assert.Equal("stop|entry-1|stop-1", Assert.Single(Match(Order("buy", 106m, 105m, "Stop Market", true), play)).Level.Key);
+        Assert.Equal("target|entry-1|target-1", Assert.Single(Match(Order("buy", 90m, reduceOnly: true), play)).Level.Key);
+
+        // At 5x, a 5% loss on margin is a 1% move and a 10% gain is a 2% move.
+        var levered = Planned(plan with { Leverage = "5" });
+        Assert.Empty(Match(Order("buy", 106m, 105m, "Stop Market", true), levered));
+        Assert.Equal("stop|entry-1|stop-1", Assert.Single(Match(Order("buy", 102m, 101m, "Stop Market", true), levered)).Level.Key);
+        Assert.Equal("target|entry-1|target-1", Assert.Single(Match(Order("buy", 98m, reduceOnly: true), levered)).Level.Key);
+    }
+
+    [Fact]
+    public void Each_stop_of_an_entry_is_its_own_level()
+    {
+        var plan = TestPlays.Plan() with
+        {
+            Entries = [TestPlays.Plan().Entries[0] with { Stops = [new PlanExit("stop-1", "price", "95", "50"), new PlanExit("stop-2", "price", "90", "50")] }],
+        };
+        var play = Planned(plan);
+        Assert.Equal("stop|entry-1|stop-1", Assert.Single(Match(Order("sell", 94m, 95m, "Stop Market", true), play)).Level.Key);
+        Assert.Equal("stop|entry-1|stop-2", Assert.Single(Match(Order("sell", 89m, 90m, "Stop Market", true), play)).Level.Key);
     }
 
     [Fact]
@@ -80,10 +98,10 @@ public sealed class ExecutionMatcherTests
     {
         var first = Planned();
         var second = Planned();
-        Assert.Equal(2, Match(Order("B", 100m), first, second).Count);
-        Assert.Empty(Match(Order("B", 100m, placed: Created.AddMinutes(-1)), first));
-        Assert.Empty(Match(Order("B", 100m, contract: "ETH"), first));
-        var dismissed = ExecutionMatcher.Candidates(Order("B", 100m), [(first, PlayDocuments.Read(first.Plan)), (second, PlayDocuments.Read(second.Plan))],
+        Assert.Equal(2, Match(Order("buy", 100m), first, second).Count);
+        Assert.Empty(Match(Order("buy", 100m, placed: Created.AddMinutes(-1)), first));
+        Assert.Empty(Match(Order("buy", 100m, contract: "ETH"), first));
+        var dismissed = ExecutionMatcher.Candidates(Order("buy", 100m), [(first, PlayDocuments.Read(first.Plan)), (second, PlayDocuments.Read(second.Plan))],
             (play, _) => play == first, false);
         Assert.Same(second, Assert.Single(dismissed).Play);
     }
@@ -92,14 +110,14 @@ public sealed class ExecutionMatcherTests
     public void Unplanned_exits_need_an_open_play_and_a_reducing_order()
     {
         var play = Planned();
-        Assert.Empty(ExecutionMatcher.Candidates(Order("A", 103m), [(play, PlayDocuments.Read(play.Plan))], (_, _) => false, true));
+        Assert.Empty(ExecutionMatcher.Candidates(Order("sell", 103m), [(play, PlayDocuments.Read(play.Plan))], (_, _) => false, true));
         play.MarkOpen("Entry fill.", Created);
         var plays = new[] { (play, PlayDocuments.Read(play.Plan)) };
         Func<Play, DateTimeOffset?> opened = _ => Created.AddSeconds(30);
-        Assert.Empty(ExecutionMatcher.Candidates(Order("A", 103m), plays, (_, _) => false, false, opened));
-        Assert.Equal("exit", Assert.Single(ExecutionMatcher.Candidates(Order("A", 103m), plays, (_, _) => false, true, opened)).Level.Key);
+        Assert.Empty(ExecutionMatcher.Candidates(Order("sell", 103m), plays, (_, _) => false, false, opened));
+        Assert.Equal("exit", Assert.Single(ExecutionMatcher.Candidates(Order("sell", 103m), plays, (_, _) => false, true, opened)).Level.Key);
         // An exit placed before the play's first entry fill belongs to something else.
-        Assert.Empty(ExecutionMatcher.Candidates(Order("A", 103m, placed: Created.AddSeconds(10)), plays, (_, _) => false, true, opened));
+        Assert.Empty(ExecutionMatcher.Candidates(Order("sell", 103m, placed: Created.AddSeconds(10)), plays, (_, _) => false, true, opened));
     }
 
     [Theory]
@@ -132,9 +150,9 @@ public sealed class ExecutionPostgresTests
         public VesselDbContext Db => db;
         public FixtureReader Reader => reader;
         public FakeOrderReader Orders => orders;
-        public WorkspaceService Workspace { get; } = new(new WorkspaceStore(db), new CoreOwner(owner), reader);
+        public WorkspaceService Workspace { get; } = new(new WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(reader));
         public PlayService Plays { get; } = new(new PlayStore(db), new MemoryObjectStore(), TimeProvider.System);
-        public PlayExecutionService Execution => new(new PlayStore(db), new ExecutionStore(db), Workspace, orders, TimeProvider.System);
+        public PlayExecutionService Execution => new(new PlayStore(db), new ExecutionStore(db), Workspace, TestVenues.With(orders), TimeProvider.System);
     }
 
     private static async Task<(CoreDatabase Database, Harness Harness, Guid Account)> SetUp()
@@ -159,8 +177,8 @@ public sealed class ExecutionPostgresTests
         status == "open" ? 1m : 0m, DateTimeOffset.UtcNow.AddSeconds(placedLater), HyperliquidPerpetualReader.Normalize(status), status, DateTimeOffset.UtcNow);
 
     private static VenueFill Fill(string id, string orderId, string dir, decimal price, decimal quantity) =>
-        new(id, "BTC", dir.Contains("Long") == dir.StartsWith("Open") ? "B" : "A", dir, price, quantity, 0.01m, "USDC",
-            dir.StartsWith("Close") ? 5m : 0m, DateTimeOffset.UtcNow, orderId, "hash-" + id, "{}");
+        new(id, "BTC", HyperliquidPerpetualReader.SideOf(dir.Contains("Long") == dir.StartsWith("Open") ? "B" : "A"), dir, price, quantity, 0.01m, "USDC",
+            dir.StartsWith("Close") ? 5m : 0m, DateTimeOffset.UtcNow, orderId, "hash-" + id, "{}", HyperliquidPerpetualReader.EffectOf(dir));
 
     [PostgresFact]
     public async Task Links_orders_automatically_and_opens_then_closes_from_linked_fills()
@@ -168,21 +186,21 @@ public sealed class ExecutionPostgresTests
         var (database, h, account) = await SetUp();
         await using var _ = database;
         var play = await PlannedPlay(h, account);
-        h.Orders.Orders.AddRange([Order("11", "B", 100.01m), Order("12", "A", 94m, trigger: 95m, type: "Stop Market", reduceOnly: true),
-            Order("13", "A", 110m, reduceOnly: true), Order("14", "B", 80m)]);
+        h.Orders.Orders.AddRange([Order("11", "buy", 100.01m), Order("12", "sell", 94m, trigger: 95m, type: "Stop Market", reduceOnly: true),
+            Order("13", "sell", 110m, reduceOnly: true), Order("14", "buy", 80m)]);
         var execution = await h.Execution.CheckAsync(play.Summary.Id, default);
         Assert.Equal(["entry", "stop", "target"], execution.Links.Select(l => l.Role));
         Assert.All(execution.Links, l => Assert.Equal(("linked", "automatic"), (l.State, l.Source)));
         Assert.Equal("14", Assert.Single(execution.UnlinkedOrders).OrderId);
         Assert.Equal(("planned", 1), (execution.Status, execution.Entries.Single().RestingOrders));
 
-        h.Orders.Orders[0] = Order("11", "B", 100.01m, "filled");
+        h.Orders.Orders[0] = Order("11", "buy", 100.01m, "filled");
         h.Reader.Result = h.Reader.Result with { Fills = [Fill("f1", "11", "Open Long", 100m, 0.5m)] };
         execution = await h.Execution.CheckAsync(play.Summary.Id, default);
         Assert.Equal(("open", "0.5", "0.5", "100"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.OpenQuantity,
             execution.Entries.Single().AverageFillPrice));
 
-        h.Orders.Orders[2] = Order("13", "A", 110m, "filled", reduceOnly: true);
+        h.Orders.Orders[2] = Order("13", "sell", 110m, "filled", reduceOnly: true);
         h.Reader.Result = h.Reader.Result with { Fills = [Fill("f1", "11", "Open Long", 100m, 0.5m), Fill("f2", "13", "Close Long", 110m, 0.5m)] };
         execution = await h.Execution.CheckAsync(play.Summary.Id, default);
         Assert.Equal(("closed", "0", "5"), (execution.Status, execution.Totals.OpenQuantity, execution.Totals.ClosedPnlUsd));
@@ -202,7 +220,7 @@ public sealed class ExecutionPostgresTests
         await using var _ = database;
         var first = await PlannedPlay(h, account, "First");
         var second = await PlannedPlay(h, account, "Second");
-        h.Orders.Orders.Add(Order("21", "B", 100m));
+        h.Orders.Orders.Add(Order("21", "buy", 100m));
         var execution = await h.Execution.CheckAsync(first.Summary.Id, default);
         Assert.Empty(execution.Links);
         var suggestion = Assert.Single(execution.Suggestions);
@@ -223,12 +241,33 @@ public sealed class ExecutionPostgresTests
     }
 
     [PostgresFact]
+    public async Task The_owner_links_an_order_to_one_of_several_stops()
+    {
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var plan = TestPlays.Plan() with
+        {
+            Entries = [TestPlays.Plan().Entries[0] with { Stops = [new PlanExit("stop-1", "price", "95", "50"), new PlanExit("stop-2", "price", "90", "50")] }],
+        };
+        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Two stops", plan), default);
+        var play = await h.Plays.ChangeStatusAsync(draft.Summary.Id, new(draft.Summary.Version, "planned"), default);
+        h.Orders.Orders.AddRange([Order("41", "sell", 89m, trigger: 90m, type: "Stop Market", reduceOnly: true), Order("42", "sell", 80m, trigger: 85m, type: "Stop Market", reduceOnly: true)]);
+        var execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        var automatic = Assert.Single(execution.Links);
+        Assert.Equal(("41", "stop", "stop-2"), (automatic.Order!.OrderId, automatic.Role, automatic.LevelId));
+
+        await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.LinkAsync(play.Summary.Id, new("42", "stop", "entry-1", "target-1"), default));
+        execution = await h.Execution.LinkAsync(play.Summary.Id, new("42", "stop", "entry-1", "stop-1"), default);
+        Assert.Equal(["stop-1", "stop-2"], execution.Links.Select(l => l.LevelId));
+    }
+
+    [PostgresFact]
     public async Task Unplanned_closes_and_filled_entries_are_protected()
     {
         var (database, h, account) = await SetUp();
         await using var _ = database;
         var play = await PlannedPlay(h, account);
-        h.Orders.Orders.AddRange([Order("31", "B", 100m, "filled"), Order("32", "A", 103m, "filled", placedLater: 5)]);
+        h.Orders.Orders.AddRange([Order("31", "buy", 100m, "filled"), Order("32", "sell", 103m, "filled", placedLater: 5)]);
         h.Reader.Result = h.Reader.Result with { Fills = [Fill("f1", "31", "Open Long", 100m, 1m), Fill("f2", "32", "Close Long", 103m, 1m)] };
         var execution = await h.Execution.CheckAsync(play.Summary.Id, default);
         Assert.Equal(["entry", "exit"], execution.Links.Select(l => l.Role));
@@ -248,7 +287,7 @@ public sealed class ExecutionPostgresTests
         var (database, h, account) = await SetUp();
         await using var _ = database;
         var play = await PlannedPlay(h, account);
-        h.Orders.Orders.Add(Order("41", "B", 100m, "filled"));
+        h.Orders.Orders.Add(Order("41", "buy", 100m, "filled"));
         h.Reader.Result = h.Reader.Result with { Fills = [Fill("f1", "41", "Open Long", 100m, 0.2m)] };
         Assert.Equal("open", (await h.Execution.CheckAsync(play.Summary.Id, default)).Status);
         var current = await h.Plays.GetAsync(play.Summary.Id, default);

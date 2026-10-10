@@ -78,8 +78,8 @@ public sealed partial class HyperliquidAdapterTests
 
         Assert.Equal("hyperliquid", reader.VenueId);
         Assert.Collection(result.Instruments,
-            instrument => Assert.Equal(new VenueInstrument("BTC", 5, 40), instrument),
-            instrument => Assert.Equal(new VenueInstrument("ETH", 4, 20), instrument));
+            instrument => Assert.Equal(new VenueInstrument("BTC", 5, 40, "USDC", MaintenanceMarginFraction: 0.0125m), instrument),
+            instrument => Assert.Equal(new VenueInstrument("ETH", 4, 20, "USDC", MaintenanceMarginFraction: 0.025m), instrument));
         Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(StateTime), result.Snapshot.ObservedAtUtc);
         Assert.Equal("primary-perpetual-dex", result.Snapshot.ValueScope);
         Assert.Equal(12345.678901234567890123m, result.Snapshot.AccountValueUsd);
@@ -93,7 +93,7 @@ public sealed partial class HyperliquidAdapterTests
         Assert.Equal("18446744073709551615", fill.SourceFillId);
         Assert.Equal("9007199254740993", fill.OrderId);
         Assert.Equal("BTC", fill.ContractId);
-        Assert.Equal("B", fill.Side);
+        Assert.Equal(("buy", "close"), (fill.Side, fill.PositionEffect));
         Assert.Equal("Close Short", fill.Direction); // Not inferred as "Open Long" from side.
         Assert.Equal(61235.1234567890123456m, fill.Price);
         Assert.Equal(0.001234567890123456789m, fill.Quantity);

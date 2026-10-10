@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -112,7 +114,7 @@ public sealed class MarketContextApiTests
             Result = [new("BTC", "1", "1", null, "1", "1", "1", "0", null)]
         };
         var time = new FixedTime(DateTimeOffset.FromUnixTimeMilliseconds(1_790_000_000_000L));
-        var service = new MarketContextService(store, reader, new MarketContextCache(time), time);
+        var service = new MarketContextService(store, TestVenues.With(reader), new MarketContextCache(time), time);
         await service.ContextAsync(account.Id, "BTC", default);
         time.Now = time.Now.AddSeconds(9);
         await service.ContextAsync(account.Id, "BTC", default);
@@ -144,7 +146,7 @@ public sealed class MarketContextApiTests
         using var client = factory.AuthorizedClient();
         var response = await client.GetAsync(Url(account.Id, "instrument=DOGE"));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("The instrument is not in the venue's primary perpetual catalogue.", await response.Content.ReadAsStringAsync());
+        Assert.Contains("The instrument is not in the venue's perpetual catalogue.", await response.Content.ReadAsStringAsync());
     }
 
     [Theory]
@@ -196,7 +198,10 @@ public sealed class MarketContextApiTests
             "wrong-shape" => ReaderFor(new Handler("[{\"universe\":[]}]")),
             _ => ReaderFor(new Handler("{\"secret\":1}"))
         };
-        await using var factory = new CoreApiFactory(owner, store, market: reader);
+        // "mismatch": the account's venue has no market adapter, only another venue's.
+        var mismatch = failure == "mismatch";
+        await using var factory = new CoreApiFactory(owner, store, market: mismatch ? null : reader,
+            configure: mismatch ? (Action<IServiceCollection>)(services => { services.RemoveAll<IMarketContextReader>(); services.AddSingleton(reader); }) : null);
         using var client = factory.AuthorizedClient();
         var response = await client.GetAsync(Url(account.Id, "instrument=BTC"));
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);

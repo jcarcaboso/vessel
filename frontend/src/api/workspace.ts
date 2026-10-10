@@ -1,9 +1,15 @@
 import { SseOverflowError, SseParser } from './sse'
 import { ApiError } from './system'
 import {
+  accountIndex, credentialSaveMessage, credentialTransportAllowed, credentialTransportMessage,
+  type AccountCredential, type AccountDiscovery,
+} from './account-access'
+import {
   isPlayExecution, isPlayHistory, isPlaySummary, isSavedEvidence, isSavedPlay,
   type LinkOrder, type PlayExecution, type PlayFields, type PlayHistory, type PlaySummary, type SavedEvidence, type SavedPlay, type StatusRequest,
 } from './plays'
+import { isSizingDocument, type SizingDocument } from './sizing'
+import { isReviewDocument, reviewPath, type ReviewDocument, type ReviewQuery } from './review'
 import type { ImageMarkup } from '@/features/plays/markup'
 
 export interface Portfolio {
@@ -12,16 +18,29 @@ export interface Portfolio {
   accountCount: number
   totalValueUsd: string | null
   valueCoverage: 'complete' | 'partial' | 'unavailable'
+  /** Sum of account balances (perps plus stablecoin wallet, or the wallet alone in unified modes). */
+  balanceUsd?: string | null
+  balanceCoverage?: 'complete' | 'partial' | 'unavailable'
 }
 export interface VenueInstrument {
   contractId: string
   quantityDecimals: number
   maxLeverage: number
+  /** Asset prices are quoted and margined in, e.g. USDC for BTC/USDC. */
+  quoteAsset: string
+  /** Price tick when the venue has one; prices placed on the chart round to it. */
+  priceStep?: number | null
+  /** Market category such as stocks or commodity; absent for venues that do not label markets. */
+  category?: string | null
+  /** The venue's own identifier when it differs from the contract key, e.g. a numeric market ID. */
+  venueContractId?: string | null
+  /** Maintenance margin as a fraction of notional when the venue states it; liquidation estimates otherwise assume one. */
+  maintenanceMarginFraction?: number | null
 }
 export interface InstrumentCatalog {
   venueId: string
   marketScope: 'perpetuals'
-  scope: 'primary-perpetual-dex' | 'manual'
+  scope: 'venue-perpetuals' | 'manual'
   instruments: VenueInstrument[]
   notice: string
 }
@@ -36,7 +55,8 @@ export interface VenueCandle {
   low: string
   close: string
   volume: string
-  trades: number
+  /** Null when the venue reports no trade count. */
+  trades: number | null
 }
 export interface CandleSeries {
   venueId: string
@@ -62,7 +82,8 @@ export interface MarketContext {
   markPrice: string
   oraclePrice: string
   midPrice: string | null
-  previousDayPrice: string
+  /** Null when the venue does not report it; the 24-hour change is then not shown. */
+  previousDayPrice: string | null
   dayNotionalVolume: string
   openInterest: string
   fundingRate: string
@@ -91,6 +112,8 @@ export interface BrokerAccount {
   name: string
   venueId: string
   address: string | null
+  /** Missing on older servers. Display sourceId ?? address for EVM compatibility. */
+  sourceId?: string | null
   accountValueUsd: string | null
   lastSyncedAtUtc: string | null
   syncStatus: 'manual' | 'not-synced' | 'synced' | 'error'
@@ -102,6 +125,10 @@ export interface BrokerAccount {
   availableStablecoinNominalUsd?: string | null
   stablecoinScope?: string | null
   accountMode?: string | null
+  /** Supported stablecoins in the wallet, held amounts included. */
+  totalStablecoinNominalUsd?: string | null
+  /** Nominal balance: perps plus wallet, or the wallet alone in unified and portfolio-margin modes. */
+  balanceUsd?: string | null
   settingsRevision?: number
 }
 export interface ImportedFill {
@@ -119,6 +146,12 @@ export interface ImportedFill {
   orderId: string
   sourceFillId: string
   transactionHash: string
+  /** open, close, flip or unknown. */
+  positionEffect: string
+  /** reported, or standard-account-free when the account tier trades without fees. */
+  feeBasis: string
+  /** gross (fee separate) or net-of-fee (already taken off the closed PnL). */
+  pnlBasis: string
   playId: string | null
 }
 export interface AccountSnapshot {
@@ -165,11 +198,13 @@ export interface Overview {
 export interface CreateAccount {
   portfolioId: string | null
   name: string
-  venueId: 'manual' | 'hyperliquid'
+  venueId: string
   address?: string
+  sourceId?: string
   manualAccountValueUsd?: string
 }
 export interface WorkspaceApi {
+  review(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewDocument>
   overview(signal?: AbortSignal): Promise<Overview>
   portfolios(signal?: AbortSignal): Promise<Portfolio[]>
   accounts(signal?: AbortSignal): Promise<BrokerAccount[]>
@@ -184,6 +219,10 @@ export interface WorkspaceApi {
   marketStream(id: string, query: MarketStreamQuery, signal: AbortSignal, onEvent: (event: MarketStreamEvent) => void): Promise<void>
   createPortfolio(name: string): Promise<Portfolio>
   createAccount(account: CreateAccount): Promise<BrokerAccount>
+  discoverAccounts(venueId: string, address: string, signal?: AbortSignal, token?: string): Promise<AccountDiscovery>
+  accountCredential(id: string, signal?: AbortSignal): Promise<AccountCredential>
+  saveAccountCredential(id: string, token: string): Promise<AccountCredential>
+  deleteAccountCredential(id: string): Promise<void>
   renamePortfolio(id: string, name: string): Promise<Portfolio>
   deletePortfolio(id: string): Promise<void>
   updateAccount(id: string, settings: { name: string; portfolioId: string | null; isEnabled: boolean; expectedRevision: number }): Promise<BrokerAccount>
@@ -210,6 +249,10 @@ export interface WorkspaceApi {
   updateEvidenceNote(id: string, note: string): Promise<SavedEvidence>
   updateEvidenceMarkup(id: string, markup: ImageMarkup | null): Promise<SavedEvidence>
   deleteEvidence(id: string): Promise<void>
+  /** The owner's risk setting, closed-play record and suggestion limits. */
+  sizing(signal?: AbortSignal): Promise<SizingDocument>
+  /** Saves the risk per trade (0.1 to 5 percent, a decimal string) and returns the new sizing document. */
+  updateSizingSettings(settings: { riskPercent: string }): Promise<SizingDocument>
 }
 
 const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
@@ -222,17 +265,24 @@ const date = (v: unknown) => text(v) && Number.isFinite(Date.parse(v))
 const count = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
 const instrumentCatalog = (v: unknown): v is InstrumentCatalog => object(v) &&
   text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 &&
-  v.marketScope === 'perpetuals' && ['primary-perpetual-dex', 'manual'].includes(String(v.scope)) &&
+  v.marketScope === 'perpetuals' && ['venue-perpetuals', 'manual'].includes(String(v.scope)) &&
   Array.isArray(v.instruments) && v.instruments.length <= 10_000 &&
   v.instruments.every((i: unknown) => object(i) && text(i.contractId) && i.contractId.trim() === i.contractId &&
     i.contractId.length > 0 && i.contractId.length <= 128 && count(i.quantityDecimals) &&
-    (i.quantityDecimals as number) <= 28 && count(i.maxLeverage) && (i.maxLeverage as number) > 0) &&
+    (i.quantityDecimals as number) <= 28 && count(i.maxLeverage) && (i.maxLeverage as number) > 0 &&
+    text(i.quoteAsset) && /^[A-Za-z0-9]{1,16}$/.test(i.quoteAsset) &&
+    (i.priceStep == null || typeof i.priceStep === 'number' && Number.isFinite(i.priceStep) && i.priceStep > 0) &&
+    (i.category == null || text(i.category) && i.category.length <= 32) &&
+    (i.venueContractId == null || text(i.venueContractId) && i.venueContractId.length <= 128) &&
+    (i.maintenanceMarginFraction == null || typeof i.maintenanceMarginFraction === 'number' && i.maintenanceMarginFraction > 0 &&
+      i.maintenanceMarginFraction < 1)) &&
   new Set(v.instruments.map((i: VenueInstrument) => i.contractId)).size === v.instruments.length &&
   (v.scope !== 'manual' || v.instruments.length === 0) && text(v.notice) && v.notice.length <= 1000
 const epoch = (v: unknown): v is number => count(v) && (v as number) > 0
 const unsignedDecimal = (v: unknown): v is string => decimal(v) && !v.startsWith('-')
 const candle = (v: unknown): v is VenueCandle => object(v) && epoch(v.openTime) && epoch(v.closeTime) &&
-  v.closeTime >= v.openTime && ['open', 'high', 'low', 'close', 'volume'].every(k => unsignedDecimal(v[k])) && count(v.trades)
+  v.closeTime >= v.openTime && ['open', 'high', 'low', 'close', 'volume'].every(k => unsignedDecimal(v[k])) &&
+  (v.trades === null || count(v.trades))
 const candleSeries = (query: CandleQuery) => (v: unknown): v is CandleSeries => object(v) &&
   text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 &&
   v.instrument === query.instrument && v.interval === query.interval && v.priceSource === 'trades' &&
@@ -242,7 +292,8 @@ const candleSeries = (query: CandleQuery) => (v: unknown): v is CandleSeries => 
   typeof v.historyExhausted === 'boolean' && text(v.notice) && v.notice.length <= 1000
 const marketContext = (instrument: string) => (v: unknown): v is MarketContext => object(v) &&
   text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 && v.instrument === instrument &&
-  ['markPrice', 'oraclePrice', 'previousDayPrice', 'dayNotionalVolume', 'openInterest'].every(k => unsignedDecimal(v[k])) &&
+  ['markPrice', 'oraclePrice', 'dayNotionalVolume', 'openInterest'].every(k => unsignedDecimal(v[k])) &&
+  (v.previousDayPrice === null || unsignedDecimal(v.previousDayPrice)) &&
   (v.midPrice === null || unsignedDecimal(v.midPrice)) && decimal(v.fundingRate) && nullableDecimal(v.premium) &&
   date(v.observedAt) && text(v.notice) && v.notice.length <= 1000
 const streamStatus = (v: unknown): v is MarketStreamStatus => object(v) &&
@@ -251,10 +302,13 @@ const streamLimit = 1024 * 1024
 const instrumentPattern = /^[A-Za-z0-9_-]{1,32}$/
 const portfolio = (v: unknown): v is Portfolio => object(v) && guid(v.id) && text(v.name) &&
   count(v.accountCount) && nullableDecimal(v.totalValueUsd) &&
-  ['complete', 'partial', 'unavailable'].includes(String(v.valueCoverage))
+  ['complete', 'partial', 'unavailable'].includes(String(v.valueCoverage)) &&
+  (v.balanceUsd === undefined || nullableDecimal(v.balanceUsd)) &&
+  (v.balanceCoverage === undefined || ['complete', 'partial', 'unavailable'].includes(String(v.balanceCoverage)))
 const account = (v: unknown): v is BrokerAccount => object(v) && guid(v.id) &&
   (v.portfolioId === null || guid(v.portfolioId)) && text(v.name) && text(v.venueId) &&
   nullableText(v.address) && nullableDecimal(v.accountValueUsd) &&
+  (v.sourceId === undefined || nullableText(v.sourceId)) &&
   (v.lastSyncedAtUtc === null || date(v.lastSyncedAtUtc)) &&
   ['manual', 'not-synced', 'synced', 'error'].includes(String(v.syncStatus)) &&
   nullableText(v.lastSyncError) && count(v.positionCount) && nullableText(v.historyNotice) &&
@@ -262,10 +316,30 @@ const account = (v: unknown): v is BrokerAccount => object(v) && guid(v.id) &&
   (v.availableStablecoinNominalUsd === undefined || nullableDecimal(v.availableStablecoinNominalUsd)) &&
   (v.stablecoinScope === undefined || nullableText(v.stablecoinScope)) &&
   (v.accountMode === undefined || nullableText(v.accountMode)) &&
+  (v.totalStablecoinNominalUsd === undefined || nullableDecimal(v.totalStablecoinNominalUsd)) &&
+  (v.balanceUsd === undefined || nullableDecimal(v.balanceUsd)) &&
   (v.settingsRevision === undefined || typeof v.settingsRevision === 'number' && count(v.settingsRevision) && v.settingsRevision > 0)
 const fill = (v: unknown): v is ImportedFill => object(v) && guid(v.id) && guid(v.accountId) &&
-  ['contractId', 'side', 'direction', 'feeToken', 'orderId', 'sourceFillId', 'transactionHash'].every(k => text(v[k])) &&
+  ['contractId', 'direction', 'feeToken', 'orderId', 'sourceFillId', 'transactionHash'].every(k => text(v[k])) &&
+  (v.side === 'buy' || v.side === 'sell') && ['open', 'close', 'flip', 'unknown'].includes(v.positionEffect as string) &&
+  ['reported', 'standard-account-free'].includes(v.feeBasis as string) && ['gross', 'net-of-fee'].includes(v.pnlBasis as string) &&
   ['price', 'quantity', 'fee', 'closedPnlUsd'].every(k => decimal(v[k])) && date(v.occurredAtUtc) && (v.playId === null || guid(v.playId))
+const discovery = (venueId: string, address: string) => (v: unknown): v is AccountDiscovery => object(v) &&
+  v.venueId === venueId && text(v.address) && v.address.toLowerCase() === address.toLowerCase() &&
+  text(v.notice) && v.notice.length <= 2000 && Array.isArray(v.accounts) && v.accounts.length <= 1000 &&
+  v.accounts.every((a: unknown) => object(a) && accountIndex(a.sourceId) && text(a.name) && a.name.length <= 200 &&
+    ['main', 'subaccount'].includes(String(a.accountType)) && nullableDecimal(a.accountValueUsd) &&
+    (a.collateralUsd === undefined || nullableDecimal(a.collateralUsd)) &&
+    (a.availableBalanceUsd === undefined || nullableDecimal(a.availableBalanceUsd)) &&
+    (a.existingAccountId === null || guid(a.existingAccountId)) && (a.isEnabled === null || typeof a.isEnabled === 'boolean')) &&
+  new Set(v.accounts.map(a => a.sourceId)).size === v.accounts.length
+const credential = (v: unknown): v is AccountCredential => object(v) && typeof v.storageConfigured === 'boolean' &&
+  Object.keys(v).every(k => ['storageConfigured', 'credential'].includes(k)) &&
+  (v.credential === null || object(v.credential) &&
+    Object.keys(v.credential).every(k => ['scope', 'expiresAt', 'lastVerifiedAt', 'status'].includes(k)) &&
+    ['single', 'all'].includes(String(v.credential.scope)) && date(v.credential.expiresAt) &&
+    (v.credential.lastVerifiedAt === null || date(v.credential.lastVerifiedAt)) &&
+    ['valid', 'expiring', 'expired', 'unavailable'].includes(String(v.credential.status)))
 const wallet = (v: unknown): v is StablecoinWallet | null => v === null || object(v) &&
   date(v.observedAtUtc) && text(v.accountMode) && text(v.scope) && decimal(v.totalNominalUsd) &&
   decimal(v.availableNominalUsd) && text(v.notice) && Array.isArray(v.balances) &&
@@ -379,7 +453,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       signal.removeEventListener('abort', stop)
     }
   }
-  async function request<T>(path: string, validate: (v: unknown) => v is T, options: RequestInit = {}, timeout = 10_000, badGateway?: string): Promise<T> {
+  async function request<T>(path: string, validate: (v: unknown) => v is T, options: RequestInit = {}, timeout = 10_000, badGateway?: string, safeError?: string): Promise<T> {
     let response: Response
     try {
       const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout)
@@ -388,17 +462,18 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
         credentials: 'omit', redirect: 'error', cache: 'no-store', signal,
       })
     } catch {
-      throw new ApiError('unavailable', 'The request did not complete. Check the API and try again.')
+      throw new ApiError('unavailable', safeError ?? 'The request did not complete. Check the API and try again.')
     }
-    if (!response.ok) throw await httpError(response, badGateway)
+    // Credential failures must never echo provider or proxy response bodies.
+    if (!response.ok) throw safeError ? new ApiError('http', safeError, response.status) : await httpError(response, badGateway)
     if (response.status === 204) {
       const noContent: unknown = undefined
       if (validate(noContent)) return noContent
-      throw new ApiError('invalid-response', 'The API returned no workspace data.')
+      throw new ApiError('invalid-response', safeError ?? 'The API returned no workspace data.')
     }
     let body: unknown
-    try { body = await response.json() } catch { throw new ApiError('invalid-response', 'The API returned invalid data.') }
-    if (!validate(body)) throw new ApiError('invalid-response', 'The API returned incompatible workspace data.')
+    try { body = await response.json() } catch { throw new ApiError('invalid-response', safeError ?? 'The API returned invalid data.') }
+    if (!validate(body)) throw new ApiError('invalid-response', safeError ?? 'The API returned incompatible workspace data.')
     return body
   }
   // Plays and evidence: JSON bodies, multipart uploads and image downloads share auth and error handling.
@@ -472,6 +547,10 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     updateEvidenceMarkup: (id, markup) => json(`${evidencePath(id)}/markup`, isSavedEvidence,
       markup ? { method: 'PUT', body: JSON.stringify(markup) } : { method: 'DELETE' }),
     deleteEvidence: id => json(evidencePath(id), none, { method: 'DELETE' }),
+    sizing: signal => json('/api/sizing', isSizingDocument, withSignal(signal)),
+    review: (query, signal) => json(reviewPath(query), isReviewDocument, withSignal(signal)),
+    updateSizingSettings: settings => json('/api/sizing/settings', isSizingDocument,
+      { method: 'PUT', body: JSON.stringify({ riskPercent: settings.riskPercent }) }),
     overview: signal => request('/api/overview', overview, signal ? { signal } : {}),
     portfolios: signal => request('/api/portfolios', (v): v is Portfolio[] => Array.isArray(v) && v.every(portfolio), signal ? { signal } : {}),
     accounts: signal => request('/api/accounts', (v): v is BrokerAccount[] => Array.isArray(v) && v.every(account), signal ? { signal } : {}),
@@ -496,6 +575,30 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     marketStream,
     createPortfolio: name => request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name }) }),
     createAccount: body => request('/api/accounts', account, { method: 'POST', body: JSON.stringify(body) }),
+    discoverAccounts: (venueId, address, signal, token) => {
+      if (!/^[a-z][a-z\d-]{0,63}$/.test(venueId) || !/^0x[\da-f]{40}$/i.test(address)) {
+        return Promise.reject(new ApiError('invalid-response', 'Use a valid venue and public wallet address.'))
+      }
+      if (token !== undefined) {
+        if (!credentialTransportAllowed()) return Promise.reject(new ApiError('http', credentialTransportMessage))
+        if (!token.trim() || token.length > 512) return Promise.reject(new ApiError('http', credentialSaveMessage))
+        return request(`/api/venues/${venueId}/accounts/credential`, discovery(venueId, address),
+          { ...withSignal(signal), method: 'POST', body: JSON.stringify({ address, token }) }, 30_000, undefined,
+          'Could not load venue names. Check the read-only token’s wallet, scope and expiry.')
+      }
+      return request(`/api/venues/${venueId}/accounts?${new URLSearchParams({ address })}`, discovery(venueId, address),
+        withSignal(signal), 30_000, undefined, 'Could not find accounts for this wallet. Check the address and try again.')
+    },
+    accountCredential: (id, signal) => request(`${accountPath(id)}/credential`, credential, withSignal(signal), 10_000,
+      undefined, 'Credential status is unavailable. Retry or ask the operator to check credential storage.'),
+    saveAccountCredential: (id, token) => {
+      if (!credentialTransportAllowed()) return Promise.reject(new ApiError('http', credentialTransportMessage))
+      if (!token.trim() || token.length > 512) return Promise.reject(new ApiError('http', credentialSaveMessage))
+      return request(`${accountPath(id)}/credential`, credential, { method: 'PUT', body: JSON.stringify({ token }) },
+        30_000, undefined, credentialSaveMessage)
+    },
+    deleteAccountCredential: id => request(`${accountPath(id)}/credential`, none, { method: 'DELETE' }, 10_000,
+      undefined, 'Could not remove the credential. Refresh its status before trying again.'),
     renamePortfolio: (id, name) => request(`/api/portfolios/${resourceId(id)}`, portfolio, { method: 'PATCH', body: JSON.stringify({ name }) }),
     deletePortfolio: id => request(`/api/portfolios/${resourceId(id)}`, (v): v is undefined => v === undefined, { method: 'DELETE' }),
     updateAccount: (id, settings) => request(accountPath(id), account, { method: 'PUT', body: JSON.stringify(settings) }),

@@ -12,8 +12,8 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
     public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct) => db.Portfolios.OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
     public Task<List<Account>> AccountsAsync(CancellationToken ct) => db.Accounts.OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => db.Accounts.SingleOrDefaultAsync(x => x.Id == id, ct);
-    public Task<bool> SourceExistsAsync(string venueId, string address, CancellationToken ct) =>
-        db.Accounts.AnyAsync(a => a.VenueId == venueId && a.Address == address, ct);
+    public Task<bool> SourceExistsAsync(string venueId, string sourceId, CancellationToken ct) =>
+        db.Accounts.AnyAsync(a => a.VenueId == venueId && a.SourceId == sourceId, ct);
     public Task<AccountSnapshot?> SnapshotAsync(Guid id, CancellationToken ct) => db.Snapshots
         .Where(s => s.AccountId == id && db.Accounts.Any(a => a.Id == s.AccountId && a.IsEnabled))
         .Include(s => s.Positions).Include(s => s.Stablecoins).AsSplitQuery().AsNoTracking().SingleOrDefaultAsync(ct);
@@ -28,9 +28,9 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
         db.Accounts.Add(account);
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException error) when (error.InnerException is PostgresException
-        { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "UX_accounts_owner_venue_address" })
+        { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "UX_accounts_owner_venue_source" })
         {
-            throw new WorkspaceException(409, "An account for this venue and address already exists. Manage or re-enable that account.");
+            throw new WorkspaceException(409, "An account for this venue and source already exists. Manage or re-enable that account.");
         }
     }
     public async Task SaveAsync(CancellationToken ct) => await db.SaveChangesAsync(ct);
@@ -86,6 +86,7 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
                 ImportedOrder o => o.OwnerId == account.OwnerId && o.AccountId == account.Id,
                 AccountSnapshot s => s.OwnerId == account.OwnerId && s.AccountId == account.Id,
                 AccountPosition p => p.OwnerId == account.OwnerId && p.AccountId == account.Id,
+                Vessel.Domain.Credentials.AccountCredential c => c.OwnerId == account.OwnerId && c.AccountId == account.Id,
                 _ => false
             };
             if (deleted) entry.State = EntityState.Detached;
@@ -151,6 +152,7 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
                 OwnerId = account.OwnerId,
                 AccountId = account.Id,
                 ContractId = p.ContractId,
+                VenueContractId = p.VenueContractId,
                 SignedQuantity = p.SignedQuantity,
                 EntryPrice = p.EntryPrice,
                 UnrealizedPnlUsd = p.UnrealizedPnlUsd,
@@ -188,14 +190,18 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
                 OwnerId = account.OwnerId,
                 AccountId = account.Id,
                 ContractId = f.ContractId,
+                VenueContractId = f.VenueContractId,
                 SourceFillId = f.SourceFillId,
                 Side = f.Side,
                 Direction = f.Direction,
+                PositionEffect = f.PositionEffect,
                 Price = f.Price,
                 Quantity = f.Quantity,
                 Fee = f.Fee,
                 FeeToken = f.FeeToken,
+                FeeBasis = f.FeeBasis,
                 ClosedPnlUsd = f.ClosedPnlUsd,
+                PnlBasis = f.PnlBasis,
                 OccurredAtUtc = f.OccurredAtUtc.ToUniversalTime(),
                 OrderId = f.OrderId,
                 TransactionHash = f.TransactionHash

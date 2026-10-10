@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError, getSystem } from './system'
 import { systemFixture } from '@/test/system-fixture'
+import { indexVenue } from '@/test/account-access-fixture'
 
 function mockResponse(body: unknown, status = 200) {
   const request = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }))
@@ -9,6 +10,34 @@ function mockResponse(body: unknown, status = 200) {
 }
 
 describe('GET /api/system', () => {
+  it('accepts account-index sources and optional discovery/credential capabilities', async () => {
+    const body = { ...systemFixture, venues: [indexVenue, ...systemFixture.venues.filter(v => v.id !== indexVenue.id)] }
+    mockResponse(body)
+    await expect(getSystem('token')).resolves.toEqual(body)
+  })
+  it.each(['accountDiscovery', 'readOnlyCredential'])('rejects a non-boolean %s capability', async name => {
+    mockResponse({ ...systemFixture, venues: [
+      { ...indexVenue, capabilities: { ...indexVenue.capabilities, [name]: 'yes' } },
+      ...systemFixture.venues.filter(v => v.id !== indexVenue.id),
+    ] })
+    await expect(getSystem('token')).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+  it('accepts the native trade placeholder and HTTPS read-only credential setup link', async () => {
+    const body = { ...systemFixture, venues: [
+      { ...indexVenue, tradeUrlTemplate: 'https://trade.example/{venueContractId}' },
+      ...systemFixture.venues.filter(v => v.id !== indexVenue.id),
+    ] }
+    mockResponse(body)
+    await expect(getSystem('token')).resolves.toEqual(body)
+  })
+  it.each(['https://trade.example/{unknown}', 'https://trade.example/{instrument}/{unknown}', 'https://{venueContractId', 'https://user:pass@trade.example/{instrument}'])('rejects unsafe or unresolved trade template %s', async tradeUrlTemplate => {
+    mockResponse({ ...systemFixture, venues: [{ ...indexVenue, tradeUrlTemplate }, ...systemFixture.venues.filter(v => v.id !== indexVenue.id)] })
+    await expect(getSystem('token')).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+  it.each(['http://venue.example/tokens', 'javascript:alert(1)', 'https://user:pass@venue.example/tokens', 'https://'])('rejects unsafe credential setup URL %s', async credentialSetupUrl => {
+    mockResponse({ ...systemFixture, venues: [{ ...indexVenue, credentialSetupUrl }, ...systemFixture.venues.filter(v => v.id !== indexVenue.id)] })
+    await expect(getSystem('token')).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
   it('uses the exact path and a plain Bearer header, without cookies or token URLs', async () => {
     const request = mockResponse(systemFixture)
     await expect(getSystem(' runtime-token ')).resolves.toEqual(systemFixture)
@@ -59,6 +88,15 @@ describe('GET /api/system', () => {
     { ...systemFixture, allowsConcurrentPlays: false },
     { ...systemFixture, marketScope: 'spot' },
     { ...systemFixture, venues: [{ id: 'hyperliquid', name: 'Hyperliquid', status: 'connected' }] },
+    { ...systemFixture, venues: [{ id: 'hyperliquid', name: 'Hyperliquid', status: 'connected' }] },
+    // Every venue states what it can do, and manual accounts must remain possible.
+    { ...systemFixture, venues: systemFixture.venues.map(venue => venue.id === 'hyperliquid' ? { ...venue, capabilities: { sync: true } } : venue) },
+    { ...systemFixture, venues: systemFixture.venues.filter(venue => venue.id !== 'manual') },
+    { ...systemFixture, venues: [...systemFixture.venues, systemFixture.venues[0]] },
+    { ...systemFixture, venues: systemFixture.venues.map(venue => venue.id === 'hyperliquid' ? { ...venue, tradeUrlTemplate: 'http://example.test/{instrument}' } : venue) },
+    { ...systemFixture, venues: systemFixture.venues.map(venue => venue.id === 'hyperliquid' ? { ...venue, tradeUrlTemplate: 'https://example.test/trade' } : venue) },
+    { ...systemFixture, venues: systemFixture.venues.map(venue => venue.id === 'hyperliquid' ? { ...venue, intervals: ['2M'] } : venue) },
+    { ...systemFixture, venues: systemFixture.venues.map(venue => venue.id === 'hyperliquid' ? { ...venue, priceRule: 'rounded' } : venue) },
   ])('rejects incompatible system data %#', async (body) => {
     mockResponse(body)
     await expect(getSystem('token')).rejects.toMatchObject({ kind: 'invalid-response' })
@@ -68,6 +106,14 @@ describe('GET /api/system', () => {
     const custom = { ...systemFixture, owner: { id: '22222222-2222-2222-2222-222222222222', displayName: 'Configured owner' } }
     mockResponse(custom)
     await expect(getSystem('token')).resolves.toEqual(custom)
+  })
+  it('accepts any number of venues with their own capabilities', async () => {
+    const other = { id: 'other-venue', name: 'Other', status: 'read-only', source: 'evm-address', quoteAsset: 'USDC', tradeUrlTemplate: null,
+      intervals: ['1m', '1h', '1d'], priceRule: 'tick-size',
+      capabilities: { sync: true, instruments: true, orders: false, candles: false, marketContext: false, stream: false, stablecoinWallet: false } }
+    const body = { ...systemFixture, venues: [...systemFixture.venues, other] }
+    mockResponse(body)
+    await expect(getSystem('token')).resolves.toEqual(body)
   })
   it('accepts the current core stage with a read-only Hyperliquid capability', async () => {
     const core = { ...systemFixture, stage: 'core', venues: systemFixture.venues.map(venue => venue.id === 'hyperliquid' ? { ...venue, status: 'read-only' } : venue) }

@@ -42,7 +42,7 @@ public sealed class WorkspaceReviewApiTests
     [InlineData("{\"name\":\"New\",\"portfolioId\":null,\"isEnabled\":true,\"expectedRevision\":9223372036854775807}", 409)]
     public async Task PUT_requires_valid_matching_revision_without_mutation(string body, int status)
     {
-        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), new FixtureReader());
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()));
         var account = await service.CreateAccountAsync(new(null, "Original", "manual"), default);
         await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
         var response = await client.PutAsync($"/api/accounts/{account.Id}", new StringContent(body, Encoding.UTF8, "application/json"));
@@ -54,7 +54,7 @@ public sealed class WorkspaceReviewApiTests
     [Fact]
     public async Task Stale_rename_does_not_reenable_and_an_explicit_reload_allows_save()
     {
-        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), new FixtureReader());
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()));
         var account = await service.CreateAccountAsync(new(null, "Original", "manual"), default);
         await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
         var disable = await client.PutAsJsonAsync($"/api/accounts/{account.Id}", new UpdateAccountRequest("Original", null, false, 1));
@@ -71,7 +71,7 @@ public sealed class WorkspaceReviewApiTests
     [Fact]
     public async Task Duplicate_source_has_safe_conflict_even_if_original_is_disabled()
     {
-        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), new FixtureReader());
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()));
         var account = await service.CreateAccountAsync(new(null, "Private name", "hyperliquid", "0x" + new string('a', 40)), default);
         await service.UpdateAccountAsync(account.Id, new("Private name", null, false, 1), default);
         await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
@@ -83,7 +83,7 @@ public sealed class WorkspaceReviewApiTests
     [Fact]
     public async Task Account_and_portfolio_collection_reads_do_not_depend_on_overview_activity_queries()
     {
-        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), new FixtureReader());
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()));
         var portfolio = await service.CreatePortfolioAsync(new("Independent"), default);
         var account = await service.CreateAccountAsync(new(portfolio.Id, "Manual", "manual"), default);
         store.RejectActivityReads = true;

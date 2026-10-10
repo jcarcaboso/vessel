@@ -1,0 +1,16 @@
+.notification-viewport { position: fixed; z-index: 70; right: 20px; bottom: 20px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; width: min(400px, calc(100vw - 32px)); pointer-events: none; }
+.notification { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 12px 12px 12px 14px; border: 1px solid var(--border); border-left-width: 3px; border-radius: 7px; background: var(--card); color: var(--foreground); box-shadow: 0 12px 32px #0006; font-family: var(--app-font); font-size: 12px; line-height: 1.55; pointer-events: auto; animation: notification-in .18s ease-out; }
+.notification > svg { flex-shrink: 0; margin-top: 2px; }
+.notification.is-error { border-color: color-mix(in srgb, var(--negative) 40%, var(--border)); border-left-color: var(--negative); background: color-mix(in srgb, var(--negative) 7%, var(--card)); }
+.notification.is-error > svg { color: var(--negative); }
+.notification.is-success { border-left-color: var(--positive); }
+.notification.is-success > svg { color: var(--positive); }
+.notification.is-info { border-left-color: var(--ring); }
+.notification.is-info > svg { color: var(--ring); }
+.notification-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.notification-body strong { display: block; font-weight: 650; }
+.notification-action { flex-shrink: 0; padding: 2px 4px; border: 0; background: none; color: var(--ring); font: inherit; font-weight: 600; cursor: pointer; }
+.notification-close { flex-shrink: 0; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted-foreground); cursor: pointer; }
+.notification-close:hover { color: var(--foreground); background: var(--accent); }
+@keyframes notification-in { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .notification { animation: none; } }

@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Trash2 } from 'lucide-react'
+import { useVenues } from '@/api/venues'
+import { AccountCredential } from './AccountCredential'
 
 const failure = (cause: unknown) => cause instanceof ApiError ? cause.message : 'The change could not be completed. Your stored records have not been replaced.'
 
@@ -53,6 +55,8 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
   account: BrokerAccount; portfolios: Portfolio[]; api: WorkspaceApi
   onClose: () => void; onChanged: (message: string) => void; onStale?: () => void
 }) {
+  const venues = useVenues()
+  const [credentialPending, setCredentialPending] = useState(false)
   const [name, setName] = useState(account.name)
   const [portfolioId, setPortfolioId] = useState(account.portfolioId ?? '')
   const [enabled, setEnabled] = useState(account.isEnabled !== false)
@@ -76,6 +80,7 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
   }
   async function save(event: FormEvent) {
     event.preventDefault(); setError(null)
+    if (credentialPending) return
     if (!name.trim()) { setError('Name the account.'); return }
     if (conflict || revision === undefined) { setError('Reload current settings before saving.'); return }
     setPending(true)
@@ -97,15 +102,16 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
     } catch (cause) { setError(failure(cause)) }
     finally { setPending(false) }
   }
-  return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>
+  return <Dialog open onOpenChange={next => { if (!next && !pending && !credentialPending) onClose() }}>
     <DialogContent className="workspace-dialog">
       <DialogHeader><DialogTitle>{deleting ? 'Delete account permanently?' : 'Manage account'}</DialogTitle><DialogDescription>{deleting ?
         `Delete ${account.name} and its retained imported executions, snapshots and positions? This cannot be undone here. Accounts with linked Play records cannot be deleted; disable them instead.` :
-        'Rename, move or disable this record. The venue and public address do not change.'}</DialogDescription></DialogHeader>
+        'Rename, move or disable this record. The venue and source identity do not change.'}</DialogDescription></DialogHeader>
       {deleting ? <div className="workspace-form">
         {error && <p className="error" role="alert">{error}</p>}
         <div className="management-actions"><Button variant="outline" onClick={() => { setDeleting(false); setError(null) }} disabled={pending}>Keep account</Button><Button variant="destructive" onClick={() => { void remove() }} disabled={pending}>{pending ? 'Deleting…' : 'Delete account'}</Button></div>
-      </div> : <form className="workspace-form" onSubmit={event => { void save(event) }} aria-busy={pending}>
+      </div> : <><p className="account-source"><span>Source</span> {venues.name(account.venueId)} · {account.sourceId ?? account.address ?? 'Manual record'}</p>
+      <form className="workspace-form" onSubmit={event => { void save(event) }} aria-busy={pending}>
         <label htmlFor="rename-account">Account name</label><Input id="rename-account" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={pending} autoFocus />
         <label htmlFor="move-account">Portfolio</label><select id="move-account" value={portfolioId} onChange={event => setPortfolioId(event.target.value)} disabled={pending}>
           <option value="">No portfolio · All accounts only</option>{portfolioOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -116,8 +122,11 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
         <p className="field-help">Disabled accounts keep their records. Imported history and positions are hidden from normal views, excluded from totals, and refresh is blocked. Enable again to restore them.</p>
         {conflict && <div className="workspace-form"><p className="field-help">These settings may be outdated. Reload to replace this form with the latest saved values, then review before saving. Your stale changes will not be replayed.</p><Button type="button" variant="outline" onClick={() => { void reloadSettings() }} disabled={pending}>Reload current settings</Button></div>}
         {error && <p className="error" role="alert">{error}</p>}
-        <div className="management-actions"><Button type="button" variant="ghost" className="danger-action" onClick={() => { setDeleting(true); setError(null) }} disabled={pending}><Trash2 size={14} />Delete</Button><Button type="submit" disabled={pending || conflict}>{pending ? 'Saving…' : 'Save settings'}</Button></div>
-      </form>}
+        <div className="management-actions"><Button type="button" variant="ghost" className="danger-action" onClick={() => { setDeleting(true); setError(null) }} disabled={pending || credentialPending}><Trash2 size={14} />Delete</Button><Button type="submit" disabled={pending || credentialPending || conflict}>{pending ? 'Saving…' : 'Save settings'}</Button></div>
+      </form>
+      {venues.can(account.venueId, 'readOnlyCredential') && <fieldset className="credential-fieldset" disabled={pending}>
+        <AccountCredential accountId={account.id} venueId={account.venueId} enabled={account.isEnabled !== false} api={api} onBusy={setCredentialPending} />
+      </fieldset>}</>}
     </DialogContent>
   </Dialog>
 }

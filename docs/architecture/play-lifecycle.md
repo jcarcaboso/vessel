@@ -115,13 +115,14 @@ October 3, 2026. Step 2 is implemented on branch `t3code/play-execution`, stacke
 
 - **Sources**: Hyperliquid `frontendOpenOrders` (current book) and `historicalOrders` (latest 2,000 status updates, latest per order kept), plus the existing `userFills` sync. Only primary perpetual contracts; rejected orders are never stored.
 - **Relevance**: orders are stored in `imported_orders` only for contracts with a Planned, Paused or Open venue Play on that account, placed at or after the earliest such Play was created. Account deletion removes them with the other venue facts.
-- **Price match**: within one step of the fifth significant figure of the plan level, the precision Hyperliquid accepts (1 at 84,541; 0.01 at 100). Percentage stops and targets resolve against the entry price. A trigger order is compared at its trigger price, a limit order at its limit price.
+- **Price match**: within one step of the fifth significant figure of the plan level, the precision Hyperliquid accepts (1 at 84,541; 0.01 at 100). Percentage stops and targets are returns on margin at the plan's leverage, so they resolve to a price move of percentage ÷ leverage from the entry. A trigger order is compared at its trigger price, a limit order at its limit price.
 - **Level fit**: entries need the entry side and an order that is neither reduce-only nor a position TP/SL. Stops need a trigger order that is not a take profit. Targets accept limit or take-profit orders, not stop orders. Orders placed before the Play was created never match it.
 - **Unplanned exit**: when no level matches, an exit-side order on an Open Play links as an unplanned exit if it reduces the position (reduce-only, position TP/SL, or its fills close) and was placed after the Play's first linked entry fill.
 - **Automatic vs. confirmation**: one candidate links automatically. Several (concurrent Plays on the same level) become suggestions; the owner links one ("Link here") or declines ("Not this play"). Unlinking is remembered as dismissed and never re-proposed for that level; other suggestions for the order return if it is unlinked.
 - **Manual fallback**: other live or filled orders on the instrument since the Play was created (latest 20) can be linked by hand to any level or as an unplanned exit. An order belongs to at most one level of one Play (unique index on linked orders).
 - **Status**: the first linked entry fill moves Planned or Paused to Open (the note names the fill; a paused Play is flagged "Filled while paused"). Open becomes Closed when linked exit fills cover all linked entry fills and no linked entry order is still open. These changes are recorded with source `venue`. There is no automatic reverse transition.
-- **Edits**: after planning, an entry with linked fills keeps its price and share and cannot be removed. Its stop and targets, and untaken entries, can still change with a revision reason.
+- **Edits**: after planning, an entry with linked fills keeps its price and share and cannot be removed. Its stops and targets, and untaken entries, can still change with a revision reason.
+- **Several stops**: each stop of an entry is its own level, like each target. Stop and target links carry the level ID (`levelId`, formerly `targetId` for targets only).
 
 ### Checking
 

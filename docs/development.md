@@ -75,6 +75,8 @@ The development launch profile binds `http://127.0.0.1:5080`.
 - Missing/wrong tokens fail closed. New unannotated endpoints have an authenticated fallback policy.
 - Development OpenAPI is also protected.
 
+Lighter read-only tokens are separate from the Vessel API token. Configure a server-only encryption key ring before saving them; public account discovery and reads work without one. See [credential setup, HTTPS and rotation](architecture/venue-credentials.md#operator-setup) and the [implemented import workflow](architecture/lighter-state.md). Never enter a real venue token in the HTTP LAN preview.
+
 Metadata and liveness can run without database connectivity. The protected core endpoints provide portfolio/account create/list/read, overview, snapshots, fills and bounded manual-trigger Hyperliquid refresh. There is no full Play CRUD, job scheduler or full-history backfill.
 
 ## Frontend
@@ -146,6 +148,14 @@ sudo iptables -I nixos-fw 1 \
 To remove it, use the same match with `iptables -D nixos-fw`. This does not change the separate prototype rule on port 5173.
 
 Verification included actual LAN page/liveness HTTP 200, missing/wrong bearer API 401, authenticated system/overview with mounted database 200, and a real T3 browser login into the Overview without synthetic responses. No wallet refresh or order request was made.
+
+### October 5 SL/TP frontend comparison preview
+
+The original `10.1.0.219:5180` frontend still served an October 4 revision when checked on October 5. The current agent host (`10.1.0.230`) has no authorized SSH access to update that service.
+
+An additional transient user service, `vessel-sl-tp-preview.service`, serves the latest-main frontend plus the SL/TP display correction at **`http://10.1.0.230:5180/`** from the `t3code-dcce987b` worktree. Its server-only `VESSEL_API_TARGET=http://10.1.0.219:5180` forwards protected API requests through the existing preview. Connect with the existing API token; no token, database configuration or private environment was copied. Stop it with `systemctl --user stop vessel-sl-tp-preview.service`.
+
+This is a frontend comparison preview, **not an upgrade of the original backend**. Newer API capabilities such as sizing suggestions still require updating and migrating the original backend with authorized access. The database, original service and firewall were left unchanged. SL/TP controls were browser-verified separately with a disposable, clearly labeled fixture that made no account/API requests.
 
 ## Checks
 

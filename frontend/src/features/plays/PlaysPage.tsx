@@ -2,15 +2,21 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { statusLabels, type PlayStatus, type PlaySummary, type StatusRequest } from '@/api/plays'
 import { Button } from '@/components/ui/button'
-import { venueName } from '@/features/workspace/format'
+import { useNotifications } from '@/components/notifications/notifications'
+import { useVenues } from '@/api/venues'
 import { ArrowLeft, History, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import { createDraft, type PlayDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
+import { instrumentLabel } from './instruments'
 import { ExecutionPanel } from './ExecutionPanel'
 import { usePlayExecution } from './usePlayExecution'
+import { useSizing } from './useSizing'
+import { planIssues, planIssueSummary } from './planChecks'
+import { formatMoney, marginOverBudget } from './sizing'
+import { leverageOf } from './levels'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
 import {
-  createPlaysSession, draftFromSaved, failure, fieldsFromDraft, isDirty, loadSavedPlay, planChanged, savedState, syncEvidence,
+  createPlaysSession, draftFromSaved, failure, fieldsFromDraft, hasDraftContent, isDirty, loadSavedPlay, planChanged, savedState, syncEvidence,
   type PlaysSession, type SavedState,
 } from './saved'
 
@@ -18,12 +24,6 @@ import {
 const ended: PlayStatus[] = ['closed', 'cancelled']
 const filters = [['active', 'In progress'], ['ended', 'Closed and cancelled'], ['all', 'All']] as const
 type Filter = typeof filters[number][0]
-
-function hasContent(draft: PlayDraft) {
-  return !!(draft.title.trim() || draft.accountId || draft.instrument || draft.size || draft.evidence.length ||
-    Object.values(draft.drawings).some(items => items.length) || Object.values(draft.notes).some(note => note.trim()) ||
-    draft.entries.some(entry => entry.price || entry.stop.value || entry.targets.some(target => target.value)))
-}
 
 export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false }: {
   accounts: BrokerAccount[]
@@ -41,11 +41,18 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     onSession(latest.current)
   }, [onSession])
   const [busy, setBusy] = useState<null | 'save' | 'status' | 'open' | 'delete'>(null)
-  const [error, setError] = useState<string | null>(null)
+  // Errors appear as popup notifications; a newer one replaces the last, and starting another action clears it.
+  const { notify, dismiss } = useNotifications()
+  const setError = useCallback((message: string | null) => {
+    if (message) notify({ tone: 'error', key: 'plays-error', message })
+    else dismiss('plays-error')
+  }, [notify, dismiss])
   const [dialog, setDialog] = useState<null | 'revision' | 'cancel' | 'delete' | 'history'>(null)
   const [dialogError, setDialogError] = useState<string | null>(null)
 
   const { draft, saved } = session
+  // Loaded once per page visit; without it the sizing suggestions stay hidden.
+  const sizing = useSizing(api)
   const tracking = usePlayExecution(api, session.view === 'editor' && saved ? saved.summary.id : null, saved?.summary.status)
 
   // Linked fills move a play to Open or Closed on the server; take the new status and version.
@@ -59,14 +66,38 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       if (active && current?.summary.id === play.summary.id) update({ saved: { ...current, summary: play.summary } })
     }).catch(cause => { if (active) setError(failure(cause)) })
     return () => { active = false }
-  }, [api, venueStatus, update])
-  const dirty = saved ? isDirty(draft, saved) : hasContent(draft)
+  }, [api, venueStatus, update, setError])
+  const dirty = saved ? isDirty(draft, saved) : hasDraftContent(draft)
+  // A blocked save says why until the plan is fixed.
   const status = saved?.summary.status ?? 'draft'
+  const fixed = !planProblem(draft, status)
+  useEffect(() => { if (fixed) dismiss('plan-blocked') }, [fixed, dismiss])
+
+  /**
+   * Stops and targets on the wrong side of their entry, and a draft's margin above its budget, block
+   * saving and planning until they are fixed. Once orders may rest the venue counts their margin as
+   * used, so the budget is only held while the play is a draft.
+   */
+  function planProblem(current: PlayDraft, currentStatus: PlayStatus) {
+    const issues = planIssues(current.entries, current.direction)
+    if (issues.length) return planIssueSummary(issues)
+    const account = accounts.find(item => item.id === current.accountId)
+    const over = currentStatus === 'draft' ? marginOverBudget(current, leverageOf(current.leverage), account?.availableStablecoinNominalUsd) : null
+    const units = { quote: 'USD', base: '', quantityDecimals: null }
+    return over && `The margin (${formatMoney(over.margin, units)}) is above the ${formatMoney(over.budget.amount, units)} ${over.budget.source === 'manual' ? 'budget' : 'available'}.`
+  }
+
+  function planBlocked() {
+    const problem = planProblem(latest.current.draft, latest.current.saved?.summary.status ?? 'draft')
+    if (problem) notify({ tone: 'error', key: 'plan-blocked', title: 'Not saved', message: `Fix the plan first. ${problem}` })
+    return !!problem
+  }
 
   /** Saves the draft and its evidence. Returns the saved state, or null when the save failed. */
   async function save(reason?: string): Promise<SavedState | null> {
     const { draft: sent, saved: before } = latest.current
     if (!sent.accountId) { setError('Choose an account before saving.'); return null }
+    if (planBlocked()) return null
     setBusy('save'); setError(null); setDialogError(null)
     try {
       const fields = fieldsFromDraft(sent)
@@ -98,6 +129,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
 
   async function changeStatus(request: StatusRequest) {
     let state = latest.current.saved
+    if (request.status === 'planned' && planBlocked()) return
     if (request.status === 'planned' && status === 'draft' && (!state || isDirty(latest.current.draft, state))) {
       state = await save()
       if (!state) return
@@ -143,7 +175,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   }
 
   if (session.view === 'list') {
-    return <PlayList api={api} accounts={accounts} busy={busy === 'open'} error={error}
+    return <PlayList api={api} accounts={accounts} busy={busy === 'open'}
       unsaved={dirty ? draft.title.trim() || 'Untitled play' : null}
       onOpen={id => { void open(id) }}
       onNew={() => { setError(null); update({ view: 'editor', draft: createDraft(), saved: null }) }}
@@ -158,35 +190,43 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const statusBlocked = dirty ? 'Save your changes first' : undefined
   const pending = busy !== null
 
-  const actions = <div className="play-actions">
-    {saved && <Button variant="ghost" size="sm" onClick={() => setDialog('history')}><History size={14} />History</Button>}
-    <Button size="sm" variant={status === 'draft' ? 'outline' : 'default'} disabled={!dirty || pending || !draft.accountId}
-      title={!draft.accountId ? 'Choose an account to save' : undefined}
-      onClick={() => { if (needsReason) { setDialogError(null); setDialog('revision') } else void save() }}>
-      <Save size={14} />{saving ? 'Saving…' : !dirty && saved ? 'Saved' : status === 'draft' ? 'Save draft' : 'Save changes'}</Button>
-    {status === 'draft' && <Button size="sm" disabled={pending || !draft.accountId || !draft.instrument}
+  // The same buttons stay in the same places whether or not the play is saved; unavailable ones are disabled.
+  const statusAction = status === 'draft'
+    ? <Button size="sm" className="play-primary" disabled={pending || !draft.accountId || !draft.instrument}
       title={!draft.instrument ? 'Choose an instrument and price an entry to plan' : 'Commit to this plan. Later changes become revisions.'}
-      onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Plan it</Button>}
-    {status === 'planned' && <Button size="sm" variant="outline" disabled={pending || dirty} title={statusBlocked ?? 'Orders withdrawn, idea still valid'}
-      onClick={() => { void changeStatus({ status: 'paused' }) }}><Pause size={14} />Pause</Button>}
-    {status === 'paused' && <Button size="sm" disabled={pending || dirty} title={statusBlocked}
-      onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Resume</Button>}
-    {(status === 'planned' || status === 'paused') && <Button size="sm" variant="ghost" className="danger-action" disabled={pending || dirty}
-      title={statusBlocked} onClick={() => { setDialogError(null); setDialog('cancel') }}><X size={14} />Cancel play</Button>}
-    {saved && status === 'draft' && <Button size="sm" variant="ghost" className="danger-action" disabled={pending}
-      onClick={() => { setDialogError(null); setDialog('delete') }}><Trash2 size={14} />Delete</Button>}
+      onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Plan it</Button>
+    : status === 'planned' ? <Button size="sm" variant="outline" disabled={pending || dirty} title={statusBlocked ?? 'Orders withdrawn, idea still valid'}
+      onClick={() => { void changeStatus({ status: 'paused' }) }}><Pause size={14} />Pause</Button>
+    : status === 'paused' ? <Button size="sm" className="play-primary" disabled={pending || dirty} title={statusBlocked}
+      onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Resume</Button>
+    : null
+  const cancellable = status === 'planned' || status === 'paused'
+  const actions = <div className="play-actions" role="group" aria-label="Play actions">
+    <Button variant="outline" size="sm" disabled={!saved} title={saved ? 'Plan revisions and status changes' : 'Save the play first'}
+      onClick={() => setDialog('history')}><History size={14} />History</Button>
+    <Button size="sm" variant="outline" className="play-save" disabled={!dirty || pending || !draft.accountId}
+      title={!draft.accountId ? 'Choose an account to save' : undefined}
+      onClick={() => { if (planBlocked()) return; if (needsReason) { setDialogError(null); setDialog('revision') } else void save() }}>
+      <Save size={14} />{saving ? 'Saving…' : !dirty && saved ? 'Saved' : 'Save'}</Button>
+    {statusAction}
+    {cancellable
+      ? <Button size="sm" variant="outline" className="danger-action" disabled={pending || dirty}
+        title={statusBlocked} onClick={() => { setDialogError(null); setDialog('cancel') }}><X size={14} />Cancel play</Button>
+      : status === 'draft' && <Button size="sm" variant="outline" className="danger-action" disabled={pending || !saved}
+        title={saved ? 'Delete this draft' : 'Nothing saved yet'} onClick={() => { setDialogError(null); setDialog('delete') }}><Trash2 size={14} />Delete</Button>}
   </div>
 
-  const notice = !saved ? 'Not saved yet. Save the draft to keep it, with its drawings and images. Nothing is sent to a venue.'
-    : readOnly ? `${statusLabels[status]}. The plan is kept as it was; you can still write the review and add images.`
-    : locked ? `${statusLabels[status]} · revision ${saved.summary.planRevision}. Stops, targets and untaken entries can still change; each saved change asks why and becomes a revision. Vessel never sends orders.`
-    : dirty ? 'Unsaved changes. Save to keep them.' : 'Saved draft. Plan it when you are ready to place the orders.'
+  // One short line, only when it changes what the owner can do; the buttons and status badge say the rest.
+  const notice = !saved ? null
+    : readOnly ? `${statusLabels[status]}. Only the review and images can change.`
+    : dirty ? 'Unsaved changes.'
+    : locked ? `Revision ${saved.summary.planRevision}. Saved plan changes ask for a reason.` : null
 
   return <>
     <Button variant="ghost" size="sm" className="plays-back" onClick={() => update({ view: 'list' })}><ArrowLeft size={14} />All plays</Button>
-    {error && <div className="workspace-alert" role="alert"><span>{error}</span><Button variant="ghost" size="sm" onClick={() => setError(null)}>Dismiss</Button></div>}
     <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={draft} onChange={next => update({ draft: next })}
-      {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} notice={notice} lockInstrument={locked} readOnly={readOnly}
+      {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} {...(notice ? { notice } : {})} lockInstrument={locked} readOnly={readOnly}
+      sizing={sizing.sizing} onRiskChange={sizing.updateRisk}
       execution={saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}
         entries={draft.entries} onCheck={() => { void tracking.check() }} onLink={request => { void tracking.link(request) }}
         onUnlink={linkId => { void tracking.unlink(linkId) }} /> : undefined} />
@@ -199,11 +239,10 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   </>
 }
 
-function PlayList({ api, accounts, busy, error, unsaved, onOpen, onNew, onContinue, onDiscard }: {
+function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onDiscard }: {
   api: WorkspaceApi
   accounts: BrokerAccount[]
   busy: boolean
-  error: string | null
   /** Title of the play with unsaved changes, if any. */
   unsaved: string | null
   onOpen: (id: string) => void
@@ -211,6 +250,7 @@ function PlayList({ api, accounts, busy, error, unsaved, onOpen, onNew, onContin
   onContinue: () => void
   onDiscard: () => void
 }) {
+  const venues = useVenues()
   const [filter, setFilter] = useState<Filter>('active')
   const [result, setResult] = useState<{ plays: PlaySummary[] } | { error: string } | null>(null)
   const [generation, setGeneration] = useState(0)
@@ -233,7 +273,6 @@ function PlayList({ api, accounts, busy, error, unsaved, onOpen, onNew, onContin
     {unsaved && <div className="workspace-alert plays-unsaved" role="status"><span>Unsaved changes in <strong>{unsaved}</strong>. Save or discard them before opening another play.</span>
       <Button variant="outline" size="sm" onClick={onContinue}>Continue editing</Button>
       <Button variant="ghost" size="sm" className="danger-action" onClick={onDiscard}>Discard changes</Button></div>}
-    {error && <div className="workspace-alert" role="alert"><span>{error}</span></div>}
     <div className="plays-list-filters" role="group" aria-label="Show plays">
       {filters.map(([value, label]) => <button key={value} type="button" className={filter === value ? 'active' : ''} aria-pressed={filter === value}
         onClick={() => setFilter(value)}>{label}</button>)}
@@ -245,7 +284,7 @@ function PlayList({ api, accounts, busy, error, unsaved, onOpen, onNew, onContin
       {shown.map(play => <li key={play.id}>
         <button type="button" className="plays-list-item" disabled={!!unsaved || busy} onClick={() => onOpen(play.id)} aria-label={`Open ${play.title || 'Untitled play'}`}>
           <span className="plays-list-title"><strong>{play.title || 'Untitled play'}</strong>
-            <small>{play.instrument ?? 'No instrument'} · {venueName(play.venueId)} · {accountName(play.accountId)}</small></span>
+            <small>{play.instrument ? instrumentLabel(venues.quote(play.venueId), play.instrument, play.instrumentSource) : 'No instrument'} · {venues.name(play.venueId)} · {accountName(play.accountId)}</small></span>
           <span className={`direction-chip ${play.direction}`}>{play.direction === 'long' ? 'Long' : 'Short'}</span>
           <span className={`badge play-status-${play.status}`}>{statusLabels[play.status]}</span>
           <small className="plays-list-meta">{play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated {new Date(play.updatedAtUtc).toLocaleDateString()}</small>

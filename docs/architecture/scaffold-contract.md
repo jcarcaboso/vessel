@@ -36,13 +36,18 @@ Bearer-protected `GET /api/system`:
   "marketScope": "perpetuals",
   "allowsConcurrentPlays": true,
   "venues": [
-    { "id": "hyperliquid", "name": "Hyperliquid", "status": "planned" },
-    { "id": "lighter", "name": "Lighter", "status": "planned" },
-    { "id": "quantfury", "name": "Quantfury", "status": "candidate" },
-    { "id": "manual", "name": "Manual", "status": "manual" }
+    { "id": "hyperliquid", "name": "Hyperliquid", "status": "read-only", "source": "evm-address",
+      "capabilities": { "sync": true, "instruments": true, "orders": true, "candles": true,
+                        "marketContext": true, "stream": true, "stablecoinWallet": true },
+      "quoteAsset": "USDC", "tradeUrlTemplate": "https://app.hyperliquid.xyz/trade/{instrument}" },
+    { "id": "lighter", "name": "Lighter", "status": "planned", "source": "none", "capabilities": { "all": false }, "quoteAsset": null, "tradeUrlTemplate": null },
+    { "id": "quantfury", "name": "Quantfury", "status": "candidate", "source": "none", "capabilities": { "all": false }, "quoteAsset": null, "tradeUrlTemplate": null },
+    { "id": "manual", "name": "Manual", "status": "manual", "source": "none", "capabilities": { "all": false }, "quoteAsset": null, "tradeUrlTemplate": null }
   ]
 }
 ```
+
+Since October 5, 2026 the venue list is built from the venue registry and each venue states its capabilities; the abbreviated `{ "all": false }` above stands for the seven capability flags. See [venue-registry.md](venue-registry.md).
 
 The owner UUID is a configurable seeded MVP identity, not a token or a user supplied in API request bodies. The response must not claim that venue integrations are implemented.
 

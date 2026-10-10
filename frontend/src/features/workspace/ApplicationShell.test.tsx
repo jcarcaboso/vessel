@@ -4,11 +4,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
 import { systemFixture } from '@/test/system-fixture'
-import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, playApiStubs, portfolioFixture } from '@/test/workspace-fixture'
+import { reviewFixture } from '@/test/review-fixture'
+import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, playApiStubs, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { ApplicationShell } from './ApplicationShell'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
+    discoverAccounts: vi.fn().mockRejectedValue(new Error('Unexpected discovery')),
+    accountCredential: vi.fn().mockResolvedValue({ storageConfigured: true, credential: null }),
+    saveAccountCredential: vi.fn().mockRejectedValue(new Error('Unexpected credential write')),
+    deleteAccountCredential: vi.fn().mockResolvedValue(undefined),
     overview: vi.fn().mockResolvedValue(emptyOverview),
     portfolios: vi.fn().mockResolvedValue([]), accounts: vi.fn().mockResolvedValue([]),
     account: vi.fn().mockResolvedValue(accountFixture),
@@ -23,6 +28,81 @@ function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
 }
 beforeEach(() => { window.history.replaceState(null, '', '/') })
 describe('Main application shell', () => {
+  it('opens contributing Plays from Review through the existing saved editor', async () => {
+    const client = api({ review: vi.fn().mockResolvedValue(reviewFixture), play: vi.fn().mockResolvedValue(savedPlayFixture) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(screen.getByRole('link', { name: 'Review' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Inspect Swing trading' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Play BTC breakout' }))
+    expect(await screen.findByRole('textbox', { name: 'Play title' })).toHaveValue(savedPlayFixture.summary.title)
+    expect(client.play).toHaveBeenCalledWith(reviewFixture.plays[0]!.id, expect.any(AbortSignal))
+  })
+  it('protects plan-only draft edits when opening a contributing Play from Review', async () => {
+    const client = api({ review: vi.fn().mockResolvedValue(reviewFixture) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await screen.findByText('Start with your accounts.')
+    await userEvent.click(screen.getByRole('link', { name: 'Plays' }))
+    await userEvent.click(screen.getByRole('button', { name: 'New play' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Add entry' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Review' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Inspect Swing trading' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Play BTC breakout' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue editing' }))
+    expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('')
+    expect(screen.getByRole('article', { name: 'Entry 2 editor' })).toBeInTheDocument()
+    expect(client.play).not.toHaveBeenCalled()
+  })
+  it('opens a saved play from Overview and preserves edits when reopening that same play', async () => {
+    const client = api({
+      overview: vi.fn().mockResolvedValue(overviewFixture),
+      plays: vi.fn().mockResolvedValue([savedPlayFixture.summary]),
+      play: vi.fn().mockResolvedValue(savedPlayFixture), evidence: vi.fn().mockResolvedValue([]),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Saved idea' }))
+    const title = await screen.findByRole('textbox', { name: 'Play title' })
+    expect(title).toHaveValue('Saved idea')
+    await userEvent.clear(title)
+    await userEvent.type(title, 'Unsaved revision')
+    await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Saved idea' }))
+    expect(await screen.findByRole('textbox', { name: 'Play title' })).toHaveValue('Unsaved revision')
+    expect(client.play).toHaveBeenCalledOnce()
+    expect(client.createPlay).not.toHaveBeenCalled()
+    expect(client.updatePlay).not.toHaveBeenCalled()
+  })
+  it('does not overwrite a local draft when a different saved play is opened from Overview', async () => {
+    const client = api({
+      overview: vi.fn().mockResolvedValue(overviewFixture),
+      plays: vi.fn().mockResolvedValue([savedPlayFixture.summary]),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await screen.findByRole('button', { name: 'Open Saved idea' })
+    await userEvent.click(screen.getByRole('link', { name: 'Plays' }))
+    await userEvent.click(screen.getByRole('button', { name: 'New play' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Play title' }), 'Keep this draft')
+    await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Saved idea' }))
+    expect(await screen.findByText('Keep this draft')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Saved idea' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: 'Continue editing' }))
+    expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Keep this draft')
+    expect(client.play).not.toHaveBeenCalled()
+  })
+  it('reloads the Overview play list independently and keeps the rest of Overview visible on failure', async () => {
+    const client = api({
+      overview: vi.fn().mockResolvedValue(overviewFixture),
+      plays: vi.fn().mockRejectedValueOnce(new ApiError('unavailable', 'Plays temporarily unavailable.'))
+        .mockResolvedValue([savedPlayFixture.summary]),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Plays temporarily unavailable.')
+    expect(screen.getByRole('button', { name: 'View Main account' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    expect(await screen.findByRole('button', { name: 'Open Saved idea' })).toBeInTheDocument()
+    expect(client.plays).toHaveBeenCalledTimes(2)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
   it('opens Overview, not the sample Play page, and has honest empty states', async () => {
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api()} />)
     await screen.findByText('Start with your accounts.')
@@ -132,11 +212,11 @@ describe('Main application shell', () => {
     await screen.findByText(/No saved plays yet/)
     expect(screen.queryByText('BTC reclaim at support')).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'New play' }))
-    await screen.findByText(/No enabled accounts are available/)
+    await screen.findByText(/No enabled accounts yet/)
     expect(screen.getByRole('heading', { level: 1, name: 'Plays' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('')
-    expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByRole('status')).toHaveTextContent('Not saved yet')
-    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled()
+    expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByText('Draft', { selector: '.badge' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Save$/ })).toBeDisabled()
   })
   it('creates an owner-scoped portfolio and reloads the workspace', async () => {
     const client = api()
@@ -354,13 +434,34 @@ describe('Main application shell', () => {
     })
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
     expect(await screen.findByText('Available wallet stablecoins')).toBeInTheDocument()
-    expect(screen.getByText('Primary perps equity $0.00')).toBeInTheDocument()
+    expect(screen.getByText('Perps equity $0.00')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'View Main account' }))
     expect(await screen.findByRole('heading', { name: 'Stablecoin wallet' })).toBeInTheDocument()
     expect(await screen.findByText('USDC')).toBeInTheDocument()
     expect(screen.getByText('Available token units')).toBeInTheDocument()
     expect(screen.getByText('10.123456')).toBeInTheDocument()
     expect(screen.getByText('Wallet funds, not guaranteed trading margin.')).toBeInTheDocument()
+    expect(screen.getByText(/^Separate Hyperliquid perpetuals equity: \$0\.00\./)).toBeInTheDocument()
+    expect(screen.getByText('Separate venue field · not added to wallet funds')).toBeInTheDocument()
+  })
+  it('names an unreported withdrawable amount and shows no wallet note for a venue without a wallet', async () => {
+    const venue = { ...systemFixture.venues[0]!, id: 'risex', name: 'RISEx', tradeUrlTemplate: 'https://www.rise.trade/trade/{instrument}',
+      priceRule: 'tick-size' as const, capabilities: { ...systemFixture.venues[0]!.capabilities, stream: false, stablecoinWallet: false } }
+    const system = { ...systemFixture, venues: [venue, ...systemFixture.venues] }
+    const risex = { ...accountFixture, venueId: 'risex', address: '0x1111111111111111111111111111111111111111', accountValueUsd: '12480.55',
+      syncStatus: 'synced' as const, lastSyncedAtUtc: '2026-10-06T09:12:00Z' }
+    const client = api({
+      overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [risex] }),
+      snapshot: vi.fn().mockResolvedValue({ observedAtUtc: '2026-10-06T09:12:00Z', valueScope: 'risex-perps-account',
+        accountValueUsd: '12480.55', withdrawableUsd: null, marginUsedUsd: '1830.2', positions: [] }),
+      fills: vi.fn().mockResolvedValue([]),
+    })
+    render(<ApplicationShell system={system} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'View Main account' }))
+    expect(await screen.findByText('Not reported by this venue')).toBeInTheDocument()
+    expect(screen.getByText('Account value · reported')).toBeInTheDocument()
+    expect(screen.queryByText(/perpetuals equity:/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/risex-perps-account/)).not.toBeInTheDocument()
   })
   it('Reload retries failed detail reads when Overview metadata remains unchanged', async () => {
     const client = api({

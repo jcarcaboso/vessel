@@ -1,4 +1,5 @@
-import { render, screen, within } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
+import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { ExecutionOrder, PlayExecution } from '@/api/plays'
@@ -7,26 +8,34 @@ import { createDraft } from './draft'
 import { fillSummary } from './execution'
 
 const entry = { ...createDraft().entries[0]!, id: 'e1', name: 'Entry 1', price: '100' }
-const entries = [{ ...entry, targets: [{ ...entry.targets[0]!, id: 't1', value: '110' }] }]
+const entries = [{ ...entry, stops: [{ ...entry.stops[0]!, id: 's1', value: '95' }], targets: [{ ...entry.targets[0]!, id: 't1', value: '110' }] }]
 const order = (orderId: string, overrides: Partial<ExecutionOrder> = {}): ExecutionOrder => ({
-  orderId, side: 'B', orderType: 'Limit', limitPrice: '100', triggerPrice: null, reduceOnly: false, isPositionTpsl: false,
+  orderId, side: 'buy', orderType: 'Limit', limitPrice: '100', triggerPrice: null, reduceOnly: false, isPositionTpsl: false,
   originalSize: '0.5', remainingSize: '0.5', placedAtUtc: '2026-10-03T10:00:00Z', status: 'open', venueStatus: 'open',
   statusAtUtc: '2026-10-03T10:00:00Z', ...overrides,
 })
 const execution: PlayExecution = {
   playId: '00000000-0000-4000-8000-000000000001', status: 'open', tracked: true, reason: null, checkedAtUtc: '2026-10-03T10:05:00Z',
-  totals: { enteredQuantity: '0.5', exitedQuantity: '0', openQuantity: '0.5', closedPnlUsd: '0', fees: [{ token: 'USDC', amount: '0.02' }] },
+  totals: { enteredQuantity: '0.5', exitedQuantity: '0', openQuantity: '0.5', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [{ token: 'USDC', amount: '0.02' }] },
   entries: [{ entryId: 'e1', filledQuantity: '0.5', averageFillPrice: '100', restingOrders: 0 }],
-  links: [{ id: '00000000-0000-4000-8000-0000000000a1', role: 'entry', entryId: 'e1', targetId: null, state: 'linked', source: 'automatic',
+  links: [{ id: '00000000-0000-4000-8000-0000000000a1', role: 'entry', entryId: 'e1', levelId: null, state: 'linked', source: 'automatic',
     order: order('11', { status: 'filled' }), filledQuantity: '0.5',
-    fills: [{ sourceFillId: 'f1', direction: 'Open Long', price: '100', quantity: '0.5', fee: '0.02', feeToken: 'USDC', closedPnlUsd: '0', occurredAtUtc: '2026-10-03T10:01:00Z' }] }],
-  suggestions: [{ id: '00000000-0000-4000-8000-0000000000a2', role: 'stop', entryId: 'e1', targetId: null, state: 'suggested', source: 'automatic',
-    order: order('12', { side: 'A', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true }), filledQuantity: '0', fills: [] }],
-  unlinkedOrders: [order('13', { side: 'A', limitPrice: '110', reduceOnly: true })],
+    fills: [{ sourceFillId: 'f1', direction: 'Open Long', price: '100', quantity: '0.5', fee: '0.02', feeToken: 'USDC', closedPnlUsd: '0', side: 'buy', positionEffect: 'open', pnlBasis: 'gross', occurredAtUtc: '2026-10-03T10:01:00Z' }] }],
+  suggestions: [{ id: '00000000-0000-4000-8000-0000000000a2', role: 'stop', entryId: 'e1', levelId: 's1', state: 'suggested', source: 'automatic',
+    order: order('12', { side: 'sell', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true }), filledQuantity: '0', fills: [] }],
+  unlinkedOrders: [order('13', { side: 'sell', limitPrice: '110', reduceOnly: true })],
   notice: 'Orders and fills come from the venue.',
 }
 
 describe('execution panel', () => {
+  it('says when the venue already took fees off the closed PnL', () => {
+    const net = { ...execution, totals: { ...execution.totals, closedPnlBasis: 'net-of-fee' as const } }
+    const { unmount } = render(<ExecutionPanel execution={execution} error={null} busy={false} entries={entries} onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+    expect(screen.getByText('Venue closed PnL')).toBeInTheDocument()
+    unmount()
+    render(<ExecutionPanel execution={net} error={null} busy={false} entries={entries} onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+    expect(screen.getByText('Venue closed PnL · after fees').parentElement).toHaveAttribute('title', expect.stringMatching(/fees already taken off/))
+  })
   it('shows linked fills, asks about ambiguous orders and links others by hand', async () => {
     const onLink = vi.fn()
     const onUnlink = vi.fn()
@@ -45,7 +54,7 @@ describe('execution panel', () => {
     const confirm = screen.getByRole('region', { name: 'Orders to confirm' })
     expect(within(confirm).getByText('Entry 1 stop')).toBeInTheDocument()
     await user.click(within(confirm).getByRole('button', { name: /Link here/ }))
-    expect(onLink).toHaveBeenCalledWith({ orderId: '12', role: 'stop', entryId: 'e1' })
+    expect(onLink).toHaveBeenCalledWith({ orderId: '12', role: 'stop', entryId: 'e1', levelId: 's1' })
     await user.click(within(confirm).getByRole('button', { name: 'Not this play' }))
     expect(onUnlink).toHaveBeenCalledWith('00000000-0000-4000-8000-0000000000a2')
 
@@ -56,7 +65,7 @@ describe('execution panel', () => {
     expect(within(select).getByRole('option', { name: 'Unplanned exit' })).toBeInTheDocument()
     await user.selectOptions(select, 'target|e1|t1')
     await user.click(link)
-    expect(onLink).toHaveBeenLastCalledWith({ orderId: '13', role: 'target', entryId: 'e1', targetId: 't1' })
+    expect(onLink).toHaveBeenLastCalledWith({ orderId: '13', role: 'target', entryId: 'e1', levelId: 't1' })
 
     await user.click(within(linked).getByRole('button', { name: 'Unlink Entry 1 order' }))
     expect(onUnlink).toHaveBeenLastCalledWith('00000000-0000-4000-8000-0000000000a1')

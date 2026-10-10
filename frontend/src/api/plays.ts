@@ -5,9 +5,9 @@ export type PlayStatus = typeof playStatuses[number]
 export const cancelReasons = ['invalidated', 'missed', 'changed-mind', 'expired', 'mistake', 'other'] as const
 export type CancelReason = typeof cancelReasons[number]
 
-export interface PlanLevel { id: string; unit: 'price' | 'percent'; value: string }
-export interface PlanTarget extends PlanLevel { share: string }
-export interface PlanEntry { id: string; name: string; color: string; share: string; price: string; stop: PlanLevel; targets: PlanTarget[] }
+/** A stop or target. A percent value is the return on margin at the plan's leverage; share is the part of the entry it closes. */
+export interface PlanExit { id: string; unit: 'price' | 'percent'; value: string; share: string }
+export interface PlanEntry { id: string; name: string; color: string; share: string; price: string; stops: PlanExit[]; targets: PlanExit[] }
 /** The plan as stored and revised. Number fields keep the exact text entered. */
 export interface PlayPlan {
   direction: 'long' | 'short'
@@ -34,6 +34,8 @@ export interface PlaySummary {
   updatedAtUtc: string
   plannedAtUtc: string | null
   endedAtUtc: string | null
+  /** Whether a nonblank review note has been saved, independently of lifecycle status. */
+  hasReview: boolean
 }
 export interface SavedPlay {
   summary: PlaySummary
@@ -76,10 +78,10 @@ const guid = (v: unknown) => text(v) && /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}
 const date = (v: unknown) => text(v, 64) && Number.isFinite(Date.parse(v))
 const nullable = <T>(check: (v: unknown) => boolean) => (v: unknown): v is T | null => v === null || check(v)
 const count = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
-const level = (v: unknown): v is PlanLevel => object(v) && text(v.id, 64) && (v.unit === 'price' || v.unit === 'percent') && text(v.value, 64)
+const exit = (v: unknown): v is PlanExit => object(v) && text(v.id, 64) && (v.unit === 'price' || v.unit === 'percent') &&
+  text(v.value, 64) && text(v.share, 64)
 const entry = (v: unknown): v is PlanEntry => object(v) && text(v.id, 64) && text(v.name, 100) && text(v.color, 16) &&
-  text(v.share, 64) && text(v.price, 64) && level(v.stop) && Array.isArray(v.targets) &&
-  v.targets.every(t => level(t) && text((t as { share?: unknown }).share, 64))
+  text(v.share, 64) && text(v.price, 64) && Array.isArray(v.stops) && v.stops.every(exit) && Array.isArray(v.targets) && v.targets.every(exit)
 export const isPlayPlan = (v: unknown): v is PlayPlan => object(v) && (v.direction === 'long' || v.direction === 'short') &&
   (v.sizingMode === 'margin' || v.sizingMode === 'quantity') && text(v.size, 64) && text(v.leverage, 8) &&
   nullable(x => text(x, 64))(v.budgetOverride) && Array.isArray(v.entries) && v.entries.length > 0 && v.entries.every(entry) &&
@@ -88,7 +90,8 @@ export const isPlaySummary = (v: unknown): v is PlaySummary => object(v) && guid
   playStatuses.includes(v.status as PlayStatus) && guid(v.accountId) && text(v.venueId, 64) && nullable(x => text(x, 128))(v.instrument) &&
   (v.instrumentSource === 'venue' || v.instrumentSource === 'manual') && (v.direction === 'long' || v.direction === 'short') &&
   count(v.planRevision) && count(v.version) && nullable(x => cancelReasons.includes(x as CancelReason))(v.cancelReason) &&
-  date(v.createdAtUtc) && date(v.updatedAtUtc) && nullable(date)(v.plannedAtUtc) && nullable(date)(v.endedAtUtc)
+  date(v.createdAtUtc) && date(v.updatedAtUtc) && nullable(date)(v.plannedAtUtc) && nullable(date)(v.endedAtUtc) &&
+  typeof v.hasReview === 'boolean'
 export const isSavedPlay = (v: unknown): v is SavedPlay => object(v) && isPlaySummary(v.summary) && isPlayPlan(v.plan) &&
   object(v.drawings) && Object.values(v.drawings).every(Array.isArray) && text(v.review)
 export const isPlayHistory = (v: unknown): v is PlayHistory => object(v) && Array.isArray(v.revisions) && Array.isArray(v.statusChanges) &&
@@ -101,13 +104,6 @@ export const isSavedEvidence = (v: unknown): v is SavedEvidence => object(v) && 
   (v.source === 'capture' || v.source === 'upload') && text(v.contentType, 64) && count(v.sizeBytes) && text(v.sha256, 64) &&
   text(v.note, 4000) && date(v.createdAtUtc) && date(v.updatedAtUtc) && (v.markup === null || object(v.markup))
 
-/** Where the owner places the planned orders. Vessel itself never sends orders. */
-export function venueTradeUrl(venueId: string, instrument: string | null, source: 'venue' | 'manual') {
-  if (!instrument || source !== 'venue') return null
-  if (venueId === 'hyperliquid' && /^[A-Za-z0-9_-]{1,32}$/.test(instrument)) return `https://app.hyperliquid.xyz/trade/${encodeURIComponent(instrument)}`
-  return null
-}
-
 export const statusLabels: Record<PlayStatus, string> = {
   draft: 'Draft', planned: 'Planned', paused: 'Paused', open: 'Open', closed: 'Closed', cancelled: 'Cancelled',
 }
@@ -119,7 +115,7 @@ export const cancelReasonLabels: Record<CancelReason, string> = {
 /** A venue order as last seen. Prices and sizes keep the venue's exact decimals. */
 export interface ExecutionOrder {
   orderId: string
-  side: 'A' | 'B'
+  side: 'buy' | 'sell'
   orderType: string
   limitPrice: string
   triggerPrice: string | null
@@ -141,13 +137,21 @@ export interface ExecutionFill {
   feeToken: string
   closedPnlUsd: string
   occurredAtUtc: string
+  side: 'buy' | 'sell'
+  positionEffect: PositionEffect
+  pnlBasis: PnlBasis
 }
+/** What a fill did to the position. Unknown when the venue's wording does not say. */
+export type PositionEffect = 'open' | 'close' | 'flip' | 'unknown'
+/** Gross: fees are reported separately. Net-of-fee: the venue already took the fee off the closed PnL. */
+export type PnlBasis = 'gross' | 'net-of-fee'
 export type LinkRole = 'entry' | 'stop' | 'target' | 'exit'
 export interface OrderLink {
   id: string
   role: LinkRole
   entryId: string | null
-  targetId: string | null
+  /** Stop or target ID within the entry; null for entries and unplanned exits. */
+  levelId: string | null
   state: 'linked' | 'suggested'
   source: 'automatic' | 'owner'
   order: ExecutionOrder | null
@@ -160,30 +164,33 @@ export interface PlayExecution {
   tracked: boolean
   reason: string | null
   checkedAtUtc: string | null
-  totals: { enteredQuantity: string; exitedQuantity: string; openQuantity: string; closedPnlUsd: string; fees: Array<{ token: string; amount: string }> }
+  totals: { enteredQuantity: string; exitedQuantity: string; openQuantity: string; closedPnlUsd: string; closedPnlBasis: PnlBasis | 'mixed'; fees: Array<{ token: string; amount: string }> }
   entries: Array<{ entryId: string; filledQuantity: string; averageFillPrice: string | null; restingOrders: number }>
   links: OrderLink[]
   suggestions: OrderLink[]
   unlinkedOrders: ExecutionOrder[]
   notice: string
 }
-export interface LinkOrder { orderId: string; role: LinkRole; entryId?: string; targetId?: string }
+export interface LinkOrder { orderId: string; role: LinkRole; entryId?: string; levelId?: string }
 
 const decimalText = (v: unknown) => text(v, 100) && /^-?\d+(\.\d+)?$/.test(v)
-const executionOrder = (v: unknown): v is ExecutionOrder => object(v) && text(v.orderId, 128) && (v.side === 'A' || v.side === 'B') &&
+const executionOrder = (v: unknown): v is ExecutionOrder => object(v) && text(v.orderId, 128) && (v.side === 'buy' || v.side === 'sell') &&
   text(v.orderType, 32) && decimalText(v.limitPrice) && (v.triggerPrice === null || decimalText(v.triggerPrice)) &&
   typeof v.reduceOnly === 'boolean' && typeof v.isPositionTpsl === 'boolean' && decimalText(v.originalSize) && decimalText(v.remainingSize) &&
   date(v.placedAtUtc) && ['open', 'filled', 'triggered', 'canceled', 'rejected', 'other'].includes(v.status as string) &&
   text(v.venueStatus, 64) && date(v.statusAtUtc)
 const executionFill = (v: unknown): v is ExecutionFill => object(v) && text(v.sourceFillId, 128) && text(v.direction, 128) &&
-  decimalText(v.price) && decimalText(v.quantity) && decimalText(v.fee) && text(v.feeToken, 64) && decimalText(v.closedPnlUsd) && date(v.occurredAtUtc)
+  decimalText(v.price) && decimalText(v.quantity) && decimalText(v.fee) && text(v.feeToken, 64) && decimalText(v.closedPnlUsd) && date(v.occurredAtUtc) &&
+  (v.side === 'buy' || v.side === 'sell') && ['open', 'close', 'flip', 'unknown'].includes(v.positionEffect as string) &&
+  (v.pnlBasis === 'gross' || v.pnlBasis === 'net-of-fee')
 const orderLink = (v: unknown): v is OrderLink => object(v) && guid(v.id) && ['entry', 'stop', 'target', 'exit'].includes(v.role as string) &&
-  nullable(x => text(x, 64))(v.entryId) && nullable(x => text(x, 64))(v.targetId) && (v.state === 'linked' || v.state === 'suggested') &&
+  nullable(x => text(x, 64))(v.entryId) && nullable(x => text(x, 64))(v.levelId) && (v.state === 'linked' || v.state === 'suggested') &&
   (v.source === 'automatic' || v.source === 'owner') && (v.order === null || executionOrder(v.order)) && decimalText(v.filledQuantity) &&
   Array.isArray(v.fills) && v.fills.every(executionFill)
 export const isPlayExecution = (v: unknown): v is PlayExecution => object(v) && guid(v.playId) && playStatuses.includes(v.status as PlayStatus) &&
   typeof v.tracked === 'boolean' && nullable(x => text(x, 500))(v.reason) && nullable(date)(v.checkedAtUtc) &&
   object(v.totals) && ['enteredQuantity', 'exitedQuantity', 'openQuantity', 'closedPnlUsd'].every(k => decimalText((v.totals as Record<string, unknown>)[k])) &&
+  ['gross', 'net-of-fee', 'mixed'].includes(v.totals.closedPnlBasis as string) &&
   Array.isArray(v.totals.fees) && v.totals.fees.every(f => object(f) && text(f.token, 64) && decimalText(f.amount)) &&
   Array.isArray(v.entries) && v.entries.every(e => object(e) && text(e.entryId, 64) && decimalText(e.filledQuantity) &&
     nullable(decimalText)(e.averageFillPrice) && count(e.restingOrders)) &&

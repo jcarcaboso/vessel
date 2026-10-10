@@ -8,6 +8,12 @@ import { describeOrder, fillSummary, levelName, levelOptions } from './execution
 const time = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
 /** Venue orders and fills linked to the play, suggestions to confirm and orders that could be linked by hand. */
+const pnlBasisNote = {
+  gross: 'As the venue reports it, before fees; fees are listed separately.',
+  'net-of-fee': 'As the venue reports it, with fees already taken off; the fees are listed for reference.',
+  mixed: 'Some fills report closed PnL before fees and some after.',
+} as const
+
 export function ExecutionPanel({ execution, error, busy, entries, onCheck, onLink, onUnlink }: {
   execution: PlayExecution | null
   error: string | null
@@ -36,7 +42,7 @@ export function ExecutionPanel({ execution, error, busy, entries, onCheck, onLin
       <div><dt>Entered</dt><dd>{totals.enteredQuantity}</dd></div>
       <div><dt>Exited</dt><dd>{totals.exitedQuantity}</dd></div>
       <div><dt>Still open</dt><dd>{totals.openQuantity}</dd></div>
-      <div><dt>Venue closed PnL</dt><dd>{totals.closedPnlUsd} USD</dd></div>
+      <div title={pnlBasisNote[totals.closedPnlBasis]}><dt>Venue closed PnL{totals.closedPnlBasis === 'net-of-fee' ? ' · after fees' : ''}</dt><dd>{totals.closedPnlUsd} USD</dd></div>
       <div><dt>Fees</dt><dd>{totals.fees.length ? totals.fees.map(fee => `${fee.amount} ${fee.token}`).join(' · ') : '0'}</dd></div>
     </dl>
 
@@ -47,7 +53,7 @@ export function ExecutionPanel({ execution, error, busy, entries, onCheck, onLin
         <span><strong>{levelName(entries, link)}</strong>{link.order && <small>{describeOrder(link.order)} · {link.order.status}</small>}</span>
         <span className="execution-actions">
           <Button size="sm" disabled={busy || !editable || !link.order} onClick={() => onLink({ orderId: link.order?.orderId ?? '', role: link.role,
-            ...(link.entryId ? { entryId: link.entryId } : {}), ...(link.targetId ? { targetId: link.targetId } : {}) })}>
+            ...(link.entryId ? { entryId: link.entryId } : {}), ...(link.levelId ? { levelId: link.levelId } : {}) })}>
             <Link2 size={13} />Link here</Button>
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => onUnlink(link.id)}>Not this play</Button>
         </span>

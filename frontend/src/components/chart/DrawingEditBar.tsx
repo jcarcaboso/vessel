@@ -50,7 +50,7 @@ export function DrawingEditBar({ drawing, label, defaultColor, onStyle, onLocked
     <ChartToolbarDivider />
     <ChartIconButton label={drawing.locked ? 'Unlock drawing' : 'Lock drawing'} pressed={drawing.locked === true}
       icon={drawing.locked ? <Lock size={14} aria-hidden="true" /> : <LockOpen size={14} aria-hidden="true" />} onClick={() => onLocked(!drawing.locked)} />
-    <ChartIconButton label="Delete drawing" icon={<Trash2 size={14} aria-hidden="true" />} onClick={onDelete}
+    <ChartIconButton label="Delete drawing" className="chart-delete" icon={<Trash2 size={14} aria-hidden="true" />} onClick={onDelete}
       disabled={drawing.locked === true} disabledReason="Unlock to delete" />
   </div>
 }

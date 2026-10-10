@@ -38,6 +38,7 @@ export function mergeCandles(current: readonly VenueCandle[], incoming: readonly
 
 export const toChartCandle = (candle: VenueCandle): ChartCandle => ({
   time: candle.openTime, open: Number(candle.open), high: Number(candle.high), low: Number(candle.low), close: Number(candle.close),
+  volume: Number(candle.volume),
 })
 
 /** Upserts one candle by open time; the common live cases (same or next candle) avoid a full merge. */

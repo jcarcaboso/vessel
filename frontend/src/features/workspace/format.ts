@@ -19,4 +19,3 @@ export function time(value: string | null): string {
   })
 }
 export const shortAddress = (value: string | null) => value === null ? 'Manual record' : `${value.slice(0, 6)}…${value.slice(-4)}`
-export const venueName = (id: string) => ({ hyperliquid: 'Hyperliquid', lighter: 'Lighter', quantfury: 'Quantfury', manual: 'Manual' })[id as 'hyperliquid' | 'lighter' | 'quantfury' | 'manual'] ?? id

@@ -77,18 +77,20 @@ internal sealed class FakeSocketFactory : IWebSocketTransportFactory
 {
     private readonly ConcurrentQueue<FakeSocket> sockets = new();
     public volatile bool FailConnect;
+    /// <summary>When set, connecting waits for it and then succeeds even if it was cancelled meanwhile.</summary>
+    public volatile TaskCompletionSource? ConnectGate;
     public IReadOnlyList<FakeSocket> Sockets => [.. sockets];
     public FakeSocket Latest => sockets.Last();
 
     public IWebSocketTransport Create()
     {
-        var socket = new FakeSocket(FailConnect);
+        var socket = new FakeSocket(FailConnect, ConnectGate);
         sockets.Enqueue(socket);
         return socket;
     }
 }
 
-internal sealed class FakeSocket(bool failConnect) : IWebSocketTransport
+internal sealed class FakeSocket(bool failConnect, TaskCompletionSource? connectGate = null) : IWebSocketTransport
 {
     private readonly Channel<object?> inbound = Channel.CreateUnbounded<object?>();
     private readonly ConcurrentQueue<string> sent = new();
@@ -103,12 +105,15 @@ internal sealed class FakeSocket(bool failConnect) : IWebSocketTransport
     public void Fail() => inbound.Writer.TryWrite(new WebSocketException("dropped"));
     public void PeerClose() => inbound.Writer.TryWrite(null);
 
-    public Task ConnectAsync(Uri uri, CancellationToken cancellationToken)
+    public volatile bool Connecting;
+
+    public async Task ConnectAsync(Uri uri, CancellationToken cancellationToken)
     {
         Assert.Equal("wss://api.hyperliquid.xyz/ws", uri.ToString());
         if (failConnect) throw new WebSocketException("refused");
+        Connecting = true;
+        if (connectGate is not null) await connectGate.Task;
         Connected = true;
-        return Task.CompletedTask;
     }
 
     public Task SendTextAsync(string message, CancellationToken cancellationToken)

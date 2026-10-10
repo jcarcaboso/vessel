@@ -12,11 +12,11 @@ public interface IMarketContextReader
 }
 
 public sealed record VenueMarketContext(
-    string ContractId, string MarkPrice, string OraclePrice, string? MidPrice, string PreviousDayPrice,
+    string ContractId, string MarkPrice, string OraclePrice, string? MidPrice, string? PreviousDayPrice,
     string DayNotionalVolume, string OpenInterest, string FundingRate, string? Premium);
 
 public sealed record MarketContextDto(string VenueId, string Instrument, string MarkPrice, string OraclePrice,
-    string? MidPrice, string PreviousDayPrice, string DayNotionalVolume, string OpenInterest, string FundingRate,
+    string? MidPrice, string? PreviousDayPrice, string DayNotionalVolume, string OpenInterest, string FundingRate,
     string? Premium, DateTimeOffset ObservedAt, string Notice);
 
 /// <summary>Bounded short-lived cache of one whole upstream snapshot per venue. Register as a singleton.</summary>
@@ -37,17 +37,19 @@ public sealed class MarketContextCache(TimeProvider time)
     }
 }
 
-public sealed class MarketContextService(IWorkspaceStore store, IMarketContextReader reader, MarketContextCache cache, TimeProvider time)
+public sealed class MarketContextService(IWorkspaceStore store, IVenueRegistry venues, MarketContextCache cache, TimeProvider time)
 {
+    /// <summary>Used when the venue's descriptor has no notice of its own.</summary>
     public const string Notice =
-        "Venue market context for the primary perpetual DEX. Funding is the current hourly rate; open interest is in base units. Not a fill or valuation.";
+        "Venue market context. Open interest is in base units. Not a fill or valuation.";
     private const string VenueFailure = "The venue market read failed. Try again later.";
 
     public async Task<MarketContextDto> ContextAsync(Guid accountId, string? instrument, CancellationToken ct)
     {
         var account = await MarketDataGuard.AccountAsync(store, accountId, ct);
         instrument = MarketDataGuard.Instrument(instrument);
-        if (reader.VenueId != account.VenueId)
+        var notice = venues.Descriptor(account.VenueId)?.MarketContextNotice ?? Notice;
+        if (venues.MarketContext(account.VenueId) is not { } reader)
             throw new WorkspaceException(502, VenueFailure);
 
         var snapshot = cache.Get(account.VenueId);
@@ -70,9 +72,9 @@ public sealed class MarketContextService(IWorkspaceStore store, IMarketContextRe
         }
 
         var match = snapshot.Value.Value.FirstOrDefault(c => c.ContractId == instrument)
-            ?? throw new WorkspaceException(400, "The instrument is not in the venue's primary perpetual catalogue.");
+            ?? throw new WorkspaceException(400, "The instrument is not in the venue's perpetual catalogue.");
         return new MarketContextDto(account.VenueId, instrument, match.MarkPrice, match.OraclePrice, match.MidPrice,
             match.PreviousDayPrice, match.DayNotionalVolume, match.OpenInterest, match.FundingRate, match.Premium,
-            snapshot.Value.Observed, Notice);
+            snapshot.Value.Observed, notice);
     }
 }

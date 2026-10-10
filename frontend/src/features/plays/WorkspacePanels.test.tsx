@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { render, screen, within } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
+import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
@@ -19,139 +20,144 @@ function BudgetHarness({ initial = createDraft(), accounts = [], portfolios = []
 }
 
 describe('Capital context', () => {
+  const metric = (label: string) => within(screen.getByTestId('capital-context')).getByText(label).closest('div')!
+
   it('leaves unknown values and budget unavailable without seeding accounts', () => {
     render(<BudgetHarness />)
     const capital = screen.getByTestId('capital-context')
-    expect(within(capital).getByText(/Select an enabled account above/)).toBeInTheDocument()
-    expect(within(capital).getAllByText('Unavailable')).toHaveLength(2)
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('Unavailable')
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveAttribute('readonly')
+    expect(metric('Account balance')).toHaveTextContent('Unavailable')
+    expect(within(capital).queryByText('Wallet total')).toBeNull()
+    expect(metric('Margin / balance')).toHaveTextContent('—')
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
     expect(within(capital).queryByRole('combobox')).not.toBeInTheDocument()
-    expect(within(capital).getByText(/Coverage: unavailable/)).toBeInTheDocument()
   })
 
-  it('displays exact API values with separate primary perps and nominal wallet coverage', () => {
-    const account: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid',
-      accountValueUsd: '9007199254740990.99', availableStablecoinNominalUsd: '123.45',
-      stablecoinScope: 'HyperCore supported stablecoins', accountMode: 'unified' }
-    const portfolio: Portfolio = { ...portfolioFixture, totalValueUsd: '9007199254740990.99', valueCoverage: 'partial' }
+  it('shows the portfolio balance, wallet total and available amount of a unified account without perps equity', () => {
+    const account: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', accountValueUsd: '0',
+      availableStablecoinNominalUsd: '150', totalStablecoinNominalUsd: '151.77', balanceUsd: '151.77',
+      stablecoinScope: 'hypercore-spot-stablecoins', accountMode: 'unifiedAccount' }
+    const portfolio: Portfolio = { ...portfolioFixture, totalValueUsd: '0', balanceUsd: '1151.77', balanceCoverage: 'complete' }
     render(<BudgetHarness initial={{ ...createDraft(), accountId: account.id }} accounts={[account]} portfolios={[portfolio]} />)
-    expect(screen.getAllByText('$9,007,199,254,740,990.99')).toHaveLength(2)
-    expect(screen.getByText('$123.45')).toHaveAttribute('title', '123.45')
-    expect(screen.getByText('Primary perps equity · USD')).toBeInTheDocument()
-    expect(screen.getByText('Supported-wallet available · nominal USD')).toBeInTheDocument()
-    expect(screen.getByText(/Coverage: partial/)).toBeInTheDocument()
-    expect(screen.getByText(/HyperCore supported stablecoins · unified/)).toBeInTheDocument()
-    expect(screen.getByText(/not market valuation, verified trading collateral or withdrawal capacity/)).toBeInTheDocument()
-    expect(screen.getByText(/Wallet funds are not added to primary perps equity or portfolio value/)).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('Unavailable')
+    expect(metric(`${portfolio.name} balance`)).toHaveTextContent('$1,151.77')
+    expect(metric(`${portfolio.name} balance`)).toHaveAttribute('title', expect.stringContaining('coverage complete'))
+    expect(metric('Wallet total')).toHaveTextContent('$151.77')
+    expect(metric('Wallet total')).toHaveAttribute('title', 'hypercore-spot-stablecoins · unifiedAccount. Nominal 1 token = 1 USD.')
+    expect(metric('Available')).toHaveTextContent('$150.00')
+    expect(within(screen.getByTestId('capital-context')).queryByText('Perps equity')).toBeNull()
+  })
+
+  it('shows perps equity beside the wallet for a standard account', () => {
+    const account: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', portfolioId: null, accountValueUsd: '1000',
+      availableStablecoinNominalUsd: '10', totalStablecoinNominalUsd: '10', balanceUsd: '1010', accountMode: 'default' }
+    render(<BudgetHarness initial={{ ...createDraft(), accountId: account.id }} accounts={[account]} portfolios={[portfolioFixture]} />)
+    expect(metric('Account balance')).toHaveTextContent('$1,010.00')
+    expect(metric('Perps equity')).toHaveTextContent('$1,000.00')
+  })
+
+  it('shows margin and exposure as shares of the balance once the position is sized', () => {
+    const portfolio: Portfolio = { ...portfolioFixture, totalValueUsd: '10000', balanceUsd: '10000' }
+    const draft = { ...createDraft(), accountId: accountFixture.id, size: '500', leverage: '4' }
+    draft.entries[0]!.price = '100'
+    render(<BudgetHarness initial={draft} accounts={[accountFixture]} portfolios={[portfolio]} />)
+    expect(metric('Margin / balance')).toHaveTextContent('5.0%')
+    expect(metric('Exposure / balance')).toHaveTextContent('20.0%')
   })
 
   it('keeps a reported zero distinct from missing values and does not create a default portfolio', () => {
     const account = { ...accountFixture, portfolioId: null, accountValueUsd: '0' }
     render(<BudgetHarness initial={{ ...createDraft(), accountId: account.id }} accounts={[account]} portfolios={[portfolioFixture]} />)
-    expect(screen.getByText('$0.00')).toBeInTheDocument()
-    expect(screen.getByText(/Unassigned account/)).toBeInTheDocument()
+    expect(metric('Account balance')).toHaveTextContent('$0.00')
     expect(screen.queryByText(/Swing trading/)).not.toBeInTheDocument()
-    expect(screen.getByText(/Coverage: unavailable/)).toBeInTheDocument()
   })
 
   it('does not reveal a disabled account value or its portfolio', () => {
     render(<BudgetHarness initial={{ ...createDraft(), accountId: accountFixture.id }}
       accounts={[{ ...accountFixture, isEnabled: false }]} portfolios={[portfolioFixture]} />)
     expect(screen.queryByText('$1,250.12')).not.toBeInTheDocument()
-    expect(screen.queryByText(/Main account/)).not.toBeInTheDocument()
-    expect(screen.getByText(/Select an enabled account above/)).toBeInTheDocument()
+    expect(metric('Account balance')).toHaveTextContent('Unavailable')
   })
 
-  it('saves an explicit local override without changing real account values or rounding its stored amount', async () => {
-    const initial = { ...createDraft(), accountId: accountFixture.id }
+})
+
+describe('Budget', () => {
+  function Budget({ initial = createDraft(), available = null as string | null, onChange = vi.fn() }) {
+    const [draft, setDraft] = useState(initial)
+    return <AvailableBudget key={draft.accountId} draft={draft} available={available} onChange={next => { setDraft(next); onChange(next) }} />
+  }
+  const budget = () => screen.getByRole('group', { name: 'Budget' })
+
+  it('uses the available amount until a manual budget is set, and can go back to it', async () => {
     const onChange = vi.fn()
-    render(<BudgetHarness initial={initial} accounts={[accountFixture]} portfolios={[portfolioFixture]} onChange={onChange} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    const input = screen.getByRole('textbox', { name: 'Available budget Nominal USD' })
-    expect(input).not.toHaveAttribute('readonly')
+    render(<Budget available="151.77" onChange={onChange} />)
+    expect(budget()).toHaveTextContent('Budget$151.77available')
+    await userEvent.click(screen.getByRole('button', { name: 'Edit budget' }))
+    const input = screen.getByRole('textbox', { name: 'Budget $' })
+    expect(input).toHaveAttribute('placeholder', '151.77')
     await userEvent.type(input, '9007199254740990.99')
     expect(onChange).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: 'Save budget' }))
-    expect(onChange).toHaveBeenCalledExactlyOnceWith({ ...initial, budgetOverride: '9007199254740990.99' })
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('$9,007,199,254,740,990.99')
-    expect(screen.getAllByText('$1,250.12')).toHaveLength(2)
-    expect(accountFixture.accountValueUsd).toBe('1250.123456')
+    expect(onChange.mock.lastCall![0].budgetOverride).toBe('9007199254740990.99')
+    expect(budget()).toHaveTextContent('$9,007,199,254,740,990.99manual')
+    await userEvent.click(screen.getByRole('button', { name: 'Use the available amount' }))
+    expect(onChange.mock.lastCall![0].budgetOverride).toBeNull()
+    expect(budget()).toHaveTextContent('$151.77available')
   })
 
-  it('cancels without applying an override and restores the saved value on reopening', async () => {
+  it('treats an empty wallet as no available budget', () => {
+    render(<Budget available="0" />)
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
+  })
+
+  it('offers only a set action without an available amount, and accepts an explicit zero', async () => {
     const onChange = vi.fn()
-    render(<BudgetHarness initial={{ ...createDraft(), budgetOverride: '250' }} onChange={onChange} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    const input = screen.getByRole('textbox', { name: 'Available budget Nominal USD' })
+    render(<Budget onChange={onChange} />)
+    expect(screen.queryByRole('group', { name: 'Budget' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Budget $' }), '100')
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Budget $' }), '0')
+    await userEvent.click(screen.getByRole('button', { name: 'Save budget' }))
+    expect(onChange.mock.calls[0]![0].budgetOverride).toBe('0')
+    expect(budget()).toHaveTextContent('$0.00manual')
+    expect(screen.queryByRole('button', { name: 'Use the available amount' })).toBeNull()
+  })
+
+  it('restores the saved value when an edit is cancelled', async () => {
+    const onChange = vi.fn()
+    render(<Budget initial={{ ...createDraft(), budgetOverride: '250' }} onChange={onChange} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Edit budget' }))
+    const input = screen.getByRole('textbox', { name: 'Budget $' })
+    expect(input).toHaveValue('250')
     await userEvent.clear(input)
     await userEvent.type(input, '500')
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(onChange).not.toHaveBeenCalled()
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('$250.00')
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('250')
-  })
-
-  it('cancels a first edit back to unavailable and accepts an explicitly saved zero', async () => {
-    const onChange = vi.fn()
-    render(<BudgetHarness onChange={onChange} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    await userEvent.type(screen.getByRole('textbox', { name: 'Available budget Nominal USD' }), '100')
-    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(onChange).not.toHaveBeenCalled()
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('Unavailable')
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    await userEvent.type(screen.getByRole('textbox', { name: 'Available budget Nominal USD' }), '0')
-    await userEvent.click(screen.getByRole('button', { name: 'Save budget' }))
-    expect(onChange.mock.calls[0]![0].budgetOverride).toBe('0')
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('$0.00')
+    expect(budget()).toHaveTextContent('$250.00')
   })
 
   it.each(['-10', 'NaN', '1e6', '1,000', '1.2.3'])('rejects invalid budget %s without applying it', async (value) => {
     const onChange = vi.fn()
-    render(<BudgetHarness onChange={onChange} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    await userEvent.type(screen.getByRole('textbox', { name: 'Available budget Nominal USD' }), value)
+    render(<Budget onChange={onChange} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Budget $' }), value)
     await userEvent.click(screen.getByRole('button', { name: 'Save budget' }))
     expect(onChange).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent('Enter a non-negative USD amount')
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('textbox', { name: 'Budget $' })).toHaveAttribute('aria-invalid', 'true')
   })
 
-  it('removes a local override only after saving an empty field', async () => {
-    const onChange = vi.fn()
-    render(<BudgetHarness initial={{ ...createDraft(), budgetOverride: '250' }} onChange={onChange} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    await userEvent.clear(screen.getByRole('textbox', { name: 'Available budget Nominal USD' }))
-    expect(onChange).not.toHaveBeenCalled()
-    await userEvent.click(screen.getByRole('button', { name: 'Save budget' }))
-    expect(onChange.mock.calls[0]![0].budgetOverride).toBeNull()
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('Unavailable')
-  })
-
-  it('discards an open unsaved override when the selected account changes', async () => {
+  it('discards an open unsaved budget when the selected account changes', async () => {
     const onChange = vi.fn()
     const initial = { ...createDraft(), accountId: accountFixture.id }
     const { rerender } = render(<AvailableBudget key={initial.accountId} draft={initial} onChange={onChange} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Edit available budget' }))
-    await userEvent.type(screen.getByRole('textbox', { name: 'Available budget Nominal USD' }), '100')
+    await userEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Budget $' }), '100')
     rerender(<AvailableBudget key="" draft={{ ...initial, accountId: '' }} onChange={onChange} />)
-    expect(screen.getByRole('textbox', { name: 'Available budget Nominal USD' })).toHaveValue('Unavailable')
     expect(screen.queryByRole('button', { name: 'Save budget' })).not.toBeInTheDocument()
     expect(onChange).not.toHaveBeenCalled()
-  })
-
-  it('keeps the optional sizing assistant collapsed and offers no suggestions or Apply action', async () => {
-    render(<BudgetHarness />)
-    const assistant = screen.getByText('Sizing assistant').closest('details')!
-    expect(assistant).not.toHaveAttribute('open')
-    expect(screen.getByTestId('capital-context')).toContainElement(assistant)
-    await userEvent.click(screen.getByText('Sizing assistant'))
-    expect(assistant).toHaveAttribute('open')
-    expect(within(assistant).getByText(/Position suggestions and financial calculations are not available/)).toBeInTheDocument()
-    expect(within(assistant).queryByRole('button')).not.toBeInTheDocument()
   })
 })
 
@@ -181,44 +187,45 @@ describe('Play journal', () => {
       expect(screen.getAllByRole('textbox')).toHaveLength(1)
     }
     await userEvent.click(screen.getByRole('tab', { name: 'Evidence' }))
-    expect(screen.getByText('General evidence notes. Each image above keeps its own note.')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Evidence' })).toHaveAttribute('placeholder', 'Notes on the evidence')
     expect(screen.getByTestId('journal-panel').querySelector('input[type="file"]')).toBeNull()
   })
 })
 
 describe('Position summary', () => {
-  it('echoes chosen margin and leverage, shows the planned average entry, and never calculates exposure or payoff', () => {
+  it('derives margin, position size and quantity from the margin and leverage, but no payoff', () => {
     const draft = { ...createDraft(), size: '1000', leverage: '5' }
     draft.entries[0]!.price = '2000'
-    draft.entries[0]!.stop.value = '1900'
+    draft.entries[0]!.stops[0]!.value = '1900'
     draft.entries[0]!.targets[0]!.value = '2200'
-    render(<PositionSummary draft={draft} />)
+    render(<PositionSummary draft={draft} units={{ quote: 'USDC', base: 'ETH', quantityDecimals: 4 }} instrumentName="ETH/USDC" />)
     const summary = screen.getByTestId('summary-panel')
-    expect(within(summary).getByText('Chosen margin')).toBeInTheDocument()
-    expect(within(summary).getByText('1000 currency units')).toBeInTheDocument()
-    expect(within(summary).getByText('5×')).toBeInTheDocument()
-    expect(within(summary).getAllByText('Not calculated')).toHaveLength(5)
-    expect(within(summary).getByText('Planned average entry').nextElementSibling).toHaveTextContent('2000')
-    expect(within(summary).queryByText(/\$|5000|1900|2200/)).not.toBeInTheDocument()
-    expect(within(summary).getByText(/no execution or realized return is implied/)).toBeInTheDocument()
+    const value = (label: string) => within(summary).getByText(label).nextElementSibling
+    expect(value('Margin')).toHaveTextContent('1,000 USDC')
+    expect(value('Position size')).toHaveTextContent('5,000 USDC')
+    expect(value('Quantity')).toHaveTextContent('2.5 ETH')
+    expect(value('Average entry')).toHaveTextContent('2000')
+    expect(within(summary).queryByText(/Not calculated|1900|2200/)).not.toBeInTheDocument()
     expect(within(summary).getByText('Long')).toHaveAttribute('data-direction', 'long')
-    expect(within(summary).getByText('No instrument · Leverage 5×')).toBeInTheDocument()
-    expect(within(summary).getAllByText('Not calculated')[0]).toHaveAttribute('data-placeholder', 'true')
-    expect(within(summary).getByText('1000 currency units')).toHaveAttribute('data-placeholder', 'false')
+    expect(within(summary).getByText('ETH/USDC · Leverage 5×')).toBeInTheDocument()
+    expect(value('Position size')).toHaveAttribute('data-placeholder', 'false')
   })
 
-  it('echoes quantity with units without converting it to USD', () => {
-    render(<PositionSummary draft={{ ...createDraft(), sizingMode: 'quantity', size: '0.125', leverage: '3' }} />)
-    expect(screen.getByText('Chosen quantity')).toBeInTheDocument()
-    expect(screen.getByText('0.125 instrument units')).toBeInTheDocument()
-    expect(screen.getAllByText('Not calculated')).toHaveLength(5)
+  it('derives margin from a quantity once an entry is priced', () => {
+    const draft = { ...createDraft(), sizingMode: 'quantity' as const, size: '0.125', leverage: '4' }
+    const view = render(<PositionSummary draft={draft} />)
+    expect(screen.getByText('Margin').nextElementSibling).toHaveTextContent('Needs an entry price')
+    expect(screen.getByText('Quantity').nextElementSibling).toHaveTextContent('0.125 units')
+    draft.entries[0]!.price = '80000'
+    view.rerender(<PositionSummary draft={{ ...draft }} />)
+    expect(screen.getByText('Position size').nextElementSibling).toHaveTextContent('10,000 quote units')
+    expect(screen.getByText('Margin').nextElementSibling).toHaveTextContent('2,500 quote units')
   })
 
   it('does not insert a sample size for an empty draft', () => {
     render(<PositionSummary draft={createDraft()} />)
-    expect(screen.getByText('Not chosen')).toBeInTheDocument()
     expect(screen.getByText('Not set')).toHaveAttribute('data-placeholder', 'true')
-    expect(screen.getByText('1×')).toBeInTheDocument()
-    expect(screen.getAllByText('Not calculated')).toHaveLength(5)
+    expect(screen.getByText('No instrument · Leverage 1×')).toBeInTheDocument()
+    expect(screen.getAllByText('Needs a size')).toHaveLength(3)
   })
 })

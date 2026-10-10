@@ -106,14 +106,19 @@ public sealed class InstrumentCatalogueApiTests
         var root = json.RootElement;
         Assert.Equal("hyperliquid", root.GetProperty("venueId").GetString());
         Assert.Equal("perpetuals", root.GetProperty("marketScope").GetString());
-        Assert.Equal("primary-perpetual-dex", root.GetProperty("scope").GetString());
-        Assert.Equal("Primary perpetual DEX metadata only. No orders, balances or execution refresh.",
+        Assert.Equal("venue-perpetuals", root.GetProperty("scope").GetString());
+        Assert.Equal("Venue perpetual contract metadata only. No orders, balances or execution refresh.",
             root.GetProperty("notice").GetString());
         var instrument = Assert.Single(root.GetProperty("instruments").EnumerateArray());
-        Assert.Equal(new[] { "contractId", "quantityDecimals", "maxLeverage" }, instrument.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(new[] { "contractId", "quantityDecimals", "maxLeverage", "quoteAsset", "priceStep", "category", "venueContractId", "maintenanceMarginFraction" },
+            instrument.EnumerateObject().Select(p => p.Name));
+        // Hyperliquid rounds to significant figures, labels no categories and keys contracts by name.
+        Assert.All(new[] { "priceStep", "category", "venueContractId" }, name => Assert.Equal(JsonValueKind.Null, instrument.GetProperty(name).ValueKind));
         Assert.Equal("MiXeD", instrument.GetProperty("contractId").GetString());
         Assert.Equal(5, instrument.GetProperty("quantityDecimals").GetInt32());
         Assert.Equal(40, instrument.GetProperty("maxLeverage").GetInt32());
+        Assert.Equal("USDC", instrument.GetProperty("quoteAsset").GetString());
+        Assert.Equal(0.0125m, instrument.GetProperty("maintenanceMarginFraction").GetDecimal());
         var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal("https://api.hyperliquid.xyz/info", request.Uri);

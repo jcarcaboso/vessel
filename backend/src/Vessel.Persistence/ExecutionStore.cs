@@ -39,6 +39,7 @@ public sealed class ExecutionStore(VesselDbContext db) : IPlayExecutionStore
             // An older status never replaces a newer one.
             else if (order.StatusAtUtc < row.StatusAtUtc) continue;
             row.ContractId = order.ContractId;
+            row.VenueContractId = order.VenueContractId;
             row.Side = order.Side;
             row.OrderType = order.OrderType;
             row.LimitPrice = order.LimitPrice;

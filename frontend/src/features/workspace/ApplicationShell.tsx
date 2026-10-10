@@ -2,22 +2,28 @@ import { useCallback, useEffect, useState } from 'react'
 import type { BrokerAccount, Overview, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { ApiError, type SystemInfo } from '@/api/system'
 import { Button } from '@/components/ui/button'
+import { NotificationProvider } from '@/components/notifications/NotificationProvider'
+import { useNotifications } from '@/components/notifications/notifications'
 import { PlaysPage } from '@/features/plays/PlaysPage'
-import { createPlaysSession } from '@/features/plays/saved'
+import { createPlaysSession, hasDraftContent, isDirty, loadSavedPlay } from '@/features/plays/saved'
 import { AccountDetail } from './AccountDetail'
 import { ActivityTable } from './ActivityTable'
 import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
-import { money, shortAddress, time, venueName } from './format'
+import { OverviewPlays } from './OverviewPlays'
+import { ReviewPage } from '@/features/review/ReviewPage'
+import { money, shortAddress, time } from './format'
+import { VenuesProvider, useVenues } from '@/api/venues'
 import {
-  Activity, ArrowRight, ArrowUpRight, Check, CircleHelp, Database, Folder, LayoutDashboard,
-  LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, ShieldCheck, Wallet, X, BookOpen, Pencil,
+  Activity, ArrowRight, ArrowUpRight, BarChart3, CircleHelp, Database, Folder, LayoutDashboard,
+  LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, ShieldCheck, Wallet, BookOpen, Pencil, ChevronDown,
 } from 'lucide-react'
 import './application-shell.css'
 
 const pages = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, description: 'Your accounts and recent execution history, in one place.' },
   { id: 'plays', label: 'Plays', icon: BookOpen, description: 'Document the idea, define the position and keep your reasoning separate from execution.' },
+  { id: 'review', label: 'Review', icon: BarChart3, description: 'Portfolio performance from closed Plays.' },
   { id: 'portfolios', label: 'Portfolios', icon: Folder, description: 'Group accounts around the way you trade.' },
   { id: 'accounts', label: 'Accounts', icon: Wallet, description: 'Read-only venue connections and manual account records.' },
   { id: 'activity', label: 'Activity', icon: Activity, description: 'Imported executions, separate from trading intent.' },
@@ -30,21 +36,30 @@ function AccountRows({ accounts, portfolioNames, refreshing, onDetail, onSync, o
   accounts: BrokerAccount[]; portfolioNames: Record<string, string>; refreshing: string | null
   onDetail: (id: string) => void; onSync: (id: string) => void; onManage: (account: BrokerAccount) => void
 }) {
+  const venues = useVenues()
   return <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Account</th><th>Known value</th><th>Latest update</th><th>Connection</th><th><span className="sr-only">Actions</span></th></tr></thead>
     <tbody>{accounts.map(account => <tr key={account.id}>
-      <td><button className="account-row-name" onClick={() => onDetail(account.id)}><span className={`venue-mark ${account.venueId}`}><Wallet size={17} /></span><span><strong>{account.name}</strong><small>{venueName(account.venueId)} · {account.portfolioId ? portfolioNames[account.portfolioId] ?? 'Portfolio' : 'Unassigned'}</small></span></button></td>
-      <td className="numeric">{account.venueId === 'hyperliquid' ?
-        <><strong>{money(account.availableStablecoinNominalUsd ?? null)}</strong><small>Wallet stablecoins available · nominal</small><small>Primary perps equity {money(account.accountValueUsd)}</small></> :
-        <><strong>{money(account.accountValueUsd)}</strong><small>{account.accountValueUsd === null ? 'No value recorded' : 'USD · manual value'}</small></>}</td>
+      <td><button className="account-row-name" onClick={() => onDetail(account.id)}><span className={`venue-mark${venues.can(account.venueId, 'sync') ? ' synced' : ''}`}><Wallet size={17} /></span><span><strong>{account.name}</strong><small>{venues.name(account.venueId)} · {account.portfolioId ? portfolioNames[account.portfolioId] ?? 'Portfolio' : 'Unassigned'}</small></span></button></td>
+      <td className="numeric">{venues.can(account.venueId, 'stablecoinWallet') ?
+        <><strong>{money(account.availableStablecoinNominalUsd ?? null)}</strong><small>Wallet stablecoins available · nominal</small><small>Perps equity {money(account.accountValueUsd)}</small></> :
+        <><strong>{money(account.accountValueUsd)}</strong><small>{account.accountValueUsd === null ? 'No value recorded' : venues.can(account.venueId, 'sync') ? 'USD · venue-reported account value' : 'USD · manual value'}</small></>}</td>
       <td><strong>{time(account.lastSyncedAtUtc)}</strong><small>{account.positionCount} reported positions</small></td>
       <td><span className={`workspace-badge ${account.isEnabled === false || account.syncStatus === 'error' ? 'warning-badge' : ''}`}>{account.isEnabled === false ? 'Disabled' : account.syncStatus === 'manual' ? 'Manual' : account.syncStatus === 'synced' ? 'Read-only' : account.syncStatus === 'error' ? 'Refresh failed' : 'Not refreshed'}</span></td>
       <td><div className="row-actions"><Button variant="ghost" size="sm" onClick={() => onDetail(account.id)} aria-label={`View ${account.name}`}>View<ArrowUpRight size={14} /></Button>
         <button className="icon-button" onClick={() => onManage(account)} aria-label={`Manage ${account.name}`} title="Rename, move, disable or delete"><Pencil size={14} /></button>
-        {account.venueId === 'hyperliquid' && <button className="icon-button" disabled={refreshing !== null || account.isEnabled === false} onClick={() => onSync(account.id)} aria-label={`Refresh ${account.name}`} title={account.isEnabled === false ? 'Enable this account before refreshing' : 'Refresh current state and recent executions'}><RefreshCw size={15} className={refreshing === account.id ? 'is-spinning' : ''} /></button>}</div></td>
+        {venues.can(account.venueId, 'sync') && <button className="icon-button" disabled={refreshing !== null || account.isEnabled === false} onClick={() => onSync(account.id)} aria-label={`Refresh ${account.name}`} title={account.isEnabled === false ? 'Enable this account before refreshing' : 'Refresh current state and recent executions'}><RefreshCw size={15} className={refreshing === account.id ? 'is-spinning' : ''} /></button>}</div></td>
     </tr>)}</tbody></table></div>
 }
 
-export function ApplicationShell({ system, disconnect, api }: { system: SystemInfo; disconnect: () => void; api: WorkspaceApi }) {
+type ShellProps = { system: SystemInfo; disconnect: () => void; api: WorkspaceApi }
+
+export function ApplicationShell(props: ShellProps) {
+  return <NotificationProvider><VenuesProvider venues={props.system.venues}><Shell {...props} /></VenuesProvider></NotificationProvider>
+}
+
+function Shell({ system, disconnect, api }: ShellProps) {
+  const { notify } = useNotifications()
+  const venues = useVenues()
   const [page, setPage] = useState<Page>(pageFromHash)
   const [playsSession, setPlaysSession] = useState(createPlaysSession)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -52,7 +67,6 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
   const [data, setData] = useState<Overview | null>(null)
   const [loaded, setLoaded] = useState<{ api: WorkspaceApi; key: number } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [mutationError, setMutationError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState<string | null>(null)
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
   const [portfolioFilter, setPortfolioFilter] = useState('')
@@ -60,7 +74,7 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
   const [accountDialog, setAccountDialog] = useState(false)
   const [managedPortfolio, setManagedPortfolio] = useState<Portfolio | null>(null)
   const [managedAccount, setManagedAccount] = useState<BrokerAccount | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
+  const setNotice = useCallback((message: string) => { notify({ tone: 'success', message }) }, [notify])
   const [reloadKey, setReloadKey] = useState(0)
   const reload = useCallback(() => setReloadKey(key => key + 1), [])
   // Derived from the request generation so Reload shows progress and a repeated
@@ -85,11 +99,6 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
       .catch(cause => { if (active) { setLoadError(cause instanceof ApiError ? cause.message : 'The workspace could not be loaded.'); setLoaded({ api, key: reloadKey }) } })
     return () => { active = false; controller.abort() }
   }, [api, reloadKey])
-  useEffect(() => {
-    if (!notice) return
-    const timer = setTimeout(() => setNotice(null), 5500)
-    return () => clearTimeout(timer)
-  }, [notice])
   useEffect(() => {
     if (!menuOpen) return
     const sidebar = document.getElementById('workspace-nav')!
@@ -123,18 +132,39 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
     setSelectedAccountId(id); setMenuOpen(false)
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
   }
+  function browsePlays() {
+    setPlaysSession(session => ({ ...session, view: 'list' }))
+    navigate('plays')
+  }
+  async function viewPlay(id: string, signal: AbortSignal) {
+    if (playsSession.saved?.summary.id === id) {
+      setPlaysSession(session => ({ ...session, view: 'editor' }))
+      navigate('plays')
+      return
+    }
+    if (playsSession.saved ? isDirty(playsSession.draft, playsSession.saved) : hasDraftContent(playsSession.draft)) {
+      browsePlays()
+      notify({ tone: 'info', message: 'Save or discard your unsaved changes before opening another play.' })
+      return
+    }
+    const loaded = await loadSavedPlay(api, id, signal)
+    if (!signal.aborted) {
+      setPlaysSession({ view: 'editor', ...loaded })
+      navigate('plays')
+    }
+  }
   async function sync(id: string) {
     if (refreshing) return
-    setRefreshing(id); setMutationError(null)
+    setRefreshing(id)
     try {
       await api.sync(id); setNotice('Account refreshed. Recent execution facts remain unassigned to plays.')
     } catch (cause) {
-      setMutationError(cause instanceof ApiError ? cause.message : 'The venue refresh did not complete.')
+      notify({ tone: 'error', key: 'account-refresh', message: cause instanceof ApiError ? cause.message : 'The venue refresh did not complete.' })
     } finally { setRefreshing(null); reload() }
   }
   const portfolios = data?.portfolios ?? [], accounts = data?.accounts ?? []
   const enabledAccounts = accounts.filter(account => account.isEnabled !== false)
-  const readOnlyAccountCount = enabledAccounts.filter(a => a.venueId === 'hyperliquid').length
+  const readOnlyAccountCount = enabledAccounts.filter(a => venues.can(a.venueId, 'sync')).length
   const portfolioNames = Object.fromEntries(portfolios.map(p => [p.id, p.name]))
   const filteredAccounts = portfolioFilter ? accounts.filter(a => a.portfolioId === portfolioFilter) : accounts
   const selectedAccount = accounts.find(a => a.id === selectedAccountId)
@@ -166,29 +196,29 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
     <div className="shell-main" inert={menuOpen}>
       <header className="shell-header"><div><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" title="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} aria-hidden="true" /></button><span className="shell-breadcrumb">Workspace <span>/</span> <strong>{currentPage.label}</strong></span></div><div><span className="connection-indicator"><i />Private session</span><span className="workspace-badge">Perpetuals</span></div></header>
       <main className="shell-content">
-        {page !== 'plays' && <section className="shell-page-heading"><div><div className="eyebrow">YOUR PRIVATE WORKSPACE</div><h1>{selectedAccount ? selectedAccount.name : currentPage.label}</h1><p>{currentPage.description}</p></div><div className="shell-heading-actions">
+        {page !== 'plays' && page !== 'review' && <section className="shell-page-heading"><div><div className="eyebrow">YOUR PRIVATE WORKSPACE</div><h1>{selectedAccount ? selectedAccount.name : currentPage.label}</h1><p>{currentPage.description}</p></div><div className="shell-heading-actions">
           {page !== 'settings' && <Button variant="outline" onClick={reload} disabled={loading} aria-busy={loading}><RefreshCw size={14} className={loading ? 'is-spinning' : ''} />Reload</Button>}
           {page === 'portfolios' ? <Button onClick={() => setPortfolioDialog(true)}><Plus size={15} />New portfolio</Button> : page !== 'settings' && page !== 'activity' && <Button onClick={() => setAccountDialog(true)} disabled={pending || !data}><Plus size={15} />Add account</Button>}
         </div></section>}
         {error && <div className="workspace-alert" role="alert"><CircleHelp size={17} /><span>{error}</span><Button variant="ghost" size="sm" onClick={reload}>Try again</Button></div>}
-        {mutationError && <div className="workspace-alert" role="alert"><CircleHelp size={17} /><span>{mutationError}</span><Button variant="ghost" size="sm" onClick={() => setMutationError(null)}>Dismiss</Button></div>}
         {pending && <div className="workspace-loading" role="status">Loading your workspace…</div>}
         {!pending && !data && !error && <div className="workspace-alert">No workspace data is available.</div>}
 
         {page === 'plays' && <PlaysPage accounts={accounts} portfolios={portfolios} api={api} session={playsSession} onSession={setPlaysSession} onReload={reload} loading={loading} />}
+        {page === 'review' && <ReviewPage api={api} reloadGeneration={reloadKey} onOpenPlay={viewPlay} />}
 
         {page === 'overview' && data && <>
           <section className="workspace-stat-grid">
-            <div className="shell-panel metric">{enabledAccounts.some(a => a.venueId === 'hyperliquid') ?
+            <div className="shell-panel metric">{enabledAccounts.some(a => venues.can(a.venueId, 'stablecoinWallet')) ?
               <><span>Available wallet stablecoins</span><strong>{money(data.totals.availableStablecoinNominalUsd ?? null)}</strong><small>{data.totals.stablecoinAccountCount ?? 0} observed enabled accounts · nominal only</small></> :
               <><span>Known nominal value</span><strong>{money(data.totals.totalAccountValueUsd)}</strong><small>{data.totals.valuedAccountCount} of {enabledAccounts.length} enabled accounts have a value · no FX adjustment</small></>}</div>
             <div className="shell-panel metric"><span>Enabled accounts</span><strong>{enabledAccounts.length}</strong><small>{accounts.length - enabledAccounts.length} disabled · {data.totals.portfolioCount} portfolios</small></div>
             <div className="shell-panel metric"><span>Perpetual positions</span><strong>{data.totals.openPositionCount}</strong><small>From latest retained snapshots</small></div>
             <div className="shell-panel metric"><span>Imported executions</span><strong>{data.totals.importedFillCount}</strong><small>Recorded facts, not inferred intent</small></div>
           </section>
-          {!accounts.length ? <section className="shell-panel workspace-start"><span className="start-icon"><Folder size={26} /></span><div className="eyebrow">SET UP YOUR DIARY</div><h2>Start with your accounts.</h2><p>Create a portfolio, then add a read-only Hyperliquid account or a manual record. Your trades and decisions will have a place to belong.</p><div className="start-steps"><span><i>1</i>Create a portfolio</span><span><i>2</i>Add an account</span><span><i>3</i>Review recent executions</span></div><Button onClick={() => portfolios.length ? setAccountDialog(true) : setPortfolioDialog(true)}>{portfolios.length ? 'Add your first account' : 'Create your first portfolio'}<ArrowRight size={15} /></Button></section> :
+          {!accounts.length ? <section className="shell-panel workspace-start"><span className="start-icon"><Folder size={26} /></span><div className="eyebrow">SET UP YOUR DIARY</div><h2>Start with your accounts.</h2><p>Create a portfolio, then add a read-only exchange account or a manual record. Your trades and decisions will have a place to belong.</p><div className="start-steps"><span><i>1</i>Create a portfolio</span><span><i>2</i>Add an account</span><span><i>3</i>Review recent executions</span></div><Button onClick={() => portfolios.length ? setAccountDialog(true) : setPortfolioDialog(true)}>{portfolios.length ? 'Add your first account' : 'Create your first portfolio'}<ArrowRight size={15} /></Button></section> :
             <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Your enabled accounts</h2><p>Disabled records stay in account management; their imported activity is hidden.</p></div><button className="text-action" onClick={() => navigate('accounts')}>View all<ArrowRight size={14} /></button></header>{enabledAccounts.length ? <AccountRows accounts={enabledAccounts.slice(0, 4)} portfolioNames={portfolioNames} refreshing={refreshing} onDetail={viewAccount} onSync={id => { void sync(id) }} onManage={setManagedAccount} /> : <div className="workspace-empty small-empty"><strong>All accounts are disabled</strong><p>Open All accounts to enable a record again. Retained imports have not been deleted.</p><Button variant="outline" onClick={() => navigate('accounts')}>Manage accounts</Button></div>}</section>}
-          <div className="overview-bottom-grid"><section className="shell-panel"><header className="shell-panel-heading"><div><h2>Recent activity</h2><p>Venue-reported executions</p></div><button className="text-action" onClick={() => navigate('activity')}>View activity<ArrowRight size={14} /></button></header><ActivityTable fills={data.recentActivity.slice(0, 5)} accounts={accounts} compact /></section><section className="shell-panel next-workflow"><div className="eyebrow">COMING NEXT</div><BookOpen size={27} /><h2>The Play workspace</h2><p>The approved layout stays separate while we build the account and history foundation. Imported fills will not create a thesis or be silently assigned to a play.</p><span className="workspace-badge">Not enabled yet</span></section></div>
+          <div className="overview-bottom-grid"><section className="shell-panel"><header className="shell-panel-heading"><div><h2>Recent activity</h2><p>Venue-reported executions</p></div><button className="text-action" onClick={() => navigate('activity')}>View activity<ArrowRight size={14} /></button></header><ActivityTable fills={data.recentActivity.slice(0, 5)} accounts={accounts} compact /></section><OverviewPlays api={api} accounts={accounts} reloadGeneration={reloadKey} onBrowse={browsePlays} onOpen={viewPlay} /></div>
           <p className="workspace-scope-note">{data.scopeNote}</p>
         </>}
 
@@ -201,25 +231,24 @@ export function ApplicationShell({ system, disconnect, api }: { system: SystemIn
         </section>}
 
         {page === 'accounts' && data && (selectedAccount ? <AccountDetail key={selectedAccount.id} account={selectedAccount} api={api} refreshing={refreshing === selectedAccount.id} reloadGeneration={reloadKey} onSync={id => { void sync(id) }} onManage={() => setManagedAccount(selectedAccount)} onBack={() => { setSelectedAccountId(null); window.scrollTo({ top: 0, left: 0, behavior: 'auto' }) }} /> :
-          <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Account records</h2><p>Automatic venues and manual accounts use the same portfolio context.</p></div><label className="account-filter"><span className="sr-only">Filter by portfolio</span><select aria-label="Filter by portfolio" value={portfolioFilter} onChange={event => setPortfolioFilter(event.target.value)}><option value="">All accounts</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label></header>
+          <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Account records</h2><p>Automatic venues and manual accounts use the same portfolio context.</p></div><label className="account-filter"><span className="sr-only">Filter by portfolio</span><select aria-label="Filter by portfolio" value={portfolioFilter} onChange={event => setPortfolioFilter(event.target.value)}><option value="">All accounts</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select><ChevronDown className="account-filter-chevron" size={14} aria-hidden="true" /></label></header>
             <p className="workspace-scope-note in-panel">Unassigned accounts appear only in All accounts. Disabled records are shown here so they can be enabled again; their imports and positions remain hidden.</p>
-            {!filteredAccounts.length ? <div className="workspace-empty"><Wallet size={30} /><strong>No accounts in this view</strong><p>Add a Hyperliquid public address or a manual account. A portfolio is optional.</p><Button onClick={() => setAccountDialog(true)}>Add account</Button></div> : <AccountRows accounts={filteredAccounts} portfolioNames={portfolioNames} refreshing={refreshing} onDetail={viewAccount} onSync={id => { void sync(id) }} onManage={setManagedAccount} />}
+            {!filteredAccounts.length ? <div className="workspace-empty"><Wallet size={30} /><strong>No accounts in this view</strong><p>Import read-only venue accounts or add a manual account. A portfolio is optional.</p><Button onClick={() => setAccountDialog(true)}>Add account</Button></div> : <AccountRows accounts={filteredAccounts} portfolioNames={portfolioNames} refreshing={refreshing} onDetail={viewAccount} onSync={id => { void sync(id) }} onManage={setManagedAccount} />}
           </section>)}
 
         {page === 'activity' && data && <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Imported execution history</h2><p>Recent records only. Full-history backfills and retrospective review are later work.</p></div><span className="workspace-badge">Read-only facts</span></header><ActivityTable fills={data.recentActivity} accounts={accounts} /><p className="workspace-scope-note in-panel">Price touches are not fills. The same account and instrument can have multiple plays; these executions remain unassigned.</p></section>}
 
         {page === 'settings' && <div className="settings-grid">
           <section className="shell-panel settings-panel"><ShieldCheck size={23} /><h2>Private session</h2><p>Connected as {system.owner.displayName}. The token lives only in this browser session's memory and is released on disconnect.</p><dl><div><dt>Authentication</dt><dd>Bearer token</dd></div><div><dt>Market scope</dt><dd>Perpetuals only</dd></div><div><dt>Orders and signing</dt><dd>Not enabled</dd></div><div><dt>Theme</dt><dd>Graphite</dd></div></dl><Button variant="outline" onClick={disconnect}><LogOut size={15} />Disconnect session</Button></section>
-          <section className="shell-panel settings-panel"><Database size={23} /><h2>Venue capabilities</h2><p>Only Hyperliquid and manual accounts can be added in this step. A refresh is explicitly requested, not a background job.</p><div className="venue-capability-list">{system.venues.map(v => <div key={v.id}><span>{v.name}</span><span className="workspace-badge">{v.status}</span></div>)}</div><p className="field-help">No venue credential, private key, full-history promise or automatic Play matching is involved.</p></section>
+          <section className="shell-panel settings-panel"><Database size={23} /><h2>Venue capabilities</h2><p>Accounts can be added at {venues.creatable().map(v => v.name).join(', ')}. A refresh is explicitly requested, not a background job.</p><div className="venue-capability-list">{system.venues.map(v => <div key={v.id}><span>{v.name}</span><span className="workspace-badge">{v.status}</span></div>)}</div><p className="field-help">No venue credential, private key, full-history promise or automatic Play matching is involved.</p></section>
         </div>}
 
-        <footer className="shell-footer"><span>VESSEL / PRIVATE TRADING DIARY</span><span>{readOnlyAccountCount} enabled read-only {readOnlyAccountCount === 1 ? 'account' : 'accounts'} · <span className="address-note">{selectedAccount ? shortAddress(selectedAccount.address) : 'No order execution'}</span></span></footer>
+        <footer className="shell-footer"><span>VESSEL / PRIVATE TRADING DIARY</span><span>{readOnlyAccountCount} enabled read-only {readOnlyAccountCount === 1 ? 'account' : 'accounts'} · <span className="address-note">{selectedAccount ? venues.find(selectedAccount.venueId)?.source === 'account-index' ? `Index ${selectedAccount.sourceId ?? selectedAccount.address ?? 'unavailable'}` : shortAddress(selectedAccount.sourceId ?? selectedAccount.address) : 'No order execution'}</span></span></footer>
       </main>
     </div>
     <CreatePortfolioDialog open={portfolioDialog} onOpenChange={setPortfolioDialog} api={api} onCreated={created} />
-    <CreateAccountDialog open={accountDialog} onOpenChange={setAccountDialog} api={api} portfolios={portfolios} onCreated={created} />
+    <CreateAccountDialog open={accountDialog} onOpenChange={setAccountDialog} api={api} portfolios={portfolios} accounts={accounts} onCreated={reload} />
     {managedPortfolio && <ManagePortfolioDialog key={managedPortfolio.id} portfolio={managedPortfolio} api={api} onClose={() => setManagedPortfolio(null)} onChanged={managementChanged} />}
     {managedAccount && <ManageAccountDialog key={managedAccount.id} account={managedAccount} portfolios={portfolios} api={api} onClose={() => setManagedAccount(null)} onChanged={managementChanged} onStale={reload} />}
-    {notice && <div className="workspace-toast" role="status"><Check size={16} />{notice}<button aria-label="Dismiss message" onClick={() => setNotice(null)}><X size={14} /></button></div>}
   </div>
 }

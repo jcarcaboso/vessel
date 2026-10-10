@@ -9,6 +9,7 @@ public interface ICandleReader
         string contractId, string interval, long fromMs, long toMs, CancellationToken cancellationToken);
 }
 
+/// <summary>One candle. <paramref name="Trades"/> is null when the venue does not report a trade count.</summary>
 public sealed record VenueCandle(
     long OpenTime, long CloseTime,
-    string Open, string High, string Low, string Close, string Volume, int Trades);
+    string Open, string High, string Low, string Close, string Volume, int? Trades);

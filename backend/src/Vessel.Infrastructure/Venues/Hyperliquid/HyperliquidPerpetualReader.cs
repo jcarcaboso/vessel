@@ -4,6 +4,8 @@ using System.Numerics;
 using System.Text.Json;
 using Vessel.Application.MarketData;
 using Vessel.Application.Venues;
+using Vessel.Domain.Workspace;
+using Vessel.Infrastructure.Venues.Common;
 
 namespace Vessel.Infrastructure.Venues.Hyperliquid;
 
@@ -38,7 +40,48 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         ["0x54e00a5988577cb0b0c9ab0cb6ef7f4b"] = "USDH"
     };
 
-    public string VenueId => "hyperliquid";
+    public const string Id = "hyperliquid";
+
+    public static readonly VenueDescriptor Descriptor = new(Id, "Hyperliquid", "read-only", VenueSources.EvmAddress,
+        new VenueCapabilities(Sync: true, Instruments: true, Orders: true, Candles: true, MarketContext: true, Stream: true, StablecoinWallet: true),
+        QuoteAsset: PrimaryQuoteAsset, TradeUrlTemplate: "https://app.hyperliquid.xyz/trade/{venueContractId}",
+        Intervals: ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M"],
+        PriceRule: PriceRules.SignificantFigures,
+        CandleNotice: "Hyperliquid exposes only the latest 5,000 candles per interval. Prices are trade candles, not fills.",
+        MarketContextNotice: "Venue market context for the primary perpetual DEX. Funding is the current hourly rate; open interest is in base units. Not a fill or valuation.");
+
+    public string VenueId => Id;
+
+    // Strict parsing and bounded reads are shared with other venues; Hyperliquid keeps its own messages.
+    private static readonly StrictJson Json = new(InvalidResponse);
+    private const string Unavailable = "Hyperliquid is unavailable. Try again later.";
+    private BoundedJsonHttp Http => new(httpClient, timeProvider, Json, Unavailable, "Hyperliquid read timed out.", MaxResponseBytes);
+
+    private Task<T> ReadBoundedAsync<T>(Func<CancellationToken, Task<T>> read, CancellationToken cancellationToken) =>
+        Http.ReadBoundedAsync(read, cancellationToken);
+
+    private Task<JsonDocument> ReadJsonAsync(object payload, CancellationToken cancellationToken)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/info") { Content = JsonContent.Create(payload) };
+        return SendAndDispose(request, cancellationToken);
+    }
+
+    private async Task<JsonDocument> SendAndDispose(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        using (request) return await Http.SendAsync(request, cancellationToken);
+    }
+
+    private static BigInteger DecimalUnits(decimal value) => StrictJson.DecimalUnits(value);
+    private static JsonElement Property(JsonElement element, string name) => Json.Property(element, name);
+    private static JsonElement Array(JsonElement element) => Json.Array(element);
+    private static string Text(JsonElement element, int maxLength = 128) => Json.Text(element, maxLength);
+    private static int Integer(JsonElement element) => Json.Integer(element);
+    private static DateTimeOffset Timestamp(JsonElement element, long latestTimestamp) => Json.Timestamp(element, latestTimestamp);
+    private static decimal Positive(JsonElement element) => Json.Positive(element);
+    private static decimal Nonnegative(JsonElement element) => Json.Nonnegative(element);
+    private static decimal Number(JsonElement element) => Json.Number(element);
+    private static decimal ParseDecimal(string text) => Json.ParseDecimal(text);
+    private static void RejectDuplicateProperties(JsonElement element) => Json.RejectDuplicateProperties(element);
 
     public Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken cancellationToken) =>
         ReadBoundedAsync<IReadOnlyList<VenueInstrument>>(async token =>
@@ -49,10 +92,7 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
 
     public async Task<PerpetualVenueReadResult> ReadAsync(string publicAddress, CancellationToken cancellationToken)
     {
-        if (publicAddress is null || publicAddress.Length != 42 ||
-            !publicAddress.StartsWith("0x", StringComparison.Ordinal) ||
-            !publicAddress.Skip(2).All(char.IsAsciiHexDigit))
-            throw new VenueReadException("A valid 42-character hexadecimal public address is required.");
+        EvmAddress.Require(publicAddress);
 
         var latestTimestamp = Math.Min(253402300799999L, timeProvider.GetUtcNow().ToUnixTimeMilliseconds() + 300000);
 
@@ -60,7 +100,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         {
             using var meta = await ReadJsonAsync(new { type = "meta", dex = "" }, token);
             var instruments = ReadInstruments(meta.RootElement);
-            var contracts = instruments.Select(instrument => instrument.ContractId).ToHashSet(StringComparer.Ordinal);
+            var contracts = instruments.Select(instrument => instrument.VenueContractId ?? instrument.ContractId)
+                .ToHashSet(StringComparer.Ordinal);
 
             using var state = await ReadJsonAsync(
                 new { type = "clearinghouseState", user = publicAddress, dex = "" }, token);
@@ -80,79 +121,10 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         }, cancellationToken);
     }
 
-    private async Task<T> ReadBoundedAsync<T>(Func<CancellationToken, Task<T>> read, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        // ResponseHeadersRead does not apply HttpClient.Timeout to streamed bodies.
-        // Bound the entire operation, not each individual request.
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20), timeProvider);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
-        try
-        {
-            var result = await read(linked.Token);
-            linked.Token.ThrowIfCancellationRequested();
-            return result;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw new OperationCanceledException(cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            throw new VenueReadException("Hyperliquid read timed out.");
-        }
-        catch (HttpRequestException)
-        {
-            throw new VenueReadException("Hyperliquid is unavailable. Try again later.");
-        }
-        catch (IOException)
-        {
-            throw new VenueReadException("Hyperliquid is unavailable. Try again later.");
-        }
-        catch (JsonException)
-        {
-            throw new VenueReadException(InvalidResponse);
-        }
-        catch (InvalidOperationException)
-        {
-            throw new VenueReadException(InvalidResponse);
-        }
-    }
 
-    private async Task<JsonDocument> ReadJsonAsync(object payload, CancellationToken cancellationToken)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/info")
-        {
-            Content = JsonContent.Create(payload)
-        };
-        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        if (!response.IsSuccessStatusCode)
-            throw new VenueReadException("Hyperliquid is unavailable. Try again later.");
-        if (response.Content.Headers.ContentLength > MaxResponseBytes)
-            throw new VenueReadException(InvalidResponse);
 
-        using var body = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var bytes = new MemoryStream();
-        var buffer = new byte[16384];
-        int count;
-        while ((count = await body.ReadAsync(buffer, cancellationToken)) != 0)
-        {
-            if (bytes.Length + count > MaxResponseBytes)
-                throw new VenueReadException(InvalidResponse);
-            bytes.Write(buffer, 0, count);
-        }
-        var document = JsonDocument.Parse(bytes.ToArray(), new JsonDocumentOptions { MaxDepth = 32 });
-        try
-        {
-            RejectDuplicateProperties(document.RootElement);
-            return document;
-        }
-        catch
-        {
-            document.Dispose();
-            throw;
-        }
-    }
+    /// <summary>Primary perpetual DEX contracts are quoted and margined in USDC.</summary>
+    private const string PrimaryQuoteAsset = "USDC";
 
     private static List<VenueInstrument> ReadInstruments(JsonElement meta, bool selectableOnly = false)
     {
@@ -165,14 +137,18 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
                 continue;
             var decimals = Integer(Property(item, "szDecimals"));
             var leverage = Integer(Property(item, "maxLeverage"));
-            if (decimals is < 0 or > 28 || leverage <= 0 || !names.Add(name))
+            var canonical = HyperliquidInstruments.Canonical(name);
+            if (decimals is < 0 or > 28 || leverage <= 0 || !names.Add(canonical) ||
+                HyperliquidInstruments.Native(canonical) != name)
                 throw new VenueReadException(InvalidResponse);
             if (item.TryGetProperty("isDelisted", out var delisted) &&
                 delisted.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
                 throw new VenueReadException(InvalidResponse);
             // Delisted contracts still identify historical positions and fills during refresh.
             if (!selectableOnly || delisted.ValueKind != JsonValueKind.True)
-                result.Add(new(name, decimals, leverage));
+                // Hyperliquid's maintenance margin is half the initial margin at the contract's maximum leverage.
+                result.Add(new(canonical, decimals, leverage, PrimaryQuoteAsset,
+                    VenueContractId: canonical == name ? null : name, MaintenanceMarginFraction: 1m / (2 * leverage)));
         }
         return result;
     }
@@ -201,8 +177,9 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
                 if (leverage <= 0)
                     throw new VenueReadException(InvalidResponse);
             }
-            positions.Add(new(name, quantity, Positive(Property(position, "entryPx")),
-                Number(Property(position, "unrealizedPnl")), Nonnegative(Property(position, "marginUsed")), leverage));
+            positions.Add(new(HyperliquidInstruments.Canonical(name), quantity, Positive(Property(position, "entryPx")),
+                Number(Property(position, "unrealizedPnl")), Nonnegative(Property(position, "marginUsed")), leverage,
+                VenueContractId: HyperliquidInstruments.Canonical(name) == name ? null : name));
         }
         return new(
             Timestamp(Property(state, "time"), latestTimestamp),
@@ -227,16 +204,35 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
             var side = Text(Property(fill, "side"));
             if (side is not ("A" or "B"))
                 throw new VenueReadException(InvalidResponse);
+            var direction = Text(Property(fill, "dir"));
             fills.Add(new(
-                Identity(Property(fill, "tid")), name, side,
-                Text(Property(fill, "dir")), Positive(Property(fill, "px")), Positive(Property(fill, "sz")),
+                Identity(Property(fill, "tid")), HyperliquidInstruments.Canonical(name), SideOf(side),
+                direction, Positive(Property(fill, "px")), Positive(Property(fill, "sz")),
                 Number(Property(fill, "fee")), Text(Property(fill, "feeToken"), FeeTokenLength),
                 Number(Property(fill, "closedPnl")), Timestamp(Property(fill, "time"), latestTimestamp),
-                Identity(Property(fill, "oid")), Text(Property(fill, "hash")), fill.GetRawText()));
+                Identity(Property(fill, "oid")), Text(Property(fill, "hash")), fill.GetRawText(),
+                // closedPnl excludes the fee, which is reported separately.
+                EffectOf(direction), ExecutionFacts.FeeReported, ExecutionFacts.PnlGross,
+                VenueContractId: HyperliquidInstruments.Canonical(name) == name ? null : name));
         }
         // Preserve venue side/direction as facts; they do not identify a journal play.
         return fills.OrderByDescending(fill => fill.OccurredAtUtc).ToList();
     }
+
+    /// <summary>Hyperliquid's B (bid) buys and A (ask) sells.</summary>
+    public static string SideOf(string side) => side == "B" ? ExecutionFacts.Buy : ExecutionFacts.Sell;
+
+    /// <summary>
+    /// From Hyperliquid's <c>dir</c>: "Open Long", "Close Short", "Long &gt; Short" (a flip). Anything else, such as
+    /// a liquidation or settlement wording, stays unknown rather than guessed.
+    /// </summary>
+    public static string EffectOf(string direction) => direction switch
+    {
+        "Open Long" or "Open Short" => ExecutionFacts.Open,
+        "Close Long" or "Close Short" => ExecutionFacts.Close,
+        "Long > Short" or "Short > Long" => ExecutionFacts.Flip,
+        _ => ExecutionFacts.Unknown
+    };
 
     internal static bool IsPrimaryContract(string name) =>
         !name.StartsWith('@') && !name.Contains('/') && !name.Contains(':');
@@ -316,55 +312,14 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         return new(observedAtUtc, accountMode, "hypercore-spot-stablecoins", balances);
     }
 
-    private static BigInteger DecimalUnits(decimal value)
-    {
-        var bits = decimal.GetBits(value);
-        var coefficient = ((BigInteger)(uint)bits[2] << 64) | ((BigInteger)(uint)bits[1] << 32) | (uint)bits[0];
-        var scale = (bits[3] >> 16) & 0xff;
-        return coefficient * BigInteger.Pow(10, 28 - scale);
-    }
 
-    private static JsonElement Property(JsonElement element, string name)
-    {
-        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(name, out var value))
-            throw new VenueReadException(InvalidResponse);
-        return value;
-    }
 
-    private static JsonElement Array(JsonElement element)
-    {
-        if (element.ValueKind != JsonValueKind.Array)
-            throw new VenueReadException(InvalidResponse);
-        return element;
-    }
 
     // Matches the persisted fee-token column, so an oversized value fails as a venue read.
     private const int FeeTokenLength = 64;
 
-    private static string Text(JsonElement element, int maxLength = 128)
-    {
-        if (element.ValueKind != JsonValueKind.String)
-            throw new VenueReadException(InvalidResponse);
-        var value = element.GetString()!;
-        if (string.IsNullOrWhiteSpace(value) || value.Length > maxLength || value.Any(char.IsControl))
-            throw new VenueReadException(InvalidResponse);
-        return value;
-    }
 
-    private static int Integer(JsonElement element)
-    {
-        if (element.ValueKind != JsonValueKind.Number || !element.TryGetInt32(out var value))
-            throw new VenueReadException(InvalidResponse);
-        return value;
-    }
 
-    private static DateTimeOffset Timestamp(JsonElement element, long latestTimestamp)
-    {
-        if (element.ValueKind != JsonValueKind.Number || !element.TryGetInt64(out var value) ||
-            value < 0 || value > latestTimestamp)
-            throw new VenueReadException(InvalidResponse);
-        return DateTimeOffset.FromUnixTimeMilliseconds(value);
-    }
 
     private static string Identity(JsonElement element)
     {
@@ -381,60 +336,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         return normalized.Length == 0 ? "0" : normalized;
     }
 
-    private static decimal Positive(JsonElement element)
-    {
-        var value = Number(element);
-        if (value <= 0)
-            throw new VenueReadException(InvalidResponse);
-        return value;
-    }
 
-    private static decimal Nonnegative(JsonElement element)
-    {
-        var value = Number(element);
-        if (value < 0)
-            throw new VenueReadException(InvalidResponse);
-        return value;
-    }
 
-    private static decimal Number(JsonElement element) => ParseDecimal(Text(element));
 
-    private static decimal ParseDecimal(string text)
-    {
-        var unsigned = text.StartsWith('-') ? text[1..] : text;
-        var parts = unsigned.Split('.');
-        if (parts.Length > 2 || parts.Any(part => part.Length == 0 || !part.All(char.IsAsciiDigit)))
-            throw new VenueReadException(InvalidResponse);
-        var fraction = parts.Length == 2 ? parts[1].TrimEnd('0') : "";
-        var coefficient = (parts[0] + fraction).TrimStart('0');
-        const string maxCoefficient = "79228162514264337593543950335";
-        // decimal.TryParse alone rounds excess precision. Reject values that cannot
-        // be represented exactly by a 96-bit coefficient and a scale of at most 28.
-        if (fraction.Length > 28 || coefficient.Length > maxCoefficient.Length ||
-            (coefficient.Length == maxCoefficient.Length &&
-             string.CompareOrdinal(coefficient, maxCoefficient) > 0) ||
-            !decimal.TryParse(text, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
-                CultureInfo.InvariantCulture, out var value))
-            throw new VenueReadException(InvalidResponse);
-        return value;
-    }
 
-    private static void RejectDuplicateProperties(JsonElement element)
-    {
-        if (element.ValueKind == JsonValueKind.Object)
-        {
-            var names = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var property in element.EnumerateObject())
-            {
-                if (!names.Add(property.Name))
-                    throw new VenueReadException(InvalidResponse);
-                RejectDuplicateProperties(property.Value);
-            }
-        }
-        else if (element.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var child in element.EnumerateArray())
-                RejectDuplicateProperties(child);
-        }
-    }
 }

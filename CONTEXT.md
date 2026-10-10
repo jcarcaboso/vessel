@@ -11,6 +11,14 @@ A collection of brokerage accounts grouped by trading purpose, such as swing tra
 A trader's account at a broker or trading venue, with manually recorded or imported activity. Portfolio assignment is optional.
 _Avoid_: User account, portfolio
 
+**Subaccount**:
+A separately identified account under a venue's main account. Each selected Lighter account index is a separate Vessel account, even when several belong to the same wallet.
+_Avoid_: Portfolio, wallet
+
+**Source identity**:
+The venue's identifier for one concrete account. A wallet address can identify an account at one venue and only help discover several accounts at another.
+_Avoid_: Account name, owner identity
+
 **Unassigned accounts**:
 Account records without a portfolio, visible in the all-account view. This is a grouping state rather than another stored portfolio.
 _Avoid_: Default portfolio as a separate entity
@@ -39,7 +47,7 @@ An append-only snapshot of a planned play's plan, with the reason it changed. Pl
 _Avoid_: Overwriting the original plan
 
 **Order link**:
-The association of one venue order with one level of a play: an entry, its stop, one of its targets, or an unplanned exit. Fills reach a play only through linked orders. Links are automatic when unambiguous, suggested otherwise, and remembered when the owner declines them.
+The association of one venue order with one level of a play: an entry, one of its stops or targets, or an unplanned exit. Fills reach a play only through linked orders. Links are automatic when unambiguous, suggested otherwise, and remembered when the owner declines them.
 _Avoid_: Assigning fills by account and instrument alone
 
 **Execution progress**:
@@ -113,8 +121,11 @@ _Avoid_: Guaranteed tradable collateral, guaranteed withdrawable balance
 The exposure multiplier relating the full position's notional value to its committed margin. One-times leverage is unlevered exposure.
 
 **Level percentage**:
-A stop or target's distance from the entry price, expressed as a percentage of that entry price.
-_Avoid_: Leveraged return, return on margin
+A stop or target expressed as the return on margin at the play's leverage: a loss for a stop, a gain for a target. The price moves the percentage divided by the leverage from the entry, so 20% at 10× is a 2% price move. Changing the leverage moves percentage levels.
+_Avoid_: Price distance from entry, profit calculation
+
+**Stop share**, **target share**:
+The part of an entry's quantity that one of its stops or targets closes. An entry can have several stops and several targets.
 
 **Average entry price**:
 The planned entry price weighted by entry quantity shares, excluding zero-share entries. The shares define this price even before the trader chooses the full position's size.
