@@ -225,7 +225,7 @@ export interface WorkspaceApi {
   accountCredential(id: string, signal?: AbortSignal): Promise<AccountCredential>
   saveAccountCredential(id: string, token: string): Promise<AccountCredential>
   deleteAccountCredential(id: string): Promise<void>
-  updatePortfolio(id: string, settings: { name: string; icon: string }): Promise<Portfolio>
+  updatePortfolio(id: string, settings: { name: string; icon?: string }): Promise<Portfolio>
   deletePortfolio(id: string): Promise<void>
   updateAccount(id: string, settings: { name: string; portfolioId: string | null; isEnabled: boolean; expectedRevision: number }): Promise<BrokerAccount>
   deleteAccount(id: string): Promise<void>

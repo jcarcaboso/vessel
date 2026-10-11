@@ -8,7 +8,7 @@ import { Trash2 } from 'lucide-react'
 import { useVenues } from '@/api/venues'
 import { AccountCredential } from './AccountCredential'
 import { PortfolioIconPicker } from './PortfolioIcon'
-import { portfolioIconKey, type PortfolioIconKey } from './portfolio-icons'
+import { defaultPortfolioIcon, type PortfolioIconKey } from './portfolio-icons'
 
 const failure = (cause: unknown) => cause instanceof ApiError ? cause.message : 'The change could not be completed. Your stored records have not been replaced.'
 
@@ -16,7 +16,8 @@ export function ManagePortfolioDialog({ portfolio, api, onClose, onChanged }: {
   portfolio: Portfolio; api: WorkspaceApi; onClose: () => void; onChanged: (message: string) => void
 }) {
   const [name, setName] = useState(portfolio.name)
-  const [icon, setIcon] = useState<PortfolioIconKey>(portfolioIconKey(portfolio.icon))
+  // Undefined until the owner picks one, so a rename never overwrites a stored icon this browser does not know.
+  const [icon, setIcon] = useState<PortfolioIconKey>()
   const [deleting, setDeleting] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -25,7 +26,7 @@ export function ManagePortfolioDialog({ portfolio, api, onClose, onChanged }: {
     if (!name.trim()) { setError('Give the portfolio a name.'); return }
     setPending(true)
     try {
-      await api.updatePortfolio(portfolio.id, { name: name.trim(), icon }); onChanged('Portfolio updated.'); onClose()
+      await api.updatePortfolio(portfolio.id, { name: name.trim(), ...(icon && { icon }) }); onChanged('Portfolio updated.'); onClose()
     } catch (cause) { setError(failure(cause)) }
     finally { setPending(false) }
   }
@@ -47,7 +48,7 @@ export function ManagePortfolioDialog({ portfolio, api, onClose, onChanged }: {
         <div className="management-actions"><Button variant="outline" onClick={() => { setDeleting(false); setError(null) }} disabled={pending}>Keep portfolio</Button><Button variant="destructive" onClick={() => { void remove() }} disabled={pending}>{pending ? 'Deleting…' : 'Delete portfolio'}</Button></div>
       </div> : <form className="workspace-form" onSubmit={event => { void save(event) }} aria-busy={pending}>
         <label htmlFor="rename-portfolio">Portfolio name</label><Input id="rename-portfolio" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={pending} autoFocus />
-        <PortfolioIconPicker name="manage-portfolio-icon" value={icon} onChange={setIcon} disabled={pending} />
+        <PortfolioIconPicker name="manage-portfolio-icon" value={icon ?? portfolio.icon ?? defaultPortfolioIcon} onChange={setIcon} disabled={pending} />
         {error && <p className="error" role="alert">{error}</p>}
         <div className="management-actions"><Button type="button" variant="ghost" className="danger-action" onClick={() => { setDeleting(true); setError(null) }} disabled={pending}><Trash2 size={14} />Delete</Button><Button type="submit" disabled={pending}>{pending ? 'Saving…' : 'Save changes'}</Button></div>
       </form>}

@@ -5,9 +5,9 @@ export function PortfolioIcon({ icon, size = 21 }: { icon: string | undefined; s
   return <Icon size={size} aria-hidden="true" />
 }
 
-/** A radio group of the available portfolio icons; arrow keys move between choices. */
+/** A radio group of the available portfolio icons; arrow keys move between choices. A value this browser does not know leaves every choice unchecked. */
 export function PortfolioIconPicker({ value, onChange, disabled = false, name }: {
-  value: PortfolioIconKey; onChange: (icon: PortfolioIconKey) => void; disabled?: boolean; name: string
+  value: string; onChange: (icon: PortfolioIconKey) => void; disabled?: boolean; name: string
 }) {
   return <fieldset className="portfolio-icon-picker" disabled={disabled}>
     <legend>Icon</legend>

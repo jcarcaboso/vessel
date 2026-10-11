@@ -35,7 +35,7 @@ October 10, 2026. The owner asked for custom portfolio icons.
 - Each portfolio has an icon chosen from a fixed set of drawn icons (folder, briefcase, wallet, piggy-bank, landmark, coins, bitcoin, gem, trending-up, chart-line, chart-candlestick, chart-column, target, compass, rocket, zap, flame, timer, hourglass, shield, anchor, mountain, sprout, crown). The default is `folder`, which existing portfolios receive through the `PortfolioIcons` migration.
 - Icons are keys, not uploaded images or markup. The server accepts only keys in `PortfolioIcons` (`Vessel.Domain/Workspace/Portfolio.cs`) and returns 400 without changes for anything else; the browser list lives in `frontend/src/features/workspace/portfolio-icons.ts` and must stay in step.
 - `POST /api/portfolios` accepts an optional `icon`. `PATCH /api/portfolios/{id}` takes `{ "name": "…", "icon": "…" }`; an omitted or null icon keeps the stored one, so a rename-only client cannot reset it. `PortfolioDto.icon` is always present.
-- The new-portfolio and manage-portfolio dialogs show the icons as a radio group; the portfolio tile shows the chosen icon. A key the browser does not know shows the folder. The picker uses theme tokens only, so every theme restyles it without layout changes.
+- The new-portfolio and manage-portfolio dialogs show the icons as a radio group; the portfolio tile shows the chosen icon. A key the browser does not know shows the folder on the tile and leaves the picker unchecked; the manage dialog sends an icon only after the owner picks one, so a rename never overwrites a stored key the browser does not know. The picker uses theme tokens only, so every theme restyles it without layout changes.
 
 ## Concurrency and ownership
 
