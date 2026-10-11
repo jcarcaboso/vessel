@@ -1,0 +1,196 @@
+# Performance plan: candle caching and chart responsiveness
+
+October 11, 2026. Status: **PR A and PR B authorized by the owner** (see [Owner decisions](#owner-decisions)).
+
+The owner asked how to make chart loading faster, for example by caching candles already viewed so switching back or refreshing is shorter, what to cache and how to invalidate it, and what else would improve performance across the app, especially when working with the chart.
+
+Two Codex Sol agents researched the backend and the frontend separately (read-only), the orchestrator merged their findings with its own reading, and a third Sol agent reviewed the draft ("approve with changes"). This version includes all of the review's required changes.
+
+Every proposal keeps the existing rules: exact decimal strings outside display arithmetic, prices are observations and never fills, owner and enabled checks on every request, no secrets in logs, cache keys or browser storage, drafts discarded on reload and disconnect, capability-driven venue behaviour, and manual refresh for Lighter and RISEx (no background polling added).
+
+## Where the time goes today
+
+### Loading and switching
+
+- **Browser:** `useCandles` (`frontend/src/features/market/useCandles.ts`) is keyed by account, instrument and interval. Any key change or remount drops the candles and fetches a fresh 500-candle window. Switching 1h → 4h → 1h, or BTC → HYPE → BTC, always waits for the venue round trip again. Older pages loaded by scrolling are lost as well. **This is the main cause of slow switch-back.**
+- **Server:** `CandleCache` (`backend/src/Vessel.Application/MarketData/CandleService.cs`) keeps each response for 10 s. The latest-window key uses `to` rounded down to 10 s, so a return after 5 s hits only about half the time and a return after 10 s never does. Older pages use an explicit `endTime` and also expire after 10 s, although most of them hold only closed candles. When 256 entries are reached and none have expired, the whole cache is cleared. Concurrent identical misses each call the venue. Explicit Refresh within the same 10 s bucket returns the cached response.
+- **Metadata:** Hyperliquid reads `meta` on every catalogue request; Lighter reads `orderBookDetails` before candles and account reads. RISEx already caches its catalogue for one minute.
+- **Transport:** there is no response compression. A 500-candle response is about 74 KB of JSON and about 7 KB gzipped (synthetic measurement).
+- **Guard:** each chart endpoint loads a tracked full `Account` to check owner, enabled state and venue, including on cache hits.
+- **Bundle:** the main chunk is 692 KB (212 KB gzip) because Plays, Review and Settings are imported eagerly. The chart renderer is already a separate 198 KB (65 KB gzip) chunk, but its download starts only when the chart mounts, and a failed import is not handled.
+- **Saved Plays:** opening a saved Play waits for every evidence image before the draft is built (`frontend/src/features/plays/saved.ts`), so image-heavy Plays delay the chart.
+
+### Working with the chart
+
+- **Dragging is not frame-batched.** Level drags (`lightweight.ts`) and drawing moves (`drawingController.ts`) publish on every `pointermove`. Each publish replaces the whole Play draft in the shell, re-rendering the editor, journal and suggestions; for saved Plays it also serializes the plan for dirty checking.
+- **Live ticks are linear in loaded history.** Each streamed candle copies the array, converts every candle's six strings to numbers, recomputes all EMAs, RSI and volume, rebuilds the time index and price format, and calls `setData` on the candle series and every indicator series. At 5,000 candles with all indicators that is about 35,000 points handed to the renderer per tick. The indicator arithmetic itself is cheap (about 1.8 ms median at 5,000 bars); renderer replacement and allocation are the larger cost.
+- **Market-context ticks** re-render the chart subtree, including the unmemoized `CandleChart`, but not the whole Plays page and not the indicators.
+- **Expanding the chart** shares one data state and one stream (no refetch), but unmounts the inline chart and creates a new renderer, so zoom and scroll are lost.
+
+## What to cache
+
+| Data | Where | Lifetime | Key |
+|---|---|---|---|
+| Historical candle windows | Server memory | 24 h | venue + native market ID + interval + window |
+| Tail candle windows | Server memory | 10 s (unchanged) | same |
+| Empty windows | Server memory | 60 s | same |
+| Instrument catalogue (full validated metadata, incl. retired markets) | Server memory | 60 s | venue + catalogue variant |
+| Market context snapshot | Server memory | 10 s (unchanged) | venue |
+| Candle series already viewed | Browser memory, per connection | Session; shown at once, then revalidated | account + instrument + interval |
+| Authorization (owner, enabled) | **Never cached** | — | — |
+
+Server entries hold public venue data, so they are shared across accounts after each request has passed the account guard. Browser entries are keyed by account, which keeps eligibility, errors and invalidation per account; a Lighter main account and subaccount each keep their own copy.
+
+Closed candles are **stable but not guaranteed immutable**: venues can correct late trades. "Historical" therefore never means "permanent".
+
+Not cached: SSE events (already live), owner financial data (overview, fills, snapshots, Plays), credentials, `/api/system` (contains owner identity).
+
+## Server rules
+
+### Lookup order
+
+1. Account guard on every request: a no-tracking projection (exists for this owner, enabled, venue), keeping the owner query filter. Never skipped on a cache hit.
+2. Resolve the instrument to its current native market through the cached catalogue (60 s). A retired or unknown market is rejected before any candle cache lookup, with a distinct problem ("This market is no longer listed.") rather than the generic venue failure, so the browser can drop its entry instead of showing stale candles. Interval support is checked against the same metadata.
+3. Look up the candle cache by venue, **native** market ID and interval, so a reused symbol never inherits a replaced market's history.
+
+### Tail or historical
+
+A window is **historical** only if the request has an explicit `endTime` and
+
+```text
+endTime ≤ now − 3 × maxDuration(interval)
+```
+
+where `maxDuration` is the interval's longest possible length (1w = 7 days, 1M = 31 days; fixed intervals their own length). Everything else is **tail**: requests without `endTime`, future `endTime`, and windows ending later than the cutoff. This conservative rule covers the forming candle plus two closed candles without epoch-modulo arithmetic, venue week alignment or calendar months. Uncertain means tail.
+
+- Tail windows: 10 s (unchanged, including the 10 s bucket for the latest window).
+- Historical windows: 24 h, unless they are empty.
+- Empty windows (either kind): 60 s.
+- Failed reads are never cached.
+
+### Requests by purpose
+
+- **Activation** (opening or switching to a chart): normal cache rules.
+- **Explicit Refresh**: a new `refresh=true` query parameter bypasses the cache for the latest window and replaces its entry. Coalesced with concurrent identical refreshes.
+- **Older paging** (`endTime` = oldest − 1): historical rules apply.
+- **Reconnect recovery**: same as activation for the latest window.
+
+### Bounds and concurrency
+
+- Bounded by both entry count (for example 1,024) and total candle count (for example 200,000), evicting least-recently-used entries one at a time, never a full clear.
+- Single-flight per cache key, per venue context snapshot and per catalogue. The shared venue read runs with its own deadline; a cancelled waiter stops waiting without cancelling the read for others. In-flight entries are removed when they complete or fail. (The RISEx catalogue cache lets the first caller's token cancel the load, so it is a model for caching but not for cancellation.)
+- Compression (Brotli/gzip) for successful candle, catalogue and market-context JSON only. Not SSE, credentials, evidence or error responses. `Cache-Control: no-store` stays.
+
+## Browser rules
+
+### Cache
+
+- `features/market/candleCache.ts`: an in-memory store per `WorkspaceApi` connection, keyed by account + instrument + interval. It survives chart and page unmounts but not reload. Disconnect, logout or a new API instance clears it.
+- Each entry keeps the exact venue candles, their numeric display form, the notice, `historyExhausted`, the latest observation time and, separately, **the time each older page was fetched**.
+- Bounds: at most 20 entries (LRU by last view) and 5,000 candles per entry. The entry on screen is never evicted. When an entry reaches 5,000 candles, older paging stops with a "Local history limit reached" notice; the cache never drops a page it just loaded and never reports this as venue history exhausted.
+- A generation counter per entry and per connection: results of requests started before an invalidation are discarded, so they cannot repopulate an evicted entry.
+
+### Activation and revalidation
+
+- On activation the cached candles are shown at once with their existing "Updated hh:mm" time, then the latest window is requested. The chart says it is refreshing until the response arrives.
+- Merging: closed candles take the REST value (corrections win). For the forming candle see "REST and live updates" below.
+- Older pages fetched more than 24 h ago are dropped on activation; the latest-window revalidation and live updates do not renew their age.
+- **Gap rule:** if the fresh window's oldest candle is newer than the cached series' newest candle (no overlap in fetched ranges), the cached series is replaced by the fresh window and older paging restarts from there. Overlap is judged by fetched ranges, never by price continuity or fixed-step timestamps; missing slots can be legitimate no-trade periods. No synthetic candles. RISEx opens are kept exactly as received, including opens outside high/low.
+- Refresh keeps today's meaning: the latest window (now with `refresh=true`), not all retained history.
+
+### Failures
+
+- 401/403: the connection is no longer authorized; clear the whole cache, as on disconnect.
+- 404/409 (account deleted, disabled or manual) or "market no longer listed": drop the entry and show the existing error state, not stale candles.
+- Venue failure (502) or network error: keep the cached candles with the existing "Refresh failed … Showing the previous candles." notice.
+- Account disable or delete in the app evicts that account's entries and aborts its requests.
+
+### REST and live updates
+
+SSE candles carry no revision, and a relay can replay an older forming candle to a late subscriber, so arrival order does not prove freshness. Rules:
+
+- Live candles are written into the same cache entry.
+- While a latest-window request is in flight, live candles are buffered, coalesced by open time and tagged with the request generation. When the response arrives, the REST snapshot is merged first, then the buffer is reapplied. The buffer is discarded on invalidation, and on a failed request it is applied to the cached series.
+- For the **same open time**, a forming candle only advances: the value with the larger trade count (or larger volume when trades are absent) wins; equal counts take the later arrival. For closed candles (open time before the current forming candle) the REST value wins.
+- Live events for older open times (corrections) are applied, not ignored.
+- When the stream reports `reconnecting` or `stale` and then `live` again without the browser stream ending, the browser revalidates the latest window, the same way it does after a browser reconnect today.
+
+## Delivery
+
+### PR A: switch-back and load caching
+
+1. Browser candle cache with all the rules above, plus renderer preload when the Plays page opens and handling of a failed renderer import.
+2. Server: catalogue cache with single-flight, native-identity lookup and the "no longer listed" problem, the tail/historical classification, entry and candle bounds, single-flight candle reads, `refresh=true`, and restricted compression.
+3. No-tracking guard projection.
+
+Latest-window server behaviour stays at 10 s, so switch-back speed comes from the browser cache. The server changes reduce venue reads for paging, catalogues and concurrent requests.
+
+### PR B: chart interaction
+
+1. Batch level drags and drawing moves to one draft update per animation frame; flush the final position on `pointerup` even before the next frame; one undo step per gesture; cancel on `pointercancel` and unmount. Updates that round to the same tick are skipped for levels only, not for drawing moves along the time axis.
+2. Incremental rendering: convert only changed candles; `series.update()` for the forming and newly opened bars; full `setData` only on reset, paging, corrections or trimming; rebuild the time index and price format only when they change. Indicator arithmetic stays a full computation for now; only the changed indicator points go to the renderer.
+3. Memoize `CandleChart` with stable callbacks and keep market statistics and update-time re-renders out of the chart subtree.
+
+### Later, after measuring A and B
+
+- **Progressive evidence loading** for saved Plays (build the draft first, load images after, keep unloaded images distinct from removed ones so a save never deletes them). A separate PR because of the data-loss risk.
+- **Incremental EMA/RSI state**, only if profiling shows the arithmetic matters.
+- **Server bar store**: candles per series and open time with fetched coverage, responses assembled from a cached closed prefix plus a small tail read, fed by the existing Hyperliquid relay (no new socket). Per-venue horizons: Hyperliquid 5,000 candles and request weight; Lighter 500 per read and manual refresh; RISEx native intervals, no WebSocket.
+- **Growing-history queries**: sizing, review, execution and the Plays list load full histories. Join exact linked order/fill pairs and project summaries. Consider fill indexes `(OwnerId, AccountId, OrderId)` and `(OwnerId, AccountId, OccurredAtUtc DESC, Id)` only after `EXPLAIN` on a synthetic database.
+- **Page code splitting** (Plays, Review, Settings) with the Plays session kept in the shell.
+- **One renderer across expand**, if measured expand latency justifies the focus and resize work.
+
+### Not recommended now
+
+- TanStack Query or a general query cache: it would not fix the imperative chart hot path. Revisit only if overview, Plays, sizing, execution and review fetching are deliberately centralized.
+- Prefetching favourite timeframes: speculative venue weight. At most one debounced request for the current interval on hover or focus of an instrument.
+- Web workers for indicators: the arithmetic is not the bottleneck.
+- Long browser `max-age` on API responses: a cached response would skip the server's newly-disabled-account check.
+- IndexedDB for candles: would make the first chart after reload instant, but changes the rule that market data is not stored in the browser and adds cross-session schema and cleanup.
+- A PostgreSQL candle archive: survives restarts and could keep history beyond Hyperliquid's horizon, but it is a product capability needing a migration and retention bounds.
+- Venue HTTP/2 or connection tuning without a benchmark; new retries that multiply venue weight.
+
+## Tests
+
+Backend (the pinned SDK 10.0.302 is installed user-locally in `~/.dotnet`; the system `dotnet` is 10.0.112):
+
+- Classification: cutoff ±1 ms, no `endTime`, future `endTime`, `1w` and `1M` (February and leap years), inclusive 501-open windows, empty and sparse windows.
+- Identity: canonical `1000…` versus native `k…`, same symbol with a replaced market ID, retirement while cached, unsupported interval after a metadata refresh.
+- Bounds and concurrency: entry and candle limits, empty-entry pressure, single-flight with one cancelled waiter, failed reads not cached and cleaned up, `refresh=true` bypass and coalescing.
+- Guard runs on cache hits; compression excludes SSE and errors.
+
+Frontend:
+
+- Switch-back shows cached candles without waiting; revalidation merge; gap replacement; 24 h page expiry not renewed by live updates.
+- Accounts: Lighter main and subaccount isolation, disable or delete during REST and SSE, 401/403 clears the cache, late responses from an old connection discarded.
+- Live: buffered ticks with REST success and failure, candle rollover during refresh, stale relay replay, older correction events, upstream reconnect without the SSE ending, refresh versus paging completion order.
+- Bounds: 20-entry LRU, local history limit during paging and live appends, no repeated paging loop.
+- Interaction: `pointerup` before the scheduled frame, `pointercancel` and unmount, one undo step, same-tick suppression for levels only; incremental rendering equals a full `setData`.
+
+Browser timing at 1402 × 877 against live Hyperliquid: first chart; switch-back (target: candles visible in under 100 ms, measured separately from revalidation finishing); live tick cost with 5,000 candles and all indicators; drag frame rate with the editor visible.
+
+## Owner decisions
+
+October 11, 2026:
+
+1. PR A (caching) and PR B (chart interaction) are authorized as scoped above.
+2. The browser cache is session-only memory; candles are not stored in the browser across reloads.
+3. The server cache is in-memory for now. The owner's longer-term direction is a **TimescaleDB candle archive** that keeps more history than the venues expose and later supports backtesting strategies on the stored data. It needs its own plan (collector job, instruments and intervals, retention, storage budget, licensing, migration from the plain PostgreSQL image) and is not part of PR A or PR B. PR A keeps cache keys by venue, native market, interval and window so a persistent store can sit behind the same lookup later.
+
+### Archive storage estimate
+
+Rough sizing for the archive discussion. Assumptions: one row per candle with exact `numeric` OHLCV, about 140 bytes per row uncompressed including the primary-key index, and about 10–20 bytes per row with TimescaleDB columnar compression (segment by market, order by time). Storing 1m candles and deriving 5m to 1d with continuous aggregates adds about 30% rows.
+
+| Rows per instrument and year | 1m | 5m | 15m | 1h | 4h | 1d |
+|---|---|---|---|---|---|---|
+| Candles | 525,600 | 105,120 | 35,040 | 8,760 | 2,190 | 365 |
+
+| Scope, per year | Uncompressed | Compressed |
+|---|---|---|
+| 1 instrument, 1m + derived | ~95 MB | ~7–14 MB |
+| 10 instruments, 1m + derived | ~1 GB | ~70–140 MB |
+| 50 instruments, 1m + derived | ~5 GB | ~0.35–0.7 GB |
+| ~200 instruments (most of Hyperliquid), 1m + derived | ~19 GB | ~1.4–2.8 GB |
+| 50 instruments, 1h only | ~60 MB | ~5–10 MB |
+
+Disk space is not the constraint; history availability is. Hyperliquid's REST API returns only the latest 5,000 candles per interval: about 3.5 days of 1m, 17 days of 5m, 52 days of 15m, 208 days of 1h, 2.3 years of 4h and 13.7 years of 1d. Deep 1m history therefore has to be **collected going forward** by an always-on job (the existing shared WebSocket or bounded polling), while coarser intervals can be backfilled to the venue horizon once. Lighter and RISEx have their own limits. Older history from other sources would need separate research.
