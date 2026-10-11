@@ -144,6 +144,14 @@
 .portfolio-open>small{display:block;font-size:8px;color:var(--muted-foreground);margin-top:8px;line-height:1.7}
 .portfolio-manage{position:absolute;right:16px;top:18px;z-index:1}
 .portfolio-open h2{padding-right:15px}
+.portfolio-icon-picker{border:0;margin:9px 0 0;padding:0;min-width:0}.portfolio-icon-picker>legend{font-size:11px;font-weight:500;margin-bottom:9px;padding:0}
+.portfolio-icon-choices{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px}
+.portfolio-icon-choice{display:grid;place-items:center;aspect-ratio:1;min-height:34px;color:var(--muted-foreground);border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--field);cursor:pointer}
+.portfolio-icon-choice:hover{color:var(--foreground);border-color:color-mix(in srgb,var(--ring) 45%,var(--border))}
+.portfolio-icon-choice:has(:checked){color:color-mix(in srgb,var(--ring) 70%,var(--foreground));border-color:var(--ring);background:var(--accent)}
+.portfolio-icon-choice:has(:focus-visible){outline:2px solid var(--ring);outline-offset:2px}
+.portfolio-icon-picker:disabled .portfolio-icon-choice{cursor:default;opacity:.6}
+@media(max-width:550px){.portfolio-icon-choices{grid-template-columns:repeat(6,minmax(0,1fr))}}
 .management-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:15px}
 .management-actions .danger-action{color:var(--negative)}
 .account-enabled-control{display:flex;align-items:center;gap:9px;margin-top:12px!important}

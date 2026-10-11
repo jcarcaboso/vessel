@@ -18,7 +18,7 @@ function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     portfolios: vi.fn().mockResolvedValue([]), accounts: vi.fn().mockResolvedValue([]),
     account: vi.fn().mockResolvedValue(accountFixture),
     createPortfolio: vi.fn().mockResolvedValue(portfolioFixture), createAccount: vi.fn().mockResolvedValue(accountFixture),
-    renamePortfolio: vi.fn().mockResolvedValue(portfolioFixture), deletePortfolio: vi.fn().mockResolvedValue(undefined),
+    updatePortfolio: vi.fn().mockResolvedValue(portfolioFixture), deletePortfolio: vi.fn().mockResolvedValue(undefined),
     updateAccount: vi.fn().mockResolvedValue(accountFixture), deleteAccount: vi.fn().mockResolvedValue(undefined),
     snapshot: vi.fn().mockResolvedValue(null), fills: vi.fn().mockResolvedValue([]),
     sync: vi.fn().mockResolvedValue(accountFixture), instruments: vi.fn().mockResolvedValue(instrumentCatalogFixture),
@@ -224,8 +224,10 @@ describe('Main application shell', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Create your first portfolio' }))
     const dialog = screen.getByRole('dialog')
     await userEvent.type(within(dialog).getByLabelText('Portfolio name'), 'Long-term perps')
+    expect(within(dialog).getByRole('radio', { name: 'Folder' })).toBeChecked()
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'Mountain' }))
     await userEvent.click(within(dialog).getByRole('button', { name: 'Create portfolio' }))
-    await waitFor(() => expect(client.createPortfolio).toHaveBeenCalledWith('Long-term perps'))
+    await waitFor(() => expect(client.createPortfolio).toHaveBeenCalledWith('Long-term perps', 'mountain'))
     await waitFor(() => expect(client.overview).toHaveBeenCalledTimes(2))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })

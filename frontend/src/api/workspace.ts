@@ -21,6 +21,8 @@ export interface Portfolio {
   /** Sum of account balances (perps plus stablecoin wallet, or the wallet alone in unified modes). */
   balanceUsd?: string | null
   balanceCoverage?: 'complete' | 'partial' | 'unavailable'
+  /** Icon key chosen by the owner; absent from servers that predate portfolio icons. */
+  icon?: string
 }
 export interface VenueInstrument {
   contractId: string
@@ -217,13 +219,13 @@ export interface WorkspaceApi {
    * aborts (resolves) or the connection fails (rejects with ApiError). Invalid events are ignored.
    */
   marketStream(id: string, query: MarketStreamQuery, signal: AbortSignal, onEvent: (event: MarketStreamEvent) => void): Promise<void>
-  createPortfolio(name: string): Promise<Portfolio>
+  createPortfolio(name: string, icon?: string): Promise<Portfolio>
   createAccount(account: CreateAccount): Promise<BrokerAccount>
   discoverAccounts(venueId: string, address: string, signal?: AbortSignal, token?: string): Promise<AccountDiscovery>
   accountCredential(id: string, signal?: AbortSignal): Promise<AccountCredential>
   saveAccountCredential(id: string, token: string): Promise<AccountCredential>
   deleteAccountCredential(id: string): Promise<void>
-  renamePortfolio(id: string, name: string): Promise<Portfolio>
+  updatePortfolio(id: string, settings: { name: string; icon?: string }): Promise<Portfolio>
   deletePortfolio(id: string): Promise<void>
   updateAccount(id: string, settings: { name: string; portfolioId: string | null; isEnabled: boolean; expectedRevision: number }): Promise<BrokerAccount>
   deleteAccount(id: string): Promise<void>
@@ -304,7 +306,8 @@ const portfolio = (v: unknown): v is Portfolio => object(v) && guid(v.id) && tex
   count(v.accountCount) && nullableDecimal(v.totalValueUsd) &&
   ['complete', 'partial', 'unavailable'].includes(String(v.valueCoverage)) &&
   (v.balanceUsd === undefined || nullableDecimal(v.balanceUsd)) &&
-  (v.balanceCoverage === undefined || ['complete', 'partial', 'unavailable'].includes(String(v.balanceCoverage)))
+  (v.balanceCoverage === undefined || ['complete', 'partial', 'unavailable'].includes(String(v.balanceCoverage))) &&
+  (v.icon === undefined || (text(v.icon) && v.icon.length <= 40))
 const account = (v: unknown): v is BrokerAccount => object(v) && guid(v.id) &&
   (v.portfolioId === null || guid(v.portfolioId)) && text(v.name) && text(v.venueId) &&
   nullableText(v.address) && nullableDecimal(v.accountValueUsd) &&
@@ -573,7 +576,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
         signal ? { signal } : {}, 25_000, 'Venue market statistics are unavailable.')
     },
     marketStream,
-    createPortfolio: name => request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name }) }),
+    createPortfolio: (name, icon) => request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name, icon }) }),
     createAccount: body => request('/api/accounts', account, { method: 'POST', body: JSON.stringify(body) }),
     discoverAccounts: (venueId, address, signal, token) => {
       if (!/^[a-z][a-z\d-]{0,63}$/.test(venueId) || !/^0x[\da-f]{40}$/i.test(address)) {
@@ -599,7 +602,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     },
     deleteAccountCredential: id => request(`${accountPath(id)}/credential`, none, { method: 'DELETE' }, 10_000,
       undefined, 'Could not remove the credential. Refresh its status before trying again.'),
-    renamePortfolio: (id, name) => request(`/api/portfolios/${resourceId(id)}`, portfolio, { method: 'PATCH', body: JSON.stringify({ name }) }),
+    updatePortfolio: (id, { name, icon }) => request(`/api/portfolios/${resourceId(id)}`, portfolio, { method: 'PATCH', body: JSON.stringify({ name, icon }) }),
     deletePortfolio: id => request(`/api/portfolios/${resourceId(id)}`, (v): v is undefined => v === undefined, { method: 'DELETE' }),
     updateAccount: (id, settings) => request(accountPath(id), account, { method: 'PUT', body: JSON.stringify(settings) }),
     deleteAccount: id => request(accountPath(id), (v): v is undefined => v === undefined, { method: 'DELETE' }),

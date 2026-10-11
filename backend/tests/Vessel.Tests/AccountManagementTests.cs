@@ -58,7 +58,7 @@ public sealed class AccountManagementTests
         Assert.Equal(1, (await service.PortfolioAsync(first.Id, default)).AccountCount);
         await service.UpdateAccountAsync(account.Id, new("Renamed", second.Id, false, 2), default);
         Assert.Equal(0, (await service.PortfolioAsync(first.Id, default)).AccountCount);
-        var renamed = await service.RenamePortfolioAsync(second.Id, new(" Second renamed "), default);
+        var renamed = await service.UpdatePortfolioAsync(second.Id, new(" Second renamed "), default);
         Assert.Equal("Second renamed", renamed.Name); Assert.Equal(1, renamed.AccountCount); Assert.Null(renamed.TotalValueUsd);
         await service.DeletePortfolioAsync(second.Id, default);
         var after = await service.AccountAsync(account.Id, default);

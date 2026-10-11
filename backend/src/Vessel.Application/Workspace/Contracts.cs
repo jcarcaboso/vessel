@@ -5,10 +5,11 @@ using Vessel.Application.Venues;
 
 namespace Vessel.Application.Workspace;
 
-public sealed record CreatePortfolioRequest(string Name);
+public sealed record CreatePortfolioRequest(string Name, string? Icon = null);
 public sealed record CreateAccountRequest(Guid? PortfolioId, string Name, string VenueId, string? Address = null, string? ManualAccountValueUsd = null,
     string? SourceId = null);
-public sealed record RenamePortfolioRequest(string Name);
+/// <summary>Renames a portfolio and, when <see cref="Icon"/> is present, changes its icon; an omitted icon is kept.</summary>
+public sealed record UpdatePortfolioRequest(string Name, string? Icon = null);
 public sealed record UpdateAccountRequest(
     [property: JsonRequired] string Name,
     [property: JsonRequired] Guid? PortfolioId,
@@ -19,7 +20,7 @@ public sealed record UpdateAccountRequest(
 /// or the wallet alone in unified and portfolio-margin modes, so no ledger is counted twice.
 /// </summary>
 public sealed record PortfolioDto(Guid Id, string Name, int AccountCount, string? TotalValueUsd, string ValueCoverage,
-    string? BalanceUsd = null, string BalanceCoverage = "unavailable");
+    string? BalanceUsd = null, string BalanceCoverage = "unavailable", string Icon = PortfolioIcons.Default);
 public sealed record AccountDto(Guid Id, Guid? PortfolioId, string Name, string VenueId, string? Address,
     string? AccountValueUsd, DateTimeOffset? LastSyncedAtUtc, string SyncStatus, string? LastSyncError,
     int PositionCount, string? HistoryNotice, bool IsEnabled, long SettingsRevision,

@@ -7,11 +7,14 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { WalletAccountImport } from './WalletAccountImport'
+import { PortfolioIconPicker } from './PortfolioIcon'
+import { defaultPortfolioIcon, type PortfolioIconKey } from './portfolio-icons'
 
 export function CreatePortfolioDialog({ open, onOpenChange, api, onCreated }: {
   open: boolean; onOpenChange: (open: boolean) => void; api: WorkspaceApi; onCreated: () => void
 }) {
   const [name, setName] = useState('')
+  const [icon, setIcon] = useState<PortfolioIconKey>(defaultPortfolioIcon)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   async function submit(event: FormEvent) {
@@ -19,7 +22,7 @@ export function CreatePortfolioDialog({ open, onOpenChange, api, onCreated }: {
     if (!name.trim()) { setError('Give the portfolio a name.'); return }
     setPending(true)
     try {
-      await api.createPortfolio(name.trim()); setName(''); onOpenChange(false); onCreated()
+      await api.createPortfolio(name.trim(), icon); setName(''); setIcon(defaultPortfolioIcon); onOpenChange(false); onCreated()
     } catch (cause) { setError(cause instanceof ApiError ? cause.message : 'Could not create this portfolio.') }
     finally { setPending(false) }
   }
@@ -28,6 +31,7 @@ export function CreatePortfolioDialog({ open, onOpenChange, api, onCreated }: {
       <DialogHeader><DialogTitle>New portfolio</DialogTitle><DialogDescription>Group accounts by the way you trade. Portfolio values use available account records, not estimated performance.</DialogDescription></DialogHeader>
       <form onSubmit={event => { void submit(event) }} className="workspace-form" aria-busy={pending}>
         <label htmlFor="portfolio-name">Portfolio name</label><Input id="portfolio-name" value={name} onChange={event => setName(event.target.value)} maxLength={200} placeholder="e.g. Swing trading" disabled={pending} autoFocus />
+        <PortfolioIconPicker name="new-portfolio-icon" value={icon} onChange={setIcon} disabled={pending} />
         {error && <p className="error" role="alert">{error}</p>}
         <Button type="submit" disabled={pending}>{pending ? 'Creating…' : 'Create portfolio'}</Button>
       </form>

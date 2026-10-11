@@ -27,6 +27,22 @@ describe('Core workspace API', () => {
     const fetch = response(portfolioFixture, 201)
     await createWorkspaceApi('token').createPortfolio('Swing trading')
     expect(fetch).toHaveBeenCalledWith('/api/portfolios', expect.objectContaining({ method: 'POST', body: '{"name":"Swing trading"}' }))
+    const withIcon = response({ ...portfolioFixture, icon: 'rocket' }, 201)
+    await expect(createWorkspaceApi('token').createPortfolio('Swing trading', 'rocket')).resolves.toMatchObject({ icon: 'rocket' })
+    expect(withIcon).toHaveBeenCalledWith('/api/portfolios', expect.objectContaining({ method: 'POST', body: '{"name":"Swing trading","icon":"rocket"}' }))
+  })
+  it('updates a portfolio name and icon in one request', async () => {
+    const fetch = response({ ...portfolioFixture, icon: 'gem' })
+    await expect(createWorkspaceApi('token').updatePortfolio(portfolioFixture.id, { name: 'Swing', icon: 'gem' })).resolves.toMatchObject({ icon: 'gem' })
+    expect(fetch).toHaveBeenCalledWith(`/api/portfolios/${portfolioFixture.id}`, expect.objectContaining({ method: 'PATCH', body: '{"name":"Swing","icon":"gem"}' }))
+  })
+  it('rejects a portfolio whose icon is not a short string', async () => {
+    response([{ ...portfolioFixture, icon: 'rocket' }])
+    await expect(createWorkspaceApi('token').portfolios()).resolves.toMatchObject([{ icon: 'rocket' }])
+    response([{ ...portfolioFixture, icon: 7 }])
+    await expect(createWorkspaceApi('token').portfolios()).rejects.toThrow('incompatible workspace data')
+    response([{ ...portfolioFixture, icon: 'x'.repeat(41) }])
+    await expect(createWorkspaceApi('token').portfolios()).rejects.toThrow('incompatible workspace data')
   })
   it('accepts an unavailable snapshot as null, not a zero balance', async () => {
     response(null)

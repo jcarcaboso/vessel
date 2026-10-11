@@ -8,7 +8,7 @@ import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
 
 function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return { ...createWorkspaceApi('test-only-token'),
-    renamePortfolio: vi.fn().mockResolvedValue(portfolioFixture), deletePortfolio: vi.fn().mockResolvedValue(undefined),
+    updatePortfolio: vi.fn().mockResolvedValue(portfolioFixture), deletePortfolio: vi.fn().mockResolvedValue(undefined),
     updateAccount: vi.fn().mockResolvedValue(accountFixture), deleteAccount: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
@@ -19,10 +19,39 @@ describe('Management dialogs', () => {
     render(<ManagePortfolioDialog portfolio={portfolioFixture} api={api} onClose={close} onChanged={changed} />)
     const input = screen.getByLabelText('Portfolio name')
     await userEvent.clear(input); await userEvent.type(input, 'Intraday')
-    await userEvent.click(screen.getByRole('button', { name: 'Save name' }))
-    await waitFor(() => expect(api.renamePortfolio).toHaveBeenCalledWith(portfolioFixture.id, 'Intraday'))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(api.updatePortfolio).toHaveBeenCalledWith(portfolioFixture.id, { name: 'Intraday' }))
     expect(api.deletePortfolio).not.toHaveBeenCalled()
     expect(close).toHaveBeenCalledOnce()
+  })
+  it('starts from the stored icon and saves a newly chosen one with the name', async () => {
+    const api = client(), changed = vi.fn()
+    render(<ManagePortfolioDialog portfolio={{ ...portfolioFixture, icon: 'gem' }} api={api} onClose={vi.fn()} onChanged={changed} />)
+    const icons = screen.getByRole('group', { name: 'Icon' })
+    expect(within(icons).getByRole('radio', { name: 'Gem' })).toBeChecked()
+    await userEvent.click(within(icons).getByRole('radio', { name: 'Rocket' }))
+    expect(within(icons).getByRole('radio', { name: 'Rocket' })).toBeChecked()
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(api.updatePortfolio).toHaveBeenCalledWith(portfolioFixture.id, { name: 'Swing trading', icon: 'rocket' }))
+    expect(changed).toHaveBeenCalledWith('Portfolio updated.')
+  })
+  it('keeps an icon this browser does not know when only the name changes', async () => {
+    const api = client()
+    render(<ManagePortfolioDialog portfolio={{ ...portfolioFixture, icon: 'future-icon' }} api={api} onClose={vi.fn()} onChanged={vi.fn()} />)
+    const icons = screen.getByRole('group', { name: 'Icon' })
+    for (const radio of within(icons).getAllByRole('radio')) expect(radio).not.toBeChecked()
+    const input = screen.getByLabelText('Portfolio name')
+    await userEvent.clear(input); await userEvent.type(input, 'Intraday')
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(api.updatePortfolio).toHaveBeenCalledOnce())
+    expect(vi.mocked(api.updatePortfolio).mock.calls[0]?.[1]).not.toHaveProperty('icon')
+  })
+  it('lets the owner explicitly choose the folder over an unknown icon', async () => {
+    const api = client()
+    render(<ManagePortfolioDialog portfolio={{ ...portfolioFixture, icon: 'future-icon' }} api={api} onClose={vi.fn()} onChanged={vi.fn()} />)
+    await userEvent.click(within(screen.getByRole('group', { name: 'Icon' })).getByRole('radio', { name: 'Folder' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(api.updatePortfolio).toHaveBeenCalledWith(portfolioFixture.id, { name: 'Swing trading', icon: 'folder' }))
   })
   it('requires a second explicit portfolio-delete confirmation and explains retained accounts', async () => {
     const api = client()

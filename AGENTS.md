@@ -34,6 +34,8 @@ October 9, 2026: the owner approved the portfolio-review proposal and requested 
 
 October 9, 2026: the owner asked for a Settings page with a theme customizer and built-in dark and light themes. Follow `docs/architecture/appearance-settings.md`: themes change colours and radius only, never layout; the theme builder rolls random readable palettes that the owner can save by name in the browser; component CSS must read theme tokens rather than hard-coded colours; built-in themes must keep passing the contrast test.
 
+October 10, 2026: the owner asked for custom portfolio icons, verified by two Sol (Codex) reviews before merging. Portfolios carry an icon key from a fixed, server-validated set (default `folder`); see the Portfolio icons section of `docs/architecture/account-management-contract.md`. Keep the backend `PortfolioIcons` list and the frontend `portfolio-icons.ts` in step; never accept uploaded images or markup as icons.
+
 ## Project tracking
 
 - Repository: https://github.com/jcarcaboso/vessel

@@ -10,6 +10,7 @@ import { AccountDetail } from './AccountDetail'
 import { ActivityTable } from './ActivityTable'
 import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
+import { PortfolioIcon } from './PortfolioIcon'
 import { OverviewPlays } from './OverviewPlays'
 import { ReviewPage } from '@/features/review/ReviewPage'
 import { AppearanceSettings, CurrentThemeName } from '@/features/settings/AppearanceSettings'
@@ -227,8 +228,8 @@ function Shell({ system, disconnect, api }: ShellProps) {
         {page === 'portfolios' && data && <section className="workspace-page-content">
           {!portfolios.length ? <div className="shell-panel workspace-empty"><Folder size={30} /><strong>No portfolios yet</strong><p>Group accounts by purpose, such as swing or intraday trading.</p><Button onClick={() => setPortfolioDialog(true)}>Create a portfolio</Button></div> :
             <div className="portfolio-grid">{portfolios.map(p => <article className="shell-panel portfolio-tile" key={p.id}>
-              <button className="portfolio-open" aria-label={`Open ${p.name}`} onClick={() => { setPortfolioFilter(p.id); navigate('accounts') }}><span className="portfolio-icon"><Folder size={21} /></span><h2>{p.name}</h2><p>{p.accountCount} {p.accountCount === 1 ? 'account record' : 'account records'}</p><strong>{money(p.totalValueUsd)}</strong><small>{p.valueCoverage === 'complete' ? 'All enabled account values recorded' : p.valueCoverage === 'partial' ? 'Partial value · some enabled accounts unavailable' : 'Enabled account values unavailable'}</small></button>
-              <button className="icon-button portfolio-manage" aria-label={`Manage portfolio ${p.name}`} title="Rename or delete portfolio" onClick={() => setManagedPortfolio(p)}><Pencil size={14} /></button>
+              <button className="portfolio-open" aria-label={`Open ${p.name}`} onClick={() => { setPortfolioFilter(p.id); navigate('accounts') }}><span className="portfolio-icon"><PortfolioIcon icon={p.icon} /></span><h2>{p.name}</h2><p>{p.accountCount} {p.accountCount === 1 ? 'account record' : 'account records'}</p><strong>{money(p.totalValueUsd)}</strong><small>{p.valueCoverage === 'complete' ? 'All enabled account values recorded' : p.valueCoverage === 'partial' ? 'Partial value · some enabled accounts unavailable' : 'Enabled account values unavailable'}</small></button>
+              <button className="icon-button portfolio-manage" aria-label={`Manage portfolio ${p.name}`} title="Rename, change icon or delete portfolio" onClick={() => setManagedPortfolio(p)}><Pencil size={14} /></button>
             </article>)}</div>}
         </section>}
 

@@ -82,7 +82,13 @@ public sealed class AccountManagementPostgresTests
             var account = await db.Accounts.SingleAsync(a => a.Id == first);
             db.Plays.AddRange(TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC")), TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC")));
             await db.SaveChangesAsync(); await service.UpdateAccountAsync(second, new("Disabled", portfolioId, false, 1), default);
-            await service.RenamePortfolioAsync(portfolioId, new("Renamed"), default); await service.DeletePortfolioAsync(portfolioId, default);
+            Assert.Equal("anchor", (await service.UpdatePortfolioAsync(portfolioId, new("Renamed", "anchor"), default)).Icon);
+            Assert.Equal("anchor", (await service.UpdatePortfolioAsync(portfolioId, new("Renamed again"), default)).Icon);
+        }
+        await using (var db = database.Context(owner))
+        {
+            Assert.Equal("anchor", (await db.Portfolios.SingleAsync()).Icon);
+            await Service(db, owner).DeletePortfolioAsync(portfolioId, default);
         }
         await using (var db = database.Context(owner))
         {
@@ -112,7 +118,7 @@ public sealed class AccountManagementPostgresTests
             await service.UpdateAccountAsync(id, new("Unlinked", null, false, moved.SettingsRevision), default);
             Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateAccountAsync(other, new("Foreign", foreignPortfolio, false, 1), default))).StatusCode);
             Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateAccountAsync(foreignId, new("Foreign", null, false, 1), default))).StatusCode);
-            Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.RenamePortfolioAsync(foreignPortfolio, new("Foreign"), default))).StatusCode);
+            Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdatePortfolioAsync(foreignPortfolio, new("Foreign"), default))).StatusCode);
             Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.DeletePortfolioAsync(foreignPortfolio, default))).StatusCode);
             Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.DeleteAccountAsync(foreignId, default))).StatusCode);
             await service.DeleteAccountAsync(id, default);

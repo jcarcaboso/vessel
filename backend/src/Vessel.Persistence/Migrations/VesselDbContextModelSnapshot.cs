@@ -776,6 +776,13 @@ namespace Vessel.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Icon")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasDefaultValue("folder");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
