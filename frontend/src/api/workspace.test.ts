@@ -9,6 +9,27 @@ function response(body: unknown, status = 200) {
   return fetch
 }
 describe('Core workspace API', () => {
+  it('keeps exact combined balance strings and coverage and never caches overview responses', async () => {
+    const fixture = { ...emptyOverview, totals: { ...emptyOverview.totals,
+      totalBalanceUsd: '79228162514264337593543950335.0000000000000000000000000001',
+      availableBalanceUsd: '-2.0000000000000000000000000001', balanceAccountCount: 2,
+      availableBalanceAccountCount: 1, enabledAccountCount: 3, balanceCoverage: 'partial', availableBalanceCoverage: 'partial' } }
+    const fetch = response(fixture)
+    const api = createWorkspaceApi('token')
+    expect(await api.overview()).toEqual(fixture)
+    fetch.mockResolvedValue(new Response(JSON.stringify(emptyOverview)))
+    expect(await api.overview()).toEqual(emptyOverview)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(fetch).toHaveBeenLastCalledWith('/api/overview', expect.objectContaining({ cache: 'no-store' }))
+  })
+  it.each([
+    { totalBalanceUsd: 10 }, { availableBalanceUsd: 5 }, { balanceAccountCount: -1 },
+    { availableBalanceAccountCount: 0.5 }, { enabledAccountCount: -1 }, { balanceCoverage: 'full' },
+    { availableBalanceCoverage: 'unknown' },
+  ])('rejects malformed overview balance fields %#', async bad => {
+    response({ ...emptyOverview, totals: { ...emptyOverview.totals, ...bad } })
+    await expect(createWorkspaceApi('token').overview()).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
   it('keeps bearer in a header, not storage, URL, cookies or owner body fields', async () => {
     const fetch = response(emptyOverview)
     await expect(createWorkspaceApi(' session-token ').overview()).resolves.toEqual(emptyOverview)

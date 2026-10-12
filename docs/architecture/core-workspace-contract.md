@@ -99,13 +99,32 @@ accounts: AccountDto[],
 totals: {
   portfolioCount, accountCount,
   totalAccountValueUsd: string|null,
-  valuedAccountCount, openPositionCount, importedFillCount
+  valuedAccountCount, openPositionCount, importedFillCount,
+  totalBalanceUsd: string|null,
+  balanceAccountCount, balanceCoverage: "complete"|"partial"|"unavailable",
+  availableBalanceUsd: string|null,
+  availableBalanceAccountCount, availableBalanceCoverage: "complete"|"partial"|"unavailable",
+  enabledAccountCount,
+  availableStablecoinNominalUsd: string|null, stablecoinAccountCount
 },
 recentActivity: FillDto[],
 scopeNote: string
 ```
 
 Only known account values contribute to the aggregate. If no values are known, total is null, not zero. Counts and value coverage make partial knowledge visible. Hyperliquid values refer to the primary perpetual DEX margin snapshot, not a guarantee of the entire broker account value.
+
+### October 12, 2026: combined balances and Overview actions
+
+Overview shows Total balance and Available balance, with known-account counts out of enabled accounts and coverage. Both span all portfolios and unassigned accounts exactly once, never disabled accounts. The earlier `totalAccountValueUsd` remains the perps/manual subtotal; it is not the headline balance.
+
+- Total balance sums each account's `Balance`: manual recorded value; supported-stablecoin wallet total alone for unified/portfolio-margin accounts; otherwise known perps equity plus any observed supported-stablecoin wallet total. A non-unified account with only one known ledger contributes that known amount. A unified account without an observed wallet contributes nothing, even if it has a perps field.
+- Available balance uses supported wallet total minus held for venues with `stablecoinWallet`, otherwise the snapshot's reported `withdrawableUsd`. Never add perps withdrawal to wallet availability or derive availability from equity, collateral or manual value. Lighter currently stores `total_asset_value` as equity and no withdrawable amount; its discovery collateral/available fields are not retained snapshot funds. RISEx also leaves withdrawal unknown.
+- Coverage counts accounts with a known eligible amount, not completeness of venue valuation. No known accounts means null and `unavailable`; some means `partial`; all enabled means `complete`. An observed empty wallet is known zero. Exact ledger amounts reach `StablecoinTotals.Sum` without intermediate decimal addition, including within a single account.
+- The legacy wallet-only subtotal also excludes disabled accounts. Position and imported-execution behaviour is unchanged.
+
+Owner financial responses are not cached. The request client uses `cache: no-store`, API responses use `Cache-Control: no-store`, and `/api/overview` is outside the market-data compression allowlist. Refresh and management changes advance the shell request generation and reread Overview, including its portfolios and accounts.
+
+Overview has a primary New play button and a separate keyboard-accessible Add menu for New portfolio and Add account. These reuse the existing editor and dialogs. New play opens a blank editor only when the current session is clean; unsaved draft or saved-Play changes reopen that editor with a notification instead of being discarded.
 
 The `Usd`-suffixed fields preserve the initial shared contract's nominal dollar display convention. Hyperliquid collateral balances are USDC-denominated; oracle/contract quote units can differ. This slice performs no FX conversion and must not present the sum as a currency-aware fair-value calculation. Scope notes and the Overview metric name make that limit visible. A full currency/numeric contract remains later work.
 

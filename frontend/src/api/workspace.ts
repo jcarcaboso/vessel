@@ -195,6 +195,13 @@ export interface Overview {
     importedFillCount: number
     availableStablecoinNominalUsd?: string | null
     stablecoinAccountCount?: number
+    totalBalanceUsd?: string | null
+    balanceAccountCount?: number
+    balanceCoverage?: 'complete' | 'partial' | 'unavailable'
+    availableBalanceUsd?: string | null
+    availableBalanceAccountCount?: number
+    availableBalanceCoverage?: 'complete' | 'partial' | 'unavailable'
+    enabledAccountCount?: number
   }
   recentActivity: ImportedFill[]
   scopeNote: string
@@ -362,6 +369,12 @@ const overview = (v: unknown): v is Overview => object(v) && Array.isArray(v.por
   nullableDecimal(v.totals.totalAccountValueUsd) &&
   (v.totals.availableStablecoinNominalUsd === undefined || nullableDecimal(v.totals.availableStablecoinNominalUsd)) &&
   (v.totals.stablecoinAccountCount === undefined || count(v.totals.stablecoinAccountCount)) &&
+  (v.totals.totalBalanceUsd === undefined || nullableDecimal(v.totals.totalBalanceUsd)) &&
+  (v.totals.availableBalanceUsd === undefined || nullableDecimal(v.totals.availableBalanceUsd)) &&
+  ['balanceAccountCount', 'availableBalanceAccountCount', 'enabledAccountCount'].every(k => object(v.totals) &&
+    (v.totals[k] === undefined || count(v.totals[k]))) &&
+  ['balanceCoverage', 'availableBalanceCoverage'].every(k => object(v.totals) &&
+    (v.totals[k] === undefined || ['complete', 'partial', 'unavailable'].includes(String(v.totals[k])))) &&
   Array.isArray(v.recentActivity) && v.recentActivity.every(fill) && text(v.scopeNote)
 
 export function createWorkspaceApi(token: string): WorkspaceApi {

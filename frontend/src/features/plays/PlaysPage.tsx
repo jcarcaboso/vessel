@@ -6,7 +6,7 @@ import { useNotifications } from '@/components/notifications/notifications'
 import { preloadLightweightRenderer } from '@/components/chart/lazy'
 import { useVenues } from '@/api/venues'
 import { ArrowLeft, History, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
-import { createDraft, type PlayDraft } from './draft'
+import type { PlayDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
 import { instrumentLabel } from './instruments'
 import { ExecutionPanel } from './ExecutionPanel'
@@ -17,7 +17,7 @@ import { formatMoney, marginOverBudget } from './sizing'
 import { leverageOf } from './levels'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
 import {
-  createPlaysSession, draftFromSaved, failure, fieldsFromDraft, hasDraftContent, isDirty, loadSavedPlay, planChanged, savedState, syncEvidence,
+  createPlaysSession, draftFromSaved, failure, fieldsFromDraft, hasDraftContent, isDirty, loadSavedPlay, planChanged, savedState, startNewPlay, syncEvidence,
   type PlaysSession, type SavedState,
 } from './saved'
 
@@ -180,7 +180,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     return <PlayList api={api} accounts={accounts} busy={busy === 'open'}
       unsaved={dirty ? draft.title.trim() || 'Untitled play' : null}
       onOpen={id => { void open(id) }}
-      onNew={() => { setError(null); update({ view: 'editor', draft: createDraft(), saved: null }) }}
+      onNew={() => { setError(null); update(startNewPlay(session)) }}
       onContinue={() => update({ view: 'editor' })}
       onDiscard={() => update(createPlaysSession())} />
   }

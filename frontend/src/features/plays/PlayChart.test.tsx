@@ -949,7 +949,7 @@ describe('Chart captures', () => {
 
     await userEvent.click(button)
     expect(onCapture).toHaveBeenCalledWith(expect.any(Blob), 'BTC · Hyperliquid · 1 hour')
-    expect(state.captions[0]).toMatch(/^BTC · Hyperliquid · 1 hour · \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · EMA 9\/21\/50\/200 · Volume · RSI 14 · Planned levels are not fills$/)
+    expect(state.captions[0]).toMatch(/^BTC · Hyperliquid · 1 hour · \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · EMA 9\/50\/100\/200 · Volume · RSI 14 · Planned levels are not fills$/)
     expect(await screen.findByText(/Capture added to the Evidence tab/)).toHaveAttribute('role', 'status')
 
     await userEvent.click(button)
@@ -1050,13 +1050,13 @@ describe('Chart indicators', () => {
 
   it('shows the default averages, volume and RSI, and hides an average from the chart legend', async () => {
     const state = await renderChart()
-    expect(state.indicators!.lines.map(line => [line.label, line.color])).toEqual([['EMA 9', '#b388ff'], ['EMA 21', '#4cbb6c'], ['EMA 50', '#f2c94c'], ['EMA 200', '#ef5350']])
+    expect(state.indicators!.lines.map(line => [line.label, line.color])).toEqual([['EMA 9', '#b388ff'], ['EMA 50', '#ef5350'], ['EMA 100', '#f2c94c'], ['EMA 200', '#4cbb6c']])
     expect(state.indicators!.volume!.values).toEqual([12.5, 9])
     expect(state.indicators!.rsi!.label).toBe('RSI 14')
 
-    await userEvent.click(within(screen.getByRole('group', { name: 'Indicators' })).getByRole('button', { name: 'Hide EMA 21' }))
-    expect(state.indicators!.lines.map(line => line.label)).toEqual(['EMA 9', 'EMA 50', 'EMA 200'])
-    expect(screen.getByRole('button', { name: 'Show EMA 21' })).toHaveAttribute('aria-pressed', 'false')
+    await userEvent.click(within(screen.getByRole('group', { name: 'Indicators' })).getByRole('button', { name: 'Hide EMA 50' }))
+    expect(state.indicators!.lines.map(line => line.label)).toEqual(['EMA 9', 'EMA 100', 'EMA 200'])
+    expect(screen.getByRole('button', { name: 'Show EMA 50' })).toHaveAttribute('aria-pressed', 'false')
     expect(JSON.parse(localStorage.getItem('vessel.chart.preferences.v1')!).indicators.emas[1].enabled).toBe(false)
   })
 
@@ -1125,7 +1125,7 @@ describe('Chart indicators', () => {
     expect(state.indicators!.volume!.size).toBe('normal')
 
     await userEvent.click(screen.getByRole('button', { name: 'Capture chart' }))
-    expect(state.captions[0]).toContain('EMA 9/21/50/200 · Volume minimized, not plotted · RSI 14 · Planned levels are not fills')
+    expect(state.captions[0]).toContain('EMA 9/50/100/200 · Volume minimized, not plotted · RSI 14 · Planned levels are not fills')
     // A larger chart can make room.
     await userEvent.click(within(volumeBar).getByRole('button', { name: 'Expand chart' }))
     expect(await screen.findByRole('dialog')).toBeInTheDocument()

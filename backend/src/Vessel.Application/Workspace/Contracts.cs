@@ -49,7 +49,10 @@ public sealed record FillDto(Guid Id, Guid AccountId, string ContractId, string 
     Guid? PlayId = null);
 public sealed record OverviewTotals(int PortfolioCount, int AccountCount, string? TotalAccountValueUsd,
     int ValuedAccountCount, int OpenPositionCount, int ImportedFillCount,
-    string? AvailableStablecoinNominalUsd = null, int StablecoinAccountCount = 0);
+    string? AvailableStablecoinNominalUsd = null, int StablecoinAccountCount = 0,
+    string? TotalBalanceUsd = null, int BalanceAccountCount = 0, string BalanceCoverage = "unavailable",
+    string? AvailableBalanceUsd = null, int AvailableBalanceAccountCount = 0, string AvailableBalanceCoverage = "unavailable",
+    int EnabledAccountCount = 0);
 public sealed record OverviewDto(IReadOnlyList<PortfolioDto> Portfolios, IReadOnlyList<AccountDto> Accounts,
     OverviewTotals Totals, IReadOnlyList<FillDto> RecentActivity, string ScopeNote);
 

@@ -4,7 +4,7 @@ October 1, 2026. The owner requested rename/delete for portfolios and accounts, 
 
 ## Behavior
 
-- Accounts may be created with no portfolio. `portfolioId: null` is the virtual unassigned/default grouping, not a stored Portfolio record. These accounts appear in All accounts only and create no portfolio tile.
+- Accounts may be created with no portfolio. `portfolioId: null` is the virtual unassigned/default grouping, not a stored Portfolio record. These accounts appear in All accounts or its Unassigned filter and create no portfolio tile.
 - Portfolios can be renamed. Deleting one transactionally unlinks both enabled and disabled accounts while retaining their data and ownership.
 - Account settings change name, optional portfolio and enabled state together. Venue and public address stay unchanged, so imports cannot be relabeled as a different source.
 - Disabled accounts remain manageable and can be re-enabled. Their retained imported fills and venue positions are hidden from overview/activity/details; refresh is blocked. Totals exclude disabled records and coverage captions refer to enabled values.
@@ -34,6 +34,16 @@ PUT requires all three fields, with explicit null to unlink. Delete returns 204,
 The Graphite UI uses pencil actions on portfolio tiles and account rows/details. Dialogs explain retention versus permanent deletion, handle safe conflict errors, and preserve source identity. Existing account metadata may temporarily omit `isEnabled` during dev rollout; it is treated as enabled, while the new API always returns it.
 
 ## Verification
+
+### October 12, 2026 workspace corrections
+
+Portfolio tiles previously used perps-only `totalValueUsd`, so moving a unified wallet account could leave the displayed amount at zero despite its portfolio balance changing. Tiles now show `balanceUsd` with coverage and the perps/manual subtotal separately. Manager selections hold IDs and reread current response objects, including revision and portfolio membership. Common reloads update tiles, counts, account filters and Plays capital context; explicit null balances are not replaced by perps equity.
+
+Accounts now has combined name/source, venue, enabled/disabled/sync-state and portfolio filters, including Unassigned, with result counts and reset. Accounts and Overview offer sequential capability-driven Refresh all with row spinners, progress, one summary listing failures, and one final shell reload. Settings/sync backend locks and deletion rules are unchanged.
+
+Regression coverage includes the old unified-wallet tile failure, move/disable/enable and revision changes through management dialogs, current Plays capital context, removal of a selected portfolio, filtered bulk refresh with failures and sequential requests, and enabled/unknown/empty/precise backend totals.
+
+### Original verification
 
 - `pnpm check` passed 364 tests: 214 backend, 74 frontend and 76 unchanged prototype cases.
 - New backend management coverage is 42 cases, including 11 actual PostgreSQL tests. Existing 12 PostgreSQL cases also ran. Checks cover disable/restore, required fields, source retention, owner isolation, deletion cleanup, linked-Play conflict and lock waits in both sync/management orders.

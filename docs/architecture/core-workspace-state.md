@@ -16,6 +16,18 @@ The default frontend opens a Graphite application shell with Overview, Portfolio
 
 The shell lives in `frontend/src/features/workspace/`. Plays now mounts the draft workspace from `frontend/src/features/plays/`. Overview remains the default page.
 
+### October 12, 2026 workspace corrections
+
+Overview now reads exact total/available balances and enabled-account coverage from `/api/overview`, across portfolios and unassigned accounts. Previously its value total was perps/manual-only and the presence of any wallet-capable venue switched the headline to wallet-only, hiding other venues. The new totals follow the [source definitions in the contract](core-workspace-contract.md#october-12-2026-combined-balances-and-overview-actions). Disabled accounts are excluded from every monetary subtotal.
+
+The API and client already enforce no-store for owner financial data; compression is restricted to market data. Regression checks verify a second Overview HTTP read sees settings changes and refreshed shell reads update metrics. No response-cache change was needed.
+
+Overview offers New play and an Add menu using the existing dialogs. New play uses the shared session guard, preserving unsaved draft or saved-Play edits. Accounts and Overview share sequential Refresh all. Account filters and manager selections follow the current common response, which also updates Plays capital context. The activity panels and execution contract are unchanged by this work.
+
+Verification for this correction: `dotnet build backend/Vessel.slnx` passed without warnings; `dotnet test backend/Vessel.slnx` passed 939 cases against a disposable PostgreSQL 18 container, with only the two opt-in live venue cases skipped. Frozen-lockfile installation, frontend typecheck/lint, all 779 frontend cases and production build passed. Vite retained its non-failing large-chunk warning. The unified-wallet portfolio test and five initial balance cases failed before the fixes.
+
+The T3 browser checked the production frontend against synthetic HTTP responses only. Graphite desktop and Paper mobile controls rendered correctly; widths 390 and 320 had no document overflow, and the Add menu supported keyboard focus with readable themed highlights. Existing theme contrast tests passed. No owner database, `.env`, real account refresh or production deployment was involved.
+
 ## Backend
 
 Two Sol workers handled separate core and Hyperliquid scopes. The orchestrator handled contracts, frontend integration, mounted migrations and verification.
