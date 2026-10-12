@@ -87,7 +87,10 @@ public sealed partial class LighterReader
     private static string? DiscoveryAmount(JsonElement row, string field)
     {
         if (!row.TryGetProperty(field, out var value) || value.ValueKind == JsonValueKind.Null) return null;
-        var text = Json.Text(value);
+        // Mainnet discovery sends "" for available_balance even when the account snapshot reports one (checked 2026-10-11).
+        // Empty means not reported, never zero.
+        var text = Json.TextOrEmpty(value);
+        if (text.Length == 0) return null;
         _ = Json.ParseDecimal(text);
         return text;
     }
