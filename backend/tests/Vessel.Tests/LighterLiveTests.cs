@@ -39,6 +39,9 @@ public sealed class LighterLiveTests
         var result = await reader.ReadAsync("1", default);
         Assert.Equal("lighter-perps-account", result.Snapshot.ValueScope);
         Assert.All(result.Fills, f => Assert.True(VenueFactChecks.Valid(f)));
+        // Wallet of account 3. Discovery must parse the live shape, including "" balances.
+        var accounts = await reader.DiscoverAsync("0x3fbba2b0e07895ae8638d17fd83d72338954d272", default);
+        Assert.Equal("main", accounts[0].AccountType);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var candles = await reader.ReadCandlesAsync("BTC", "1h", now - 2 * 3600000L, now, default);
         Assert.InRange(candles.Count, 1, 3);
