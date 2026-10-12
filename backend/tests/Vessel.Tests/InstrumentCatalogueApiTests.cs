@@ -167,17 +167,18 @@ public sealed class InstrumentCatalogueApiTests
     }
 
     [Fact]
-    public async Task Aborted_catalogue_request_cancels_venue_read_without_recording_sync_failure_or_writing()
+    public async Task Aborted_catalogue_waiter_does_not_cancel_shared_read_or_record_sync_failure_or_write()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "HL"); store.Accounts.Add(account);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken shared = default;
         using var handler = new CatalogueHandler("{\"universe\":[]}", wait: async ct =>
         {
             entered.TrySetResult();
-            try { await Task.Delay(Timeout.InfiniteTimeSpan, ct); }
-            catch (OperationCanceledException) { cancelled.TrySetResult(); throw; }
+            shared = ct;
+            await release.Task.WaitAsync(ct);
         });
         using var venueClient = new HttpClient(handler) { BaseAddress = new Uri("https://api.hyperliquid.xyz/") };
         var reader = new HyperliquidPerpetualReader(venueClient, TimeProvider.System);
@@ -186,9 +187,12 @@ public sealed class InstrumentCatalogueApiTests
         using var caller = new CancellationTokenSource();
         var request = client.GetAsync($"/api/accounts/{account.Id}/instruments", caller.Token);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var other = client.GetAsync($"/api/accounts/{account.Id}/instruments");
         caller.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
-        await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(shared.IsCancellationRequested);
+        release.SetResult();
+        Assert.Equal(HttpStatusCode.OK, (await other).StatusCode);
         Assert.Single(handler.Requests);
         Assert.Equal("not-synced", account.SyncStatus);
         Assert.Null(account.LastSyncError);

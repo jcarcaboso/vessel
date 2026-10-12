@@ -43,6 +43,12 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
         {
             if (store is not null) services.AddSingleton(store);
             if (reader is not null) services.AddSingleton<IPerpetualVenueReader>(reader);
+            else if (candles is not null)
+            {
+                var catalogue = new FixtureReader();
+                catalogue.Result = catalogue.Result with { Instruments = [new("BTC", 5, 50, "USDC"), new("ETH", 4, 20, "USDC")] };
+                services.AddSingleton<IPerpetualVenueReader>(catalogue);
+            }
             if (candles is not null) services.AddSingleton<Vessel.Application.MarketData.ICandleReader>(candles);
             if (market is not null) services.AddSingleton<Vessel.Application.MarketData.IMarketContextReader>(market);
             if (stream is not null) services.AddSingleton(stream);

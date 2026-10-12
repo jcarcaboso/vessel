@@ -114,7 +114,7 @@ public sealed class MarketContextApiTests
             Result = [new("BTC", "1", "1", null, "1", "1", "1", "0", null)]
         };
         var time = new FixedTime(DateTimeOffset.FromUnixTimeMilliseconds(1_790_000_000_000L));
-        var service = new MarketContextService(store, TestVenues.With(reader), new MarketContextCache(time), time);
+        var service = new MarketContextService(store, TestVenues.With(reader), new MarketContextCache(time));
         await service.ContextAsync(account.Id, "BTC", default);
         time.Now = time.Now.AddSeconds(9);
         await service.ContextAsync(account.Id, "BTC", default);

@@ -1,5 +1,6 @@
 import { SseOverflowError, SseParser } from './sse'
 import { ApiError } from './system'
+import { clearCandleCache, evictAccountCandles } from '@/features/market/candleCache'
 import {
   accountIndex, credentialSaveMessage, credentialTransportAllowed, credentialTransportMessage,
   type AccountCredential, type AccountDiscovery,
@@ -76,6 +77,7 @@ export interface CandleQuery {
   instrument: string
   interval: CandleInterval
   endTime?: number
+  refresh?: boolean
 }
 /** Venue header statistics for one perpetual. Decimal strings are kept exactly as reported. */
 export interface MarketContext {
@@ -410,6 +412,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     } finally {
       clearTimeout(timer)
     }
+    if (response.status === 401 || response.status === 403) clearCandleCache(api)
     if (!response.ok) {
       throw await httpError(response, 'Venue market data is unavailable. Try refreshing the chart.',
         'Too many live chart streams. Close another chart and try again.')
@@ -468,6 +471,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       throw new ApiError('unavailable', safeError ?? 'The request did not complete. Check the API and try again.')
     }
     // Credential failures must never echo provider or proxy response bodies.
+    if (response.status === 401 || response.status === 403) clearCandleCache(api)
     if (!response.ok) throw safeError ? new ApiError('http', safeError, response.status) : await httpError(response, badGateway)
     if (response.status === 204) {
       const noContent: unknown = undefined
@@ -492,6 +496,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     } catch {
       throw new ApiError('unavailable', 'The request did not complete. Check the API and try again.')
     }
+    if (response.status === 401 || response.status === 403) clearCandleCache(api)
     if (!response.ok) throw await httpError(response, undefined, undefined, 'This play or image is no longer available.')
     return response
   }
@@ -517,7 +522,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
   }
   const none = (v: unknown): v is undefined => v === undefined
   const withSignal = (signal?: AbortSignal) => signal ? { signal } : {}
-  return {
+  const api: WorkspaceApi = {
     plays: signal => json('/api/plays', (v): v is PlaySummary[] => Array.isArray(v) && v.every(isPlaySummary), withSignal(signal)),
     play: (id, signal) => json(playPath(id), isSavedPlay, withSignal(signal)),
     createPlay: fields => json('/api/plays', isSavedPlay, { method: 'POST', body: JSON.stringify(fields) }),
@@ -567,6 +572,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       }
       const params = new URLSearchParams({ instrument: query.instrument, interval: query.interval })
       if (query.endTime !== undefined) params.set('endTime', String(query.endTime))
+      if (query.refresh === true) params.set('refresh', 'true')
       return request(`${accountPath(id)}/candles?${params}`, candleSeries(query), signal ? { signal } : {},
         25_000, 'Venue candles are unavailable. Try refreshing the chart.')
     },
@@ -606,10 +612,18 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       undefined, 'Could not remove the credential. Refresh its status before trying again.'),
     updatePortfolio: (id, { name, icon }) => request(`/api/portfolios/${resourceId(id)}`, portfolio, { method: 'PATCH', body: JSON.stringify({ name, icon }) }),
     deletePortfolio: id => request(`/api/portfolios/${resourceId(id)}`, (v): v is undefined => v === undefined, { method: 'DELETE' }),
-    updateAccount: (id, settings) => request(accountPath(id), account, { method: 'PUT', body: JSON.stringify(settings) }),
-    deleteAccount: id => request(accountPath(id), (v): v is undefined => v === undefined, { method: 'DELETE' }),
+    updateAccount: async (id, settings) => {
+      const updated = await request(accountPath(id), account, { method: 'PUT', body: JSON.stringify(settings) })
+      if (updated.isEnabled === false) evictAccountCandles(api, id)
+      return updated
+    },
+    deleteAccount: async id => {
+      await request(accountPath(id), (v): v is undefined => v === undefined, { method: 'DELETE' })
+      evictAccountCandles(api, id)
+    },
     snapshot: (id, signal) => request(`${accountPath(id)}/snapshot`, snapshot, signal ? { signal } : {}),
     fills: (id, signal) => request(`${accountPath(id)}/fills`, (v): v is ImportedFill[] => Array.isArray(v) && v.every(fill), signal ? { signal } : {}),
     sync: id => request(`${accountPath(id)}/sync`, account, { method: 'POST' }, 30_000, 'The venue refresh failed. Previous account data is still available.'),
   }
+  return api
 }

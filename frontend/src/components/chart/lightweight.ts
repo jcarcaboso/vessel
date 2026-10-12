@@ -6,6 +6,8 @@ import {
 } from 'lightweight-charts'
 import { DrawingController, type DrawingSpace, type DrawingTheme } from './drawingController'
 import { TimeIndex, snapPrice } from './drawings'
+import { FrameEdit, roundedLevelPrice } from './frameEdit'
+import { createSeriesWriter } from './seriesWriter'
 import type { IndicatorPaneId, IndicatorView, PaneLayout, PaneSize } from './indicators'
 import { readableInk } from './ink'
 import { barHeight, solvePaneLayout, type SolvedLayout } from './paneLayout'
@@ -87,6 +89,12 @@ export function pricePrecision(candles: readonly ChartCandle[]) {
 class LevelsPrimitive implements ISeriesPrimitive<Time> {
   private overlays: readonly PriceOverlay[] = []
   private raw: readonly PriceOverlay[] = []
+  private preview: { id: string; price: number } | null = null
+
+  dragPreview(preview: { id: string; price: number } | null) {
+    this.preview = preview
+    this.set(this.raw)
+  }
   private axisViews: readonly ISeriesPrimitiveAxisView[] = []
   private series: ISeriesApi<'Candlestick'> | null = null
   private requestUpdate: (() => void) | null = null
@@ -113,7 +121,7 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
     // Selected levels are drawn last so they stay on top of overlapping aggregate levels.
     this.overlays = [...overlays]
       .sort((a, b) => Number(a.emphasis === 'selected') - Number(b.emphasis === 'selected'))
-      .map(overlay => ({ ...overlay, color: this.resolve(overlay.color), ...(overlay.accent ? { accent: this.resolve(overlay.accent) } : {}) }))
+      .map(overlay => ({ ...overlay, ...(this.preview?.id === overlay.id ? { price: this.preview.price } : {}), color: this.resolve(overlay.color), ...(overlay.accent ? { accent: this.resolve(overlay.accent) } : {}) }))
     this.axisViews = this.overlays.map(overlay => ({
       coordinate: () => this.y(overlay.price) ?? -1000,
       text: () => this.series?.priceFormatter().format(overlay.price) ?? String(overlay.price),
@@ -272,9 +280,13 @@ const openingRightOffset = 12
 /** Space kept above indicator values for the pane's control bar. */
 const barRoom = barHeight + 4
 const toTime = (ms: number) => Math.floor(ms / 1000) as UTCTimestamp
-/** Indicator values with gaps as whitespace, so lines start where the indicator is defined. */
-const lineData = (times: readonly number[], values: readonly (number | null)[]) =>
-  values.map((value, index) => value === null ? { time: toTime(times[index]!) } : { time: toTime(times[index]!), value })
+type IndicatorPoint = { time: number; value: number | null; color?: string }
+/** Whitespace preserves the undefined EMA/RSI prefix; only changed points are converted. */
+const indicatorWriter = (series: ISeriesApi<'Line'> | ISeriesApi<'Histogram'>) => createSeriesWriter<IndicatorPoint, { time: UTCTimestamp; value?: number; color?: string }>(
+  series, (a, b) => a.time === b.time && a.value === b.value && a.color === b.color,
+  point => point.value === null ? { time: toTime(point.time) }
+    : { time: toTime(point.time), value: point.value, ...(point.color ? { color: point.color } : {}) },
+)
 const withAlpha = (color: string, alpha: number) => /^#[0-9a-f]{6}$/i.test(color)
   ? `${color}${Math.round(alpha * 255).toString(16).padStart(2, '0')}` : color
 
@@ -308,6 +320,10 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   let candleCount = 0
   let loaded: readonly ChartCandle[] = []
   let index = new TimeIndex([])
+  const writeCandles = createSeriesWriter<ChartCandle, { time: UTCTimestamp; open: number; high: number; low: number; close: number }>(
+    series, (a, b) => a.time === b.time && a.open === b.open && a.high === b.high && a.low === b.low && a.close === b.close && a.volume === b.volume,
+    candle => ({ time: toTime(candle.time), open: candle.open, high: candle.high, low: candle.low, close: candle.close }),
+  )
 
   /**
    * The library converts only whole bars (x → bar rounds up, a fractional bar → 0), which would tie every
@@ -365,6 +381,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     onDrawingCreate: drawing => callbacks.onDrawingCreate(drawing),
     onDrawingChange: (drawing, phase) => callbacks.onDrawingChange(drawing, phase),
     onDrawingSelect: id => callbacks.onDrawingSelect(id),
+    onDrawingCancel: () => callbacks.onDrawingCancel?.(),
   }, () => drawingsLayer.requestUpdate())
   drawingsLayer.controller = drawings
 
@@ -373,6 +390,13 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   /** Averages use the candles' precision. */
   let priceFormat: PriceFormat = { type: 'price', precision: 2, minMove: 0.01 }
   const indicatorPanes: { id: IndicatorPaneId; series: ISeriesApi<'Histogram'> | ISeriesApi<'Line'>; size: PaneSize }[] = []
+  const indicatorWriters = new Map<ISeriesApi<'Line'> | ISeriesApi<'Histogram'>, ReturnType<typeof indicatorWriter>>()
+  let resetIndicators = false
+  const writeIndicator = (series: ISeriesApi<'Line'> | ISeriesApi<'Histogram'>, points: IndicatorPoint[]) => {
+    let write = indicatorWriters.get(series)
+    if (!write) { write = indicatorWriter(series); indicatorWriters.set(series, write) }
+    write(points, resetIndicators)
+  }
   let shownPanes = ''
   let destroyed = false
   /** Averages far from the latest close stay off the scale, like distant plan levels. */
@@ -488,7 +512,11 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     settle()
   }
   // A resize ends any press: a release outside the window may never arrive (seen in Firefox).
-  const containerObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => { if (pressed !== false) onRelease(); queueLayout() })
+  const containerObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
+    cancelLevelDrag()
+    if (pressed !== false) onRelease()
+    queueLayout()
+  })
   containerObserver?.observe(container)
   /** The latest release still waiting for the chart to draw; layout waits for it. */
   let releasing = 0
@@ -535,24 +563,25 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       if (view.lines.some(line => line.id === id)) continue
       chart.removeSeries(series)
       averages.delete(id)
+      indicatorWriters.delete(series)
     }
     for (const line of view.lines) {
       let series = averages.get(line.id)
       if (!series) {
         series = chart.addSeries(LineSeries, {
-          lineWidth: 1, priceLineVisible: false, crosshairMarkerRadius: 3, autoscaleInfoProvider: nearPrice,
+          lineWidth: 1, priceLineVisible: false, crosshairMarkerRadius: 3, autoscaleInfoProvider: nearPrice, priceFormat,
         })
         averages.set(line.id, series)
       }
-      series.applyOptions({ color: line.color, priceFormat })
-      series.setData(lineData(times, line.values))
+      series.applyOptions({ color: line.color })
+      writeIndicator(series, line.values.map((value, index) => ({ time: times[index]!, value })))
     }
 
     // Panes are rebuilt in a fixed order (volume above RSI) when one is shown or hidden.
     const wanted = [view.volume && 'volume', view.rsi && 'rsi'].filter(Boolean).join('|')
     const rebuilt = wanted !== shownPanes
     if (rebuilt) {
-      for (const pane of indicatorPanes.splice(0)) chart.removeSeries(pane.series)
+      for (const pane of indicatorPanes.splice(0)) { chart.removeSeries(pane.series); indicatorWriters.delete(pane.series) }
       if (view.volume) {
         const series = chart.addSeries(HistogramSeries, {
           priceFormat: { type: 'volume' }, priceLineVisible: false,
@@ -588,15 +617,16 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     const volume = indicatorPanes.find(pane => pane.id === 'volume')
     if (volume && view.volume) {
       const { values, up } = view.volume
-      volume.series.setData(values.map((value, index) => ({
-        time: toTime(times[index]!), value, color: withAlpha(up[index] ? theme.candleUp : theme.candleDownEdge, 0.42),
+      writeIndicator(volume.series, values.map((value, index) => ({
+        time: times[index]!, value, color: withAlpha(up[index] ? theme.candleUp : theme.candleDownEdge, 0.42),
       })))
     }
     const rsiPane = indicatorPanes.find(pane => pane.id === 'rsi')
     if (rsiPane && view.rsi) {
       rsiPane.series.applyOptions({ color: view.rsi.color })
-      rsiPane.series.setData(lineData(times, view.rsi.values))
+      writeIndicator(rsiPane.series, view.rsi.values.map((value, index) => ({ time: times[index]!, value })))
     }
+    resetIndicators = false
     // Dragged heights last until panes are shown, hidden or resized from a bar; candle updates keep them.
     if (rebuilt || resized) {
       dragged = null
@@ -624,7 +654,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   chart.subscribeCrosshairMove(onCrosshair)
 
   // Drawings and level drags are handled before the chart sees the pointer, so panning stays off while they move.
-  let drag: { id: string; pointerId: number; price: number; moved: boolean } | null = null
+  let drag: { id: string; pointerId: number; price: number; moved: boolean; edit: FrameEdit<number>; autoScale: boolean; offsetY: number } | null = null
   let drawingPointer: number | null = null
   // While picking, a click on the pane reports its price instead of panning, drawing or dragging.
   let picking = false
@@ -641,6 +671,20 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     }
   }
   const lockChart = (locked: boolean) => chart.applyOptions({ handleScroll: !locked, handleScale: !locked })
+  const finishLevelDrag = (cancel: boolean, price?: number) => {
+    if (!drag) return
+    const finished = drag
+    drag = null
+    // Capture may already be gone on cancellation/blur; releasing an inactive pointer can throw.
+    if (container.hasPointerCapture?.(finished.pointerId)) container.releasePointerCapture(finished.pointerId)
+    series.priceScale().applyOptions({ autoScale: finished.autoScale })
+    lockChart(false)
+    if (cancel) { finished.edit.cancel(); callbacks.onLevelCancel?.() }
+    else if (finished.moved) finished.edit.end(price ?? finished.price)
+    else { finished.edit.cancel(); callbacks.onLevelSelect(finished.id) }
+    levels.dragPreview(null)
+  }
+  const cancelLevelDrag = () => finishLevelDrag(true)
   const consume = (event: PointerEvent) => { event.preventDefault(); event.stopPropagation() }
   const onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0 || drag) return
@@ -670,7 +714,13 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     const hit = levels.levelAt(y)
     if (!hit?.overlay.draggable) return
     consume(event)
-    drag = { id: hit.overlay.id, pointerId: event.pointerId, price: hit.overlay.price, moved: false }
+    const { id, priceStep } = hit.overlay
+    drag = { id, pointerId: event.pointerId, price: hit.overlay.price, moved: false,
+      autoScale: series.priceScale().options().autoScale, offsetY: (series.priceToCoordinate(hit.overlay.price) ?? y) - y,
+      edit: new FrameEdit((price, phase) => callbacks.onLevelDrag(id, price, phase),
+        (before, after) => roundedLevelPrice(before, priceStep) === roundedLevelPrice(after, priceStep), hit.overlay.price) }
+    // Dragged overlays and live candles must not change the price beneath a stationary pointer.
+    series.priceScale().applyOptions({ autoScale: false })
     container.setPointerCapture?.(event.pointerId)
     lockChart(true)
   }
@@ -691,12 +741,14 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       return
     }
     if (!drag || event.pointerId !== drag.pointerId) return
+    if (event.buttons === 0) { cancelLevelDrag(); return }
     consume(event)
-    const price = series.coordinateToPrice(pricePane(event).y)
-    if (price === null || !Number.isFinite(price) || price <= 0) return
+    const price = series.coordinateToPrice(Math.min(Math.max(pane(event).y + drag.offsetY, 0), chart.paneSize(0).height))
+    if (price === null || !Number.isFinite(price) || price <= 0 || price === drag.price) return
     drag.price = price
     drag.moved = true
-    callbacks.onLevelDrag(drag.id, price, 'move')
+    levels.dragPreview({ id: drag.id, price })
+    drag.edit.move(price)
   }
   const endDrag = (event: PointerEvent) => {
     if (drawingPointer === event.pointerId) {
@@ -704,7 +756,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       drawingPointer = null
       container.releasePointerCapture?.(event.pointerId)
       const { x, y } = pricePane(event)
-      if (event.type === 'pointercancel') drawings.cancel()
+      if (event.type !== 'pointerup') drawings.cancel()
       else drawings.pointerUp(x, y)
       // A two-click creation keeps panning off until the second click.
       lockChart(drawings.busy)
@@ -712,12 +764,18 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     }
     if (!drag || event.pointerId !== drag.pointerId) return
     event.stopPropagation()
-    const finished = drag
-    drag = null
-    container.releasePointerCapture?.(event.pointerId)
-    lockChart(false)
-    if (finished.moved) callbacks.onLevelDrag(finished.id, finished.price, 'end')
-    else callbacks.onLevelSelect(finished.id)
+    if (event.type !== 'pointerup') { cancelLevelDrag(); return }
+    // Preserve the final-pointer flush, with the original grab offset.
+    const price = series.coordinateToPrice(Math.min(Math.max(pane(event).y + drag.offsetY, 0), chart.paneSize(0).height))
+    finishLevelDrag(false, price !== null && Number.isFinite(price) && price > 0 ? price : drag.price)
+  }
+  /** Ends level and drawing gestures on reset or destroy; state is cleared before capture is released. */
+  const releaseGestures = () => {
+    const pointer = drawingPointer
+    drawingPointer = null
+    cancelLevelDrag()
+    if (pointer !== null) container.releasePointerCapture?.(pointer)
+    drawings.cancel()
   }
   const onDoubleClick = (event: MouseEvent) => {
     const rect = container.getBoundingClientRect()
@@ -734,6 +792,9 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   container.addEventListener('pointermove', onPointerMove, true)
   container.addEventListener('pointerup', endDrag, true)
   container.addEventListener('pointercancel', endDrag, true)
+  // Capture taken away without a pointerup ends the gesture like a cancel; after our own release nothing matches.
+  container.addEventListener('lostpointercapture', endDrag, true)
+  window.addEventListener('blur', cancelLevelDrag)
   const onPointerLeave = () => drawings.setGuide(null)
   container.addEventListener('pointerleave', onPointerLeave)
 
@@ -754,18 +815,23 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
 
   const adapter: ChartAdapter = {
     setCandles(candles, reset) {
+      if (reset) {
+        releaseGestures()
+        levels.dragPreview(null)
+        lockChart(false)
+        resetIndicators = true
+      }
       candleCount = candles.length
-      loaded = candles
-      index = new TimeIndex(candles)
       levels.reference = candles.at(-1)?.close ?? null
+      const timesChanged = writeCandles(candles, reset)
+      loaded = candles
+      if (timesChanged) index = new TimeIndex(candles)
       const precision = pricePrecision(candles)
-      priceFormat = { type: 'price', precision, minMove: 10 ** -precision }
-      series.applyOptions({ priceFormat })
-      for (const average of averages.values()) average.applyOptions({ priceFormat })
-      series.setData(candles.map(candle => ({
-        time: Math.floor(candle.time / 1000) as UTCTimestamp,
-        open: candle.open, high: candle.high, low: candle.low, close: candle.close,
-      })))
+      if (priceFormat.type !== 'price' || precision !== priceFormat.precision) {
+        priceFormat = { type: 'price', precision, minMove: 10 ** -precision }
+        series.applyOptions({ priceFormat })
+        for (const average of averages.values()) average.applyOptions({ priceFormat })
+      }
       if (reset) {
         chart.priceScale('right').applyOptions({ autoScale: true })
         // Jump, not animate, to the latest candles.
@@ -838,6 +904,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       }
     },
     destroy() {
+      releaseGestures()
       themeObserver.disconnect()
       cancelAnimationFrame(rethemeFrame)
       container.removeEventListener('dblclick', onDoubleClick)
@@ -845,6 +912,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       container.removeEventListener('pointermove', onPointerMove, true)
       container.removeEventListener('pointerup', endDrag, true)
       container.removeEventListener('pointercancel', endDrag, true)
+      container.removeEventListener('lostpointercapture', endDrag, true)
+      window.removeEventListener('blur', cancelLevelDrag)
       container.removeEventListener('pointerleave', onPointerLeave)
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
       chart.unsubscribeCrosshairMove(onCrosshair)

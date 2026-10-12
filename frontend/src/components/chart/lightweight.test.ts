@@ -1,0 +1,179 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { computeIndicators, defaultIndicators } from './indicators'
+import type { ChartAdapter, ChartCallbacks, ChartCandle, PriceOverlay } from './types'
+import { testFrames } from './testFrames'
+
+vi.unmock('@/components/chart/lightweight')
+const library = vi.hoisted(() => ({ createChart: vi.fn() }))
+vi.mock('lightweight-charts', () => ({
+  createChart: library.createChart, CandlestickSeries: 'candles', LineSeries: 'line', HistogramSeries: 'volume',
+  ColorType: { Solid: 'solid' }, CrosshairMode: { Normal: 0 }, LineStyle: { Dashed: 2 },
+}))
+import { createLightweightAdapter } from './lightweight'
+
+type Point = { time: number; open?: number; high?: number; low?: number; close?: number; value?: number; color?: string }
+function makeSeries(kind: string) {
+    let data: Point[] = []
+    let autoScale = true
+    const scale = {
+      options: () => ({ autoScale }),
+      applyOptions: vi.fn((options: { autoScale?: boolean }) => { if (options.autoScale !== undefined) autoScale = options.autoScale }),
+    }
+    const primitives: { find?: (id: string) => PriceOverlay | undefined }[] = []
+    const current = {
+      kind, primitives, data: () => data,
+      setData: vi.fn((next: Point[]) => { data = [...next] }),
+      update: vi.fn((point: Point) => {
+        if (point.time < data.at(-1)!.time) throw new Error('historical update')
+        if (point.time === data.at(-1)?.time) data[data.length - 1] = point
+        else data.push(point)
+      }),
+      applyOptions: vi.fn(), priceScale: () => scale, createPriceLine: vi.fn(),
+      priceToCoordinate: (price: number) => 1000 - price, coordinateToPrice: (y: number) => 1000 - y,
+      priceFormatter: () => ({ format: String }),
+      attachPrimitive: (primitive: { find?: (id: string) => PriceOverlay | undefined; attached?: (params: { series: unknown; requestUpdate: () => void }) => void }) => {
+        primitives.push(primitive); primitive.attached?.({ series: current, requestUpdate: vi.fn() })
+      },
+    }
+    return current
+}
+function fakeChart() {
+  const series: ReturnType<typeof makeSeries>[] = []
+  const addSeries = vi.fn((kind: string) => { const current = makeSeries(kind); series.push(current); return current })
+  const chart = {
+    addSeries, series, applyOptions: vi.fn(), removeSeries: vi.fn(), remove: vi.fn(),
+    subscribeClick: vi.fn(), subscribeCrosshairMove: vi.fn(), unsubscribeCrosshairMove: vi.fn(),
+    priceScale: () => ({ applyOptions: vi.fn() }),
+    panes: () => [{ getHTMLElement: () => null, setStretchFactor: vi.fn() }], paneSize: () => ({ width: 800, height: 1000 }),
+    timeScale: () => ({ width: () => 800, height: () => 20, logicalToCoordinate: (logical: number) => logical * 100,
+      coordinateToLogical: (x: number) => x / 100, scrollToPosition: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn() }),
+  }
+  library.createChart.mockReturnValue(chart)
+  return chart
+}
+const candles: ChartCandle[] = Array.from({ length: 6 }, (_, index) => ({ time: (index + 1) * 60_000, open: 100, high: 120, low: 90, close: [100, 101, 99, 103, 101, 105][index]!, volume: 12 }))
+const settings = { ...defaultIndicators, emas: defaultIndicators.emas.map(ema => ({ ...ema, enabled: true, period: 2 })), rsi: { ...defaultIndicators.rsi, period: 2 } }
+const events = (): ChartCallbacks => ({
+  onLevelDrag: vi.fn(), onLevelSelect: vi.fn(), onLevelCancel: vi.fn(), onNeedOlder: vi.fn(), onDrawingCreate: vi.fn(),
+  onDrawingChange: vi.fn(), onDrawingSelect: vi.fn(), onDrawingCancel: vi.fn(), onLevelEdit: vi.fn(), onPricePick: vi.fn(), onCrosshairMove: vi.fn(), onPaneLayout: vi.fn(),
+})
+function pointer(container: HTMLElement, type: string, price: number, x = 400) {
+  const event = new MouseEvent(type, { clientX: x, clientY: 1000 - price, bubbles: true, button: 0, buttons: type === 'pointermove' ? 1 : 0 })
+  Object.defineProperty(event, 'pointerId', { value: 1 })
+  container.dispatchEvent(event)
+}
+let adapter: ChartAdapter
+let frames: ReturnType<typeof testFrames>
+let chart: ReturnType<typeof fakeChart>
+let container: HTMLDivElement
+let callbacks: ChartCallbacks
+beforeEach(() => {
+  frames = testFrames(); chart = fakeChart(); container = document.createElement('div'); callbacks = events()
+  adapter = createLightweightAdapter(container, callbacks)
+  adapter.setCandles(candles, true)
+})
+afterEach(() => adapter.destroy())
+
+const variants = [
+  { name: 'forming', next: [...candles.slice(0, -1), { ...candles.at(-1)!, close: 106, volume: 13 }], incremental: true },
+  { name: 'append', next: [...candles, { ...candles.at(-1)!, time: 420_000, close: 108 }], incremental: true },
+  { name: 'append + update', next: [...candles.slice(0, -1), { ...candles.at(-1)!, close: 106, volume: 13 }, { ...candles.at(-1)!, time: 420_000, close: 108 }], incremental: true },
+  { name: 'prepend', next: [{ ...candles[0]!, time: 0 }, ...candles], incremental: false },
+  { name: 'correction', next: [candles[0]!, { ...candles[1]!, close: 110, volume: 14 }, ...candles.slice(2)], incremental: false },
+  { name: 'trim', next: candles.slice(1), incremental: false },
+  { name: 'reset', next: candles, incremental: false, reset: true },
+]
+describe('adapter incremental candle and indicator rendering', () => {
+  it.each(variants)('$name matches a full replacement on every series', ({ next, incremental, reset = false }) => {
+    adapter.setIndicators(computeIndicators(candles, settings))
+    for (const series of chart.series) { series.setData.mockClear(); series.update.mockClear() }
+    adapter.setCandles(next, reset)
+    adapter.setIndicators(computeIndicators(next, settings))
+    const actual = chart.series.map(series => series.data())
+    for (const series of chart.series) {
+      expect(series.setData).toHaveBeenCalledTimes(incremental ? 0 : 1)
+      if (incremental) expect(series.update).toHaveBeenCalled()
+    }
+    // A fresh renderer uses full setData for the same inputs.
+    const original = chart
+    chart = fakeChart()
+    const fresh = createLightweightAdapter(document.createElement('div'), events())
+    fresh.setCandles(next, true); fresh.setIndicators(computeIndicators(next, settings))
+    expect(actual).toEqual(chart.series.map(series => series.data()))
+    fresh.destroy(); chart = original
+  })
+
+  it('does no renderer writes for value-equivalent arrays and changes price format only with precision', () => {
+    adapter.setIndicators(computeIndicators(candles, settings))
+    for (const series of chart.series) { series.setData.mockClear(); series.update.mockClear(); series.applyOptions.mockClear() }
+    adapter.setCandles(candles.map(candle => ({ ...candle })), false)
+    adapter.setIndicators(computeIndicators(candles, settings))
+    for (const series of chart.series) {
+      expect(series.setData).not.toHaveBeenCalled(); expect(series.update).not.toHaveBeenCalled()
+      expect(series.applyOptions.mock.calls.flat()).not.toEqual(expect.arrayContaining([expect.objectContaining({ priceFormat: expect.anything() })]))
+    }
+    adapter.setCandles([...candles.slice(0, -1), { ...candles.at(-1)!, close: 105.125 }], false)
+    expect(chart.series[0]!.applyOptions).toHaveBeenCalledWith({ priceFormat: { type: 'price', precision: 3, minMove: 0.001 } })
+    chart.series.slice(1, 5).forEach(series => expect(series.applyOptions).toHaveBeenCalledWith({ priceFormat: { type: 'price', precision: 3, minMove: 0.001 } }))
+  })
+})
+
+describe('adapter level gesture lifecycle', () => {
+  const overlay: PriceOverlay = { id: 'level', label: 'Entry', price: 100, color: '#ffffff', emphasis: 'selected', kind: 'entry', draggable: true }
+  it('shows the latest pointer immediately, batches moves, and flushes pointerup before the frame', () => {
+    adapter.setOverlays([overlay]); pointer(container, 'pointerdown', 100)
+    pointer(container, 'pointermove', 101); pointer(container, 'pointermove', 102)
+    expect(callbacks.onLevelDrag).not.toHaveBeenCalled()
+    expect(chart.series[0]!.primitives[0]!.find?.('level')?.price).toBe(102)
+    pointer(container, 'pointerup', 103); frames.run()
+    // The capture released by pointerup no longer matches a gesture.
+    pointer(container, 'lostpointercapture', 104)
+    expect(callbacks.onLevelDrag).toHaveBeenCalledExactlyOnceWith('level', 103, 'end')
+  })
+
+  it.each(['pointercancel', 'lostpointercapture'])('discards the preview on %s and cancels the pending frame', type => {
+    adapter.setOverlays([overlay]); pointer(container, 'pointerdown', 100); pointer(container, 'pointermove', 102)
+    pointer(container, type, 103); frames.run()
+    expect(callbacks.onLevelDrag).not.toHaveBeenCalled()
+    expect(callbacks.onLevelCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['destroy', 'source'] as const)('%s cancels queued publications', how => {
+    adapter.setOverlays([overlay]); pointer(container, 'pointerdown', 100); pointer(container, 'pointermove', 102)
+    if (how === 'destroy') adapter.destroy()
+    else adapter.setCandles(candles, true)
+    frames.run()
+    expect(callbacks.onLevelDrag).not.toHaveBeenCalled()
+    expect(callbacks.onLevelCancel).toHaveBeenCalledTimes(1)
+    if (how === 'destroy') adapter = { ...adapter, destroy: vi.fn() }
+  })
+
+  it('suppresses only equivalent rounded level moves', () => {
+    adapter.setOverlays([{ ...overlay, priceStep: 0.25 }]); pointer(container, 'pointerdown', 100)
+    pointer(container, 'pointermove', 101); frames.run()
+    pointer(container, 'pointermove', 101.01); frames.run()
+    pointer(container, 'pointermove', 101.3); frames.run()
+    pointer(container, 'pointerup', 101.3)
+    expect(callbacks.onLevelDrag).toHaveBeenCalledTimes(3)
+    expect(callbacks.onLevelDrag).toHaveBeenNthCalledWith(1, 'level', 101, 'move')
+    expect(callbacks.onLevelDrag).toHaveBeenNthCalledWith(2, 'level', expect.closeTo(101.3), 'move')
+    expect(callbacks.onLevelDrag).toHaveBeenLastCalledWith('level', expect.closeTo(101.3), 'end')
+  })
+})
+
+
+describe('adapter drawing gesture cancellation', () => {
+  it.each(['pointercancel', 'lostpointercapture', 'source', 'destroy'] as const)('%s drops pending drawing changes', how => {
+    adapter.setDrawings([{ id: 'drawing', schemaVersion: 1, kind: 'vertical-line', points: [{ time: 300_000, price: 100 }] }], null)
+    pointer(container, 'pointerdown', 500)
+    pointer(container, 'pointermove', 500, 450)
+    expect(callbacks.onDrawingChange).not.toHaveBeenCalled()
+    if (how === 'pointercancel' || how === 'lostpointercapture') pointer(container, how, 500, 450)
+    else if (how === 'source') adapter.setCandles(candles, true)
+    else adapter.destroy()
+    frames.run()
+    expect(callbacks.onDrawingChange).not.toHaveBeenCalled()
+    expect(callbacks.onDrawingCancel).toHaveBeenCalledTimes(1)
+    if (how === 'destroy') adapter = { ...adapter, destroy: vi.fn() }
+  })
+})

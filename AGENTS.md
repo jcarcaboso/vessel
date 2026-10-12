@@ -36,6 +36,8 @@ October 9, 2026: the owner asked for a Settings page with a theme customizer and
 
 October 10, 2026: the owner asked for custom portfolio icons, verified by two Sol (Codex) reviews before merging. Portfolios carry an icon key from a fixed, server-validated set (default `folder`); see the Portfolio icons section of `docs/architecture/account-management-contract.md`. Keep the backend `PortfolioIcons` list and the frontend `portfolio-icons.ts` in step; never accept uploaded images or markup as icons.
 
+October 11, 2026: the owner asked for faster chart loading and smoother chart work and authorized PR A (session-only browser candle cache, server tail/historical candle TTLs, catalogue single-flight, restricted compression) and PR B (frame-batched drags, incremental chart rendering) with Sol agents; follow `docs/architecture/performance-plan.md`. Never cache authorization; candles are never stored in the browser across reloads. A TimescaleDB candle archive for longer history and later backtesting is the owner's direction but needs its own plan.
+
 ## Project tracking
 
 - Repository: https://github.com/jcarcaboso/vessel

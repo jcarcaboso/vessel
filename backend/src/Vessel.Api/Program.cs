@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Api;
 using Vessel.Application.Workspace;
@@ -13,6 +14,15 @@ builder.Services.AddVesselInfrastructure(builder.Configuration);
 builder.Services.AddVesselPersistence(builder.Configuration);
 builder.Services.AddOpenApi();
 builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ["application/json"];
+});
+builder.Services.AddSingleton<ResponseCompressionProvider>();
+builder.Services.AddSingleton<IResponseCompressionProvider, MarketDataCompression>();
 
 // Only loopback proxies (the defaults) may report the original scheme and client, so a TLS-terminating
 // proxy on the same host is recognised and a remote client cannot claim HTTPS with a header.
@@ -67,6 +77,7 @@ app.Use(async (context, next) =>
             extensions: new Dictionary<string, object?> { ["traceId"] = traceId }).ExecuteAsync(context);
     }
 });
+app.UseResponseCompression();
 app.UseAuthentication();
 app.UseAuthorization();
 // Bound credential JSON before model binding, including chunked requests. Never log its body.

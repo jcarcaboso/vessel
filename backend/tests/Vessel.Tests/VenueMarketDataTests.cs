@@ -43,7 +43,8 @@ public sealed class VenueMarketDataTests
     }
 
     private static VenueRegistry Registry(params object[] adapters) => new(
-        [VenueDescriptor.Manual, HyperliquidPerpetualReader.Descriptor, Tick], [], [],
+        [VenueDescriptor.Manual, HyperliquidPerpetualReader.Descriptor, Tick],
+        [new FixtureReader { VenueId = "tick", Result = new FixtureReader().Result with { Instruments = [new("DOGE", 5, 10, "USDC", VenueContractId: "17")] } }], [],
         adapters.OfType<ICandleReader>(), adapters.OfType<IMarketContextReader>(), []);
 
     [Fact]
@@ -79,7 +80,7 @@ public sealed class VenueMarketDataTests
     public async Task Market_context_allows_a_missing_previous_day_price_and_uses_the_venue_notice()
     {
         var (store, account) = Setup();
-        var service = new MarketContextService(store, Registry(new TickContexts()), new MarketContextCache(TimeProvider.System), TimeProvider.System);
+        var service = new MarketContextService(store, Registry(new TickContexts()), new MarketContextCache(TimeProvider.System));
         var context = await service.ContextAsync(account.Id, "DOGE", default);
         Assert.Null(context.PreviousDayPrice);
         Assert.Equal("Tick venue context.", context.Notice);

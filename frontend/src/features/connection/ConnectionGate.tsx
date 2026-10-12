@@ -1,6 +1,7 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { ApiError, getSystem, type SystemInfo } from '@/api/system'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
+import { clearCandleCache } from '@/features/market/candleCache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -10,6 +11,7 @@ export function ConnectionGate({ children }: { children: (system: SystemInfo, di
   const [api, setApi] = useState<WorkspaceApi | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+  useEffect(() => () => { if (api) clearCandleCache(api) }, [api])
 
   async function connect(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -31,7 +33,7 @@ export function ConnectionGate({ children }: { children: (system: SystemInfo, di
     }
   }
 
-  if (system && api) return children(system, () => { setSystem(null); setApi(null); setError(null); setToken('') }, api)
+  if (system && api) return children(system, () => { clearCandleCache(api); setSystem(null); setApi(null); setError(null); setToken('') }, api)
   return (
     <main className="connection-page">
       <section className="panel connection-card" aria-labelledby="connection-title">

@@ -8,7 +8,7 @@ import type { ChartHistory } from './useChartHistory'
  */
 export function useDrawingEditor(drawings: readonly ChartDrawing[], onChange: (next: ChartDrawing[]) => void, scopeKey: string, history: ChartHistory) {
   const [state, setState] = useState({ scopeKey, tool: null as DrawingKind | null, selectedId: null as string | null })
-  const gestureStart = useRef<readonly ChartDrawing[] | null>(null)
+  const gestureStart = useRef<{ scopeKey: string; drawings: readonly ChartDrawing[] } | null>(null)
   // History actions run later, so they always write through the latest callback.
   const change = useRef(onChange)
   useEffect(() => { change.current = onChange })
@@ -16,13 +16,18 @@ export function useDrawingEditor(drawings: readonly ChartDrawing[], onChange: (n
   const current = state.scopeKey === scopeKey ? state : { scopeKey, tool: null, selectedId: null }
   const selected = drawings.find(drawing => drawing.id === current.selectedId) ?? null
 
-  const record = (label: string, before: readonly ChartDrawing[], after: readonly ChartDrawing[]) => history.push({
+  const record = (label: string, before: readonly ChartDrawing[], after: readonly ChartDrawing[], scope = scopeKey) => history.push({
     label, undo: () => change.current([...before]), redo: () => change.current([...after]),
-  })
+  }, scope)
+  /** A gesture that ends where it started is not an edit. */
+  const recordMove = (before: readonly ChartDrawing[], after: readonly ChartDrawing[], scope: string) => {
+    if (JSON.stringify(before) !== JSON.stringify(after)) record('Move drawing', before, after, scope)
+  }
   const commit = (label: string, next: ChartDrawing[]) => { record(label, drawings, next); onChange(next) }
   const update = (id: string, patch: (drawing: ChartDrawing) => ChartDrawing) =>
     drawings.map(drawing => drawing.id === id ? patch(drawing) : drawing)
   const textStart = useRef<readonly ChartDrawing[] | null>(null)
+  useEffect(() => { gestureStart.current = null; textStart.current = null }, [scopeKey])
 
   return {
     tool: current.tool,
@@ -34,12 +39,18 @@ export function useDrawingEditor(drawings: readonly ChartDrawing[], onChange: (n
       commit('Add drawing', [...drawings, drawing])
       setState(value => ({ ...value, tool: null, selectedId: drawing.id }))
     },
+    /** A reset or unmount mid-drag keeps the moves already applied as one step, within the same scope. */
+    cancelGesture: () => {
+      const start = gestureStart.current
+      gestureStart.current = null
+      if (start) recordMove(start.drawings, drawings, start.scopeKey)
+    },
     change: (drawing: ChartDrawing, phase: 'move' | 'end') => {
-      gestureStart.current ??= drawings
+      gestureStart.current ??= { scopeKey, drawings }
       const next = drawings.map(existing => existing.id === drawing.id ? drawing : existing)
       onChange(next)
       if (phase === 'end') {
-        record('Move drawing', gestureStart.current, next)
+        recordMove(gestureStart.current.drawings, next, gestureStart.current.scopeKey)
         gestureStart.current = null
       }
     },

@@ -3,6 +3,7 @@ import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { statusLabels, type PlayStatus, type PlaySummary, type StatusRequest } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { useNotifications } from '@/components/notifications/notifications'
+import { preloadLightweightRenderer } from '@/components/chart/lazy'
 import { useVenues } from '@/api/venues'
 import { ArrowLeft, History, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import { createDraft, type PlayDraft } from './draft'
@@ -34,6 +35,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   onReload?: (() => void) | undefined
   loading?: boolean
 }) {
+  useEffect(() => { void preloadLightweightRenderer().catch(() => { /* The adapter shows a load error when mounted. */ }) }, [])
   const latest = useRef(session)
   useEffect(() => { latest.current = session })
   const update = useCallback((next: Partial<PlaysSession>) => {

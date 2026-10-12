@@ -2,17 +2,26 @@ import type { ChartDrawing, DrawingKind } from './drawings'
 import type { IndicatorView } from './indicators'
 import type { ChartAdapter, ChartAdapterFactory, ChartCandle, PriceOverlay } from './types'
 
+let renderer: Promise<typeof import('./lightweight')> | null = null
+
+/** Shared by the Plays page and every chart; a rejected chunk stays failed until reload. */
+export function preloadLightweightRenderer() {
+  renderer ??= import('./lightweight')
+  return renderer
+}
+
 /** Loads the canvas renderer on first use and replays the latest inputs once it is ready. */
 export const createLazyLightweightAdapter: ChartAdapterFactory = (container, callbacks) => {
   let adapter: ChartAdapter | null = null
   let destroyed = false
+  let errorState: HTMLElement | null = null
   let candles: readonly ChartCandle[] | null = null
   let overlays: readonly PriceOverlay[] | null = null
   let drawings: [readonly ChartDrawing[], string | null] | null = null
   let tool: [DrawingKind | null, boolean] | null = null
   let picking = false
   let indicators: IndicatorView | null = null
-  void import('./lightweight').then(({ createLightweightAdapter }) => {
+  void preloadLightweightRenderer().then(({ createLightweightAdapter }) => {
     if (destroyed) return
     adapter = createLightweightAdapter(container, callbacks)
     if (candles) adapter.setCandles(candles, true)
@@ -21,6 +30,13 @@ export const createLazyLightweightAdapter: ChartAdapterFactory = (container, cal
     if (drawings) adapter.setDrawings(...drawings)
     if (tool) adapter.setDrawingTool(...tool)
     if (picking) adapter.setPricePicker(true)
+  }).catch(() => {
+    if (destroyed) return
+    errorState = document.createElement('p')
+    errorState.className = 'chart-state'
+    errorState.setAttribute('role', 'alert')
+    errorState.textContent = 'The chart renderer could not be loaded. Reload the page to try again.'
+    container.append(errorState)
   })
   return {
     setCandles(next, reset) {
@@ -53,6 +69,7 @@ export const createLazyLightweightAdapter: ChartAdapterFactory = (container, cal
     destroy() {
       destroyed = true
       adapter?.destroy()
+      errorState?.remove()
     },
   }
 }
