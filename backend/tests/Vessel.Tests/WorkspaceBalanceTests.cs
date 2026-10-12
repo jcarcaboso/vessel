@@ -23,7 +23,7 @@ public sealed class WorkspaceBalanceTests
     }
 
     private Account Add(Guid? portfolio, string venue, decimal? equity, decimal? withdrawable = null,
-        string? mode = null, decimal? walletTotal = null, decimal? walletAvailable = null, bool enabled = true)
+        string? mode = null, decimal? walletTotal = null, decimal? walletAvailable = null, bool enabled = true, decimal? availableMargin = null)
     {
         var account = new Account(Guid.NewGuid(), owner, venue, "Fixture account");
         account.Configure(portfolio, null, venue == "manual" ? equity : null);
@@ -33,13 +33,61 @@ public sealed class WorkspaceBalanceTests
             store.Snapshots.Add(new AccountSnapshot
             {
                 OwnerId = owner, AccountId = account.Id, ObservedAtUtc = DateTimeOffset.UtcNow, ValueScope = "fixture",
-                AccountValueUsd = equity, WithdrawableUsd = withdrawable, AccountMode = mode,
+                AccountValueUsd = equity, WithdrawableUsd = withdrawable, AvailableMarginUsd = availableMargin, AccountMode = mode,
                 StablecoinsObservedAtUtc = walletTotal.HasValue ? DateTimeOffset.UtcNow : null,
                 Stablecoins = walletTotal is { } total
                     ? [new() { Total = total, Held = total - (walletAvailable ?? total), Available = walletAvailable ?? total }]
                     : [],
             });
         return account;
+    }
+
+    [Fact]
+    public async Task Availability_aggregates_keep_all_digits_beyond_decimal_sum_precision()
+    {
+        var portfolio = await service.CreatePortfolioAsync(new("Exact availability"), default);
+        var large = Add(portfolio.Id, "public-perps", 0m, decimal.MaxValue);
+        var tiny = Add(portfolio.Id, "public-perps", 0m, availableMargin: 0.0000000000000000000000000001m);
+        const string exact = "79228162514264337593543950335.0000000000000000000000000001";
+        Assert.Equal(exact, (await service.OverviewAsync(default)).Totals.AvailableBalanceUsd);
+        var funds = await service.PortfolioAsync(portfolio.Id, default);
+        Assert.Equal(exact, funds.AvailableBalanceUsd);
+        Assert.Equal((2, 2, "complete"), (funds.AvailableBalanceAccountCount, funds.EnabledAccountCount, funds.AvailableBalanceCoverage));
+        Assert.Equal("79228162514264337593543950335", (await service.AccountAsync(large.Id, default)).AvailableBalanceUsd);
+        Assert.Equal("0.0000000000000000000000000001", (await service.AccountAsync(tiny.Id, default)).AvailableBalanceUsd);
+    }
+
+    [Fact]
+    public async Task Available_margin_precedes_withdrawal_and_each_account_contributes_once_to_overview_portfolio_and_detail()
+    {
+        var portfolio = await service.CreatePortfolioAsync(new("Available"), default);
+        var lighter = Add(portfolio.Id, "public-perps", 100m, 50m, availableMargin: 12.12345678901234567890123456m);
+        var risex = Add(portfolio.Id, "public-perps", 80m, availableMargin: 3m);
+        var standard = Add(portfolio.Id, "hyperliquid", 40m, 35m, "default", 10m, 7m);
+        var unified = Add(null, "hyperliquid", 999m, 888m, "unifiedAccount", 100m, 80m, availableMargin: 777m);
+        var zero = Add(portfolio.Id, "public-perps", 100m, 50m, availableMargin: 0m);
+        Add(portfolio.Id, "public-perps", 100m, 50m, enabled: false, availableMargin: 1000m);
+        Add(portfolio.Id, "manual", 100m);
+        Add(null, "public-perps", 100m); // Known equity is not availability.
+        var totals = (await service.OverviewAsync(default)).Totals;
+        Assert.Equal("130.12345678901234567890123456", totals.AvailableBalanceUsd);
+        Assert.Equal(5, totals.AvailableBalanceAccountCount);
+        Assert.Equal(7, totals.EnabledAccountCount);
+        Assert.Equal("partial", totals.AvailableBalanceCoverage);
+        var funds = await service.PortfolioAsync(portfolio.Id, default);
+        Assert.Equal("50.12345678901234567890123456", funds.AvailableBalanceUsd);
+        Assert.Equal((4, 5, "partial"), (funds.AvailableBalanceAccountCount, funds.EnabledAccountCount, funds.AvailableBalanceCoverage));
+        foreach (var account in new[] { lighter, risex, zero })
+            Assert.Equal("margin", (await service.AccountAsync(account.Id, default)).AvailableBalanceSource);
+        Assert.Equal("0", (await service.AccountAsync(zero.Id, default)).AvailableBalanceUsd);
+        Assert.Equal(("35", "withdrawable"), ((await service.AccountAsync(standard.Id, default)).AvailableBalanceUsd, (await service.AccountAsync(standard.Id, default)).AvailableBalanceSource));
+        Assert.Equal(("80", "wallet"), ((await service.AccountAsync(unified.Id, default)).AvailableBalanceUsd, (await service.AccountAsync(unified.Id, default)).AvailableBalanceSource));
+        Assert.Equal("12.12345678901234567890123456", (await service.SnapshotAsync(lighter.Id, default))!.AvailableMarginUsd);
+        await service.UpdateAccountAsync(lighter.Id, new(lighter.Name, null, false, lighter.SettingsRevision), default);
+        Assert.Null((await service.AccountAsync(lighter.Id, default)).AvailableBalanceUsd);
+        Assert.Null((await service.AccountAsync(lighter.Id, default)).AvailableBalanceSource);
+        Assert.Equal("118", (await service.OverviewAsync(default)).Totals.AvailableBalanceUsd);
+        Assert.Equal("38", (await service.PortfolioAsync(portfolio.Id, default)).AvailableBalanceUsd);
     }
 
     [Fact]
@@ -61,8 +109,8 @@ public sealed class WorkspaceBalanceTests
         Assert.Equal("205", totals.TotalBalanceUsd);
         Assert.Equal(4, totals.BalanceAccountCount);
         Assert.Equal("partial", totals.BalanceCoverage);
-        // Wallet accounts contribute wallet availability only, not their perps withdrawal as well.
-        Assert.Equal("107", totals.AvailableBalanceUsd);
+        // Unified uses wallet only; standard uses withdrawal, not the separate spot wallet.
+        Assert.Equal("135", totals.AvailableBalanceUsd);
         Assert.Equal(3, totals.AvailableBalanceAccountCount);
         Assert.Equal("partial", totals.AvailableBalanceCoverage);
         Assert.Equal("87", totals.AvailableStablecoinNominalUsd);

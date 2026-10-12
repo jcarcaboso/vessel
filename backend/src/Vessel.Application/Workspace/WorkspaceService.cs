@@ -161,7 +161,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         MapPortfolios(await store.PortfoliosAsync(ct), await store.AccountsAsync(ct),
             (await store.SnapshotsAsync(ct)).ToDictionary(s => s.AccountId));
 
-    private static List<PortfolioDto> MapPortfolios(IReadOnlyList<Portfolio> portfolios, IReadOnlyList<Account> accounts,
+    private List<PortfolioDto> MapPortfolios(IReadOnlyList<Portfolio> portfolios, IReadOnlyList<Account> accounts,
         IReadOnlyDictionary<Guid, AccountSnapshot> snapshots)
     {
         decimal? Value(Account a) => a.VenueId == "manual" ? a.ManualAccountValueUsd : snapshots.GetValueOrDefault(a.Id)?.AccountValueUsd;
@@ -171,10 +171,13 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             var enabledMembers = members.Where(a => a.IsEnabled).ToList();
             var values = enabledMembers.Select(Value).Where(v => v.HasValue).ToList();
             var balances = enabledMembers.Select(a => Balance(a, snapshots.GetValueOrDefault(a.Id))).OfType<IReadOnlyList<decimal>>().ToList();
+            var available = enabledMembers.Select(a => AvailableBalance(a, snapshots.GetValueOrDefault(a.Id))).OfType<IReadOnlyList<decimal>>().ToList();
             return new PortfolioDto(p.Id, p.Name, members.Count, values.Count == 0 ? null : StablecoinTotals.Sum(values.Select(v => v!.Value)),
                 values.Count == 0 ? "unavailable" : values.Count == enabledMembers.Count ? "complete" : "partial",
                 balances.Count == 0 ? null : StablecoinTotals.Sum(balances.SelectMany(v => v!)),
-                Coverage(balances.Count, enabledMembers.Count), p.Icon);
+                Coverage(balances.Count, enabledMembers.Count), p.Icon,
+                available.Count == 0 ? null : StablecoinTotals.Sum(available.SelectMany(v => v)),
+                available.Count, Coverage(available.Count, enabledMembers.Count), enabledMembers.Count);
         }).ToList();
     }
 
@@ -197,7 +200,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             balances.Count == 0 ? null : StablecoinTotals.Sum(balances.SelectMany(b => b)), balances.Count, Coverage(balances.Count, enabled.Count),
             available.Count == 0 ? null : StablecoinTotals.Sum(available.SelectMany(b => b)), available.Count, Coverage(available.Count, enabled.Count), enabled.Count),
             (await store.FillsAsync(null, 100, ct)).Select(ToDto).ToList(),
-            "Enabled accounts across all portfolios and unassigned only. Total balance sums known perps/manual values and supported stablecoin wallet totals; unified and portfolio-margin accounts use the wallet alone. Available balance uses wallet total minus held for wallet-capable venues, otherwise reported withdrawable funds. Manual value, collateral and equity do not imply availability. Coverage counts accounts with a known amount, not full venue valuation. Nominal USD only: no FX, depeg, lending, EVM or risk adjustment. Availability is not guaranteed free trading margin or withdrawal. Imported fills are recent, not complete lifetime history.");
+            "Enabled accounts across all portfolios and unassigned only. Total balance sums known perps/manual values and supported stablecoin wallet totals; unified and portfolio-margin accounts use the wallet alone. Available balance uses wallet total minus held in unified/portfolio-margin modes, otherwise reported available margin first, then withdrawable funds. Manual value, collateral and equity do not imply availability. Coverage counts accounts with a known amount, not full venue valuation. Nominal USD only: no FX, depeg, lending, EVM or risk adjustment. Availability is not guaranteed free trading margin or withdrawal. Imported fills are recent, not complete lifetime history.");
     }
 
     public async Task<SnapshotDto?> SnapshotAsync(Guid id, CancellationToken ct)
@@ -206,7 +209,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         var s = await store.SnapshotAsync(id, ct);
         return s is null ? null : new(s.ObservedAtUtc, s.ValueScope, Money(s.AccountValueUsd), Money(s.WithdrawableUsd), Money(s.MarginUsedUsd),
             s.Positions.OrderBy(p => p.ContractId).Select(p => new PositionDto(p.ContractId, Money(p.SignedQuantity)!, Money(p.EntryPrice)!,
-                Money(p.UnrealizedPnlUsd)!, Money(p.MarginUsedUsd)!, p.Leverage)).ToList(), WalletDto(s));
+                Money(p.UnrealizedPnlUsd)!, Money(p.MarginUsedUsd)!, p.Leverage)).ToList(), WalletDto(s), Money(s.AvailableMarginUsd));
     }
 
     public async Task<PortfolioDto> PortfolioAsync(Guid id, CancellationToken ct) =>
@@ -292,13 +295,14 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
 
     private async Task<Account> RequireAccount(Guid id, CancellationToken ct) =>
         await store.AccountAsync(id, ct) ?? throw new WorkspaceException(404, "Account not found.");
-    private static AccountDto ToDto(Account a, AccountSnapshot? s) => new(a.Id, a.PortfolioId, a.Name, a.VenueId, a.Address,
+    private AccountDto ToDto(Account a, AccountSnapshot? s) => new(a.Id, a.PortfolioId, a.Name, a.VenueId, a.Address,
         Money(a.VenueId == "manual" ? a.ManualAccountValueUsd : s?.AccountValueUsd), a.LastSyncedAtUtc,
         a.SyncStatus, a.LastSyncError, a.IsEnabled ? s?.Positions.Count ?? 0 : 0, a.HistoryNotice, a.IsEnabled, a.SettingsRevision,
         s?.StablecoinsObservedAtUtc is null ? null : StablecoinTotals.Sum(s.Stablecoins.Select(balance => balance.Available)),
         s?.StablecoinScope, s?.AccountMode,
         s?.StablecoinsObservedAtUtc is null ? null : StablecoinTotals.Sum(s.Stablecoins.Select(balance => balance.Total)),
-        Balance(a, s) is { } balance ? StablecoinTotals.Sum(balance) : null, a.SourceId);
+        Balance(a, s) is { } balance ? StablecoinTotals.Sum(balance) : null, a.SourceId,
+        AvailableBalance(a, s) is { } available ? StablecoinTotals.Sum(available) : null, AvailableSource(a, s));
 
     /// <summary>
     /// What the account holds in nominal USD. Unified and portfolio-margin accounts keep every balance in the spot
@@ -315,14 +319,23 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         return s.AccountValueUsd is { } perps ? [perps, ..wallet ?? []] : wallet;
     }
 
-    /// <summary>Wallet availability replaces, never adds to, perps withdrawal for wallet-capable venues.</summary>
-    private IReadOnlyList<decimal>? AvailableBalance(Account a, AccountSnapshot? s)
+    /// <summary>One reported availability source per enabled account. Never infer it from equity or margin used.</summary>
+    private string? AvailableSource(Account a, AccountSnapshot? s)
     {
-        if (a.VenueId == VenueDescriptor.ManualId || s is null) return null;
-        if (venues.Descriptor(a.VenueId)?.Capabilities.StablecoinWallet == true)
-            return s.StablecoinsObservedAtUtc is null ? null : s.Stablecoins.Select(balance => balance.Available).ToList();
-        return s.WithdrawableUsd is { } withdrawable ? [withdrawable] : null;
+        if (!a.IsEnabled || a.VenueId == VenueDescriptor.ManualId || s is null) return null;
+        if (venues.Descriptor(a.VenueId)?.Capabilities.StablecoinWallet == true &&
+            s.AccountMode is "unifiedAccount" or "portfolioMargin")
+            return s.StablecoinsObservedAtUtc is null ? null : "wallet";
+        return s.AvailableMarginUsd is not null ? "margin" : s.WithdrawableUsd is not null ? "withdrawable" : null;
     }
+
+    private IReadOnlyList<decimal>? AvailableBalance(Account a, AccountSnapshot? s) => AvailableSource(a, s) switch
+    {
+        "wallet" => s!.Stablecoins.Select(balance => balance.Available).ToList(),
+        "margin" => [s!.AvailableMarginUsd!.Value],
+        "withdrawable" => [s!.WithdrawableUsd!.Value],
+        _ => null
+    };
 
     private static string Coverage(int known, int enabled) =>
         known == 0 ? "unavailable" : known == enabled ? "complete" : "partial";

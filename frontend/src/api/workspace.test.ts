@@ -9,6 +9,35 @@ function response(body: unknown, status = 200) {
   return fetch
 }
 describe('Core workspace API', () => {
+  it.each([undefined, null, '0', '-0.0000000000000000000000000001', '131.89123456789012345678901234'])('keeps exact nullable snapshot available margin %s', async value => {
+    const snapshot = { observedAtUtc: '2026-10-12T10:00:00Z', valueScope: 'fixture', accountValueUsd: '1000',
+      withdrawableUsd: null, availableMarginUsd: value, marginUsedUsd: '20', positions: [] }
+    response(snapshot)
+    expect((await createWorkspaceApi('token').snapshot(accountFixture.id))?.availableMarginUsd).toBe(value)
+  })
+  it.each([0, '', '1e3', ' ', true, {}, ['0']])('rejects malformed snapshot available margin %j', async value => {
+    response({ observedAtUtc: '2026-10-12T10:00:00Z', valueScope: 'fixture', accountValueUsd: '1000',
+      withdrawableUsd: null, availableMarginUsd: value, marginUsedUsd: '20', positions: [] })
+    await expect(createWorkspaceApi('token').snapshot(accountFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+  it('keeps the account available amount and selected source, and portfolio coverage', async () => {
+    const account = { ...accountFixture, availableBalanceUsd: '-0.0000000000000000000000000001', availableBalanceSource: 'margin' }
+    response(account)
+    expect(await createWorkspaceApi('token').account(accountFixture.id)).toEqual(account)
+    const portfolio = { ...portfolioFixture, availableBalanceUsd: '0', availableBalanceAccountCount: 1,
+      enabledAccountCount: 2, availableBalanceCoverage: 'partial' }
+    response([portfolio])
+    expect(await createWorkspaceApi('token').portfolios()).toEqual([portfolio])
+  })
+  it.each([{ availableBalanceUsd: 0 }, { availableBalanceUsd: '' }, { availableBalanceSource: 'equity' }, { availableBalanceSource: ['margin'] }])('rejects malformed account availability %j', async fields => {
+    response({ ...accountFixture, ...fields })
+    await expect(createWorkspaceApi('token').account(accountFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+  it.each([{ availableBalanceUsd: 0 }, { availableBalanceUsd: '' }, { availableBalanceAccountCount: -1 },
+    { enabledAccountCount: 0.5 }, { availableBalanceCoverage: 'full' }, { availableBalanceCoverage: ['partial'] }])('rejects malformed portfolio availability %j', async fields => {
+    response([{ ...portfolioFixture, ...fields }])
+    await expect(createWorkspaceApi('token').portfolios()).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
   it('keeps exact combined balance strings and coverage and never caches overview responses', async () => {
     const fixture = { ...emptyOverview, totals: { ...emptyOverview.totals,
       totalBalanceUsd: '79228162514264337593543950335.0000000000000000000000000001',

@@ -20,12 +20,15 @@ public sealed record UpdateAccountRequest(
 /// or the wallet alone in unified and portfolio-margin modes, so no ledger is counted twice.
 /// </summary>
 public sealed record PortfolioDto(Guid Id, string Name, int AccountCount, string? TotalValueUsd, string ValueCoverage,
-    string? BalanceUsd = null, string BalanceCoverage = "unavailable", string Icon = PortfolioIcons.Default);
+    string? BalanceUsd = null, string BalanceCoverage = "unavailable", string Icon = PortfolioIcons.Default,
+    string? AvailableBalanceUsd = null, int AvailableBalanceAccountCount = 0,
+    string AvailableBalanceCoverage = "unavailable", int EnabledAccountCount = 0);
 public sealed record AccountDto(Guid Id, Guid? PortfolioId, string Name, string VenueId, string? Address,
     string? AccountValueUsd, DateTimeOffset? LastSyncedAtUtc, string SyncStatus, string? LastSyncError,
     int PositionCount, string? HistoryNotice, bool IsEnabled, long SettingsRevision,
     string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null,
-    string? TotalStablecoinNominalUsd = null, string? BalanceUsd = null, string? SourceId = null);
+    string? TotalStablecoinNominalUsd = null, string? BalanceUsd = null, string? SourceId = null,
+    string? AvailableBalanceUsd = null, string? AvailableBalanceSource = null);
 public sealed record AccountInstrumentsDto(string VenueId, string MarketScope, string Scope,
     IReadOnlyList<VenueInstrument> Instruments, string Notice);
 /// <summary>Where a catalogue comes from: the venue's selectable perpetuals, or none for a manual account.</summary>
@@ -37,7 +40,7 @@ public sealed record PositionDto(string ContractId, string SignedQuantity, strin
     string UnrealizedPnlUsd, string MarginUsedUsd, int? Leverage);
 public sealed record SnapshotDto(DateTimeOffset ObservedAtUtc, string ValueScope, string? AccountValueUsd,
     string? WithdrawableUsd, string? MarginUsedUsd, IReadOnlyList<PositionDto> Positions,
-    StablecoinWalletDto? StablecoinWallet = null);
+    StablecoinWalletDto? StablecoinWallet = null, string? AvailableMarginUsd = null);
 public sealed record StablecoinBalanceDto(string Symbol, int TokenIndex, string TokenId,
     string Total, string Held, string Available);
 public sealed record StablecoinWalletDto(DateTimeOffset ObservedAtUtc, string AccountMode, string Scope,

@@ -28,6 +28,37 @@ function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
 }
 beforeEach(() => { window.history.replaceState(null, '', '/') })
 describe('Main application shell', () => {
+  it.each([
+    ['lighter', 'margin', '131.89123456789012345678901234', '$131.89', 'Venue-reported available margin · not guaranteed withdrawable'],
+    ['risex', 'margin', '0', '$0.00', 'Venue-reported available margin · not guaranteed withdrawable'],
+    ['hyperliquid', 'withdrawable', '35', '$35.00', 'Venue-reported perps withdrawable'],
+    ['risex', null, null, '—', 'Not reported by this venue'],
+  ] as const)('shows the selected available source in %s account rows and detail', async (venueId, source, value, display, note) => {
+    const account = { ...accountFixture, venueId, availableBalanceUsd: value, availableBalanceSource: source }
+    const client = api({
+      overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [account] }),
+      snapshot: vi.fn().mockResolvedValue({ observedAtUtc: '2026-10-12T10:00:00Z', valueScope: 'fixture',
+        accountValueUsd: '1000', withdrawableUsd: source === 'withdrawable' ? value : null,
+        availableMarginUsd: source === 'margin' ? value : null, marginUsedUsd: '20', positions: [] }),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    const row = (await screen.findByRole('button', { name: 'View Main account' })).closest('tr')!
+    expect(row).toHaveTextContent(`Available balance ${display}`)
+    await userEvent.click(screen.getByRole('button', { name: 'View Main account' }))
+    await screen.findByText('Latest snapshot')
+    const available = screen.getByText('Available balance').closest('.metric')!
+    expect(available).toHaveTextContent(display)
+    expect(available).toHaveTextContent(note)
+    if (source === 'margin') expect(available).toHaveTextContent('Perps withdrawable — · separate field')
+  })
+  it('shows portfolio available balance with enabled-account coverage, not the equity subtotal', async () => {
+    const portfolio = { ...portfolioFixture, availableBalanceUsd: '131.89', availableBalanceAccountCount: 1,
+      enabledAccountCount: 2, availableBalanceCoverage: 'partial' as const }
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api({ overview: vi.fn().mockResolvedValue({ ...overviewFixture, portfolios: [portfolio] }) })} />)
+    await screen.findByRole('button', { name: 'View Main account' })
+    await userEvent.click(screen.getByRole('link', { name: 'Portfolios' }))
+    expect(await screen.findByRole('button', { name: 'Open Swing trading' })).toHaveTextContent('Available balance $131.89 · 1 of 2 enabled · partial')
+  })
   it('shows combined total and available balances with coverage, and rereads after refresh', async () => {
     const refreshed = { ...overviewFixture, totals: { ...overviewFixture.totals, totalBalanceUsd: '240', availableBalanceUsd: '95',
       balanceAccountCount: 3, availableBalanceAccountCount: 2, balanceCoverage: 'complete' as const, availableBalanceCoverage: 'partial' as const } }
@@ -610,6 +641,7 @@ describe('Main application shell', () => {
   })
   it('shows available stablecoins rather than misleading zero perp equity for a unified wallet', async () => {
     const wallet = { ...accountFixture, venueId: 'hyperliquid', accountValueUsd: '0',
+      availableBalanceUsd: '10.123456', availableBalanceSource: 'wallet' as const,
       availableStablecoinNominalUsd: '10.123456', accountMode: 'unifiedAccount', stablecoinScope: 'hypercore-spot-stablecoins' }
     const client = api({
       overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [wallet],
@@ -633,7 +665,8 @@ describe('Main application shell', () => {
     expect(screen.getByText('10.123456')).toBeInTheDocument()
     expect(screen.getByText('Wallet funds, not guaranteed trading margin.')).toBeInTheDocument()
     expect(screen.getByText(/^Separate Hyperliquid perpetuals equity: \$0\.00\./)).toBeInTheDocument()
-    expect(screen.getByText('Separate venue field · not added to wallet funds')).toBeInTheDocument()
+    expect(screen.getByText('Wallet total minus held · nominal')).toBeInTheDocument()
+    expect(screen.getByText('Perps withdrawable $0.00 · separate field')).toBeInTheDocument()
   })
   it('names an unreported withdrawable amount and shows no wallet note for a venue without a wallet', async () => {
     const venue = { ...systemFixture.venues[0]!, id: 'risex', name: 'RISEx', tradeUrlTemplate: 'https://www.rise.trade/trade/{instrument}',

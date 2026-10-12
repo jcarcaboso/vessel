@@ -148,6 +148,7 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
             snapshot.ValueScope = observation.ValueScope;
             snapshot.AccountValueUsd = observation.AccountValueUsd;
             snapshot.WithdrawableUsd = observation.WithdrawableUsd;
+            snapshot.AvailableMarginUsd = observation.AvailableMarginUsd;
             snapshot.MarginUsedUsd = observation.MarginUsedUsd;
             snapshot.Positions = observation.Positions.Select(p => new AccountPosition
             {

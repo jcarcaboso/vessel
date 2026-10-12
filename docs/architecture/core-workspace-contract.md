@@ -33,6 +33,8 @@ All routes below use the authenticated owner, never an owner ID supplied by the 
 id, name, accountCount,
 totalValueUsd: string|null,
 valueCoverage: "complete"|"partial"|"unavailable"
+availableBalanceUsd: string|null, availableBalanceAccountCount, enabledAccountCount,
+availableBalanceCoverage: "complete"|"partial"|"unavailable"
 ```
 
 The first management workflow assigns each new account to one portfolio. Existing unassigned foundation accounts can remain unassigned until later migration/UI work. This is an initial workflow assumption, not permission to double-count accounts in future portfolio grouping.
@@ -52,6 +54,7 @@ The first management workflow assigns each new account to one portfolio. Existin
 id, portfolioId: string|null, name, venueId,
 address: string|null,
 accountValueUsd: string|null,
+availableBalanceUsd: string|null, availableBalanceSource: "wallet"|"margin"|"withdrawable"|null,
 lastSyncedAtUtc: string|null,
 syncStatus: "manual"|"not-synced"|"synced"|"error",
 lastSyncError: string|null,
@@ -72,7 +75,7 @@ historyNotice: string|null
 
 ```text
 observedAtUtc, valueScope,
-accountValueUsd, withdrawableUsd, marginUsedUsd,
+accountValueUsd, withdrawableUsd, availableMarginUsd, marginUsedUsd,
 positions: [{
   contractId, signedQuantity, entryPrice,
   unrealizedPnlUsd, marginUsedUsd, leverage: number|null
@@ -118,7 +121,10 @@ Only known account values contribute to the aggregate. If no values are known, t
 Overview shows Total balance and Available balance, with known-account counts out of enabled accounts and coverage. Both span all portfolios and unassigned accounts exactly once, never disabled accounts. The earlier `totalAccountValueUsd` remains the perps/manual subtotal; it is not the headline balance.
 
 - Total balance sums each account's `Balance`: manual recorded value; supported-stablecoin wallet total alone for unified/portfolio-margin accounts; otherwise known perps equity plus any observed supported-stablecoin wallet total. A non-unified account with only one known ledger contributes that known amount. A unified account without an observed wallet contributes nothing, even if it has a perps field.
-- Available balance uses supported wallet total minus held for venues with `stablecoinWallet`, otherwise the snapshot's reported `withdrawableUsd`. Never add perps withdrawal to wallet availability or derive availability from equity, collateral or manual value. Lighter currently stores `total_asset_value` as equity and no withdrawable amount; its discovery collateral/available fields are not retained snapshot funds. RISEx also leaves withdrawal unknown.
+- Available balance selects one source per enabled account. A wallet-capable account in `unifiedAccount` or `portfolioMargin` uses observed supported wallet total minus held only. Without that observation it stays unknown, even if a perps field exists. All other modes use reported `availableMarginUsd` first, then `withdrawableUsd`. Standard Hyperliquid therefore uses perps `withdrawable`, not its separate spot wallet. Never add availability sources, derive availability from equity minus margin, or use manual value or discovery amounts as snapshot funds.
+- `availableMarginUsd` stores Lighter account `available_balance` and RISEx summary `free_collateral`. The RISEx API defines free collateral as available for new positions. Lighter names an available balance but does not establish guaranteed withdrawal capacity in its account schema; Vessel does not relabel it as withdrawable. Missing, null or empty strings are unknown; an explicit zero is known. Signed exact decimals are preserved without clamping. Both venues keep `withdrawableUsd` null.
+- Account DTOs expose the selected `availableBalanceUsd` and `availableBalanceSource` (`wallet`, `margin`, `withdrawable`, or null). Disabled accounts expose neither. Portfolio DTOs expose `availableBalanceUsd`, `availableBalanceAccountCount`, `availableBalanceCoverage` and `enabledAccountCount`, using the same selection as Overview. Account detail names the selected source and keeps the separate perps withdrawal field; account rows and portfolio tiles show availability without another ledger addition.
+- Migration `20261012192227_AvailableMargin`, generated with the repository's pinned .NET EF CLI and persistence startup project, adds nullable unconstrained numeric `account_snapshots.AvailableMarginUsd`. Existing snapshots remain unknown until an explicit refresh. Apply it explicitly during deployment; verification uses only disposable databases.
 - Coverage counts accounts with a known eligible amount, not completeness of venue valuation. No known accounts means null and `unavailable`; some means `partial`; all enabled means `complete`. An observed empty wallet is known zero. Exact ledger amounts reach `StablecoinTotals.Sum` without intermediate decimal addition, including within a single account.
 - The legacy wallet-only subtotal also excludes disabled accounts. Position and imported-execution behaviour is unchanged.
 

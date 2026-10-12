@@ -14,7 +14,7 @@ public sealed partial class LighterReader
     internal const string HistoryNotice =
         "Incomplete Lighter history: at most the latest 500 perpetual executions, no backfill. " +
         "Only fee-free executions with reported realized PnL are imported; liquidation, deleverage, settlement and self-trade records are not. " +
-        "USDC perpetual equity only, no spot wallets. Margin is the initial-margin requirement. Withdrawal availability is unknown.";
+        "USDC perpetual equity only, no spot wallets. Margin is the initial-margin requirement. Reported availability is not guaranteed withdrawal capacity.";
     internal const string NonzeroRateNotice = "The account reports a nonzero maker or taker rate. No fills were imported.";
     internal const string CredentialRefusedNotice = "The optional read-only credential could not be verified. Public reads only; verify or replace the token.";
     internal const string HistoryRetryNotice = "The history credential was refused. Retrying this page once as a public read.";
@@ -167,7 +167,8 @@ public sealed partial class LighterReader
                 VenueContractId: id));
         }
         return new(observed, "lighter-perps-account", Number(account, "total_asset_value"), null,
-            ExactSum(Nonnegative(account, "cross_initial_margin_requirement"), isolatedRequirement), positions);
+            ExactSum(Nonnegative(account, "cross_initial_margin_requirement"), isolatedRequirement), positions,
+            AvailableMarginUsd: Json.OptionalAmount(account, "available_balance"));
     }
 
     private static decimal ExactSum(decimal first, decimal second)
