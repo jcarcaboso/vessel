@@ -3,6 +3,7 @@ import {
   sidedPositionPoints,
   priceRangeStats, type ChartDrawing, type DrawingKind, type DrawingPoint,
 } from './drawings'
+import { FrameEdit } from './frameEdit'
 
 /** Pane coordinate conversions supplied by the renderer adapter. */
 export interface DrawingSpace {
@@ -22,6 +23,7 @@ export interface DrawingCallbacks {
   onDrawingCreate(drawing: ChartDrawing): void
   onDrawingChange(drawing: ChartDrawing, phase: 'move' | 'end'): void
   onDrawingSelect(id: string | null): void
+  onDrawingCancel?(): void
 }
 
 export interface DrawingTheme {
@@ -72,10 +74,13 @@ export class DrawingController {
   magnet = false
   private gesture: Gesture | null = null
   private preview: ChartDrawing | null = null
+  private readonly edit: FrameEdit<ChartDrawing>
   /** Pane x of the free vertical guide shown while a tool is active, or null. */
   private guide: number | null = null
 
-  constructor(private readonly space: DrawingSpace, private readonly callbacks: DrawingCallbacks, private readonly requestUpdate: () => void) {}
+  constructor(private readonly space: DrawingSpace, private readonly callbacks: DrawingCallbacks, private readonly requestUpdate: () => void) {
+    this.edit = new FrameEdit((drawing, phase) => this.callbacks.onDrawingChange(drawing, phase))
+  }
 
   get busy() { return this.gesture !== null }
 
@@ -91,6 +96,8 @@ export class DrawingController {
   }
 
   cancel() {
+    if (this.gesture && this.gesture.type !== 'create') this.callbacks.onDrawingCancel?.()
+    this.edit.cancel()
     this.gesture = null
     this.preview = null
     this.requestUpdate()
@@ -143,13 +150,13 @@ export class DrawingController {
       const point = this.space.point(x, y, this.magnet)
       if (!point) return true
       gesture.moved = true
-      this.callbacks.onDrawingChange(this.resize(gesture.drawing, gesture.index, point), 'move')
+      this.move(this.resize(gesture.drawing, gesture.index, point))
       return true
     }
     if (!gesture.moved && Math.hypot(x - gesture.x, y - gesture.y) < 3) return true
     gesture.moved = true
     const moved = this.translate(gesture.drawing, x - gesture.x, y - gesture.y)
-    if (moved) this.callbacks.onDrawingChange(moved, 'move')
+    if (moved) this.move(moved)
     return true
   }
 
@@ -176,8 +183,18 @@ export class DrawingController {
     const finished = gesture.type === 'handle'
       ? (() => { const point = this.space.point(x, y, this.magnet); return point ? this.resize(gesture.drawing, gesture.index, point) : null })()
       : this.translate(gesture.drawing, x - gesture.x, y - gesture.y)
-    if (finished) this.callbacks.onDrawingChange(finished, 'end')
+    if (finished) {
+      this.edit.end(finished)
+    } else this.edit.cancel()
+    this.preview = null
+    this.requestUpdate()
     return true
+  }
+
+  private move(drawing: ChartDrawing) {
+    this.preview = drawing
+    this.requestUpdate()
+    this.edit.move(drawing)
   }
 
   cursor(x: number, y: number) {
@@ -306,7 +323,7 @@ export class DrawingController {
   }
 
   render(context: CanvasRenderingContext2D, theme: DrawingTheme) {
-    const all = this.preview ? [...this.drawings, this.preview] : this.drawings
+    const all = this.preview ? [...this.drawings.filter(drawing => drawing.id !== this.preview!.id), this.preview] : this.drawings
     context.save()
     context.lineCap = 'round'
     context.font = `500 ${textFont - 1}px ${theme.font}`

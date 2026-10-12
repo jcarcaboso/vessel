@@ -494,6 +494,18 @@ describe('Chart panel level editing', () => {
     expect(selectedExit()).toEqual(['price', value, '100'])
   })
 
+  it('keeps a level drag cut short by a chart reset as one undo step', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<LevelHarness factory={factory} onSelect={vi.fn()} initial={two()} />)
+    await screen.findByText(/Updated/)
+    const second = state.overlays.find(o => o.label === 'E2 SL')!
+    act(() => state.callbacks!.onLevelDrag(second.id, 84, 'move'))
+    act(() => state.callbacks!.onLevelCancel!())
+    expect(shown()[1]!.stop.value).toBe('84')
+    await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    expect(shown()[1]!.stop.value).toBe('85')
+  })
+
   it('edits a percentage level price on the chart and switches it to price units', async () => {
     const { state, factory } = fakeAdapter()
     render(<LevelHarness factory={factory} initial={two()} />)
