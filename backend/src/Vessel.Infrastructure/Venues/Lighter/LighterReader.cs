@@ -143,13 +143,14 @@ public sealed partial class LighterReader(HttpClient httpClient, TimeProvider ti
     }
 
     private readonly LighterCatalogueCache catalogues = catalogueCache ?? new(timeProvider);
-    private Task<Catalogue> CatalogueAsync(CancellationToken ct) => catalogues.GetAsync(token =>
+    // Imports pass refresh so a market listed within the cache lifetime is not filtered out of their facts.
+    private Task<Catalogue> CatalogueAsync(CancellationToken ct, bool refresh = false) => catalogues.GetAsync(token =>
         // Public single-flight metadata must not reacquire the account-read semaphore.
         Http.ReadBoundedAsync(async bounded =>
         {
             using var document = await GetAsync("orderBookDetails", bounded);
             return ReadCatalogue(document.RootElement);
-        }, token), ct);
+        }, token), ct, refresh);
 
     // Official schemas: https://apidocs.lighter.xyz/reference/orderbookdetails.md
     // and https://apidocs.lighter.xyz/reference/orderbooks.md, checked with public mainnet on 2026-10-07.
@@ -213,5 +214,5 @@ public sealed class LighterCatalogueCache(TimeProvider time)
 {
     private readonly BoundedMarketDataCache<LighterReader.Catalogue> entries = new(time, 1, 1, _ => 1);
     internal Task<LighterReader.Catalogue> GetAsync(Func<CancellationToken, Task<LighterReader.Catalogue>> load,
-        CancellationToken ct) => entries.GetAsync("order-books", load, _ => TimeSpan.FromSeconds(60), ct);
+        CancellationToken ct, bool refresh = false) => entries.GetAsync("order-books", load, _ => TimeSpan.FromSeconds(60), ct, refresh);
 }

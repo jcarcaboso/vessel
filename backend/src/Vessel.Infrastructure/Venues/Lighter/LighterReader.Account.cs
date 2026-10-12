@@ -42,7 +42,7 @@ public sealed partial class LighterReader
         BoundedAsync(async ct =>
         {
             var refused = false;
-            var catalogue = await CatalogueAsync(ct);
+            var catalogue = await CatalogueAsync(ct, refresh: true);
             using var account = await AccountAsync(source, ct);
             var snapshot = ReadSnapshot(account.RootElement.GetProperty("accounts")[0], catalogue, timeProvider.GetUtcNow());
             var notices = new List<string> { HistoryNotice };

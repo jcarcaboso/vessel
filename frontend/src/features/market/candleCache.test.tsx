@@ -9,7 +9,11 @@ import { useCandles } from './useCandles'
 function candle(time: number, trades = 10, close = '103'): VenueCandle {
   return { openTime: time, closeTime: time + 59_999, open: '100', high: '105', low: '95', close, volume: '20', trades }
 }
-const series = (...candles: VenueCandle[]): CandleSeries => ({ ...candleSeriesFixture, candles, historyExhausted: false })
+/** A window whose fetched range is exactly its candles unless a range is given. */
+const series = (...candles: VenueCandle[]): CandleSeries => ({ ...candleSeriesFixture, candles, historyExhausted: false,
+  requestedFrom: candles[0]?.openTime ?? 0, requestedTo: candles.at(-1)?.closeTime ?? 0 })
+const windowed = (requestedFrom: number, requestedTo: number, ...candles: VenueCandle[]): CandleSeries =>
+  ({ ...series(...candles), requestedFrom, requestedTo })
 function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (error: unknown) => void
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
@@ -80,6 +84,37 @@ describe('session candle cache', () => {
     candles.mockResolvedValueOnce(series(candle(90_000), candle(180_000)))
     await cache.load(entry, 'latest')
     expect(entry.snapshot.candles.map(c => c.time)).toEqual([60_000, 90_000, 120_000, 180_000])
+  })
+
+  it('keeps history when fetched windows overlap through a no-trade period', async () => {
+    const { cache, entry, candles } = setup(vi.fn<WorkspaceApi['candles']>().mockResolvedValue(windowed(0, 300_000, candle(60_000), candle(120_000))))
+    await cache.load(entry, 'latest')
+    candles.mockResolvedValueOnce(windowed(100_000, 400_000, candle(360_000)))
+    await cache.load(entry, 'latest')
+    expect(entry.snapshot.candles.map(c => c.time)).toEqual([60_000, 120_000, 360_000])
+  })
+
+  it('replaces the series when fetched windows are disjoint, even after a live candle bridged them', async () => {
+    const { cache, entry, candles } = setup(vi.fn<WorkspaceApi['candles']>().mockResolvedValue(windowed(0, 300_000, candle(60_000), candle(120_000))))
+    await cache.load(entry, 'latest')
+    cache.upsert(entry, candle(900_000), '2026-10-11T12:00:00Z')
+    candles.mockResolvedValueOnce(windowed(800_000, 1_000_000, candle(840_000), candle(900_000)))
+    await cache.load(entry, 'latest')
+    expect(entry.snapshot.candles.map(c => c.time)).toEqual([840_000, 900_000])
+  })
+
+  it('ignores a late failure from a read that a refresh superseded', async () => {
+    const { cache, entry, candles } = setup()
+    await cache.load(entry, 'latest')
+    const activation = deferred<CandleSeries>()
+    candles.mockReturnValueOnce(activation.promise).mockResolvedValueOnce(series(candle(60_000), candle(120_000, 20, '104')))
+    const stale = cache.load(entry, 'latest')
+    await cache.load(entry, 'refresh')
+    activation.reject(new ApiError('http', 'This market is no longer listed.', 409))
+    await stale
+    expect(cache.entries.get(entry.key)).toBe(entry)
+    expect(entry.snapshot.status).toBe('ready')
+    expect(entry.snapshot.candles[1]?.close).toBe(104)
   })
 
   it('expires older pages at activation without renewing their age from REST or live', async () => {
@@ -153,6 +188,9 @@ describe('session candle cache', () => {
     act(() => hook.result.current.refresh())
     await waitFor(() => expect(hook.result.current.status).toBe('ready'))
     expect(hook.result.current.candles.map(c => c.time)).toEqual([60_000, 120_000])
+    // The retry keeps Refresh's server-cache bypass, and activation joins it instead of reading again.
+    expect(candles).toHaveBeenCalledTimes(2)
+    expect(candles).toHaveBeenLastCalledWith('lighter-main', { instrument: 'BTC', interval: '1m', refresh: true }, expect.any(AbortSignal))
   })
 
   it.each([new ApiError('http', 'Venue unavailable.', 502), new TypeError('Network unavailable')])('retains cached candles on a refresh failure (%s)', async error => {

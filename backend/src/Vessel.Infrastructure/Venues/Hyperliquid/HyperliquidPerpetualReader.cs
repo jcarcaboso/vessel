@@ -87,12 +87,13 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
     private readonly HyperliquidCatalogueCache catalogues = catalogueCache ?? new(timeProvider);
     internal sealed record Catalogue(IReadOnlyList<VenueInstrument> All, IReadOnlyList<VenueInstrument> Selectable);
 
-    private Task<Catalogue> CatalogueAsync(CancellationToken ct) => catalogues.GetAsync(token =>
+    // Imports pass refresh so a market listed within the cache lifetime is not filtered out of their facts.
+    private Task<Catalogue> CatalogueAsync(CancellationToken ct, bool refresh = false) => catalogues.GetAsync(token =>
         ReadBoundedAsync(async bounded =>
         {
             using var meta = await ReadJsonAsync(new { type = "meta", dex = "" }, bounded);
             return new Catalogue(ReadInstruments(meta.RootElement), ReadInstruments(meta.RootElement, selectableOnly: true));
-        }, token), ct);
+        }, token), ct, refresh);
 
     public async Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken cancellationToken) =>
         (await CatalogueAsync(cancellationToken)).Selectable;
@@ -105,7 +106,7 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
 
         return await ReadBoundedAsync(async token =>
         {
-            var instruments = (await CatalogueAsync(token)).All;
+            var instruments = (await CatalogueAsync(token, refresh: true)).All;
             var contracts = instruments.Select(instrument => instrument.VenueContractId ?? instrument.ContractId)
                 .ToHashSet(StringComparer.Ordinal);
 
@@ -353,6 +354,6 @@ public sealed class HyperliquidCatalogueCache(TimeProvider time)
 {
     private readonly BoundedMarketDataCache<HyperliquidPerpetualReader.Catalogue> entries = new(time, 1, 1, _ => 1);
     internal Task<HyperliquidPerpetualReader.Catalogue> GetAsync(
-        Func<CancellationToken, Task<HyperliquidPerpetualReader.Catalogue>> load, CancellationToken ct) =>
-        entries.GetAsync("primary", load, _ => TimeSpan.FromSeconds(60), ct);
+        Func<CancellationToken, Task<HyperliquidPerpetualReader.Catalogue>> load, CancellationToken ct, bool refresh = false) =>
+        entries.GetAsync("primary", load, _ => TimeSpan.FromSeconds(60), ct, refresh);
 }

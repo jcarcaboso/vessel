@@ -29,6 +29,8 @@ export interface CandleEntry {
   snapshot: Snapshot
   pages: Map<number, Page>
   tailTimes: Set<number>
+  /** End of the fetched REST tail coverage; live candles never extend it. */
+  coveredTo: number | null
   buffer: Map<number, Tick>
   controllers: Set<AbortController>
   flights: Map<string, { controller: AbortController; promise: Promise<void> }>
@@ -78,7 +80,7 @@ export class CandleCache {
     let entry = this.entries.get(key)
     if (!entry) {
       entry = { key, accountId, instrument, interval, generation: 0, historyGeneration: 0, tailRequest: 0,
-        viewers: 0, lastView: ++this.clock, snapshot: initial(), pages: new Map(), tailTimes: new Set(), buffer: new Map(),
+        viewers: 0, lastView: ++this.clock, snapshot: initial(), pages: new Map(), tailTimes: new Set(), coveredTo: null, buffer: new Map(),
         controllers: new Set(), flights: new Map(), listeners: new Set() }
       this.entries.set(key, entry)
       this.trim(entry)
@@ -119,6 +121,7 @@ export class CandleCache {
     entry.buffer.clear()
     entry.pages.clear()
     entry.tailTimes.clear()
+    entry.coveredTo = null
     this.entries.delete(entry.key)
     this.publish(entry, { ...initial(), status: 'error', error })
   }
@@ -222,8 +225,10 @@ export class CandleCache {
       ...(endTime !== undefined ? { endTime } : {}), ...(mode === 'refresh' ? { refresh: true } : {}) }, controller.signal).then((series: CandleSeries) => {
       if (connectionGeneration !== this.generation || !this.valid(entry, generation) || (older ? entry.historyGeneration !== historyGeneration : entry.tailRequest !== request)) return
       const current = entry.snapshot.venueCandles
-      const gap = !older && series.candles.length > 0 && current.length > 0 && series.candles[0]!.openTime > current.at(-1)!.openTime
+      // Fetched ranges decide continuity: an empty stretch inside them is a no-trade period, not a gap.
+      const gap = !older && current.length > 0 && entry.coveredTo !== null && series.requestedFrom > entry.coveredTo
       if (gap) { entry.historyGeneration++; entry.pages.clear(); entry.tailTimes.clear() }
+      if (!older) entry.coveredTo = gap || entry.coveredTo === null ? series.requestedTo : Math.max(entry.coveredTo, series.requestedTo)
       const incoming = older ? series.candles.filter(candle => candle.openTime <= endTime!) : series.candles
       if (older) entry.pages.set(endTime!, { fetchedAt: Date.now(), times: new Set(incoming.map(candle => candle.openTime)) })
       else incoming.forEach(candle => entry.tailTimes.add(candle.openTime))
@@ -250,10 +255,11 @@ export class CandleCache {
     }, (error: unknown) => {
       if (!this.valid(entry, generation)) return
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) { this.invalidate(undefined, message(error)); return }
+      // A superseded read's failure says nothing about the newer one.
+      if (connectionGeneration !== this.generation || (older ? entry.historyGeneration !== historyGeneration : entry.tailRequest !== request)) return
       // A missing account ends every chart for it; a 409 may name only this market, so other charts keep streaming.
       if (error instanceof ApiError && error.status === 404) { this.invalidate(entry.accountId, message(error)); return }
       if (error instanceof ApiError && error.status === 409) { this.drop(entry, message(error)); return }
-      if (older ? entry.historyGeneration !== historyGeneration : entry.tailRequest !== request) return
       if (!older) this.flush(entry)
       this.publish(entry, older ? { olderError: message(error) } : { status: entry.snapshot.candles.length ? 'ready' : 'error', error: message(error), refreshing: false })
     }).finally(() => {

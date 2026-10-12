@@ -537,6 +537,21 @@ public sealed partial class HyperliquidAdapterTests
         return node.ToJsonString();
     }
 
+    [Fact]
+    public async Task Account_reads_refresh_a_cached_catalogue_so_new_listings_are_not_filtered()
+    {
+        var responses = new[] { Meta, Meta, State, $"[{Fill}]", "\"default\"", SpotMeta, "{\"balances\":[]}" };
+        using var handler = new FixtureHandler((index, _) => Task.FromResult(Json(responses[index])));
+        using var client = Client(handler);
+        var clock = new TestClock();
+        var cache = new HyperliquidCatalogueCache(clock);
+        await new HyperliquidPerpetualReader(client, clock, cache).ReadInstrumentsAsync(CancellationToken.None);
+        await new HyperliquidPerpetualReader(client, clock, cache).ReadAsync(Address, CancellationToken.None);
+        Assert.Equal(7, handler.Requests.Count);
+        using var payload = JsonDocument.Parse(handler.Requests[1].Body);
+        Assert.Equal("meta", payload.RootElement.GetProperty("type").GetString());
+    }
+
     private static HttpClient Client(HttpMessageHandler handler) =>
         new(handler) { BaseAddress = new Uri("https://api.hyperliquid.xyz/"), Timeout = TimeSpan.FromSeconds(30) };
 
