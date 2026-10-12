@@ -121,12 +121,14 @@ describe('adapter level gesture lifecycle', () => {
     expect(callbacks.onLevelDrag).not.toHaveBeenCalled()
     expect(chart.series[0]!.primitives[0]!.find?.('level')?.price).toBe(102)
     pointer(container, 'pointerup', 103); frames.run()
+    // The capture released by pointerup no longer matches a gesture.
+    pointer(container, 'lostpointercapture', 104)
     expect(callbacks.onLevelDrag).toHaveBeenCalledExactlyOnceWith('level', 103, 'end')
   })
 
-  it('keeps the last-move commit on pointercancel, but cancels the pending frame', () => {
+  it.each(['pointercancel', 'lostpointercapture'])('keeps the last-move commit on %s, but cancels the pending frame', type => {
     adapter.setOverlays([overlay]); pointer(container, 'pointerdown', 100); pointer(container, 'pointermove', 102)
-    pointer(container, 'pointercancel', 103); frames.run()
+    pointer(container, type, 103); frames.run()
     expect(callbacks.onLevelDrag).toHaveBeenCalledExactlyOnceWith('level', 102, 'end')
   })
 
@@ -155,12 +157,12 @@ describe('adapter level gesture lifecycle', () => {
 
 
 describe('adapter drawing gesture cancellation', () => {
-  it.each(['pointercancel', 'source', 'destroy'] as const)('%s drops pending drawing changes', how => {
+  it.each(['pointercancel', 'lostpointercapture', 'source', 'destroy'] as const)('%s drops pending drawing changes', how => {
     adapter.setDrawings([{ id: 'drawing', schemaVersion: 1, kind: 'vertical-line', points: [{ time: 300_000, price: 100 }] }], null)
     pointer(container, 'pointerdown', 500)
     pointer(container, 'pointermove', 500, 450)
     expect(callbacks.onDrawingChange).not.toHaveBeenCalled()
-    if (how === 'pointercancel') pointer(container, 'pointercancel', 500, 450)
+    if (how === 'pointercancel' || how === 'lostpointercapture') pointer(container, how, 500, 450)
     else if (how === 'source') adapter.setCandles(candles, true)
     else adapter.destroy()
     frames.run()

@@ -53,6 +53,32 @@ describe('frame-batched drawing gestures', () => {
     expect(controller.busy).toBe(false)
   })
 
+  it('ends the gesture when the release cannot be converted to a chart point', () => {
+    const frames = testFrames(); const events = callbacks()
+    // Releases below the price scale have no positive price.
+    const bounded: DrawingSpace = { ...space, point: (x, y) => y > 1000 ? null : { time: x, price: 1000 - y } }
+    const controller = new DrawingController(bounded, events, vi.fn())
+    const trend: ChartDrawing = { id: 'trend', schemaVersion: 1, kind: 'trend-line', points: [{ time: 100, price: 500 }, { time: 300, price: 600 }] }
+    controller.drawings = [trend]
+    controller.selectedId = trend.id
+    controller.pointerDown(100, 500); controller.pointerMove(120, 520); frames.run()
+    controller.pointerUp(130, 1200); frames.run()
+    expect(events.onDrawingChange).toHaveBeenCalledOnce()
+    expect(events.onDrawingCancel).toHaveBeenCalledOnce()
+    expect(controller.busy).toBe(false)
+  })
+
+  it('records no undo step for a gesture that ends where it started', () => {
+    const { result } = renderHook(() => {
+      const [drawings, setDrawings] = useState([line])
+      const history = useChartHistory('instrument')
+      return { history, editor: useDrawingEditor(drawings, setDrawings, 'instrument', history) }
+    })
+    act(() => result.current.editor.change({ ...line, points: [{ time: 120, price: 500 }] }, 'move'))
+    act(() => result.current.editor.change(line, 'end'))
+    expect(result.current.history.canUndo).toBe(false)
+  })
+
   it('records one undo step for the entire gesture, and keeps a cancelled gesture as its own step', () => {
     const frames = testFrames()
     const { result } = renderHook(() => {
@@ -100,5 +126,14 @@ describe('frame-batched level publications', () => {
     edit.move(price + epsilon * 2); edit.end(price + epsilon * 3); frames.run()
     expect(publish).toHaveBeenCalledTimes(2)
     expect(publish).toHaveBeenLastCalledWith(price + epsilon * 3, 'end')
+  })
+
+  it('skips a first move that rounds to the starting price', () => {
+    const frames = testFrames(); const publish = vi.fn()
+    const edit = new FrameEdit<number>(publish, (a, b) => roundedLevelPrice(a, 0.25) === roundedLevelPrice(b, 0.25), 100)
+    edit.move(100.01); frames.run()
+    expect(publish).not.toHaveBeenCalled()
+    edit.move(100.3); frames.run()
+    expect(publish).toHaveBeenCalledExactlyOnceWith(100.3, 'move')
   })
 })

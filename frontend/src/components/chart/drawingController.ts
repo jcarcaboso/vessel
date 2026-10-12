@@ -183,9 +183,12 @@ export class DrawingController {
     const finished = gesture.type === 'handle'
       ? (() => { const point = this.space.point(x, y, this.magnet); return point ? this.resize(gesture.drawing, gesture.index, point) : null })()
       : this.translate(gesture.drawing, x - gesture.x, y - gesture.y)
-    if (finished) {
-      this.edit.end(finished)
-    } else this.edit.cancel()
+    if (finished) this.edit.end(finished)
+    else {
+      // A release off the price scale ends the gesture with whatever was already published.
+      this.edit.cancel()
+      this.callbacks.onDrawingCancel?.()
+    }
     this.preview = null
     this.requestUpdate()
     return true

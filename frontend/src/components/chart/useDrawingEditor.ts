@@ -16,9 +16,13 @@ export function useDrawingEditor(drawings: readonly ChartDrawing[], onChange: (n
   const current = state.scopeKey === scopeKey ? state : { scopeKey, tool: null, selectedId: null }
   const selected = drawings.find(drawing => drawing.id === current.selectedId) ?? null
 
-  const record = (label: string, before: readonly ChartDrawing[], after: readonly ChartDrawing[]) => history.push({
+  const record = (label: string, before: readonly ChartDrawing[], after: readonly ChartDrawing[], scope = scopeKey) => history.push({
     label, undo: () => change.current([...before]), redo: () => change.current([...after]),
-  })
+  }, scope)
+  /** A gesture that ends where it started is not an edit. */
+  const recordMove = (before: readonly ChartDrawing[], after: readonly ChartDrawing[], scope: string) => {
+    if (JSON.stringify(before) !== JSON.stringify(after)) record('Move drawing', before, after, scope)
+  }
   const commit = (label: string, next: ChartDrawing[]) => { record(label, drawings, next); onChange(next) }
   const update = (id: string, patch: (drawing: ChartDrawing) => ChartDrawing) =>
     drawings.map(drawing => drawing.id === id ? patch(drawing) : drawing)
@@ -39,14 +43,14 @@ export function useDrawingEditor(drawings: readonly ChartDrawing[], onChange: (n
     cancelGesture: () => {
       const start = gestureStart.current
       gestureStart.current = null
-      if (start?.scopeKey === scopeKey && start.drawings !== drawings) record('Move drawing', start.drawings, drawings)
+      if (start) recordMove(start.drawings, drawings, start.scopeKey)
     },
     change: (drawing: ChartDrawing, phase: 'move' | 'end') => {
       gestureStart.current ??= { scopeKey, drawings }
       const next = drawings.map(existing => existing.id === drawing.id ? drawing : existing)
       onChange(next)
       if (phase === 'end') {
-        record('Move drawing', gestureStart.current.drawings, next)
+        recordMove(gestureStart.current.drawings, next, gestureStart.current.scopeKey)
         gestureStart.current = null
       }
     },

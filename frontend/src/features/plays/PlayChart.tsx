@@ -91,13 +91,17 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   // History actions and drag gestures read the latest entries, not the ones captured when they started.
   const latest = useRef({ entries, onEntriesChange })
   useEffect(() => { latest.current = { entries, onEntriesChange } })
-  const dragStart = useRef<DraftEntry | null>(null)
+  const dragStart = useRef<{ entry: DraftEntry; scopeKey: string } | null>(null)
+  /** A level drag that leaves the entry unchanged is not an edit. */
+  const recordLevelMove = (start: { entry: DraftEntry; scopeKey: string }, after: DraftEntry | undefined) => {
+    if (after && JSON.stringify(start.entry) !== JSON.stringify(after)) recordEntryEdit(`Move ${start.entry.name} level`, start.entry, after, start.scopeKey)
+  }
 
   /** Records an entry edit made on the chart so undo/redo reverts only the fields it changed. */
-  const recordEntryEdit = (label: string, before: DraftEntry, after: DraftEntry) => {
+  const recordEntryEdit = (label: string, before: DraftEntry, after: DraftEntry, scope?: string) => {
     const apply = (from: DraftEntry, to: DraftEntry) => latest.current.onEntriesChange?.(latest.current.entries.map(entry =>
       entry.id === before.id ? applyEntryEdit(entry, from, to) : entry))
-    history.push({ label, undo: () => apply(after, before), redo: () => apply(before, after) })
+    history.push({ label, undo: () => apply(after, before), redo: () => apply(before, after) }, scope)
   }
   const applyEntry = (next: DraftEntry, label: string) => {
     const before = entries.find(entry => entry.id === next.id)
@@ -110,8 +114,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
     onLevelCancel: () => {
       const start = dragStart.current
       dragStart.current = null
-      const after = start && latest.current.entries.find(item => item.id === start.id)
-      if (start && after && after !== start) recordEntryEdit(`Move ${start.name} level`, start, after)
+      if (start) recordLevelMove(start, latest.current.entries.find(item => item.id === start.entry.id))
     },
     onLevelSelect: (id: string) => { const ref = parseOverlayId(id); if (ref) onSelect(ref.entryId) },
     onLevelDrag: (id: string, price: number, phase: 'move' | 'end') => {
@@ -119,12 +122,11 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
       const current = latest.current.entries
       const entry = ref && current.find(item => item.id === ref.entryId)
       if (!ref || !entry) return
-      dragStart.current ??= entry
+      dragStart.current ??= { entry, scopeKey }
       const next = applyLevelDrag(current, id, price, priceStep)
       onEntriesChange?.(next)
       if (phase === 'end') {
-        const after = next.find(item => item.id === ref.entryId)!
-        recordEntryEdit(`Move ${entry.name} level`, dragStart.current, after)
+        recordLevelMove(dragStart.current, next.find(item => item.id === ref.entryId))
         dragStart.current = null
         if (ref.entryId !== selectedId) onSelect(ref.entryId)
       }

@@ -2,10 +2,13 @@
 export class FrameEdit<T> {
   private frame: number | null = null
   private pending: T | null = null
-  private published: T | null = null
+  private published: T | null
 
+  /** `start` is the value already shown, so a first move that rounds to it publishes nothing. */
   constructor(private readonly publish: (value: T, phase: 'move' | 'end') => void,
-    private readonly same?: (before: T, after: T) => boolean) {}
+    private readonly same?: (before: T, after: T) => boolean, start: T | null = null) {
+    this.published = start
+  }
 
   move(value: T) {
     this.pending = value
