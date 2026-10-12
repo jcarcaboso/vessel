@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { credentialSaveMessage } from '@/api/account-access'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
 import { VenuesProvider } from '@/api/venues'
 import { credentialFixture, indexAccount, indexVenue } from '@/test/account-access-fixture'
 import { ManageAccountDialog } from './ManageDialogs'
+
+beforeEach(() => vi.stubEnv('DEV', false))
 
 function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
@@ -100,6 +102,21 @@ describe('Account credential management', () => {
     expect(api.updateAccount).not.toHaveBeenCalled()
     expect(screen.getByText('Missing')).toBeInTheDocument()
   })
+  it.each([
+    [401, /Reconnect with your Vessel API token/],
+    [403, /trusted reverse proxy/],
+    [409, /enable it before saving a token/],
+    [503, /server credential vault/],
+  ])('explains the blocker at HTTP %s without echoing an error body', async (status, message) => {
+    const api = client({ saveAccountCredential: vi.fn().mockRejectedValue(new ApiError('http', 'ro:never-display', status)) })
+    render(<Fixture api={api} />)
+    await screen.findByText('Valid')
+    await userEvent.type(screen.getByLabelText('Read-only token'), 'ro:fixture-only')
+    await userEvent.click(screen.getByRole('button', { name: 'Verify and replace token' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(message)
+    expect(document.body).not.toHaveTextContent('ro:never-display')
+    expect(screen.getByLabelText('Read-only token')).toHaveValue('')
+  })
   it('shows operator guidance for an unconfigured vault, while allowing credential removal without a key', async () => {
     const api = client({ accountCredential: vi.fn().mockResolvedValue({ ...credentialFixture, storageConfigured: false }) })
     render(<Fixture api={api} />)
@@ -146,6 +163,20 @@ describe('Account credential management', () => {
     expect(api.saveAccountCredential).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: 'Remove token' }))
     expect(screen.getByRole('button', { name: 'Confirm remove token' })).toBeEnabled()
+  })
+  it('allows LAN HTTP replacement only in development and warns about unencrypted transport', async () => {
+    vi.stubEnv('DEV', true)
+    vi.stubGlobal('location', { protocol: 'http:', hostname: 'vessel.local' })
+    const api = client()
+    render(<Fixture api={api} />)
+    await screen.findByText('Valid')
+    expect(screen.getByLabelText('Read-only token')).toBeEnabled()
+    expect(screen.getByRole('note')).toHaveTextContent('Development only')
+    expect(screen.getByRole('note')).toHaveTextContent('without transport encryption')
+    await userEvent.type(screen.getByLabelText('Read-only token'), 'ro:test')
+    await userEvent.click(screen.getByRole('button', { name: 'Verify and replace token' }))
+    await waitFor(() => expect(api.saveAccountCredential).toHaveBeenCalled())
+    expect(screen.getByLabelText('Read-only token')).toHaveValue('')
   })
   it('clears unsaved token text on explicit metadata refresh', async () => {
     const api = client()

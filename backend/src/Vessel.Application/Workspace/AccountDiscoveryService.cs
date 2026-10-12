@@ -21,11 +21,12 @@ public sealed class AccountDiscoveryService(IWorkspaceStore accounts, IJournalOw
 
     public Task<AccountDiscoveryDto> DiscoverAsync(string venueId, CredentialDiscoveryRequest request, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(request.Token) || request.Token.Length > 512)
+        var token = request.Token?.Trim();
+        if (string.IsNullOrEmpty(token) || request.Token!.Length > 512)
             throw new WorkspaceException(400, "Enter a read-only token of at most 512 characters.");
         if (venues.Descriptor(venueId)?.Capabilities.ReadOnlyCredential != true)
             throw new WorkspaceException(400, "This venue does not support read-only credentials.");
-        return DiscoverCoreAsync(venueId, request.Address, request.Token, ct);
+        return DiscoverCoreAsync(venueId, request.Address, token, ct);
     }
 
     private async Task<AccountDiscoveryDto> DiscoverCoreAsync(string venueId, string? address, string? token, CancellationToken ct)

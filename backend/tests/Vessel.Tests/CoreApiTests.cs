@@ -6,18 +6,33 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 
 namespace Vessel.Tests;
 
 internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, string? connection = null, IPerpetualVenueReader? reader = null, Vessel.Application.MarketData.ICandleReader? candles = null, Vessel.Application.MarketData.IMarketContextReader? market = null, Vessel.Application.MarketData.IMarketStream? stream = null,
-    Dictionary<string, string?>? settings = null, Action<IServiceCollection>? configure = null) : WebApplicationFactory<Program>
+    Dictionary<string, string?>? settings = null, Action<IServiceCollection>? configure = null,
+    string environment = "Development") : WebApplicationFactory<Program>
 {
-    public const string Token = "core-tests-only-token";
+    public const string Token = "core-tests-only-token-not-a-real-secret";
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        // Production validation runs before ConfigureAppConfiguration on a minimal host.
+        // Supply synthetic bootstrap settings early; never change the process environment.
+        if (environment != "Development")
+            builder.ConfigureHostConfiguration(config => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Vessel:Auth:Token"] = Token,
+                ["ConnectionStrings:Vessel"] = connection
+            }));
+        return base.CreateHost(builder);
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Development");
+        builder.UseEnvironment(environment);
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Vessel:Auth:Token"] = Token,

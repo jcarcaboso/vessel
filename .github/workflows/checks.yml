@@ -39,6 +39,8 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
+      - name: Operator script regressions
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Prototype regressions
         run: pnpm test:prototype
       - name: Backend restore

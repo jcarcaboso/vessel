@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import type { AccountDiscovery, DiscoveredAccount } from '@/api/account-access'
-import { credentialTransportAllowed } from '@/api/account-access'
+import { credentialFailureMessage, credentialTransportAllowed } from '@/api/account-access'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
 import { useVenues } from '@/api/venues'
@@ -59,8 +59,9 @@ export function WalletAccountImport({ venueId, api, portfolios, accounts, onCrea
       })))
       setDiscovery(next)
       setNamesNotice('Venue names loaded where available. Unnamed accounts keep their index label. The token was not saved; re-enter it at import if you also want order access.')
-    } catch {
-      setError('Could not load venue names. Check the read-only token’s wallet, scope and expiry. Public balances and your selections are unchanged.')
+    } catch (cause) {
+      setError(credentialFailureMessage(cause, 'Could not load venue names. Check the read-only token’s wallet, scope and expiry.') +
+        ' Public balances and your selections are unchanged.')
     } finally { setLoadingNames(false); finish() }
   }
   async function importSelected(event: FormEvent) {
@@ -91,8 +92,8 @@ export function WalletAccountImport({ venueId, api, portfolios, accounts, onCrea
           try {
             await api.saveAccountCredential(account.id, submitted)
             message = 'Imported. Read-only token verified and saved.'
-          } catch {
-            message = 'Imported, but token not saved. Open Manage account to retry. Check token scope and expiry, or ask the operator to check credential storage.'
+          } catch (cause) {
+            message = 'Imported. Token save was not confirmed. Open Manage account to check its status before retrying. ' + credentialFailureMessage(cause)
           }
         }
         setResults(previous => ({ ...previous, [candidate.sourceId]: { account, message } }))

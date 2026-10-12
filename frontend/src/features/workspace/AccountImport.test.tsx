@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
 import { VenuesProvider } from '@/api/venues'
@@ -9,6 +9,8 @@ import { credentialFixture, discoveryFixture, indexAccount, indexVenue } from '@
 import { portfolioFixture } from '@/test/workspace-fixture'
 import { systemFixture } from '@/test/system-fixture'
 import { CreateAccountDialog } from './CreateDialogs'
+
+beforeEach(() => vi.stubEnv('DEV', false))
 
 function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
@@ -141,7 +143,7 @@ describe('Wallet account import', () => {
     expect(token).toHaveAttribute('autocomplete', 'new-password')
     await userEvent.type(token, secret)
     await userEvent.click(screen.getByRole('button', { name: 'Import selected (2)' }))
-    await screen.findByText(/Imported, but token not saved/)
+    await screen.findByText(/Imported. Token save was not confirmed/)
     await screen.findByText('Imported. Read-only token verified and saved.')
     expect(api.saveAccountCredential).toHaveBeenNthCalledWith(1, indexAccount.id, secret)
     expect(api.saveAccountCredential).toHaveBeenNthCalledWith(2, portfolioFixture.id, secret)
@@ -149,6 +151,32 @@ describe('Wallet account import', () => {
     expect(screen.queryByLabelText('Read-only token')).not.toBeInTheDocument()
     expect(screen.getAllByRole('checkbox').every(box => (box as HTMLInputElement).disabled)).toBe(true)
     expect(api.createAccount).toHaveBeenCalledTimes(2)
+  })
+  it('explains server HTTPS rejection during name lookup and retains the public selection', async () => {
+    const api = client({ discoverAccounts: vi.fn().mockResolvedValueOnce(discoveryFixture)
+      .mockRejectedValueOnce(new ApiError('http', 'ro:never-display', 403)) })
+    render(<Fixture api={api} />)
+    await discover(); await selectMain()
+    await userEvent.type(screen.getByLabelText('Read-only token'), 'ro:fixture-only')
+    await userEvent.click(screen.getByRole('button', { name: 'Load Lighter names' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/trusted reverse proxy/)
+    expect(screen.getByRole('checkbox', { name: /Main account.*9007199254740993/ })).toBeChecked()
+    expect(screen.getByLabelText('Read-only token')).toHaveValue('')
+    expect(document.body).not.toHaveTextContent('ro:never-display')
+    expect(api.createAccount).not.toHaveBeenCalled()
+  })
+  it('explains unavailable credential storage without losing or reimporting the account', async () => {
+    const api = client({ saveAccountCredential: vi.fn().mockRejectedValue(new ApiError('http', 'ro:never-display', 503)) })
+    render(<Fixture api={api} />)
+    await discover(); await selectMain()
+    await userEvent.type(screen.getByLabelText('Read-only token'), 'ro:fixture-only')
+    await userEvent.click(screen.getByRole('button', { name: 'Import selected (1)' }))
+    await screen.findByText(/Imported. Token save was not confirmed.*server credential vault/)
+    expect(screen.getByRole('checkbox', { name: /Main account.*9007199254740993/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Import selected' })).toBeDisabled()
+    expect(api.createAccount).toHaveBeenCalledOnce()
+    expect(api.sync).not.toHaveBeenCalled()
+    expect(document.body).not.toHaveTextContent('ro:never-display')
   })
   it('reports creation failure per account without hiding successful imports or blindly retrying', async () => {
     const api = client({ createAccount: vi.fn().mockRejectedValueOnce(new Error('unknown outcome')).mockResolvedValueOnce({
@@ -215,6 +243,18 @@ describe('Wallet account import', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Import selected (1)' }))
     await screen.findByText(/Imported. Public reads are available/)
     expect(api.saveAccountCredential).not.toHaveBeenCalled()
+  })
+  it('allows importing with a read-only token on LAN HTTP in development', async () => {
+    vi.stubEnv('DEV', true)
+    vi.stubGlobal('location', { protocol: 'http:', hostname: '192.168.1.5' })
+    const api = client()
+    render(<Fixture api={api} />)
+    await discover(); await selectMain()
+    expect(screen.getByLabelText('Read-only token')).toBeEnabled()
+    expect(screen.getByRole('note')).toHaveTextContent('Development only')
+    await userEvent.type(screen.getByLabelText('Read-only token'), 'ro:test')
+    await userEvent.click(screen.getByRole('button', { name: 'Import selected (1)' }))
+    await waitFor(() => expect(api.saveAccountCredential).toHaveBeenCalled())
   })
   it('requires a valid wallet and lets the owner retry a discovery failure', async () => {
     const api = client({ discoverAccounts: vi.fn().mockRejectedValueOnce(new Error('upstream')).mockResolvedValueOnce(discoveryFixture) })

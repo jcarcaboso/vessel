@@ -58,6 +58,7 @@ def frontend_environment():
     # credentials out of it, even when they came from the caller's environment.
     return {key: value for key, value in os.environ.items()
             if not configuration_key(key).startswith(("vessel:", "connectionstrings:"))
+            and not key.casefold().startswith("infisical_")
             and key not in ["POSTGRES_PASSWORD", "Vessel_TEST_POSTGRES"]}
 
 

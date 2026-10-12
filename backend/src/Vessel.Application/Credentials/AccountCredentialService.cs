@@ -24,14 +24,15 @@ public sealed class AccountCredentialService(
         {
             Guard(account, requireEnabled: true);
             if (!vault.IsConfigured) throw new WorkspaceException(503, "Credential storage is not configured.");
-            if (string.IsNullOrEmpty(request.Token) || request.Token.Length > 512)
+            var token = request.Token?.Trim();
+            if (string.IsNullOrEmpty(token) || request.Token!.Length > 512)
                 throw new WorkspaceException(400, "Enter a read-only token of at most 512 characters.");
             var verifier = verifiers.SingleOrDefault(v => v.VenueId == account.VenueId)
                 ?? throw new WorkspaceException(503, "Credential verification is unavailable.");
             VerifiedVenueCredential verified;
             try
             {
-                verified = await verifier.VerifyAsync(account.SourceId!, request.Token, ct);
+                verified = await verifier.VerifyAsync(account.SourceId!, token, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception)
@@ -44,7 +45,7 @@ public sealed class AccountCredentialService(
                 throw new WorkspaceException(400, "The venue did not accept this read-only token.");
             var purpose = Purpose(account);
             SealedCredential sealedCredential;
-            try { sealedCredential = vault.Seal(owner.OwnerId, id, purpose, request.Token); }
+            try { sealedCredential = vault.Seal(owner.OwnerId, id, purpose, token); }
             catch (CredentialStorageException) { throw new WorkspaceException(503, "Credential storage is unavailable."); }
             var previous = await credentials.FindAsync(id, purpose, ct);
             var credential = new AccountCredential
