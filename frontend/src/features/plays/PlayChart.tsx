@@ -348,7 +348,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
   // One stream per chart; the expanded dialog renders from the same state.
   const live = useLiveMarket({
     api: source.api, accountId: source.accountId, instrument, interval, enabled: liveUpdates, ready: data.status === 'ready',
-    onCandle: data.upsert, onContext: market.apply, refreshCandles: data.refresh, refreshContext: market.refresh,
+    onCandle: data.upsert, onContext: market.apply, refreshCandles: data.revalidate, refreshContext: market.refresh,
   })
   // The inline and expanded charts each own a control: closing the dialog unmounts its chart after the
   // inline one has remounted, and a shared ref would then be cleared under the visible chart.
@@ -399,7 +399,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
   const header = marketContext && <ChartHeader stats={stats} statsLabel={`${instrument} market statistics`}
     notice={market.error && <p className="chart-header-error" role="alert">{market.error}</p>} />
   const status = data.status === 'loading' ? 'Loading candles…'
-    : data.refreshing ? 'Refreshing…'
+    : data.refreshing ? `Refreshing…${updatedAt ? ` Updated ${timeFormat.format(new Date(updatedAt))} UTC (cached)` : ''}`
       : data.loadingOlder ? 'Loading older candles…'
         : updatedAt ? `Updated ${timeFormat.format(new Date(updatedAt))} UTC` : ''
   const toolbar = (inDialog: boolean) => <ChartToolbar label="Chart controls" end={<>
@@ -442,6 +442,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
       {!capture.failed && onShowEvidence && <> <button type="button" onClick={showEvidence}>Show</button></>}</p>}
     {data.status === 'ready' && data.error && <p className="chart-notice" role="alert">Refresh failed: {data.error} Showing the previous candles.</p>}
     {data.olderError && <p className="chart-notice" role="alert">Older candles failed to load. <button type="button" onClick={data.retryOlder}>Retry</button></p>}
+    {data.localHistoryLimit && <p className="chart-notice">Local history limit reached. Older paging is stopped at 5,000 candles.</p>}
     {data.historyExhausted && data.candles.length > 0 && <p className="chart-notice">Start of available venue history. {data.notice}</p>}
   </>
 

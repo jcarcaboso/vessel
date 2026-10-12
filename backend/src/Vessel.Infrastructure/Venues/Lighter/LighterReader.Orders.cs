@@ -27,7 +27,7 @@ public sealed partial class LighterReader
         return await BoundedAsync(async ct =>
         {
             await BindAsync(source, credential, ct);
-            var catalogue = await CatalogueAsync(ct);
+            var catalogue = await CatalogueAsync(ct, refresh: true);
             var observed = timeProvider.GetUtcNow();
             var orders = new Dictionary<string, VenueOrder>(StringComparer.Ordinal);
             using (var active = await GetAsync("accountActiveOrders?account_index=" + source + "&market_type=perp", ct, credential))

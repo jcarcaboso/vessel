@@ -215,6 +215,7 @@ public sealed class ServerDiagnosticTests
     {
         private readonly MemoryWorkspaceStore other = new(Guid.NewGuid());
         public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => throw error;
+        public Task<MarketDataAccount?> MarketDataAccountAsync(Guid id, CancellationToken ct) => throw error;
         public Task<AccountSnapshot?> SnapshotAsync(Guid id, CancellationToken ct) => other.SnapshotAsync(id, ct);
         public Task<bool> SourceExistsAsync(string venueId, string address, CancellationToken ct) => other.SourceExistsAsync(venueId, address, ct);
         public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct) => other.PortfoliosAsync(ct);

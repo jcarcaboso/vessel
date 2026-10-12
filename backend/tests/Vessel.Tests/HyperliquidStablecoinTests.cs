@@ -309,7 +309,7 @@ public sealed partial class HyperliquidAdapterTests
         Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(StateTime), result.Snapshot.ObservedAtUtc);
         Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(StateTime).AddSeconds(6),
             result.Snapshot.StablecoinWallet!.ObservedAtUtc);
-        Assert.Equal(1, clock.TimerCount);
+        Assert.Equal(2, clock.TimerCount);
     }
 
     [Theory]
@@ -347,7 +347,7 @@ public sealed partial class HyperliquidAdapterTests
             Assert.Equal("Hyperliquid read timed out.", exception.Message);
         }
         Assert.Equal(6, handler.Requests.Count);
-        Assert.Equal(1, clock.TimerCount);
+        Assert.Equal(2, clock.TimerCount);
         Assert.Equal(TimeSpan.FromSeconds(20), clock.Deadline);
     }
 

@@ -17,7 +17,8 @@ namespace Vessel.Infrastructure.Venues.Lighter;
 /// https://mainnet.zklighter.elliot.ai/. Disable automatic redirects so Authorization cannot leave this host.
 /// There is no credential on the HttpClient, catalogue, or string-source overload.
 /// </summary>
-public sealed partial class LighterReader(HttpClient httpClient, TimeProvider timeProvider, IAccountCredentialReader credentials)
+public sealed partial class LighterReader(HttpClient httpClient, TimeProvider timeProvider, IAccountCredentialReader credentials,
+    LighterCatalogueCache? catalogueCache = null)
     : IPerpetualVenueReader, IVenueOrderReader, ICandleReader, IVenueAccountDiscovery, IVenueCredentialVerifier
 {
     public const string Id = "lighter";
@@ -141,11 +142,15 @@ public sealed partial class LighterReader(HttpClient httpClient, TimeProvider ti
         public Market? ActiveByKey(string key) => Markets.FirstOrDefault(m => m.Active && m.Key == key);
     }
 
-    private async Task<Catalogue> CatalogueAsync(CancellationToken ct)
-    {
-        using var document = await GetAsync("orderBookDetails", ct);
-        return ReadCatalogue(document.RootElement);
-    }
+    private readonly LighterCatalogueCache catalogues = catalogueCache ?? new(timeProvider);
+    // Imports pass refresh so a market listed within the cache lifetime is not filtered out of their facts.
+    private Task<Catalogue> CatalogueAsync(CancellationToken ct, bool refresh = false) => catalogues.GetAsync(token =>
+        // Public single-flight metadata must not reacquire the account-read semaphore.
+        Http.ReadBoundedAsync(async bounded =>
+        {
+            using var document = await GetAsync("orderBookDetails", bounded);
+            return ReadCatalogue(document.RootElement);
+        }, token), ct, refresh);
 
     // Official schemas: https://apidocs.lighter.xyz/reference/orderbookdetails.md
     // and https://apidocs.lighter.xyz/reference/orderbooks.md, checked with public mainnet on 2026-10-07.
@@ -164,7 +169,7 @@ public sealed partial class LighterReader(HttpClient httpClient, TimeProvider ti
             if (kind != "perp") throw Json.Invalid();
             var key = Text(row, "symbol", 24);
             // Lighter already names multiplied assets canonically, e.g. 1000PEPE. No price/size rescaling.
-            if (!SymbolPattern().IsMatch(key) || !keys.Add(key)) throw Json.Invalid();
+            if (!SymbolPattern().IsMatch(key)) throw Json.Invalid();
             var sizeDecimals = Json.Integer(Json.Property(row, "supported_size_decimals"));
             var priceDecimals = Json.Integer(Json.Property(row, "supported_price_decimals"));
             var initial = Json.Integer(Json.Property(row, "min_initial_margin_fraction"));
@@ -183,6 +188,7 @@ public sealed partial class LighterReader(HttpClient httpClient, TimeProvider ti
             var step = 1m;
             for (var i = 0; i < priceDecimals; i++) step /= 10m;
             var frozen = row.TryGetProperty("is_frozen", out var flag) && Json.Boolean(flag);
+            if (status == "active" && !frozen && !keys.Add(key)) throw Json.Invalid();
             markets.Add(new(id, key, status == "active" && !frozen,
                 new VenueInstrument(key, sizeDecimals, 10000 / initial, QuoteAsset, step,
                     VenueContractId: id, MaintenanceMarginFraction: maintenance / 10000m)));
@@ -199,7 +205,14 @@ public sealed partial class LighterReader(HttpClient httpClient, TimeProvider ti
         return new(markets, spotIds);
     }
 
-    public Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken cancellationToken) =>
-        BoundedAsync<IReadOnlyList<VenueInstrument>>(async ct =>
-            (await CatalogueAsync(ct)).Markets.Where(m => m.Active).Select(m => m.Instrument!).ToArray(), cancellationToken);
+    public async Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken cancellationToken) =>
+        (await CatalogueAsync(cancellationToken)).Markets.Where(m => m.Active).Select(m => m.Instrument!).ToArray();
+}
+
+/// <summary>Public full metadata only; inactive and frozen IDs remain available for historical facts.</summary>
+public sealed class LighterCatalogueCache(TimeProvider time)
+{
+    private readonly BoundedMarketDataCache<LighterReader.Catalogue> entries = new(time, 1, 1, _ => 1);
+    internal Task<LighterReader.Catalogue> GetAsync(Func<CancellationToken, Task<LighterReader.Catalogue>> load,
+        CancellationToken ct, bool refresh = false) => entries.GetAsync("order-books", load, _ => TimeSpan.FromSeconds(60), ct, refresh);
 }

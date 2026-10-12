@@ -392,10 +392,26 @@ public sealed class LighterAdapterTests
     [Theory]
     [InlineData("\"NaN\"")]
     [InlineData("123")]
+    [InlineData("\" \"")]
     public async Task Malformed_discovery_balances_are_not_silently_zeroed(string value)
     {
         var handler = new Handler { Reply = _ => Response(Discovery.Replace("\"400.0\"", value, StringComparison.Ordinal)) };
         await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).DiscoverAsync(Address, default));
+    }
+
+    [Fact]
+    public async Task Empty_discovery_balances_are_unavailable_not_zero()
+    {
+        // Live mainnet shape: every row sends available_balance as "".
+        var handler = new Handler { Reply = _ => Response(Discovery
+            .Replace("\"-0.000000000000000000001\"", "\"\"", StringComparison.Ordinal)
+            .Replace("\"0.00\"", "\"\"", StringComparison.Ordinal)
+            .Replace("\"400.0\"", "\"\"", StringComparison.Ordinal)) };
+        var accounts = await Reader(handler).DiscoverAsync(Address, default);
+        Assert.Equal([Source, "9007199254740994"], accounts.Select(a => a.SourceId));
+        Assert.Equal("998.0", accounts[0].CollateralUsd);
+        Assert.All(accounts, a => Assert.Null(a.AvailableBalanceUsd));
+        Assert.Null(accounts[1].CollateralUsd);
     }
 
     [Theory]
