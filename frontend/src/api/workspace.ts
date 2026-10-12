@@ -1,3 +1,4 @@
+import { isActivityDocument, type ActivityDocument } from './activity'
 import { SseOverflowError, SseParser } from './sse'
 import { ApiError } from './system'
 import { clearCandleCache, evictAccountCandles } from '@/features/market/candleCache'
@@ -208,6 +209,7 @@ export interface CreateAccount {
   manualAccountValueUsd?: string
 }
 export interface WorkspaceApi {
+  activity(accountId?: string, signal?: AbortSignal): Promise<ActivityDocument>
   review(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewDocument>
   overview(signal?: AbortSignal): Promise<Overview>
   portfolios(signal?: AbortSignal): Promise<Portfolio[]>
@@ -559,6 +561,9 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     review: (query, signal) => json(reviewPath(query), isReviewDocument, withSignal(signal)),
     updateSizingSettings: settings => json('/api/sizing/settings', isSizingDocument,
       { method: 'PUT', body: JSON.stringify({ riskPercent: settings.riskPercent }) }),
+    activity: (id, signal) => request(`/api/activity${id !== undefined ? `?${new URLSearchParams({ accountId: resourceId(id) })}` : ''}`,
+      (v): v is ActivityDocument => isActivityDocument(v, fill) && (id === undefined ||
+        v.operations.every(op => op.accountId.toLowerCase() === id.toLowerCase()) && v.coverage.every(c => c.accountId.toLowerCase() === id.toLowerCase())), signal ? { signal } : {}),
     overview: signal => request('/api/overview', overview, signal ? { signal } : {}),
     portfolios: signal => request('/api/portfolios', (v): v is Portfolio[] => Array.isArray(v) && v.every(portfolio), signal ? { signal } : {}),
     accounts: signal => request('/api/accounts', (v): v is BrokerAccount[] => Array.isArray(v) && v.every(account), signal ? { signal } : {}),

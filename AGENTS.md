@@ -58,3 +58,5 @@ The existing Trading Diary project points to a different GitLab repository. Do n
 ## Package manager
 
 Use pnpm for all JavaScript/TypeScript package operations, never npm or yarn. The exact pnpm version is pinned in root `package.json`; the workspace uses one root `pnpm-lock.yaml`. Use Corepack if pnpm is not installed. .NET packages continue to use the .NET CLI and NuGet lockfiles.
+
+October 12, 2026: Activity now reports venue-neutral position operations from all retained enabled-account fills, with expandable executions and account/portfolio/instrument/direction/status/date filters; Overview shows five recent operations and account detail shows its own. Follow `docs/architecture/activity-operations.md`: signed-position round trips, exact flip quantity splits with full fee/P&L attributed to the closing part, USDC-only gross-fee subtraction matching sizing, explicit incomplete-history and snapshot-disagreement coverage, bounded responses and unchanged original fill facts. Operations are not retrospective Plays or inferred intent; disabled and foreign accounts remain hidden, and colours use theme tokens.

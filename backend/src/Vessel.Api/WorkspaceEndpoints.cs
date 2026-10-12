@@ -83,6 +83,11 @@ public static class WorkspaceEndpoints
         api.MapGet("/accounts/{id:guid}/market-stream", MarketStreamEndpoint.StreamAsync);
         api.MapPost("/accounts/{id:guid}/sync", async (Guid id, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.SyncAsync(id, ct)));
+        api.MapGet("/activity", async (Guid? accountId, Vessel.Application.Activity.ActivityService service, HttpContext context, CancellationToken ct) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Ok(await service.GetAsync(accountId, ct));
+        });
         api.MapGet("/overview", async (WorkspaceService service, CancellationToken ct) => Results.Ok(await service.OverviewAsync(ct)));
     }
 }
