@@ -162,7 +162,8 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             var leverage = Json.Nonnegative(Json.Property(item, "leverage"));
             positions.Add(new(market.Key, size, Json.Positive(Json.Property(item, "avg_entry_price")),
                 Json.Number(Json.Property(item, "unrealized_pnl")), Json.Nonnegative(Json.Property(item, "initial_margin_requirement")),
-                leverage > 0 && leverage == decimal.Truncate(leverage) && leverage <= 1000 ? (int)leverage : null));
+                leverage > 0 && leverage == decimal.Truncate(leverage) && leverage <= 1000 ? (int)leverage : null,
+                VenueContractId: market.MarketId));
         }
         return new VenueSnapshot(observedAt, "risex-perps-account",
             Json.Number(Json.Property(summary, "total_account_value")), null,

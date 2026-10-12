@@ -21,6 +21,35 @@ public sealed class ActivityOperationsPostgresTests
     };
 
     [PostgresFact]
+    public async Task Retained_native_contract_ids_partition_activity_after_database_readback()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture");
+        var retiredOpen = Fill(account, 0); retiredOpen.VenueContractId = "13";
+        var retiredClose = Fill(account, 1); retiredClose.VenueContractId = "13"; retiredClose.ClosedPnlUsd = 10;
+        var activeClose = Fill(account, 3); activeClose.VenueContractId = "14"; activeClose.ClosedPnlUsd = 20;
+        await using (var db = database.Context(owner))
+        {
+            db.Accounts.Add(account); db.Fills.AddRange(retiredOpen, retiredClose, activeClose);
+            db.Snapshots.Add(new AccountSnapshot { OwnerId = owner, AccountId = account.Id, ObservedAtUtc = At.AddDays(1),
+                ValueScope = "fixture", Positions = [new() { OwnerId = owner, AccountId = account.Id, ContractId = "BTC",
+                    VenueContractId = "14", SignedQuantity = 1, EntryPrice = 100 }] });
+            await db.SaveChangesAsync();
+        }
+        await using (var db = database.Context(owner))
+        {
+            var result = await new ActivityService(new ActivityStore(db)).GetAsync(account.Id, default);
+            Assert.Equal(2, result.TotalOperationCount);
+            Assert.Equal("10", result.Operations.Single(o => o.Status == "closed").ReportedClosedPnlUsd);
+            var active = result.Operations.Single(o => o.Status == "incomplete");
+            Assert.Equal("20", active.ReportedClosedPnlUsd); Assert.Equal("1", active.OpenQuantity);
+            Assert.Empty(result.Coverage);
+            Assert.Equal("14", (await db.Positions.SingleAsync()).VenueContractId);
+            Assert.Equal(3, await db.Fills.CountAsync());
+        }
+    }
+
+    [PostgresFact]
     public async Task Activity_reads_all_retained_facts_owner_scoped_enabled_only_and_actual_play_links()
     {
         await using var database = await CoreDatabase.CreateAsync();

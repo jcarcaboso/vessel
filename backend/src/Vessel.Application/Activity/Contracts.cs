@@ -19,7 +19,11 @@ public sealed record ActivityOperationDto(string Id, Guid AccountId, string Cont
     string? AverageEntryPrice, string? AverageExitPrice, int EntryOrderCount, int ExitOrderCount, int FillCount,
     string ReportedClosedPnlUsd, string StablecoinFeesNominalUsd, IReadOnlyList<OperationFeeDto> OtherFees,
     string? NetResultUsd, string PnlBasis, Guid? PlayId, string PlayAssociation,
-    IReadOnlyList<string> Coverage, IReadOnlyList<OperationFillDto> Fills, int OmittedFillCount = 0);
+    IReadOnlyList<string> Coverage, IReadOnlyList<OperationFillDto> Fills, int OmittedFillCount = 0)
+{
+    // Internal partition identity, never the canonical display key or a serialized API field.
+    internal ActivityContractKey ContractKey { get; init; }
+}
 public sealed record ActivityCoverageDto(Guid AccountId, string? ContractId, string Notice);
 public sealed record ActivityDto(IReadOnlyList<ActivityOperationDto> Operations, int TotalOperationCount, int RetainedFillCount,
     int OmittedOperationCount, IReadOnlyList<ActivityCoverageDto> Coverage, string ScopeNote);

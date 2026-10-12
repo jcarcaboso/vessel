@@ -175,6 +175,7 @@ public sealed class RisexAdapterTests
         Assert.Equal(12051.377019174158945586m, snapshot.MarginUsedUsd);
         Assert.Null(snapshot.StablecoinWallet);
         Assert.Equal([("BTC", 0.702475m, 10), ("DOGE", -2000m, 5)], snapshot.Positions.Select(p => (p.ContractId, p.SignedQuantity, p.Leverage!.Value)));
+        Assert.Equal(["1", "14"], snapshot.Positions.Select(p => p.VenueContractId));
 
         var fills = result.Fills.ToDictionary(f => f.SourceFillId);
         Assert.Equal(4, fills.Count); // the unknown market is left out

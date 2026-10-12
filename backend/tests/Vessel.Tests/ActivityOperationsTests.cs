@@ -108,6 +108,98 @@ public sealed class ActivityOperationsTests
         Positions = quantity == 0 ? [] : [new() { ContractId = "BTC", SignedQuantity = quantity }]
     };
 
+    [Fact]
+    public async Task Native_markets_sharing_a_canonical_key_keep_round_trips_and_snapshot_anchors_separate()
+    {
+        var retiredOpen = Fill(0); retiredOpen.VenueContractId = "13";
+        var retiredClose = Fill(1, "sell", "close", pnl: 10); retiredClose.VenueContractId = "13";
+        var activeClose = Fill(2, "sell", "close", pnl: 20); activeClose.VenueContractId = "14";
+        var snapshot = Snapshot(1); snapshot.Positions[0].VenueContractId = "14";
+        var result = await new ActivityService(new Store(new([Account(AccountId)],
+            [retiredOpen, retiredClose, activeClose], [snapshot], new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        Assert.Equal(2, result.TotalOperationCount);
+        var retired = result.Operations.Single(o => o.Status == "closed");
+        Assert.Equal("10", retired.ReportedClosedPnlUsd); Assert.Equal("0", retired.OpenQuantity); Assert.Empty(retired.Coverage);
+        var active = result.Operations.Single(o => o.Status == "incomplete");
+        Assert.Equal("20", active.ReportedClosedPnlUsd); Assert.Equal("1", active.OpenQuantity);
+        Assert.Null(active.OpenedAtUtc); Assert.Null(active.Quantity);
+        Assert.Empty(result.Coverage);
+    }
+
+    [Fact]
+    public async Task Legacy_snapshot_without_native_id_anchors_only_one_unambiguous_market()
+    {
+        var fill = Fill(0, "sell", "close"); fill.VenueContractId = "14";
+        var result = await new ActivityService(new Store(new([Account(AccountId)], [fill], [Snapshot(1)],
+            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var op = Assert.Single(result.Operations);
+        Assert.Equal("long", op.Direction); Assert.Equal("1", op.OpenQuantity);
+        Assert.Contains(op.Coverage, c => c.Contains("entries") && c.Contains("missing"));
+        Assert.Empty(result.Coverage);
+    }
+
+    [Fact]
+    public async Task Legacy_snapshot_without_native_id_never_anchors_multiple_markets_to_the_same_position()
+    {
+        var first = Fill(0); first.VenueContractId = "13";
+        var second = Fill(1, "sell", "close"); second.VenueContractId = "14";
+        var result = await new ActivityService(new Store(new([Account(AccountId)], [first, second], [Snapshot(1)],
+            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        Assert.Equal(2, result.TotalOperationCount);
+        Assert.Null(result.Operations.Single(o => o.Fills[0].Fill.Id == second.Id).OpenQuantity);
+        Assert.All(result.Operations, o => Assert.Contains(o.Coverage, c => c.Contains("native") && c.Contains("ambiguous")));
+        Assert.Contains(result.Coverage, c => c.Notice.Contains("native") && c.Notice.Contains("ambiguous"));
+    }
+
+    [Fact]
+    public void Same_timestamp_peak_disagreement_keeps_boundaries_prices_and_money_but_quantity_unknown()
+    {
+        var ops = OperationAggregator.Aggregate([Fill(0, quantity: 2), Fill(1), Fill(1, "sell", "close", pnl: 10, fee: 1),
+            Fill(2, "sell", "close", quantity: 2, pnl: 20, fee: 2)]);
+        var op = Assert.Single(ops);
+        Assert.Equal("closed", op.Status); Assert.Equal("long", op.Direction);
+        Assert.Equal(Start, op.OpenedAtUtc); Assert.Equal(Start.AddMinutes(2), op.ClosedAtUtc);
+        Assert.Null(op.Quantity); Assert.Equal("3", op.TotalEnteredQuantity); Assert.Equal("3", op.TotalExitedQuantity);
+        Assert.Equal("100", op.AverageEntryPrice); Assert.Equal("100", op.AverageExitPrice); Assert.Equal("27", op.NetResultUsd);
+        Assert.Contains(op.Coverage, c => c.Contains("peak") && c.Contains("timestamp"));
+    }
+
+    [Fact]
+    public async Task Snapshot_index_is_built_once_instead_of_scanning_for_each_contract()
+    {
+        var fills = Enumerable.Range(0, 100).Select(n => { var fill = Fill(n); fill.ContractId = $"C{n}"; return fill; }).ToList();
+        var snapshots = new CountedSnapshots([Snapshot()]);
+        await new ActivityService(new Store(new([Account(AccountId)], fills, snapshots, new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        Assert.InRange(snapshots.Enumerations, 1, 2);
+    }
+
+    private sealed class CountedSnapshots(IReadOnlyList<AccountSnapshot> snapshots) : IReadOnlyList<AccountSnapshot>
+    {
+        public int Enumerations { get; private set; }
+        public int Count => snapshots.Count;
+        public AccountSnapshot this[int index] => snapshots[index];
+        public IEnumerator<AccountSnapshot> GetEnumerator() { Enumerations++; return snapshots.GetEnumerator(); }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    [Fact]
+    public async Task Bounded_service_materializes_only_returned_execution_rows_without_losing_totals()
+    {
+        var fills = Enumerable.Range(0, 15000).Select(n => Fill(n, pnl: 1, fee: 0.1m)).ToList();
+        var service = new ActivityService(new Store(new([Account(AccountId)], fills, [], new Dictionary<Guid, Guid>())));
+        _ = OperationAggregator.Aggregate(fills); _ = await service.GetAsync(null, default);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        _ = OperationAggregator.Aggregate(fills);
+        var fullBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        before = GC.GetAllocatedBytesForCurrentThread();
+        var result = await service.GetAsync(null, default);
+        var boundedBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        var op = Assert.Single(result.Operations);
+        Assert.Equal(15000, op.FillCount); Assert.Equal(200, op.Fills.Count); Assert.Equal(14800, op.OmittedFillCount);
+        Assert.Equal("15000", op.ReportedClosedPnlUsd); Assert.Equal("13500", op.NetResultUsd);
+        Assert.True(boundedBytes < fullBytes * 0.7, $"Bounded DTO allocation {boundedBytes} should be below 70% of full materialization {fullBytes}.");
+    }
+
     [Theory]
     [InlineData("sell", "buy", "long")]
     [InlineData("buy", "sell", "short")]

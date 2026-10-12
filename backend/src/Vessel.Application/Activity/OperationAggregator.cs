@@ -12,21 +12,30 @@ public static class OperationAggregator
     public static IReadOnlyList<ActivityOperationDto> Aggregate(IEnumerable<ImportedFill> fills,
         IReadOnlyDictionary<Guid, Guid>? fillPlayIds = null, IReadOnlyList<AccountSnapshot>? snapshots = null)
     {
+        var retained = fills.ToList();
+        return AggregateSummaries(retained, fillPlayIds, new(retained, snapshots ?? []))
+            .Select(o => o with { Fills = o.Fills.ToList() }).ToList();
+    }
+
+    internal static IReadOnlyList<ActivityOperationDto> AggregateSummaries(IReadOnlyList<ImportedFill> fills,
+        IReadOnlyDictionary<Guid, Guid>? fillPlayIds, ActivityPositions positions)
+    {
         var result = new List<ActivityOperationDto>();
-        foreach (var group in fills.GroupBy(f => (f.AccountId, f.ContractId)))
+        foreach (var group in fills.GroupBy(ActivityContractKey.From))
         {
             var times = group.GroupBy(f => f.OccurredAtUtc).OrderBy(g => g.Key).ToList();
-            var snapshot = snapshots?.SingleOrDefault(s => s.AccountId == group.Key.AccountId);
-            var anchored = snapshot is not null && snapshot.ObservedAtUtc >= times[^1].Key && group.All(f => f.Quantity > 0);
+            var snapshot = positions.Snapshots.GetValueOrDefault(group.Key.AccountId);
+            var observed = positions.Quantity(group.Key);
+            var anchored = snapshot is not null && observed is not null && snapshot.ObservedAtUtc >= times[^1].Key && group.All(f => f.Quantity > 0);
             // Addition is order-independent. This is the backward walk's position before the first fill.
-            var position = anchored ? ExactAmount.From(snapshot!.Positions.SingleOrDefault(p => p.ContractId == group.Key.ContractId)?.SignedQuantity ?? 0m)
+            var position = anchored ? observed!.Value
                 - group.Aggregate(default(ExactAmount), (sum, f) => sum + Signed(f)) : default;
             var known = anchored || times[0].All(f => f.PositionEffect == ExecutionFacts.Open) && times[0].Select(f => f.Side).Distinct().Count() == 1;
             var unknownDirection = 0;
             Builder? current = null;
             foreach (var time in times)
             {
-                var (ordered, ambiguous) = OrderTimestamp(time, known ? position : null);
+                var (ordered, ambiguous, peakAmbiguous) = OrderTimestamp(time, known ? position : null, current?.Peak ?? position.Abs());
                 foreach (var fill in ordered)
                 {
                     var quantity = ExactAmount.From(fill.Quantity);
@@ -74,6 +83,7 @@ public static class OperationAggregator
                     };
                     if (current.MissingEntries) current.Note("Opening entries precede retained history and are missing; entry quantity, entry average and opening time are unknown.");
                     if (ambiguous) { current.UnknownBoundaries = true; current.Note(TimestampNotice); }
+                    if (peakAmbiguous) { current.UnknownPeak = true; current.Note(PeakNotice); }
                     if (!valid) current.Note($"Position effect '{fill.PositionEffect}' contradicts snapshot-anchored quantities in this operation; boundaries use side and quantity.");
                     if (fill.Price <= 0) { current.UnknownBoundaries = true; current.Note("Nonpositive price makes weighted prices unavailable."); }
                     var after = position + signed;
@@ -86,6 +96,7 @@ public static class OperationAggregator
                         result.Add(current.Build(default));
                         current = new Builder(fill, signed.Units.Sign) { Peak = after.Abs(), UnknownBoundaries = ambiguous || fill.Price <= 0 };
                         if (ambiguous) current.Note(TimestampNotice);
+                        if (peakAmbiguous) { current.UnknownPeak = true; current.Note(PeakNotice); }
                         if (fill.Price <= 0) current.Note("Nonpositive price makes weighted prices unavailable.");
                         if (!valid) current.Note($"Position effect '{fill.PositionEffect}' contradicts snapshot-anchored quantities in this operation; boundaries use side and quantity.");
                         current.Add(fill, "entry", after.Abs(), false, fillPlayIds);
@@ -110,6 +121,7 @@ public static class OperationAggregator
     }
 
     private const string TimestampNotice = "Fills share a timestamp with no unique effect-consistent operation boundary; only operations touching this timestamp are ambiguous.";
+    private const string PeakNotice = "Effect-consistent orders at a shared timestamp disagree on peak position; maximum quantity is unknown, while operation boundaries and totals are retained.";
     private static ExactAmount Signed(ImportedFill fill) => fill.Side == ExecutionFacts.Buy ? ExactAmount.From(fill.Quantity) : -ExactAmount.From(fill.Quantity);
     private static bool EffectMatches(ImportedFill fill, ExactAmount before)
     {
@@ -125,16 +137,17 @@ public static class OperationAggregator
         };
     }
 
-    private static (IReadOnlyList<ImportedFill> Fills, bool Ambiguous) OrderTimestamp(IEnumerable<ImportedFill> time, ExactAmount? position)
+    private static (IReadOnlyList<ImportedFill> Fills, bool Ambiguous, bool PeakAmbiguous) OrderTimestamp(
+        IEnumerable<ImportedFill> time, ExactAmount? position, ExactAmount priorPeak)
     {
         var rows = time.OrderBy(f => f.PositionEffect == ExecutionFacts.Close ? 0 : f.PositionEffect == ExecutionFacts.Flip ? 1 : 2)
             .ThenBy(f => f.Id).ToArray();
-        if (rows.Length == 1) return (rows, false);
+        if (rows.Length == 1) return (rows, false, false);
         if (position is null)
         {
             // With unknown size, same-side closes before opens can prove a direction change.
             // Opposing-side ties cannot prove the size or which position their opens increased.
-            return (rows, rows.Select(f => f.Side).Distinct().Count() > 1 || rows.Any(f => f.PositionEffect is ExecutionFacts.Flip or ExecutionFacts.Unknown));
+            return (rows, rows.Select(f => f.Side).Distinct().Count() > 1 || rows.Any(f => f.PositionEffect is ExecutionFacts.Flip or ExecutionFacts.Unknown), false);
         }
         if (rows.Select(f => f.Side).Distinct().Count() == 1 && rows.All(f => f.Quantity > 0))
         {
@@ -142,33 +155,37 @@ public static class OperationAggregator
             var total = rows.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Quantity));
             if (sameSide && rows.All(f => f.PositionEffect is ExecutionFacts.Open or ExecutionFacts.Unknown) ||
                 !sameSide && total.CompareTo(position.Value.Abs()) <= 0 && rows.All(f => f.PositionEffect is ExecutionFacts.Close or ExecutionFacts.Unknown))
-                return (rows, false); // No internal boundary, regardless of order or burst size.
+                return (rows, false, false); // No internal boundary, regardless of order or burst size.
             var closed = rows.Where(f => f.PositionEffect == ExecutionFacts.Close)
                 .Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Quantity));
             if (!sameSide && closed == position.Value.Abs() && rows.All(f => f.PositionEffect is ExecutionFacts.Close or ExecutionFacts.Open))
-                return (rows, false); // All closes must finish before this opposite-position open.
+                return (rows, false, false); // All closes must finish before this opposite-position open.
         }
 
         // ponytail: cap unusual timestamp bursts, conservatively flag their operations instead of
         // factorial work. Ordinary bursts without internal boundaries take the linear path.
-        if (rows.Length > 12) return (rows, true);
+        if (rows.Length > 12) return (rows, true, false);
         var used = new bool[rows.Length];
         var path = new List<ImportedFill>();
         ImportedFill[]? chosen = null;
         string? signature = null;
+        string? peakSignature = null;
         var ambiguous = false;
+        var peakAmbiguous = false;
         var visited = 0;
         var states = new HashSet<string>(StringComparer.Ordinal);
-        void Search(ExactAmount before, int operation, List<string> allocations)
+        void Search(ExactAmount before, int operation, List<string> allocations, List<ExactAmount> peaks)
         {
             if (ambiguous) return;
-            if (!states.Add($"{string.Join("", used.Select(u => u ? '1' : '0'))}:{operation}:{string.Join("|", allocations.Order(StringComparer.Ordinal))}")) return;
+            var peakState = string.Join("|", peaks);
+            if (!states.Add($"{string.Join("", used.Select(u => u ? '1' : '0'))}:{before}:{operation}:{peakState}:{string.Join("|", allocations.Order(StringComparer.Ordinal))}")) return;
             if (++visited > 4096) { ambiguous = true; return; }
             if (path.Count == rows.Length)
             {
                 var candidate = string.Join("|", allocations.Order(StringComparer.Ordinal));
-                if (chosen is null) { chosen = path.ToArray(); signature = candidate; }
+                if (chosen is null) { chosen = path.ToArray(); signature = candidate; peakSignature = peakState; }
                 else if (signature != candidate) ambiguous = true;
+                else if (peakSignature != peakState) peakAmbiguous = true;
                 return;
             }
             for (var i = 0; i < rows.Length; i++)
@@ -180,34 +197,37 @@ public static class OperationAggregator
                 var crosses = reducing && !after.Units.IsZero && before.Units.Sign != after.Units.Sign;
                 var next = operation;
                 var added = new List<string>(allocations);
+                var nextPeaks = new List<ExactAmount>(peaks);
                 if (crosses)
                 {
                     added.Add($"{fill.Id}:{operation}:exit:{before.Abs()}");
                     added.Add($"{fill.Id}:{++next}:entry:{after.Abs()}");
+                    nextPeaks.Add(after.Abs());
                 }
                 else
                 {
                     added.Add($"{fill.Id}:{operation}:{(reducing ? "exit" : "entry")}:{ExactAmount.From(fill.Quantity)}");
-                    if (after.Units.IsZero) next++;
+                    if (after.Abs().CompareTo(nextPeaks[operation]) > 0) nextPeaks[operation] = after.Abs();
+                    if (after.Units.IsZero) { next++; nextPeaks.Add(default); }
                 }
                 used[i] = true; path.Add(fill);
-                Search(after, next, added);
+                Search(after, next, added, nextPeaks);
                 path.RemoveAt(path.Count - 1); used[i] = false;
                 if (ambiguous) break;
             }
         }
-        Search(position.Value, 0, []);
-        return (chosen ?? rows, ambiguous || chosen is null);
+        Search(position.Value, 0, [], [priorPeak]);
+        return (chosen ?? rows, ambiguous || chosen is null, peakAmbiguous);
     }
 
     private sealed class Builder(ImportedFill first, int sign)
     {
-        public bool UnknownBoundaries, MissingEntries;
+        public bool UnknownBoundaries, MissingEntries, UnknownPeak;
         public void Note(string notice) { if (!Coverage.Contains(notice)) Coverage.Add(notice); }
         public ExactAmount Peak;
         public DateTimeOffset? ClosedAt;
         public List<string> Coverage = [];
-        private readonly List<OperationFillDto> parts = [];
+        private readonly List<Allocation> parts = [];
         private readonly HashSet<string> entries = [], exits = [];
         private readonly HashSet<string> bases = [];
         private readonly Dictionary<string, ExactAmount> fees = new(StringComparer.Ordinal);
@@ -231,10 +251,7 @@ public static class OperationAggregator
             }
             if (role == "entry") { entered += quantity; entryNotional += quantity.Units * ExactAmount.From(fill.Price).Units; if (!string.IsNullOrWhiteSpace(fill.OrderId)) entries.Add(fill.OrderId); }
             if (role == "exit") { exited += quantity; exitNotional += quantity.Units * ExactAmount.From(fill.Price).Units; if (!string.IsNullOrWhiteSpace(fill.OrderId)) exits.Add(fill.OrderId); }
-            parts.Add(new(new(fill.Id, fill.AccountId, fill.ContractId, fill.Side, fill.Direction,
-                ExactAmount.From(fill.Price).ToString(), ExactAmount.From(fill.Quantity).ToString(), ExactAmount.From(fill.Fee).ToString(),
-                fill.FeeToken, ExactAmount.From(fill.ClosedPnlUsd).ToString(), fill.OccurredAtUtc, fill.OrderId, fill.SourceFillId,
-                fill.TransactionHash, fill.PositionEffect, fill.FeeBasis, fill.PnlBasis, play), role, quantity.ToString(), fee.ToString(), closedPnl.ToString()));
+            parts.Add(new(fill, role, quantity, fee, closedPnl, play));
         }
         public ActivityOperationDto Build(ExactAmount position)
         {
@@ -245,12 +262,38 @@ public static class OperationAggregator
             return new($"{first.Id}:{(sign > 0 ? "long" : "short")}", first.AccountId, first.ContractId,
                 UnknownBoundaries ? null : sign > 0 ? "long" : "short", UnknownBoundaries || MissingEntries ? "incomplete" : ClosedAt is null ? "open" : "closed",
                 UnknownBoundaries || MissingEntries ? null : first.OccurredAtUtc, UnknownBoundaries ? null : ClosedAt, parts[^1].Fill.OccurredAtUtc,
-                UnknownBoundaries || MissingEntries ? null : Peak.ToString(), UnknownBoundaries || MissingEntries ? null : entered.ToString(), UnknownBoundaries ? null : exited.ToString(),
+                UnknownBoundaries || MissingEntries || UnknownPeak ? null : Peak.ToString(), UnknownBoundaries || MissingEntries ? null : entered.ToString(), UnknownBoundaries ? null : exited.ToString(),
                 UnknownBoundaries ? null : position.Abs().ToString(), UnknownBoundaries || MissingEntries ? null : ExactAmount.Average(entryNotional, entered),
                 UnknownBoundaries ? null : ExactAmount.Average(exitNotional, exited), entries.Count, exits.Count, parts.Count,
                 pnl.ToString(), stableFees.ToString(), fees.Where(f => !Stablecoins.Contains(f.Key)).OrderBy(f => f.Key, StringComparer.Ordinal)
                     .Select(f => new OperationFeeDto(f.Key, f.Value.ToString())).ToList(), unsupportedGrossFee ? null : (pnl - grossFees).ToString(),
-                bases.Count == 1 ? bases.Single() : "mixed", association == "linked" ? plays.Single() : null, association, Coverage, parts);
+                bases.Count == 1 ? bases.Single() : "mixed", association == "linked" ? plays.Single() : null, association, Coverage, new AllocationRows(parts))
+                { ContractKey = ActivityContractKey.From(first) };
         }
+    }
+
+    private readonly record struct Allocation(ImportedFill Fill, string Role, ExactAmount Quantity, ExactAmount Fee, ExactAmount ClosedPnl, Guid? PlayId);
+
+    // Keep exact totals for all allocations, but create constituent DTOs only when a caller reads them.
+    private sealed class AllocationRows(IReadOnlyList<Allocation> parts) : IReadOnlyList<OperationFillDto>
+    {
+        public int Count => parts.Count;
+        public OperationFillDto this[int index]
+        {
+            get
+            {
+                var part = parts[index]; var fill = part.Fill;
+                return new(new(fill.Id, fill.AccountId, fill.ContractId, fill.Side, fill.Direction,
+                    ExactAmount.From(fill.Price).ToString(), ExactAmount.From(fill.Quantity).ToString(), ExactAmount.From(fill.Fee).ToString(),
+                    fill.FeeToken, ExactAmount.From(fill.ClosedPnlUsd).ToString(), fill.OccurredAtUtc, fill.OrderId, fill.SourceFillId,
+                    fill.TransactionHash, fill.PositionEffect, fill.FeeBasis, fill.PnlBasis, part.PlayId),
+                    part.Role, part.Quantity.ToString(), part.Fee.ToString(), part.ClosedPnl.ToString());
+            }
+        }
+        public IEnumerator<OperationFillDto> GetEnumerator()
+        {
+            for (var i = 0; i < Count; i++) yield return this[i];
+        }
+        global::System.Collections.IEnumerator global::System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }

@@ -18,30 +18,39 @@ public sealed class ActivityService(IActivityStore store)
         var facts = await store.ReadAsync(accountId, ct);
         var accounts = facts.Accounts.Where(a => a.IsEnabled && (accountId == null || a.Id == accountId)).ToDictionary(a => a.Id);
         var fills = facts.Fills.Where(f => accounts.ContainsKey(f.AccountId)).ToList();
-        var operations = OperationAggregator.Aggregate(fills, facts.FillPlayIds, facts.Snapshots).ToList();
+        var positions = new ActivityPositions(fills, facts.Snapshots);
+        var operations = OperationAggregator.AggregateSummaries(fills, facts.FillPlayIds, positions).ToList();
+        var lastByContract = new Dictionary<ActivityContractKey, int>();
+        for (var i = 0; i < operations.Count; i++)
+        {
+            var operation = operations[i];
+            if (!lastByContract.TryGetValue(operation.ContractKey, out var previous) ||
+                operation.LastOccurredAtUtc > operations[previous].LastOccurredAtUtc ||
+                operation.LastOccurredAtUtc == operations[previous].LastOccurredAtUtc && operations[previous].OpenQuantity == "0" && operation.OpenQuantity != "0")
+                lastByContract[operation.ContractKey] = i;
+        }
+        var contractsByAccount = positions.Contracts.GroupBy(p => p.Key.AccountId).ToDictionary(g => g.Key, g => g.ToList());
         var coverage = new List<ActivityCoverageDto>();
         foreach (var account in accounts.Values)
         {
             if (account.HistoryNotice is { Length: > 0 } notice) coverage.Add(new(account.Id, null, notice));
-            var snapshot = facts.Snapshots.SingleOrDefault(s => s.AccountId == account.Id);
+            var snapshot = positions.Snapshots.GetValueOrDefault(account.Id);
             if (snapshot is null) { coverage.Add(new(account.Id, null, "No latest position snapshot is available for comparison.")); continue; }
-            var contracts = fills.Where(f => f.AccountId == account.Id).Select(f => f.ContractId)
-                .Concat(snapshot.Positions.Select(p => p.ContractId)).Distinct(StringComparer.Ordinal);
-            foreach (var contract in contracts)
+            foreach (var (key, contract) in contractsByAccount.GetValueOrDefault(account.Id) ?? [])
             {
-                // A close and the next open can have identical last timestamps. The remaining
-                // position, not UUID display ordering, identifies the final operation.
-                var last = operations.Where(o => o.AccountId == account.Id && o.ContractId == contract)
-                    .OrderByDescending(o => o.LastOccurredAtUtc).ThenBy(o => o.OpenQuantity == "0" ? 1 : 0).FirstOrDefault();
-                string? reason = last?.LastOccurredAtUtc > snapshot.ObservedAtUtc ? "Latest snapshot predates retained fills; position comparison is unavailable." :
+                // Same-time close/open operations use remaining position, not UUID display ordering.
+                var hasLast = lastByContract.TryGetValue(key, out var index);
+                var last = hasLast ? operations[index] : null;
+                var observed = positions.Quantity(key);
+                string? reason = observed is null ? ActivityPositions.AmbiguousIdentityNotice :
+                    last?.LastOccurredAtUtc > snapshot.ObservedAtUtc ? "Latest snapshot predates retained fills; position comparison is unavailable." :
                     last is not null && last.OpenQuantity is null ? "Computed position is unknown because retained history is incomplete; snapshot comparison is unavailable." : null;
                 if (reason is null)
                 {
-                    var observed = ExactAmount.From(snapshot.Positions.SingleOrDefault(p => p.ContractId == contract)?.SignedQuantity ?? 0m);
                     var computedText = last?.OpenQuantity ?? "0";
                     // Compare exact strings after normalizing through the aggregator's own signed position.
                     var signed = last?.Direction == "short" && computedText != "0" ? "-" + computedText : computedText;
-                    if (observed.ToString() != signed)
+                    if (observed!.Value.ToString() != signed)
                         reason = $"Latest snapshot position {observed} disagrees with retained-fill position {signed}. Neither is corrected.";
                 }
                 if (reason is not null)
@@ -49,7 +58,6 @@ public sealed class ActivityService(IActivityStore store)
                     coverage.Add(new(account.Id, contract, reason));
                     if (last is not null)
                     {
-                        var index = operations.IndexOf(last);
                         operations[index] = last with { Coverage = last.Coverage.Append(reason).ToList() };
                     }
                 }
