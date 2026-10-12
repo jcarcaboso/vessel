@@ -193,6 +193,19 @@ describe('session candle cache', () => {
     expect(candles).toHaveBeenLastCalledWith('lighter-main', { instrument: 'BTC', interval: '1m', refresh: true }, expect.any(AbortSignal))
   })
 
+  it.each([['succeeds', null], ['fails', new ApiError('http', 'Venue unavailable.', 502)]] as const)(
+    'does not read again when a retry %s before its activation', async (_, failure) => {
+      const { cache, candles } = setup()
+      if (failure) candles.mockRejectedValueOnce(failure)
+      const entry = cache.retry('lighter-main', 'BTC', '1m')
+      await waitFor(() => expect(entry.snapshot.status).toBe(failure ? 'error' : 'ready'))
+      cache.activate(entry)
+      expect(candles).toHaveBeenCalledExactlyOnceWith('lighter-main', { instrument: 'BTC', interval: '1m', refresh: true }, expect.any(AbortSignal))
+      expect(entry.snapshot.error).toBe(failure ? 'Venue unavailable.' : null)
+      cache.activate(entry)
+      await waitFor(() => expect(candles).toHaveBeenCalledTimes(2))
+    })
+
   it.each([new ApiError('http', 'Venue unavailable.', 502), new TypeError('Network unavailable')])('retains cached candles on a refresh failure (%s)', async error => {
     const { cache, entry, candles } = setup()
     await cache.load(entry, 'latest')

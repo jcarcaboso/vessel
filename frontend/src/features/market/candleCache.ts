@@ -31,6 +31,8 @@ export interface CandleEntry {
   tailTimes: Set<number>
   /** End of the fetched REST tail coverage; live candles never extend it. */
   coveredTo: number | null
+  /** A retry already started this entry's read, so its next activation does not read again. */
+  retried: boolean
   buffer: Map<number, Tick>
   controllers: Set<AbortController>
   flights: Map<string, { controller: AbortController; promise: Promise<void> }>
@@ -80,7 +82,7 @@ export class CandleCache {
     let entry = this.entries.get(key)
     if (!entry) {
       entry = { key, accountId, instrument, interval, generation: 0, historyGeneration: 0, tailRequest: 0,
-        viewers: 0, lastView: ++this.clock, snapshot: initial(), pages: new Map(), tailTimes: new Set(), coveredTo: null, buffer: new Map(),
+        viewers: 0, lastView: ++this.clock, snapshot: initial(), pages: new Map(), tailTimes: new Set(), coveredTo: null, retried: false, buffer: new Map(),
         controllers: new Set(), flights: new Map(), listeners: new Set() }
       this.entries.set(key, entry)
       this.trim(entry)
@@ -130,9 +132,17 @@ export class CandleCache {
     for (const entry of [...this.entries.values()]) if (!accountId || entry.accountId === accountId) this.drop(entry, error)
     for (const listener of this.invalidations) if (!accountId || listener.accountId === accountId) listener.callback()
   }
+  /** Try again after a dropped entry: a fresh entry whose first read bypasses the server cache. */
+  retry(accountId: string, instrument: string, interval: CandleInterval) {
+    const entry = this.entry(accountId, instrument, interval)
+    entry.retried = true
+    void this.load(entry, 'refresh')
+    return entry
+  }
   activate(entry: CandleEntry) {
     if (!this.valid(entry, entry.generation)) return
     entry.lastView = ++this.clock
+    if (entry.retried) { entry.retried = false; return }
     const expired = new Set<number>()
     for (const [window, page] of entry.pages) if (Date.now() - page.fetchedAt > pageLifetime) {
       page.times.forEach(time => expired.add(time))

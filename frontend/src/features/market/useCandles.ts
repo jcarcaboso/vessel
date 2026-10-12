@@ -19,12 +19,7 @@ export function useCandles({ api, accountId, instrument, interval }: CandleSourc
   useEffect(() => { cache.activate(entry) }, [cache, entry])
   const refresh = useCallback(() => {
     if (cache.entries.get(entry.key) === entry) void cache.load(entry, 'refresh')
-    else {
-      // The replacement's activation joins this refresh, so the retry still bypasses the server cache.
-      const fresh = cache.entry(accountId, instrument, interval)
-      setRetried({ cache, entry: fresh })
-      void cache.load(fresh, 'refresh')
-    }
+    else setRetried({ cache, entry: cache.retry(accountId, instrument, interval) })
   }, [cache, entry, accountId, instrument, interval])
   const revalidate = useCallback(() => { void cache.load(entry, 'latest') }, [cache, entry])
   const upsert = useCallback((candle: VenueCandle, receivedAt: string) => cache.upsert(entry, candle, receivedAt), [cache, entry])
