@@ -32,8 +32,8 @@ export interface PriceOverlay {
 
 export interface ChartCallbacks {
   onLevelSelect(id: string): void
-  /** Called continuously while dragging, then once with phase "end". */
-  onLevelDrag(id: string, price: number, phase: 'move' | 'end'): void
+  /** Preview moves, then "end" to commit or "cancel" to discard an interrupted gesture. */
+  onLevelDrag(id: string, price: number, phase: 'move' | 'end' | 'cancel'): void
   /** The visible range is close to the oldest loaded candle. */
   onNeedOlder(): void
   onDrawingCreate(drawing: ChartDrawing): void

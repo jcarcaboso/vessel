@@ -91,7 +91,10 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   // History actions and drag gestures read the latest entries, not the ones captured when they started.
   const latest = useRef({ entries, onEntriesChange })
   useEffect(() => { latest.current = { entries, onEntriesChange } })
-  const dragStart = useRef<DraftEntry | null>(null)
+  // Preview overlays only. Updating the workspace on every move lets suggestions/notices
+  // resize above the pointer, feeding a different price into the next move.
+  const [dragPreview, setDragPreview] = useState<{ source: DraftEntry[]; entries: DraftEntry[] } | null>(null)
+  const chartEntries = dragPreview?.source === entries ? dragPreview.entries : entries
 
   /** Records an entry edit made on the chart so undo/redo reverts only the fields it changed. */
   const recordEntryEdit = (label: string, before: DraftEntry, after: DraftEntry) => {
@@ -107,18 +110,19 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   }
   const levelProps = {
     onLevelSelect: (id: string) => { const ref = parseOverlayId(id); if (ref) onSelect(ref.entryId) },
-    onLevelDrag: (id: string, price: number, phase: 'move' | 'end') => {
+    onLevelDrag: (id: string, price: number, phase: 'move' | 'end' | 'cancel') => {
+      if (phase !== 'move') setDragPreview(null)
+      if (phase === 'cancel' || !editable) return
       const ref = parseOverlayId(id)
       const current = latest.current.entries
       const entry = ref && current.find(item => item.id === ref.entryId)
       if (!ref || !entry) return
-      dragStart.current ??= entry
       const next = applyLevelDrag(current, id, price, priceStep)
-      onEntriesChange?.(next)
-      if (phase === 'end') {
+      if (phase === 'move') setDragPreview({ source: current, entries: next })
+      else {
         const after = next.find(item => item.id === ref.entryId)!
-        recordEntryEdit(`Move ${entry.name} level`, dragStart.current, after)
-        dragStart.current = null
+        recordEntryEdit(`Move ${entry.name} level`, entry, after)
+        latest.current.onEntriesChange?.(next)
         if (ref.entryId !== selectedId) onSelect(ref.entryId)
       }
     },
@@ -167,9 +171,10 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   const expandButton = useRef<HTMLButtonElement>(null)
   const live = source !== null && instrument !== ''
   const overlays = useMemo(() => {
-    const plan = planOverlays(entries, selectedId, view, direction, leverage)
+    const plan = planOverlays(chartEntries, selectedId, view, direction, leverage)
     return liquidation === null ? plan : [...plan, liquidationOverlay(liquidation)]
-  }, [entries, selectedId, view, direction, leverage, liquidation])
+  }, [chartEntries, selectedId, view, direction, leverage, liquidation])
+  // Keep the HTML legend stable too: a wrapping value could resize the canvas during the drag.
   const average = view === 'aggregate' ? averageEntryPrice(entries) : null
   const several = entries.length > 1
 
