@@ -73,11 +73,12 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
     [GeneratedRegex(@"^(?<asset>[A-Za-z0-9]{1,24})/USDC(?<retired> \[deprecated-\d{1,20}\])?$")]
     private static partial Regex MarketName();
 
-    private Task<RisexCatalogue> CatalogueAsync(CancellationToken ct) => catalogueCache.GetAsync(async token =>
-    {
-        using var document = await GetAsync("/v1/markets", token);
-        return ReadCatalogue(Data(document));
-    }, ct);
+    private Task<RisexCatalogue> CatalogueAsync(CancellationToken ct) => catalogueCache.GetAsync(token =>
+        Http.ReadBoundedAsync(async bounded =>
+        {
+            using var document = await GetAsync("/v1/markets", bounded);
+            return ReadCatalogue(Data(document));
+        }, token), ct);
 
     internal static RisexCatalogue ReadCatalogue(JsonElement data)
     {
@@ -338,9 +339,21 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
         {
             var market = (await CatalogueAsync(token)).ActiveByKey(contractId)
                 ?? throw new VenueReadException("The instrument is not an active RISEx market.");
+            return await ReadNativeCandlesAsync(market.Instrument, interval, fromMs, toMs, token);
+        }, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<VenueCandle>> ReadNativeCandlesAsync(VenueInstrument market, string interval,
+        long fromMs, long toMs, CancellationToken cancellationToken)
+    {
+        if (!IntervalMs.TryGetValue(interval, out var step) || fromMs < 0 || toMs < fromMs ||
+            market.VenueContractId is not { } id || id.Length is < 1 or > 20 || !id.All(char.IsAsciiDigit))
+            throw new VenueReadException("A native RISEx market and a valid candle window are required.");
+        return Http.ReadBoundedAsync<IReadOnlyList<VenueCandle>>(async token =>
+        {
             using var document = await GetAsync(
-                $"/v1/markets/id/{market.MarketId}/trading-view-data?interval={step * 1_000_000}&from={fromMs * 1_000_000}&to={toMs * 1_000_000}", token);
-            return ReadCandles(Data(document), market.MarketId, interval, step);
+                $"/v1/markets/id/{id}/trading-view-data?interval={step * 1_000_000}&from={fromMs * 1_000_000}&to={toMs * 1_000_000}", token);
+            return ReadCandles(Data(document), id, interval, step);
         }, cancellationToken);
     }
 
@@ -407,20 +420,7 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
 public sealed class RisexCatalogueCache(TimeProvider time)
 {
     public static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(1);
-    private readonly SemaphoreSlim gate = new(1, 1);
-    private (DateTimeOffset Expires, RisexReader.RisexCatalogue Value)? entry;
-
-    internal async Task<RisexReader.RisexCatalogue> GetAsync(Func<CancellationToken, Task<RisexReader.RisexCatalogue>> load, CancellationToken ct)
-    {
-        if (entry is { } hit && hit.Expires > time.GetUtcNow()) return hit.Value;
-        await gate.WaitAsync(ct);
-        try
-        {
-            if (entry is { } again && again.Expires > time.GetUtcNow()) return again.Value;
-            var value = await load(ct);
-            entry = (time.GetUtcNow() + Lifetime, value);
-            return value;
-        }
-        finally { gate.Release(); }
-    }
+    private readonly BoundedMarketDataCache<RisexReader.RisexCatalogue> entries = new(time, 1, 1, _ => 1);
+    internal Task<RisexReader.RisexCatalogue> GetAsync(Func<CancellationToken, Task<RisexReader.RisexCatalogue>> load,
+        CancellationToken ct) => entries.GetAsync("markets", load, _ => Lifetime, ct);
 }

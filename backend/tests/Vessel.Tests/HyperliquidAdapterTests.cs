@@ -457,7 +457,7 @@ public sealed partial class HyperliquidAdapterTests
             new HyperliquidPerpetualReader(client, clock).ReadAsync(Address, CancellationToken.None));
         Assert.Equal("Hyperliquid read timed out.", exception.Message);
         Assert.Equal(6, handler.Requests.Count);
-        Assert.Equal(1, clock.TimerCount);
+        Assert.Equal(2, clock.TimerCount); // Account deadline plus independent shared metadata deadline.
         Assert.Equal(TimeSpan.FromSeconds(20), clock.Deadline);
     }
 
@@ -587,7 +587,7 @@ public sealed partial class HyperliquidAdapterTests
     private sealed class TestClock : TimeProvider
     {
         private DateTimeOffset now = DateTimeOffset.FromUnixTimeMilliseconds(StateTime);
-        private TestTimer? timer;
+        private readonly List<TestTimer> timers = [];
         internal int TimerCount { get; private set; }
         internal TimeSpan Deadline { get; private set; }
         public override DateTimeOffset GetUtcNow() => now;
@@ -597,14 +597,15 @@ public sealed partial class HyperliquidAdapterTests
             Assert.Equal(Timeout.InfiniteTimeSpan, period);
             TimerCount++;
             Deadline = dueTime;
-            timer = new TestTimer(now + dueTime, callback, state);
+            var timer = new TestTimer(now + dueTime, callback, state);
+            timers.Add(timer);
             return timer;
         }
 
         internal void Advance(TimeSpan interval)
         {
             now += interval;
-            timer?.FireIfDue(now);
+            foreach (var timer in timers.ToArray()) timer.FireIfDue(now);
         }
 
         private sealed class TestTimer(DateTimeOffset due, TimerCallback callback, object? state) : ITimer

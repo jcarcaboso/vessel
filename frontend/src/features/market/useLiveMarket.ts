@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CandleInterval, MarketContext, VenueCandle, WorkspaceApi } from '@/api/workspace'
 
+import { ApiError } from '@/api/system'
+import { candleCache } from './candleCache'
+
 export type LiveMarketState = 'off' | 'connecting' | 'live' | 'reconnecting' | 'polling' | 'stale'
 
 /** Delays before reopening the stream after it ends or fails, by consecutive unstable attempt. */
@@ -51,9 +54,14 @@ export function useLiveMarket(options: LiveMarketOptions) {
     let unstable = 0
     let polling = false
     let gapFill = false
+    let upstreamInterrupted = false
 
     const publish = (state: LiveMarketState, eventAt?: string) => {
       if (disposed) return
+      if (state === 'live' && upstreamInterrupted) {
+        upstreamInterrupted = false
+        handlers.current.refreshCandles()
+      } else if (state === 'reconnecting' || state === 'stale') upstreamInterrupted = true
       setSession(previous => {
         const lastEventAt = eventAt ?? (previous?.key === key ? previous.lastEventAt : null)
         return previous?.key === key && previous.state === state && previous.lastEventAt === lastEventAt ? previous : { key, state, lastEventAt }
@@ -77,13 +85,17 @@ export function useLiveMarket(options: LiveMarketOptions) {
           received = true
           failures = 0
           if (polling) { polling = false; clearPoll() }
-          if (gapFill) { gapFill = false; handlers.current.refreshCandles() }
+          if (gapFill) { gapFill = false; upstreamInterrupted = false; handlers.current.refreshCandles() }
         }
         const now = new Date().toISOString()
         if (event.type === 'candle') { handlers.current.onCandle(event.candle, now); publish('live', now) }
         else if (event.type === 'context') { handlers.current.onContext(event.context); publish('live', now) }
         else publish(event.status.state)
-      }).then(() => ended(abort, received, openedAt), () => ended(abort, received, openedAt))
+      }).then(() => ended(abort, received, openedAt), (error: unknown) => {
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) candleCache(api).invalidate()
+        else if (error instanceof ApiError && (error.status === 404 || error.status === 409)) candleCache(api).invalidate(accountId)
+        else ended(abort, received, openedAt)
+      })
     }
 
     const ended = (abort: AbortController, received: boolean, openedAt: number) => {
@@ -107,6 +119,7 @@ export function useLiveMarket(options: LiveMarketOptions) {
     }
 
     const onVisibility = () => {
+      if (disposed) return
       if (hidden()) {
         clearRetry()
         clearPoll()
@@ -116,16 +129,25 @@ export function useLiveMarket(options: LiveMarketOptions) {
         gapFill = true
       } else if (!controller && retryTimer === undefined) {
         gapFill = false
+        upstreamInterrupted = false
         refreshAll()
         if (polling) pollTimer = setInterval(refreshAll, pollInterval)
         connect()
       }
     }
 
+    const unsubscribe = candleCache(api).onInvalidate(accountId, () => {
+      disposed = true
+      clearRetry()
+      clearPoll()
+      controller?.abort()
+      setSession(null)
+    })
     document.addEventListener('visibilitychange', onVisibility)
     connect()
     return () => {
       disposed = true
+      unsubscribe()
       document.removeEventListener('visibilitychange', onVisibility)
       clearRetry()
       clearPoll()

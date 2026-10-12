@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MarketContext, WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
+import { candleCache } from './candleCache'
 
 /**
  * Venue header statistics, loaded once per instrument, refreshed with the chart and replaced by live updates.
@@ -20,6 +21,9 @@ export function useMarketContext(api: WorkspaceApi, accountId: string, instrumen
     api.marketContext(accountId, instrument, abort.signal).then(context => {
       if (!abort.signal.aborted) setState({ key, context, error: null })
     }, (error: unknown) => {
+      if (abort.signal.aborted) return
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) candleCache(api).invalidate()
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) candleCache(api).invalidate(accountId)
       if (!abort.signal.aborted) setState(previous => ({ key, context: previous.key === key ? previous.context : null,
         error: error instanceof ApiError ? error.message : 'Market statistics could not be loaded.' }))
     })
@@ -33,9 +37,10 @@ export function useMarketContext(api: WorkspaceApi, accountId: string, instrumen
   }, [instrument, key])
 
   useEffect(() => {
+    const unsubscribe = candleCache(api).onInvalidate(accountId, () => controller.current?.abort())
     load()
-    return () => controller.current?.abort()
-  }, [load])
+    return () => { unsubscribe(); controller.current?.abort() }
+  }, [load, api, accountId])
 
   return { ...(state.key === key ? state : { context: null, error: null }), refresh: load, apply }
 }
