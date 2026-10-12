@@ -15,11 +15,11 @@ import { OverviewPlays } from './OverviewPlays'
 import { ReviewPage } from '@/features/review/ReviewPage'
 import { AppearanceSettings, CurrentThemeName } from '@/features/settings/AppearanceSettings'
 import { showAppearanceSection } from '@/features/settings/appearance'
-import { money, shortAddress, time } from './format'
+import { money, time } from './format'
 import { VenuesProvider, useVenues } from '@/api/venues'
 import {
   Activity, ArrowRight, ArrowUpRight, BarChart3, CircleHelp, Database, Folder, LayoutDashboard,
-  LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, ShieldCheck, Wallet, BookOpen, Pencil, ChevronDown,
+  LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, ShieldCheck, Wallet, BookOpen, Pencil, ChevronDown, X,
 } from 'lucide-react'
 import './application-shell.css'
 
@@ -104,6 +104,8 @@ function Shell({ system, disconnect, api }: ShellProps) {
   }, [api, reloadKey])
   useEffect(() => {
     if (!menuOpen) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
     const sidebar = document.getElementById('workspace-nav')!
     const controls = () => [...sidebar.querySelectorAll<HTMLAnchorElement | HTMLButtonElement>('a[href],button:not(:disabled)')]
     controls()[0]?.focus()
@@ -120,6 +122,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
     window.addEventListener('keydown', handle)
     window.addEventListener('resize', resize)
     return () => {
+      document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', handle)
       window.removeEventListener('resize', resize)
       document.getElementById('workspace-menu')?.focus({ preventScroll: true })
@@ -167,7 +170,6 @@ function Shell({ system, disconnect, api }: ShellProps) {
   }
   const portfolios = data?.portfolios ?? [], accounts = data?.accounts ?? []
   const enabledAccounts = accounts.filter(account => account.isEnabled !== false)
-  const readOnlyAccountCount = enabledAccounts.filter(a => venues.can(a.venueId, 'sync')).length
   const portfolioNames = Object.fromEntries(portfolios.map(p => [p.id, p.name]))
   const filteredAccounts = portfolioFilter ? accounts.filter(a => a.portfolioId === portfolioFilter) : accounts
   const selectedAccount = accounts.find(a => a.id === selectedAccountId)
@@ -180,9 +182,9 @@ function Shell({ system, disconnect, api }: ShellProps) {
   }
 
   return <div className={`journal-shell ${navigationCollapsed ? 'navigation-collapsed' : ''}`}>
-    {menuOpen && <button className="sidebar-backdrop" aria-label="Close navigation" title="Close navigation" onClick={() => setMenuOpen(false)} />}
     <aside id="workspace-nav" className={`shell-sidebar ${menuOpen ? 'is-open' : ''}`} aria-label="Main navigation" role={menuOpen ? 'dialog' : undefined} aria-modal={menuOpen ? true : undefined}>
       <a className="shell-brand" href="#overview" aria-label="Vessel overview" title="Vessel overview" onClick={() => navigate('overview')}><span className="shell-monogram" aria-hidden="true">V</span><span className="sidebar-copy">vessel<small>THE TRADING JOURNAL</small></span></a>
+      {menuOpen && <button type="button" className="icon-button sidebar-close" aria-label="Close navigation" title="Close navigation" onClick={() => setMenuOpen(false)}><X size={19} aria-hidden="true" /></button>}
       <button type="button" className="icon-button sidebar-toggle" aria-label={navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'} title={navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'} aria-controls="workspace-nav" aria-expanded={!navigationCollapsed} onClick={() => setNavigationCollapsed(collapsed => !collapsed)}>
         {navigationCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
       </button>
@@ -191,13 +193,12 @@ function Shell({ system, disconnect, api }: ShellProps) {
       <div className="nav-section-label later-section">LATER</div>
       <div className="shell-nav-later" role="link" aria-label="Strategies" aria-disabled="true" title="Strategies are not available yet"><Folder size={18} aria-hidden="true" /><span className="sidebar-copy">Strategies</span></div>
       <div className="shell-sidebar-bottom">
-        <div className="read-only-note" title="Read-only by design. Perpetuals first. No order placement."><ShieldCheck size={17} aria-hidden="true" /><div className="sidebar-copy"><strong>Read-only by design</strong><span>Perpetuals first. No order placement.</span></div></div>
         <a href="#settings" className={`shell-nav-item ${page === 'settings' ? 'active' : ''}`} aria-label="Settings" title="Settings" aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} aria-hidden="true" /><span className="sidebar-copy">Settings</span></a>
         <button className="owner-card" onClick={disconnect} aria-label={`Disconnect ${system.owner.displayName}'s session`} title={`Disconnect ${system.owner.displayName}'s browser session`}><span className="owner-avatar" aria-hidden="true">{system.owner.displayName.slice(0, 1).toUpperCase()}</span><span className="sidebar-copy"><strong>{system.owner.displayName}</strong><small>Private workspace</small></span><LogOut size={15} aria-hidden="true" /></button>
       </div>
     </aside>
     <div className="shell-main" inert={menuOpen}>
-      <header className="shell-header"><div><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" title="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} aria-hidden="true" /></button><span className="shell-breadcrumb">Workspace <span>/</span> <strong>{currentPage.label}</strong></span></div><div><span className="connection-indicator"><i />Private session</span><span className="workspace-badge">Perpetuals</span></div></header>
+      <header className="shell-header"><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" title="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} aria-hidden="true" /></button></header>
       <main className="shell-content">
         {page !== 'plays' && page !== 'review' && <section className="shell-page-heading"><div><div className="eyebrow">YOUR PRIVATE WORKSPACE</div><h1>{selectedAccount ? selectedAccount.name : currentPage.label}</h1><p>{currentPage.description}</p></div><div className="shell-heading-actions">
           {page !== 'settings' && <Button variant="outline" onClick={reload} disabled={loading} aria-busy={loading}><RefreshCw size={14} className={loading ? 'is-spinning' : ''} />Reload</Button>}
@@ -247,7 +248,6 @@ function Shell({ system, disconnect, api }: ShellProps) {
           <section className="shell-panel settings-panel"><Database size={23} /><h2>Venue capabilities</h2><p>Accounts can be added at {venues.creatable().map(v => v.name).join(', ')}. A refresh is explicitly requested, not a background job.</p><div className="venue-capability-list">{system.venues.map(v => <div key={v.id}><span>{v.name}</span><span className="workspace-badge">{v.status}</span></div>)}</div><p className="field-help">No venue credential, private key, full-history promise or automatic Play matching is involved.</p></section>
         </div>}
 
-        <footer className="shell-footer"><span>VESSEL / PRIVATE TRADING DIARY</span><span>{readOnlyAccountCount} enabled read-only {readOnlyAccountCount === 1 ? 'account' : 'accounts'} · <span className="address-note">{selectedAccount ? venues.find(selectedAccount.venueId)?.source === 'account-index' ? `Index ${selectedAccount.sourceId ?? selectedAccount.address ?? 'unavailable'}` : shortAddress(selectedAccount.sourceId ?? selectedAccount.address) : 'No order execution'}</span></span></footer>
       </main>
     </div>
     <CreatePortfolioDialog open={portfolioDialog} onOpenChange={setPortfolioDialog} api={api} onCreated={created} />
