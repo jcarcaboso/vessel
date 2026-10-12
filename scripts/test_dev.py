@@ -37,6 +37,8 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
             "ConnectionStrings__Vessel": "test-connection",
             "POSTGRES_PASSWORD": "test-password",
             "Vessel_TEST_POSTGRES": "test-database",
+            "INFISICAL_TOKEN": "test-infisical-access-token",
+            "infisical_client_secret": "test-infisical-client-secret",
         }
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

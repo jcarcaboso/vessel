@@ -13,24 +13,31 @@ namespace Vessel.Tests;
 public sealed class CredentialTransportApiTests
 {
     [Theory]
-    // Direct plaintext from another machine, with or without a spoofed forwarded scheme.
-    [InlineData("http://vessel.example.invalid", "192.0.2.10", null, null, false)]
-    [InlineData("http://vessel.example.invalid", "192.0.2.10", "https", null, false)]
-    [InlineData("http://localhost", "192.0.2.10", "https", null, false)]
+    // Production plaintext from another machine, with or without a spoofed forwarded scheme.
+    [InlineData("Production", "http://vessel.example.invalid", "192.0.2.10", null, null, false)]
+    [InlineData("Production", "http://vessel.example.invalid", "192.0.2.10", "https", null, false)]
+    [InlineData("Production", "http://localhost", "192.0.2.10", "https", null, false)]
     // Same-host plaintext proxy for a LAN origin keeps the LAN host or forwards the LAN client.
-    [InlineData("http://10.1.0.219:5180", "127.0.0.1", null, null, false)]
-    [InlineData("http://localhost", "127.0.0.1", "http", "192.0.2.10", false)]
+    [InlineData("Production", "http://10.1.0.219:5180", "127.0.0.1", null, null, false)]
+    [InlineData("Production", "http://localhost", "127.0.0.1", "http", "192.0.2.10", false)]
     // Loopback development, HTTPS, and a same-host TLS-terminating proxy.
-    [InlineData("http://localhost", "127.0.0.1", null, null, true)]
-    [InlineData("http://[::1]", "::1", null, null, true)]
-    [InlineData("https://vessel.example.invalid", "192.0.2.10", null, null, true)]
-    [InlineData("http://vessel.example.invalid", "127.0.0.1", "https", "192.0.2.10", true)]
-    public async Task Token_bearing_credential_requests_need_https_outside_loopback(string origin, string peer, string? forwardedProto, string? forwardedFor, bool allowed)
+    [InlineData("Production", "http://localhost", "127.0.0.1", null, null, true)]
+    [InlineData("Production", "http://[::1]", "::1", null, null, true)]
+    [InlineData("Production", "https://vessel.example.invalid", "192.0.2.10", null, null, true)]
+    [InlineData("Production", "http://vessel.example.invalid", "127.0.0.1", "https", "192.0.2.10", true)]
+    // Only the explicitly named Development environment gets the LAN exception.
+    [InlineData("Development", "http://10.1.0.219:5180", "127.0.0.1", null, null, true)]
+    [InlineData("Development", "http://vessel.example.invalid", "192.0.2.10", null, null, true)]
+    [InlineData("Development", "http://localhost", "127.0.0.1", "http", "192.0.2.10", true)]
+    [InlineData("Staging", "http://vessel.example.invalid", "192.0.2.10", null, null, false)]
+    [InlineData("Testing", "http://vessel.example.invalid", "192.0.2.10", null, null, false)]
+    public async Task Token_transport_exception_is_development_only(string environment, string origin, string peer, string? forwardedProto, string? forwardedFor, bool allowed)
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var account = SecurityFixture.Account(owner); store.Accounts.Add(account);
         var credentials = new SecurityCredentialStore(); using var vault = SecurityFixture.Vault();
         var verifier = new CountingVerifier(); var discovery = new SecurityDiscovery([new("123", "Main", "main")]);
-        await using var factory = new CoreApiFactory(owner, store, configure: services =>
+        await using var factory = new CoreApiFactory(owner, store, connection: "Host=unused.invalid;Database=synthetic",
+            environment: environment, configure: services =>
         {
             services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry()); services.AddSingleton<ICredentialVault>(vault);
             services.AddSingleton<IAccountCredentialStore>(credentials); services.AddSingleton<IVenueCredentialVerifier>(verifier);
@@ -38,6 +45,10 @@ public sealed class CredentialTransportApiTests
             services.AddSingleton<IStartupFilter>(new Peer(IPAddress.Parse(peer)));
         });
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri(origin), AllowAutoRedirect = false });
+        // A browser cannot request the Development environment through a header.
+        client.DefaultRequestHeaders.Add("ASPNETCORE_ENVIRONMENT", "Development");
+        using (var unauthorized = await client.PutAsJsonAsync($"/api/accounts/{account.Id}/credential", new { token = SecurityFixture.Token }))
+            Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CoreApiFactory.Token);
         if (forwardedProto is not null) client.DefaultRequestHeaders.Add("X-Forwarded-Proto", forwardedProto);
         if (forwardedFor is not null) client.DefaultRequestHeaders.Add("X-Forwarded-For", forwardedFor);
@@ -48,7 +59,12 @@ public sealed class CredentialTransportApiTests
         if (allowed)
         {
             Assert.Equal(HttpStatusCode.OK, save.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
             Assert.Equal(1, verifier.Calls); Assert.Equal(SecurityFixture.Token, discovery.ReceivedToken);
+            Assert.True(save.Headers.CacheControl!.NoStore);
+            Assert.True(preview.Headers.CacheControl!.NoStore);
+            Assert.DoesNotContain(SecurityFixture.Token, await save.Content.ReadAsStringAsync());
+            Assert.DoesNotContain(SecurityFixture.Token, await preview.Content.ReadAsStringAsync());
         }
         else
         {

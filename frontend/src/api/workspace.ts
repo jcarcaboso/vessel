@@ -585,6 +585,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       if (token !== undefined) {
         if (!credentialTransportAllowed()) return Promise.reject(new ApiError('http', credentialTransportMessage))
         if (!token.trim() || token.length > 512) return Promise.reject(new ApiError('http', credentialSaveMessage))
+        token = token.trim()
         return request(`/api/venues/${venueId}/accounts/credential`, discovery(venueId, address),
           { ...withSignal(signal), method: 'POST', body: JSON.stringify({ address, token }) }, 30_000, undefined,
           'Could not load venue names. Check the read-only token’s wallet, scope and expiry.')
@@ -597,6 +598,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     saveAccountCredential: (id, token) => {
       if (!credentialTransportAllowed()) return Promise.reject(new ApiError('http', credentialTransportMessage))
       if (!token.trim() || token.length > 512) return Promise.reject(new ApiError('http', credentialSaveMessage))
+      token = token.trim()
       return request(`${accountPath(id)}/credential`, credential, { method: 'PUT', body: JSON.stringify({ token }) },
         30_000, undefined, credentialSaveMessage)
     },

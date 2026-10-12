@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, type FormEvent } from 'react'
 import {
-  credentialSaveMessage, credentialStorageMessage, credentialTransportAllowed, credentialTransportMessage,
+  credentialDevelopmentTransportMessage, credentialFailureMessage, credentialStorageMessage, credentialTransportAllowed, credentialTransportMessage,
   type AccountCredential as CredentialMetadata,
 } from '@/api/account-access'
 import type { WorkspaceApi } from '@/api/workspace'
@@ -28,6 +28,8 @@ export function ReadOnlyTokenInput({ venueId, value, onChange, disabled = false 
     <p id={`${id}-help`} className="field-help">{secure
       ? 'Only a read-only token. Do not enter API private keys. No wallet signing is required. Vessel verifies access before storing it encrypted; the token is never displayed again.'
       : credentialTransportMessage}</p>
+    {secure && !credentialTransportAllowed(window.location, false) &&
+      <p className="credential-notice" role="note">{credentialDevelopmentTransportMessage}</p>}
   </div>
 }
 
@@ -63,7 +65,7 @@ export function AccountCredential({ accountId, venueId, enabled, api, onBusy }: 
     try {
       setMetadata(await api.saveAccountCredential(accountId, submitted))
       setNotice('Read-only token verified and saved.')
-    } catch { setError(credentialSaveMessage) }
+    } catch (cause) { setError(credentialFailureMessage(cause)) }
     finally { setToken(''); setPending(false); onBusy(false) }
   }
   async function remove() {

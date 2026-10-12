@@ -1,9 +1,11 @@
-import { describe, expect, it, vi } from 'vitest'
-import { accountIndex, credentialSaveMessage, credentialTransportAllowed, credentialTransportMessage } from './account-access'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { accountIndex, credentialFailureMessage, credentialSaveMessage, credentialTransportAllowed, credentialTransportMessage } from './account-access'
+import { ApiError } from './system'
 import { createWorkspaceApi } from './workspace'
 import { credentialFixture, discoveryFixture, indexAccount } from '@/test/account-access-fixture'
 
 const api = () => createWorkspaceApi('vessel-test-token')
+beforeEach(() => vi.stubEnv('DEV', false))
 function respond(body: unknown, status = 200) {
   const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }))
   vi.stubGlobal('fetch', fetch)
@@ -11,6 +13,13 @@ function respond(body: unknown, status = 200) {
 }
 
 describe('Account discovery contract', () => {
+  it('trims pasted token whitespace before sending a name lookup', async () => {
+    const fetch = respond(discoveryFixture)
+    await api().discoverAccounts('lighter', discoveryFixture.address, undefined, ' \r\nro:fixture-only\t ')
+    expect(fetch).toHaveBeenCalledWith('/api/venues/lighter/accounts/credential', expect.objectContaining({
+      body: JSON.stringify({ address: discoveryFixture.address, token: 'ro:fixture-only' }),
+    }))
+  })
   it('loads names with the token in a POST body only and disables caching', async () => {
     const fetch = respond(discoveryFixture)
     const token = 'ro:fixture-only'
@@ -27,6 +36,13 @@ describe('Account discovery contract', () => {
     const fetch = respond(discoveryFixture)
     await expect(api().discoverAccounts('lighter', discoveryFixture.address, undefined, 'ro:test')).rejects.toThrow(credentialTransportMessage)
     expect(fetch).not.toHaveBeenCalled()
+  })
+  it('allows authenticated name lookup on LAN HTTP in development', async () => {
+    vi.stubEnv('DEV', true)
+    vi.stubGlobal('location', { protocol: 'http:', hostname: '192.168.1.20' })
+    const fetch = respond(discoveryFixture)
+    await expect(api().discoverAccounts('lighter', discoveryFixture.address, undefined, 'ro:test')).resolves.toEqual(discoveryFixture)
+    expect(fetch).toHaveBeenCalledOnce()
   })
   it('keeps int64 indices and decimal balances as exact strings', async () => {
     const fetch = respond(discoveryFixture)
@@ -81,6 +97,29 @@ describe('Account discovery contract', () => {
 })
 
 describe('Credential API safety', () => {
+  it.each([
+    [401, /Reconnect/], [403, /trusted reverse proxy/], [404, /same version/],
+    [409, /enable it/], [413, /512 characters/], [429, /Too many requests/],
+    [502, /server credential vault/], [503, /server credential vault/], [504, /server credential vault/],
+  ])('uses a local diagnostic for HTTP %s, not the error message', (status, message) => {
+    const result = credentialFailureMessage(new ApiError('http', 'ro:never-display', status))
+    expect(result).toMatch(message)
+    expect(result).not.toContain('ro:never-display')
+  })
+  it('explains unknown save outcomes and never trusts arbitrary error messages', () => {
+    expect(credentialFailureMessage(new ApiError('unavailable', 'ro:never-display'))).toMatch(/Refresh credential status/)
+    for (const error of [new Error('ro:never-display'), new ApiError('http', 'ro:never-display', 400),
+      new ApiError('invalid-response', 'ro:never-display'), { status: 403, message: 'ro:never-display' }]) {
+      expect(credentialFailureMessage(error)).toBe(credentialSaveMessage)
+    }
+  })
+  it('trims pasted token whitespace before sending a save', async () => {
+    const fetch = respond(credentialFixture)
+    await api().saveAccountCredential(indexAccount.id, ' \r\nro:fixture-only\t ')
+    expect(fetch).toHaveBeenCalledWith(`/api/accounts/${indexAccount.id}/credential`, expect.objectContaining({
+      body: JSON.stringify({ token: 'ro:fixture-only' }),
+    }))
+  })
   it('sends the secret in the PUT body only, and returns metadata only', async () => {
     const fetch = respond(credentialFixture)
     const token = 'ro:test-only-secret'
@@ -125,11 +164,31 @@ describe('Credential API safety', () => {
     await api().accountCredential(indexAccount.id)
     expect(fetch).toHaveBeenCalledOnce()
   })
+  it('allows credential saving over LAN HTTP in development without browser persistence', async () => {
+    vi.stubEnv('DEV', true)
+    vi.stubGlobal('location', { protocol: 'http:', hostname: '192.168.1.5' })
+    const fetch = respond(credentialFixture)
+    await expect(api().saveAccountCredential(indexAccount.id, 'ro:test')).resolves.toEqual(credentialFixture)
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(0)
+  })
+  it.each(['development', 'staging', 'test'])('a named mode %s does not bypass transport without DEV', mode => {
+    vi.stubEnv('MODE', mode)
+    expect(credentialTransportAllowed({ protocol: 'http:', hostname: 'vessel.local' })).toBe(false)
+  })
   it.each([
     ['https:', 'vessel.example', true], ['http:', 'localhost', true], ['http:', '127.0.0.1', true],
     ['http:', '[::1]', true], ['http:', '192.168.1.5', false], ['http:', 'localhost.example', false],
     ['http:', 'vessel.local', false], ['file:', 'localhost', false],
   ])('checks transport %s %s', (protocol, hostname, allowed) => {
+    expect(credentialTransportAllowed({ protocol, hostname })).toBe(allowed)
+  })
+  it.each([
+    ['http:', 'vessel.local', true], ['https:', 'vessel.local', true],
+    ['file:', 'localhost', false], ['ftp:', 'vessel.local', false],
+  ])('development still restricts protocols %s %s', (protocol, hostname, allowed) => {
+    vi.stubEnv('DEV', true)
     expect(credentialTransportAllowed({ protocol, hostname })).toBe(allowed)
   })
 })

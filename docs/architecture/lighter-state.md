@@ -15,7 +15,7 @@ One concrete Lighter account index corresponds to one Vessel account. Indices st
 
 **Manage account** shows token scope, expiry, last verification and status. Replacement requires another venue verification. Removal requires confirmation and retains imported facts. Disabled accounts retain their encrypted credential but cannot use it for venue reads.
 
-The browser blocks token entry on plain HTTP outside loopback hosts. Password fields clear after attempts or closing and are not saved in browser storage. The backend stores only an AES-GCM envelope and non-secret metadata. Server-side key setup, rotation and backup procedures are in [venue-credentials.md](venue-credentials.md).
+Production browser builds block token entry on plain HTTP outside loopback hosts. October 12: the owner allowed HTTP entry in the Vite development build with the API in Development, with a visible plaintext-transport warning. The API still enforces HTTPS outside loopback in every non-Development environment. Password fields clear after attempts or closing and are not saved in browser storage. The backend stores only an AES-GCM envelope and non-secret metadata. Server-side key setup, rotation and backup procedures are in [venue-credentials.md](venue-credentials.md).
 
 ## Venue coverage
 

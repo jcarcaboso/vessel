@@ -103,6 +103,48 @@ public sealed class AccountSecurityTests
         finally { Directory.Delete(directory, true); }
     }
 
+    [Fact]
+    public void Key_file_restart_and_additive_rotation_preserve_existing_ciphertext()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var directory = Path.Combine(Path.GetTempPath(), "vessel-key-restart-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var file = Path.Combine(directory, "keys.json");
+        var owner = Guid.NewGuid(); var account = Guid.NewGuid();
+        try
+        {
+            File.WriteAllText(file, JsonSerializer.Serialize(new
+            {
+                ActiveKeyId = "current", Keys = new Dictionary<string, string> { ["current"] = SecurityFixture.Key }
+            }));
+            File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            SealedCredential sealedToken;
+            using (var initial = new AesGcmCredentialVault(new() { KeyFile = file }))
+                sealedToken = initial.Seal(owner, account, "lighter-read-token", SecurityFixture.Token);
+            using (var restarted = new AesGcmCredentialVault(new() { KeyFile = file }))
+                Assert.Equal(SecurityFixture.Token, restarted.Open(owner, account, "lighter-read-token", sealedToken));
+
+            // The provisioning source can change; only key IDs and bytes determine decryption.
+            File.WriteAllText(file, JsonSerializer.Serialize(new
+            {
+                ActiveKeyId = "next", Keys = new Dictionary<string, string>
+                {
+                    ["current"] = SecurityFixture.Key,
+                    ["next"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+                }
+            }));
+            using (var rotated = new AesGcmCredentialVault(new() { KeyFile = file }))
+            {
+                Assert.Equal(SecurityFixture.Token, rotated.Open(owner, account, "lighter-read-token", sealedToken));
+                Assert.Equal("next", rotated.Seal(owner, account, "lighter-read-token", SecurityFixture.Token).KeyId);
+            }
+            File.Delete(file);
+            Assert.Throws<CredentialStorageException>(() => new AesGcmCredentialVault(new() { KeyFile = file }));
+            Assert.False(File.Exists(file)); // Startup must never replace a missing key.
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
     [Theory]
     [InlineData("0")]
     [InlineData("9007199254740993")]
@@ -156,6 +198,50 @@ public sealed class AccountSecurityTests
         Assert.Equal("-0.01", result.Accounts[0].AvailableBalanceUsd);
         Assert.Null(result.Accounts[1].ExistingAccountId); Assert.Null(result.Accounts[1].IsEnabled);
         Assert.Equal(2, store.Accounts.Count);
+    }
+
+    [Fact]
+    public async Task Pasted_token_whitespace_is_removed_before_verification_and_storage()
+    {
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var account = SecurityFixture.Account(owner); store.Accounts.Add(account);
+        var credentials = new SecurityCredentialStore(); using var vault = SecurityFixture.Vault();
+        var verifier = new SecurityVerifier();
+        var service = SecurityFixture.Service(owner, store, credentials, vault, verifier);
+        await service.PutAsync(account.Id, new() { Token = " \r\n" + SecurityFixture.Token + "\t " }, default);
+        Assert.Equal(SecurityFixture.Token, verifier.ReceivedToken);
+        var reader = new AccountCredentialReader(store, credentials, new CoreOwner(owner), vault, SecurityFixture.Clock);
+        Assert.Equal(SecurityFixture.Token, await reader.ReadAsync(account.Id, default));
+    }
+
+    [Fact]
+    public async Task Pasted_token_whitespace_is_removed_before_name_discovery()
+    {
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
+        var discovery = new SecurityDiscovery([new("123", "Main", "main")]);
+        var service = new AccountDiscoveryService(store, new CoreOwner(owner), SecurityFixture.Registry(), [discovery]);
+        await service.DiscoverAsync(SecurityFixture.Venue.Id,
+            new CredentialDiscoveryRequest { Address = SecurityFixture.Address, Token = " \r\n" + SecurityFixture.Token + "\t " }, default);
+        Assert.Equal(SecurityFixture.Token, discovery.ReceivedToken);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" \r\n\t ")]
+    public async Task Empty_token_is_rejected_before_verification_or_name_discovery(string token)
+    {
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var account = SecurityFixture.Account(owner); store.Accounts.Add(account);
+        var credentials = new SecurityCredentialStore(); using var vault = SecurityFixture.Vault();
+        var verifier = new SecurityVerifier();
+        var service = SecurityFixture.Service(owner, store, credentials, vault, verifier);
+        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+            service.PutAsync(account.Id, new() { Token = token }, default))).StatusCode);
+        Assert.Null(verifier.ReceivedToken); Assert.Null(credentials.Stored);
+        var discovery = new SecurityDiscovery([new("123", "Main", "main")]);
+        var discover = new AccountDiscoveryService(store, new CoreOwner(owner), SecurityFixture.Registry(), [discovery]);
+        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+            discover.DiscoverAsync(SecurityFixture.Venue.Id,
+                new CredentialDiscoveryRequest { Address = SecurityFixture.Address, Token = token }, default))).StatusCode);
+        Assert.Null(discovery.ReceivedToken);
     }
 
     [Fact]
@@ -263,9 +349,13 @@ internal sealed class SecurityVerifier : IVenueCredentialVerifier
 {
     public string VenueId => SecurityFixture.Venue.Id;
     public Exception? Error { get; set; }
+    public string? ReceivedToken { get; private set; }
     public DateTimeOffset Expiry { get; set; } = SecurityFixture.Now.AddDays(60);
-    public Task<VerifiedVenueCredential> VerifyAsync(string sourceId, string token, CancellationToken cancellationToken) =>
-        Error is { } error ? Task.FromException<VerifiedVenueCredential>(error) : Task.FromResult(new VerifiedVenueCredential("single", Expiry));
+    public Task<VerifiedVenueCredential> VerifyAsync(string sourceId, string token, CancellationToken cancellationToken)
+    {
+        ReceivedToken = token;
+        return Error is { } error ? Task.FromException<VerifiedVenueCredential>(error) : Task.FromResult(new VerifiedVenueCredential("single", Expiry));
+    }
 }
 
 internal sealed class SecurityDiscovery(IReadOnlyList<VenueAccountCandidate> candidates) : IVenueAccountDiscovery

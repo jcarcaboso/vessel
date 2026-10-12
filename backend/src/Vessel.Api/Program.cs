@@ -75,8 +75,10 @@ app.Use(async (context, next) =>
     if (context.Request.Path.Value?.TrimEnd('/').EndsWith("/credential", StringComparison.OrdinalIgnoreCase) == true)
     {
         context.Response.Headers.CacheControl = "no-store";
-        // The browser blocks token entry on plaintext LAN origins; enforce it here too for other clients.
+        // Local/LAN development may use HTTP. Every other environment retains the transport guard,
+        // independently of the frontend build; headers and request bodies cannot enable this exception.
         if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsDelete(context.Request.Method) &&
+            !app.Environment.IsDevelopment() &&
             !CredentialTransport.IsAllowed(context))
             throw new WorkspaceException(403, "Credential entry requires HTTPS outside localhost.");
         var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
