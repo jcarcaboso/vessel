@@ -133,7 +133,7 @@ describe('Chart panel', () => {
     await screen.findByText(/Updated/)
     const stop = state.overlays[1]!.id
     act(() => state.callbacks!.onLevelDrag(stop, 100.99, 'move'))
-    act(() => state.callbacks!.onLevelDrag(stop, 100.99, 'cancel'))
+    act(() => state.callbacks!.onLevelCancel!())
     expect(state.overlays.find(overlay => overlay.id === stop)?.price).toBe(99)
     expect(onEntriesChange).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled()
@@ -330,6 +330,32 @@ describe('Chart panel drawing tools', () => {
     return <ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()} drawings={drawings} onDrawingsChange={setDrawings}
       source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />
   }
+
+  it('records nothing from a chart torn down by an instrument switch mid-drag', async () => {
+    const { state, factory: base } = fakeAdapter()
+    // Like the real adapter, a chart destroyed mid-drag reports the cancelled gesture through its own callbacks.
+    const factory: ChartAdapterFactory = (container, callbacks) => {
+      const adapter = base(container, callbacks)
+      return { ...adapter, destroy: () => { callbacks.onDrawingCancel?.(); adapter.destroy() } }
+    }
+    function Switching() {
+      const [instrument, setInstrument] = useState('BTC')
+      const [lists, setLists] = useState<Record<string, ChartDrawing[]>>({ BTC: [line('a')], ETH: [line('b')] })
+      return <>
+        <ChartPanel entries={entries()} selectedId="" instrument={instrument} onSelect={vi.fn()} drawings={lists[instrument]!}
+          onDrawingsChange={next => setLists(value => ({ ...value, [instrument]: next }))}
+          source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />
+        <button type="button" onClick={() => setInstrument('ETH')}>switch</button>
+      </>
+    }
+    render(<Switching />)
+    await screen.findByText(/Updated/)
+    act(() => state.callbacks!.onDrawingChange({ ...line('a'), points: [{ time: 1, price: 120 }, { time: 2, price: 121 }] }, 'move'))
+    await userEvent.click(screen.getByRole('button', { name: 'switch' }))
+    await screen.findByText(/Updated/)
+    expect(state.drawings).toEqual([line('b')])
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
+  })
 
   it('creates a drawing with the chosen tool, then returns to the crosshair with it selected', async () => {
     const { state, factory } = fakeAdapter()
@@ -535,6 +561,28 @@ describe('Chart panel level editing', () => {
     expect(selectedExit()).toEqual(['percent', kind === 'stop' ? '5' : '15', '100'])
     await userEvent.click(screen.getByRole('button', { name: /^Redo/ }))
     expect(selectedExit()).toEqual(['price', value, '100'])
+  })
+
+  it('records no undo step for a level drag that ends where it started', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<LevelHarness factory={factory} onSelect={vi.fn()} initial={two()} />)
+    await screen.findByText(/Updated/)
+    const second = state.overlays.find(o => o.label === 'E2 SL')!
+    act(() => state.callbacks!.onLevelDrag(second.id, 84, 'move'))
+    act(() => state.callbacks!.onLevelDrag(second.id, 85, 'end'))
+    expect(shown()[1]!.stop.value).toBe('85')
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
+  })
+
+  it('discards a level drag cut short by a chart reset without an undo step', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<LevelHarness factory={factory} onSelect={vi.fn()} initial={two()} />)
+    await screen.findByText(/Updated/)
+    const second = state.overlays.find(o => o.label === 'E2 SL')!
+    act(() => state.callbacks!.onLevelDrag(second.id, 84, 'move'))
+    act(() => state.callbacks!.onLevelCancel!())
+    expect(shown()[1]!.stop.value).toBe('85')
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled()
   })
 
   it('edits a percentage level price on the chart and switches it to price units', async () => {

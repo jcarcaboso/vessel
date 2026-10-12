@@ -7,21 +7,31 @@ namespace Vessel.Infrastructure.Venues.Lighter;
 
 public sealed partial class LighterReader
 {
-    public Task<IReadOnlyList<VenueCandle>> ReadCandlesAsync(string contractId, string interval, long fromMs, long toMs,
+    public async Task<IReadOnlyList<VenueCandle>> ReadCandlesAsync(string contractId, string interval, long fromMs, long toMs,
         CancellationToken cancellationToken)
     {
-        if (!Intervals.TryGetValue(interval, out var step) || fromMs < 0 || toMs <= fromMs ||
+        if (!Intervals.ContainsKey(interval) || fromMs < 0 || toMs <= fromMs ||
             toMs > timeProvider.GetUtcNow().AddDays(1).ToUnixTimeMilliseconds())
             throw new VenueReadException("A native Lighter interval and a valid candle window are required.");
+        var market = (await CatalogueAsync(cancellationToken)).ActiveByKey(contractId)
+            ?? throw new VenueReadException("The instrument is not an active Lighter perpetual.");
+        return await ReadNativeCandlesAsync(market.Instrument!, interval, fromMs, toMs, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<VenueCandle>> ReadNativeCandlesAsync(VenueInstrument market, string interval,
+        long fromMs, long toMs, CancellationToken cancellationToken)
+    {
+        if (!Intervals.TryGetValue(interval, out var step) || fromMs < 0 || toMs <= fromMs ||
+            toMs > timeProvider.GetUtcNow().AddDays(1).ToUnixTimeMilliseconds() ||
+            market.VenueContractId is not { } id || id.Length is < 1 or > 20 || !id.All(char.IsAsciiDigit))
+            throw new VenueReadException("A native Lighter market and a valid candle window are required.");
         return BoundedAsync<IReadOnlyList<VenueCandle>>(async ct =>
         {
-            var catalogue = await CatalogueAsync(ct);
-            var market = catalogue.ActiveByKey(contractId) ?? throw new VenueReadException("The instrument is not an active Lighter perpetual.");
             // One request only, never a full-history walk. Candle timestamps are ms; request bounds are seconds.
             var start = Math.Max(fromMs, toMs - MaxCandles * step);
             var count = Math.Min(MaxCandles, (toMs - start) / step + 1);
             var query = FormattableString.Invariant(
-                $"candles?market_id={market.MarketId}&resolution={interval}&start_timestamp={start / 1000}&end_timestamp={toMs / 1000}&count_back={count}&set_timestamp_to_end=false");
+                $"candles?market_id={id}&resolution={interval}&start_timestamp={start / 1000}&end_timestamp={toMs / 1000}&count_back={count}&set_timestamp_to_end=false");
             using var document = await GetAsync(query, ct);
             return ReadCandles(document.RootElement, interval, start, toMs, step);
         }, cancellationToken);

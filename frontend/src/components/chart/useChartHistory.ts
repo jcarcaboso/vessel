@@ -17,8 +17,10 @@ export function useChartHistory(scopeKey: string) {
   const latest = useRef(current)
   useEffect(() => { latest.current = current })
 
-  const push = useCallback((action: ChartHistoryAction) =>
-    setState(value => ({ ...value, past: [...value.past.slice(-(limit - 1)), action], future: [] })), [])
+  /** `scope` is where the change began; a chart torn down mid-gesture after a scope change records nothing. */
+  const push = useCallback((action: ChartHistoryAction, scope?: string) =>
+    setState(value => scope !== undefined && scope !== value.scopeKey ? value
+      : { ...value, past: [...value.past.slice(-(limit - 1)), action], future: [] }), [])
   const undo = useCallback(() => {
     const action = latest.current.past.at(-1)
     if (!action) return

@@ -457,7 +457,7 @@ public sealed partial class HyperliquidAdapterTests
             new HyperliquidPerpetualReader(client, clock).ReadAsync(Address, CancellationToken.None));
         Assert.Equal("Hyperliquid read timed out.", exception.Message);
         Assert.Equal(6, handler.Requests.Count);
-        Assert.Equal(1, clock.TimerCount);
+        Assert.Equal(2, clock.TimerCount); // Account deadline plus independent shared metadata deadline.
         Assert.Equal(TimeSpan.FromSeconds(20), clock.Deadline);
     }
 
@@ -537,6 +537,21 @@ public sealed partial class HyperliquidAdapterTests
         return node.ToJsonString();
     }
 
+    [Fact]
+    public async Task Account_reads_refresh_a_cached_catalogue_so_new_listings_are_not_filtered()
+    {
+        var responses = new[] { Meta, Meta, State, $"[{Fill}]", "\"default\"", SpotMeta, "{\"balances\":[]}" };
+        using var handler = new FixtureHandler((index, _) => Task.FromResult(Json(responses[index])));
+        using var client = Client(handler);
+        var clock = new TestClock();
+        var cache = new HyperliquidCatalogueCache(clock);
+        await new HyperliquidPerpetualReader(client, clock, cache).ReadInstrumentsAsync(CancellationToken.None);
+        await new HyperliquidPerpetualReader(client, clock, cache).ReadAsync(Address, CancellationToken.None);
+        Assert.Equal(7, handler.Requests.Count);
+        using var payload = JsonDocument.Parse(handler.Requests[1].Body);
+        Assert.Equal("meta", payload.RootElement.GetProperty("type").GetString());
+    }
+
     private static HttpClient Client(HttpMessageHandler handler) =>
         new(handler) { BaseAddress = new Uri("https://api.hyperliquid.xyz/"), Timeout = TimeSpan.FromSeconds(30) };
 
@@ -587,7 +602,7 @@ public sealed partial class HyperliquidAdapterTests
     private sealed class TestClock : TimeProvider
     {
         private DateTimeOffset now = DateTimeOffset.FromUnixTimeMilliseconds(StateTime);
-        private TestTimer? timer;
+        private readonly List<TestTimer> timers = [];
         internal int TimerCount { get; private set; }
         internal TimeSpan Deadline { get; private set; }
         public override DateTimeOffset GetUtcNow() => now;
@@ -597,14 +612,15 @@ public sealed partial class HyperliquidAdapterTests
             Assert.Equal(Timeout.InfiniteTimeSpan, period);
             TimerCount++;
             Deadline = dueTime;
-            timer = new TestTimer(now + dueTime, callback, state);
+            var timer = new TestTimer(now + dueTime, callback, state);
+            timers.Add(timer);
             return timer;
         }
 
         internal void Advance(TimeSpan interval)
         {
             now += interval;
-            timer?.FireIfDue(now);
+            foreach (var timer in timers.ToArray()) timer.FireIfDue(now);
         }
 
         private sealed class TestTimer(DateTimeOffset due, TimerCallback callback, object? state) : ITimer

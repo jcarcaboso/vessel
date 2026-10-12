@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { candleCache } from '@/features/market/candleCache'
 import { createWorkspaceApi } from './workspace'
 import { accountFixture, candleSeriesFixture, emptyOverview, marketContextFixture, portfolioFixture, sizingFixture } from '@/test/workspace-fixture'
 
@@ -369,5 +370,49 @@ describe('Sizing API', () => {
   it('shows the server reason for an out-of-range risk', async () => {
     response({ detail: 'Risk per trade must be between 0.1% and 5%.' }, 400)
     await expect(createWorkspaceApi('token').updateSizingSettings({ riskPercent: '9' })).rejects.toThrow('between 0.1% and 5%')
+  })
+})
+
+
+describe('candle cache API boundaries', () => {
+  it('encodes refresh=true only when explicitly requested', async () => {
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify(candleSeriesFixture))))
+    vi.stubGlobal('fetch', fetch)
+    const api = createWorkspaceApi('test-only')
+    await api.candles(accountFixture.id, { instrument: 'BTC', interval: '1h', refresh: true })
+    await api.candles(accountFixture.id, { instrument: 'BTC', interval: '1h', refresh: false })
+    await api.candles(accountFixture.id, { instrument: 'BTC', interval: '1h', endTime: 1_790_000_000_000 })
+    expect(fetch.mock.calls.map(call => call[0])).toEqual([
+      `/api/accounts/${accountFixture.id}/candles?instrument=BTC&interval=1h&refresh=true`,
+      `/api/accounts/${accountFixture.id}/candles?instrument=BTC&interval=1h`,
+      `/api/accounts/${accountFixture.id}/candles?instrument=BTC&interval=1h&endTime=1790000000000`,
+    ])
+  })
+
+  it.each(['disable', 'delete'])('invalidates candle entries after a successful account %s', async operation => {
+    const api = createWorkspaceApi('test-only')
+    const cache = candleCache(api), entry = cache.entry(accountFixture.id, 'BTC', '1h')
+    response(candleSeriesFixture)
+    await cache.load(entry, 'latest')
+    expect(entry.snapshot.candles).toHaveLength(2)
+    if (operation === 'disable') {
+      response({ ...accountFixture, isEnabled: false })
+      await api.updateAccount(accountFixture.id, { name: accountFixture.name, portfolioId: null, isEnabled: false, expectedRevision: 0 })
+    } else {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
+      await api.deleteAccount(accountFixture.id)
+    }
+    expect(cache.entries.size).toBe(0)
+    expect(entry.snapshot.candles).toEqual([])
+  })
+
+  it('clears cached candles when an unrelated authenticated API read is unauthorized', async () => {
+    const api = createWorkspaceApi('test-only')
+    const cache = candleCache(api), entry = cache.entry(accountFixture.id, 'BTC', '1h')
+    response(candleSeriesFixture)
+    await cache.load(entry, 'latest')
+    response({}, 401)
+    await expect(api.overview()).rejects.toThrow()
+    expect(cache.entries.size).toBe(0)
   })
 })

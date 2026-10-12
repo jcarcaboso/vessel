@@ -116,10 +116,12 @@ public sealed class MarketStreamApiTests
         var (owner, store, account) = Setup(); var stream = new FakeMarketStream();
         await using var factory = new CoreApiFactory(owner, store, stream: stream);
         using var client = factory.AuthorizedClient();
+        client.DefaultRequestHeaders.AcceptEncoding.ParseAdd("br, gzip");
         using var response = await client.GetAsync(Url(account.Id, "instrument=BTC&interval=1m"), HttpCompletionOption.ResponseHeadersRead);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+        Assert.Empty(response.Content.Headers.ContentEncoding);
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
         Assert.Equal("no", Assert.Single(response.Headers.GetValues("X-Accel-Buffering")));
         var subscription = Assert.Single(stream.Subscriptions);

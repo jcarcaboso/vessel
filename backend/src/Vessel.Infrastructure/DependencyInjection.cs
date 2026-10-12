@@ -23,6 +23,8 @@ public static class DependencyInjection
     {
         services.Configure<VesselAuthOptions>(config.GetSection("Vessel:Auth"));
         services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<HyperliquidCatalogueCache>();
+        services.AddSingleton<LighterCatalogueCache>();
         services.AddHttpClient<IPerpetualVenueReader, HyperliquidPerpetualReader>(client =>
         {
             client.BaseAddress = new Uri("https://api.hyperliquid.xyz/");

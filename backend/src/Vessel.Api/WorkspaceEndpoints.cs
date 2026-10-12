@@ -72,13 +72,14 @@ public static class WorkspaceEndpoints
         api.MapGet("/accounts/{id:guid}/fills", async (Guid id, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.FillsAsync(id, ct)));
         api.MapGet("/accounts/{id:guid}/instruments", async (Guid id, WorkspaceService service, CancellationToken ct) =>
-            Results.Ok(await service.InstrumentsAsync(id, ct)));
+            Results.Ok(await service.InstrumentsAsync(id, ct))).WithMetadata(new CompressMarketData());
         api.MapGet("/accounts/{id:guid}/candles", async (Guid id, string? instrument, string? interval, long? endTime,
-            CandleService service, CancellationToken ct) =>
-            Results.Ok(await service.CandlesAsync(id, instrument, interval, endTime, ct)));
+            string? refresh, CandleService service, CancellationToken ct) =>
+            Results.Ok(await service.CandlesAsync(id, instrument, interval, endTime, ct, refresh)))
+            .WithMetadata(new CompressMarketData());
         api.MapGet("/accounts/{id:guid}/market-context", async (Guid id, string? instrument,
             MarketContextService service, CancellationToken ct) =>
-            Results.Ok(await service.ContextAsync(id, instrument, ct)));
+            Results.Ok(await service.ContextAsync(id, instrument, ct))).WithMetadata(new CompressMarketData());
         api.MapGet("/accounts/{id:guid}/market-stream", MarketStreamEndpoint.StreamAsync);
         api.MapPost("/accounts/{id:guid}/sync", async (Guid id, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.SyncAsync(id, ct)));

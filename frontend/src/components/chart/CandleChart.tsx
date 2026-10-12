@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent, type Ref } from 'react'
+import { memo, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent, type Ref } from 'react'
 import type { ChartDrawing, DrawingKind } from './drawings'
 import { IndicatorOverlay } from './IndicatorControls'
 import { computeIndicators, describeIndicators, type IndicatorSettings, type PaneLayout } from './indicators'
@@ -19,7 +19,7 @@ export interface CandleChartControl {
  * Reusable candle chart. Features supply candles, price overlays and drawings; the renderer stays
  * behind the adapter so it never sees plays, journals or execution data.
  */
-export function CandleChart({
+export const CandleChart = memo(function CandleChart({
   candles, overlays, viewKey, label, drawings = noDrawings, selectedDrawingId = null, tool = null, magnet = false, pricePicker = false,
   onKeyDown, createAdapter = createLazyLightweightAdapter, controlRef, indicators, onIndicatorsChange, onExpand, ...handlers
 }: {
@@ -68,6 +68,8 @@ export function CandleChart({
       onDrawingCreate: drawing => callbacks.current.onDrawingCreate?.(drawing),
       onDrawingChange: (drawing, phase) => callbacks.current.onDrawingChange?.(drawing, phase),
       onDrawingSelect: id => callbacks.current.onDrawingSelect?.(id),
+      onDrawingCancel: () => callbacks.current.onDrawingCancel?.(),
+      onLevelCancel: () => callbacks.current.onLevelCancel?.(),
       onLevelEdit: (id, anchor) => callbacks.current.onLevelEdit?.(id, anchor),
       onPricePick: price => callbacks.current.onPricePick?.(price),
       onCrosshairMove: setHoverTime,
@@ -103,4 +105,4 @@ export function CandleChart({
     {indicators && indicatorView && onIndicatorsChange && candles.length > 0 &&
       <IndicatorOverlay settings={indicators} view={indicatorView} panes={panes} hoverIndex={hoverIndex} onChange={onIndicatorsChange} onExpand={onExpand} />}
   </div>
-}
+})
