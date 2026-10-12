@@ -34,7 +34,7 @@ export interface PriceOverlay {
 
 export interface ChartCallbacks {
   onLevelSelect(id: string): void
-  /** Called continuously while dragging, then once with phase "end". */
+  /** Frame-batched previews while dragging, then once with phase "end" to commit. */
   onLevelDrag(id: string, price: number, phase: 'move' | 'end'): void
   /** The visible range is close to the oldest loaded candle. */
   onNeedOlder(): void
@@ -44,7 +44,7 @@ export interface ChartCallbacks {
   onDrawingSelect(id: string | null): void
   /** Ends a gesture cut short by a reset or unmount; changes already published become one undo step. */
   onDrawingCancel?(): void
-  /** Ends a level drag cut short by a reset or unmount; moves already published become one undo step. */
+  /** Discards an interrupted level preview without changing the draft. */
   onLevelCancel?(): void
   /** Asks to edit a level in place, e.g. after a double-click or a click on its tag. `anchor` is in pane pixels. */
   onLevelEdit(id: string, anchor: { x: number; y: number }): void

@@ -14,6 +14,11 @@ import { createLightweightAdapter } from './lightweight'
 type Point = { time: number; open?: number; high?: number; low?: number; close?: number; value?: number; color?: string }
 function makeSeries(kind: string) {
     let data: Point[] = []
+    let autoScale = true
+    const scale = {
+      options: () => ({ autoScale }),
+      applyOptions: vi.fn((options: { autoScale?: boolean }) => { if (options.autoScale !== undefined) autoScale = options.autoScale }),
+    }
     const primitives: { find?: (id: string) => PriceOverlay | undefined }[] = []
     const current = {
       kind, primitives, data: () => data,
@@ -23,7 +28,7 @@ function makeSeries(kind: string) {
         if (point.time === data.at(-1)?.time) data[data.length - 1] = point
         else data.push(point)
       }),
-      applyOptions: vi.fn(), priceScale: () => ({ applyOptions: vi.fn() }), createPriceLine: vi.fn(),
+      applyOptions: vi.fn(), priceScale: () => scale, createPriceLine: vi.fn(),
       priceToCoordinate: (price: number) => 1000 - price, coordinateToPrice: (y: number) => 1000 - y,
       priceFormatter: () => ({ format: String }),
       attachPrimitive: (primitive: { find?: (id: string) => PriceOverlay | undefined; attached?: (params: { series: unknown; requestUpdate: () => void }) => void }) => {
@@ -126,10 +131,11 @@ describe('adapter level gesture lifecycle', () => {
     expect(callbacks.onLevelDrag).toHaveBeenCalledExactlyOnceWith('level', 103, 'end')
   })
 
-  it.each(['pointercancel', 'lostpointercapture'])('keeps the last-move commit on %s, but cancels the pending frame', type => {
+  it.each(['pointercancel', 'lostpointercapture'])('discards the preview on %s and cancels the pending frame', type => {
     adapter.setOverlays([overlay]); pointer(container, 'pointerdown', 100); pointer(container, 'pointermove', 102)
     pointer(container, type, 103); frames.run()
-    expect(callbacks.onLevelDrag).toHaveBeenCalledExactlyOnceWith('level', 102, 'end')
+    expect(callbacks.onLevelDrag).not.toHaveBeenCalled()
+    expect(callbacks.onLevelCancel).toHaveBeenCalledTimes(1)
   })
 
   it.each(['destroy', 'source'] as const)('%s cancels queued publications', how => {

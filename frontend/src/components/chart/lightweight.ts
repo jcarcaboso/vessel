@@ -512,7 +512,11 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     settle()
   }
   // A resize ends any press: a release outside the window may never arrive (seen in Firefox).
-  const containerObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => { if (pressed !== false) onRelease(); queueLayout() })
+  const containerObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
+    cancelLevelDrag()
+    if (pressed !== false) onRelease()
+    queueLayout()
+  })
   containerObserver?.observe(container)
   /** The latest release still waiting for the chart to draw; layout waits for it. */
   let releasing = 0
@@ -650,7 +654,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   chart.subscribeCrosshairMove(onCrosshair)
 
   // Drawings and level drags are handled before the chart sees the pointer, so panning stays off while they move.
-  let drag: { id: string; pointerId: number; price: number; moved: boolean; edit: FrameEdit<number> } | null = null
+  let drag: { id: string; pointerId: number; price: number; moved: boolean; edit: FrameEdit<number>; autoScale: boolean; offsetY: number } | null = null
   let drawingPointer: number | null = null
   // While picking, a click on the pane reports its price instead of panning, drawing or dragging.
   let picking = false
@@ -667,6 +671,20 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     }
   }
   const lockChart = (locked: boolean) => chart.applyOptions({ handleScroll: !locked, handleScale: !locked })
+  const finishLevelDrag = (cancel: boolean, price?: number) => {
+    if (!drag) return
+    const finished = drag
+    drag = null
+    // Capture may already be gone on cancellation/blur; releasing an inactive pointer can throw.
+    if (container.hasPointerCapture?.(finished.pointerId)) container.releasePointerCapture(finished.pointerId)
+    series.priceScale().applyOptions({ autoScale: finished.autoScale })
+    lockChart(false)
+    if (cancel) { finished.edit.cancel(); callbacks.onLevelCancel?.() }
+    else if (finished.moved) finished.edit.end(price ?? finished.price)
+    else { finished.edit.cancel(); callbacks.onLevelSelect(finished.id) }
+    levels.dragPreview(null)
+  }
+  const cancelLevelDrag = () => finishLevelDrag(true)
   const consume = (event: PointerEvent) => { event.preventDefault(); event.stopPropagation() }
   const onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0 || drag) return
@@ -698,8 +716,11 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     consume(event)
     const { id, priceStep } = hit.overlay
     drag = { id, pointerId: event.pointerId, price: hit.overlay.price, moved: false,
+      autoScale: series.priceScale().options().autoScale, offsetY: (series.priceToCoordinate(hit.overlay.price) ?? y) - y,
       edit: new FrameEdit((price, phase) => callbacks.onLevelDrag(id, price, phase),
         (before, after) => roundedLevelPrice(before, priceStep) === roundedLevelPrice(after, priceStep), hit.overlay.price) }
+    // Dragged overlays and live candles must not change the price beneath a stationary pointer.
+    series.priceScale().applyOptions({ autoScale: false })
     container.setPointerCapture?.(event.pointerId)
     lockChart(true)
   }
@@ -720,9 +741,10 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       return
     }
     if (!drag || event.pointerId !== drag.pointerId) return
+    if (event.buttons === 0) { cancelLevelDrag(); return }
     consume(event)
-    const price = series.coordinateToPrice(pricePane(event).y)
-    if (price === null || !Number.isFinite(price) || price <= 0) return
+    const price = series.coordinateToPrice(Math.min(Math.max(pane(event).y + drag.offsetY, 0), chart.paneSize(0).height))
+    if (price === null || !Number.isFinite(price) || price <= 0 || price === drag.price) return
     drag.price = price
     drag.moved = true
     levels.dragPreview({ id: drag.id, price })
@@ -742,23 +764,16 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     }
     if (!drag || event.pointerId !== drag.pointerId) return
     event.stopPropagation()
-    const finished = drag
-    drag = null
-    container.releasePointerCapture?.(event.pointerId)
-    lockChart(false)
-    if (finished.moved) {
-      // Cancellation keeps today's last-move commit; release uses the actual final pointer position.
-      const price = event.type !== 'pointerup' ? finished.price : series.coordinateToPrice(pricePane(event).y)
-      finished.edit.end(price !== null && Number.isFinite(price) && price > 0 ? price : finished.price)
-    } else { finished.edit.cancel(); callbacks.onLevelSelect(finished.id) }
-    levels.dragPreview(null)
+    if (event.type !== 'pointerup') { cancelLevelDrag(); return }
+    // Preserve the final-pointer flush, with the original grab offset.
+    const price = series.coordinateToPrice(Math.min(Math.max(pane(event).y + drag.offsetY, 0), chart.paneSize(0).height))
+    finishLevelDrag(false, price !== null && Number.isFinite(price) && price > 0 ? price : drag.price)
   }
   /** Ends level and drawing gestures on reset or destroy; state is cleared before capture is released. */
   const releaseGestures = () => {
-    const level = drag, pointer = drawingPointer
-    drag = null
+    const pointer = drawingPointer
     drawingPointer = null
-    if (level) { level.edit.cancel(); container.releasePointerCapture?.(level.pointerId); callbacks.onLevelCancel?.() }
+    cancelLevelDrag()
     if (pointer !== null) container.releasePointerCapture?.(pointer)
     drawings.cancel()
   }
@@ -779,6 +794,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   container.addEventListener('pointercancel', endDrag, true)
   // Capture taken away without a pointerup ends the gesture like a cancel; after our own release nothing matches.
   container.addEventListener('lostpointercapture', endDrag, true)
+  window.addEventListener('blur', cancelLevelDrag)
   const onPointerLeave = () => drawings.setGuide(null)
   container.addEventListener('pointerleave', onPointerLeave)
 
@@ -897,6 +913,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       container.removeEventListener('pointerup', endDrag, true)
       container.removeEventListener('pointercancel', endDrag, true)
       container.removeEventListener('lostpointercapture', endDrag, true)
+      window.removeEventListener('blur', cancelLevelDrag)
       container.removeEventListener('pointerleave', onPointerLeave)
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
       chart.unsubscribeCrosshairMove(onCrosshair)

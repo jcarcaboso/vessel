@@ -103,15 +103,40 @@ describe('Chart panel', () => {
     expect(screen.queryByRole('button', { name: '3 minutes' })).not.toBeInTheDocument()
   })
 
-  it('writes dragged levels back to the draft entries', async () => {
+  it('previews a drag only on the chart, then updates the workspace once on release', async () => {
     const list = entries()
     const onEntriesChange = vi.fn()
     const { state, factory } = fakeAdapter()
     render(<ChartPanel entries={list} selectedId={list[0]!.id} instrument="BTC" onSelect={vi.fn()} onEntriesChange={onEntriesChange}
       source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
     await screen.findByText(/Updated/)
-    act(() => state.callbacks!.onLevelDrag(state.overlays[1]!.id, 97.123456, 'move'))
-    expect(onEntriesChange).toHaveBeenLastCalledWith([{ ...list[0], stops: [{ id: 'stop-1', unit: 'price', value: '97.123', share: '100' }] }, list[1]])
+    const stop = state.overlays[1]!.id
+    const resets = [...state.resets]
+    // Moving close to (and across) entry must not reflow the workspace's Suggestions/PlanNotices.
+    for (const price of [100.9, 100.99, 101, 101.01]) {
+      act(() => state.callbacks!.onLevelDrag(stop, price, 'move'))
+      expect(onEntriesChange).not.toHaveBeenCalled()
+      expect(state.overlays.find(overlay => overlay.id === stop)?.price).toBe(price)
+    }
+    expect(state.created).toBe(1)
+    expect(state.resets).toEqual(resets)
+    act(() => state.callbacks!.onLevelDrag(stop, 97.123456, 'end'))
+    expect(onEntriesChange).toHaveBeenCalledExactlyOnceWith([{ ...list[0], stops: [{ id: 'stop-1', unit: 'price', value: '97.123', share: '100' }] }, list[1]])
+  })
+
+  it('discards an interrupted preview without changing the draft or recording undo', async () => {
+    const list = entries()
+    const onEntriesChange = vi.fn()
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={list} selectedId={list[0]!.id} instrument="BTC" onSelect={vi.fn()} onEntriesChange={onEntriesChange}
+      source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    const stop = state.overlays[1]!.id
+    act(() => state.callbacks!.onLevelDrag(stop, 100.99, 'move'))
+    act(() => state.callbacks!.onLevelCancel!())
+    expect(state.overlays.find(overlay => overlay.id === stop)?.price).toBe(99)
+    expect(onEntriesChange).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled()
   })
 
   it('switches between all entries and one entry from the legend', async () => {
@@ -474,6 +499,21 @@ describe('Chart panel level editing', () => {
   ]
   const shown = () => JSON.parse(screen.getByTestId('entries').textContent!) as { price: string; share: string; stop: { unit: string; value: string }; stops: string[][]; targets: string[][] }[]
 
+  it('previews the average on the canvas without reflowing the HTML legend', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<LevelHarness factory={factory} initial={two()} />)
+    await screen.findByText(/Updated/)
+    const entry = state.overlays.find(overlay => overlay.label === 'E1')!
+    const average = screen.getByRole('group', { name: 'Planned entries' }).querySelector('.chart-legend-average strong')!
+    act(() => state.callbacks!.onLevelDrag(entry.id, 150, 'move'))
+    expect(state.overlays.find(overlay => overlay.label === 'AVG')?.price).toBe(120)
+    expect(average).toHaveTextContent('95')
+    expect(shown()[0]!.price).toBe('100')
+    act(() => state.callbacks!.onLevelDrag(entry.id, 150, 'end'))
+    expect(average).toHaveTextContent('120')
+    expect(shown()[0]!.price).toBe('150')
+  })
+
   it('drags any entry level, selects that entry, and undoes and redoes the whole move', async () => {
     const { state, factory } = fakeAdapter()
     const onSelect = vi.fn()
@@ -482,10 +522,12 @@ describe('Chart panel level editing', () => {
     const second = state.overlays.find(o => o.label === 'E2 SL')!
     expect(second.draggable).toBe(true)
     act(() => state.callbacks!.onLevelDrag(second.id, 84, 'move'))
+    expect(shown()[1]!.stop.value).toBe('85')
+    // A side edit that arrives during the gesture is kept, and is not part of its undo record.
+    await userEvent.click(screen.getByRole('button', { name: 'side edit' }))
     act(() => state.callbacks!.onLevelDrag(second.id, 83.5, 'end'))
     expect(shown()[1]!.stop.value).toBe('83.5')
     expect(onSelect).toHaveBeenLastCalledWith(second.id.split('|')[0])
-    await userEvent.click(screen.getByRole('button', { name: 'side edit' }))
     await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
     expect(shown()[1]).toMatchObject({ share: '25', stop: { value: '85' } })
     await userEvent.click(screen.getByRole('button', { name: /^Redo/ }))
@@ -510,7 +552,8 @@ describe('Chart panel level editing', () => {
     const value = kind === 'stop' ? '92.5' : '118.13'
     const selectedExit = () => kind === 'stop' ? shown()[0]!.stops[0] : shown()[0]!.targets[0]
     act(() => state.callbacks!.onLevelDrag(level.id, price, 'move'))
-    expect(selectedExit()).toEqual(['price', value, '100'])
+    expect(selectedExit()).toEqual(['percent', kind === 'stop' ? '5' : '15', '100'])
+    expect(state.overlays.find(overlay => overlay.id === level.id)?.price).toBe(Number(value))
     act(() => state.callbacks!.onLevelDrag(level.id, price, 'end'))
     expect(selectedExit()).toEqual(['price', value, '100'])
     expect(shown()[1]!.stop).toMatchObject({ unit: 'price', value: '85' })
@@ -531,16 +574,15 @@ describe('Chart panel level editing', () => {
     expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
   })
 
-  it('keeps a level drag cut short by a chart reset as one undo step', async () => {
+  it('discards a level drag cut short by a chart reset without an undo step', async () => {
     const { state, factory } = fakeAdapter()
     render(<LevelHarness factory={factory} onSelect={vi.fn()} initial={two()} />)
     await screen.findByText(/Updated/)
     const second = state.overlays.find(o => o.label === 'E2 SL')!
     act(() => state.callbacks!.onLevelDrag(second.id, 84, 'move'))
     act(() => state.callbacks!.onLevelCancel!())
-    expect(shown()[1]!.stop.value).toBe('84')
-    await userEvent.click(screen.getByRole('button', { name: /^Undo/ }))
     expect(shown()[1]!.stop.value).toBe('85')
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled()
   })
 
   it('edits a percentage level price on the chart and switches it to price units', async () => {

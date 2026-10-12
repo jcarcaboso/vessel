@@ -137,6 +137,8 @@ Latest-window server behaviour stays at 10 s, so switch-back speed comes from th
 
 ### Combined verification (October 12)
 
+The subsequent [level-drag stability fix](chart-plan.md#october-12-stable-level-dragging) keeps frame batching and incremental rendering, but level moves now preview only on the chart and commit the workspace on release. Interrupted **level** gestures discard their preview rather than recording a partial move; drawing gesture history is unchanged. The price scale stays fixed during a level drag so autoscaling cannot feed back into pointer prices.
+
 The combined implementation passed `scripts/check.sh` (737 frontend tests, typecheck, lint and production build) and the PostgreSQL-enabled backend suite (933 passed, two opt-in live-venue tests skipped). Tests used a throwaway PostgreSQL container; the owner database was untouched. Sol independently approved the merged chart/cache/renderer paths and the subsequent error-overlay fix.
 
 Manual browser checks used a synthetic account and real public Hyperliquid candles: BTC/ETH and 1h/4h switching, cached revalidation, explicit refresh, a simulated 503 retaining previous candles, a real disabled-account 409 clearing candles, re-enable/retry, level and rectangle dragging with one-step undo/redo, Volume/RSI controls, expansion without a new candle read, live updates, older paging (four 500-candle pages), and disconnect. Browser storage held chart preferences, not candles or credentials.

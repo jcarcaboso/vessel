@@ -92,10 +92,9 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   const latest = useRef({ entries, onEntriesChange })
   useEffect(() => { latest.current = { entries, onEntriesChange } })
   const dragStart = useRef<{ entry: DraftEntry; scopeKey: string } | null>(null)
-  /** A level drag that leaves the entry unchanged is not an edit. */
-  const recordLevelMove = (start: { entry: DraftEntry; scopeKey: string }, after: DraftEntry | undefined) => {
-    if (after && JSON.stringify(start.entry) !== JSON.stringify(after)) recordEntryEdit(`Move ${start.entry.name} level`, start.entry, after, start.scopeKey)
-  }
+  // Only overlays preview during a drag: suggestions/notices must not move the canvas under the pointer.
+  const [dragPreview, setDragPreview] = useState<{ source: DraftEntry[]; entries: DraftEntry[]; scopeKey: string } | null>(null)
+  const chartEntries = dragPreview?.source === entries && dragPreview.scopeKey === scopeKey ? dragPreview.entries : entries
 
   /** Records an entry edit made on the chart so undo/redo reverts only the fields it changed. */
   const recordEntryEdit = (label: string, before: DraftEntry, after: DraftEntry, scope?: string) => {
@@ -110,23 +109,29 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
     onEntriesChange?.(entries.map(entry => entry.id === next.id ? next : entry))
   }
   const levelProps = {
-    // A reset or unmount mid-drag keeps the moves already applied as one undoable step.
+    // Interrupted gestures have not changed the draft and must not create an undo step.
     onLevelCancel: () => {
-      const start = dragStart.current
       dragStart.current = null
-      if (start) recordLevelMove(start, latest.current.entries.find(item => item.id === start.entry.id))
+      setDragPreview(null)
     },
     onLevelSelect: (id: string) => { const ref = parseOverlayId(id); if (ref) onSelect(ref.entryId) },
     onLevelDrag: (id: string, price: number, phase: 'move' | 'end') => {
+      if (phase === 'end') setDragPreview(null)
+      if (!editable) return
       const ref = parseOverlayId(id)
       const current = latest.current.entries
       const entry = ref && current.find(item => item.id === ref.entryId)
       if (!ref || !entry) return
       dragStart.current ??= { entry, scopeKey }
+      if (dragStart.current.scopeKey !== scopeKey) { dragStart.current = null; return }
       const next = applyLevelDrag(current, id, price, priceStep)
-      onEntriesChange?.(next)
-      if (phase === 'end') {
-        recordLevelMove(dragStart.current, next.find(item => item.id === ref.entryId))
+      if (phase === 'move') setDragPreview({ source: current, entries: next, scopeKey })
+      else {
+        const after = next.find(item => item.id === ref.entryId)!
+        if (JSON.stringify(entry) !== JSON.stringify(after)) {
+          recordEntryEdit(`Move ${entry.name} level`, entry, after, dragStart.current.scopeKey)
+          latest.current.onEntriesChange?.(next)
+        }
         dragStart.current = null
         if (ref.entryId !== selectedId) onSelect(ref.entryId)
       }
@@ -176,9 +181,10 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   const expandButton = useRef<HTMLButtonElement>(null)
   const live = source !== null && instrument !== ''
   const overlays = useMemo(() => {
-    const plan = planOverlays(entries, selectedId, view, direction, leverage).map(overlay => ({ ...overlay, priceStep, draggable: overlay.draggable && editable }))
+    const plan = planOverlays(chartEntries, selectedId, view, direction, leverage).map(overlay => ({ ...overlay, priceStep, draggable: overlay.draggable && editable }))
     return liquidation === null ? plan : [...plan, liquidationOverlay(liquidation)]
-  }, [entries, selectedId, view, direction, leverage, liquidation, priceStep, editable])
+  }, [chartEntries, selectedId, view, direction, leverage, liquidation, priceStep, editable])
+  // The HTML legend stays committed too, so a wrapping value cannot resize the canvas mid-drag.
   const average = view === 'aggregate' ? averageEntryPrice(entries) : null
   const several = entries.length > 1
 
