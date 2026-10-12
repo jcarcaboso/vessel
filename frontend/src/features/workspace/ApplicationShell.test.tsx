@@ -14,6 +14,7 @@ function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     accountCredential: vi.fn().mockResolvedValue({ storageConfigured: true, credential: null }),
     saveAccountCredential: vi.fn().mockRejectedValue(new Error('Unexpected credential write')),
     deleteAccountCredential: vi.fn().mockResolvedValue(undefined),
+    activity: vi.fn().mockResolvedValue({ operations: [], totalOperationCount: 0, retainedFillCount: 0, omittedOperationCount: 0, coverage: [], scopeNote: 'Fixture history' }),
     overview: vi.fn().mockResolvedValue(emptyOverview),
     portfolios: vi.fn().mockResolvedValue([]), accounts: vi.fn().mockResolvedValue([]),
     account: vi.fn().mockResolvedValue(accountFixture),
@@ -108,7 +109,7 @@ describe('Main application shell', () => {
     await screen.findByText('Start with your accounts.')
     expect(screen.getByRole('heading', { level: 1, name: 'Overview' })).toBeInTheDocument()
     expect(screen.queryByText('BTC reclaim at support')).not.toBeInTheDocument()
-    expect(screen.getByText('No imported executions yet')).toBeInTheDocument()
+    expect(await screen.findByText('No operations in this view')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Plays' })).toHaveAttribute('href', '#plays')
     expect(screen.queryByRole('region', { name: 'Play draft workspace' })).not.toBeInTheDocument()
     expect(screen.queryByText('Read-only by design')).not.toBeInTheDocument()
@@ -322,7 +323,7 @@ describe('Main application shell', () => {
     await screen.findByRole('heading', { level: 1, name: 'Main account' })
     expect(await screen.findByText('No positions in the latest snapshot')).toBeInTheDocument()
     expect(client.snapshot).toHaveBeenCalledWith(accountFixture.id, expect.any(AbortSignal))
-    expect(client.fills).toHaveBeenCalledWith(accountFixture.id, expect.any(AbortSignal))
+    expect(client.activity).toHaveBeenCalledWith(accountFixture.id, expect.any(AbortSignal))
   })
   it('retains previous data when a refresh fails and does not invent fills', async () => {
     const wallet = { ...accountFixture, venueId: 'hyperliquid', syncStatus: 'synced' as const, address: '0x' + '1'.repeat(40) }
@@ -498,7 +499,7 @@ describe('Main application shell', () => {
     expect(client.snapshot).toHaveBeenCalledTimes(1)
     await userEvent.click(screen.getByRole('button', { name: 'Reload' }))
     await waitFor(() => expect(client.snapshot).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(client.fills).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(client.activity).toHaveBeenCalledTimes(3))
     expect(await screen.findByText('No positions in the latest snapshot')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })

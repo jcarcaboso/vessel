@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import type { AccountSnapshot, BrokerAccount, ImportedFill, WorkspaceApi } from '@/api/workspace'
+import type { AccountSnapshot, BrokerAccount, WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
 import { Button } from '@/components/ui/button'
-import { ActivityTable } from './ActivityTable'
+import { ActivityOperations } from './ActivityOperations'
 import { amount, money, time } from './format'
 import { useVenues } from '@/api/venues'
 import { ArrowLeft, RefreshCw, Wallet } from 'lucide-react'
@@ -14,7 +14,6 @@ export function AccountDetail({ account, api, refreshing, onSync, onBack, onMana
   const synced = venues.can(account.venueId, 'sync')
   const wallet = venues.can(account.venueId, 'stablecoinWallet')
   const [snapshot, setSnapshot] = useState<AccountSnapshot | null>(null)
-  const [fills, setFills] = useState<ImportedFill[]>([])
   const [completed, setCompleted] = useState<{ api: WorkspaceApi; key: string } | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   // A refresh ends with a shell reload, so an in-flight refresh does not start a racing read.
@@ -26,8 +25,8 @@ export function AccountDetail({ account, api, refreshing, onSync, onBack, onMana
     let active = true
     // Loading/error visibility derives from the request generation, avoiding a
     // synchronous effect render while keeping prior observations during retries.
-    Promise.all([api.snapshot(account.id, controller.signal), api.fills(account.id, controller.signal)]).then(([nextSnapshot, nextFills]) => {
-      if (active) { setSnapshot(nextSnapshot); setFills(nextFills); setDetailError(null); setCompleted({ api, key: requestKey }) }
+    api.snapshot(account.id, controller.signal).then(nextSnapshot => {
+      if (active) { setSnapshot(nextSnapshot); setDetailError(null); setCompleted({ api, key: requestKey }) }
     }).catch(cause => {
       if (active) { setDetailError(cause instanceof ApiError ? cause.message : 'Unable to read the account.'); setCompleted({ api, key: requestKey }) }
     })
@@ -54,7 +53,7 @@ export function AccountDetail({ account, api, refreshing, onSync, onBack, onMana
       {account.isEnabled === false ? <div className="workspace-empty small-empty"><strong>Positions hidden while disabled</strong><p>The stored snapshot is retained. Enable the account to read it again.</p></div> : !snapshot?.positions.length ? <div className="workspace-empty small-empty"><strong>{pending ? 'Reading the snapshot…' : 'No positions in the latest snapshot'}</strong><p>{snapshot ? 'These are venue-reported positions, not planned plays.' : 'Refresh a read-only account to get a snapshot. A missing snapshot is not proof of zero exposure.'}</p></div> :
         <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Contract</th><th>Signed quantity</th><th>Entry price</th><th>Unrealized P&amp;L</th><th>Leverage</th></tr></thead><tbody>{snapshot.positions.map(p => <tr key={p.contractId}><td><strong>{p.contractId}</strong></td><td>{amount(p.signedQuantity)}</td><td>{money(p.entryPrice)}</td><td>{money(p.unrealizedPnlUsd)}</td><td>{p.leverage === null ? '—' : `${p.leverage}×`}</td></tr>)}</tbody></table></div>}
     </section>
-    <section className="shell-panel"><header className="shell-panel-heading"><h2>Recent executions</h2><span className="muted">{account.isEnabled === false ? 'Disabled account' : `Latest ${fills.length} retained rows`}</span></header>{account.isEnabled === false ? <div className="workspace-empty small-empty"><strong>Imported movements hidden while disabled</strong><p>Nothing was deleted. Enable the account to restore this view.</p></div> : <ActivityTable fills={fills} accounts={[account]} />}</section>
+    <section className="shell-panel"><header className="shell-panel-heading"><h2>Recent executions</h2><span className="muted">{account.isEnabled === false ? 'Disabled account' : 'Position operations'}</span></header>{account.isEnabled === false ? <div className="workspace-empty small-empty"><strong>Imported movements hidden while disabled</strong><p>Nothing was deleted. Enable the account to restore this view.</p></div> : <ActivityOperations key={requestKey} api={api} accountId={account.id} accounts={[account]} reloadGeneration={reloadGeneration} />}</section>
     {account.historyNotice && <p className="workspace-scope-note">{account.historyNotice}</p>}
   </div>
 }

@@ -27,6 +27,8 @@ public static class DependencyInjection
         });
         services.AddScoped<Vessel.Application.Workspace.IWorkspaceStore, WorkspaceStore>();
         services.AddScoped<Vessel.Application.Workspace.WorkspaceService>();
+        services.AddScoped<Vessel.Application.Activity.IActivityStore, ActivityStore>();
+        services.AddScoped<Vessel.Application.Activity.ActivityService>();
         services.AddScoped<Vessel.Application.Workspace.AccountDiscoveryService>();
         services.AddScoped<Vessel.Application.Credentials.IAccountCredentialStore, AccountCredentialStore>();
         services.AddScoped<Vessel.Application.Credentials.AccountCredentialService>();
