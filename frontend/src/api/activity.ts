@@ -79,8 +79,12 @@ export function isActivityDocument(value: unknown, isFill: (value: unknown) => v
         !['entry', 'exit', 'unknown'].includes(String(f.role)) || !decimal(f.quantity) || f.role !== 'unknown' && !unsigned(f.quantity) || !decimal(f.fee) || !decimal(f.closedPnlUsd)) ||
       (op.playAssociation === 'linked') !== (op.playId !== null)) return false
     if (op.status === 'incomplete') {
-      if (op.direction !== null || op.openedAtUtc !== null || op.closedAtUtc !== null || op.quantity !== null || op.openQuantity !== null ||
-        op.totalEnteredQuantity !== null || op.totalExitedQuantity !== null || op.averageEntryPrice !== null || op.averageExitPrice !== null || !op.coverage.length) return false
+      if (!op.coverage.length) return false
+      if (op.direction === null) {
+        if (op.openedAtUtc !== null || op.closedAtUtc !== null || op.quantity !== null || op.openQuantity !== null ||
+          op.totalEnteredQuantity !== null || op.totalExitedQuantity !== null || op.averageEntryPrice !== null || op.averageExitPrice !== null) return false
+      } else if (op.openedAtUtc !== null || op.quantity !== null || op.totalEnteredQuantity !== null || op.averageEntryPrice !== null ||
+        op.openQuantity === null || op.totalExitedQuantity === null) return false
     } else if (op.direction === null || op.openedAtUtc === null || op.quantity === null || op.openQuantity === null ||
       op.totalEnteredQuantity === null || op.totalExitedQuantity === null || op.averageEntryPrice === null ||
       (op.status === 'closed') !== (op.closedAtUtc !== null) || op.closedAtUtc !== null && Date.parse(String(op.closedAtUtc)) < Date.parse(String(op.openedAtUtc))) return false

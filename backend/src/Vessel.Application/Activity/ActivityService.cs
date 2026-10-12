@@ -18,7 +18,7 @@ public sealed class ActivityService(IActivityStore store)
         var facts = await store.ReadAsync(accountId, ct);
         var accounts = facts.Accounts.Where(a => a.IsEnabled && (accountId == null || a.Id == accountId)).ToDictionary(a => a.Id);
         var fills = facts.Fills.Where(f => accounts.ContainsKey(f.AccountId)).ToList();
-        var operations = OperationAggregator.Aggregate(fills, facts.FillPlayIds).ToList();
+        var operations = OperationAggregator.Aggregate(fills, facts.FillPlayIds, facts.Snapshots).ToList();
         var coverage = new List<ActivityCoverageDto>();
         foreach (var account in accounts.Values)
         {
@@ -29,9 +29,12 @@ public sealed class ActivityService(IActivityStore store)
                 .Concat(snapshot.Positions.Select(p => p.ContractId)).Distinct(StringComparer.Ordinal);
             foreach (var contract in contracts)
             {
-                var last = operations.FirstOrDefault(o => o.AccountId == account.Id && o.ContractId == contract);
-                string? reason = last?.Status == "incomplete" ? "Computed position is unknown because retained history is incomplete; snapshot comparison is unavailable." :
-                    last?.LastOccurredAtUtc > snapshot.ObservedAtUtc ? "Latest snapshot predates retained fills; position comparison is unavailable." : null;
+                // A close and the next open can have identical last timestamps. The remaining
+                // position, not UUID display ordering, identifies the final operation.
+                var last = operations.Where(o => o.AccountId == account.Id && o.ContractId == contract)
+                    .OrderByDescending(o => o.LastOccurredAtUtc).ThenBy(o => o.OpenQuantity == "0" ? 1 : 0).FirstOrDefault();
+                string? reason = last?.LastOccurredAtUtc > snapshot.ObservedAtUtc ? "Latest snapshot predates retained fills; position comparison is unavailable." :
+                    last is not null && last.OpenQuantity is null ? "Computed position is unknown because retained history is incomplete; snapshot comparison is unavailable." : null;
                 if (reason is null)
                 {
                     var observed = ExactAmount.From(snapshot.Positions.SingleOrDefault(p => p.ContractId == contract)?.SignedQuantity ?? 0m);

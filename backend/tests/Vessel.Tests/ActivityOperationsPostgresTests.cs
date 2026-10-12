@@ -56,7 +56,7 @@ public sealed class ActivityOperationsPostgresTests
     }
 
     [PostgresFact]
-    public async Task Retained_snapshot_mismatch_is_reported_without_mutation()
+    public async Task Retained_snapshot_anchors_missing_entries_without_mutation()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
         var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture");
@@ -70,7 +70,8 @@ public sealed class ActivityOperationsPostgresTests
         await using (var db = database.Context(owner))
         {
             var result = await new ActivityService(new ActivityStore(db)).GetAsync(account.Id, default);
-            var op = Assert.Single(result.Operations); Assert.Equal("1", op.OpenQuantity); Assert.Contains(op.Coverage, c => c.Contains("disagrees"));
+            var op = Assert.Single(result.Operations); Assert.Equal("2", op.OpenQuantity); Assert.Equal("long", op.Direction); Assert.Equal("incomplete", op.Status);
+            Assert.Null(op.AverageEntryPrice); Assert.Contains(op.Coverage, c => c.Contains("entries") && c.Contains("missing"));
             Assert.Equal(2, (await db.Positions.SingleAsync()).SignedQuantity); Assert.Single(await db.Fills.ToListAsync());
         }
     }

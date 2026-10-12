@@ -40,6 +40,18 @@ describe('operation table', () => {
     expect(screen.getByText('Snapshot disagrees.')).toBeInTheDocument()
     expect(screen.getByText(/10 older\/display-limited fill rows omitted/)).toBeInTheDocument()
   })
+  it('shows direction and known exits when snapshot anchoring finds missing entries', async () => {
+    const missing: ActivityOperation = { ...closed, status: 'incomplete', openedAtUtc: null, quantity: null,
+      totalEnteredQuantity: null, averageEntryPrice: null, coverage: ['Opening entries are missing.'] }
+    render(<OperationsTable operations={[missing]} accounts={[accountFixture]} />)
+    expect(screen.getByText('Short')).toHaveClass('short')
+    expect(screen.getByText('Opened unknown')).toBeInTheDocument()
+    expect(screen.getByText('Exited 2')).toBeInTheDocument()
+    expect(screen.getByTitle('99')).toHaveTextContent('$99.00')
+    expect(screen.getByText('incomplete')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Expand BTC operation' }))
+    expect(screen.getByText('Opening entries are missing.')).toBeInTheDocument()
+  })
   it('hides disabled account operations even if an earlier response includes them', () => {
     render(<OperationsTable operations={[operationFixture]} accounts={[{ ...accountFixture, isEnabled: false }]} />)
     expect(screen.getByText('No operations in this view')).toBeInTheDocument()

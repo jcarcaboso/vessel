@@ -36,6 +36,17 @@ describe('activity API', () => {
     response({ ...activityFixture, operations: [incomplete] })
     await expect(createWorkspaceApi('token').activity()).resolves.toMatchObject({ operations: [{ direction: null, quantity: null }] })
   })
+  it('accepts snapshot-anchored missing entries with known direction and exits', async () => {
+    const incomplete = { ...operationFixture, status: 'incomplete', openedAtUtc: null, quantity: null, totalEnteredQuantity: null,
+      totalExitedQuantity: '2', openQuantity: '0', averageEntryPrice: null, averageExitPrice: '120',
+      closedAtUtc: operationFixture.lastOccurredAtUtc, coverage: ['Opening entries are missing.'] }
+    response({ ...activityFixture, operations: [incomplete] })
+    await expect(createWorkspaceApi('token').activity()).resolves.toMatchObject({ operations: [{ direction: 'long', averageEntryPrice: null, averageExitPrice: '120' }] })
+    for (const invalid of [{ coverage: [] }, { averageEntryPrice: '100' }, { direction: null }, { openQuantity: null }]) {
+      response({ ...activityFixture, operations: [{ ...incomplete, ...invalid }] })
+      await expect(createWorkspaceApi('token').activity()).rejects.toMatchObject({ kind: 'invalid-response' })
+    }
+  })
   it('rejects missing document fields, foreign coverage identities and duplicated operations', async () => {
     for (const key of Object.keys(activityFixture)) {
       const document = structuredClone(activityFixture); delete (document as unknown as Record<string, unknown>)[key]; response(document)
