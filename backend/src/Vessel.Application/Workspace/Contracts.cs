@@ -59,11 +59,14 @@ public sealed class WorkspaceException(int statusCode, string detail) : Exceptio
 }
 
 // Application owns this bounded use-case port; EF and transaction details stay in Persistence.
+public sealed record MarketDataAccount(bool IsEnabled, string VenueId);
+
 public interface IWorkspaceStore
 {
     Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct);
     Task<List<Account>> AccountsAsync(CancellationToken ct);
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);
+    Task<MarketDataAccount?> MarketDataAccountAsync(Guid id, CancellationToken ct);
     Task<AccountSnapshot?> SnapshotAsync(Guid id, CancellationToken ct);
     Task<bool> SourceExistsAsync(string venueId, string address, CancellationToken ct);
     Task<List<AccountSnapshot>> SnapshotsAsync(CancellationToken ct);

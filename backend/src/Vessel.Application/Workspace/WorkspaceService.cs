@@ -223,7 +223,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     public async Task<AccountInstrumentsDto> InstrumentsAsync(Guid id, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var account = await RequireAccount(id, ct);
+        var account = await store.MarketDataAccountAsync(id, ct) ?? throw new WorkspaceException(404, "Account not found.");
         if (!account.IsEnabled)
             throw new WorkspaceException(409, "Enable the account before reading its instrument catalogue.");
         if (account.VenueId == "manual")

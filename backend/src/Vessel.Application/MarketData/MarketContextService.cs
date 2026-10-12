@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 
@@ -22,22 +21,19 @@ public sealed record MarketContextDto(string VenueId, string Instrument, string 
 /// <summary>Bounded short-lived cache of one whole upstream snapshot per venue. Register as a singleton.</summary>
 public sealed class MarketContextCache(TimeProvider time)
 {
-    private const int MaxEntries = 16;
     public static readonly TimeSpan Lifetime = TimeSpan.FromSeconds(10);
-    private readonly ConcurrentDictionary<string, (DateTimeOffset Expires, DateTimeOffset Observed, IReadOnlyList<VenueMarketContext> Value)> entries = new();
+    public sealed record Snapshot(DateTimeOffset Observed, IReadOnlyList<VenueMarketContext> Value);
+    private readonly BoundedMarketDataCache<Snapshot> entries = new(time, 16, 16, _ => 1);
 
-    public (DateTimeOffset Observed, IReadOnlyList<VenueMarketContext> Value)? Get(string venueId) =>
-        entries.TryGetValue(venueId, out var entry) && entry.Expires > time.GetUtcNow() ? (entry.Observed, entry.Value) : null;
-
-    public void Set(string venueId, DateTimeOffset observed, IReadOnlyList<VenueMarketContext> value)
-    {
-        var now = time.GetUtcNow();
-        if (entries.Count >= MaxEntries && !entries.ContainsKey(venueId)) entries.Clear();
-        entries[venueId] = (now + Lifetime, observed, value);
-    }
+    public Task<Snapshot> GetAsync(string venueId, IMarketContextReader reader, CancellationToken ct) =>
+        entries.GetAsync(venueId, async token =>
+        {
+            var value = await reader.ReadMarketContextsAsync(token);
+            return new Snapshot(time.GetUtcNow(), value);
+        }, _ => Lifetime, ct);
 }
 
-public sealed class MarketContextService(IWorkspaceStore store, IVenueRegistry venues, MarketContextCache cache, TimeProvider time)
+public sealed class MarketContextService(IWorkspaceStore store, IVenueRegistry venues, MarketContextCache cache)
 {
     /// <summary>Used when the venue's descriptor has no notice of its own.</summary>
     public const string Notice =
@@ -52,29 +48,21 @@ public sealed class MarketContextService(IWorkspaceStore store, IVenueRegistry v
         if (venues.MarketContext(account.VenueId) is not { } reader)
             throw new WorkspaceException(502, VenueFailure);
 
-        var snapshot = cache.Get(account.VenueId);
-        if (snapshot is null)
+        MarketContextCache.Snapshot snapshot;
+        try
         {
-            IReadOnlyList<VenueMarketContext> raw;
-            try
-            {
-                raw = await reader.ReadMarketContextsAsync(ct);
-                ct.ThrowIfCancellationRequested();
-            }
-            catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
-                ex is OperationCanceledException && !ct.IsCancellationRequested)
-            {
-                throw new WorkspaceException(502, VenueFailure);
-            }
-            var observed = time.GetUtcNow();
-            cache.Set(account.VenueId, observed, raw);
-            snapshot = (observed, raw);
+            snapshot = await cache.GetAsync(account.VenueId, reader, ct);
+        }
+        catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
+            ex is OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            throw new WorkspaceException(502, VenueFailure);
         }
 
-        var match = snapshot.Value.Value.FirstOrDefault(c => c.ContractId == instrument)
+        var match = snapshot.Value.FirstOrDefault(c => c.ContractId == instrument)
             ?? throw new WorkspaceException(400, "The instrument is not in the venue's perpetual catalogue.");
         return new MarketContextDto(account.VenueId, instrument, match.MarkPrice, match.OraclePrice, match.MidPrice,
             match.PreviousDayPrice, match.DayNotionalVolume, match.OpenInterest, match.FundingRate, match.Premium,
-            snapshot.Value.Observed, notice);
+            snapshot.Observed, notice);
     }
 }

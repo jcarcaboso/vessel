@@ -14,7 +14,7 @@ internal sealed record CoreOwner(Guid OwnerId) : IJournalOwnerContext;
 
 internal sealed class FixtureReader : IPerpetualVenueReader
 {
-    public string VenueId => "hyperliquid";
+    public string VenueId { get; init; } = "hyperliquid";
     public bool Fail { get; set; }
     public int Reads;
     public int InstrumentReads;
@@ -56,6 +56,8 @@ internal sealed class MemoryWorkspaceStore(Guid ownerId) : IWorkspaceStore
     public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct) => Task.FromResult(Portfolios.Where(p => p.OwnerId == ownerId).ToList());
     public Task<List<Account>> AccountsAsync(CancellationToken ct) => Task.FromResult(Accounts.Where(a => a.OwnerId == ownerId).ToList());
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => Task.FromResult(Accounts.SingleOrDefault(a => a.Id == id && a.OwnerId == ownerId));
+    public Task<MarketDataAccount?> MarketDataAccountAsync(Guid id, CancellationToken ct) => Task.FromResult(
+        Accounts.Where(a => a.Id == id && a.OwnerId == ownerId).Select(a => new MarketDataAccount(a.IsEnabled, a.VenueId)).SingleOrDefault());
     public Task<bool> SourceExistsAsync(string venueId, string address, CancellationToken ct) =>
         Task.FromResult(Accounts.Any(a => a.OwnerId == ownerId && a.VenueId == venueId && a.Address == address));
     public Task<AccountSnapshot?> SnapshotAsync(Guid id, CancellationToken ct) => Task.FromResult(Snapshots.SingleOrDefault(s =>

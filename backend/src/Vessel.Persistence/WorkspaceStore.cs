@@ -12,6 +12,8 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
     public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct) => db.Portfolios.OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
     public Task<List<Account>> AccountsAsync(CancellationToken ct) => db.Accounts.OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => db.Accounts.SingleOrDefaultAsync(x => x.Id == id, ct);
+    public Task<MarketDataAccount?> MarketDataAccountAsync(Guid id, CancellationToken ct) => db.Accounts.AsNoTracking()
+        .Where(x => x.Id == id).Select(x => new MarketDataAccount(x.IsEnabled, x.VenueId)).SingleOrDefaultAsync(ct);
     public Task<bool> SourceExistsAsync(string venueId, string sourceId, CancellationToken ct) =>
         db.Accounts.AnyAsync(a => a.VenueId == venueId && a.SourceId == sourceId, ct);
     public Task<AccountSnapshot?> SnapshotAsync(Guid id, CancellationToken ct) => db.Snapshots

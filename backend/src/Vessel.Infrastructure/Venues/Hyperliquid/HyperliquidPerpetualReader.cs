@@ -13,7 +13,8 @@ namespace Vessel.Infrastructure.Venues.Hyperliquid;
 /// Bounded, read-only primary perpetual DEX adapter. Composition supplies an
 /// HttpClient with BaseAddress https://api.hyperliquid.xyz/ (and no signing credentials).
 /// </summary>
-public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvider timeProvider)
+public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvider timeProvider,
+    HyperliquidCatalogueCache? catalogueCache = null)
     : IPerpetualVenueReader, ICandleReader
 {
     // Official schemas and bounds, checked October 1, 2026:
@@ -83,12 +84,19 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
     private static decimal ParseDecimal(string text) => Json.ParseDecimal(text);
     private static void RejectDuplicateProperties(JsonElement element) => Json.RejectDuplicateProperties(element);
 
-    public Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken cancellationToken) =>
-        ReadBoundedAsync<IReadOnlyList<VenueInstrument>>(async token =>
+    private readonly HyperliquidCatalogueCache catalogues = catalogueCache ?? new(timeProvider);
+    internal sealed record Catalogue(IReadOnlyList<VenueInstrument> All, IReadOnlyList<VenueInstrument> Selectable);
+
+    // Imports pass refresh so a market listed within the cache lifetime is not filtered out of their facts.
+    private Task<Catalogue> CatalogueAsync(CancellationToken ct, bool refresh = false) => catalogues.GetAsync(token =>
+        ReadBoundedAsync(async bounded =>
         {
-            using var meta = await ReadJsonAsync(new { type = "meta", dex = "" }, token);
-            return ReadInstruments(meta.RootElement, selectableOnly: true);
-        }, cancellationToken);
+            using var meta = await ReadJsonAsync(new { type = "meta", dex = "" }, bounded);
+            return new Catalogue(ReadInstruments(meta.RootElement), ReadInstruments(meta.RootElement, selectableOnly: true));
+        }, token), ct, refresh);
+
+    public async Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken cancellationToken) =>
+        (await CatalogueAsync(cancellationToken)).Selectable;
 
     public async Task<PerpetualVenueReadResult> ReadAsync(string publicAddress, CancellationToken cancellationToken)
     {
@@ -98,8 +106,7 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
 
         return await ReadBoundedAsync(async token =>
         {
-            using var meta = await ReadJsonAsync(new { type = "meta", dex = "" }, token);
-            var instruments = ReadInstruments(meta.RootElement);
+            var instruments = (await CatalogueAsync(token, refresh: true)).All;
             var contracts = instruments.Select(instrument => instrument.VenueContractId ?? instrument.ContractId)
                 .ToHashSet(StringComparer.Ordinal);
 
@@ -340,4 +347,13 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
 
 
 
+}
+
+/// <summary>Full validated primary metadata, including retired identities; shared across adapter instances.</summary>
+public sealed class HyperliquidCatalogueCache(TimeProvider time)
+{
+    private readonly BoundedMarketDataCache<HyperliquidPerpetualReader.Catalogue> entries = new(time, 1, 1, _ => 1);
+    internal Task<HyperliquidPerpetualReader.Catalogue> GetAsync(
+        Func<CancellationToken, Task<HyperliquidPerpetualReader.Catalogue>> load, CancellationToken ct, bool refresh = false) =>
+        entries.GetAsync("primary", load, _ => TimeSpan.FromSeconds(60), ct, refresh);
 }

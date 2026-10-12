@@ -18,8 +18,7 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
         var latestTimestamp = Math.Min(253402300799999L, timeProvider.GetUtcNow().ToUnixTimeMilliseconds() + 300000);
         return ReadBoundedAsync(async token =>
         {
-            using var meta = await ReadJsonAsync(new { type = "meta", dex = "" }, token);
-            var contracts = ReadInstruments(meta.RootElement).Select(i => i.VenueContractId ?? i.ContractId)
+            var contracts = (await CatalogueAsync(token, refresh: true)).All.Select(i => i.VenueContractId ?? i.ContractId)
                 .ToHashSet(StringComparer.Ordinal);
             using var history = await ReadJsonAsync(new { type = "historicalOrders", user = publicAddress }, token);
             using var open = await ReadJsonAsync(new { type = "frontendOpenOrders", user = publicAddress, dex = "" }, token);

@@ -1,7 +1,6 @@
 using Vessel.Application.Venues;
 using System.Text.RegularExpressions;
 using Vessel.Application.Workspace;
-using Vessel.Domain.Accounts;
 
 namespace Vessel.Application.MarketData;
 
@@ -20,10 +19,10 @@ internal static partial class MarketDataGuard
     [GeneratedRegex("^[A-Za-z0-9_-]{1,32}$")]
     private static partial Regex InstrumentPattern();
 
-    public static async Task<Account> AccountAsync(IWorkspaceStore store, Guid accountId, CancellationToken ct)
+    public static async Task<MarketDataAccount> AccountAsync(IWorkspaceStore store, Guid accountId, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var account = await store.AccountAsync(accountId, ct) ?? throw new WorkspaceException(404, "Account not found.");
+        var account = await store.MarketDataAccountAsync(accountId, ct) ?? throw new WorkspaceException(404, "Account not found.");
         if (!account.IsEnabled)
             throw new WorkspaceException(409, "Enable the account before reading market data.");
         if (account.VenueId == "manual")
