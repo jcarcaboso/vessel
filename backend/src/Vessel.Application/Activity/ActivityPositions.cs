@@ -2,35 +2,41 @@ using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Activity;
 
-internal readonly record struct ActivityContractKey(Guid AccountId, string Identity)
-{
-    public static ActivityContractKey From(ImportedFill fill) => new(fill.AccountId, fill.VenueContractId ?? fill.ContractId);
-}
+internal readonly record struct ActivityContractKey(Guid AccountId, string Identity, bool IsNative);
 
-/// <summary>One shared index for anchoring and comparison, including legacy snapshot identities.</summary>
+/// <summary>One shared index for grouping, anchoring and comparison, including legacy identities.</summary>
 internal sealed class ActivityPositions
 {
-    public const string AmbiguousIdentityNotice = "Snapshot native contract identity is missing or ambiguous; this position cannot anchor or compare multiple markets sharing a canonical key.";
+    public const string AmbiguousIdentityNotice = "Missing or ambiguous native contract identity across markets sharing a canonical key; unresolved facts cannot use snapshot anchoring or comparison.";
     public IReadOnlyDictionary<Guid, AccountSnapshot> Snapshots { get; }
     public Dictionary<ActivityContractKey, string> Contracts { get; } = [];
     private readonly Dictionary<ActivityContractKey, ExactAmount?> quantities = [];
+    private readonly Dictionary<(Guid AccountId, string ContractId), ActivityContractKey[]> nativeCandidates;
 
     public ActivityPositions(IReadOnlyList<ImportedFill> fills, IReadOnlyList<AccountSnapshot> snapshots)
     {
         Snapshots = snapshots.ToDictionary(s => s.AccountId);
-        var candidates = fills.Select(f => (f.AccountId, f.ContractId, Key: ActivityContractKey.From(f)))
+        nativeCandidates = fills.Where(f => f.VenueContractId is not null)
+            .Select(f => (f.AccountId, f.ContractId, Key: new ActivityContractKey(f.AccountId, f.VenueContractId!, true)))
             .Concat(Snapshots.Values.SelectMany(s => s.Positions.Where(p => p.VenueContractId is not null)
-                .Select(p => (s.AccountId, p.ContractId, Key: new ActivityContractKey(s.AccountId, p.VenueContractId!)))))
+                .Select(p => (s.AccountId, p.ContractId, Key: new ActivityContractKey(s.AccountId, p.VenueContractId!, true)))))
             .GroupBy(p => (p.AccountId, p.ContractId))
             .ToDictionary(g => g.Key, g => g.Select(p => p.Key).Distinct().ToArray());
-        foreach (var fill in fills) Contracts[ActivityContractKey.From(fill)] = fill.ContractId;
+        foreach (var fill in fills)
+        {
+            var key = Key(fill);
+            Contracts[key] = fill.ContractId;
+            // Missing identity is not evidence of a separate, absent (flat) market.
+            if (!key.IsNative && nativeCandidates.GetValueOrDefault((fill.AccountId, fill.ContractId)) is { Length: > 1 })
+                quantities[key] = null;
+        }
         foreach (var snapshot in Snapshots.Values)
         foreach (var position in snapshot.Positions)
         {
-            var keys = position.VenueContractId is { } native
-                ? [new ActivityContractKey(snapshot.AccountId, native)]
-                : candidates.GetValueOrDefault((snapshot.AccountId, position.ContractId))
-                    ?? [new ActivityContractKey(snapshot.AccountId, position.ContractId)];
+            var candidates = nativeCandidates.GetValueOrDefault((snapshot.AccountId, position.ContractId));
+            var keys = position.VenueContractId is null && candidates is { Length: > 1 }
+                ? candidates
+                : [Key(snapshot.AccountId, position.ContractId, position.VenueContractId)];
             foreach (var key in keys)
             {
                 Contracts[key] = position.ContractId;
@@ -41,6 +47,14 @@ internal sealed class ActivityPositions
         }
     }
 
-    // A contract absent from a coherent snapshot is flat. A present but ambiguous identity is unknown.
+    public ActivityContractKey Key(ImportedFill fill) => Key(fill.AccountId, fill.ContractId, fill.VenueContractId);
+
+    private ActivityContractKey Key(Guid accountId, string contractId, string? nativeId) => nativeId is not null
+        ? new(accountId, nativeId, true)
+        : nativeCandidates.GetValueOrDefault((accountId, contractId)) is { Length: 1 } candidates
+            ? candidates[0]
+            : new(accountId, contractId, false);
+
+    // Only a resolved contract absent from a coherent snapshot is flat; ambiguous identities stay unknown.
     public ExactAmount? Quantity(ActivityContractKey key) => quantities.TryGetValue(key, out var quantity) ? quantity : default(ExactAmount);
 }

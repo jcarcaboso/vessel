@@ -21,8 +21,9 @@ public static class OperationAggregator
         IReadOnlyDictionary<Guid, Guid>? fillPlayIds, ActivityPositions positions)
     {
         var result = new List<ActivityOperationDto>();
-        foreach (var group in fills.GroupBy(ActivityContractKey.From))
+        foreach (var group in fills.GroupBy(positions.Key))
         {
+            var firstResult = result.Count;
             var times = group.GroupBy(f => f.OccurredAtUtc).OrderBy(g => g.Key).ToList();
             var snapshot = positions.Snapshots.GetValueOrDefault(group.Key.AccountId);
             var observed = positions.Quantity(group.Key);
@@ -116,6 +117,14 @@ public static class OperationAggregator
                 }
             }
             if (current is not null) result.Add(current.Build(position));
+            for (var i = firstResult; i < result.Count; i++)
+                result[i] = result[i] with
+                {
+                    ContractKey = group.Key,
+                    Coverage = observed is null
+                        ? result[i].Coverage.Append(ActivityPositions.AmbiguousIdentityNotice).ToList()
+                        : result[i].Coverage
+                };
         }
         return result.OrderByDescending(o => o.LastOccurredAtUtc).ThenBy(o => o.Id, StringComparer.Ordinal).ToList();
     }
@@ -267,8 +276,7 @@ public static class OperationAggregator
                 UnknownBoundaries ? null : ExactAmount.Average(exitNotional, exited), entries.Count, exits.Count, parts.Count,
                 pnl.ToString(), stableFees.ToString(), fees.Where(f => !Stablecoins.Contains(f.Key)).OrderBy(f => f.Key, StringComparer.Ordinal)
                     .Select(f => new OperationFeeDto(f.Key, f.Value.ToString())).ToList(), unsupportedGrossFee ? null : (pnl - grossFees).ToString(),
-                bases.Count == 1 ? bases.Single() : "mixed", association == "linked" ? plays.Single() : null, association, Coverage, new AllocationRows(parts))
-                { ContractKey = ActivityContractKey.From(first) };
+                bases.Count == 1 ? bases.Single() : "mixed", association == "linked" ? plays.Single() : null, association, Coverage, new AllocationRows(parts));
         }
     }
 

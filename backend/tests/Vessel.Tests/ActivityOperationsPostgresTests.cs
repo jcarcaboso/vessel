@@ -21,6 +21,35 @@ public sealed class ActivityOperationsPostgresTests
     };
 
     [PostgresFact]
+    public async Task Legacy_fill_and_snapshot_ids_resolve_after_database_readback_without_rewriting_facts()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var account = new Account(Guid.NewGuid(), owner, "risex", "Legacy fixture");
+        var legacy = Fill(account, 0); legacy.ContractId = "DOGE";
+        var native = Fill(account, 2); native.ContractId = "DOGE"; native.VenueContractId = "14";
+        await using (var db = database.Context(owner))
+        {
+            db.Accounts.Add(account); db.Fills.AddRange(legacy, native);
+            db.Snapshots.Add(new AccountSnapshot { OwnerId = owner, AccountId = account.Id, ObservedAtUtc = At.AddDays(1),
+                ValueScope = "fixture", Positions = [new() { OwnerId = owner, AccountId = account.Id, ContractId = "DOGE",
+                    SignedQuantity = 2, EntryPrice = 100 }] });
+            await db.SaveChangesAsync();
+        }
+        await using (var db = database.Context(owner))
+        {
+            var result = await new ActivityService(new ActivityStore(db)).GetAsync(account.Id, default);
+            var op = Assert.Single(result.Operations);
+            Assert.Equal("long", op.Direction); Assert.Equal("open", op.Status);
+            Assert.Equal("2", op.OpenQuantity); Assert.Equal("2", op.TotalEnteredQuantity);
+            Assert.Equal(new[] { legacy.Id, native.Id }, op.Fills.Select(f => f.Fill.Id));
+            Assert.Empty(op.Coverage); Assert.Empty(result.Coverage);
+            Assert.Null((await db.Fills.SingleAsync(f => f.Id == legacy.Id)).VenueContractId);
+            Assert.Equal("14", (await db.Fills.SingleAsync(f => f.Id == native.Id)).VenueContractId);
+            Assert.Null((await db.Positions.SingleAsync()).VenueContractId);
+        }
+    }
+
+    [PostgresFact]
     public async Task Retained_native_contract_ids_partition_activity_after_database_readback()
     {
         await using var database = await CoreDatabase.CreateAsync();

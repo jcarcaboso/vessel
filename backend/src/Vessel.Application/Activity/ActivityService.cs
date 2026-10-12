@@ -35,15 +35,16 @@ public sealed class ActivityService(IActivityStore store)
         {
             if (account.HistoryNotice is { Length: > 0 } notice) coverage.Add(new(account.Id, null, notice));
             var snapshot = positions.Snapshots.GetValueOrDefault(account.Id);
-            if (snapshot is null) { coverage.Add(new(account.Id, null, "No latest position snapshot is available for comparison.")); continue; }
+            if (snapshot is null) coverage.Add(new(account.Id, null, "No latest position snapshot is available for comparison."));
             foreach (var (key, contract) in contractsByAccount.GetValueOrDefault(account.Id) ?? [])
             {
                 // Same-time close/open operations use remaining position, not UUID display ordering.
                 var hasLast = lastByContract.TryGetValue(key, out var index);
                 var last = hasLast ? operations[index] : null;
                 var observed = positions.Quantity(key);
+                if (snapshot is null && observed is not null) continue;
                 string? reason = observed is null ? ActivityPositions.AmbiguousIdentityNotice :
-                    last?.LastOccurredAtUtc > snapshot.ObservedAtUtc ? "Latest snapshot predates retained fills; position comparison is unavailable." :
+                    last?.LastOccurredAtUtc > snapshot!.ObservedAtUtc ? "Latest snapshot predates retained fills; position comparison is unavailable." :
                     last is not null && last.OpenQuantity is null ? "Computed position is unknown because retained history is incomplete; snapshot comparison is unavailable." : null;
                 if (reason is null)
                 {
@@ -56,7 +57,7 @@ public sealed class ActivityService(IActivityStore store)
                 if (reason is not null)
                 {
                     coverage.Add(new(account.Id, contract, reason));
-                    if (last is not null)
+                    if (last is not null && !last.Coverage.Contains(reason))
                     {
                         operations[index] = last with { Coverage = last.Coverage.Append(reason).ToList() };
                     }

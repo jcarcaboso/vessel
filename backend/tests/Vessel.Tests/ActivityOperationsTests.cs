@@ -109,12 +109,144 @@ public sealed class ActivityOperationsTests
     };
 
     [Fact]
+    public async Task Canonical_only_and_native_entries_share_the_unambiguous_snapshot_anchor()
+    {
+        var legacy = Fill(0); legacy.ContractId = "DOGE";
+        var native = Fill(1); native.ContractId = "DOGE"; native.VenueContractId = "14";
+        var snapshot = Snapshot(2); snapshot.Positions[0].ContractId = "DOGE"; snapshot.Positions[0].VenueContractId = "14";
+        var result = await new ActivityService(new Store(new([Account(AccountId)], [native, legacy], [snapshot],
+            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var op = Assert.Single(result.Operations);
+        Assert.Equal("long", op.Direction); Assert.Equal("open", op.Status);
+        Assert.Equal("2", op.TotalEnteredQuantity); Assert.Equal("0", op.TotalExitedQuantity); Assert.Equal("2", op.OpenQuantity);
+        Assert.Equal(new[] { legacy.Id, native.Id }, op.Fills.Select(f => f.Fill.Id));
+        Assert.All(op.Fills, f => Assert.Equal("entry", f.Role));
+        Assert.Empty(op.Coverage); Assert.Empty(result.Coverage);
+        Assert.Null(legacy.VenueContractId);
+    }
+
+    [Fact]
+    public async Task Canonical_only_open_and_native_close_form_one_closed_operation_with_a_flat_snapshot()
+    {
+        var legacy = Fill(0); legacy.ContractId = "DOGE";
+        var native = Fill(1, "sell", "close"); native.ContractId = "DOGE"; native.VenueContractId = "14";
+        var result = await new ActivityService(new Store(new([Account(AccountId)], [native, legacy], [Snapshot()],
+            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var op = Assert.Single(result.Operations);
+        Assert.Equal("long", op.Direction); Assert.Equal("closed", op.Status);
+        Assert.Equal("1", op.TotalEnteredQuantity); Assert.Equal("1", op.TotalExitedQuantity); Assert.Equal("0", op.OpenQuantity);
+        Assert.Empty(op.Coverage); Assert.Empty(result.Coverage);
+    }
+
+    [Fact]
+    public async Task Canonical_only_fill_resolves_a_native_id_observed_only_in_the_snapshot()
+    {
+        var snapshot = Snapshot(1); snapshot.Positions[0].VenueContractId = "14";
+        var result = await new ActivityService(new Store(new([Account(AccountId)], [Fill(0)], [snapshot],
+            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var op = Assert.Single(result.Operations);
+        Assert.Equal("long", op.Direction); Assert.Equal("open", op.Status); Assert.Equal("1", op.OpenQuantity);
+        Assert.Empty(op.Coverage); Assert.Empty(result.Coverage);
+    }
+
+    [Fact]
+    public async Task Legacy_fill_and_snapshot_resolve_to_the_same_unambiguous_native_market()
+    {
+        var legacy = Fill(0); var native = Fill(1); native.VenueContractId = "14";
+        var snapshot = Snapshot(2);
+        var result = await new ActivityService(new Store(new([Account(AccountId)], [native, legacy], [snapshot],
+            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var op = Assert.Single(result.Operations);
+        Assert.Equal("long", op.Direction); Assert.Equal("open", op.Status); Assert.Equal("2", op.OpenQuantity);
+        Assert.Empty(op.Coverage); Assert.Empty(result.Coverage);
+        Assert.Null(legacy.VenueContractId); Assert.Null(snapshot.Positions[0].VenueContractId);
+    }
+
+    [Theory]
+    [InlineData("native")]
+    [InlineData("flat")]
+    [InlineData("missing")]
+    public async Task Unresolved_canonical_fills_use_the_forward_walk_and_cover_every_operation(string snapshotKind)
+    {
+        var retired = Fill(0); retired.VenueContractId = "13";
+        var active = Fill(1); active.VenueContractId = "14";
+        var closedOpen = Fill(2); var closedExit = Fill(3, "sell", "close"); var open = Fill(4);
+        var snapshot = Snapshot(snapshotKind == "native" ? 1 : 0);
+        if (snapshot.Positions.Count > 0) snapshot.Positions[0].VenueContractId = "14";
+        var result = await new ActivityService(new Store(new([Account(AccountId)],
+            [retired, active, closedOpen, closedExit, open], snapshotKind == "missing" ? [] : [snapshot],
+            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        Assert.Equal(4, result.TotalOperationCount);
+        var unresolved = result.Operations.Where(o => o.Fills.Any(f => f.Fill.Id == closedOpen.Id || f.Fill.Id == open.Id)).ToList();
+        Assert.Equal(2, unresolved.Count);
+        var closed = unresolved.Single(o => o.Status == "closed");
+        Assert.Equal("0", closed.OpenQuantity); Assert.Equal("1", closed.TotalEnteredQuantity); Assert.Equal("1", closed.TotalExitedQuantity);
+        var remaining = unresolved.Single(o => o.Status == "open");
+        Assert.Equal("1", remaining.OpenQuantity); Assert.Equal("1", remaining.TotalEnteredQuantity);
+        Assert.All(unresolved, o =>
+        {
+            Assert.Equal("long", o.Direction);
+            Assert.Contains(o.Coverage, c => c.Contains("native") && c.Contains("ambiguous"));
+        });
+        Assert.Contains(result.Coverage, c => c.ContractId == "BTC" && c.Notice.Contains("native") && c.Notice.Contains("ambiguous"));
+    }
+
+    [Fact]
+    public async Task Native_candidates_from_fills_and_snapshots_both_make_legacy_fills_unresolved()
+    {
+        var legacy = Fill(0); var native = Fill(1); native.VenueContractId = "13";
+        var snapshot = Snapshot(2); snapshot.Positions[0].VenueContractId = "14";
+        var result = await new ActivityService(new Store(new([Account(AccountId)], [legacy, native], [snapshot],
+            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        Assert.Equal(2, result.TotalOperationCount);
+        var op = result.Operations.Single(o => o.Fills[0].Fill.Id == legacy.Id);
+        Assert.Equal("long", op.Direction); Assert.Equal("open", op.Status); Assert.Equal("1", op.OpenQuantity);
+        Assert.Contains(op.Coverage, c => c.Contains("native") && c.Contains("ambiguous"));
+        Assert.Contains(result.Coverage, c => c.Notice.Contains("native") && c.Notice.Contains("ambiguous"));
+    }
+
+    [Fact]
+    public async Task Unresolved_canonical_identity_never_collides_with_an_equal_native_identifier()
+    {
+        var legacy = Fill(0);
+        var first = Fill(1); first.VenueContractId = first.ContractId;
+        var second = Fill(2); second.VenueContractId = "14";
+        var snapshot = Snapshot(1); snapshot.Positions[0].VenueContractId = "14";
+        var result = await new ActivityService(new Store(new([Account(AccountId)], [legacy, first, second], [snapshot],
+            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        Assert.Equal(3, result.TotalOperationCount);
+        var op = result.Operations.Single(o => o.Fills[0].Fill.Id == legacy.Id);
+        Assert.Equal(1, op.FillCount); Assert.Equal("long", op.Direction); Assert.Equal("1", op.OpenQuantity);
+        Assert.Contains(op.Coverage, c => c.Contains("native") && c.Contains("ambiguous"));
+    }
+
+    [Fact]
+    public async Task Native_identity_resolution_is_scoped_to_the_account_and_canonical_key()
+    {
+        var legacy = Fill(0); var native = Fill(1); native.VenueContractId = "14";
+        var otherAccount = Guid.NewGuid();
+        var foreignMarket = Fill(2); foreignMarket.AccountId = otherAccount; foreignMarket.VenueContractId = "13";
+        var otherContract = Fill(3); otherContract.ContractId = "ETH"; otherContract.VenueContractId = "15";
+        var snapshot = Snapshot(2); snapshot.Positions[0].VenueContractId = "14";
+        snapshot.Positions.Add(new() { ContractId = "ETH", VenueContractId = "15", SignedQuantity = 1 });
+        var otherSnapshot = new AccountSnapshot { AccountId = otherAccount, ObservedAtUtc = Start.AddMinutes(100),
+            Positions = [new() { ContractId = "BTC", VenueContractId = "13", SignedQuantity = 1 }] };
+        var result = await new ActivityService(new Store(new([Account(AccountId), Account(otherAccount)],
+            [legacy, native, foreignMarket, otherContract], [snapshot, otherSnapshot], new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var op = result.Operations.Single(o => o.Fills.Any(f => f.Fill.Id == legacy.Id));
+        Assert.Equal(2, op.FillCount); Assert.Equal("2", op.OpenQuantity);
+        Assert.Empty(op.Coverage); Assert.Empty(result.Coverage);
+    }
+
+    [Fact]
     public async Task Native_markets_sharing_a_canonical_key_keep_round_trips_and_snapshot_anchors_separate()
     {
         var retiredOpen = Fill(0); retiredOpen.VenueContractId = "13";
         var retiredClose = Fill(1, "sell", "close", pnl: 10); retiredClose.VenueContractId = "13";
         var activeClose = Fill(2, "sell", "close", pnl: 20); activeClose.VenueContractId = "14";
         var snapshot = Snapshot(1); snapshot.Positions[0].VenueContractId = "14";
+        foreach (var fill in new[] { retiredOpen, retiredClose, activeClose }) fill.ContractId = "DOGE";
+        snapshot.Positions[0].ContractId = "DOGE";
         var result = await new ActivityService(new Store(new([Account(AccountId)],
             [retiredOpen, retiredClose, activeClose], [snapshot], new Dictionary<Guid, Guid>()))).GetAsync(null, default);
         Assert.Equal(2, result.TotalOperationCount);
