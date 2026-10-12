@@ -18,6 +18,8 @@ import { showAppearanceSection } from '@/features/settings/appearance'
 import { money } from './format'
 import { AccountRows } from './AccountRows'
 import { AccountsPanel } from './AccountsPanel'
+import { emptyAccountFilters } from './account-filters'
+import { emptyFilters } from './activity-filters'
 import { OverviewActions } from './OverviewActions'
 import { VenuesProvider, useVenues } from '@/api/venues'
 import {
@@ -55,11 +57,22 @@ function Shell({ system, disconnect, api }: ShellProps) {
   const [data, setData] = useState<Overview | null>(null)
   const [loaded, setLoaded] = useState<{ api: WorkspaceApi; key: number } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [refreshing, setRefreshing] = useState<string | null>(null)
-  const refreshLock = useRef(false)
-  const [refreshProgress, setRefreshProgress] = useState<{ current: number; total: number } | null>(null)
+  const refreshSession = useRef<{ api: WorkspaceApi; controller: AbortController; busy: boolean } | null>(null)
+  const [refreshState, setRefreshState] = useState<{
+    api: WorkspaceApi; accountId: string; progress: { current: number; total: number } | null
+  } | null>(null)
+  const refreshing = refreshState?.api === api ? refreshState.accountId : null
+  const refreshProgress = refreshState?.api === api ? refreshState.progress : null
+  useEffect(() => {
+    const controller = new AbortController()
+    refreshSession.current = { api, controller, busy: false }
+    return () => controller.abort()
+  }, [api])
+  const disconnectSession = () => { refreshSession.current?.controller.abort(); disconnect() }
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
   const [portfolioFilter, setPortfolioFilter] = useState('')
+  const [accountFilters, setAccountFilters] = useState(emptyAccountFilters)
+  const [activityFilters, setActivityFilters] = useState(emptyFilters)
   const [portfolioDialog, setPortfolioDialog] = useState(false)
   const [accountDialog, setAccountDialog] = useState(false)
   const [managedPortfolioId, setManagedPortfolioId] = useState<string | null>(null)
@@ -147,14 +160,21 @@ function Shell({ system, disconnect, api }: ShellProps) {
     }
   }
   async function sync(id: string) {
-    if (refreshLock.current) return
-    refreshLock.current = true
-    setRefreshing(id)
+    const session = refreshSession.current
+    if (!session || session.api !== api) return
+    const { signal } = session.controller
+    if (session.busy || signal.aborted) return
+    session.busy = true
+    setRefreshState({ api, accountId: id, progress: null })
     try {
-      await api.sync(id); setNotice('Account refreshed. Recent execution facts remain unassigned to plays.')
+      await api.sync(id, signal)
+      if (!signal.aborted) setNotice('Account refreshed. Recent execution facts remain unassigned to plays.')
     } catch (cause) {
-      notify({ tone: 'error', key: 'account-refresh', message: cause instanceof ApiError ? cause.message : 'The venue refresh did not complete.' })
-    } finally { refreshLock.current = false; setRefreshing(null); reload() }
+      if (!signal.aborted) notify({ tone: 'error', key: 'account-refresh', message: cause instanceof ApiError ? cause.message : 'The venue refresh did not complete.' })
+    } finally {
+      session.busy = false
+      if (!signal.aborted) { setRefreshState(null); reload() }
+    }
   }
   const portfolios = data?.portfolios ?? [], accounts = data?.accounts ?? []
   const enabledAccounts = accounts.filter(account => account.isEnabled !== false)
@@ -181,21 +201,24 @@ function Shell({ system, disconnect, api }: ShellProps) {
     navigate('plays')
   }
   async function refreshAll() {
-    if (refreshLock.current || !refreshable.length) return
-    refreshLock.current = true
+    const session = refreshSession.current
+    if (!session || session.api !== api) return
+    const { signal } = session.controller
+    if (session.busy || signal.aborted || !refreshable.length) return
+    session.busy = true
     const failures: string[] = []
     try {
       for (const [index, account] of refreshable.entries()) {
-        setRefreshProgress({ current: index + 1, total: refreshable.length })
-        setRefreshing(account.id)
-        try { await api.sync(account.id) }
+        if (signal.aborted) return
+        setRefreshState({ api, accountId: account.id, progress: { current: index + 1, total: refreshable.length } })
+        try { await api.sync(account.id, signal) }
         catch { failures.push(account.name) }
       }
-      notify({ tone: failures.length ? 'error' : 'success', key: 'account-refresh',
+      if (!signal.aborted) notify({ tone: failures.length ? 'error' : 'success', key: 'account-refresh',
         message: `${refreshable.length - failures.length} of ${refreshable.length} accounts refreshed.${failures.length ? ` Failed: ${failures.join(', ')}.` : ''}` })
     } finally {
-      refreshLock.current = false
-      setRefreshing(null); setRefreshProgress(null); reload()
+      session.busy = false
+      if (!signal.aborted) { setRefreshState(null); reload() }
     }
   }
   const refreshAllAction = <Button variant="outline" size="sm" onClick={() => { void refreshAll() }}
@@ -217,7 +240,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
       <div className="shell-nav-later" role="link" aria-label="Strategies" aria-disabled="true" title="Strategies are not available yet"><Folder size={18} aria-hidden="true" /><span className="sidebar-copy">Strategies</span></div>
       <div className="shell-sidebar-bottom">
         <a href="#settings" className={`shell-nav-item ${page === 'settings' ? 'active' : ''}`} aria-label="Settings" title="Settings" aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} aria-hidden="true" /><span className="sidebar-copy">Settings</span></a>
-        <button className="owner-card" onClick={disconnect} aria-label={`Disconnect ${system.owner.displayName}'s session`} title={`Disconnect ${system.owner.displayName}'s browser session`}><span className="owner-avatar" aria-hidden="true">{system.owner.displayName.slice(0, 1).toUpperCase()}</span><span className="sidebar-copy"><strong>{system.owner.displayName}</strong><small>Private workspace</small></span><LogOut size={15} aria-hidden="true" /></button>
+        <button className="owner-card" onClick={disconnectSession} aria-label={`Disconnect ${system.owner.displayName}'s session`} title={`Disconnect ${system.owner.displayName}'s browser session`}><span className="owner-avatar" aria-hidden="true">{system.owner.displayName.slice(0, 1).toUpperCase()}</span><span className="sidebar-copy"><strong>{system.owner.displayName}</strong><small>Private workspace</small></span><LogOut size={15} aria-hidden="true" /></button>
       </div>
     </aside>
     <div className="shell-main" inert={menuOpen}>
@@ -256,16 +279,16 @@ function Shell({ system, disconnect, api }: ShellProps) {
             </article>)}</div>}
         </section>}
 
-        {page === 'accounts' && data && (selectedAccount ? <AccountDetail key={selectedAccount.id} account={selectedAccount} api={api} refreshing={refreshing === selectedAccount.id} reloadGeneration={reloadKey} onSync={id => { void sync(id) }} onManage={() => manageAccount(selectedAccount)} onBack={() => { setSelectedAccountId(null); window.scrollTo({ top: 0, left: 0, behavior: 'auto' }) }} /> :
-          <AccountsPanel accounts={accounts} portfolios={portfolios} portfolioFilter={activePortfolioFilter} onPortfolioFilter={setPortfolioFilter}
+        {page === 'accounts' && data && (selectedAccount ? <AccountDetail key={selectedAccount.id} account={selectedAccount} api={api} refreshing={refreshing === selectedAccount.id} busy={refreshing !== null} reloadGeneration={reloadKey} onSync={id => { void sync(id) }} onManage={() => manageAccount(selectedAccount)} onBack={() => { setSelectedAccountId(null); window.scrollTo({ top: 0, left: 0, behavior: 'auto' }) }} /> :
+          <AccountsPanel filters={accountFilters} onFiltersChange={setAccountFilters} accounts={accounts} portfolios={portfolios} portfolioFilter={activePortfolioFilter} onPortfolioFilter={setPortfolioFilter}
             refreshing={refreshing} refreshAction={refreshAllAction} onDetail={viewAccount} onSync={id => { void sync(id) }} onManage={manageAccount} onAdd={() => setAccountDialog(true)} />)}
 
 
-        {page === 'activity' && data && <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Position operations</h2><p>Retained fills grouped into position round trips, separate from trading intent.</p></div><span className="workspace-badge">Read-only facts</span></header><ActivityOperations api={api} accounts={accounts} portfolios={portfolios} filters reloadGeneration={reloadKey} /></section>}
+        {page === 'activity' && data && <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Position operations</h2><p>Retained fills grouped into position round trips, separate from trading intent.</p></div><span className="workspace-badge">Read-only facts</span></header><ActivityOperations api={api} accounts={accounts} portfolios={portfolios} filters filterValues={activityFilters} onFiltersChange={setActivityFilters} reloadGeneration={reloadKey} /></section>}
 
         {page === 'settings' && <div className="settings-grid">
           <AppearanceSettings />
-          <section className="shell-panel settings-panel"><ShieldCheck size={23} /><h2>Private session</h2><p>Connected as {system.owner.displayName}. The token lives only in this browser session's memory and is released on disconnect.</p><dl><div><dt>Authentication</dt><dd>Bearer token</dd></div><div><dt>Market scope</dt><dd>Perpetuals only</dd></div><div><dt>Orders and signing</dt><dd>Not enabled</dd></div><div><dt>Theme</dt><dd className="settings-theme"><CurrentThemeName /><Button variant="outline" size="sm" onClick={() => showAppearanceSection('theme-customizer')}>Customize</Button></dd></div></dl><Button variant="outline" onClick={disconnect}><LogOut size={15} />Disconnect session</Button></section>
+          <section className="shell-panel settings-panel"><ShieldCheck size={23} /><h2>Private session</h2><p>Connected as {system.owner.displayName}. The token lives only in this browser session's memory and is released on disconnect.</p><dl><div><dt>Authentication</dt><dd>Bearer token</dd></div><div><dt>Market scope</dt><dd>Perpetuals only</dd></div><div><dt>Orders and signing</dt><dd>Not enabled</dd></div><div><dt>Theme</dt><dd className="settings-theme"><CurrentThemeName /><Button variant="outline" size="sm" onClick={() => showAppearanceSection('theme-customizer')}>Customize</Button></dd></div></dl><Button variant="outline" onClick={disconnectSession}><LogOut size={15} />Disconnect session</Button></section>
           <section className="shell-panel settings-panel"><Database size={23} /><h2>Venue capabilities</h2><p>Accounts can be added at {venues.creatable().map(v => v.name).join(', ')}. A refresh is explicitly requested, not a background job.</p><div className="venue-capability-list">{system.venues.map(v => <div key={v.id}><span>{v.name}</span><span className="workspace-badge">{v.status}</span></div>)}</div><p className="field-help">No venue credential, private key, full-history promise or automatic Play matching is involved.</p></section>
         </div>}
 

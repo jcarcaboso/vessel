@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeIndicators, defaultIndicators, describeIndicators, ema, normalizeIndicators, resizePane, rsi } from './indicators'
+import { computeIndicators, defaultIndicators, describeIndicators, ema, migrateLegacyIndicators, normalizeIndicators, resizePane, rsi } from './indicators'
 
 describe('moving average', () => {
   it('starts at the simple average of the first period and then weights the latest close', () => {
@@ -37,7 +37,7 @@ describe('indicator settings', () => {
     ])
   })
   it('migrates each untouched old slot, preserving custom slots and visibility', () => {
-    const migrated = normalizeIndicators({ emas: [
+    const migrated = migrateLegacyIndicators({ emas: [
       { period: 9, color: '#b388ff', enabled: false },
       { period: 21, color: '#4cbb6c', enabled: false },
       { period: 50, color: '#f2c94c' },

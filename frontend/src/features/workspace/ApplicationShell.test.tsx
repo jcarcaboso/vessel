@@ -7,6 +7,7 @@ import { systemFixture } from '@/test/system-fixture'
 import { reviewFixture } from '@/test/review-fixture'
 import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, playApiStubs, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { ApplicationShell } from './ApplicationShell'
+import { activityFixture, operationFixture } from '@/test/activity-fixture'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
@@ -29,6 +30,77 @@ function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
 }
 beforeEach(() => { window.history.replaceState(null, '', '/') })
 describe('Main application shell', () => {
+  it.each(['disconnect', 'unmount', 'API replacement'])('cancels Refresh all on %s while the first sync is pending', async action => {
+    const first = { ...accountFixture, venueId: 'hyperliquid' }
+    const second = { ...first, id: 'second', name: 'Second' }
+    let finish!: (account: BrokerAccount) => void
+    const sync = vi.fn().mockImplementationOnce(() => new Promise<BrokerAccount>(resolve => { finish = resolve })).mockResolvedValue(second)
+    const client = api({ overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [first, second] }), sync })
+    const disconnect = vi.fn()
+    const view = render(<ApplicationShell system={systemFixture} disconnect={disconnect} api={client} />)
+    await screen.findByRole('button', { name: 'View Main account' })
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh all' }))
+    if (action === 'disconnect') await userEvent.click(screen.getByRole('button', { name: /^Disconnect .*session$/ }))
+    else if (action === 'unmount') view.unmount()
+    else view.rerender(<ApplicationShell system={systemFixture} disconnect={disconnect} api={api()} />)
+    await act(async () => finish(first))
+    expect(sync).toHaveBeenCalledTimes(1)
+    expect((sync.mock.calls[0]?.[1] as AbortSignal)?.aborted).toBe(true)
+    expect(client.overview).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(/accounts refreshed/)).not.toBeInTheDocument()
+  })
+  it('disables account detail refresh during another account refresh without showing its spinner', async () => {
+    const first = { ...accountFixture, venueId: 'hyperliquid' }
+    const second = { ...first, id: 'second', name: 'Second' }
+    let finish!: (account: BrokerAccount) => void
+    const client = api({ overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [first, second] }),
+      sync: vi.fn().mockImplementation(() => new Promise<BrokerAccount>(resolve => { finish = resolve })) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await screen.findByRole('button', { name: 'View Main account' })
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh Main account' }))
+    await userEvent.click(screen.getByRole('button', { name: 'View Second' }))
+    const refresh = screen.getByRole('button', { name: 'Refresh account' })
+    expect(refresh).toBeDisabled()
+    expect(refresh.querySelector('.is-spinning')).toBeNull()
+    await act(async () => finish(first))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh account' })).toBeEnabled())
+  })
+  it('retains account search, venue and status filters across detail and page navigation', async () => {
+    const account = { ...accountFixture, venueId: 'hyperliquid', syncStatus: 'error' as const }
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api({
+      overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [account] }),
+    })} />)
+    await screen.findByRole('button', { name: 'View Main account' })
+    await userEvent.click(screen.getByRole('link', { name: 'Accounts' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Search accounts' }), 'Main')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Filter by venue' }), 'hyperliquid')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Filter by status' }), 'error')
+    await userEvent.click(screen.getByRole('button', { name: 'View Main account' }))
+    await userEvent.click(screen.getByRole('button', { name: 'All accounts' }))
+    expect(screen.getByRole('textbox', { name: 'Search accounts' })).toHaveValue('Main')
+    await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Accounts' }))
+    expect(screen.getByRole('textbox', { name: 'Search accounts' })).toHaveValue('Main')
+    expect(screen.getByRole('combobox', { name: 'Filter by venue' })).toHaveValue('hyperliquid')
+    expect(screen.getByRole('combobox', { name: 'Filter by status' })).toHaveValue('error')
+  })
+  it('retains Activity filters across page navigation', async () => {
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api({
+      overview: vi.fn().mockResolvedValue(overviewFixture),
+      activity: vi.fn().mockResolvedValue({ ...activityFixture, operations: [operationFixture] }),
+    })} />)
+    await screen.findByRole('button', { name: 'View Main account' })
+    await userEvent.click(screen.getByRole('link', { name: 'Activity' }))
+    await screen.findByRole('combobox', { name: 'Instrument' })
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Instrument' }), 'BTC')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Direction' }), 'long')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Period' }), '30')
+    await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Activity' }))
+    expect(await screen.findByRole('combobox', { name: 'Instrument' })).toHaveValue('BTC')
+    expect(screen.getByRole('combobox', { name: 'Direction' })).toHaveValue('long')
+    expect(screen.getByRole('combobox', { name: 'Period' })).toHaveValue('30')
+  })
   it.each([
     ['lighter', 'margin', '131.89123456789012345678901234', '$131.89', 'Venue-reported available margin · not guaranteed withdrawable'],
     ['risex', 'margin', '0', '$0.00', 'Venue-reported available margin · not guaranteed withdrawable'],
@@ -531,7 +603,7 @@ describe('Main application shell', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Refresh Main account' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Previous account data')
     expect(screen.getByRole('button', { name: 'View Main account' })).toBeInTheDocument()
-    expect(client.sync).toHaveBeenCalledWith(wallet.id)
+    expect(client.sync).toHaveBeenCalledWith(wallet.id, expect.any(AbortSignal))
   })
   it('keeps settings and disconnect available while core data is unavailable', async () => {
     const disconnect = vi.fn()

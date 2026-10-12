@@ -9,6 +9,15 @@ function response(body: unknown, status = 200) {
   return fetch
 }
 describe('Core workspace API', () => {
+  it('passes session cancellation through sync to the HTTP request', async () => {
+    const fetch = response(accountFixture)
+    const controller = new AbortController()
+    await createWorkspaceApi('token').sync(accountFixture.id, controller.signal)
+    const signal = fetch.mock.calls[0]![1].signal as AbortSignal
+    expect(signal.aborted).toBe(false)
+    controller.abort()
+    expect(signal.aborted).toBe(true)
+  })
   it.each([undefined, null, '0', '-0.0000000000000000000000000001', '131.89123456789012345678901234'])('keeps exact nullable snapshot available margin %s', async value => {
     const snapshot = { observedAtUtc: '2026-10-12T10:00:00Z', valueScope: 'fixture', accountValueUsd: '1000',
       withdrawableUsd: null, availableMarginUsd: value, marginUsedUsd: '20', positions: [] }

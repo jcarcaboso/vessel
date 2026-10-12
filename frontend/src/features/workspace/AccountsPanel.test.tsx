@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { render } from '@/test/render'
 import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { AccountsPanel } from './AccountsPanel'
+import { emptyAccountFilters } from './account-filters'
 
 const accounts = [
   { ...accountFixture, name: 'Manual savings' },
@@ -16,7 +17,9 @@ const accounts = [
 ]
 function Harness() {
   const [portfolio, setPortfolio] = useState('')
+  const [filters, setFilters] = useState(emptyAccountFilters)
   return <AccountsPanel accounts={accounts} portfolios={[portfolioFixture]} portfolioFilter={portfolio} onPortfolioFilter={setPortfolio}
+    filters={filters} onFiltersChange={setFilters}
     refreshing={null} refreshAction={null} onDetail={vi.fn()} onSync={vi.fn()} onManage={vi.fn()} onAdd={vi.fn()} />
 }
 const names = () => within(screen.getByRole('table')).getAllByRole('button', { name: /^View / }).map(button => button.textContent)

@@ -7,8 +7,8 @@ import { amount, money, time } from './format'
 import { useVenues } from '@/api/venues'
 import { ArrowLeft, RefreshCw, Wallet } from 'lucide-react'
 
-export function AccountDetail({ account, api, refreshing, onSync, onBack, onManage, reloadGeneration = 0 }: {
-  account: BrokerAccount; api: WorkspaceApi; refreshing: boolean; onSync: (id: string) => void; onBack: () => void; onManage: () => void; reloadGeneration?: number
+export function AccountDetail({ account, api, refreshing, busy = refreshing, onSync, onBack, onManage, reloadGeneration = 0 }: {
+  account: BrokerAccount; api: WorkspaceApi; refreshing: boolean; busy?: boolean; onSync: (id: string) => void; onBack: () => void; onManage: () => void; reloadGeneration?: number
 }) {
   const venues = useVenues()
   const synced = venues.can(account.venueId, 'sync')
@@ -33,7 +33,7 @@ export function AccountDetail({ account, api, refreshing, onSync, onBack, onMana
     return () => { active = false; controller.abort() }
   }, [api, account.id, requestKey])
   return <div className="workspace-page-content">
-    <div className="detail-actions"><Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft size={15} />All accounts</Button><div className="detail-management"><Button variant="outline" onClick={onManage}>Manage account</Button>{synced && <Button variant="outline" onClick={() => onSync(account.id)} disabled={refreshing || account.isEnabled === false}><RefreshCw size={15} className={refreshing ? 'is-spinning' : ''} />{refreshing ? 'Refreshing…' : 'Refresh account'}</Button>}</div></div>
+    <div className="detail-actions"><Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft size={15} />All accounts</Button><div className="detail-management"><Button variant="outline" onClick={onManage}>Manage account</Button>{synced && <Button variant="outline" onClick={() => onSync(account.id)} disabled={busy || account.isEnabled === false}><RefreshCw size={15} className={refreshing ? 'is-spinning' : ''} />{refreshing ? 'Refreshing…' : 'Refresh account'}</Button>}</div></div>
     <section className="shell-panel account-detail-heading"><Wallet size={24} /><div><h2>{account.name}</h2><p>{venues.name(account.venueId)} · {synced ? 'read-only perpetuals' : account.venueId === 'manual' ? 'manual record' : 'reader not enabled'} · {time(account.lastSyncedAtUtc)}</p></div><span className="workspace-badge">{account.syncStatus}</span></section>
     {(account.sourceId ?? account.address) && <p className="account-source"><span>Source</span> {account.sourceId ?? account.address}</p>}
     {error && <div className="workspace-alert" role="alert">{error}</div>}

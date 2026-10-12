@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react'
 import { candleIntervals, type CandleInterval } from '@/api/workspace'
 import { isDrawingKind } from '@/components/chart/drawingTools'
 import type { DrawingKind } from '@/components/chart/drawings'
-import { defaultIndicators, normalizeIndicators, type IndicatorSettings } from '@/components/chart/indicators'
+import { defaultIndicators, migrateLegacyIndicators, normalizeIndicators, type IndicatorSettings } from '@/components/chart/indicators'
 
 /** View preferences only. No market data, tokens or draft content are stored. */
 export interface ChartPreferences {
@@ -21,6 +21,10 @@ export interface ChartPreferences {
 }
 
 const storageKey = 'vessel.chart.preferences.v1'
+const schemaVersion = 2
+function saveChartPreferences(preferences: ChartPreferences) {
+  try { localStorage.setItem(storageKey, JSON.stringify({ ...preferences, schemaVersion })) } catch { /* Preferences stay in memory. */ }
+}
 export const defaultChartPreferences: ChartPreferences = {
   interval: '1h', favorites: ['5m', '1h', '4h', '1d'], magnet: false, live: true,
   drawingFavorites: ['trend-line', 'horizontal-line', 'fibonacci'], toolChoice: {}, indicators: defaultIndicators,
@@ -33,8 +37,8 @@ export function readChartPreferences(): ChartPreferences {
   try {
     const stored: unknown = JSON.parse(localStorage.getItem(storageKey) ?? 'null')
     if (typeof stored !== 'object' || stored === null) return defaultChartPreferences
-    const { interval, favorites, magnet, live, drawingFavorites, toolChoice, indicators } = stored as Record<string, unknown>
-    return {
+    const { interval, favorites, magnet, live, drawingFavorites, toolChoice, indicators, schemaVersion: version } = stored as Record<string, unknown>
+    const preferences: ChartPreferences = {
       interval: isInterval(interval) ? interval : defaultChartPreferences.interval,
       favorites: Array.isArray(favorites) ? ordered(favorites.filter(isInterval)) : defaultChartPreferences.favorites,
       magnet: magnet === true,
@@ -44,8 +48,10 @@ export function readChartPreferences(): ChartPreferences {
       toolChoice: typeof toolChoice === 'object' && toolChoice !== null
         ? Object.fromEntries(Object.entries(toolChoice).filter((entry): entry is [string, DrawingKind] => typeof entry[1] === 'string' && isDrawingKind(entry[1])))
         : {},
-      indicators: normalizeIndicators(indicators),
+      indicators: version === undefined ? migrateLegacyIndicators(indicators) : normalizeIndicators(indicators),
     }
+    if (version === undefined) saveChartPreferences(preferences)
+    return preferences
   } catch {
     return defaultChartPreferences
   }
@@ -56,7 +62,7 @@ export function useChartPreferences() {
   const update = useCallback((patch: Partial<ChartPreferences>) => {
     setPreferences(current => {
       const next = { ...current, ...patch, favorites: ordered(patch.favorites ?? current.favorites) }
-      try { localStorage.setItem(storageKey, JSON.stringify(next)) } catch { /* Preferences stay in memory. */ }
+      saveChartPreferences(next)
       return next
     })
   }, [])

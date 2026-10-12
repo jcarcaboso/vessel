@@ -92,6 +92,39 @@ describe('operation table', () => {
 })
 
 describe('activity loading and filters', () => {
+  it.each(['portfolio', 'disabled account', 'deleted account', 'instrument'])('validates a disappeared %s selection against the displayed options', async kind => {
+    const other = { ...accountFixture, id: 'other', name: 'Other', portfolioId: null }
+    const eth = { ...closed, id: 'eth', contractId: 'ETH', accountId: other.id }
+    const activity = vi.fn().mockResolvedValue({ ...activityFixture, operations: [operationFixture, eth] })
+    const api = client(activity)
+    const view = render(<ActivityOperations api={api} accounts={[accountFixture, other]} portfolios={[portfolioFixture]} filters />)
+    await screen.findByText(/Showing 2 of 2/)
+    const label = kind === 'portfolio' ? 'Portfolio' : kind === 'instrument' ? 'Instrument' : 'Account'
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: label }),
+      kind === 'portfolio' ? portfolioFixture.id : kind === 'instrument' ? 'ETH' : other.id)
+    activity.mockResolvedValue({ ...activityFixture, operations: [operationFixture] })
+    view.rerender(<ActivityOperations api={api}
+      accounts={kind === 'disabled account' ? [accountFixture, { ...other, isEnabled: false }] : kind === 'deleted account' ? [accountFixture] :
+        kind === 'portfolio' ? [{ ...accountFixture, portfolioId: null }, other] : [accountFixture, other]}
+      portfolios={kind === 'portfolio' ? [] : [portfolioFixture]} filters reloadGeneration={1} />)
+    await screen.findByText(/Showing 1 of 1/)
+    expect(screen.getByRole('combobox', { name: label })).toHaveValue('')
+    expect(within(screen.getByRole('table')).getByText('BTC')).toBeInTheDocument()
+  })
+  it('advances the rolling date window when Reload accepts fresh activity', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-10-18T12:00:00Z'))
+      const api = client(vi.fn().mockResolvedValue({ ...activityFixture, operations: [closed] }))
+      const view = render(<ActivityOperations api={api} accounts={[accountFixture]} filters />)
+      await screen.findByText(/Showing 1 of 1/)
+      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Period' }), '7')
+      vi.setSystemTime(new Date('2026-10-20T12:00:00Z'))
+      view.rerender(<ActivityOperations api={api} accounts={[accountFixture]} filters reloadGeneration={1} />)
+      await screen.findByText(/Showing 0 of 1/)
+      expect(screen.getByRole('combobox', { name: 'Period' })).toHaveValue('7')
+    } finally { vi.useRealTimers() }
+  })
   it('filters account, portfolio, instrument, direction and status with labelled controls and reset', async () => {
     const otherAccount = { ...accountFixture, id: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', name: 'Other account', portfolioId: null }
     const eth = { ...closed, contractId: 'ETH', accountId: otherAccount.id }

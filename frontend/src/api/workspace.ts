@@ -251,7 +251,7 @@ export interface WorkspaceApi {
   deleteAccount(id: string): Promise<void>
   snapshot(id: string, signal?: AbortSignal): Promise<AccountSnapshot | null>
   fills(id: string, signal?: AbortSignal): Promise<ImportedFill[]>
-  sync(id: string): Promise<BrokerAccount>
+  sync(id: string, signal?: AbortSignal): Promise<BrokerAccount>
   plays(signal?: AbortSignal): Promise<PlaySummary[]>
   play(id: string, signal?: AbortSignal): Promise<SavedPlay>
   createPlay(fields: PlayFields): Promise<SavedPlay>
@@ -656,7 +656,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     },
     snapshot: (id, signal) => request(`${accountPath(id)}/snapshot`, snapshot, signal ? { signal } : {}),
     fills: (id, signal) => request(`${accountPath(id)}/fills`, (v): v is ImportedFill[] => Array.isArray(v) && v.every(fill), signal ? { signal } : {}),
-    sync: id => request(`${accountPath(id)}/sync`, account, { method: 'POST' }, 30_000, 'The venue refresh failed. Previous account data is still available.'),
+    sync: (id, signal) => request(`${accountPath(id)}/sync`, account, { method: 'POST', ...withSignal(signal) }, 30_000, 'The venue refresh failed. Previous account data is still available.'),
   }
   return api
 }

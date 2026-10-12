@@ -58,6 +58,18 @@ const oldEmaDefaults = [
   { period: 50, color: '#f2c94c' }, { period: 200, color: '#ef5350' },
 ]
 
+/** One-time legacy preference migration, separate from ordinary validation. */
+export function migrateLegacyIndicators(value: unknown): IndicatorSettings {
+  const settings = normalizeIndicators(value)
+  const stored = record(value)
+  const emas = Array.isArray(stored.emas) ? stored.emas : []
+  return { ...settings, emas: settings.emas.map((ema, index) => {
+    const raw = record(emas[index]), old = oldEmaDefaults[index]!, fallback = defaultIndicators.emas[index]!
+    return raw.period === old.period && raw.color === old.color
+      ? { ...ema, period: fallback.period, color: fallback.color } : ema
+  }) }
+}
+
 /** Reads stored settings, keeping each valid field and defaulting the rest. */
 export function normalizeIndicators(value: unknown): IndicatorSettings {
   const stored = record(value)
@@ -74,14 +86,11 @@ export function normalizeIndicators(value: unknown): IndicatorSettings {
   return {
     emas: defaultIndicators.emas.map((fallback, index) => {
       const { enabled, period: length, color } = record(emas[index])
-      // Migrate only untouched period/color pairs in their original slots. Visibility stays as saved.
-      const old = oldEmaDefaults[index]!
-      const untouched = length === old.period && color === old.color
       return {
         id: fallback.id,
         enabled: typeof enabled === 'boolean' ? enabled : fallback.enabled,
-        period: untouched ? fallback.period : period(length, emaPeriodLimits, fallback.period),
-        color: untouched ? fallback.color : isColor(color) ? color.toLowerCase() : fallback.color,
+        period: period(length, emaPeriodLimits, fallback.period),
+        color: isColor(color) ? color.toLowerCase() : fallback.color,
       }
     }),
     volume,
