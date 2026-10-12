@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CandleInterval, VenueCandle, WorkspaceApi } from '@/api/workspace'
 import { candleCache, type CandleCache, type CandleEntry } from './candleCache'
 export { mergeCandles, upsertCandle, toChartCandle } from './candleCache'
@@ -12,14 +12,25 @@ export function useCandles({ api, accountId, instrument, interval }: CandleSourc
   const keyed = useMemo(() => cache.entry(accountId, instrument, interval), [cache, accountId, instrument, interval])
   // A dropped entry (404/409/eviction) keeps its error until the owner retries, which takes a fresh entry.
   const [retried, setRetried] = useState<{ cache: CandleCache; entry: CandleEntry } | null>(null)
+  // The entry whose refresh a retry already started; the next activation consumes or discards it.
+  const retrying = useRef<CandleEntry | null>(null)
   const entry = cache.entries.get(keyed.key) !== keyed && retried?.cache === cache && retried.entry.key === keyed.key
     ? retried.entry : keyed
   const subscribe = useCallback((listener: () => void) => cache.subscribe(entry, listener), [cache, entry])
   const snapshot = useSyncExternalStore(subscribe, () => entry.snapshot)
-  useEffect(() => { cache.activate(entry) }, [cache, entry])
+  useEffect(() => {
+    const started = retrying.current === entry
+    retrying.current = null
+    cache.activate(entry, !started)
+  }, [cache, entry])
   const refresh = useCallback(() => {
     if (cache.entries.get(entry.key) === entry) void cache.load(entry, 'refresh')
-    else setRetried({ cache, entry: cache.retry(accountId, instrument, interval) })
+    else {
+      const fresh = cache.entry(accountId, instrument, interval)
+      retrying.current = fresh
+      void cache.load(fresh, 'refresh')
+      setRetried({ cache, entry: fresh })
+    }
   }, [cache, entry, accountId, instrument, interval])
   const revalidate = useCallback(() => { void cache.load(entry, 'latest') }, [cache, entry])
   const upsert = useCallback((candle: VenueCandle, receivedAt: string) => cache.upsert(entry, candle, receivedAt), [cache, entry])

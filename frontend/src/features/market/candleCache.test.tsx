@@ -194,17 +194,47 @@ describe('session candle cache', () => {
   })
 
   it.each([['succeeds', null], ['fails', new ApiError('http', 'Venue unavailable.', 502)]] as const)(
-    'does not read again when a retry %s before its activation', async (_, failure) => {
-      const { cache, candles } = setup()
+    'reads once when Try again %s before its activation', async (_, failure) => {
+      const { api, candles } = setup()
+      candles.mockRejectedValueOnce(new ApiError('http', 'Enable the account before reading market data.', 409))
+      const hook = renderHook(() => useCandles({ api, accountId: 'lighter-main', instrument: 'BTC', interval: '1m' }))
+      await waitFor(() => expect(hook.result.current.status).toBe('error'))
       if (failure) candles.mockRejectedValueOnce(failure)
-      const entry = cache.retry('lighter-main', 'BTC', '1m')
-      await waitFor(() => expect(entry.snapshot.status).toBe(failure ? 'error' : 'ready'))
-      cache.activate(entry)
-      expect(candles).toHaveBeenCalledExactlyOnceWith('lighter-main', { instrument: 'BTC', interval: '1m', refresh: true }, expect.any(AbortSignal))
-      expect(entry.snapshot.error).toBe(failure ? 'Venue unavailable.' : null)
-      cache.activate(entry)
-      await waitFor(() => expect(candles).toHaveBeenCalledTimes(2))
+      // The read settles inside the act scope, before React runs the replacement's activation.
+      await act(async () => { hook.result.current.refresh(); await new Promise(resolve => setTimeout(resolve, 0)) })
+      expect(candles).toHaveBeenCalledTimes(2)
+      expect(candles).toHaveBeenLastCalledWith('lighter-main', { instrument: 'BTC', interval: '1m', refresh: true }, expect.any(AbortSignal))
+      expect(hook.result.current.status).toBe(failure ? 'error' : 'ready')
+      expect(hook.result.current.error).toBe(failure ? 'Venue unavailable.' : null)
     })
+
+  it('revalidates a later switch-back after a retry whose activation was abandoned', async () => {
+    const { api, candles } = setup()
+    candles.mockRejectedValueOnce(new ApiError('http', 'Enable the account before reading market data.', 409))
+    const hook = renderHook(({ interval }: { interval: '1m' | '5m' }) => useCandles({ api, accountId: 'lighter-main', instrument: 'BTC', interval }),
+      { initialProps: { interval: '1m' } })
+    await waitFor(() => expect(hook.result.current.status).toBe('error'))
+    act(() => { hook.result.current.refresh(); hook.rerender({ interval: '5m' }) })
+    await waitFor(() => expect(hook.result.current.status).toBe('ready'))
+    const before = candles.mock.calls.length
+    hook.rerender({ interval: '1m' })
+    await waitFor(() => expect(candles).toHaveBeenCalledTimes(before + 1))
+    expect(candles).toHaveBeenLastCalledWith('lighter-main', { instrument: 'BTC', interval: '1m' }, expect.any(AbortSignal))
+  })
+
+  it('still expires old pages when activation skips its read', async () => {
+    let now = 1000
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const { cache, entry, candles } = setup()
+    await cache.load(entry, 'latest')
+    candles.mockResolvedValueOnce(series(candle(0)))
+    await cache.load(entry, 'older')
+    now += pageLifetime + 1
+    const calls = candles.mock.calls.length
+    cache.activate(entry, false)
+    expect(entry.snapshot.candles.map(c => c.time)).toEqual([60_000, 120_000])
+    expect(candles).toHaveBeenCalledTimes(calls)
+  })
 
   it.each([new ApiError('http', 'Venue unavailable.', 502), new TypeError('Network unavailable')])('retains cached candles on a refresh failure (%s)', async error => {
     const { cache, entry, candles } = setup()
