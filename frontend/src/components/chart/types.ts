@@ -28,6 +28,8 @@ export interface PriceOverlay {
   kind: 'entry' | 'stop' | 'target' | 'reference'
   emphasis: 'selected' | 'normal'
   draggable: boolean
+  /** Venue tick for suppressing equivalent drag publications; absent uses five significant figures. */
+  priceStep?: number | null
 }
 
 export interface ChartCallbacks {
@@ -40,6 +42,10 @@ export interface ChartCallbacks {
   /** Called continuously while moving or resizing, then once with phase "end". */
   onDrawingChange(drawing: ChartDrawing, phase: 'move' | 'end'): void
   onDrawingSelect(id: string | null): void
+  /** Ends a gesture cut short by a reset or unmount; changes already published become one undo step. */
+  onDrawingCancel?(): void
+  /** Ends a level drag cut short by a reset or unmount; moves already published become one undo step. */
+  onLevelCancel?(): void
   /** Asks to edit a level in place, e.g. after a double-click or a click on its tag. `anchor` is in pane pixels. */
   onLevelEdit(id: string, anchor: { x: number; y: number }): void
   /** A click while the price picker is on, with the price under the pointer (magnet applied). */

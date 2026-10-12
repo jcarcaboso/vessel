@@ -133,6 +133,25 @@ Latest-window server behaviour stays at 10 s, so switch-back speed comes from th
 2. Incremental rendering: convert only changed candles; `series.update()` for the forming and newly opened bars; full `setData` only on reset, paging, corrections or trimming; rebuild the time index and price format only when they change. Indicator arithmetic stays a full computation for now; only the changed indicator points go to the renderer.
 3. Memoize `CandleChart` with stable callbacks and keep market statistics and update-time re-renders out of the chart subtree.
 
+**State (October 12):** implemented. `FrameEdit` (`frontend/src/components/chart/frameEdit.ts`) publishes level and drawing drags at most once per frame while the renderer draws the live preview; release publishes the final pointer position. A drag cut short by a chart reset, unmount, lost pointer capture or a release off the price scale records the moves already applied as one undo step. History actions carry the scope (account and instrument) where the gesture began and are dropped if the history has moved on, so a chart torn down by an instrument switch cannot write into the new instrument's history. Gestures that end where they started record nothing, and level suppression starts from the level's current price. `createSeriesWriter` (`seriesWriter.ts`) compares candles and indicator points by value and uses `update()` for tail changes, otherwise `setData`; the time index and price format are rebuilt only when they change. `CandleChart` is memoized, and `LiveChart` passes `onNeedOlder` and `onExpand` as stable callbacks. During a drag the chart still re-renders once per published frame. Verified with the frontend typecheck, lint, tests (676 passed) and build.
+
+### Combined verification (October 12)
+
+The combined implementation passed `scripts/check.sh` (737 frontend tests, typecheck, lint and production build) and the PostgreSQL-enabled backend suite (933 passed, two opt-in live-venue tests skipped). Tests used a throwaway PostgreSQL container; the owner database was untouched. Sol independently approved the merged chart/cache/renderer paths and the subsequent error-overlay fix.
+
+Manual browser checks used a synthetic account and real public Hyperliquid candles: BTC/ETH and 1h/4h switching, cached revalidation, explicit refresh, a simulated 503 retaining previous candles, a real disabled-account 409 clearing candles, re-enable/retry, level and rectangle dragging with one-step undo/redo, Volume/RSI controls, expansion without a new candle read, live updates, older paging (four 500-candle pages), and disconnect. Browser storage held chart preferences, not candles or credentials.
+
+On the production build at 1402 × 877, cached switch-back was visible after two animation frames in 42, 58, 55 and 69 ms while a deliberately delayed 1.2-second revalidation remained pending. Local API samples were 426 → 21 ms for repeated tail reads and 274 → 4 ms for a repeated historical window. Successful candle/catalogue responses used gzip and `Cache-Control: no-store`; warmed-cache unauthenticated/disabled requests returned uncompressed 401/409 errors. These are local smoke measurements, not cross-device performance guarantees or a 5,000-candle drag-FPS benchmark.
+
+Manual checking found the chart canvas covering the error overlay's **Try again** button. The state overlay now sits above the renderer and drawing controls. A native browser click after re-enabling the test account restored candles with exactly one `refresh=true` read. To repeat the hit-testing regression check, trigger a candle error with no retained data, then run this in the browser before clicking **Try again** (also check the expanded chart):
+
+```js
+const retry = [...document.querySelectorAll('button')].find(button => button.textContent === 'Try again')
+const box = retry.getBoundingClientRect()
+const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+console.assert(retry === hit || retry.contains(hit), 'The chart must not intercept retry clicks')
+```
+
 ### Later, after measuring A and B
 
 - **Progressive evidence loading** for saved Plays (build the draft first, load images after, keep unloaded images distinct from removed ones so a save never deletes them). A separate PR because of the data-loss risk.

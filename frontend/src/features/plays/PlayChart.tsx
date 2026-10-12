@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { ArrowRightToLine, Camera, ChartNoAxesCombined, ChartSpline, Layers, Maximize2, OctagonX, RefreshCw, Star, Target } from 'lucide-react'
 import { Popover } from 'radix-ui'
 import { candleIntervals, type CandleInterval, type WorkspaceApi } from '@/api/workspace'
@@ -91,13 +91,17 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   // History actions and drag gestures read the latest entries, not the ones captured when they started.
   const latest = useRef({ entries, onEntriesChange })
   useEffect(() => { latest.current = { entries, onEntriesChange } })
-  const dragStart = useRef<DraftEntry | null>(null)
+  const dragStart = useRef<{ entry: DraftEntry; scopeKey: string } | null>(null)
+  /** A level drag that leaves the entry unchanged is not an edit. */
+  const recordLevelMove = (start: { entry: DraftEntry; scopeKey: string }, after: DraftEntry | undefined) => {
+    if (after && JSON.stringify(start.entry) !== JSON.stringify(after)) recordEntryEdit(`Move ${start.entry.name} level`, start.entry, after, start.scopeKey)
+  }
 
   /** Records an entry edit made on the chart so undo/redo reverts only the fields it changed. */
-  const recordEntryEdit = (label: string, before: DraftEntry, after: DraftEntry) => {
+  const recordEntryEdit = (label: string, before: DraftEntry, after: DraftEntry, scope?: string) => {
     const apply = (from: DraftEntry, to: DraftEntry) => latest.current.onEntriesChange?.(latest.current.entries.map(entry =>
       entry.id === before.id ? applyEntryEdit(entry, from, to) : entry))
-    history.push({ label, undo: () => apply(after, before), redo: () => apply(before, after) })
+    history.push({ label, undo: () => apply(after, before), redo: () => apply(before, after) }, scope)
   }
   const applyEntry = (next: DraftEntry, label: string) => {
     const before = entries.find(entry => entry.id === next.id)
@@ -106,18 +110,23 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
     onEntriesChange?.(entries.map(entry => entry.id === next.id ? next : entry))
   }
   const levelProps = {
+    // A reset or unmount mid-drag keeps the moves already applied as one undoable step.
+    onLevelCancel: () => {
+      const start = dragStart.current
+      dragStart.current = null
+      if (start) recordLevelMove(start, latest.current.entries.find(item => item.id === start.entry.id))
+    },
     onLevelSelect: (id: string) => { const ref = parseOverlayId(id); if (ref) onSelect(ref.entryId) },
     onLevelDrag: (id: string, price: number, phase: 'move' | 'end') => {
       const ref = parseOverlayId(id)
       const current = latest.current.entries
       const entry = ref && current.find(item => item.id === ref.entryId)
       if (!ref || !entry) return
-      dragStart.current ??= entry
+      dragStart.current ??= { entry, scopeKey }
       const next = applyLevelDrag(current, id, price, priceStep)
       onEntriesChange?.(next)
       if (phase === 'end') {
-        const after = next.find(item => item.id === ref.entryId)!
-        recordEntryEdit(`Move ${entry.name} level`, dragStart.current, after)
+        recordLevelMove(dragStart.current, next.find(item => item.id === ref.entryId))
         dragStart.current = null
         if (ref.entryId !== selectedId) onSelect(ref.entryId)
       }
@@ -167,9 +176,9 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   const expandButton = useRef<HTMLButtonElement>(null)
   const live = source !== null && instrument !== ''
   const overlays = useMemo(() => {
-    const plan = planOverlays(entries, selectedId, view, direction, leverage)
+    const plan = planOverlays(entries, selectedId, view, direction, leverage).map(overlay => ({ ...overlay, priceStep, draggable: overlay.draggable && editable }))
     return liquidation === null ? plan : [...plan, liquidationOverlay(liquidation)]
-  }, [entries, selectedId, view, direction, leverage, liquidation])
+  }, [entries, selectedId, view, direction, leverage, liquidation, priceStep, editable])
   const average = view === 'aggregate' ? averageEntryPrice(entries) : null
   const several = entries.length > 1
 
@@ -256,7 +265,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   const drawingProps = {
     drawings, selectedDrawingId: editor.selectedId, tool: editor.tool, magnet: preferences.magnet,
     pricePicker: planTool !== null, onPricePick: pickPrice,
-    onDrawingCreate: editor.create, onDrawingChange: editor.change, onDrawingSelect: editor.select, onKeyDown: onChartKeyDown,
+    onDrawingCreate: editor.create, onDrawingChange: editor.change, onDrawingSelect: editor.select, onDrawingCancel: editor.cancelGesture, onKeyDown: onChartKeyDown,
     indicators: preferences.indicators, onIndicatorsChange: (indicators: typeof preferences.indicators) => setPreferences({ indicators }),
     ...levelProps,
   }
@@ -328,6 +337,12 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
   onDialogClosed: () => void
 }) {
   const data = useCandles({ ...source, instrument, interval })
+  // Market/status ticks recreate loadOlder in the current hook. Forward to the latest function
+  // without changing CandleChart's props; ordinary memo still checks every callback.
+  const loadOlder = useRef(data.loadOlder)
+  useLayoutEffect(() => { loadOlder.current = data.loadOlder })
+  const onNeedOlder = useCallback(() => loadOlder.current(), [])
+  const onExpand = useCallback(() => onExpandedChange(true), [onExpandedChange])
   const market = useMarketContext(source.api, source.accountId, instrument, marketContext)
   const refresh = () => { data.refresh(); market.refresh() }
   // One stream per chart; the expanded dialog renders from the same state.
@@ -407,7 +422,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
   const chartProps = {
     candles: data.candles, overlays, viewKey: `${instrument}|${interval}`,
     label: `${instrument} ${intervalName(interval)} trade candles with planned levels. Edit levels in the entry editor.`,
-    onNeedOlder: data.loadOlder,
+    onNeedOlder,
     ...drawingProps,
     ...(createAdapter ? { createAdapter } : {}),
   }
@@ -415,7 +430,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
     {rail}
     <div className="chart-body" data-testid={testId}>
       <CandleChart {...chartProps} controlRef={testId === 'chart-body' ? inlineChart : dialogChart}
-        {...(testId === 'chart-body' ? { onExpand: () => onExpandedChange(true) } : {})} />
+        {...(testId === 'chart-body' ? { onExpand } : {})} />
       {drawingBar}
       {data.status === 'loading' && <p className="chart-state">Loading {instrument} candles…</p>}
       {data.status === 'error' && <div className="chart-state" role="alert"><p>{data.error}</p><Button type="button" size="sm" variant="outline" onClick={data.refresh}>Try again</Button></div>}
