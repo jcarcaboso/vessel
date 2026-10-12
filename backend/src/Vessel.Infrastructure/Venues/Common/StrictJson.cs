@@ -51,6 +51,14 @@ public sealed class StrictJson(string invalidResponse)
         return value;
     }
 
+    /// <summary>Optional reported amount. Missing, null and empty string mean unknown, never zero.</summary>
+    public decimal? OptionalAmount(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null) return null;
+        var text = TextOrEmpty(value);
+        return text.Length == 0 ? null : ParseDecimal(text);
+    }
+
     public int Integer(JsonElement element)
     {
         if (element.ValueKind != JsonValueKind.Number || !element.TryGetInt32(out var value))

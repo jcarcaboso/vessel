@@ -23,7 +23,7 @@ The browser blocks token entry on plain HTTP outside loopback hosts. Password fi
 | --- | --- |
 | Discovery | Main account and personal subaccounts from the public L1-address lookup; no pool import or wallet signing. |
 | Catalogue | Active perpetual markets only; ticks, maximum leverage and maintenance fractions come from venue metadata. Retired identities are retained for interpreting existing facts, not offered for new plans. |
-| Snapshot | USDC perpetual account equity and reported positions. Position initial-margin requirements use reported notional and margin fraction. Withdrawal availability stays unknown; no separate spot-wallet balance is added. Non-USDC collateral and binary positions are unsupported. |
+| Snapshot | USDC perpetual account equity and reported positions. Position initial-margin requirements use reported notional and margin fraction. Snapshot `available_balance` is retained as reported margin availability; withdrawal capacity stays unknown. No separate spot-wallet balance is added. Non-USDC collateral and binary positions are unsupported. |
 | Fills | At most five pages of 100 recent records. Only verified fee-free executions with reported realized PnL are accepted. Omitted or unverified values are never silently replaced with zero. Liquidation, deleverage, settlement and self-trade records are unsupported and omitted rather than failing the refresh. The account's history notice reports omissions and limits. |
 | Orders | Verified read-only token required. Up to 1,000 active records and five pages of 100 inactive records. Zero-size, flagged and TWAP orders are omitted rather than guessed. |
 | Candles | One bounded manual request, at most 500 candles. Native intervals are 1m, 5m, 15m, 30m, 1h, 4h, 12h and 1d. No trade-count value is fabricated. |
@@ -69,3 +69,13 @@ These are synthetic review accounts, not the owner's balances or credentials.
 ![Credential management on desktop](../design/lighter-accounts/manage-desktop.png)
 
 ![Credential management on mobile](../design/lighter-accounts/manage-mobile.png)
+
+## October 12, 2026 available balance follow-up
+
+The existing public account read (`account?by=index`) reports `available_balance` on the account object. Its [official schema](https://apidocs.lighter.xyz/reference/account-1.md) names it as a string available balance, separate from `total_asset_value` and collateral. The discovery read's empty `available_balance` is not evidence that snapshot availability is unknown. No extra venue request or credential is needed.
+
+The adapter now stores the snapshot amount in `AvailableMarginUsd`, exposed as exact decimal string `availableMarginUsd`; `withdrawableUsd` stays null because the schema does not establish guaranteed withdrawal capacity. Missing, null and empty string become null, not zero. Reported zero and negative values are retained; malformed or unrepresentable amounts reject the observation without rounding. The USDC-only collateral guard is unchanged. No equity-minus-margin formula is used.
+
+Account `availableBalanceUsd` selects this reported margin availability before any withdrawal fallback. Overview and portfolios count it once for each enabled account. Manual and discovery values are not fallback funds. Account rows and detail label it as reported margin, not withdrawal. Migration `20261012192227_AvailableMargin` was generated with the pinned EF CLI; prior snapshots remain null until refreshed. Tests use an isolated PostgreSQL container, never the owner's database or `.env`.
+
+Official schema and existing synthetic response shapes were checked without owner credentials. Live owner balances, deployment migration and authenticated venue access were not verified in this follow-up.

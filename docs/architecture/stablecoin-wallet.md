@@ -19,8 +19,8 @@ Supported assets are USDC, USDE, USDT0 and USDH. Identity uses curated token IDs
 
 - Total/Held are exact venue token units. Available is exact `Total - Held`.
 - This is wallet/order-hold availability, not guaranteed perpetual collateral, borrowing or withdrawal capacity.
-- Primary perpetual equity/withdrawable/margin fields stay separate. They are never added again to the wallet as total equity.
-- Overview/account rows show available wallet stablecoins prominently. Account detail shows each supported coin's amounts.
+- Primary perpetual equity/withdrawable/margin fields stay separate. Unified and portfolio-margin balances use the wallet alone; other account modes sum the separate perps equity and observed wallet total once.
+- Overview shows total and available balance across enabled accounts, with coverage. Account rows show wallet availability where supported; account detail shows each supported coin's amounts.
 - Nominal summaries assume one nominal unit per supported USD-pegged token. There is no pricing, FX, depeg or full-account valuation. Exact strings and integer-arithmetic sums avoid decimal addition rounding.
 - HYPE, UBTC and other assets, HyperEVM wallets and lending/borrow accounting are excluded.
 
@@ -32,7 +32,19 @@ Migration `20261001125452_StablecoinWallet` adds observation/mode/scope fields a
 
 `SnapshotDto.stablecoinWallet` is nullable, with observation time, mode, scope, balances and caveats. Account DTOs add available nominal wallet amount, scope and mode. Overview totals add that amount and observed enabled-account count. Existing perps/manual value fields are not silently redefined.
 
+`AccountSnapshot.AvailableMarginUsd` and the snapshot DTO `availableMarginUsd` retain venue-reported availability separately from `withdrawableUsd`. Lighter supplies account `available_balance`; RISEx supplies summary `free_collateral`, documented as available for new positions. Standard Hyperliquid uses its existing perps `withdrawable`. Neither a separate spot wallet nor a second availability field is added to the selected account amount. Missing/null/empty is unknown and zero is known. Equity minus margin is never calculated as availability.
+
+Account DTOs carry the selected `availableBalanceUsd` and its `wallet`/`margin`/`withdrawable` source. Overview and portfolio totals sum it once per enabled account, with known-account coverage. Account detail, account rows and portfolio tiles show it; the raw withdrawal field remains separate. Migration `20261012192227_AvailableMargin` leaves older snapshots null until refresh and was tested only in disposable PostgreSQL.
+
 ## Verification
+
+### October 12, 2026 correction
+
+Overview's wallet-only subtotal now selects snapshots through enabled accounts explicitly. The store already filters disabled snapshots; the service no longer relies on that filter for monetary totals. The new total balance follows the existing account/portfolio balance rule, and available balance uses wallet availability only for wallet-capable unified/portfolio-margin accounts; other accounts use reported available margin, then reported withdrawal. It never adds those two availability sources together for one account. Manual values and discovery collateral are not availability. Unknown remains null; an observed empty wallet is zero. Coverage counts known enabled accounts, not full venue valuation. Both account-level and cross-account sums pass original decimal ledger amounts to the exact integer-arithmetic summation without intermediate decimal addition.
+
+See [the core contract](core-workspace-contract.md#october-12-2026-combined-balances-and-overview-actions) for the fields and source limitations. These nominal sums still exclude non-stable assets and make no promise about free margin or withdrawability.
+
+### Original verification
 
 `pnpm check` passed 452 cases: 299 backend, 77 frontend, 76 unchanged prototype. Adapter coverage includes 169 fixture cases across six requests. Three new PostgreSQL cases cover exact persistence, isolation, replacement/empty/unknown observations, failure retention, disable/enable and deletion. Previous migration/API-shape expectations were updated.
 

@@ -23,6 +23,12 @@ export interface PlaysSession {
 }
 export const createPlaysSession = (): PlaysSession => ({ view: 'list', draft: createDraft(), saved: null })
 
+/** A new editor must never replace unsaved work, including changes to a saved Play. */
+export function startNewPlay(session: PlaysSession): PlaysSession {
+  const unsaved = session.saved ? isDirty(session.draft, session.saved) : hasDraftContent(session.draft)
+  return { ...(unsaved ? session : createPlaysSession()), view: 'editor' }
+}
+
 export function hasDraftContent(draft: PlayDraft) {
   return !!(draft.title.trim() || draft.accountId || draft.instrument || draft.evidence.length || draft.notes.review.trim() ||
     Object.values(draft.drawings).some(items => items.length) || planContent(draft) !== blankPlanContent)

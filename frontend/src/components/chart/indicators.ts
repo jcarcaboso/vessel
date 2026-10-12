@@ -33,13 +33,13 @@ export const rsiPeriodLimits = { min: 2, max: 100 } as const
 /** Overbought and oversold guides on the RSI pane. */
 export const rsiGuides = [70, 30] as const
 
-/** Purple for the fastest average, then traffic-light colors from fast to slow. */
+/** EMA 9 purple, 50 red, 100 yellow and 200 green. */
 export const defaultIndicators: IndicatorSettings = {
   emas: [
     { id: 'ema-1', enabled: true, period: 9, color: '#b388ff' },
-    { id: 'ema-2', enabled: true, period: 21, color: '#4cbb6c' },
-    { id: 'ema-3', enabled: true, period: 50, color: '#f2c94c' },
-    { id: 'ema-4', enabled: true, period: 200, color: '#ef5350' },
+    { id: 'ema-2', enabled: true, period: 50, color: '#ef5350' },
+    { id: 'ema-3', enabled: true, period: 100, color: '#f2c94c' },
+    { id: 'ema-4', enabled: true, period: 200, color: '#4cbb6c' },
   ],
   volume: { enabled: true, size: 'normal' },
   rsi: { enabled: true, size: 'normal', period: 14, color: '#7fb2f0' },
@@ -53,6 +53,10 @@ const isSize = (value: unknown): value is PaneSize => value === 'normal' || valu
 const period = (value: unknown, limits: { min: number; max: number }, fallback: number) =>
   Number.isInteger(value) && (value as number) >= limits.min && (value as number) <= limits.max ? value as number : fallback
 const record = (value: unknown) => typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
+const oldEmaDefaults = [
+  { period: 9, color: '#b388ff' }, { period: 21, color: '#4cbb6c' },
+  { period: 50, color: '#f2c94c' }, { period: 200, color: '#ef5350' },
+]
 
 /** Reads stored settings, keeping each valid field and defaulting the rest. */
 export function normalizeIndicators(value: unknown): IndicatorSettings {
@@ -70,11 +74,14 @@ export function normalizeIndicators(value: unknown): IndicatorSettings {
   return {
     emas: defaultIndicators.emas.map((fallback, index) => {
       const { enabled, period: length, color } = record(emas[index])
+      // Migrate only untouched period/color pairs in their original slots. Visibility stays as saved.
+      const old = oldEmaDefaults[index]!
+      const untouched = length === old.period && color === old.color
       return {
         id: fallback.id,
         enabled: typeof enabled === 'boolean' ? enabled : fallback.enabled,
-        period: period(length, emaPeriodLimits, fallback.period),
-        color: isColor(color) ? color.toLowerCase() : fallback.color,
+        period: untouched ? fallback.period : period(length, emaPeriodLimits, fallback.period),
+        color: untouched ? fallback.color : isColor(color) ? color.toLowerCase() : fallback.color,
       }
     }),
     volume,

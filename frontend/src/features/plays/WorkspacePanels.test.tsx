@@ -22,6 +22,14 @@ function BudgetHarness({ initial = createDraft(), accounts = [], portfolios = []
 describe('Capital context', () => {
   const metric = (label: string) => within(screen.getByTestId('capital-context')).getByText(label).closest('div')!
 
+  it('does not replace an explicitly unknown portfolio or account balance with perps equity', () => {
+    const account = { ...accountFixture, balanceUsd: null, portfolioId: null }
+    const { rerender } = render(<BudgetHarness initial={{ ...createDraft(), accountId: account.id }} accounts={[account]} />)
+    expect(metric('Account balance')).toHaveTextContent('Unavailable')
+    rerender(<BudgetHarness initial={{ ...createDraft(), accountId: account.id }}
+      accounts={[{ ...account, portfolioId: portfolioFixture.id }]} portfolios={[{ ...portfolioFixture, balanceUsd: null }]} />)
+    expect(metric(`${portfolioFixture.name} balance`)).toHaveTextContent('Unavailable')
+  })
   it('leaves unknown values and budget unavailable without seeding accounts', () => {
     render(<BudgetHarness />)
     const capital = screen.getByTestId('capital-context')

@@ -35,6 +35,8 @@ public sealed class AccountSnapshot
     public string ValueScope { get; set; } = null!;
     public decimal? AccountValueUsd { get; set; }
     public decimal? WithdrawableUsd { get; set; }
+    // Venue-reported available balance/free collateral, not a withdrawal guarantee.
+    public decimal? AvailableMarginUsd { get; set; }
     public decimal? MarginUsedUsd { get; set; }
     public List<AccountPosition> Positions { get; set; } = [];
     public DateTimeOffset? StablecoinsObservedAtUtc { get; set; }

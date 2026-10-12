@@ -526,6 +526,9 @@ namespace Vessel.Persistence.Migrations
                     b.Property<decimal?>("AccountValueUsd")
                         .HasColumnType("numeric");
 
+                    b.Property<decimal?>("AvailableMarginUsd")
+                        .HasColumnType("numeric");
+
                     b.Property<decimal?>("MarginUsedUsd")
                         .HasColumnType("numeric");
 

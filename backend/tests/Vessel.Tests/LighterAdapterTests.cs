@@ -31,7 +31,7 @@ public sealed class LighterAdapterTests
         """;
     private static readonly string Snapshot = $$"""
         {"code":200,"accounts":[{"index":{{Source}},"account_index":{{Source}},"account_type":0,
-          "l1_address":"{{Address}}","total_asset_value":"1000.0012345678901234","cross_initial_margin_requirement":"60.1",
+          "l1_address":"{{Address}}","total_asset_value":"1000.0012345678901234","available_balance":"939.9012345678901234","cross_initial_margin_requirement":"60.1",
           "assets":[{"asset_id":3,"symbol":"USDC","margin_balance":"998.0","balance":"100","locked_balance":"1"}],
           "positions":[{"market_id":1,"symbol":"BTC","position":"0.001","sign":-1,"initial_margin_fraction":"5.00",
           "margin_mode":0,"position_value":"80","avg_entry_price":"79000.1","unrealized_pnl":"-0.9999","allocated_margin":"0"}]}]}
@@ -120,6 +120,35 @@ public sealed class LighterAdapterTests
         var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "lighter", "Test");
         account.Configure(null, null, null, source);
         return account;
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("null", null)]
+    [InlineData("\"\"", null)]
+    [InlineData("\"0\"", "0")]
+    [InlineData("\"-0.0000000000000000000000000001\"", "-0.0000000000000000000000000001")]
+    [InlineData("\"131.89123456789012345678901234\"", "131.89123456789012345678901234")]
+    public async Task Available_margin_preserves_reported_value_and_distinguishes_missing_from_zero(string? field, string? expected)
+    {
+        var body = Snapshot.Replace("\"available_balance\":\"939.9012345678901234\",", field is null ? "" : "\"available_balance\":" + field + ",");
+        var handler = new Handler { Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/account", StringComparison.Ordinal) ? Response(body) : null };
+        var snapshot = (await Reader(handler).ReadAsync(Source, default)).Snapshot;
+        Assert.Equal(expected is null ? (decimal?)null : decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture), snapshot.AvailableMarginUsd);
+        Assert.Null(snapshot.WithdrawableUsd);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("true")]
+    [InlineData("\" \"")]
+    [InlineData("\"1e3\"")]
+    [InlineData("\"0.00000000000000000000000000001\"")]
+    public async Task Invalid_available_margin_rejects_the_snapshot_without_rounding(string field)
+    {
+        var body = Snapshot.Replace("\"available_balance\":\"939.9012345678901234\",", field is null ? "" : "\"available_balance\":" + field + ",");
+        var handler = new Handler { Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/account", StringComparison.Ordinal) ? Response(body) : null };
+        await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).ReadAsync(Source, default));
     }
 
     [Fact]

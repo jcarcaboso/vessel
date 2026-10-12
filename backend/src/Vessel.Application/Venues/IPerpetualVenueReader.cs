@@ -41,7 +41,8 @@ public sealed record VenueSnapshot(
     decimal? WithdrawableUsd,
     decimal MarginUsedUsd,
     IReadOnlyList<VenuePosition> Positions,
-    VenueStablecoinWallet? StablecoinWallet = null);
+    VenueStablecoinWallet? StablecoinWallet = null,
+    decimal? AvailableMarginUsd = null);
 
 public sealed record VenueStablecoinBalance(
     string Symbol, int TokenIndex, string TokenId,

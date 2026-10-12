@@ -7,6 +7,7 @@ import type { BrokerAccount, CandleSeries, InstrumentCatalog, MarketContext, Ove
 export const portfolioFixture: Portfolio = {
   id: '11111111-2222-3333-4444-555555555555', name: 'Swing trading', accountCount: 1,
   totalValueUsd: '1250.123456', valueCoverage: 'complete',
+  balanceUsd: '1250.123456', balanceCoverage: 'complete',
 }
 export const accountFixture: BrokerAccount = {
   id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', portfolioId: portfolioFixture.id,
@@ -15,12 +16,15 @@ export const accountFixture: BrokerAccount = {
 }
 export const emptyOverview: Overview = {
   portfolios: [], accounts: [],
-  totals: { portfolioCount: 0, accountCount: 0, totalAccountValueUsd: null, valuedAccountCount: 0, openPositionCount: 0, importedFillCount: 0 },
+  totals: { portfolioCount: 0, accountCount: 0, totalAccountValueUsd: null, valuedAccountCount: 0, openPositionCount: 0, importedFillCount: 0,
+    totalBalanceUsd: null, balanceAccountCount: 0, balanceCoverage: 'unavailable',
+    availableBalanceUsd: null, availableBalanceAccountCount: 0, availableBalanceCoverage: 'unavailable', enabledAccountCount: 0 },
   recentActivity: [], scopeNote: 'Values are only known account records. Provider history can be incomplete.',
 }
 export const overviewFixture: Overview = {
   ...emptyOverview, portfolios: [portfolioFixture], accounts: [accountFixture],
-  totals: { ...emptyOverview.totals, portfolioCount: 1, accountCount: 1, totalAccountValueUsd: '1250.123456', valuedAccountCount: 1 },
+  totals: { ...emptyOverview.totals, portfolioCount: 1, accountCount: 1, totalAccountValueUsd: '1250.123456', valuedAccountCount: 1,
+    totalBalanceUsd: '1250.123456', balanceAccountCount: 1, balanceCoverage: 'complete', enabledAccountCount: 1 },
 }
 
 export const savedPlayFixture: SavedPlay = {
