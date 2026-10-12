@@ -112,6 +112,33 @@ public sealed class RisexAdapterTests
         return (new RisexReader(new HttpClient(routes) { BaseAddress = new Uri("https://api.rise.trade/") }, time, new RisexCatalogueCache(time)), routes);
     }
 
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("null", null)]
+    [InlineData("\"\"", null)]
+    [InlineData("\"0\"", "0")]
+    [InlineData("\"-0.0000000000000000000000000001\"", "-0.0000000000000000000000000001")]
+    [InlineData("\"131.89123456789012345678901234\"", "131.89123456789012345678901234")]
+    public async Task Available_margin_preserves_reported_value_and_distinguishes_missing_from_zero(string? field, string? expected)
+    {
+        var body = Portfolio.Replace("\"free_collateral\":\"131.89\",", field is null ? "" : "\"free_collateral\":" + field + ",");
+        var snapshot = (await Reader(new() { ["/v1/portfolio/details"] = body }).Reader.ReadAsync(Address, default)).Snapshot;
+        Assert.Equal(expected is null ? (decimal?)null : decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture), snapshot.AvailableMarginUsd);
+        Assert.Null(snapshot.WithdrawableUsd);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("true")]
+    [InlineData("\" \"")]
+    [InlineData("\"1e3\"")]
+    [InlineData("\"0.00000000000000000000000000001\"")]
+    public async Task Invalid_available_margin_rejects_the_snapshot_without_rounding(string field)
+    {
+        var body = Portfolio.Replace("\"free_collateral\":\"131.89\",", field is null ? "" : "\"free_collateral\":" + field + ",");
+        await Assert.ThrowsAsync<VenueReadException>(() => Reader(new() { ["/v1/portfolio/details"] = body }).Reader.ReadAsync(Address, default));
+    }
+
     [Fact]
     public async Task Catalogue_maps_markets_to_assets_with_ticks_categories_and_market_ids_and_hides_retired_ones()
     {
@@ -144,9 +171,11 @@ public sealed class RisexAdapterTests
         var snapshot = result.Snapshot;
         Assert.Equal(12183.268781664941504325m, snapshot.AccountValueUsd);
         Assert.Null(snapshot.WithdrawableUsd);
+        Assert.Equal(131.89m, snapshot.AvailableMarginUsd);
         Assert.Equal(12051.377019174158945586m, snapshot.MarginUsedUsd);
         Assert.Null(snapshot.StablecoinWallet);
         Assert.Equal([("BTC", 0.702475m, 10), ("DOGE", -2000m, 5)], snapshot.Positions.Select(p => (p.ContractId, p.SignedQuantity, p.Leverage!.Value)));
+        Assert.Equal(["1", "14"], snapshot.Positions.Select(p => p.VenueContractId));
 
         var fills = result.Fills.ToDictionary(f => f.SourceFillId);
         Assert.Equal(4, fills.Count); // the unknown market is left out

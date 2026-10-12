@@ -1,3 +1,4 @@
+import { isActivityDocument, type ActivityDocument } from './activity'
 import { SseOverflowError, SseParser } from './sse'
 import { ApiError } from './system'
 import { clearCandleCache, evictAccountCandles } from '@/features/market/candleCache'
@@ -22,6 +23,10 @@ export interface Portfolio {
   /** Sum of account balances (perps plus stablecoin wallet, or the wallet alone in unified modes). */
   balanceUsd?: string | null
   balanceCoverage?: 'complete' | 'partial' | 'unavailable'
+  availableBalanceUsd?: string | null
+  availableBalanceAccountCount?: number
+  availableBalanceCoverage?: 'complete' | 'partial' | 'unavailable'
+  enabledAccountCount?: number
   /** Icon key chosen by the owner; absent from servers that predate portfolio icons. */
   icon?: string
 }
@@ -133,6 +138,9 @@ export interface BrokerAccount {
   totalStablecoinNominalUsd?: string | null
   /** Nominal balance: perps plus wallet, or the wallet alone in unified and portfolio-margin modes. */
   balanceUsd?: string | null
+  /** Exactly one availability source selected by the server, never summed with another ledger. */
+  availableBalanceUsd?: string | null
+  availableBalanceSource?: 'wallet' | 'margin' | 'withdrawable' | null
   settingsRevision?: number
 }
 export interface ImportedFill {
@@ -163,6 +171,8 @@ export interface AccountSnapshot {
   valueScope: string
   accountValueUsd: string | null
   withdrawableUsd: string | null
+  /** Reported available balance/free collateral, not guaranteed withdrawal capacity. */
+  availableMarginUsd?: string | null
   marginUsedUsd: string | null
   positions: Array<{
     contractId: string
@@ -195,6 +205,13 @@ export interface Overview {
     importedFillCount: number
     availableStablecoinNominalUsd?: string | null
     stablecoinAccountCount?: number
+    totalBalanceUsd?: string | null
+    balanceAccountCount?: number
+    balanceCoverage?: 'complete' | 'partial' | 'unavailable'
+    availableBalanceUsd?: string | null
+    availableBalanceAccountCount?: number
+    availableBalanceCoverage?: 'complete' | 'partial' | 'unavailable'
+    enabledAccountCount?: number
   }
   recentActivity: ImportedFill[]
   scopeNote: string
@@ -208,6 +225,7 @@ export interface CreateAccount {
   manualAccountValueUsd?: string
 }
 export interface WorkspaceApi {
+  activity(accountId?: string, signal?: AbortSignal): Promise<ActivityDocument>
   review(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewDocument>
   overview(signal?: AbortSignal): Promise<Overview>
   portfolios(signal?: AbortSignal): Promise<Portfolio[]>
@@ -233,7 +251,7 @@ export interface WorkspaceApi {
   deleteAccount(id: string): Promise<void>
   snapshot(id: string, signal?: AbortSignal): Promise<AccountSnapshot | null>
   fills(id: string, signal?: AbortSignal): Promise<ImportedFill[]>
-  sync(id: string): Promise<BrokerAccount>
+  sync(id: string, signal?: AbortSignal): Promise<BrokerAccount>
   plays(signal?: AbortSignal): Promise<PlaySummary[]>
   play(id: string, signal?: AbortSignal): Promise<SavedPlay>
   createPlay(fields: PlayFields): Promise<SavedPlay>
@@ -309,6 +327,10 @@ const portfolio = (v: unknown): v is Portfolio => object(v) && guid(v.id) && tex
   ['complete', 'partial', 'unavailable'].includes(String(v.valueCoverage)) &&
   (v.balanceUsd === undefined || nullableDecimal(v.balanceUsd)) &&
   (v.balanceCoverage === undefined || ['complete', 'partial', 'unavailable'].includes(String(v.balanceCoverage))) &&
+  (v.availableBalanceUsd === undefined || nullableDecimal(v.availableBalanceUsd)) &&
+  (v.availableBalanceAccountCount === undefined || count(v.availableBalanceAccountCount)) &&
+  (v.enabledAccountCount === undefined || count(v.enabledAccountCount)) &&
+  (v.availableBalanceCoverage === undefined || text(v.availableBalanceCoverage) && ['complete', 'partial', 'unavailable'].includes(v.availableBalanceCoverage)) &&
   (v.icon === undefined || (text(v.icon) && v.icon.length <= 40))
 const account = (v: unknown): v is BrokerAccount => object(v) && guid(v.id) &&
   (v.portfolioId === null || guid(v.portfolioId)) && text(v.name) && text(v.venueId) &&
@@ -323,6 +345,9 @@ const account = (v: unknown): v is BrokerAccount => object(v) && guid(v.id) &&
   (v.accountMode === undefined || nullableText(v.accountMode)) &&
   (v.totalStablecoinNominalUsd === undefined || nullableDecimal(v.totalStablecoinNominalUsd)) &&
   (v.balanceUsd === undefined || nullableDecimal(v.balanceUsd)) &&
+  (v.availableBalanceUsd === undefined || nullableDecimal(v.availableBalanceUsd)) &&
+  (v.availableBalanceSource === undefined || v.availableBalanceSource === null ||
+    text(v.availableBalanceSource) && ['wallet', 'margin', 'withdrawable'].includes(v.availableBalanceSource)) &&
   (v.settingsRevision === undefined || typeof v.settingsRevision === 'number' && count(v.settingsRevision) && v.settingsRevision > 0)
 const fill = (v: unknown): v is ImportedFill => object(v) && guid(v.id) && guid(v.accountId) &&
   ['contractId', 'direction', 'feeToken', 'orderId', 'sourceFillId', 'transactionHash'].every(k => text(v[k])) &&
@@ -352,6 +377,7 @@ const wallet = (v: unknown): v is StablecoinWallet | null => v === null || objec
     decimal(b.total) && decimal(b.held) && decimal(b.available))
 const snapshot = (v: unknown): v is AccountSnapshot | null => v === null || object(v) &&
   date(v.observedAtUtc) && text(v.valueScope) && ['accountValueUsd', 'withdrawableUsd', 'marginUsedUsd'].every(k => nullableDecimal(v[k])) &&
+  (v.availableMarginUsd === undefined || nullableDecimal(v.availableMarginUsd)) &&
   Array.isArray(v.positions) && v.positions.every(p => object(p) && text(p.contractId) &&
     ['signedQuantity', 'entryPrice', 'unrealizedPnlUsd', 'marginUsedUsd'].every(k => decimal(p[k])) &&
     (p.leverage === null || typeof p.leverage === 'number' && Number.isInteger(p.leverage) && p.leverage > 0)) &&
@@ -362,6 +388,12 @@ const overview = (v: unknown): v is Overview => object(v) && Array.isArray(v.por
   nullableDecimal(v.totals.totalAccountValueUsd) &&
   (v.totals.availableStablecoinNominalUsd === undefined || nullableDecimal(v.totals.availableStablecoinNominalUsd)) &&
   (v.totals.stablecoinAccountCount === undefined || count(v.totals.stablecoinAccountCount)) &&
+  (v.totals.totalBalanceUsd === undefined || nullableDecimal(v.totals.totalBalanceUsd)) &&
+  (v.totals.availableBalanceUsd === undefined || nullableDecimal(v.totals.availableBalanceUsd)) &&
+  ['balanceAccountCount', 'availableBalanceAccountCount', 'enabledAccountCount'].every(k => object(v.totals) &&
+    (v.totals[k] === undefined || count(v.totals[k]))) &&
+  ['balanceCoverage', 'availableBalanceCoverage'].every(k => object(v.totals) &&
+    (v.totals[k] === undefined || ['complete', 'partial', 'unavailable'].includes(String(v.totals[k])))) &&
   Array.isArray(v.recentActivity) && v.recentActivity.every(fill) && text(v.scopeNote)
 
 export function createWorkspaceApi(token: string): WorkspaceApi {
@@ -559,6 +591,9 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     review: (query, signal) => json(reviewPath(query), isReviewDocument, withSignal(signal)),
     updateSizingSettings: settings => json('/api/sizing/settings', isSizingDocument,
       { method: 'PUT', body: JSON.stringify({ riskPercent: settings.riskPercent }) }),
+    activity: (id, signal) => request(`/api/activity${id !== undefined ? `?${new URLSearchParams({ accountId: resourceId(id) })}` : ''}`,
+      (v): v is ActivityDocument => isActivityDocument(v, fill) && (id === undefined ||
+        v.operations.every(op => op.accountId.toLowerCase() === id.toLowerCase()) && v.coverage.every(c => c.accountId.toLowerCase() === id.toLowerCase())), signal ? { signal } : {}),
     overview: signal => request('/api/overview', overview, signal ? { signal } : {}),
     portfolios: signal => request('/api/portfolios', (v): v is Portfolio[] => Array.isArray(v) && v.every(portfolio), signal ? { signal } : {}),
     accounts: signal => request('/api/accounts', (v): v is BrokerAccount[] => Array.isArray(v) && v.every(account), signal ? { signal } : {}),
@@ -623,7 +658,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     },
     snapshot: (id, signal) => request(`${accountPath(id)}/snapshot`, snapshot, signal ? { signal } : {}),
     fills: (id, signal) => request(`${accountPath(id)}/fills`, (v): v is ImportedFill[] => Array.isArray(v) && v.every(fill), signal ? { signal } : {}),
-    sync: id => request(`${accountPath(id)}/sync`, account, { method: 'POST' }, 30_000, 'The venue refresh failed. Previous account data is still available.'),
+    sync: (id, signal) => request(`${accountPath(id)}/sync`, account, { method: 'POST', ...withSignal(signal) }, 30_000, 'The venue refresh failed. Previous account data is still available.'),
   }
   return api
 }

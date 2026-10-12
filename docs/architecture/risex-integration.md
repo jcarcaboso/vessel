@@ -147,7 +147,7 @@ Tasks R1.1 to R1.7 are done, with these differences from the plan:
 - **Shared adapter kit:** `Venues/Common/StrictJson` and `BoundedJsonHttp` were extracted from the Hyperliquid adapter. Hyperliquid now uses them with its own messages, and its tests pass unchanged.
 - **HTTP clients** are registered under RISEx-specific names. A typed client's default name is its interface, so sharing it would have mixed RISEx's base address into Hyperliquid's client. A test pins both.
 - **No request budget class.** A refresh makes four requests (catalogue, portfolio and up to two fill pages), well under 500 per 10 s. The catalogue is cached for one minute.
-- **Snapshot:** account value is `total_account_value`, margin used is `total_initial_margin`. RISEx reports no withdrawable amount, so it stays unknown (`VenueSnapshot.WithdrawableUsd` is now nullable). Position sizes come signed from portfolio details.
+- **Snapshot:** account value is `total_account_value`, margin used is `total_initial_margin`. The existing summary `free_collateral` is retained as `AvailableMarginUsd` following the October 12 correction below. RISEx reports no account-level withdrawable amount, so `WithdrawableUsd` stays unknown. Position sizes come signed from portfolio details.
 - **Fills:** the direction wording ("Open Long", "Close Short") is derived from side and position side, because RISEx sends none. The same side with PnL beyond the fee is `unknown`, as the effect rule above says. Closed PnL is `net-of-fee`, and fees are `reported` in USDC.
 - **Orders** come from `/v1/orders` (the latest 1,000 records, open ones included) and `/v1/orders/tpsl`. A TP/SL is a trigger order (`Stop Market` or `Take Profit Market`, whole-position at 10,000 bps). When one triggers, its fills belong to a new regular order, which links as an unplanned exit or by the owner; this is still to verify.
 - **Candles:** RISEx opens each candle at the previous close, so the open can lie a tick outside that candle's range (26 of 501 hourly BTC candles). Opens are kept as reported, and only the close is checked against the range. Rows labelled with another interval are rejected.
@@ -157,3 +157,11 @@ Tasks R1.1 to R1.7 are done, with these differences from the plan:
 - **Tests:** `RisexAdapterTests` (fixtures with a synthetic address) and the opt-in `RisexLiveTests` (set `Vessel_TEST_RISEX_ADDRESS`).
 
 Still open (R1.8, with the owner's own account): the meaning of same-side fills with extra PnL, TP/SL trigger linking, the units of `maintenance_margin_factor` and `unsettled_usdc`, and isolated-margin positions.
+
+## October 12, 2026 free collateral follow-up
+
+The existing `/v1/portfolio/details` response includes summary `free_collateral`; the recorded adapter fixture already contains it. The [official portfolio schema](https://developer.rise.trade/reference/accountservice_getportfoliodetails.md) defines it as "Free collateral available for new positions". It is not account withdrawal capacity. The position-level `free_isolated_usdc_balance` is separately documented as withdrawable for isolated positions and is not added to summary availability.
+
+The adapter now stores summary `free_collateral` as nullable exact `AvailableMarginUsd`, exposed as snapshot `availableMarginUsd`. Missing, null and empty string remain unknown; explicit zero and signed decimals are retained. Invalid or unrepresentable decimals reject the observation. `WithdrawableUsd` remains null. No equity-minus-initial-margin calculation is substituted, and collateral, unsettled funds and position-level isolated balances are never added to free collateral.
+
+Overview and portfolios select this reported amount once per enabled RISEx account with known-account coverage. Account rows and detail show reported margin availability, not withdrawable funds. Migration `20261012192227_AvailableMargin` leaves older snapshots unknown until explicit refresh. Fixture and disposable PostgreSQL tests cover parsing, exact persistence, unknown/zero replacement, owner isolation and retained observations after failed refresh. No live owner venue read or owner database migration was performed.

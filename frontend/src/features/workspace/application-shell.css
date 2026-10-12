@@ -155,3 +155,12 @@
 @media(max-width:550px){.management-actions>button{font-size:11px}.detail-management{flex-wrap:wrap;justify-content:flex-end}.portfolio-open{padding:21px}}
 @media(max-width:550px){.account-filter{flex-basis:100%;margin-top:2px}.shell-content .account-filter select{max-width:100%;min-height:40px}.overview-play-row{padding:14px 16px}.overview-play-tabs>[data-slot="tabs-list"]{width:calc(100% - 32px);margin:0 16px}.overview-play-description{padding:12px 16px}}
 .settings-panel dd.settings-theme{display:flex;align-items:center;gap:10px}.settings-theme button{height:24px;padding:0 9px;font-size:10px}
+.accounts-filters{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:16px 22px 0}
+.accounts-filters>input{flex:1 1 180px;min-width:0}
+.accounts-filters .account-filter{position:relative;flex:1 1 150px}
+.account-result-count{font-size:11px;color:var(--muted-foreground)}
+.panel-heading-actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.overview-add-menu{z-index:60;min-width:180px;padding:6px;border:1px solid var(--border);border-radius:var(--radius);background:var(--popover);color:var(--popover-foreground);box-shadow:0 8px 24px color-mix(in srgb,var(--foreground) 12%,transparent)}
+.overview-add-menu [role=menuitem]{padding:10px 12px;border-radius:var(--radius);font-size:12px;cursor:pointer;outline:none}
+.overview-add-menu [data-highlighted]{background:var(--accent);color:var(--accent-foreground)}
+.workspace-stat-grid.overview-metrics{grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr))}

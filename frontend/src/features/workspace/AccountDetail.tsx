@@ -1,20 +1,19 @@
 import { useEffect, useState } from 'react'
-import type { AccountSnapshot, BrokerAccount, ImportedFill, WorkspaceApi } from '@/api/workspace'
+import type { AccountSnapshot, BrokerAccount, WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
 import { Button } from '@/components/ui/button'
-import { ActivityTable } from './ActivityTable'
+import { ActivityOperations } from './ActivityOperations'
 import { amount, money, time } from './format'
 import { useVenues } from '@/api/venues'
 import { ArrowLeft, RefreshCw, Wallet } from 'lucide-react'
 
-export function AccountDetail({ account, api, refreshing, onSync, onBack, onManage, reloadGeneration = 0 }: {
-  account: BrokerAccount; api: WorkspaceApi; refreshing: boolean; onSync: (id: string) => void; onBack: () => void; onManage: () => void; reloadGeneration?: number
+export function AccountDetail({ account, api, refreshing, busy = refreshing, onSync, onBack, onManage, reloadGeneration = 0 }: {
+  account: BrokerAccount; api: WorkspaceApi; refreshing: boolean; busy?: boolean; onSync: (id: string) => void; onBack: () => void; onManage: () => void; reloadGeneration?: number
 }) {
   const venues = useVenues()
   const synced = venues.can(account.venueId, 'sync')
   const wallet = venues.can(account.venueId, 'stablecoinWallet')
   const [snapshot, setSnapshot] = useState<AccountSnapshot | null>(null)
-  const [fills, setFills] = useState<ImportedFill[]>([])
   const [completed, setCompleted] = useState<{ api: WorkspaceApi; key: string } | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   // A refresh ends with a shell reload, so an in-flight refresh does not start a racing read.
@@ -26,22 +25,22 @@ export function AccountDetail({ account, api, refreshing, onSync, onBack, onMana
     let active = true
     // Loading/error visibility derives from the request generation, avoiding a
     // synchronous effect render while keeping prior observations during retries.
-    Promise.all([api.snapshot(account.id, controller.signal), api.fills(account.id, controller.signal)]).then(([nextSnapshot, nextFills]) => {
-      if (active) { setSnapshot(nextSnapshot); setFills(nextFills); setDetailError(null); setCompleted({ api, key: requestKey }) }
+    api.snapshot(account.id, controller.signal).then(nextSnapshot => {
+      if (active) { setSnapshot(nextSnapshot); setDetailError(null); setCompleted({ api, key: requestKey }) }
     }).catch(cause => {
       if (active) { setDetailError(cause instanceof ApiError ? cause.message : 'Unable to read the account.'); setCompleted({ api, key: requestKey }) }
     })
     return () => { active = false; controller.abort() }
   }, [api, account.id, requestKey])
   return <div className="workspace-page-content">
-    <div className="detail-actions"><Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft size={15} />All accounts</Button><div className="detail-management"><Button variant="outline" onClick={onManage}>Manage account</Button>{synced && <Button variant="outline" onClick={() => onSync(account.id)} disabled={refreshing || account.isEnabled === false}><RefreshCw size={15} className={refreshing ? 'is-spinning' : ''} />{refreshing ? 'Refreshing…' : 'Refresh account'}</Button>}</div></div>
+    <div className="detail-actions"><Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft size={15} />All accounts</Button><div className="detail-management"><Button variant="outline" onClick={onManage}>Manage account</Button>{synced && <Button variant="outline" onClick={() => onSync(account.id)} disabled={busy || account.isEnabled === false}><RefreshCw size={15} className={refreshing ? 'is-spinning' : ''} />{refreshing ? 'Refreshing…' : 'Refresh account'}</Button>}</div></div>
     <section className="shell-panel account-detail-heading"><Wallet size={24} /><div><h2>{account.name}</h2><p>{venues.name(account.venueId)} · {synced ? 'read-only perpetuals' : account.venueId === 'manual' ? 'manual record' : 'reader not enabled'} · {time(account.lastSyncedAtUtc)}</p></div><span className="workspace-badge">{account.syncStatus}</span></section>
     {(account.sourceId ?? account.address) && <p className="account-source"><span>Source</span> {account.sourceId ?? account.address}</p>}
     {error && <div className="workspace-alert" role="alert">{error}</div>}
     {account.isEnabled === false && <div className="workspace-alert" role="status">This account is disabled. Retained imports and positions are hidden and excluded from workspace totals. Use Manage account to enable it again.</div>}
     <div className="workspace-stat-grid three">
       <div className="shell-panel metric"><span>{wallet ? 'Wallet stablecoins available' : synced ? 'Account value · reported' : 'Known manual value'}</span><strong>{money(wallet ? account.availableStablecoinNominalUsd ?? null : account.accountValueUsd)}</strong><small>{account.isEnabled === false ? 'Hidden while disabled' : !wallet ? (synced ? 'Perpetuals equity in the quote asset · nominal' : 'Entered manually') : snapshot?.stablecoinWallet ? `${snapshot.stablecoinWallet.accountMode} · nominal total minus held` : 'Refresh to read the stablecoin wallet'}</small></div>
-      <div className="shell-panel metric"><span>Perps withdrawable</span><strong>{money(snapshot?.withdrawableUsd ?? null)}</strong><small>{snapshot && snapshot.withdrawableUsd === null ? 'Not reported by this venue' : 'Separate venue field · not added to wallet funds'}</small></div>
+      <div className="shell-panel metric"><span>Available balance</span><strong>{money(account.isEnabled === false ? null : account.availableBalanceUsd ?? null)}</strong><small>{account.isEnabled === false ? 'Hidden while disabled' : account.availableBalanceSource === 'wallet' ? 'Wallet total minus held · nominal' : account.availableBalanceSource === 'margin' ? 'Venue-reported available margin · not guaranteed withdrawable' : account.availableBalanceSource === 'withdrawable' ? 'Venue-reported perps withdrawable' : 'Not reported by this venue'}</small><small>Perps withdrawable {money(account.isEnabled === false ? null : snapshot?.withdrawableUsd ?? null)} · separate field</small></div>
       <div className="shell-panel metric"><span>Margin used · reported</span><strong>{money(snapshot?.marginUsedUsd ?? null)}</strong><small>{snapshot?.positions.length ?? 0} positions in last snapshot</small></div>
     </div>
     {wallet && <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Stablecoin wallet</h2><p>Supported stablecoins in the venue wallet. Other assets are excluded.</p></div><span className="workspace-badge">{snapshot?.stablecoinWallet?.accountMode ?? 'Not observed'}</span></header>
@@ -54,7 +53,7 @@ export function AccountDetail({ account, api, refreshing, onSync, onBack, onMana
       {account.isEnabled === false ? <div className="workspace-empty small-empty"><strong>Positions hidden while disabled</strong><p>The stored snapshot is retained. Enable the account to read it again.</p></div> : !snapshot?.positions.length ? <div className="workspace-empty small-empty"><strong>{pending ? 'Reading the snapshot…' : 'No positions in the latest snapshot'}</strong><p>{snapshot ? 'These are venue-reported positions, not planned plays.' : 'Refresh a read-only account to get a snapshot. A missing snapshot is not proof of zero exposure.'}</p></div> :
         <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Contract</th><th>Signed quantity</th><th>Entry price</th><th>Unrealized P&amp;L</th><th>Leverage</th></tr></thead><tbody>{snapshot.positions.map(p => <tr key={p.contractId}><td><strong>{p.contractId}</strong></td><td>{amount(p.signedQuantity)}</td><td>{money(p.entryPrice)}</td><td>{money(p.unrealizedPnlUsd)}</td><td>{p.leverage === null ? '—' : `${p.leverage}×`}</td></tr>)}</tbody></table></div>}
     </section>
-    <section className="shell-panel"><header className="shell-panel-heading"><h2>Recent executions</h2><span className="muted">{account.isEnabled === false ? 'Disabled account' : `Latest ${fills.length} retained rows`}</span></header>{account.isEnabled === false ? <div className="workspace-empty small-empty"><strong>Imported movements hidden while disabled</strong><p>Nothing was deleted. Enable the account to restore this view.</p></div> : <ActivityTable fills={fills} accounts={[account]} />}</section>
+    <section className="shell-panel"><header className="shell-panel-heading"><h2>Recent executions</h2><span className="muted">{account.isEnabled === false ? 'Disabled account' : 'Position operations'}</span></header>{account.isEnabled === false ? <div className="workspace-empty small-empty"><strong>Imported movements hidden while disabled</strong><p>Nothing was deleted. Enable the account to restore this view.</p></div> : <ActivityOperations key={requestKey} api={api} accountId={account.id} accounts={[account]} reloadGeneration={reloadGeneration} />}</section>
     {account.historyNotice && <p className="workspace-scope-note">{account.historyNotice}</p>}
   </div>
 }

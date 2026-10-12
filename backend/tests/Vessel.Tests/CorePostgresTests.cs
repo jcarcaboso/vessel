@@ -21,6 +21,50 @@ public sealed class CorePostgresTests
     }
 
     [PostgresFact]
+    public async Task Available_margin_migration_and_refresh_preserve_exact_nullable_owner_scoped_values()
+    {
+        // Upgrade real preceding schema; the migration must leave old snapshots unknown.
+        await using var database = await CoreDatabase.CreateAsync("20261010210015_PortfolioIcons");
+        var owner = Guid.NewGuid(); var id = Guid.NewGuid();
+        await using (var db = database.Context(owner))
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO accounts (\"Id\", \"OwnerId\", \"VenueId\", \"Name\", \"SyncStatus\", \"IsEnabled\", \"SettingsRevision\") VALUES ({id}, {owner}, 'manual', 'Legacy', 'manual', true, 1)");
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO account_snapshots (\"OwnerId\", \"AccountId\", \"ObservedAtUtc\", \"ValueScope\") VALUES ({owner}, {id}, {DateTimeOffset.UtcNow}, 'legacy')");
+            await db.Database.MigrateAsync();
+            Assert.Null((await db.Snapshots.SingleAsync()).AvailableMarginUsd);
+            Assert.False(db.Database.HasPendingModelChanges());
+        }
+        var reader = new FixtureReader(); Guid synced;
+        const decimal exact = -0.1234567890123456789012345678m;
+        reader.Result = reader.Result with { Snapshot = reader.Result.Snapshot with { AvailableMarginUsd = exact } };
+        await using (var db = database.Context(owner))
+        {
+            var service = Service(db, owner, reader); synced = await CreateVenueAccount(service);
+            var account = await service.SyncAsync(synced, default);
+            Assert.Equal("-0.1234567890123456789012345678", account.AvailableBalanceUsd);
+            Assert.Equal("margin", account.AvailableBalanceSource);
+        }
+        await using (var db = database.Context(Guid.NewGuid())) Assert.Empty(await db.Snapshots.ToListAsync());
+        await using (var db = database.Context(owner))
+        {
+            Assert.Equal(exact, (await db.Snapshots.SingleAsync(s => s.AccountId == synced)).AvailableMarginUsd);
+            Assert.Equal("-0.1234567890123456789012345678", (await Service(db, owner, reader).SnapshotAsync(synced, default))!.AvailableMarginUsd);
+            reader.Fail = true;
+            await Assert.ThrowsAsync<WorkspaceException>(() => Service(db, owner, reader).SyncAsync(synced, default));
+            Assert.Equal(exact, (await db.Snapshots.SingleAsync(s => s.AccountId == synced)).AvailableMarginUsd);
+        }
+        reader.Fail = false;
+        foreach (var amount in new decimal?[] { 0m, null })
+        {
+            reader.Result = reader.Result with { Snapshot = reader.Result.Snapshot with { AvailableMarginUsd = amount, ObservedAtUtc = reader.Result.Snapshot.ObservedAtUtc.AddHours(1) } };
+            await using var db = database.Context(owner);
+            await Service(db, owner, reader).SyncAsync(synced, default);
+            db.ChangeTracker.Clear();
+            Assert.Equal(amount, (await db.Snapshots.SingleAsync(s => s.AccountId == synced)).AvailableMarginUsd);
+        }
+    }
+
+    [PostgresFact]
     public async Task Migration_upgrades_actual_foundation_heads_without_losing_concurrent_plays()
     {
         await using var database = await CoreDatabase.CreateAsync("20260930201658_InitialAccountPlayHeads");

@@ -1,0 +1,20 @@
+.workspace-badge.operation-direction { display: inline-flex; align-items: center; gap: 4px; margin-top: 5px; }
+.operation-direction.long, .operation-result.positive { color: var(--positive); }
+.operation-direction.short, .operation-result.negative { color: var(--negative); }
+.operation-direction.long { background: var(--card); border-color: color-mix(in srgb, var(--positive) 35%, var(--border)); }
+.operation-direction.short { background: var(--card); border-color: color-mix(in srgb, var(--negative) 35%, var(--border)); }
+.operation-direction.unknown, .operation-result.neutral { color: var(--muted-foreground); }
+.operation-incomplete, .operation-coverage { color: var(--warning); }
+.operation-heading { display: flex; align-items: flex-start; gap: 8px; }
+.operation-heading > div { display: flex; flex-direction: column; align-items: flex-start; min-width: 85px; }
+.workspace-table.operations-table td { vertical-align: top; }
+.operation-expanded { background: var(--background); padding: 16px !important; }
+.operation-coverage { margin: 0 0 12px; padding-left: 20px; font-size: 12px; }
+.operation-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 0 20px 14px; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.operation-filters legend { color: var(--muted-foreground); font-size: 12px; padding: 0 6px; }
+.operation-filters label { display: grid; gap: 5px; color: var(--muted-foreground); font-size: 12px; flex: 1 1 150px; }
+.operation-filters select, .operation-filters input { width: 100%; min-height: 36px; padding: 7px 10px; color: var(--foreground); background: var(--field); border: 1px solid var(--border); border-radius: var(--radius); font: inherit; }
+.operation-filters select:focus-visible, .operation-filters input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.operation-scope, .operation-originals { padding: 16px; color: var(--muted-foreground); font-size: 12px; }
+.operation-scope summary, .operation-originals summary { cursor: pointer; color: var(--foreground); }
+.execution-flip-directions { display: inline-flex; gap: 4px; align-items: center; }

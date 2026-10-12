@@ -4,13 +4,21 @@ October 1, 2026. The owner requested rename/delete portfolios and accounts, disa
 
 ## Behavior
 
-- Unassigned accounts use `portfolioId: null`, not a seeded/default Portfolio row. They appear in All accounts, not a portfolio tile or individual portfolio filter. Accounts may be created without a portfolio.
+- Unassigned accounts use `portfolioId: null`, not a seeded/default Portfolio row. They appear in All accounts or its Unassigned filter, not a portfolio tile or individual portfolio filter. Accounts may be created without a portfolio.
 - Renaming changes only the display name, not the venue, address, source identity or history.
 - Deleting a portfolio unlinks all its accounts, including disabled accounts, transactionally. It never deletes accounts, snapshots, fills or plays.
 - Disabled accounts remain visible in account management with a Disabled marker and can be enabled again. Disable preserves all data, blocks refresh, and hides their imported fills and venue positions from normal activity, overview and detail routes.
 - Overview/portfolio balances and position/fill counts exclude disabled accounts. Account record counts still include disabled records. UI coverage text must refer to enabled account values rather than imply every record contributes.
 - Hard account deletion removes that account's retained imported facts and latest snapshots/positions. Require an explicit confirmation in the UI. If any Play head references it, return safe 409 and retain everything; do not delete trading intent as a side effect.
 - Move/unlink does not rewrite imported facts or historical intent. Grouping uses the current account assignment; historical portfolio membership analysis is not part of this step.
+
+## October 12, 2026: refresh and account filters
+
+Accounts and Overview's enabled-account panel offer Refresh all. It takes every enabled account whose descriptor has `sync`, regardless of the current account filters, and calls the existing locked refresh endpoint one account at a time. The button shows "Refreshing N of M", the active row spins, and individual/bulk refresh buttons are disabled during any refresh. No eligible accounts also disables the action. Failures do not stop later accounts; one summary notification names failed accounts and the shell reloads once after the batch. Backend management/sync locking is unchanged.
+
+Accounts combines portfolio, text search by name/source/address, venue and status filters. Status choices are enabled, disabled, refresh failed, not refreshed and manual. A result count and Reset filters remain visible. Unassigned is a filter over null membership, not a stored portfolio. If a selected portfolio disappears on reload, the view falls back to All accounts.
+
+Portfolio tiles headline `balanceUsd` and `balanceCoverage`, with the perps/manual `totalValueUsd` as secondary detail. Explicit null balances stay unknown, never falling back to a perps value. Record counts include disabled accounts; balances exclude them. Successful management changes reload the common Overview response used by tiles, account filters and Plays capital context. Manager selections retain IDs, not stale account/portfolio objects, so reopening uses the current revision and assignment.
 
 ## API additions
 

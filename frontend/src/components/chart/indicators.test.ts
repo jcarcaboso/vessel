@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeIndicators, defaultIndicators, describeIndicators, ema, normalizeIndicators, resizePane, rsi } from './indicators'
+import { computeIndicators, defaultIndicators, describeIndicators, ema, migrateLegacyIndicators, normalizeIndicators, resizePane, rsi } from './indicators'
 
 describe('moving average', () => {
   it('starts at the simple average of the first period and then weights the latest close', () => {
@@ -31,6 +31,30 @@ describe('relative strength', () => {
 })
 
 describe('indicator settings', () => {
+  it('uses the owner-selected default periods and colors', () => {
+    expect(defaultIndicators.emas.map(({ period, color }) => [period, color])).toEqual([
+      [9, '#b388ff'], [50, '#ef5350'], [100, '#f2c94c'], [200, '#4cbb6c'],
+    ])
+  })
+  it('migrates each untouched old slot, preserving custom slots and visibility', () => {
+    const migrated = migrateLegacyIndicators({ emas: [
+      { period: 9, color: '#b388ff', enabled: false },
+      { period: 21, color: '#4cbb6c', enabled: false },
+      { period: 50, color: '#f2c94c' },
+      { period: 200, color: '#ef5350' },
+    ], volume: { enabled: false, size: 'minimized' }, rsi: { period: 7, color: '#123456' } })
+    expect(migrated.emas).toEqual(defaultIndicators.emas.map((ema, index) => ({ ...ema, enabled: index > 1 })))
+    expect(migrated.volume).toEqual({ enabled: false, size: 'minimized' })
+    expect(migrated.rsi).toMatchObject({ period: 7, color: '#123456' })
+    expect(normalizeIndicators(migrated)).toEqual(migrated)
+    const customized = normalizeIndicators({ emas: [
+      { period: 12, color: '#b388ff' }, { period: 21, color: '#123456' },
+      { period: 55, color: '#f2c94c' }, { period: 200, color: '#abcdef' },
+    ] })
+    expect(customized.emas.map(({ period, color }) => [period, color])).toEqual([
+      [12, '#b388ff'], [21, '#123456'], [55, '#f2c94c'], [200, '#abcdef'],
+    ])
+  })
   it('keeps valid stored fields and defaults the rest', () => {
     const stored = normalizeIndicators({
       emas: [{ enabled: false, period: 10, color: '#ABCDEF' }, { period: 0, color: 'red' }],
@@ -62,13 +86,13 @@ describe('indicator settings', () => {
     expect(view.volume).toEqual({ size: 'normal', values: [1, 2, 3], up: [false, true, true] })
     expect(view.rsi).toBeNull()
     expect(describeIndicators(settings)).toBe('EMA 2 · Volume')
-    expect(describeIndicators(defaultIndicators)).toBe('EMA 9/21/50/200 · Volume · RSI 14')
+    expect(describeIndicators(defaultIndicators)).toBe('EMA 9/50/100/200 · Volume · RSI 14')
   })
 })
 
 describe('indicator caption', () => {
   it('says which panes are minimized and therefore not plotted', () => {
-    expect(describeIndicators({ ...defaultIndicators, rsi: { ...defaultIndicators.rsi, size: 'minimized' } })).toBe('EMA 9/21/50/200 · Volume · RSI 14 minimized, not plotted')
-    expect(describeIndicators(defaultIndicators, { volume: 'minimized' })).toBe('EMA 9/21/50/200 · Volume minimized, not plotted · RSI 14')
+    expect(describeIndicators({ ...defaultIndicators, rsi: { ...defaultIndicators.rsi, size: 'minimized' } })).toBe('EMA 9/50/100/200 · Volume · RSI 14 minimized, not plotted')
+    expect(describeIndicators(defaultIndicators, { volume: 'minimized' })).toBe('EMA 9/50/100/200 · Volume minimized, not plotted · RSI 14')
   })
 })

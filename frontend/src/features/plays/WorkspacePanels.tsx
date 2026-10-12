@@ -87,7 +87,8 @@ export function CapitalContext({ accounts, portfolios, draft }: {
   const unified = account?.accountMode === 'unifiedAccount' || account?.accountMode === 'portfolioMargin'
   const sized = positionSize(draft, leverageOf(draft.leverage))
   // A portfolio sums its accounts' balances; an unassigned account stands on its own.
-  const balance = portfolio ? portfolio.balanceUsd ?? portfolio.totalValueUsd : account?.balanceUsd ?? account?.accountValueUsd ?? null
+  const balance = portfolio ? (portfolio.balanceUsd === undefined ? portfolio.totalValueUsd : portfolio.balanceUsd)
+    : account?.balanceUsd === undefined ? account?.accountValueUsd ?? null : account.balanceUsd
   const balanceValue = balance == null ? null : Number(balance)
   // Shares of the balance treat the quote asset as USD, like the nominal account values.
   const share = (value: number | null) => value === null || !balanceValue ? '—' : `${(value / balanceValue * 100).toFixed(1)}%`
