@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Activity;
 using Vessel.Application.Overview;
@@ -25,9 +26,12 @@ public sealed class OverviewSummaryTests
     private sealed class Clock : TimeProvider { public override DateTimeOffset GetUtcNow() => Now; }
     private sealed class SummaryActivityStore(MemoryWorkspaceStore store, Guid owner) : IActivityStore
     {
-        public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct)
+        public List<IReadOnlySet<Guid>?> Reads { get; } = [];
+        public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
         {
-            var accounts = store.Accounts.Where(a => a.OwnerId == owner && a.IsEnabled && (accountId is null || a.Id == accountId)).ToList();
+            Reads.Add(accountIds);
+            var accounts = store.Accounts.Where(a => a.OwnerId == owner && a.IsEnabled && (accountId is null || a.Id == accountId) &&
+                (accountIds is null || accountIds.Contains(a.Id))).ToList();
             var ids = accounts.Select(a => a.Id).ToHashSet();
             return Task.FromResult(new ActivityFacts(accounts, store.Fills.Where(f => f.OwnerId == owner && ids.Contains(f.AccountId)).ToList(),
                 store.Snapshots.Where(s => s.OwnerId == owner && ids.Contains(s.AccountId)).ToList(), new Dictionary<Guid, Guid>()));
@@ -106,6 +110,43 @@ public sealed class OverviewSummaryTests
         Assert.Equal("50", (await service.GetAsync("portfolio", "30", "unassigned", default)).Totals.Balance.AmountUsd);
         Assert.Equal("10", (await service.GetAsync("portfolio", "30", $"account:{a.Id}", default)).Totals.Balance.AmountUsd);
         Assert.Equal(0, (await service.GetAsync("portfolio", "30", $"account:{disabled.Id}", default)).Totals.AccountCount);
+    }
+
+    [Fact]
+    public async Task Scope_passes_only_resolved_enabled_accounts_and_empty_scopes_do_not_read_activity()
+    {
+        var p = Portfolio(); var empty = Portfolio("Empty");
+        var a = Account(p.Id); var b = Account(p.Id); var disabled = Account(p.Id, enabled: false); var unassigned = Account();
+        await service.GetAsync("portfolio", "30", $"portfolio:{p.Id}", default);
+        Assert.True(new HashSet<Guid> { a.Id, b.Id }.SetEquals(Assert.Single(activityStore.Reads)!));
+        await service.GetAsync("account", "7", "unassigned", default);
+        Assert.True(new HashSet<Guid> { unassigned.Id }.SetEquals(activityStore.Reads[1]!));
+        await service.GetAsync("portfolio", "90", $"account:{a.Id}", default);
+        Assert.True(new HashSet<Guid> { a.Id }.SetEquals(activityStore.Reads[2]!));
+        await service.GetAsync("account", "all", "all", default);
+        Assert.True(new HashSet<Guid> { a.Id, b.Id, unassigned.Id }.SetEquals(activityStore.Reads[3]!));
+        await service.GetAsync("portfolio", "30", $"portfolio:{empty.Id}", default);
+        await service.GetAsync("account", "30", $"account:{disabled.Id}", default);
+        unassigned.UpdateSettings(unassigned.Name, null, false);
+        await service.GetAsync("portfolio", "30", "unassigned", default);
+        Assert.Equal(4, activityStore.Reads.Count);
+    }
+
+    [Fact]
+    public async Task Restricted_summary_matches_unrestricted_per_account_totals_without_truncating_history()
+    {
+        var p = Portfolio(); var a = Account(p.Id, 10, venue: "hyperliquid"); var b = Account(p.Id, 20);
+        var other = Account(balance: 100);
+        Snapshot(a, 10, 5, pnl: 2, quantity: 1);
+        for (var i = 0; i < 510; i++) Operation(a, Now.AddMinutes(-i), 1);
+        Operation(b, Now.AddHours(-1), 5, 1);
+        Operation(other, Now.AddHours(-1), 100);
+        var all = await service.GetAsync("account", "all", "all", default);
+        var restricted = await service.GetAsync("account", "all", $"portfolio:{p.Id}", default);
+        foreach (var row in restricted.Rows)
+            Assert.Equal(JsonSerializer.Serialize(all.Rows.Single(r => r.Id == row.Id).Totals), JsonSerializer.Serialize(row.Totals));
+        Assert.Equal(1022, restricted.Totals.ImportedFillCount);
+        Assert.Equal("514", restricted.Totals.RealizedResult.AmountUsd);
     }
 
     [Theory]

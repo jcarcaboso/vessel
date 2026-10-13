@@ -9,7 +9,8 @@ public sealed record ActivityFacts(IReadOnlyList<Account> Accounts, IReadOnlyLis
 public interface IActivityStore
 {
     // All retained facts, not the overview's most recent 100; owner-scoped and enabled accounts only.
-    Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct);
+    // An optional account set restricts every fact query; an empty set reads no facts.
+    Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null);
 }
 public sealed record OperationFillDto(FillDto Fill, string Role, string Quantity, string Fee, string ClosedPnlUsd);
 public sealed record OperationFeeDto(string Token, string Amount);

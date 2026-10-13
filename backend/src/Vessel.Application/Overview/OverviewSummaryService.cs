@@ -32,7 +32,7 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
             "unassigned" => a.PortfolioId is null,
             _ => true
         })).ToList();
-        var summaries = await activity.ReadSummariesAsync(scopeKind == "account" ? scopeId : null, ct);
+        var summaries = await activity.ReadSummariesAsync(null, ct, members.Select(a => a.Id).ToHashSet());
         var snapshots = summaries.Facts.Snapshots.ToDictionary(s => s.AccountId);
         var operations = summaries.Operations.GroupBy(o => o.AccountId).ToDictionary(g => g.Key, g => g.ToList());
         var fills = summaries.Facts.Fills.GroupBy(f => f.AccountId).ToDictionary(g => g.Key, g => g.Count());

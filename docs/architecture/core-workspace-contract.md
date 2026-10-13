@@ -160,6 +160,8 @@ Invalid values return 400. Resource scopes require canonical GUID form and nonem
 
 `OverviewSummaryDto` returns `groupBy`, `period`, `scope`, request-time UTC `asOfUtc`, nullable `fromUtc`, `totals`, `rows`, `totalGroupCount`, `omittedGroupCount` and `scopeNote`. The response includes at most 200 rows. Totals and shares include all scoped enabled accounts, even when some rows are omitted. Portfolio rows exist only for groups with enabled members; Unassigned is null membership, not a stored portfolio. Rows sort by exact balance descending, nulls last, with name/ID tie-breakers. Group IDs double as scope values. Each row has `id`, `name`, nullable portfolio `icon` or account `venueId`, `totals` and nullable `shareOfBalance`.
 
+The summary passes its resolved enabled-account set into Activity's store and aggregation path. Portfolio, Unassigned and account scopes load only those accounts' retained fills, snapshots and confirmed order links. SQL account selection still enforces owner and enabled-only restrictions. An empty scope skips Activity reads entirely, and an empty account set also short-circuits the store before any query. All retained fills for included accounts contribute before display limits; restricting accounts does not change their operation results. The existing `/api/activity` all-account and single-`accountId` reads remain unchanged.
+
 Scope and row totals contain:
 
 ```text

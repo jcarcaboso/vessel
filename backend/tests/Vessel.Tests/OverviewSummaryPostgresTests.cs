@@ -1,13 +1,75 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Vessel.Domain.Markets;
+using Vessel.Domain.Plays;
 using Vessel.Application.Overview;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Persistence;
 
 namespace Vessel.Tests;
 
 public sealed class OverviewSummaryPostgresTests
 {
+    [PostgresFact]
+    public async Task Portfolio_account_set_limits_loaded_fills_snapshots_and_links_and_empty_set_issues_no_queries()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var foreignOwner = Guid.NewGuid();
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Selected");
+        var otherPortfolio = new Portfolio(Guid.NewGuid(), owner, "Other");
+        var selected = new Account(Guid.NewGuid(), owner, "manual", "Selected"); selected.Configure(portfolio.Id, null, null);
+        var disabled = new Account(Guid.NewGuid(), owner, "manual", "Disabled"); disabled.UpdateSettings(disabled.Name, portfolio.Id, false);
+        var other = new Account(Guid.NewGuid(), owner, "manual", "Other"); other.Configure(otherPortfolio.Id, null, null);
+        var unassigned = new Account(Guid.NewGuid(), owner, "manual", "Unassigned");
+        var foreign = new Account(Guid.NewGuid(), foreignOwner, "manual", "Foreign");
+        var now = DateTimeOffset.UtcNow;
+        async Task Seed(Guid actor, Account[] accounts, params Portfolio[] portfolios)
+        {
+            await using var db = database.Context(actor);
+            db.Portfolios.AddRange(portfolios); db.Accounts.AddRange(accounts);
+            foreach (var account in accounts)
+            {
+                db.Snapshots.Add(new AccountSnapshot { OwnerId = actor, AccountId = account.Id, ObservedAtUtc = now, ValueScope = "fixture" });
+                var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("manual", "BTC"), InstrumentSource.Manual, "{}", now);
+                db.Plays.Add(play);
+                db.OrderLinks.Add(new PlayOrderLink(play, "order", OrderLinkRole.Entry, "entry", null, OrderLinkState.Linked, OrderLinkSource.Owner, now));
+                // More than the overview fill display limit, including for unrelated accounts.
+                for (var i = 0; i < 120; i++)
+                    db.Fills.Add(new ImportedFill { Id = Guid.NewGuid(), OwnerId = actor, AccountId = account.Id, ContractId = "BTC",
+                        SourceFillId = i.ToString(), Side = "buy", PositionEffect = "open", Direction = "Fixture", Price = 100,
+                        Quantity = 1, FeeToken = "USDC", OccurredAtUtc = now.AddMinutes(-i), OrderId = "order", TransactionHash = "" });
+            }
+            await db.SaveChangesAsync();
+        }
+        await Seed(owner, [selected, disabled, other, unassigned], portfolio, otherPortfolio);
+        await Seed(foreignOwner, [foreign]);
+        var commands = new List<string>();
+        await using var context = new VesselDbContext(new DbContextOptionsBuilder<VesselDbContext>()
+            .UseNpgsql(database.ConnectionString)
+            .LogTo(commands.Add, [DbLoggerCategory.Database.Command.Name], LogLevel.Information).Options, new CoreOwner(owner));
+        var ids = (await context.Accounts.Where(a => a.IsEnabled && a.PortfolioId == portfolio.Id).Select(a => a.Id).ToListAsync()).ToHashSet();
+        commands.Clear();
+        var store = new ActivityStore(context);
+        var facts = await store.ReadAsync(null, default, ids);
+        Assert.Equal(selected.Id, Assert.Single(facts.Accounts).Id);
+        Assert.Equal(120, facts.Fills.Count); Assert.All(facts.Fills, f => Assert.Equal(selected.Id, f.AccountId));
+        Assert.Equal(selected.Id, Assert.Single(facts.Snapshots).AccountId);
+        Assert.Equal(120, facts.FillPlayIds.Count);
+        Assert.All(facts.FillPlayIds.Keys, id => Assert.Contains(facts.Fills, f => f.Id == id));
+        Assert.Equal(4, commands.Count); // Scoped accounts, fills, snapshots and linked orders.
+        // Even caller-supplied disabled/foreign IDs cannot bypass the SQL account restrictions.
+        var guarded = await store.ReadAsync(null, default, new HashSet<Guid> { selected.Id, disabled.Id, foreign.Id });
+        Assert.Equal(selected.Id, Assert.Single(guarded.Accounts).Id);
+        Assert.Equal(120, guarded.Fills.Count); Assert.Single(guarded.Snapshots); Assert.Equal(120, guarded.FillPlayIds.Count);
+        commands.Clear();
+        var empty = await store.ReadAsync(null, default, new HashSet<Guid>());
+        Assert.Empty(empty.Accounts); Assert.Empty(empty.Fills); Assert.Empty(empty.Snapshots); Assert.Empty(empty.FillPlayIds);
+        Assert.Empty(commands);
+    }
+
     [PostgresFact]
     public async Task Endpoint_uses_owner_enabled_facts_exact_amounts_and_current_membership()
     {
