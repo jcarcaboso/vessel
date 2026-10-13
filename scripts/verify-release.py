@@ -147,7 +147,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             return http.client.HTTPSConnection('localhost', self.https_port, context=ssl._create_unverified_context(), timeout=15)
         return http.client.HTTPConnection('127.0.0.1', self.http_port, timeout=15)
 
-    def request(self, path, method='GET', body=None, headers=None, auth=True):
+    def request(self, path, method='GET', body=None, headers=None, auth=True, early_response=False):
         headers = {'Host': f'localhost:{self.https_port if self.tls else self.http_port}', **(headers or {})}
         if auth:
             headers.setdefault('Authorization', f'Bearer {self.token}')
@@ -156,11 +156,30 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             body = json.dumps(body).encode()
         conn = self.connect()
         try:
-            conn.request(method, path, body, headers)
+            try:
+                conn.request(method, path, body, headers)
+            except (BrokenPipeError, ConnectionResetError):
+                # A proxy may reject a declared oversize body before the client finishes sending it.
+                if not early_response:
+                    raise
             response = conn.getresponse()
             return response.status, response.getheaders(), response.read()
         finally:
             conn.close()
+
+    def malformed_chunked(self, path):
+        raw = socket.create_connection(('localhost' if self.tls else '127.0.0.1', self.https_port if self.tls else self.http_port), timeout=15)
+        if self.tls:
+            raw = ssl._create_unverified_context().wrap_socket(raw, server_hostname='localhost')
+        with raw:
+            host = f'localhost:{self.https_port if self.tls else self.http_port}'
+            raw.sendall(f'POST {path} HTTP/1.1\r\nHost: {host}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\nzz\r\n'.encode())
+            data = b''
+            while chunk := raw.recv(65536):
+                data += chunk
+        head = data.split(b'\r\n\r\n', 1)[0].decode('latin-1').split('\r\n')
+        status = int(head[0].split()[1]) if head and len(head[0].split()) > 1 else 0
+        return status, [tuple(part.strip() for part in line.split(':', 1)) for line in head[1:] if ':' in line]
 
     def json(self, path, body=None, method='GET'):
         status, _, data = self.request(path, method, body)
@@ -201,9 +220,12 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             self.expect(sum(k.lower() == 'content-security-policy' for k, _ in headers) == 1, path + ' CSP')
         _, headers, data = self.request(asset, headers={'Accept-Encoding': 'gzip'})
         self.expect(any(k.lower() == 'content-encoding' and v == 'gzip' for k, v in headers) and len(gzip.decompress(data)) > len(data), 'static JS gzip')
-        status, headers, _ = self.request('/api/plays/00000000-0000-0000-0000-000000000001/evidence', 'POST', b'x' * (10551296 + 1))
+        status, headers, _ = self.request('/api/plays/00000000-0000-0000-0000-000000000001/evidence', 'POST', b'x' * (10551296 + 1), early_response=True)
         self.expect(status == 413, 'upload body limit is enforced by nginx')
         self.expect(any(k.lower() == 'x-content-type-options' and v == 'nosniff' for k, v in headers) and any(k.lower() == 'content-security-policy' for k, _ in headers), 'nginx upload error has security headers')
+        for path in ('/api/test', '/health/ready'):
+            status, headers = self.malformed_chunked(path)
+            self.expect((status >= 400 if self.tls else status == 400) and any(k.lower() == 'content-security-policy' for k, _ in headers) and any(k.lower() == 'x-content-type-options' and v == 'nosniff' for k, v in headers), path + f' proxy-generated error has security headers (got {status} {[k for k, _ in headers]})')
         boundary = 'vessel-release-limit'
         image = self.png + b'x' * (10 * 1024 * 1024 + 1 - len(self.png))
         body = f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="large.png"\r\nContent-Type: image/png\r\n\r\n'.encode() + image + f'\r\n--{boundary}--\r\n'.encode()

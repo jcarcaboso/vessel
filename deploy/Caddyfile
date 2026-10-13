@@ -3,4 +3,12 @@
     # Caddy's default untrusted-client policy replaces forwarded headers.
     # Do not add trusted_proxies without a separately secured upstream design.
     reverse_proxy web:8080
+    # Caddy's own errors (e.g. a malformed request body) never reach nginx's static policy.
+    handle_errors {
+        header X-Content-Type-Options nosniff
+        header X-Frame-Options DENY
+        header Referrer-Policy no-referrer
+        header Content-Security-Policy "default-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+        respond "{err.status_code} {err.status_text}" {err.status_code}
+    }
 }
