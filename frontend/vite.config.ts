@@ -10,10 +10,6 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), tailwindcss()],
     resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
-    // Keep the application chunk below the warning budget without eagerly bundling the lazy chart renderer.
-    build: { rolldownOptions: { output: { codeSplitting: { groups: [{ name: 'ui',
-      test: /[\\/]node_modules[\\/](?:@radix-ui[\\/]|radix-ui[\\/]|react[\\/]|react-dom[\\/]|scheduler[\\/]|lucide-react[\\/])/,
-    }] } } } },
     server: {
       port: 5180,
       strictPort: true,
