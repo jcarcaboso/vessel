@@ -33,6 +33,26 @@ PUT requires all three fields, with explicit null to unlink. Delete returns 204,
 
 The Graphite UI uses pencil actions on portfolio tiles and account rows/details. Dialogs explain retention versus permanent deletion, handle safe conflict errors, and preserve source identity. Existing account metadata may temporarily omit `isEnabled` during dev rollout; it is treated as enabled, while the new API always returns it.
 
+## October 13, 2026: membership implementation
+
+Portfolio creation optionally moves existing accounts in the same PostgreSQL transaction. The new authenticated `POST /api/accounts/portfolio` supports owner-scoped all-or-nothing assignment or null unassignment of 1–200 distinct accounts, including disabled records. It uses the existing management and sync row locks, validates every member before changes, bumps revisions only for changed assignments, and retains imported facts. No EF migration was added.
+
+`CreatePortfolioDialog` and `ManagePortfolioDialog` share a searchable, labelled account checklist. Tiles have Add accounts, focused on membership. New account and Lighter import share a New portfolio… destination/name control with retained confirmed creations across failed account requests and slow shell reloads. Accounts has visible-row selection and a bulk move bar; hidden/deleted selections are removed. Success and partial/uncertain failures use the common reload path. Account management now follows current portfolio options even while open.
+
+Managing both additions and removals still uses separate bulk calls after the existing rename/icon request. Each call is atomic; the entire dialog save is not. Both membership endpoints now accept complete per-account `expected` settings revisions. They validate the expectation list and compare every current revision after acquiring all row locks, before any mutation or portfolio creation. A mismatch returns 409 without partially changing membership or revisions. Omitted/null expectations retain unconditional API assignment semantics, but all existing-account membership UI flows use expectations. No read-then-unconditional-unlink remains.
+
+New portfolio and the Accounts bulk bar retain the revisions of selected rows across reloads. Manage portfolio retains displayed revisions for pending checklist edits. Conflicts show explicit messages, request a common shell reload, and discard stale membership selections rather than replay them. The dialogs refresh their account/portfolio lists. Manage also requires Reload accounts before enabling another save and warns that an earlier rename or separate membership request may already have succeeded.
+
+Verification uses synthetic in-memory/API fixtures and disposable PostgreSQL 18 containers. The original membership checks used loopback port 55521; the verification fixes ran against a new `postgres:18-alpine` container on loopback port 36661, stopped after the suite. Tests cover authentication, required nullable target, bounds/duplicates, disabled moves, no-op revisions, stale account PUT, unknown/foreign resource rejection, exact create-with-accounts totals, retention, transaction rollback after a parent save, and waiting for a sync row lock. New regression cases reproduce the two-tab A rev1 → B rev2 move followed by a rejected stale removal, validate complete expectations, and prove no partial bulk changes or rejected portfolio creation. Frontend tests exercise each dialog, failed creation/retry, live option/membership reconciliation, selection pruning, shell reloads, pending controls and strict API validation. The owner's live database and `.env` are untouched.
+
+### Membership checks
+
+- Frontend typecheck, zero-warning lint, all 966 tests (55 files), and production build pass. Membership and verification fixes add 52 frontend cases: 22 dialog/selection tests, 29 API-client cases and one shell reload/tile entry test. The fixes add 15 cases beyond the initial membership implementation.
+- Release backend build passes with zero warnings/errors. All 1,086 runnable tests pass, including all 77 PostgreSQL facts; two existing opt-in live-venue probes remain skipped. Membership and verification fixes add 47 backend cases: 24 unit, 15 API and eight PostgreSQL facts. The fixes add 21 cases beyond the initial membership implementation.
+- Native browser checks use synthetic fetch fixtures only. The checklist is bounded to a 240px scroll area; account-name and detail contrast exceed 7:1 across all ten built-in themes. The 390px-wide bulk bar with the inline portfolio name does not overflow the page. The production bundle loads without console errors and keeps the chart renderer deferred.
+- The attempted eager vendor split was reverted. `frontend/vite.config.ts` retains the existing bundling configuration and the production build emits the existing over-500 kB chunk warning. The warning is accepted for this membership change; no zero-warning production-build claim is made.
+- `git diff --check origin/main...HEAD` passes after removing the extra EOF blank line in `usePortfolioDestination.ts`.
+
 ## Verification
 
 ### October 12, 2026 workspace corrections

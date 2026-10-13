@@ -5,7 +5,15 @@ using Vessel.Application.Venues;
 
 namespace Vessel.Application.Workspace;
 
-public sealed record CreatePortfolioRequest(string Name, string? Icon = null);
+public sealed record AccountSettingsExpectation(
+    [property: JsonRequired] Guid AccountId,
+    [property: JsonRequired] long SettingsRevision);
+public sealed record CreatePortfolioRequest(string Name, string? Icon = null, IReadOnlyList<Guid>? AccountIds = null,
+    IReadOnlyList<AccountSettingsExpectation>? Expected = null);
+public sealed record MoveAccountsRequest(
+    [property: JsonRequired] IReadOnlyList<Guid>? AccountIds,
+    [property: JsonRequired] Guid? PortfolioId,
+    IReadOnlyList<AccountSettingsExpectation>? Expected = null);
 public sealed record CreateAccountRequest(Guid? PortfolioId, string Name, string VenueId, string? Address = null, string? ManualAccountValueUsd = null,
     string? SourceId = null);
 /// <summary>Renames a portfolio and, when <see cref="Icon"/> is present, changes its icon; an omitted icon is kept.</summary>

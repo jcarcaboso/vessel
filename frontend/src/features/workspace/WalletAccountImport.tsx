@@ -1,3 +1,5 @@
+import { PortfolioDestination } from './PortfolioDestination'
+import { usePortfolioDestination } from './usePortfolioDestination'
 import { useState, type FormEvent } from 'react'
 import type { AccountDiscovery, DiscoveredAccount } from '@/api/account-access'
 import { credentialFailureMessage, credentialTransportAllowed } from '@/api/account-access'
@@ -20,7 +22,7 @@ export function WalletAccountImport({ venueId, api, portfolios, accounts, onCrea
   const [discovery, setDiscovery] = useState<AccountDiscovery | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [names, setNames] = useState<Record<string, string>>({})
-  const [portfolioId, setPortfolioId] = useState('')
+  const destination = usePortfolioDestination(portfolios, api, onCreated)
   const [token, setToken] = useState('')
   const [pending, setPending] = useState(false)
   const [loadingNames, setLoadingNames] = useState(false)
@@ -73,13 +75,15 @@ export function WalletAccountImport({ venueId, api, portfolios, accounts, onCrea
     if (candidates.some(a => !names[a.sourceId]?.trim())) { setError('Name each selected account before importing.'); return }
     begin()
     try {
+      const target = await destination.resolve()
       for (const candidate of candidates) {
         let account: BrokerAccount
         try {
           account = await api.createAccount({ venueId, sourceId: candidate.sourceId, name: names[candidate.sourceId]!.trim(),
-            portfolioId: portfolios.some(p => p.id === portfolioId) ? portfolioId : null })
+            portfolioId: target.portfolioId })
           setCreated(previous => [...previous, account]); onCreated()
         } catch (cause) {
+          if (target.created) setError('The new portfolio was created and kept. It remains selected. Find wallet again before retrying imports; a duplicate portfolio will not be created.')
           setResults(previous => ({ ...previous, [candidate.sourceId]: { message: cause instanceof ApiError && cause.status === 409
             ? 'Already added. Close this dialog to manage or re-enable the existing account.'
             : 'Import not confirmed. Find wallet again before retrying; any existing account will be shown.' } }))
@@ -99,7 +103,8 @@ export function WalletAccountImport({ venueId, api, portfolios, accounts, onCrea
         setResults(previous => ({ ...previous, [candidate.sourceId]: { account, message } }))
       }
       setSelected([])
-    } finally { finish() }
+    } catch (cause) { setError(cause instanceof ApiError ? cause.message : 'Could not create the portfolio. No accounts were imported.') }
+    finally { finish() }
   }
   const importable = discovery?.accounts.filter(a => selected.includes(a.sourceId) && !added(a) && !results[a.sourceId]) ?? []
   return <div className="wallet-import" aria-busy={pending}>
@@ -148,11 +153,8 @@ export function WalletAccountImport({ venueId, api, portfolios, accounts, onCrea
       {discovery.notice && <p className="field-help">{discovery.notice}</p>}
       {discovery.accounts.some(a => a.collateralUsd != null || a.availableBalanceUsd != null) &&
         <p className="field-help">Venue-reported collateral and available balance in USD, not total equity. Balances are a snapshot from discovery.</p>}
-      {importable.length > 0 && <>
-        <label htmlFor="import-portfolio">Portfolio <span className="optional">optional · selected accounts</span></label>
-        <select id="import-portfolio" value={portfolioId} disabled={pending} onChange={event => setPortfolioId(event.target.value)}>
-          <option value="">No portfolio · All accounts only</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
+      {(importable.length > 0 || Object.values(results).some(result => !result.account)) && <>
+        <PortfolioDestination destination={destination} inputId="import-portfolio" label="Portfolio · optional · selected accounts" disabled={pending} />
       </>}
         {discovery.accounts.length > 0 && Object.keys(results).length === 0 && venues.can(venueId, 'readOnlyCredential') && <section className="credential-panel" aria-label="Optional order access">
           <h3>Venue names &amp; order access <span className="optional">optional</span></h3>
