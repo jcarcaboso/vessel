@@ -14,6 +14,21 @@ public sealed class ActivityService(IActivityStore store)
 
     public async Task<ActivityDto> GetAsync(Guid? accountId, CancellationToken ct)
     {
+        var summary = await ReadSummariesAsync(accountId, ct);
+        var budget = MaxResponseFills;
+        var bounded = summary.Operations.Take(MaxOperations).Select(o =>
+        {
+            var take = Math.Min(budget, Math.Min(o.Fills.Count, MaxFillsPerOperation));
+            budget -= take;
+            return o with { Fills = o.Fills.Take(take).ToList(), OmittedFillCount = o.Fills.Count - take };
+        }).ToList();
+        return new(bounded, summary.Operations.Count, summary.Facts.Fills.Count,
+            summary.Operations.Count - bounded.Count, summary.Coverage, ScopeNote);
+    }
+
+    // Overview needs all aggregate results, not the bounded activity display or constituent DTOs.
+    internal async Task<ActivitySummaries> ReadSummariesAsync(Guid? accountId, CancellationToken ct)
+    {
         if (accountId == Guid.Empty) throw new WorkspaceException(400, "Choose a valid account.");
         var facts = await store.ReadAsync(accountId, ct);
         var accounts = facts.Accounts.Where(a => a.IsEnabled && (accountId == null || a.Id == accountId)).ToDictionary(a => a.Id);
@@ -64,13 +79,9 @@ public sealed class ActivityService(IActivityStore store)
                 }
             }
         }
-        var budget = MaxResponseFills;
-        var bounded = operations.Take(MaxOperations).Select(o =>
-        {
-            var take = Math.Min(budget, Math.Min(o.Fills.Count, MaxFillsPerOperation));
-            budget -= take;
-            return o with { Fills = o.Fills.Take(take).ToList(), OmittedFillCount = o.Fills.Count - take };
-        }).ToList();
-        return new(bounded, operations.Count, fills.Count, operations.Count - bounded.Count, coverage, ScopeNote);
+        return new(operations, coverage, facts with { Accounts = accounts.Values.ToList(), Fills = fills });
     }
 }
+
+internal sealed record ActivitySummaries(IReadOnlyList<ActivityOperationDto> Operations,
+    IReadOnlyList<ActivityCoverageDto> Coverage, ActivityFacts Facts);

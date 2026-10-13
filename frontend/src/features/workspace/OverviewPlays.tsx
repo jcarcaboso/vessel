@@ -19,9 +19,10 @@ const ended = (play: PlaySummary) => play.status === 'closed' || play.status ===
 const matches = (play: PlaySummary, filter: Filter) => filter === 'all' ||
   (filter === 'progress' ? !ended(play) : ended(play) && !play.hasReview)
 
-export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpen }: {
+export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpen, scopeAccountIds }: {
   api: WorkspaceApi
   accounts: BrokerAccount[]
+  scopeAccountIds?: readonly string[]
   reloadGeneration: number
   onBrowse: () => void
   onOpen: (id: string, signal: AbortSignal) => Promise<void>
@@ -53,7 +54,7 @@ export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpe
     return () => request.abort()
   }, [api, reloadGeneration, retry])
   const loaded = result?.api === api && result.reloadGeneration === reloadGeneration && result.retry === retry
-  const plays = loaded ? result.plays ?? [] : []
+  const plays = (loaded ? result.plays ?? [] : []).filter(play => scopeAccountIds === undefined || scopeAccountIds.includes(play.accountId))
 
   async function open(id: string) {
     const signal = openRequest.current!.signal

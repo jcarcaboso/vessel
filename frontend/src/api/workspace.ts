@@ -1,3 +1,4 @@
+import { overviewSummaryPath, isOverviewSummary, type OverviewQuery, type OverviewSummaryDocument } from './overview-summary'
 import { isActivityDocument, type ActivityDocument } from './activity'
 import { SseOverflowError, SseParser } from './sse'
 import { ApiError } from './system'
@@ -229,6 +230,7 @@ export interface CreateAccount {
   manualAccountValueUsd?: string
 }
 export interface WorkspaceApi {
+  overviewSummary(query: OverviewQuery, signal?: AbortSignal): Promise<OverviewSummaryDocument>
   activity(accountId?: string, signal?: AbortSignal): Promise<ActivityDocument>
   review(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewDocument>
   overview(signal?: AbortSignal): Promise<Overview>
@@ -603,6 +605,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     activity: (id, signal) => request(`/api/activity${id !== undefined ? `?${new URLSearchParams({ accountId: resourceId(id) })}` : ''}`,
       (v): v is ActivityDocument => isActivityDocument(v, fill) && (id === undefined ||
         v.operations.every(op => op.accountId.toLowerCase() === id.toLowerCase()) && v.coverage.every(c => c.accountId.toLowerCase() === id.toLowerCase())), signal ? { signal } : {}),
+    overviewSummary: (query, signal) => request(overviewSummaryPath(query), (v): v is OverviewSummaryDocument => isOverviewSummary(v, query), signal ? { signal } : {}),
     overview: signal => request('/api/overview', overview, signal ? { signal } : {}),
     portfolios: signal => request('/api/portfolios', (v): v is Portfolio[] => Array.isArray(v) && v.every(portfolio), signal ? { signal } : {}),
     accounts: signal => request('/api/accounts', (v): v is BrokerAccount[] => Array.isArray(v) && v.every(account), signal ? { signal } : {}),

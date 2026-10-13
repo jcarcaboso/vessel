@@ -145,3 +145,40 @@ Use existing clean dependency direction, migrations and PostgreSQL owner constra
 Core tests must cover unauthorized calls, foreign resources, manual account creation, Hyperliquid validation, persisted snapshots and fill deduplication, failure preserving earlier data, portfolio coverage, multiple concurrent plays and explicit migration compatibility.
 
 Frontend default becomes Overview with navigation for Overview, Portfolios, Accounts, Activity and Settings. Play navigation is disabled/marked later; it must not mount the approved Play workspace yet. Use real core API data with honest empty/loading/error states. No invented chart/P&L on the overview; no dummy working buttons for deferred features. The approved Play component and prototype are retained for later integration.
+
+## October 13, 2026: scoped Overview summary
+
+Overview defaults to All accounts and By portfolio. Its scope selector offers every current portfolio, Unassigned when it has enabled accounts, and each enabled account. The metric tiles, Summary, Recent activity and saved Plays panel use that account set. Scope, grouping and the result period live in shell memory across navigation; a removed portfolio, removed/disabled account or empty Unassigned selection falls back to All on the common reload. A row's native button or row click selects its portfolio/account scope. The enabled-account panel remains below Summary, including Accounts navigation and the existing owner-wide Refresh all action.
+
+Authenticated `GET /api/overview/summary` accepts these optional query parameters:
+
+- `groupBy=portfolio|account`, default `portfolio`.
+- `period=7|30|90|all`, default `30`.
+- `scope=all|portfolio:<GUID>|unassigned|account:<GUID>`, default `all`.
+
+Invalid values return 400. Resource scopes require canonical GUID form and nonempty IDs. An unknown or foreign resource returns 404, without distinguishing those cases. An owned disabled account has an empty scope. The response and client requests use `no-store`; summary reads are outside market-data compression and authorization is never cached.
+
+`OverviewSummaryDto` returns `groupBy`, `period`, `scope`, request-time UTC `asOfUtc`, nullable `fromUtc`, `totals`, `rows`, `totalGroupCount`, `omittedGroupCount` and `scopeNote`. The response includes at most 200 rows. Totals and shares include all scoped enabled accounts, even when some rows are omitted. Portfolio rows exist only for groups with enabled members; Unassigned is null membership, not a stored portfolio. Rows sort by exact balance descending, nulls last, with name/ID tie-breakers. Group IDs double as scope values. Each row has `id`, `name`, nullable portfolio `icon` or account `venueId`, `totals` and nullable `shareOfBalance`.
+
+Scope and row totals contain:
+
+```text
+accountCount, openPositionCount, importedFillCount,
+balance, available, unrealizedPnl, realizedResult: {
+  amountUsd: string|null,
+  coverage: {
+    contributingAccountCount, totalAccountCount,
+    contributingOperationCount, excludedOperationCount,
+    reasons: [{ reason, count }]
+  }
+}
+shareOfBalance: { numerator: string, denominator: string }|null
+```
+
+Balance/availability reuse `WorkspaceService` account DTO calculations without changing their ledger definitions. Exact strings reach `Activity/ExactAmount` for cross-account addition, including results exceeding .NET decimal's range. Position count includes nonzero signed perpetual positions only. Unrealized P&L sums their reported values from latest retained snapshots, with snapshot-account coverage. An observed empty snapshot contributes known zero; a missing snapshot contributes nothing. Counts describe retained snapshots, not a live completeness claim.
+
+Realized result reuses Activity's complete internal operation summaries before its 500-operation display limit. Only known-net closed operations with actual `closedAtUtc` in the inclusive UTC window contribute; `all` still excludes future exits. Gross USDC fees are deducted once by the existing aggregator, and net-of-fee P&L is not charged again. Unknown net results and incomplete operations are excluded and counted. For incomplete operations without an exit time, their latest execution determines only whether to include an exclusion notice in this period, never a fabricated closing date or result. Coverage states contributing accounts, known closed operations, excluded operations, accounts without a known closed result, and retained-history/snapshot limitations. No known closed result is null, not a fabricated zero. No retrospective Play, initial risk, complete-history or funding-free P&L is inferred.
+
+Shares retain an exact numerator/denominator ratio, because division can recur. A missing balance or nonpositive denominator yields null. Percentages round to two places only for display using integer arithmetic; the theme-token bar clamps its visual width to 0–100%, without changing the ratio or balance. Unknown and partial financial values keep coverage visible. While a narrower request loads, its amounts stay unknown rather than briefly displaying All totals. Failures clear summary amounts and offer Retry summary. The common reload generation rereads Summary.
+
+Recent activity applies the scoped account set before its latest-five display limit and uses account-scoped HTTP reads for individual accounts. Portfolio/Unassigned filtering does not expand Activity's bounded response or retained import history. Saved Plays uses the same enabled-account set for rows and tab counts. No new persistence, EF migration, packages, credential handling or venue network reads are involved.

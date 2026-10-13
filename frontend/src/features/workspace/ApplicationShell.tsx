@@ -11,6 +11,10 @@ import { ActivityOperations } from './ActivityOperations'
 import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
 import { PortfolioIcon } from './PortfolioIcon'
+import type { OverviewQuery } from '@/api/overview-summary'
+import { OverviewScope } from './OverviewScope'
+import { overviewAccounts, resolveOverviewScope } from './overview-scope'
+import { OverviewSummary } from './OverviewSummary'
 import { OverviewPlays } from './OverviewPlays'
 import { ReviewPage } from '@/features/review/ReviewPage'
 import { AppearanceSettings, CurrentThemeName } from '@/features/settings/AppearanceSettings'
@@ -72,6 +76,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
   const [portfolioFilter, setPortfolioFilter] = useState('')
   const [accountFilters, setAccountFilters] = useState(emptyAccountFilters)
+  const [overviewQuery, setOverviewQuery] = useState<OverviewQuery>({ groupBy: 'portfolio', period: '30', scope: 'all' })
   const [activityFilters, setActivityFilters] = useState(emptyFilters)
   const [portfolioDialog, setPortfolioDialog] = useState(false)
   const [accountDialog, setAccountDialog] = useState(false)
@@ -99,7 +104,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
   useEffect(() => {
     const controller = new AbortController()
     let active = true
-    api.overview(controller.signal).then(next => { if (active) { setData(next); setLoadError(null); setLoaded({ api, key: reloadKey }) } })
+    api.overview(controller.signal).then(next => { if (active) { setData(next); setOverviewQuery(query => { const scope = resolveOverviewScope(query.scope, next.accounts, next.portfolios); return scope === query.scope ? query : { ...query, scope } }); setLoadError(null); setLoaded({ api, key: reloadKey }) } })
       .catch(cause => { if (active) { setLoadError(cause instanceof ApiError ? cause.message : 'The workspace could not be loaded.'); setLoaded({ api, key: reloadKey }) } })
     return () => { active = false; controller.abort() }
   }, [api, reloadKey])
@@ -259,16 +264,11 @@ function Shell({ system, disconnect, api }: ShellProps) {
         {page === 'review' && <ReviewPage api={api} reloadGeneration={reloadKey} onOpenPlay={viewPlay} />}
 
         {page === 'overview' && data && <>
-          <section className="workspace-stat-grid overview-metrics">
-            <div className="shell-panel metric"><span>Total balance</span><strong>{money(data.totals.totalBalanceUsd ?? null)}</strong><small>{data.totals.balanceAccountCount ?? 0} of {enabledAccounts.length} enabled accounts · {data.totals.balanceCoverage ?? 'unavailable'} · nominal USD</small></div>
-            <div className="shell-panel metric"><span>Available balance</span><strong>{money(data.totals.availableBalanceUsd ?? null)}</strong><small>{data.totals.availableBalanceAccountCount ?? 0} of {enabledAccounts.length} enabled accounts · {data.totals.availableBalanceCoverage ?? 'unavailable'} · wallet, reported margin or withdrawal</small></div>
-            <div className="shell-panel metric"><span>Enabled accounts</span><strong>{enabledAccounts.length}</strong><small>{accounts.length - enabledAccounts.length} disabled · {data.totals.portfolioCount} portfolios</small></div>
-            <div className="shell-panel metric"><span>Perpetual positions</span><strong>{data.totals.openPositionCount}</strong><small>From latest retained snapshots</small></div>
-            <div className="shell-panel metric"><span>Imported executions</span><strong>{data.totals.importedFillCount}</strong><small>Recorded facts, not inferred intent</small></div>
-          </section>
+          <OverviewScope scope={overviewQuery.scope} onScope={scope => setOverviewQuery(query => ({ ...query, scope }))} accounts={accounts} portfolios={portfolios} />
+          <OverviewSummary api={api} query={overviewQuery} onQuery={setOverviewQuery} reloadGeneration={reloadKey} fallback={data} accountCount={overviewAccounts(overviewQuery.scope, accounts).length} />
           {!accounts.length ? <section className="shell-panel workspace-start"><span className="start-icon"><Folder size={26} /></span><div className="eyebrow">SET UP YOUR DIARY</div><h2>Start with your accounts.</h2><p>Create a portfolio, then add a read-only exchange account or a manual record. Your trades and decisions will have a place to belong.</p><div className="start-steps"><span><i>1</i>Create a portfolio</span><span><i>2</i>Add an account</span><span><i>3</i>Review recent executions</span></div><Button onClick={() => portfolios.length ? setAccountDialog(true) : setPortfolioDialog(true)}>{portfolios.length ? 'Add your first account' : 'Create your first portfolio'}<ArrowRight size={15} /></Button></section> :
-            <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Your enabled accounts</h2><p>Disabled records stay in account management; their imported activity is hidden.</p></div><div className="panel-heading-actions">{refreshAllAction}<button className="text-action" onClick={() => navigate('accounts')}>View all<ArrowRight size={14} /></button></div></header>{enabledAccounts.length ? <AccountRows accounts={enabledAccounts.slice(0, 4)} portfolioNames={portfolioNames} refreshing={refreshing} onDetail={viewAccount} onSync={id => { void sync(id) }} onManage={manageAccount} /> : <div className="workspace-empty small-empty"><strong>All accounts are disabled</strong><p>Open All accounts to enable a record again. Retained imports have not been deleted.</p><Button variant="outline" onClick={() => navigate('accounts')}>Manage accounts</Button></div>}</section>}
-          <div className="overview-bottom-grid"><section className="shell-panel"><header className="shell-panel-heading"><div><h2>Recent activity</h2><p>Aggregated position operations</p></div><button className="text-action" onClick={() => navigate('activity')}>View activity<ArrowRight size={14} /></button></header><ActivityOperations api={api} accounts={accounts} compact reloadGeneration={reloadKey} /></section><OverviewPlays api={api} accounts={accounts} reloadGeneration={reloadKey} onBrowse={browsePlays} onOpen={viewPlay} /></div>
+            <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Your enabled accounts</h2><p>Disabled records stay in account management; their imported activity is hidden.</p></div><div className="panel-heading-actions">{refreshAllAction}<button className="text-action" onClick={() => navigate('accounts')}>View all<ArrowRight size={14} /></button></div></header>{enabledAccounts.length ? <AccountRows accounts={overviewAccounts(overviewQuery.scope, accounts).slice(0, 4)} portfolioNames={portfolioNames} refreshing={refreshing} onDetail={viewAccount} onSync={id => { void sync(id) }} onManage={manageAccount} /> : <div className="workspace-empty small-empty"><strong>All accounts are disabled</strong><p>Open All accounts to enable a record again. Retained imports have not been deleted.</p><Button variant="outline" onClick={() => navigate('accounts')}>Manage accounts</Button></div>}</section>}
+          <div className="overview-bottom-grid"><section className="shell-panel"><header className="shell-panel-heading"><div><h2>Recent activity</h2><p>Aggregated position operations</p></div><button className="text-action" onClick={() => navigate('activity')}>View activity<ArrowRight size={14} /></button></header><ActivityOperations api={api} accounts={accounts} scopeAccountIds={overviewAccounts(overviewQuery.scope, accounts).map(a => a.id)} accountId={overviewQuery.scope.startsWith('account:') ? overviewQuery.scope.slice(8) : undefined} compact reloadGeneration={reloadKey} /></section><OverviewPlays api={api} accounts={accounts} scopeAccountIds={overviewAccounts(overviewQuery.scope, accounts).map(a => a.id)} reloadGeneration={reloadKey} onBrowse={browsePlays} onOpen={viewPlay} /></div>
           <p className="workspace-scope-note">{data.scopeNote}</p>
         </>}
 
