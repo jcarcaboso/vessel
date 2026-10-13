@@ -54,7 +54,7 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
       {filters.period === 'custom' && <><label>From date<input type="date" value={filters.from} onChange={e => update('from', e.target.value)} /></label><label>Through date<input type="date" value={filters.to} min={filters.from || undefined} onChange={e => update('to', e.target.value)} /></label></>}
       <Button variant="outline" size="sm" onClick={() => setFilters(emptyFilters)}>Reset filters</Button>
     </fieldset>}
-    <p className="workspace-scope-note in-panel" role="status">Showing {visible.length} of {loaded.length} loaded operations{document.omittedOperationCount > 0 ? ` · ${document.omittedOperationCount} older operations omitted` : ''}. {document.retainedFillCount} retained fills evaluated.{showFilters && ' Dates filter the latest constituent fill, in UTC.'}</p>
+    <p className="workspace-scope-note in-panel" role="status">Showing {visible.length} of {loaded.length} loaded operations{document.omittedOperationCount > 0 ? ` · ${document.omittedOperationCount} older operations omitted` : ''}.{showFilters && ' Dates filter the latest execution, in UTC.'}</p>
     <OperationsTable operations={visible} accounts={accounts} compact={compact} />
     {!compact && <><details className="operation-scope"><summary>Scope and coverage</summary><p className="workspace-scope-note">{document.scopeNote}</p>{document.coverage.filter(c => enabled.some(a => a.id === c.accountId)).map((c, index) => <p className="workspace-scope-note" key={index}><strong>{accounts.find(a => a.id === c.accountId)?.name}{c.contractId ? ` · ${c.contractId}` : ''}</strong>: {c.notice}</p>)}</details></>}
   </div>

@@ -17,4 +17,3 @@
 .operation-filters select:focus-visible, .operation-filters input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .operation-scope, .operation-originals { padding: 16px; color: var(--muted-foreground); font-size: 12px; }
 .operation-scope summary, .operation-originals summary { cursor: pointer; color: var(--foreground); }
-.execution-flip-directions { display: inline-flex; gap: 4px; align-items: center; }
