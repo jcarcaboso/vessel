@@ -239,7 +239,8 @@ export interface WorkspaceApi {
    * aborts (resolves) or the connection fails (rejects with ApiError). Invalid events are ignored.
    */
   marketStream(id: string, query: MarketStreamQuery, signal: AbortSignal, onEvent: (event: MarketStreamEvent) => void): Promise<void>
-  createPortfolio(name: string, icon?: string): Promise<Portfolio>
+  createPortfolio(name: string, icon?: string, accountIds?: string[]): Promise<Portfolio>
+  moveAccounts(accountIds: string[], portfolioId: string | null): Promise<BrokerAccount[]>
   createAccount(account: CreateAccount): Promise<BrokerAccount>
   discoverAccounts(venueId: string, address: string, signal?: AbortSignal, token?: string): Promise<AccountDiscovery>
   accountCredential(id: string, signal?: AbortSignal): Promise<AccountCredential>
@@ -617,7 +618,14 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
         signal ? { signal } : {}, 25_000, 'Venue market statistics are unavailable.')
     },
     marketStream,
-    createPortfolio: (name, icon) => request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name, icon }) }),
+    createPortfolio: (name, icon, accountIds) => request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name, icon, accountIds }) }),
+    moveAccounts: (accountIds, portfolioId) => {
+      if (!accountIds.length || accountIds.length > 200 || !accountIds.every(guid) || new Set(accountIds).size !== accountIds.length ||
+          portfolioId !== null && !guid(portfolioId)) return Promise.reject(new ApiError('invalid-response', 'Choose between 1 and 200 distinct accounts and a valid portfolio.'))
+      return request('/api/accounts/portfolio', (v): v is BrokerAccount[] => Array.isArray(v) && v.length === accountIds.length &&
+        v.every(a => account(a) && accountIds.includes(a.id) && a.portfolioId === portfolioId && count(a.settingsRevision) && a.settingsRevision! > 0) &&
+        new Set(v.map(a => a.id)).size === v.length, { method: 'POST', body: JSON.stringify({ accountIds, portfolioId }) })
+    },
     createAccount: body => request('/api/accounts', account, { method: 'POST', body: JSON.stringify(body) }),
     discoverAccounts: (venueId, address, signal, token) => {
       if (!/^[a-z][a-z\d-]{0,63}$/.test(venueId) || !/^0x[\da-f]{40}$/i.test(address)) {

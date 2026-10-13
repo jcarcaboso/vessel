@@ -47,6 +47,8 @@ public static class WorkspaceEndpoints
             await service.DeletePortfolioAsync(id, ct);
             return Results.NoContent();
         });
+        api.MapPost("/accounts/portfolio", async (MoveAccountsRequest request, WorkspaceService service, CancellationToken ct) =>
+            Results.Ok(await service.MoveAccountsAsync(request, ct)));
         api.MapPut("/accounts/{id:guid}", async (Guid id, UpdateAccountRequest request, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.UpdateAccountAsync(id, request, ct)));
         api.MapDelete("/accounts/{id:guid}", async (Guid id, WorkspaceService service, CancellationToken ct) =>

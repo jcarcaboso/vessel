@@ -75,6 +75,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
   const [activityFilters, setActivityFilters] = useState(emptyFilters)
   const [portfolioDialog, setPortfolioDialog] = useState(false)
   const [accountDialog, setAccountDialog] = useState(false)
+  const [focusPortfolioAccounts, setFocusPortfolioAccounts] = useState(false)
   const [managedPortfolioId, setManagedPortfolioId] = useState<string | null>(null)
   const [managedAccountId, setManagedAccountId] = useState<string | null>(null)
   const setNotice = useCallback((message: string) => { notify({ tone: 'success', message }) }, [notify])
@@ -275,12 +276,13 @@ function Shell({ system, disconnect, api }: ShellProps) {
           {!portfolios.length ? <div className="shell-panel workspace-empty"><Folder size={30} /><strong>No portfolios yet</strong><p>Group accounts by purpose, such as swing or intraday trading.</p><Button onClick={() => setPortfolioDialog(true)}>Create a portfolio</Button></div> :
             <div className="portfolio-grid">{portfolios.map(p => <article className="shell-panel portfolio-tile" key={p.id}>
               <button className="portfolio-open" aria-label={`Open ${p.name}`} onClick={() => { setPortfolioFilter(p.id); navigate('accounts') }}><span className="portfolio-icon"><PortfolioIcon icon={p.icon} /></span><h2>{p.name}</h2><p>{p.accountCount} {p.accountCount === 1 ? 'account record' : 'account records'}</p><strong>{money(p.balanceUsd === undefined ? p.totalValueUsd : p.balanceUsd)}</strong><small>{(p.balanceCoverage ?? p.valueCoverage) === 'complete' ? 'All enabled account balances recorded' : (p.balanceCoverage ?? p.valueCoverage) === 'partial' ? 'Partial balance · some enabled accounts unavailable' : 'Enabled account balances unavailable'}</small><small>Perps/manual value {money(p.totalValueUsd)}</small><small>Available balance {money(p.availableBalanceUsd ?? null)} · {p.availableBalanceAccountCount ?? 0} of {p.enabledAccountCount ?? 0} enabled · {p.availableBalanceCoverage ?? 'unavailable'}</small></button>
-              <button className="icon-button portfolio-manage" aria-label={`Manage portfolio ${p.name}`} title="Rename, change icon or delete portfolio" onClick={() => setManagedPortfolioId(p.id)}><Pencil size={14} /></button>
+              <button className="icon-button portfolio-manage" aria-label={`Manage portfolio ${p.name}`} title="Rename, change icon, manage accounts or delete portfolio" onClick={() => { setFocusPortfolioAccounts(false); setManagedPortfolioId(p.id) }}><Pencil size={14} /></button>
+              <Button variant="outline" size="sm" aria-label={`Add accounts to ${p.name}`} onClick={() => { setFocusPortfolioAccounts(true); setManagedPortfolioId(p.id) }}>Add accounts</Button>
             </article>)}</div>}
         </section>}
 
         {page === 'accounts' && data && (selectedAccount ? <AccountDetail key={selectedAccount.id} account={selectedAccount} api={api} refreshing={refreshing === selectedAccount.id} busy={refreshing !== null} reloadGeneration={reloadKey} onSync={id => { void sync(id) }} onManage={() => manageAccount(selectedAccount)} onBack={() => { setSelectedAccountId(null); window.scrollTo({ top: 0, left: 0, behavior: 'auto' }) }} /> :
-          <AccountsPanel filters={accountFilters} onFiltersChange={setAccountFilters} accounts={accounts} portfolios={portfolios} portfolioFilter={activePortfolioFilter} onPortfolioFilter={setPortfolioFilter}
+          <AccountsPanel api={api} onChanged={managementChanged} onReload={reload} filters={accountFilters} onFiltersChange={setAccountFilters} accounts={accounts} portfolios={portfolios} portfolioFilter={activePortfolioFilter} onPortfolioFilter={setPortfolioFilter}
             refreshing={refreshing} refreshAction={refreshAllAction} onDetail={viewAccount} onSync={id => { void sync(id) }} onManage={manageAccount} onAdd={() => setAccountDialog(true)} />)}
 
 
@@ -294,9 +296,9 @@ function Shell({ system, disconnect, api }: ShellProps) {
 
       </main>
     </div>
-    <CreatePortfolioDialog open={portfolioDialog} onOpenChange={setPortfolioDialog} api={api} onCreated={created} />
+    <CreatePortfolioDialog open={portfolioDialog} onOpenChange={setPortfolioDialog} api={api} accounts={accounts} portfolios={portfolios} onCreated={created} />
     <CreateAccountDialog open={accountDialog} onOpenChange={setAccountDialog} api={api} portfolios={portfolios} accounts={accounts} onCreated={reload} />
-    {managedPortfolio && <ManagePortfolioDialog key={managedPortfolio.id} portfolio={managedPortfolio} api={api} onClose={() => setManagedPortfolioId(null)} onChanged={managementChanged} />}
+    {managedPortfolio && <ManagePortfolioDialog key={managedPortfolio.id} portfolio={managedPortfolio} accounts={accounts} portfolios={portfolios} focusAccounts={focusPortfolioAccounts} onStale={reload} api={api} onClose={() => setManagedPortfolioId(null)} onChanged={managementChanged} />}
     {managedAccount && <ManageAccountDialog key={managedAccount.id} account={managedAccount} portfolios={portfolios} api={api} onClose={() => setManagedAccountId(null)} onChanged={managementChanged} onStale={reload} />}
   </div>
 }

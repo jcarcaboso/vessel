@@ -475,3 +475,41 @@ describe('candle cache API boundaries', () => {
     expect(cache.entries.size).toBe(0)
   })
 })
+
+describe('Portfolio membership API', () => {
+  it('includes optional account IDs in portfolio creation', async () => {
+    const fetch = response(portfolioFixture)
+    await createWorkspaceApi('token').createPortfolio('Together', 'anchor', [accountFixture.id])
+    expect(fetch.mock.calls[0]![0]).toBe('/api/portfolios')
+    expect(JSON.parse(fetch.mock.calls[0]![1].body as string)).toEqual({ name: 'Together', icon: 'anchor', accountIds: [accountFixture.id] })
+  })
+  it.each([portfolioFixture.id, null])('posts an exact nullable destination %s and validates the returned accounts', async portfolioId => {
+    const updated = { ...accountFixture, portfolioId, settingsRevision: 2 }
+    const fetch = response([updated])
+    expect(await createWorkspaceApi('token').moveAccounts([accountFixture.id], portfolioId)).toEqual([updated])
+    expect(fetch.mock.calls[0]![0]).toBe('/api/accounts/portfolio')
+    expect(fetch.mock.calls[0]![1].method).toBe('POST')
+    expect(JSON.parse(fetch.mock.calls[0]![1].body as string)).toEqual({ accountIds: [accountFixture.id], portfolioId })
+    expect(fetch.mock.calls[0]![1].cache).toBe('no-store')
+  })
+  it.each([
+    [], [accountFixture.id, accountFixture.id], ['not-a-guid'], Array.from({ length: 201 }, (_, index) => `aaaaaaaa-bbbb-cccc-dddd-${String(index).padStart(12, '0')}`),
+  ].map(ids => ({ ids })))('rejects invalid account lists before sending $ids', async ({ ids }) => {
+    const fetch = response([])
+    await expect(createWorkspaceApi('token').moveAccounts(ids, null)).rejects.toMatchObject({ kind: 'invalid-response' })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+  it('rejects an invalid target before sending', async () => {
+    const fetch = response([])
+    await expect(createWorkspaceApi('token').moveAccounts([accountFixture.id], 'invalid')).rejects.toMatchObject({ kind: 'invalid-response' })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+  it.each([
+    null, {}, [], [accountFixture, accountFixture], [{ ...accountFixture, id: portfolioFixture.id }],
+    [{ ...accountFixture, portfolioId: null }], [{ ...accountFixture, settingsRevision: undefined }],
+    [{ ...accountFixture, settingsRevision: 0 }], [{ ...accountFixture, accountValueUsd: 100 }],
+  ].map(value => ({ value })))('rejects incomplete, unexpected or malformed move responses $value', async ({ value }) => {
+    response(value)
+    await expect(createWorkspaceApi('token').moveAccounts([accountFixture.id], portfolioFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+})

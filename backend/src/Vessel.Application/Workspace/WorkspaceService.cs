@@ -27,9 +27,54 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     {
         ValidateName(request.Name);
         ValidateIcon(request.Icon);
-        var portfolio = new Portfolio(Guid.NewGuid(), owner.OwnerId, request.Name, request.Icon ?? PortfolioIcons.Default);
-        await store.AddPortfolioAsync(portfolio, ct);
-        return new(portfolio.Id, portfolio.Name, 0, null, "unavailable", Icon: portfolio.Icon);
+        if (request.AccountIds is not null) ValidateAccountIds(request.AccountIds);
+        return await store.WithManagementLockAsync(async () =>
+        {
+            var accounts = await LockAccounts(request.AccountIds ?? [], ct);
+            var portfolio = new Portfolio(Guid.NewGuid(), owner.OwnerId, request.Name, request.Icon ?? PortfolioIcons.Default);
+            await store.AddPortfolioAsync(portfolio, ct);
+            MoveAccounts(accounts, portfolio.Id);
+            await store.SaveAsync(ct);
+            return await PortfolioAsync(portfolio.Id, ct);
+        }, ct);
+    }
+
+    private static void ValidateAccountIds(IReadOnlyList<Guid>? ids)
+    {
+        if (ids is null || ids.Count is 0 or > 200 || ids.Distinct().Count() != ids.Count)
+            throw new WorkspaceException(400, "Choose between 1 and 200 distinct accounts.");
+    }
+
+    private async Task<List<Account>> LockAccounts(IReadOnlyList<Guid> ids, CancellationToken ct)
+    {
+        var accounts = new List<Account>();
+        // Take every row lock before changing settings; the management transaction holds them until commit.
+        foreach (var id in ids.Order())
+            accounts.Add(await store.WithAccountLockAsync(id, account => Task.FromResult(account), ct));
+        return accounts;
+    }
+
+    private static void MoveAccounts(IEnumerable<Account> accounts, Guid? portfolioId)
+    {
+        foreach (var account in accounts)
+            if (account.PortfolioId != portfolioId)
+                account.UpdateSettings(account.Name, portfolioId, account.IsEnabled);
+    }
+
+    public async Task<IReadOnlyList<AccountDto>> MoveAccountsAsync(MoveAccountsRequest request, CancellationToken ct)
+    {
+        ValidateAccountIds(request.AccountIds);
+        return await store.WithManagementLockAsync(async () =>
+        {
+            await ValidatePortfolio(request.PortfolioId, ct);
+            var accounts = await LockAccounts(request.AccountIds!, ct);
+            MoveAccounts(accounts, request.PortfolioId);
+            await store.SaveAsync(ct);
+            var result = new List<AccountDto>();
+            foreach (var account in accounts)
+                result.Add(ToDto(account, await store.SnapshotAsync(account.Id, ct)));
+            return result;
+        }, ct);
     }
 
     public async Task<AccountDto> CreateAccountAsync(CreateAccountRequest request, CancellationToken ct)

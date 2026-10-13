@@ -19,6 +19,7 @@ function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     overview: vi.fn().mockResolvedValue(emptyOverview),
     portfolios: vi.fn().mockResolvedValue([]), accounts: vi.fn().mockResolvedValue([]),
     account: vi.fn().mockResolvedValue(accountFixture),
+    moveAccounts: vi.fn().mockResolvedValue([accountFixture]),
     createPortfolio: vi.fn().mockResolvedValue(portfolioFixture), createAccount: vi.fn().mockResolvedValue(accountFixture),
     updatePortfolio: vi.fn().mockResolvedValue(portfolioFixture), deletePortfolio: vi.fn().mockResolvedValue(undefined),
     updateAccount: vi.fn().mockResolvedValue(accountFixture), deleteAccount: vi.fn().mockResolvedValue(undefined),
@@ -793,4 +794,40 @@ describe('Main application shell', () => {
     expect(await screen.findByText('Fresh-contract')).toBeInTheDocument()
     expect(client.snapshot).toHaveBeenCalledTimes(2)
   })
+  it('opens membership directly from an empty tile and reloads counts after a bulk move', async () => {
+    const second = { ...portfolioFixture, id: '22222222-3333-4444-5555-666666666666', name: 'Second', accountCount: 0, balanceUsd: null }
+    let current: Overview = { ...overviewFixture, portfolios: [portfolioFixture, second] }
+    const client = api({
+      overview: vi.fn().mockImplementation(() => Promise.resolve(current)),
+      moveAccounts: vi.fn().mockImplementation((ids, portfolioId) => {
+        const moved = current.accounts.map(account => ids.includes(account.id) ? { ...account, portfolioId, settingsRevision: account.settingsRevision! + 1 } : account)
+        current = { ...current, accounts: moved, portfolios: current.portfolios.map(p => ({ ...p,
+          accountCount: moved.filter(a => a.portfolioId === p.id).length,
+          balanceUsd: moved.some(a => a.portfolioId === p.id) ? '1250.123456' : null,
+        })) }
+        return Promise.resolve(moved.filter(a => ids.includes(a.id)))
+      }),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await screen.findByRole('button', { name: 'View Main account' })
+    await userEvent.click(screen.getByRole('link', { name: 'Portfolios' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Add accounts to Second' }))
+    expect(screen.getByRole('textbox', { name: 'Search portfolio accounts' })).toHaveFocus()
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Accounts' }))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Select Main account' }))
+    await userEvent.selectOptions(screen.getByLabelText('Move to'), second.id)
+    await userEvent.click(screen.getByRole('button', { name: 'Move' }))
+    await waitFor(() => expect(client.overview).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('1 account moved to the portfolio.')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('link', { name: 'Portfolios' }))
+    expect(screen.getByRole('button', { name: 'Open Second' })).toHaveTextContent('1 account record')
+    expect(screen.getByRole('button', { name: 'Open Second' })).toHaveTextContent('$1,250.12')
+    expect(screen.getByRole('button', { name: `Open ${portfolioFixture.name}` })).toHaveTextContent('0 account records')
+    await userEvent.click(screen.getByRole('button', { name: 'Open Second' }))
+    expect(screen.getByRole('combobox', { name: 'Filter by portfolio' })).toHaveValue(second.id)
+    await userEvent.click(screen.getByRole('button', { name: 'Manage Main account' }))
+    expect(screen.getByLabelText('Portfolio')).toHaveValue(second.id)
+  })
+
 })

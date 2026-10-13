@@ -9,6 +9,10 @@ export default defineConfig(({ mode }) => {
   const target = loadEnv(mode, process.cwd(), '').VESSEL_API_TARGET ?? 'http://127.0.0.1:5080'
   return {
     plugins: [react(), tailwindcss()],
+    // Split eager dependencies without pulling the lazy chart renderer into the shell.
+    build: { rolldownOptions: { output: { codeSplitting: { groups: [
+      { name: 'vendor', test: /node_modules[\\/]/, tags: ['$initial'] },
+    ] } } } },
     resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
     server: {
       port: 5180,

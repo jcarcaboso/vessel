@@ -1,0 +1,20 @@
+import { Input } from '@/components/ui/input'
+import type { usePortfolioDestination } from './usePortfolioDestination'
+
+const newPortfolio = 'new-portfolio'
+
+export function PortfolioDestination({ destination, inputId, label = 'Portfolio', disabled }: {
+  destination: ReturnType<typeof usePortfolioDestination>; inputId: string; label?: string; disabled: boolean
+}) {
+  return <>
+    <label htmlFor={inputId}>{label}</label><select id={inputId} value={destination.id} disabled={disabled}
+      onChange={event => destination.setId(event.target.value)}>
+      <option value="">No portfolio · All accounts only</option>{destination.options.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+      {destination.id && destination.id !== newPortfolio && !destination.options.some(p => p.id === destination.id) &&
+        <option value={destination.id} disabled>Portfolio no longer available</option>}
+      <option value={newPortfolio}>New portfolio…</option>
+    </select>
+    {destination.id === newPortfolio && <><label htmlFor={`${inputId}-name`}>New portfolio name</label>
+      <Input id={`${inputId}-name`} value={destination.name} onChange={event => destination.setName(event.target.value)} maxLength={200} disabled={disabled} /></>}
+  </>
+}

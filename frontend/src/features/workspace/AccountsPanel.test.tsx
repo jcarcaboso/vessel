@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from '@/test/render'
 import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
+import { createWorkspaceApi } from '@/api/workspace'
 import { AccountsPanel } from './AccountsPanel'
 import { emptyAccountFilters } from './account-filters'
 
@@ -18,7 +19,7 @@ const accounts = [
 function Harness() {
   const [portfolio, setPortfolio] = useState('')
   const [filters, setFilters] = useState(emptyAccountFilters)
-  return <AccountsPanel accounts={accounts} portfolios={[portfolioFixture]} portfolioFilter={portfolio} onPortfolioFilter={setPortfolio}
+  return <AccountsPanel api={createWorkspaceApi('test-only-token')} onChanged={vi.fn()} onReload={vi.fn()} accounts={accounts} portfolios={[portfolioFixture]} portfolioFilter={portfolio} onPortfolioFilter={setPortfolio}
     filters={filters} onFiltersChange={setFilters}
     refreshing={null} refreshAction={null} onDetail={vi.fn()} onSync={vi.fn()} onManage={vi.fn()} onAdd={vi.fn()} />
 }

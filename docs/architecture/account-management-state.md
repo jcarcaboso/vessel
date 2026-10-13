@@ -33,6 +33,23 @@ PUT requires all three fields, with explicit null to unlink. Delete returns 204,
 
 The Graphite UI uses pencil actions on portfolio tiles and account rows/details. Dialogs explain retention versus permanent deletion, handle safe conflict errors, and preserve source identity. Existing account metadata may temporarily omit `isEnabled` during dev rollout; it is treated as enabled, while the new API always returns it.
 
+## October 13, 2026: membership implementation
+
+Portfolio creation optionally moves existing accounts in the same PostgreSQL transaction. The new authenticated `POST /api/accounts/portfolio` supports owner-scoped all-or-nothing assignment or null unassignment of 1–200 distinct accounts, including disabled records. It uses the existing management and sync row locks, validates every member before changes, bumps revisions only for changed assignments, and retains imported facts. No EF migration was added.
+
+`CreatePortfolioDialog` and `ManagePortfolioDialog` share a searchable, labelled account checklist. Tiles have Add accounts, focused on membership. New account and Lighter import share a New portfolio… destination/name control with retained confirmed creations across failed account requests and slow shell reloads. Accounts has visible-row selection and a bulk move bar; hidden/deleted selections are removed. Success and partial/uncertain failures use the common reload path. Account management now follows current portfolio options even while open.
+
+Managing both additions and removals still uses the requested separate bulk calls, after the existing rename/icon request. Each call is atomic; the entire dialog save is not. An intermediate failure reports possibly saved changes and requires rereading membership before retry. Unlinking rereads current accounts so a member already moved to a different portfolio is not deliberately unlinked from there; no membership-version precondition is claimed for the bulk endpoint.
+
+Verification uses synthetic in-memory/API fixtures and a disposable PostgreSQL 18 container on loopback port 55521. Tests cover authentication, required nullable target, bounds/duplicates, disabled moves, no-op revisions, stale account PUT, unknown/foreign resource rejection, exact create-with-accounts totals, retention, transaction rollback after a parent save, and waiting for a sync row lock. Frontend tests exercise each dialog, failed creation/retry, live option/membership reconciliation, selection pruning, shell reloads, pending controls and strict API validation. The owner's live database and `.env` are untouched.
+
+### Membership checks
+
+- Frontend typecheck, zero-warning lint, all 951 tests (55 files), and production build pass. The membership work adds 37 frontend cases: 19 dialog/selection tests, 17 API-client cases and one shell reload/tile entry test.
+- Release backend build passes with zero warnings/errors. All 1,065 runnable tests pass, including all 75 PostgreSQL facts; two existing opt-in live-venue probes remain skipped. Membership adds 26 backend cases: 12 unit, eight API and six PostgreSQL facts.
+- Native browser checks use synthetic fetch fixtures only. The checklist is bounded to a 240px scroll area; account-name and detail contrast exceed 7:1 across all ten built-in themes. The 390px-wide bulk bar with the inline portfolio name does not overflow the page. The production bundle loads without console errors and keeps the chart renderer deferred.
+- `frontend/vite.config.ts` now separates eager vendor modules from the app shell to satisfy the requested zero-warning production build. The previous main chunk exceeded Vite's 500kB warning limit. The limit is unchanged; the lazy chart chunk is not included in the eager vendor group.
+
 ## Verification
 
 ### October 12, 2026 workspace corrections

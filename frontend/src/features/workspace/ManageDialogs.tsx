@@ -7,14 +7,33 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Trash2 } from 'lucide-react'
 import { useVenues } from '@/api/venues'
 import { AccountCredential } from './AccountCredential'
+import { PortfolioAccounts } from './PortfolioAccounts'
 import { PortfolioIconPicker } from './PortfolioIcon'
 import { defaultPortfolioIcon, type PortfolioIconKey } from './portfolio-icons'
 
-const failure = (cause: unknown) => cause instanceof ApiError ? cause.message : 'The change could not be completed. Your stored records have not been replaced.'
+const noAccounts: BrokerAccount[] = []
+const noPortfolios: Portfolio[] = []
 
-export function ManagePortfolioDialog({ portfolio, api, onClose, onChanged }: {
-  portfolio: Portfolio; api: WorkspaceApi; onClose: () => void; onChanged: (message: string) => void
+const failure = (cause: unknown) => cause instanceof ApiError ? cause.message : 'The change could not be confirmed. Reload current settings before retrying.'
+
+export function ManagePortfolioDialog({ portfolio, accounts = noAccounts, portfolios = noPortfolios, focusAccounts = false, api, onClose, onChanged, onStale }: {
+  portfolio: Portfolio; accounts?: BrokerAccount[]; portfolios?: Portfolio[]; focusAccounts?: boolean; api: WorkspaceApi
+  onClose: () => void; onChanged: (message: string) => void; onStale?: () => void
 }) {
+  const [baseline, setBaseline] = useState(accounts.filter(a => a.portfolioId === portfolio.id).map(a => a.id))
+  const [selected, setSelected] = useState(baseline)
+  const [needsReload, setNeedsReload] = useState(false)
+  const [reloaded, setReloaded] = useState<{ source: BrokerAccount[]; portfolioSource: Portfolio[]; accounts: BrokerAccount[]; portfolios: Portfolio[] } | null>(null)
+  const currentAccounts = reloaded?.source === accounts ? reloaded.accounts : accounts
+  const currentPortfolios = reloaded?.portfolioSource === portfolios ? reloaded.portfolios : portfolios
+  const [membershipSource, setMembershipSource] = useState(currentAccounts)
+  if (membershipSource !== currentAccounts) {
+    const added = selected.filter(id => !baseline.includes(id) && currentAccounts.some(a => a.id === id))
+    const removed = baseline.filter(id => !selected.includes(id))
+    const members = currentAccounts.filter(a => a.portfolioId === portfolio.id).map(a => a.id)
+    setMembershipSource(currentAccounts); setBaseline(members)
+    setSelected([...new Set([...members.filter(id => !removed.includes(id)), ...added])])
+  }
   const [name, setName] = useState(portfolio.name)
   // Undefined until the owner picks one, so a rename never overwrites a stored icon this browser does not know.
   const [icon, setIcon] = useState<PortfolioIconKey>()
@@ -24,9 +43,32 @@ export function ManagePortfolioDialog({ portfolio, api, onClose, onChanged }: {
   async function save(event: FormEvent) {
     event.preventDefault(); setError(null)
     if (!name.trim()) { setError('Give the portfolio a name.'); return }
+    const added = selected.filter(id => !baseline.includes(id) && currentAccounts.some(a => a.id === id))
+    const removed = baseline.filter(id => !selected.includes(id))
+    if (added.length > 200 || removed.length > 200) { setError('Add or remove up to 200 accounts at a time.'); return }
     setPending(true)
     try {
-      await api.updatePortfolio(portfolio.id, { name: name.trim(), ...(icon && { icon }) }); onChanged('Portfolio updated.'); onClose()
+      await api.updatePortfolio(portfolio.id, { name: name.trim(), ...(icon && { icon }) })
+      if (added.length) await api.moveAccounts(added, portfolio.id)
+      if (removed.length) {
+        // Do not unlink a member that another tab has already moved elsewhere.
+        const latest = await api.accounts()
+        const stillHere = removed.filter(id => latest.some(a => a.id === id && a.portfolioId === portfolio.id))
+        if (stillHere.length) await api.moveAccounts(stillHere, null)
+      }
+      onChanged('Portfolio updated.'); onClose()
+    } catch (cause) {
+      setError('Some changes may have saved. Reload accounts before retrying. ' + failure(cause)); setNeedsReload(true); onStale?.()
+    }
+    finally { setPending(false) }
+  }
+  async function reloadAccounts() {
+    setPending(true); setError(null)
+    try {
+      const [latestAccounts, latestPortfolios] = await Promise.all([api.accounts(), api.portfolios()])
+      const members = latestAccounts.filter(a => a.portfolioId === portfolio.id).map(a => a.id)
+      setReloaded({ source: accounts, portfolioSource: portfolios, accounts: latestAccounts, portfolios: latestPortfolios })
+      setBaseline(members); setSelected(members); setNeedsReload(false); onStale?.()
     } catch (cause) { setError(failure(cause)) }
     finally { setPending(false) }
   }
@@ -42,15 +84,18 @@ export function ManagePortfolioDialog({ portfolio, api, onClose, onChanged }: {
     <DialogContent className="workspace-dialog">
       <DialogHeader><DialogTitle>{deleting ? 'Delete portfolio?' : 'Manage portfolio'}</DialogTitle><DialogDescription>{deleting ?
         `Delete ${portfolio.name}? Its account records, imported executions, snapshots and plays are kept. Accounts will be unassigned and visible in All accounts.` :
-        'Change the display name and icon, or remove the grouping without deleting its accounts.'}</DialogDescription></DialogHeader>
+        'Change the name, icon and accounts, or remove the grouping without deleting its history.'}</DialogDescription></DialogHeader>
       {deleting ? <div className="workspace-form">
         {error && <p className="error" role="alert">{error}</p>}
         <div className="management-actions"><Button variant="outline" onClick={() => { setDeleting(false); setError(null) }} disabled={pending}>Keep portfolio</Button><Button variant="destructive" onClick={() => { void remove() }} disabled={pending}>{pending ? 'Deleting…' : 'Delete portfolio'}</Button></div>
       </div> : <form className="workspace-form" onSubmit={event => { void save(event) }} aria-busy={pending}>
-        <label htmlFor="rename-portfolio">Portfolio name</label><Input id="rename-portfolio" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={pending} autoFocus />
+        <label htmlFor="rename-portfolio">Portfolio name</label><Input id="rename-portfolio" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={pending} autoFocus={!focusAccounts} />
         <PortfolioIconPicker name="manage-portfolio-icon" value={icon ?? portfolio.icon ?? defaultPortfolioIcon} onChange={setIcon} disabled={pending} />
+        <PortfolioAccounts accounts={currentAccounts} portfolios={currentPortfolios} selected={selected.filter(id => currentAccounts.some(a => a.id === id))}
+          onChange={setSelected} disabled={pending || needsReload} autoFocus={focusAccounts} maxSelected={currentAccounts.length} />
+        {needsReload && <Button type="button" variant="outline" disabled={pending} onClick={() => { void reloadAccounts() }}>Reload accounts</Button>}
         {error && <p className="error" role="alert">{error}</p>}
-        <div className="management-actions"><Button type="button" variant="ghost" className="danger-action" onClick={() => { setDeleting(true); setError(null) }} disabled={pending}><Trash2 size={14} />Delete</Button><Button type="submit" disabled={pending}>{pending ? 'Saving…' : 'Save changes'}</Button></div>
+        <div className="management-actions"><Button type="button" variant="ghost" className="danger-action" onClick={() => { setDeleting(true); setError(null) }} disabled={pending}><Trash2 size={14} />Delete</Button><Button type="submit" disabled={pending || needsReload}>{pending ? 'Saving…' : 'Save changes'}</Button></div>
       </form>}
     </DialogContent>
   </Dialog>
@@ -70,14 +115,15 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
   const [error, setError] = useState<string | null>(null)
   const [revision, setRevision] = useState(account.settingsRevision)
   const [conflict, setConflict] = useState(account.settingsRevision === undefined)
-  const [portfolioOptions, setPortfolioOptions] = useState(portfolios)
+  const [reloadedPortfolios, setReloadedPortfolios] = useState<{ source: Portfolio[]; options: Portfolio[] } | null>(null)
+  const portfolioOptions = reloadedPortfolios?.source === portfolios ? reloadedPortfolios.options : portfolios
   async function reloadSettings() {
     setPending(true); setError(null)
     try {
       // Another tab may also have created the portfolio the account now belongs to.
       const [current, currentPortfolios] = await Promise.all([api.account(account.id), api.portfolios()])
       if (current.settingsRevision === undefined) throw new ApiError('invalid-response', 'Current settings version is unavailable. Reload after the API update.')
-      setPortfolioOptions(currentPortfolios)
+      setReloadedPortfolios({ source: portfolios, options: currentPortfolios })
       setName(current.name); setPortfolioId(current.portfolioId ?? '')
       setEnabled(current.isEnabled !== false); setRevision(current.settingsRevision); setConflict(false)
     } catch (cause) { setError(failure(cause)) }

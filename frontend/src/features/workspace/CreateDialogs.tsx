@@ -7,12 +7,16 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { WalletAccountImport } from './WalletAccountImport'
+import { PortfolioAccounts } from './PortfolioAccounts'
+import { PortfolioDestination } from './PortfolioDestination'
+import { usePortfolioDestination } from './usePortfolioDestination'
 import { PortfolioIconPicker } from './PortfolioIcon'
 import { defaultPortfolioIcon, type PortfolioIconKey } from './portfolio-icons'
 
-export function CreatePortfolioDialog({ open, onOpenChange, api, onCreated }: {
-  open: boolean; onOpenChange: (open: boolean) => void; api: WorkspaceApi; onCreated: () => void
+export function CreatePortfolioDialog({ open, onOpenChange, api, accounts = [], portfolios = [], onCreated }: {
+  open: boolean; onOpenChange: (open: boolean) => void; api: WorkspaceApi; accounts?: BrokerAccount[]; portfolios?: Portfolio[]; onCreated: () => void
 }) {
+  const [selected, setSelected] = useState<string[]>([])
   const [name, setName] = useState('')
   const [icon, setIcon] = useState<PortfolioIconKey>(defaultPortfolioIcon)
   const [pending, setPending] = useState(false)
@@ -22,7 +26,10 @@ export function CreatePortfolioDialog({ open, onOpenChange, api, onCreated }: {
     if (!name.trim()) { setError('Give the portfolio a name.'); return }
     setPending(true)
     try {
-      await api.createPortfolio(name.trim(), icon); setName(''); setIcon(defaultPortfolioIcon); onOpenChange(false); onCreated()
+      const ids = selected.filter(id => accounts.some(a => a.id === id))
+      if (ids.length) await api.createPortfolio(name.trim(), icon, ids)
+      else await api.createPortfolio(name.trim(), icon)
+      setSelected([]); setName(''); setIcon(defaultPortfolioIcon); onOpenChange(false); onCreated()
     } catch (cause) { setError(cause instanceof ApiError ? cause.message : 'Could not create this portfolio.') }
     finally { setPending(false) }
   }
@@ -32,6 +39,7 @@ export function CreatePortfolioDialog({ open, onOpenChange, api, onCreated }: {
       <form onSubmit={event => { void submit(event) }} className="workspace-form" aria-busy={pending}>
         <label htmlFor="portfolio-name">Portfolio name</label><Input id="portfolio-name" value={name} onChange={event => setName(event.target.value)} maxLength={200} placeholder="e.g. Swing trading" disabled={pending} autoFocus />
         <PortfolioIconPicker name="new-portfolio-icon" value={icon} onChange={setIcon} disabled={pending} />
+        <PortfolioAccounts accounts={accounts} portfolios={portfolios} selected={selected.filter(id => accounts.some(a => a.id === id))} onChange={setSelected} disabled={pending} />
         {error && <p className="error" role="alert">{error}</p>}
         <Button type="submit" disabled={pending}>{pending ? 'Creating…' : 'Create portfolio'}</Button>
       </form>
@@ -44,7 +52,7 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
   accounts?: BrokerAccount[]; onCreated: () => void
 }) {
   const [name, setName] = useState('')
-  const [portfolioId, setPortfolioId] = useState('')
+  const destination = usePortfolioDestination(portfolios, api, onCreated)
   const venues = useVenues()
   const choices = venues.creatable()
   const [venueChoice, setVenue] = useState('')
@@ -58,7 +66,6 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
   const [manualValue, setManualValue] = useState('')
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const chosenPortfolio = portfolios.some(p => p.id === portfolioId) ? portfolioId : ''
   async function submit(event: FormEvent) {
     event.preventDefault(); setError(null)
     if (!name.trim()) { setError('Name the account. A portfolio is optional.'); return }
@@ -69,13 +76,15 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
     }
     if (venue === 'manual' && manualValue.trim() && !/^\d+(\.\d+)?$/.test(manualValue.trim())) { setError('Use a nonnegative balance, or leave it unavailable.'); return }
     setPending(true)
+    let portfolioCreated = false
     try {
+      const target = await destination.resolve(); portfolioCreated = target.created
       await api.createAccount({
-        portfolioId: chosenPortfolio || null, name: name.trim(), venueId: venue,
+        portfolioId: target.portfolioId, name: name.trim(), venueId: venue,
         ...(needsAddress ? { address: address.trim().toLowerCase() } : needsIndex ? { sourceId: address.trim() } : manualValue.trim() ? { manualAccountValueUsd: manualValue.trim() } : {}),
       })
       setName(''); setAddress(''); setManualValue(''); onOpenChange(false); onCreated()
-    } catch (cause) { setError(cause instanceof ApiError ? cause.message : 'Could not create this account.') }
+    } catch (cause) { setError((portfolioCreated ? 'The new portfolio was created and kept. Retry adding the account into it; a duplicate portfolio will not be created. ' : '') + (cause instanceof ApiError ? cause.message : 'Could not create this account.')) }
     finally { setPending(false) }
   }
   return <Dialog open={open} onOpenChange={next => { if (!pending) { onOpenChange(next); setError(null) } }}>
@@ -89,7 +98,7 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
       {canDiscover ? <WalletAccountImport key={venue} venueId={venue} api={api} portfolios={portfolios} accounts={accounts}
         onCreated={onCreated} onBusy={setPending} onClose={() => onOpenChange(false)} /> :
         <form onSubmit={event => { void submit(event) }} className="workspace-form" aria-busy={pending}>
-          <label htmlFor="account-portfolio">Portfolio <span className="optional">optional</span></label><select id="account-portfolio" value={chosenPortfolio} onChange={event => setPortfolioId(event.target.value)} disabled={pending}><option value="">No portfolio · All accounts only</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <PortfolioDestination destination={destination} inputId="account-portfolio" label="Portfolio · optional" disabled={pending} />
           <label htmlFor="account-name">Account name</label><Input id="account-name" value={name} onChange={event => setName(event.target.value)} placeholder="e.g. Main account" maxLength={200} disabled={pending} />
           {needsAddress ? <><label htmlFor="account-address">Public wallet address</label><Input id="account-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="0x…" maxLength={128} spellCheck={false} autoComplete="off" disabled={pending} /><p className="field-help">Never enter a private key or seed phrase. Adding the account does not automatically import its history.</p></> :
             needsIndex ? <><label htmlFor="account-source">Account index</label><Input id="account-source" value={address} onChange={event => setAddress(event.target.value)} inputMode="numeric" autoComplete="off" disabled={pending} /><p className="field-help">Use a concrete main or subaccount index. Add an optional read-only token in Manage account after creating the record.</p></> :

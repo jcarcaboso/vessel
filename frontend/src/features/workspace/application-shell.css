@@ -164,3 +164,20 @@
 .overview-add-menu [role=menuitem]{padding:10px 12px;border-radius:var(--radius);font-size:12px;cursor:pointer;outline:none}
 .overview-add-menu [data-highlighted]{background:var(--accent);color:var(--accent-foreground)}
 .workspace-stat-grid.overview-metrics{grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr))}
+
+.portfolio-membership{border:0;padding:0;margin:12px 0 0;min-width:0}
+.portfolio-membership legend{font-size:12px;font-weight:600}
+.portfolio-membership>.field-help{margin:8px 0}
+.portfolio-account-list{display:flex;flex-direction:column;gap:9px;max-height:240px;overflow-y:auto;margin-top:10px}
+.portfolio-account-choice{display:flex;align-items:center;gap:10px;padding:9px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card)}
+.portfolio-account-choice span{display:flex;flex-direction:column;gap:4px;min-width:0}
+.portfolio-account-choice strong{font-size:12px;overflow-wrap:anywhere}
+.portfolio-account-choice small{font-size:10px;color:var(--muted-foreground)}
+.portfolio-tile>button:last-child:not(.portfolio-manage){margin:0 22px 20px}
+.accounts-bulk-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:16px 22px;margin-top:12px;border-block:1px solid var(--border);background:var(--accent);color:var(--accent-foreground)}
+.accounts-bulk-bar strong,.accounts-bulk-bar label{font-size:12px}
+.accounts-bulk-bar select{min-width:170px;max-width:100%}
+.accounts-bulk-bar input{max-width:220px}
+.bulk-error{padding:12px 22px;color:var(--negative);font-size:12px}
+
+.portfolio-account-choice input,.workspace-table input[type="checkbox"]{accent-color:var(--primary)}
