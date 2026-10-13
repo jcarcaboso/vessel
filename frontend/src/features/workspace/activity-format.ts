@@ -1,9 +1,8 @@
 import type { ImportedFill } from '@/api/workspace'
 
-/** Use normalized facts, never venue wording. A close's side is opposite its position direction. */
-export function fillDirection(fill: ImportedFill): 'long' | 'short' | null {
-  if (fill.positionEffect === 'unknown' || fill.positionEffect === 'flip') return null
-  return (fill.side === 'buy') === (fill.positionEffect === 'open') ? 'long' : 'short'
+/** A fill's own trade side from the normalized side, never venue wording: a buy is Long, a sell is Short. */
+export function sideDirection(fill: ImportedFill): 'long' | 'short' {
+  return fill.side === 'buy' ? 'long' : 'short'
 }
 /** Classify a decimal string without rounding it to a JavaScript float. */
 export function resultSign(value: string | null): 'positive' | 'negative' | 'neutral' {

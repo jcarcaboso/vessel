@@ -8,7 +8,7 @@ import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { ActivityOperations } from './ActivityOperations'
 import { OperationsTable } from './OperationsTable'
 import { ActivityTable } from './ActivityTable'
-import { fillDirection, resultSign } from './activity-format'
+import { sideDirection, resultSign } from './activity-format'
 import { emptyFilters, filterOperations } from './activity-filters'
 
 const client = (activity = vi.fn().mockResolvedValue(activityFixture)) => ({ activity }) as unknown as WorkspaceApi
@@ -27,9 +27,11 @@ describe('operation table', () => {
     expect(button).toHaveAttribute('aria-expanded', 'false')
     await userEvent.click(button)
     expect(screen.getByRole('button', { name: 'Collapse BTC operation' })).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('columnheader', { name: 'Execution' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Side' })).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: /Orders/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/constituent fills/)).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Collapse BTC operation' }))
-    expect(screen.queryByRole('columnheader', { name: 'Execution' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'Side' })).not.toBeInTheDocument()
   })
   it('shows Short, positive results, elapsed duration and coverage when expanded', async () => {
     render(<OperationsTable operations={[{ ...closed, coverage: ['Snapshot disagrees.'], omittedFillCount: 10 }]} accounts={[accountFixture]} />)
@@ -38,7 +40,7 @@ describe('operation table', () => {
     expect(screen.getByText('2h')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Expand BTC operation' }))
     expect(screen.getByText('Snapshot disagrees.')).toBeInTheDocument()
-    expect(screen.getByText(/10 older\/display-limited fill rows omitted/)).toBeInTheDocument()
+    expect(screen.getByText(/Some execution rows are not shown/)).toBeInTheDocument()
   })
   it('shows direction and known exits when snapshot anchoring finds missing entries', async () => {
     const missing: ActivityOperation = { ...closed, status: 'incomplete', openedAtUtc: null, quantity: null,
@@ -67,20 +69,25 @@ describe('operation table', () => {
     render(<OperationsTable operations={[{ ...operationFixture, fills: [{ fill, role: 'exit', quantity: '2', fee: '0.5', closedPnlUsd: '10' }] }]} accounts={[accountFixture]} />)
     await userEvent.click(screen.getByRole('button', { name: 'Expand BTC operation' }))
     expect(screen.getByText('Original flip facts')).toBeInTheDocument()
-    expect(screen.getAllByText('Long').length).toBeGreaterThan(1)
-    expect(screen.getByText('Short')).toHaveClass('short')
+    expect(screen.getByText(/Flip rows show this operation's allocated quantity/)).toBeInTheDocument()
+    expect(screen.getAllByText('Short')).toHaveLength(2)
+    for (const badge of screen.getAllByText('Short')) expect(badge).toHaveClass('short')
   })
-  it('colours normalized fill direction rather than buy/sell or display wording', () => {
-    render(<ActivityTable fills={[{ ...activityFillFixture, side: 'sell', positionEffect: 'close', direction: 'Untrusted wording' }]} accounts={[accountFixture]} />)
+  it('labels each execution by its own side, without repeating instrument, account or venue wording', () => {
+    render(<ActivityTable fills={[{ ...activityFillFixture, id: 'open', side: 'buy', positionEffect: 'open' },
+      { ...activityFillFixture, id: 'close', side: 'sell', positionEffect: 'close', direction: 'Close Long' }]} accounts={[accountFixture]} />)
     expect(screen.getByText('Long')).toHaveClass('long')
-    expect(fillDirection({ ...activityFillFixture, side: 'buy', positionEffect: 'close' })).toBe('short')
-    expect(fillDirection({ ...activityFillFixture, side: 'sell' })).toBe('short')
-    expect(fillDirection({ ...activityFillFixture, positionEffect: 'unknown' })).toBeNull()
+    expect(screen.getByText('Short')).toHaveClass('short')
+    expect(screen.queryByText('Close Long')).not.toBeInTheDocument()
+    expect(screen.queryByText('BTC')).not.toBeInTheDocument()
+    expect(screen.queryByText(accountFixture.name)).not.toBeInTheDocument()
+    expect(sideDirection({ ...activityFillFixture, side: 'buy', positionEffect: 'close' })).toBe('long')
+    expect(sideDirection({ ...activityFillFixture, side: 'sell', positionEffect: 'unknown' })).toBe('short')
   })
   it('never claims there are no executions when the response omits all constituent rows', async () => {
     render(<OperationsTable operations={[{ ...operationFixture, fills: [], omittedFillCount: 1 }]} accounts={[accountFixture]} />)
     await userEvent.click(screen.getByRole('button', { name: 'Expand BTC operation' }))
-    expect(screen.getByText('Constituent fill rows were omitted by the response limit.')).toBeInTheDocument()
+    expect(screen.getByText('Execution rows were omitted by the response limit.')).toBeInTheDocument()
     expect(screen.queryByText('No imported executions yet')).not.toBeInTheDocument()
   })
   it('classifies tiny and huge result signs without binary floating point', () => {
