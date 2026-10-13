@@ -1,0 +1,30 @@
+# Compose >= 2.24.4 is required for !reset. Web has no published port in this mode.
+services:
+  web:
+    ports: !reset []
+    environment:
+      VESSEL_TRUSTED_PROXY: ${VESSEL_TLS_PROXY_IP:-172.30.86.20}
+
+  tls:
+    image: caddy:2-alpine
+    environment:
+      VESSEL_TLS_HOST: ${VESSEL_TLS_HOST:?Set the TLS hostname}
+      VESSEL_TLS_DIRECTIVE: ${VESSEL_TLS_DIRECTIVE:-}
+    ports:
+      - "${VESSEL_TLS_HTTP_BIND:-127.0.0.1:80}:80"
+      - "${VESSEL_TLS_HTTPS_BIND:-127.0.0.1:443}:443"
+    networks:
+      default:
+        ipv4_address: ${VESSEL_TLS_PROXY_IP:-172.30.86.20}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

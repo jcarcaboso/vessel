@@ -2,7 +2,14 @@
 
 A trading diary for recording decisions, executions, and reflection.
 
-This repository contains the approved Graphite prototype and the React/Vite/TypeScript plus modular ASP.NET Core 10/PostgreSQL application core. The default app is Overview with account/portfolio management and bounded read-only Hyperliquid refresh. The Play workspace stays separate for later integration.
+## Deploy with Docker
+
+See the [Docker deployment guide](deploy/README.md) for the v0.1.0 API and web
+images, Compose setup, explicit migrations, opt-in Caddy TLS, credential keys,
+backups and isolated restores.
+Both images use `skorcius/vessel` with `api-` and `web-` tags.
+
+This repository contains the approved Graphite prototype and the React/Vite/TypeScript plus modular ASP.NET Core 10/PostgreSQL application. The default page is Overview. The app includes account/portfolio management, saved Plays and bounded read-only Hyperliquid, Lighter and RISEx integration. The disposable prototype is separate from the application.
 
 - [Project brief](docs/project-brief.md)
 - [Working glossary](CONTEXT.md)

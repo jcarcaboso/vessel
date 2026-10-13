@@ -1,0 +1,72 @@
+# Generated at startup. Empty VESSEL_TRUSTED_PROXY means no forwarded-header trust.
+include /tmp/vessel-trusted-proxy.conf;
+map "$vessel_trusted_peer:$http_x_forwarded_proto" $vessel_forwarded_proto {
+    default $scheme;
+    "1:http" http;
+    "1:https" https;
+}
+
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+    # API allows a 10 MiB image plus 64 KiB multipart overhead.
+    client_max_body_size 10551296;
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_types text/css application/javascript image/svg+xml;
+    include /etc/nginx/static-security.conf;
+
+    location /assets/ {
+        try_files $uri =404;
+        include /etc/nginx/static-security.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+    location = /index.html {
+        include /etc/nginx/static-security.conf;
+        add_header Cache-Control "no-cache";
+    }
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+    location ~ ^/(api|health)(/|$) {
+        # Suppress inherited static headers. Upstream API supplies its own, once.
+        add_header X-Content-Type-Options "";
+        # Nginx-generated errors still need the static security policy.
+        # Only nginx's own errors reach these; upstream responses are never intercepted.
+        error_page 400 = @bad_request;
+        error_page 408 = @request_timeout;
+        error_page 411 = @length_required;
+        error_page 413 = @body_too_large;
+        error_page 414 = @uri_too_long;
+        error_page 500 = @internal_error;
+        error_page 502 = @bad_gateway;
+        error_page 503 = @unavailable;
+        error_page 504 = @gateway_timeout;
+        gzip off;
+        proxy_pass ${VESSEL_API_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        # Overwrite, never append caller-controlled chains. realip changes remote_addr
+        # only for the optional exact trusted peer configured at startup.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $vessel_forwarded_proto;
+        proxy_set_header X-Forwarded-Host "";
+        proxy_set_header Forwarded "";
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+    }
+    location @bad_request { return 400; }
+    location @request_timeout { return 408; }
+    location @length_required { return 411; }
+    location @body_too_large { return 413; }
+    location @uri_too_long { return 414; }
+    location @internal_error { return 500; }
+    location @bad_gateway { return 502; }
+    location @unavailable { return 503; }
+    location @gateway_timeout { return 504; }
+}

@@ -11,6 +11,8 @@ public sealed record SystemMetadata(
     string Application, string Stage, JournalOwner Owner, string MarketScope,
     bool AllowsConcurrentPlays, IReadOnlyList<VenueMetadata> Venues)
 {
+    public string Version => typeof(SystemMetadata).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+
     // Venues the owner has named but that have no adapter yet. They are listed so the browser can say so.
     private static readonly VenueDescriptor[] Upcoming =
     [

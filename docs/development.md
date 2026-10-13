@@ -1,6 +1,6 @@
 # Application development
 
-The application core lives in `frontend/` and `backend/`. Overview, portfolio/account management, persisted snapshots and recent fills use the protected core API. The approved Play UX remains separate in `prototype/` and is not mounted by the default app.
+The application lives in `frontend/` and `backend/`. Overview, portfolio/account management, saved Plays, review and activity use the protected API. The disposable design prototype remains separate in `prototype/`.
 
 ## Tooling
 
@@ -28,6 +28,38 @@ corepack prepare pnpm@12.8.1 --activate
 ```
 
 The tool was installed locally through Corepack during setup. Use a current Corepack or the official pnpm installation method when the selected Node distribution does not include Corepack; do not silently substitute another package manager. The root `pnpm-workspace.yaml` explicitly allows the already-reviewed pinned packages released within pnpm's default age window; there is no blanket release-age exemption.
+
+## Release images
+
+Manual v0.1.0 builds target Linux amd64. From the repository root:
+
+```sh
+REVISION=$(git rev-parse HEAD)
+docker build --platform linux/amd64 -f backend/Dockerfile \
+  --build-arg VERSION=0.1.0 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.1.0 -t skorcius/vessel:api-latest .
+docker build --platform linux/amd64 -f frontend/Dockerfile \
+  --build-arg VERSION=0.1.0 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.1.0 -t skorcius/vessel:web-latest .
+# Owner publication only, after local verification and registry authentication:
+docker push skorcius/vessel:api-0.1.0
+docker push skorcius/vessel:api-latest
+docker push skorcius/vessel:web-0.1.0
+docker push skorcius/vessel:web-latest
+```
+
+The `api-latest` and `web-latest` tags move with releases; deploy fixed versions
+for predictable upgrades. Builds do not need secrets or a live database.
+The API image includes `/app/migrate`; applying migrations remains an explicit
+one-shot deployment step, never API startup behaviour.
+See [deployment setup and verification](../deploy/README.md). Default nginx
+ignores incoming forwarded claims; the API trusts only the pinned web peer.
+The opt-in Caddy TLS overlay unpublishes web and trusts only Caddy's exact IP.
+Host-gateway trust is a weaker explicit alternative: any local process can forge
+scheme/client headers. The production credential guard is never disabled.
+`python3 scripts/verify-release.py` builds isolated throwaway images, checks both
+transport modes and restores synthetic backups into fresh volumes. Its optional
+`--browser-module` check verifies the built SPA's CSP without real venue calls.
 
 ## PostgreSQL
 
