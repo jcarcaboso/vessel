@@ -14,6 +14,15 @@ internal readonly record struct ExactAmount(BigInteger Units) : IComparable<Exac
         var coefficient = (BigInteger)(uint)bits[0] | ((BigInteger)(uint)bits[1] << 32) | ((BigInteger)(uint)bits[2] << 64);
         return new(((bits[3] & int.MinValue) == 0 ? coefficient : -coefficient) * BigInteger.Pow(10, 28 - ((bits[3] >> 16) & 0xff)));
     }
+    // Trusted exact DTO strings can exceed decimal's coefficient range after summing.
+    public static ExactAmount Parse(string value)
+    {
+        var negative = value.StartsWith('-');
+        var parts = (negative ? value[1..] : value).Split('.');
+        var fraction = parts.Length == 2 ? parts[1] : "";
+        var units = BigInteger.Parse(parts[0] + fraction.PadRight(28, '0'), CultureInfo.InvariantCulture);
+        return new(negative ? -units : units);
+    }
     public static ExactAmount operator +(ExactAmount a, ExactAmount b) => new(a.Units + b.Units);
     public static ExactAmount operator -(ExactAmount a, ExactAmount b) => new(a.Units - b.Units);
     public static ExactAmount operator -(ExactAmount a) => new(-a.Units);

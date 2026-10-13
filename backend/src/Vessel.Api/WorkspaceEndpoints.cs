@@ -90,6 +90,12 @@ public static class WorkspaceEndpoints
             context.Response.Headers.CacheControl = "no-store";
             return Results.Ok(await service.GetAsync(accountId, ct));
         });
+        api.MapGet("/overview/summary", async (string? groupBy, string? period, string? scope,
+            Vessel.Application.Overview.OverviewSummaryService service, HttpContext context, CancellationToken ct) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Ok(await service.GetAsync(groupBy, period, scope, ct));
+        });
         api.MapGet("/overview", async (WorkspaceService service, CancellationToken ct) => Results.Ok(await service.OverviewAsync(ct)));
     }
 }

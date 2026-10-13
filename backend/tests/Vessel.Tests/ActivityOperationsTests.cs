@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Activity;
 using Vessel.Domain.Accounts;
@@ -596,7 +597,36 @@ public sealed class ActivityOperationsTests
     }
     private sealed class Store(ActivityFacts facts) : IActivityStore
     {
-        public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct) => Task.FromResult(facts);
+        public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) => Task.FromResult(facts);
+    }
+
+    [Fact]
+    public async Task Restricting_facts_to_accounts_preserves_operations_and_coverage_for_those_accounts()
+    {
+        var second = Guid.NewGuid(); var unrelated = Guid.NewGuid();
+        var opening = Fill(0, quantity: 2); opening.VenueContractId = "14";
+        var flip = Fill(1, "sell", "flip", quantity: 3, pnl: 10, fee: 0.1m); flip.VenueContractId = "14";
+        var legacy = Fill(2, "buy", "close"); // Resolves only against this account's native ID.
+        var missingOpen = Fill(0, "sell", "close", pnl: 5); missingOpen.AccountId = second;
+        var outside = Fill(0); outside.AccountId = unrelated; outside.VenueContractId = "15";
+        var snapshot = new AccountSnapshot { OwnerId = Owner, AccountId = AccountId, ObservedAtUtc = Start.AddDays(1), ValueScope = "fixture" };
+        var otherSnapshot = new AccountSnapshot { OwnerId = Owner, AccountId = unrelated, ObservedAtUtc = Start.AddDays(1), ValueScope = "fixture" };
+        var play = Guid.NewGuid();
+        var links = new Dictionary<Guid, Guid> { [opening.Id] = play, [flip.Id] = play, [legacy.Id] = play };
+        var all = new ActivityFacts([Account(AccountId), Account(second), Account(unrelated)],
+            [opening, flip, legacy, missingOpen, outside], [snapshot, otherSnapshot], links);
+        var ids = new HashSet<Guid> { AccountId, second };
+        var restricted = all with
+        {
+            Accounts = all.Accounts.Where(a => ids.Contains(a.Id)).ToList(),
+            Fills = all.Fills.Where(f => ids.Contains(f.AccountId)).ToList(),
+            Snapshots = all.Snapshots.Where(s => ids.Contains(s.AccountId)).ToList()
+        };
+        var full = await new ActivityService(new Store(all)).GetAsync(null, default);
+        var scoped = await new ActivityService(new Store(restricted)).GetAsync(null, default);
+        Assert.Equal(JsonSerializer.Serialize(full.Operations.Where(o => ids.Contains(o.AccountId))), JsonSerializer.Serialize(scoped.Operations));
+        Assert.Equal(JsonSerializer.Serialize(full.Coverage.Where(c => ids.Contains(c.AccountId))), JsonSerializer.Serialize(scoped.Coverage));
+        Assert.Equal(4, scoped.RetainedFillCount);
     }
 
     [Fact]

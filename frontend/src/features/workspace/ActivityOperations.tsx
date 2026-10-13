@@ -8,9 +8,9 @@ import { OperationsTable } from './OperationsTable'
 import './activity-operations.css'
 
 export function ActivityOperations({ api, accounts, portfolios = [], accountId, compact = false, filters: showFilters = false, reloadGeneration = 0,
-  filterValues, onFiltersChange }: {
-  api: WorkspaceApi; accounts: BrokerAccount[]; portfolios?: Portfolio[]; accountId?: string; compact?: boolean; filters?: boolean; reloadGeneration?: number
-  filterValues?: Filters; onFiltersChange?: (filters: Filters) => void
+  filterValues, onFiltersChange, scopeAccountIds }: {
+  api: WorkspaceApi; accounts: BrokerAccount[]; portfolios?: Portfolio[]; accountId?: string | undefined; compact?: boolean; filters?: boolean; reloadGeneration?: number
+  scopeAccountIds?: readonly string[]; filterValues?: Filters; onFiltersChange?: (filters: Filters) => void
 }) {
   const [state, setState] = useState<{ key: string; api: WorkspaceApi; document: ActivityDocument | null; error: string | null; receivedAt: number } | null>(null)
   const [retry, setRetry] = useState(0)
@@ -32,7 +32,7 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
   if (pending) return <div className="workspace-loading" role="status">Loading operations…</div>
   if (state.error) return <div className="workspace-alert" role="alert">{state.error}<Button variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>Retry operations</Button></div>
   const document = state.document!
-  const enabled = accounts.filter(a => a.isEnabled !== false)
+  const enabled = accounts.filter(a => a.isEnabled !== false && (scopeAccountIds === undefined || scopeAccountIds.includes(a.id)))
   const loaded = document.operations.filter(op => enabled.some(a => a.id === op.accountId))
   const contracts = [...new Set(loaded.map(op => op.contractId))].sort()
   const filters = {

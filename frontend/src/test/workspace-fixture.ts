@@ -74,10 +74,12 @@ export const idleMarketStream: WorkspaceApi['marketStream'] = (_id, _query, sign
   new Promise(resolve => signal.aborted ? resolve() : signal.addEventListener('abort', () => resolve(), { once: true }))
 
 /** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
-export function playApiStubs(): Pick<WorkspaceApi, 'plays' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' |
+export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' |
   'deletePlay' | 'playExecution' | 'checkPlayExecution' | 'linkOrder' | 'unlinkOrder' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'review'> {
   const unexpected = () => Promise.reject(new Error('Unexpected play API call in this test.'))
   return {
+    // Tests outside Overview keep this unrelated read pending unless they supply a summary fixture.
+    overviewSummary: vi.fn().mockImplementation(() => new Promise(() => {})),
     plays: vi.fn().mockResolvedValue([]), play: vi.fn(unexpected), createPlay: vi.fn(unexpected), updatePlay: vi.fn(unexpected),
     changePlayStatus: vi.fn(unexpected), playHistory: vi.fn().mockResolvedValue({ revisions: [], statusChanges: [] }),
     deletePlay: vi.fn(unexpected), playExecution: vi.fn(unexpected), checkPlayExecution: vi.fn(unexpected),
