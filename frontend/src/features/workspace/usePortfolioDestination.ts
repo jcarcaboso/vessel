@@ -23,4 +23,3 @@ export function usePortfolioDestination(portfolios: Portfolio[], api: WorkspaceA
   }
   return { id, setId, name, setName, options, resolve }
 }
-

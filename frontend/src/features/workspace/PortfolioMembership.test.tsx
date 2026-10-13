@@ -18,6 +18,7 @@ const otherPortfolio = { ...portfolioFixture, id: '22222222-3333-4444-5555-66666
 const otherAccount = { ...accountFixture, id: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff', name: 'Other account', portfolioId: otherPortfolio.id, isEnabled: false }
 const portfolios = [portfolioFixture, otherPortfolio]
 const accounts = [accountFixture, otherAccount]
+const expected = (records: BrokerAccount[]) => records.map(a => ({ accountId: a.id, settingsRevision: a.settingsRevision }))
 function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return { ...createWorkspaceApi('test-only'),
     createPortfolio: vi.fn().mockResolvedValue(otherPortfolio), createAccount: vi.fn().mockResolvedValue(accountFixture),
@@ -48,7 +49,7 @@ describe('Portfolio membership', () => {
     await userEvent.type(screen.getByLabelText('Portfolio name'), 'Together')
     await userEvent.click(screen.getByRole('checkbox', { name: 'Include Other account' }))
     await userEvent.click(screen.getByRole('button', { name: 'Create portfolio' }))
-    await waitFor(() => expect(api.createPortfolio).toHaveBeenCalledWith('Together', 'folder', [otherAccount.id]))
+    await waitFor(() => expect(api.createPortfolio).toHaveBeenCalledWith('Together', 'folder', [otherAccount.id], expected([otherAccount])))
     expect(created).toHaveBeenCalledOnce()
   })
   it('searches a long checklist without losing selections and drops disappeared accounts before create', async () => {
@@ -62,7 +63,7 @@ describe('Portfolio membership', () => {
     view.rerender(<CreatePortfolioDialog {...props} accounts={records.slice(1)} />)
     await userEvent.type(screen.getByLabelText('Portfolio name'), 'Together')
     await userEvent.click(screen.getByRole('button', { name: 'Create portfolio' }))
-    await waitFor(() => expect(api.createPortfolio).toHaveBeenCalledWith('Together', 'folder', ['11']))
+    await waitFor(() => expect(api.createPortfolio).toHaveBeenCalledWith('Together', 'folder', ['11'], expected([records[11]!])))
   })
   it('saves additions as moves and removals as unassignment, retaining the rename/icon flow', async () => {
     const api = client(), changed = vi.fn()
@@ -71,17 +72,38 @@ describe('Portfolio membership', () => {
     await userEvent.click(screen.getByRole('checkbox', { name: 'Include Other account' }))
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
     await waitFor(() => expect(api.moveAccounts).toHaveBeenCalledTimes(2))
-    expect(api.moveAccounts).toHaveBeenNthCalledWith(1, [otherAccount.id], portfolioFixture.id)
-    expect(api.moveAccounts).toHaveBeenNthCalledWith(2, [accountFixture.id], null)
+    expect(api.moveAccounts).toHaveBeenNthCalledWith(1, [otherAccount.id], portfolioFixture.id, expected([otherAccount]))
+    expect(api.moveAccounts).toHaveBeenNthCalledWith(2, [accountFixture.id], null, expected([accountFixture]))
     expect(changed).toHaveBeenCalledWith('Portfolio updated.')
   })
-  it('does not unlink an account that was concurrently moved elsewhere', async () => {
-    const api = client({ accounts: vi.fn().mockResolvedValue([{ ...accountFixture, portfolioId: otherPortfolio.id }]) })
-    render(<ManagePortfolioDialog portfolio={portfolioFixture} api={api} accounts={accounts} portfolios={portfolios} onClose={vi.fn()} onChanged={vi.fn()} />)
+  it('rejects tab A removal after tab B moves the displayed A rev1 account to B rev2', async () => {
+    let current = { ...accountFixture }
+    let finishRename!: () => void
+    const changed = vi.fn(), close = vi.fn(), stale = vi.fn()
+    const api = client({
+      updatePortfolio: vi.fn().mockResolvedValue(portfolioFixture).mockImplementationOnce(() => new Promise<void>(resolve => { finishRename = resolve })),
+      moveAccounts: vi.fn().mockImplementation((_ids, _portfolioId, revisions) => {
+        if (revisions[0].settingsRevision !== current.settingsRevision) throw new ApiError('http', 'Account settings changed elsewhere.', 409)
+        throw new Error('Tab A must not overwrite tab B')
+      }),
+      accounts: vi.fn().mockImplementation(async () => [current, otherAccount]),
+    })
+    render(<ManagePortfolioDialog portfolio={portfolioFixture} api={api} accounts={accounts} portfolios={portfolios} onClose={close} onChanged={changed} onStale={stale} />)
     await userEvent.click(screen.getByRole('checkbox', { name: 'Include Main account' }))
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    current = { ...accountFixture, portfolioId: otherPortfolio.id, settingsRevision: 2 }; finishRename()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Account settings changed elsewhere.')
     await waitFor(() => expect(api.accounts).toHaveBeenCalledOnce())
-    expect(api.moveAccounts).not.toHaveBeenCalled()
+    expect(api.moveAccounts).toHaveBeenCalledExactlyOnceWith([accountFixture.id], null, expected([accountFixture]))
+    expect(current.portfolioId).toBe(otherPortfolio.id); expect(current.settingsRevision).toBe(2)
+    expect(screen.getByRole('checkbox', { name: 'Include Main account' })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled()
+    expect(stale).toHaveBeenCalledOnce(); expect(changed).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Reload accounts' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled())
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(changed).toHaveBeenCalledOnce())
+    expect(api.moveAccounts).toHaveBeenCalledOnce()
   })
   it('reports partially saved membership and requires a current read before retrying', async () => {
     const api = client({ moveAccounts: vi.fn().mockRejectedValueOnce(new ApiError('http', 'Target missing', 404)) }), stale = vi.fn()
@@ -94,6 +116,55 @@ describe('Portfolio membership', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled())
     expect(api.portfolios).toHaveBeenCalledOnce(); expect(stale).toHaveBeenCalledTimes(2)
     expect(screen.getByRole('checkbox', { name: 'Include Other account' })).not.toBeChecked()
+  })
+  it('keeps the displayed revision for a pending addition across shell reloads and refreshes lists on conflict', async () => {
+    const latest = { ...otherAccount, portfolioId: null, settingsRevision: 2 }
+    const stale = vi.fn(), changed = vi.fn()
+    const api = client({ moveAccounts: vi.fn().mockRejectedValue(new ApiError('http', 'Conflict', 409)),
+      accounts: vi.fn().mockResolvedValue([accountFixture, latest]) })
+    const props = { portfolio: portfolioFixture, api, portfolios, onClose: vi.fn(), onChanged: changed, onStale: stale }
+    const view = render(<ManagePortfolioDialog {...props} accounts={accounts} />)
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Include Other account' }))
+    view.rerender(<ManagePortfolioDialog {...props} accounts={[accountFixture, latest]} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Account settings changed elsewhere.')
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Include Other account' })).not.toBeChecked())
+    expect(api.moveAccounts).toHaveBeenCalledExactlyOnceWith([otherAccount.id], portfolioFixture.id, expected([otherAccount]))
+    expect(api.accounts).toHaveBeenCalledOnce(); expect(api.portfolios).toHaveBeenCalledOnce()
+    expect(stale).toHaveBeenCalledOnce(); expect(changed).not.toHaveBeenCalled()
+  })
+  it('keeps the selected row revision in the bulk bar and clears stale selections on conflict', async () => {
+    const api = client({ moveAccounts: vi.fn().mockRejectedValue(new ApiError('http', 'Conflict', 409)) })
+    const reload = vi.fn(), changed = vi.fn()
+    const view = render(<Panel api={api} reload={reload} changed={changed} />)
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Select Main account' }))
+    view.rerender(<Panel api={api} reload={reload} changed={changed} records={[{ ...accountFixture, settingsRevision: 2 }, otherAccount]} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Move' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Account settings changed elsewhere. No accounts were moved.')
+    expect(api.moveAccounts).toHaveBeenCalledExactlyOnceWith([accountFixture.id], null, expected([accountFixture]))
+    expect(screen.queryByRole('form', { name: 'Move selected accounts' })).not.toBeInTheDocument()
+    expect(reload).toHaveBeenCalledOnce(); expect(changed).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Select Main account' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Move' }))
+    await waitFor(() => expect(api.moveAccounts).toHaveBeenCalledTimes(2))
+    expect(api.moveAccounts).toHaveBeenLastCalledWith([accountFixture.id], null, [{ accountId: accountFixture.id, settingsRevision: 2 }])
+  })
+  it('does not create a portfolio from stale selected accounts and refreshes the checklist without replaying selection', async () => {
+    const latest = { ...otherAccount, portfolioId: null, settingsRevision: 2 }
+    const created = vi.fn(), close = vi.fn()
+    const api = client({ createPortfolio: vi.fn().mockRejectedValue(new ApiError('http', 'Conflict', 409)),
+      accounts: vi.fn().mockResolvedValue([accountFixture, latest]) })
+    const props = { open: true, onOpenChange: close, api, portfolios, onCreated: created }
+    const view = render(<CreatePortfolioDialog {...props} accounts={accounts} />)
+    await userEvent.type(screen.getByLabelText('Portfolio name'), 'Together')
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Include Other account' }))
+    view.rerender(<CreatePortfolioDialog {...props} accounts={[accountFixture, latest]} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Create portfolio' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('No portfolio was created or accounts moved.')
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Include Other account' })).not.toBeChecked())
+    expect(api.createPortfolio).toHaveBeenCalledExactlyOnceWith('Together', 'folder', [otherAccount.id], expected([otherAccount]))
+    expect(api.accounts).toHaveBeenCalledOnce(); expect(api.portfolios).toHaveBeenCalledOnce()
+    expect(created).toHaveBeenCalledOnce(); expect(close).not.toHaveBeenCalled()
   })
   it('takes new portfolio lists while an account settings dialog is open', () => {
     const api = client(), props = { api, account: accountFixture, onClose: vi.fn(), onChanged: vi.fn() }
@@ -153,7 +224,7 @@ describe('Portfolio membership', () => {
     await userEvent.click(screen.getByRole('checkbox', { name: 'Select all visible accounts' }))
     await userEvent.selectOptions(screen.getByLabelText('Move to'), otherPortfolio.id)
     await userEvent.click(screen.getByRole('button', { name: 'Move' }))
-    await waitFor(() => expect(api.moveAccounts).toHaveBeenCalledExactlyOnceWith([accountFixture.id, otherAccount.id], otherPortfolio.id))
+    await waitFor(() => expect(api.moveAccounts).toHaveBeenCalledExactlyOnceWith([accountFixture.id, otherAccount.id], otherPortfolio.id, expected(accounts)))
     expect(changed).toHaveBeenCalledWith('2 accounts moved to the portfolio.')
     expect(screen.queryByRole('form', { name: 'Move selected accounts' })).not.toBeInTheDocument()
   })
@@ -161,7 +232,7 @@ describe('Portfolio membership', () => {
     const api = client(); render(<Panel api={api} />)
     await userEvent.click(screen.getByRole('checkbox', { name: 'Select Main account' }))
     await userEvent.click(screen.getByRole('button', { name: 'Move' }))
-    await waitFor(() => expect(api.moveAccounts).toHaveBeenCalledExactlyOnceWith([accountFixture.id], null))
+    await waitFor(() => expect(api.moveAccounts).toHaveBeenCalledExactlyOnceWith([accountFixture.id], null, expected([accountFixture])))
   })
   it('keeps a newly created bulk destination on failure, disables controls while moving, and retries safely', async () => {
     let reject!: (cause: Error) => void
@@ -220,7 +291,7 @@ describe('Portfolio membership', () => {
     api.accounts = vi.fn().mockResolvedValue([...accounts, newcomer])
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
     await waitFor(() => expect(api.moveAccounts).toHaveBeenCalledTimes(2))
-    expect(api.moveAccounts).toHaveBeenNthCalledWith(2, [accountFixture.id, newcomer.id], null)
+    expect(api.moveAccounts).toHaveBeenNthCalledWith(2, [accountFixture.id, newcomer.id], null, expected([accountFixture, newcomer]))
   })
   it('never silently substitutes Unassigned when a selected portfolio disappears', async () => {
     const api = client(), props = { open: true, onOpenChange: vi.fn(), api, onCreated: vi.fn() }

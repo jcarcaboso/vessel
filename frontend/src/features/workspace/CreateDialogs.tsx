@@ -16,21 +16,35 @@ import { defaultPortfolioIcon, type PortfolioIconKey } from './portfolio-icons'
 export function CreatePortfolioDialog({ open, onOpenChange, api, accounts = [], portfolios = [], onCreated }: {
   open: boolean; onOpenChange: (open: boolean) => void; api: WorkspaceApi; accounts?: BrokerAccount[]; portfolios?: Portfolio[]; onCreated: () => void
 }) {
-  const [selected, setSelected] = useState<string[]>([])
+  const [selected, setSelected] = useState<BrokerAccount[]>([])
   const [name, setName] = useState('')
   const [icon, setIcon] = useState<PortfolioIconKey>(defaultPortfolioIcon)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [reloaded, setReloaded] = useState<{ source: BrokerAccount[]; portfolioSource: Portfolio[]; accounts: BrokerAccount[]; portfolios: Portfolio[] } | null>(null)
+  const currentAccounts = reloaded?.source === accounts ? reloaded.accounts : accounts
+  const currentPortfolios = reloaded?.portfolioSource === portfolios ? reloaded.portfolios : portfolios
   async function submit(event: FormEvent) {
     event.preventDefault(); setError(null)
     if (!name.trim()) { setError('Give the portfolio a name.'); return }
     setPending(true)
     try {
-      const ids = selected.filter(id => accounts.some(a => a.id === id))
-      if (ids.length) await api.createPortfolio(name.trim(), icon, ids)
+      const members = selected.filter(a => currentAccounts.some(current => current.id === a.id))
+      if (members.length) await api.createPortfolio(name.trim(), icon, members.map(a => a.id),
+        members.map(a => ({ accountId: a.id, settingsRevision: a.settingsRevision! })))
       else await api.createPortfolio(name.trim(), icon)
       setSelected([]); setName(''); setIcon(defaultPortfolioIcon); onOpenChange(false); onCreated()
-    } catch (cause) { setError(cause instanceof ApiError ? cause.message : 'Could not create this portfolio.') }
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Could not create this portfolio.')
+      if (cause instanceof ApiError && (cause.status === 409 || cause.status === 412)) {
+        setSelected([]); onCreated()
+        setError('Account settings changed elsewhere. No portfolio was created or accounts moved. Review the reloaded accounts and select them again before retrying.')
+        try {
+          const [latestAccounts, latestPortfolios] = await Promise.all([api.accounts(), api.portfolios()])
+          setReloaded({ source: accounts, portfolioSource: portfolios, accounts: latestAccounts, portfolios: latestPortfolios })
+        } catch { setError('Account settings changed elsewhere. Reloading failed. Close this dialog and reload accounts before retrying.') }
+      }
+    }
     finally { setPending(false) }
   }
   return <Dialog open={open} onOpenChange={next => { if (!pending) { onOpenChange(next); setError(null) } }}>
@@ -39,7 +53,9 @@ export function CreatePortfolioDialog({ open, onOpenChange, api, accounts = [], 
       <form onSubmit={event => { void submit(event) }} className="workspace-form" aria-busy={pending}>
         <label htmlFor="portfolio-name">Portfolio name</label><Input id="portfolio-name" value={name} onChange={event => setName(event.target.value)} maxLength={200} placeholder="e.g. Swing trading" disabled={pending} autoFocus />
         <PortfolioIconPicker name="new-portfolio-icon" value={icon} onChange={setIcon} disabled={pending} />
-        <PortfolioAccounts accounts={accounts} portfolios={portfolios} selected={selected.filter(id => accounts.some(a => a.id === id))} onChange={setSelected} disabled={pending} />
+        <PortfolioAccounts accounts={currentAccounts} portfolios={currentPortfolios}
+          selected={selected.filter(a => currentAccounts.some(current => current.id === a.id)).map(a => a.id)}
+          onChange={ids => setSelected(ids.map(id => selected.find(a => a.id === id) ?? currentAccounts.find(a => a.id === id)!))} disabled={pending} />
         {error && <p className="error" role="alert">{error}</p>}
         <Button type="submit" disabled={pending}>{pending ? 'Creating…' : 'Create portfolio'}</Button>
       </form>

@@ -22,7 +22,7 @@ export function AccountsPanel({ accounts, portfolios, portfolioFilter, onPortfol
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const destination = usePortfolioDestination(portfolios, api, onReload)
-  const [selection, setSelection] = useState<{ visible: string; ids: string[] }>({ visible: '', ids: [] })
+  const [selection, setSelection] = useState<{ visible: string; accounts: BrokerAccount[] }>({ visible: '', accounts: [] })
   const { search, status } = filters
   const venueIds = [...new Set(accounts.map(account => account.venueId))]
   const venue = venueIds.includes(filters.venue) ? filters.venue : ''
@@ -34,19 +34,23 @@ export function AccountsPanel({ accounts, portfolios, portfolioFilter, onPortfol
     (!venue || account.venueId === venue) &&
     (!status || (status === 'enabled' ? account.isEnabled !== false : status === 'disabled' ? account.isEnabled === false : account.syncStatus === status)))
   const visible = shown.map(a => a.id).join(',')
-  const selected = selection.ids.filter(id => shown.some(a => a.id === id))
-  if (selection.visible !== visible) setSelection({ visible, ids: selected })
-  const choose = (ids: string[]) => setSelection({ visible, ids })
+  const selectedAccounts = selection.accounts.filter(a => shown.some(current => current.id === a.id))
+  const selected = selectedAccounts.map(a => a.id)
+  if (selection.visible !== visible) setSelection({ visible, accounts: selectedAccounts })
+  const choose = (ids: string[]) => setSelection({ visible, accounts: ids.map(id => selectedAccounts.find(a => a.id === id) ?? shown.find(a => a.id === id)!) })
   async function move(event: FormEvent) {
     event.preventDefault(); setPending(true); setError(null)
     let portfolioCreated = false
     try {
       const target = await destination.resolve(); portfolioCreated = target.created
-      await api.moveAccounts(selected, target.portfolioId)
+      await api.moveAccounts(selected, target.portfolioId, selectedAccounts.map(a => ({ accountId: a.id, settingsRevision: a.settingsRevision! })))
       choose([]); onChanged(`${selected.length} account${selected.length === 1 ? '' : 's'} moved${target.portfolioId ? ' to the portfolio' : ' to Unassigned'}.`)
     } catch (cause) {
+      const conflict = cause instanceof ApiError && (cause.status === 409 || cause.status === 412)
+      if (conflict) choose([])
       setError((portfolioCreated ? 'The new portfolio was created and kept. Retry the move into it; a duplicate portfolio will not be created. ' : '') +
-        (cause instanceof ApiError ? cause.message : 'The move was not confirmed. Reload before retrying.'))
+        (conflict ? 'Account settings changed elsewhere. No accounts were moved. Reload and review the rows, then select them again before retrying.' :
+          cause instanceof ApiError ? cause.message : 'The move was not confirmed. Reload before retrying.'))
       onReload()
     } finally { setPending(false) }
   }

@@ -16,6 +16,78 @@ public sealed class PortfolioMembershipTests
     }
 
     [Fact]
+    public async Task Guarded_moves_match_revisions_by_id_and_keep_no_op_revisions()
+    {
+        var store = new MemoryWorkspaceStore(Owner); var target = new Portfolio(Guid.NewGuid(), Owner, "Target"); store.Portfolios.Add(target);
+        var first = Account(); var same = Account(target.Id); store.Accounts.AddRange([first, same]);
+        await Service(store).MoveAccountsAsync(new([first.Id, same.Id], target.Id, [new(same.Id, 1), new(first.Id, 1)]), default);
+        Assert.Equal(2, first.SettingsRevision); Assert.Equal(1, same.SettingsRevision);
+        var created = await Service(store).CreatePortfolioAsync(new("New", AccountIds: [first.Id], Expected: [new(first.Id, 2)]), default);
+        Assert.Equal(created.Id, first.PortfolioId); Assert.Equal(3, first.SettingsRevision);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task Stale_membership_rejects_all_changes_before_mutation(bool create, bool unlink)
+    {
+        var store = new MemoryWorkspaceStore(Owner); var old = new Portfolio(Guid.NewGuid(), Owner, "Old");
+        var target = new Portfolio(Guid.NewGuid(), Owner, "Other"); store.Portfolios.AddRange([old, target]);
+        // Sort the valid sibling first, so a mutate-as-you-check implementation would partially move it.
+        var accounts = new[] { Account(old.Id), Account(old.Id) }.OrderBy(a => a.Id).ToArray();
+        store.Accounts.AddRange(accounts); var first = accounts[0]; var stale = accounts[1];
+        stale.UpdateSettings(stale.Name, target.Id, stale.IsEnabled);
+        var expected = new AccountSettingsExpectation[] { new(first.Id, 1), new(stale.Id, 1) };
+        var error = await Assert.ThrowsAsync<WorkspaceException>(async () =>
+        {
+            if (create) await Service(store).CreatePortfolioAsync(new("Rejected", AccountIds: [first.Id, stale.Id], Expected: expected), default);
+            else await Service(store).MoveAccountsAsync(new([first.Id, stale.Id], unlink ? null : target.Id, expected), default);
+        });
+        Assert.Equal(409, error.StatusCode); Assert.Contains("No accounts were moved", error.Message);
+        Assert.Equal(old.Id, first.PortfolioId); Assert.Equal(1, first.SettingsRevision);
+        Assert.Equal(target.Id, stale.PortfolioId); Assert.Equal(2, stale.SettingsRevision);
+        Assert.Equal(2, store.Portfolios.Count); Assert.Equal(0, store.Saves);
+    }
+
+    [Theory]
+    [InlineData("empty")]
+    [InlineData("missing")]
+    [InlineData("duplicate")]
+    [InlineData("foreign")]
+    [InlineData("zero")]
+    [InlineData("negative")]
+    [InlineData("null")]
+    public async Task Rejects_incomplete_or_invalid_expectations(string kind)
+    {
+        var store = new MemoryWorkspaceStore(Owner); var first = Account(); var second = Account(); store.Accounts.AddRange([first, second]);
+        AccountSettingsExpectation[] expected = kind switch
+        {
+            "empty" => [],
+            "missing" => [new(first.Id, 1)],
+            "duplicate" => [new(first.Id, 1), new(first.Id, 1)],
+            "foreign" => [new(first.Id, 1), new(Guid.NewGuid(), 1)],
+            "zero" => [new(first.Id, 0), new(second.Id, 1)],
+            "negative" => [new(first.Id, -1), new(second.Id, 1)],
+            _ => [new(first.Id, 1), null!]
+        };
+        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+            Service(store).MoveAccountsAsync(new([first.Id, second.Id], null, expected), default))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+            Service(store).CreatePortfolioAsync(new("Rejected", AccountIds: [first.Id, second.Id], Expected: expected), default))).StatusCode);
+        Assert.Empty(store.Portfolios); Assert.Equal(0, store.Saves);
+    }
+
+    [Fact]
+    public async Task Expectations_without_selected_accounts_cannot_create_a_portfolio()
+    {
+        var store = new MemoryWorkspaceStore(Owner);
+        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+            Service(store).CreatePortfolioAsync(new("Rejected", Expected: [new(Guid.NewGuid(), 1)]), default))).StatusCode);
+        Assert.Empty(store.Portfolios);
+    }
+
+    [Fact]
     public async Task Bulk_move_includes_disabled_accounts_bumps_only_changes_and_preserves_settings()
     {
         var store = new MemoryWorkspaceStore(Owner); var portfolio = new Portfolio(Guid.NewGuid(), Owner, "Target"); store.Portfolios.Add(portfolio);

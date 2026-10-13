@@ -27,10 +27,14 @@ export function ManagePortfolioDialog({ portfolio, accounts = noAccounts, portfo
   const currentAccounts = reloaded?.source === accounts ? reloaded.accounts : accounts
   const currentPortfolios = reloaded?.portfolioSource === portfolios ? reloaded.portfolios : portfolios
   const [membershipSource, setMembershipSource] = useState(currentAccounts)
+  const [membershipRevisions, setMembershipRevisions] = useState(() => Object.fromEntries(accounts.map(a => [a.id, a.settingsRevision])))
   if (membershipSource !== currentAccounts) {
     const added = selected.filter(id => !baseline.includes(id) && currentAccounts.some(a => a.id === id))
     const removed = baseline.filter(id => !selected.includes(id))
     const members = currentAccounts.filter(a => a.portfolioId === portfolio.id).map(a => a.id)
+    const changed = new Set([...added, ...removed])
+    setMembershipRevisions(Object.fromEntries(currentAccounts.map(a =>
+      [a.id, changed.has(a.id) ? membershipRevisions[a.id] : a.settingsRevision])))
     setMembershipSource(currentAccounts); setBaseline(members)
     setSelected([...new Set([...members.filter(id => !removed.includes(id)), ...added])])
   }
@@ -49,26 +53,31 @@ export function ManagePortfolioDialog({ portfolio, accounts = noAccounts, portfo
     setPending(true)
     try {
       await api.updatePortfolio(portfolio.id, { name: name.trim(), ...(icon && { icon }) })
-      if (added.length) await api.moveAccounts(added, portfolio.id)
-      if (removed.length) {
-        // Do not unlink a member that another tab has already moved elsewhere.
-        const latest = await api.accounts()
-        const stillHere = removed.filter(id => latest.some(a => a.id === id && a.portfolioId === portfolio.id))
-        if (stillHere.length) await api.moveAccounts(stillHere, null)
-      }
+      const expected = (ids: string[]) => ids.map(accountId => ({ accountId, settingsRevision: membershipRevisions[accountId]! }))
+      if (added.length) await api.moveAccounts(added, portfolio.id, expected(added))
+      if (removed.length) await api.moveAccounts(removed, null, expected(removed))
       onChanged('Portfolio updated.'); onClose()
     } catch (cause) {
       setError('Some changes may have saved. Reload accounts before retrying. ' + failure(cause)); setNeedsReload(true); onStale?.()
+      if (cause instanceof ApiError && (cause.status === 409 || cause.status === 412)) {
+        setError('Account settings changed elsewhere. The conflicting membership request moved no accounts. Earlier changes may have saved. Reload accounts and review before retrying.')
+        try { await readAccounts() }
+        catch { setError('Account settings changed elsewhere. Reloading failed. Reload accounts before retrying; earlier changes may have saved.') }
+      }
     }
     finally { setPending(false) }
+  }
+  async function readAccounts() {
+    const [latestAccounts, latestPortfolios] = await Promise.all([api.accounts(), api.portfolios()])
+    const members = latestAccounts.filter(a => a.portfolioId === portfolio.id).map(a => a.id)
+    setReloaded({ source: accounts, portfolioSource: portfolios, accounts: latestAccounts, portfolios: latestPortfolios })
+    setBaseline(members); setSelected(members)
+    setMembershipRevisions(Object.fromEntries(latestAccounts.map(a => [a.id, a.settingsRevision])))
   }
   async function reloadAccounts() {
     setPending(true); setError(null)
     try {
-      const [latestAccounts, latestPortfolios] = await Promise.all([api.accounts(), api.portfolios()])
-      const members = latestAccounts.filter(a => a.portfolioId === portfolio.id).map(a => a.id)
-      setReloaded({ source: accounts, portfolioSource: portfolios, accounts: latestAccounts, portfolios: latestPortfolios })
-      setBaseline(members); setSelected(members); setNeedsReload(false); onStale?.()
+      await readAccounts(); setNeedsReload(false); onStale?.()
     } catch (cause) { setError(failure(cause)) }
     finally { setPending(false) }
   }

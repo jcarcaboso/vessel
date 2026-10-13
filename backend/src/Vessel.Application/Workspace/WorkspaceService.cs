@@ -28,9 +28,11 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         ValidateName(request.Name);
         ValidateIcon(request.Icon);
         if (request.AccountIds is not null) ValidateAccountIds(request.AccountIds);
+        ValidateExpected(request.AccountIds, request.Expected);
         return await store.WithManagementLockAsync(async () =>
         {
             var accounts = await LockAccounts(request.AccountIds ?? [], ct);
+            CheckExpected(accounts, request.Expected);
             var portfolio = new Portfolio(Guid.NewGuid(), owner.OwnerId, request.Name, request.Icon ?? PortfolioIcons.Default);
             await store.AddPortfolioAsync(portfolio, ct);
             MoveAccounts(accounts, portfolio.Id);
@@ -43,6 +45,23 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     {
         if (ids is null || ids.Count is 0 or > 200 || ids.Distinct().Count() != ids.Count)
             throw new WorkspaceException(400, "Choose between 1 and 200 distinct accounts.");
+    }
+
+    private static void ValidateExpected(IReadOnlyList<Guid>? ids, IReadOnlyList<AccountSettingsExpectation>? expected)
+    {
+        if (expected is null) return;
+        if (ids is null || expected.Count == 0 || expected.Count != ids.Count ||
+            expected.Any(e => e is null || e.SettingsRevision < 1 || !ids.Contains(e.AccountId)) ||
+            expected.Select(e => e.AccountId).Distinct().Count() != expected.Count)
+            throw new WorkspaceException(400, "Provide exactly one positive settings revision for each selected account.");
+    }
+
+    private static void CheckExpected(IReadOnlyList<Account> accounts, IReadOnlyList<AccountSettingsExpectation>? expected)
+    {
+        if (expected is null) return;
+        var revisions = expected.ToDictionary(e => e.AccountId, e => e.SettingsRevision);
+        if (accounts.Any(a => a.SettingsRevision != revisions[a.Id]))
+            throw new WorkspaceException(409, "Account settings changed elsewhere. No accounts were moved. Reload accounts and review the membership before retrying.");
     }
 
     private async Task<List<Account>> LockAccounts(IReadOnlyList<Guid> ids, CancellationToken ct)
@@ -64,10 +83,12 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     public async Task<IReadOnlyList<AccountDto>> MoveAccountsAsync(MoveAccountsRequest request, CancellationToken ct)
     {
         ValidateAccountIds(request.AccountIds);
+        ValidateExpected(request.AccountIds, request.Expected);
         return await store.WithManagementLockAsync(async () =>
         {
             await ValidatePortfolio(request.PortfolioId, ct);
             var accounts = await LockAccounts(request.AccountIds!, ct);
+            CheckExpected(accounts, request.Expected);
             MoveAccounts(accounts, request.PortfolioId);
             await store.SaveAsync(ct);
             var result = new List<AccountDto>();

@@ -9,6 +9,61 @@ namespace Vessel.Tests;
 
 public sealed class PortfolioMembershipPostgresTests
 {
+    [PostgresFact]
+    public async Task Stale_tab_cannot_unlink_an_account_after_a_concurrent_move()
+    {
+        await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); Guid account, old, target;
+        await using (var db = database.Context(owner))
+        {
+            var service = Service(db, owner); old = (await service.CreatePortfolioAsync(new("Old"), default)).Id;
+            target = (await service.CreatePortfolioAsync(new("Other"), default)).Id;
+            account = (await service.CreateAccountAsync(new(old, "Member", "manual"), default)).Id;
+        }
+        await using var tabA = database.Context(owner);
+        // Keep a stale tracked entity too; the locked check must use the reloaded row.
+        var displayed = await tabA.Accounts.SingleAsync();
+        await using (var tabB = database.Context(owner))
+            await Service(tabB, owner).MoveAccountsAsync(new([account], target), default);
+        Assert.Equal(old, displayed.PortfolioId); Assert.Equal(1, displayed.SettingsRevision);
+        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+            Service(tabA, owner).MoveAccountsAsync(new([account], null, [new(account, 1)]), default))).StatusCode);
+        await using var verify = database.Context(owner); var retained = await verify.Accounts.SingleAsync();
+        Assert.Equal(target, retained.PortfolioId); Assert.Equal(2, retained.SettingsRevision);
+    }
+
+    [PostgresFact]
+    public async Task Stale_member_rejects_bulk_and_creation_without_any_partial_changes()
+    {
+        await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); Guid first, stale, old, target;
+        await using (var db = database.Context(owner))
+        {
+            var service = Service(db, owner); old = (await service.CreatePortfolioAsync(new("Old"), default)).Id;
+            target = (await service.CreatePortfolioAsync(new("Other"), default)).Id;
+            var ids = new[] { (await service.CreateAccountAsync(new(old, "First", "manual"), default)).Id,
+                (await service.CreateAccountAsync(new(old, "Second", "manual"), default)).Id }.Order().ToArray();
+            first = ids[0]; stale = ids[1];
+            await service.MoveAccountsAsync(new([stale], target), default);
+        }
+        foreach (var action in new[] { "unlink", "move", "create" })
+        {
+            await using (var db = database.Context(owner))
+            {
+                var service = Service(db, owner); var expected = new AccountSettingsExpectation[] { new(first, 1), new(stale, 1) };
+                Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(async () =>
+                {
+                    if (action == "create") await service.CreatePortfolioAsync(new("Rejected", AccountIds: [first, stale], Expected: expected), default);
+                    else await service.MoveAccountsAsync(new([first, stale], action == "unlink" ? null : target, expected), default);
+                })).StatusCode);
+            }
+            await using var verify = database.Context(owner);
+            Assert.Equal(2, await verify.Portfolios.CountAsync());
+            var untouched = await verify.Accounts.SingleAsync(a => a.Id == first);
+            Assert.Equal(old, untouched.PortfolioId); Assert.Equal(1, untouched.SettingsRevision);
+            var moved = await verify.Accounts.SingleAsync(a => a.Id == stale);
+            Assert.Equal(target, moved.PortfolioId); Assert.Equal(2, moved.SettingsRevision);
+        }
+    }
+
     private static WorkspaceService Service(VesselDbContext db, Guid owner) =>
         new(new WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(new FixtureReader()));
 

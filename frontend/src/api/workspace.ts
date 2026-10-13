@@ -143,6 +143,10 @@ export interface BrokerAccount {
   availableBalanceSource?: 'wallet' | 'margin' | 'withdrawable' | null
   settingsRevision?: number
 }
+export interface AccountSettingsExpectation {
+  accountId: string
+  settingsRevision: number
+}
 export interface ImportedFill {
   id: string
   accountId: string
@@ -239,8 +243,8 @@ export interface WorkspaceApi {
    * aborts (resolves) or the connection fails (rejects with ApiError). Invalid events are ignored.
    */
   marketStream(id: string, query: MarketStreamQuery, signal: AbortSignal, onEvent: (event: MarketStreamEvent) => void): Promise<void>
-  createPortfolio(name: string, icon?: string, accountIds?: string[]): Promise<Portfolio>
-  moveAccounts(accountIds: string[], portfolioId: string | null): Promise<BrokerAccount[]>
+  createPortfolio(name: string, icon?: string, accountIds?: string[], expected?: AccountSettingsExpectation[]): Promise<Portfolio>
+  moveAccounts(accountIds: string[], portfolioId: string | null, expected?: AccountSettingsExpectation[]): Promise<BrokerAccount[]>
   createAccount(account: CreateAccount): Promise<BrokerAccount>
   discoverAccounts(venueId: string, address: string, signal?: AbortSignal, token?: string): Promise<AccountDiscovery>
   accountCredential(id: string, signal?: AbortSignal): Promise<AccountCredential>
@@ -286,6 +290,10 @@ const decimal = (v: unknown): v is string => text(v) && v.length <= 100 && /^-?\
 const nullableDecimal = (v: unknown) => v === null || decimal(v)
 const date = (v: unknown) => text(v) && Number.isFinite(Date.parse(v))
 const count = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
+const validExpected = (ids: string[] | undefined, expected: AccountSettingsExpectation[] | undefined) =>
+  expected === undefined || Array.isArray(expected) && !!ids?.length && expected.length === ids.length &&
+  expected.every(e => object(e) && guid(e.accountId) && ids.includes(e.accountId) && count(e.settingsRevision) && e.settingsRevision > 0) &&
+  new Set(expected.map(e => e.accountId)).size === expected.length
 const instrumentCatalog = (v: unknown): v is InstrumentCatalog => object(v) &&
   text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 &&
   v.marketScope === 'perpetuals' && ['venue-perpetuals', 'manual'].includes(String(v.scope)) &&
@@ -618,13 +626,17 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
         signal ? { signal } : {}, 25_000, 'Venue market statistics are unavailable.')
     },
     marketStream,
-    createPortfolio: (name, icon, accountIds) => request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name, icon, accountIds }) }),
-    moveAccounts: (accountIds, portfolioId) => {
+    createPortfolio: (name, icon, accountIds, expected) => {
+      if (!validExpected(accountIds, expected)) return Promise.reject(new ApiError('invalid-response', 'Reload accounts and provide one positive settings revision per selected account.'))
+      return request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name, icon, accountIds, expected }) })
+    },
+    moveAccounts: (accountIds, portfolioId, expected) => {
       if (!accountIds.length || accountIds.length > 200 || !accountIds.every(guid) || new Set(accountIds).size !== accountIds.length ||
           portfolioId !== null && !guid(portfolioId)) return Promise.reject(new ApiError('invalid-response', 'Choose between 1 and 200 distinct accounts and a valid portfolio.'))
+      if (!validExpected(accountIds, expected)) return Promise.reject(new ApiError('invalid-response', 'Reload accounts and provide one positive settings revision per selected account.'))
       return request('/api/accounts/portfolio', (v): v is BrokerAccount[] => Array.isArray(v) && v.length === accountIds.length &&
         v.every(a => account(a) && accountIds.includes(a.id) && a.portfolioId === portfolioId && count(a.settingsRevision) && a.settingsRevision! > 0) &&
-        new Set(v.map(a => a.id)).size === v.length, { method: 'POST', body: JSON.stringify({ accountIds, portfolioId }) })
+        new Set(v.map(a => a.id)).size === v.length, { method: 'POST', body: JSON.stringify({ accountIds, portfolioId, expected }) })
     },
     createAccount: body => request('/api/accounts', account, { method: 'POST', body: JSON.stringify(body) }),
     discoverAccounts: (venueId, address, signal, token) => {

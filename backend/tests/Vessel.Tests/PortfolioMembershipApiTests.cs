@@ -31,6 +31,39 @@ public sealed class PortfolioMembershipApiTests
     }
 
     [Fact]
+    public async Task Guarded_requests_return_conflict_without_moving_or_creating()
+    {
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Account"); store.Accounts.Add(account);
+        account.UpdateSettings("Current", null, true);
+        await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
+        var expected = new[] { new AccountSettingsExpectation(account.Id, 1) };
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/accounts/portfolio",
+            new MoveAccountsRequest([account.Id], null, expected))).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/portfolios",
+            new CreatePortfolioRequest("Rejected", AccountIds: [account.Id], Expected: expected))).StatusCode);
+        Assert.Null(account.PortfolioId); Assert.Equal(2, account.SettingsRevision); Assert.Empty(store.Portfolios);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"accountId\":\"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"}")]
+    [InlineData("{\"settingsRevision\":1}")]
+    [InlineData("{\"accountId\":\"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\",\"settingsRevision\":0}")]
+    [InlineData("{\"accountId\":\"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\",\"settingsRevision\":1.5}")]
+    [InlineData("null")]
+    public async Task Rejects_malformed_expected_items_on_both_routes(string item)
+    {
+        var owner = Guid.NewGuid(); await using var factory = new CoreApiFactory(owner, new MemoryWorkspaceStore(owner)); using var client = factory.AuthorizedClient();
+        foreach (var path in new[] { "/api/accounts/portfolio", "/api/portfolios" })
+        {
+            var json = "{\"name\":\"Rejected\",\"accountIds\":[\"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"],\"portfolioId\":null,\"expected\":[" + item + "]}";
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync(path,
+                new StringContent(json, System.Text.Encoding.UTF8, "application/json"))).StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task Move_and_create_endpoints_return_updated_resources()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
