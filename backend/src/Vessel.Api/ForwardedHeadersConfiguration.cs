@@ -9,6 +9,14 @@ public static class ForwardedHeadersConfiguration
     {
         options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
         var section = configuration.GetSection("Vessel:ForwardedHeaders");
+        // Explicit trust replaces the framework's loopback defaults. Compose trusts
+        // only its pinned web peer, not the bridge gateway or another container.
+        if (section.GetSection("KnownNetworks").GetChildren().Any() ||
+            section.GetSection("KnownProxies").GetChildren().Any())
+        {
+            options.KnownIPNetworks.Clear();
+            options.KnownProxies.Clear();
+        }
         foreach (var entry in section.GetSection("KnownNetworks").GetChildren())
         {
             if (entry.Value is not { } value || !value.Contains('/') ||

@@ -31,17 +31,20 @@ public sealed class CredentialTransportApiTests
     [InlineData("Development", "http://localhost", "127.0.0.1", "http", "192.0.2.10", true)]
     [InlineData("Staging", "http://vessel.example.invalid", "192.0.2.10", null, null, false)]
     [InlineData("Testing", "http://vessel.example.invalid", "192.0.2.10", null, null, false)]
-    [InlineData("Production", "http://vessel.example.invalid", "172.30.86.10", "https", "198.51.100.7", true, "172.30.86.0/24")]
-    [InlineData("Production", "http://vessel.example.invalid", "172.30.86.10", "http", "198.51.100.7", false, "172.30.86.0/24")]
-    [InlineData("Production", "http://vessel.example.invalid", "192.0.2.10", "https", "198.51.100.7", false, "172.30.86.0/24")]
-    public async Task Token_transport_exception_is_development_only(string environment, string origin, string peer, string? forwardedProto, string? forwardedFor, bool allowed, string? knownNetwork = null)
+    [InlineData("Production", "http://vessel.example.invalid", "172.30.86.10", "https", "198.51.100.7", true, "172.30.86.10")]
+    [InlineData("Production", "http://vessel.example.invalid", "172.30.86.10", "http", "198.51.100.7", false, "172.30.86.10")]
+    [InlineData("Production", "http://vessel.example.invalid", "192.0.2.10", "https", "198.51.100.7", false, "172.30.86.10")]
+    [InlineData("Production", "http://vessel.example.invalid", "172.30.86.1", "https", "198.51.100.7", false, "172.30.86.10")]
+    [InlineData("Production", "http://vessel.example.invalid", "172.30.86.11", "https", "198.51.100.7", false, "172.30.86.10")]
+    [InlineData("Production", "http://vessel.example.invalid", "127.0.0.1", "https", "198.51.100.7", false, "172.30.86.10")]
+    public async Task Token_transport_exception_is_development_only(string environment, string origin, string peer, string? forwardedProto, string? forwardedFor, bool allowed, string? knownProxy = null)
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var account = SecurityFixture.Account(owner); store.Accounts.Add(account);
         var credentials = new SecurityCredentialStore(); using var vault = SecurityFixture.Vault();
         var verifier = new CountingVerifier(); var discovery = new SecurityDiscovery([new("123", "Main", "main")]);
         await using var factory = new CoreApiFactory(owner, store, connection: "Host=unused.invalid;Database=synthetic",
             environment: environment,
-            settings: knownNetwork is null ? null : new() { ["Vessel:ForwardedHeaders:KnownNetworks:0"] = knownNetwork },
+            settings: knownProxy is null ? null : new() { ["Vessel:ForwardedHeaders:KnownProxies:0"] = knownProxy },
             configure: services =>
         {
             services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry()); services.AddSingleton<ICredentialVault>(vault);
@@ -83,6 +86,36 @@ public sealed class CredentialTransportApiTests
             using var removed = await client.DeleteAsync($"/api/accounts/{account.Id}/credential");
             Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
         }
+    }
+
+    [Theory]
+    [InlineData("172.30.86.1")]
+    [InlineData("172.30.86.11")]
+    public async Task Untrusted_bridge_peers_cannot_reset_auth_limiter_with_forwarded_claims(string peer)
+    {
+        var owner = Guid.NewGuid();
+        await using var factory = new CoreApiFactory(owner, new MemoryWorkspaceStore(owner),
+            connection: "Host=unused.invalid;Database=synthetic", environment: "Production",
+            settings: new() { ["Vessel:ForwardedHeaders:KnownProxies:0"] = "172.30.86.10", ["Vessel:ForwardedHeaders:ForwardLimit"] = "1" },
+            configure: services => services.AddSingleton<IStartupFilter>(new Peer(IPAddress.Parse(peer))));
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "wrong-token");
+        for (var i = 0; i < 20; i++)
+        {
+            using var failure = await client.GetAsync("/api/system");
+            Assert.Equal(HttpStatusCode.Unauthorized, failure.StatusCode);
+        }
+        for (var i = 1; i <= 3; i++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/api/system");
+            request.Headers.Add("X-Forwarded-For", $"198.51.100.{i}");
+            request.Headers.Add("X-Forwarded-Proto", "https");
+            using var failure = await client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        }
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CoreApiFactory.Token);
+        using var success = await client.GetAsync("/api/system");
+        Assert.Equal(HttpStatusCode.OK, success.StatusCode);
     }
 
     private sealed class Peer(IPAddress address) : IStartupFilter

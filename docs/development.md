@@ -52,7 +52,14 @@ The `api-latest` and `web-latest` tags move with releases; deploy fixed versions
 for predictable upgrades. Builds do not need secrets or a live database.
 The API image includes `/app/migrate`; applying migrations remains an explicit
 one-shot deployment step, never API startup behaviour.
-See [deployment setup and verification](../deploy/README.md).
+See [deployment setup and verification](../deploy/README.md). Default nginx
+ignores incoming forwarded claims; the API trusts only the pinned web peer.
+The opt-in Caddy TLS overlay unpublishes web and trusts only Caddy's exact IP.
+Host-gateway trust is a weaker explicit alternative: any local process can forge
+scheme/client headers. The production credential guard is never disabled.
+`python3 scripts/verify-release.py` builds isolated throwaway images, checks both
+transport modes and restores synthetic backups into fresh volumes. Its optional
+`--browser-module` check verifies the built SPA's CSP without real venue calls.
 
 ## PostgreSQL
 

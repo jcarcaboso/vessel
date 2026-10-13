@@ -53,11 +53,15 @@ public sealed class ForwardedHeadersTests
     [InlineData("172.30.86.10", true, true)]
     [InlineData("192.0.2.10", true, false)]
     [InlineData("::ffff:172.30.86.10", true, true)]
+    [InlineData("172.30.86.1", true, false)]
+    [InlineData("172.30.86.11", true, false)]
+    [InlineData("127.0.0.1", true, false)]
+    [InlineData("::1", true, false)]
     [InlineData("127.0.0.1", false, true)]
     [InlineData("::1", false, true)]
     public async Task Only_trusted_peers_can_change_https_and_the_limiter_client_ip(string peer, bool configured, bool trusted)
     {
-        var options = configured ? Configure(("Vessel:ForwardedHeaders:KnownNetworks:0", "172.30.86.0/24")) : Configure();
+        var options = configured ? Configure(("Vessel:ForwardedHeaders:KnownProxies:0", "172.30.86.10")) : Configure();
         var context = new DefaultHttpContext();
         context.Connection.RemoteIpAddress = IPAddress.Parse(peer);
         context.Request.Scheme = "http";
@@ -67,6 +71,24 @@ public sealed class ForwardedHeadersTests
         await middleware.Invoke(context);
         Assert.Equal(trusted, context.Request.IsHttps);
         Assert.Equal(IPAddress.Parse(trusted ? "198.51.100.7" : peer), context.Connection.RemoteIpAddress);
+    }
+
+    [Fact]
+    public async Task Compose_trust_is_exactly_web_and_consumes_only_the_sanitized_hop()
+    {
+        var options = Configure(("Vessel:ForwardedHeaders:KnownProxies:0", "172.30.86.10"),
+            ("Vessel:ForwardedHeaders:ForwardLimit", "1"));
+        Assert.Empty(options.KnownIPNetworks);
+        Assert.Equal(IPAddress.Parse("172.30.86.10"), Assert.Single(options.KnownProxies));
+        var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = IPAddress.Parse("172.30.86.10");
+        context.Request.Scheme = "http";
+        context.Request.Headers["X-Forwarded-Proto"] = "https, http";
+        context.Request.Headers["X-Forwarded-For"] = "203.0.113.99, 198.51.100.7";
+        await new ForwardedHeadersMiddleware(_ => Task.CompletedTask, NullLoggerFactory.Instance, Options.Create(options)).Invoke(context);
+        Assert.False(context.Request.IsHttps);
+        Assert.Equal(IPAddress.Parse("198.51.100.7"), context.Connection.RemoteIpAddress);
+        Assert.Equal("203.0.113.99", context.Request.Headers["X-Forwarded-For"]);
     }
 
     [Fact]

@@ -18,6 +18,10 @@ First manual release of the self-hosted, single-owner Vessel application.
 - Settings, built-in dark/light themes and browser-saved custom palettes.
 - Production auth hardening, health endpoints and explicitly trusted proxy settings.
 - Separate API and web Docker images, explicit migration bundle and Compose example.
+- Exact single-hop proxy trust, an optional Caddy TLS overlay with unpublished web,
+  static security headers/CSP and backend-only API compression decisions.
+- Isolated database/evidence/key-ring restore instructions and local HTTP/TLS,
+  browser CSP and restore verification scripts.
 
 Full-history backfills, background monitoring and notification delivery remain
 outside this release. Activity operations are not retrospective Plays or inferred

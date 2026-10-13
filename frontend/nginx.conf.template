@@ -1,8 +1,9 @@
-# Only a trusted TLS proxy should reach this server. Never expose it directly to the internet.
-map $http_x_forwarded_proto $vessel_forwarded_proto {
+# Generated at startup. Empty VESSEL_TRUSTED_PROXY means no forwarded-header trust.
+include /tmp/vessel-trusted-proxy.conf;
+map "$vessel_trusted_peer:$http_x_forwarded_proto" $vessel_forwarded_proto {
     default $scheme;
-    http http;
-    https https;
+    "1:http" http;
+    "1:https" https;
 }
 
 server {
@@ -14,28 +15,45 @@ server {
     client_max_body_size 10551296;
     gzip on;
     gzip_vary on;
-    gzip_types text/css application/javascript application/json image/svg+xml;
+    gzip_proxied any;
+    gzip_types text/css application/javascript image/svg+xml;
+    include /etc/nginx/static-security.conf;
 
     location /assets/ {
         try_files $uri =404;
+        include /etc/nginx/static-security.conf;
         add_header Cache-Control "public, max-age=31536000, immutable";
     }
     location = /index.html {
+        include /etc/nginx/static-security.conf;
         add_header Cache-Control "no-cache";
     }
     location / {
         try_files $uri $uri/ /index.html;
     }
-    location ~ ^/(api|health)/ {
+    location ~ ^/(api|health)(/|$) {
+        # Suppress inherited static headers. Upstream API supplies its own, once.
+        add_header X-Content-Type-Options "";
+        # Nginx-generated errors still need the static security policy.
+        error_page 413 = @body_too_large;
+        error_page 502 = @bad_gateway;
+        error_page 504 = @gateway_timeout;
+        gzip off;
         proxy_pass ${VESSEL_API_UPSTREAM};
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Overwrite, never append caller-controlled chains. realip changes remote_addr
+        # only for the optional exact trusted peer configured at startup.
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $vessel_forwarded_proto;
+        proxy_set_header X-Forwarded-Host "";
+        proxy_set_header Forwarded "";
         proxy_set_header Connection "";
-        # Market SSE must arrive incrementally, and must not idle out between observations.
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 1h;
     }
+    location @body_too_large { return 413; }
+    location @bad_gateway { return 502; }
+    location @gateway_timeout { return 504; }
 }

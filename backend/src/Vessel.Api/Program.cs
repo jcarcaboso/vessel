@@ -24,7 +24,7 @@ builder.Services.AddResponseCompression(options =>
 builder.Services.AddSingleton<ResponseCompressionProvider>();
 builder.Services.AddSingleton<IResponseCompressionProvider, MarketDataCompression>();
 
-// Loopback is always trusted. Container deployments must explicitly name their trusted proxies.
+// Loopback is the default. Explicit proxy configuration replaces that default trust.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
     ForwardedHeadersConfiguration.Configure(options, builder.Configuration));
 

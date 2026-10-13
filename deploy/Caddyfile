@@ -1,0 +1,6 @@
+{$VESSEL_TLS_HOST} {
+    {$VESSEL_TLS_DIRECTIVE}
+    # Caddy's default untrusted-client policy replaces forwarded headers.
+    # Do not add trusted_proxies without a separately secured upstream design.
+    reverse_proxy web:8080
+}

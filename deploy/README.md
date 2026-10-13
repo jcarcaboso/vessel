@@ -12,14 +12,15 @@ The first release targets Linux amd64.
 
 ## Requirements
 
-Install Docker Engine with Docker Compose v2 on a Linux amd64 host, OpenSSL,
+Install Docker Engine with Docker Compose 2.24.4 or newer on a Linux amd64 host, OpenSSL,
 `uuidgen` and Python 3. Provide persistent disk space for PostgreSQL and evidence
-images, plus a DNS name and a trusted TLS-terminating proxy for remote use.
+images, plus a DNS name for remote TLS use. The optional TLS overlay supplies Caddy.
 The optional credential-key helper needs a source checkout.
 
 Copy this `deploy/` directory to a private operator directory outside the source
 checkout. Do not reuse the development `.env`, database or LAN preview services.
-Only web publishes a port. PostgreSQL and API have no host ports.
+In default HTTP mode only web publishes a port. In the TLS overlay only Caddy
+publishes ports. PostgreSQL and API have no host ports.
 
 ## Configure an installation
 
@@ -71,8 +72,10 @@ it to a private interface reachable only by your TLS proxy. Never expose plain
 HTTP to the internet. Choose another port if 8080 is already used.
 
 The Compose network is pinned to `172.30.86.0/24` with gateway `172.30.86.1`.
-If it overlaps a host, VPN or Docker network, change `VESSEL_NETWORK_SUBNET`,
-`VESSEL_NETWORK_GATEWAY` and `VESSEL_TLS_PROXY_IP` together.
+Web is pinned to `172.30.86.10`; optional Caddy is pinned to `172.30.86.20`.
+If these overlap a host, VPN or Docker network, change `VESSEL_NETWORK_SUBNET`,
+`VESSEL_NETWORK_GATEWAY`, `VESSEL_WEB_IP` and `VESSEL_TLS_PROXY_IP` together.
+Keep both service IPs inside the subnet and distinct from its gateway.
 
 ## Optional Lighter credential storage
 
@@ -140,7 +143,64 @@ keeps this login token only in browser session memory, not local storage or URLs
 
 ## HTTPS and proxy trust
 
-For a host-local nginx TLS proxy, use your own certificate paths and hostname:
+### Default HTTP mode
+
+Web overwrites `X-Forwarded-For` with its observed client address and
+`X-Forwarded-Proto` with its own HTTP scheme. It clears `X-Forwarded-Host` and
+`Forwarded`. `VESSEL_TRUSTED_PROXY` is empty, so no caller can claim HTTPS or
+choose another rate-limiter address by supplying these headers. Docker NAT may
+make different clients share the gateway address and therefore the failure
+limiter. This is conservative, not an identity guarantee.
+
+The API trusts only the pinned `VESSEL_WEB_IP`, with `ForwardLimit=1`, not the
+bridge subnet or gateway. PostgreSQL and API are unpublished. Plain HTTP remains
+unsuitable for credentials and login tokens beyond a secured local host. The
+production Lighter credential guard stays enabled.
+
+### Preferred TLS mode, Caddy in Compose
+
+Set these in the private operator `.env`:
+
+```text
+VESSEL_TLS_HOST=vessel.example.com
+VESSEL_TLS_HTTP_BIND=0.0.0.0:80
+VESSEL_TLS_HTTPS_BIND=0.0.0.0:443
+VESSEL_TLS_DIRECTIVE=
+```
+
+Point DNS to the host and permit inbound 80/443 for Caddy's public certificates.
+Use the overlay on every command, and include the credential override when needed:
+
+```sh
+docker compose -f compose.yaml -f compose.tls.yaml up -d
+docker compose -f compose.yaml -f compose.tls.yaml ps -a
+# With optional credential storage:
+docker compose -f compose.yaml -f compose.tls.yaml -f compose.credentials.yaml up -d
+```
+
+The overlay resets web's published ports to an empty list. Only Caddy publishes
+HTTP/HTTPS. Caddy replaces untrusted forwarded headers and terminates TLS. Nginx
+trusts exactly Caddy's pinned IPv4 address through `set_real_ip_from`,
+`real_ip_header X-Forwarded-For` and `real_ip_recursive off`. A `geo`/`map` checks
+`$realip_remote_addr`, the **immediate** peer before real-IP replacement, before
+accepting its scheme. Other peers get their observed address and `$scheme`, even
+when they can reach web on the private network. Nginx sends one sanitized hop to
+the API, preserving Caddy's observed client IP and HTTPS. The unprivileged nginx
+image must include `--with-http_realip_module`; the local verification checks it.
+Do not attach untrusted containers or publish web/API in this mode. A container
+controlling Caddy's exact IP is a trusted proxy and can impersonate clients.
+
+For an isolated local test, use `VESSEL_TLS_HOST=localhost`, loopback-only free
+ports and `VESSEL_TLS_DIRECTIVE=tls internal`. Test with `curl -k`, or install the
+local CA in your test browser. Never use `-k` for production credentials. The
+`caddy_data` volume contains certificates and private keys; protect it.
+
+### Host-local TLS proxy, weaker alternative
+
+Keep `VESSEL_WEB_BIND=127.0.0.1:8080`, omit the TLS overlay, and explicitly set
+`VESSEL_TRUSTED_PROXY=172.30.86.1`, or the actual gateway seen by nginx. Configure
+the host proxy with trusted certificates, the same upload limit and unbuffered
+SSE. For example:
 
 ```nginx
 server {
@@ -153,9 +213,10 @@ server {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
-        # Overwrite untrusted client headers, never append an incoming claim.
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host "";
+        proxy_set_header Forwarded "";
         proxy_set_header Connection "";
         proxy_buffering off;
         proxy_read_timeout 1h;
@@ -163,25 +224,38 @@ server {
 }
 ```
 
-Configure port 80 only to redirect to HTTPS if needed. The web container preserves
-the proxy's `X-Forwarded-Proto` and appends its immediate peer to
-`X-Forwarded-For`. The API defaults to trusting loopback only. Compose explicitly
-adds its private subnet and the host-local proxy IP with a two-hop limit so it
-can see both HTTPS and the original client IP for failed-token rate limiting.
-`VESSEL_TLS_PROXY_IP` must match the TLS proxy's peer IP as seen by web.
+**This explicitly trusts every host-local process that can reach the web port.**
+Docker NAT gives those processes the same gateway peer as the host TLS proxy.
+They can forge HTTPS and client addresses. Loopback binding does not distinguish
+processes or encrypt that hop. Use this only on a host where all local processes
+are trusted; prefer the unpublished-web overlay. Never combine gateway trust
+with a public web binding.
 
-All containers on the configured trusted subnet can claim a scheme and client
-address. Do not attach untrusted workloads to it. Trust only proxies that replace
-incoming client headers. Direct callers of the loopback web port can also claim
-HTTPS, so restrict access to the host and proxy. Lighter token entry requires
-HTTPS outside direct loopback; preserving a header is not encryption.
+### Other API deployments
 
-For a custom deployment, use indexed
-`Vessel__ForwardedHeaders__KnownNetworks__0` and/or
-`Vessel__ForwardedHeaders__KnownProxies__0` environment settings. Empty additional
-lists mean no additional trust. The API rejects malformed CIDRs, `/0` networks,
-unspecified proxy addresses and hop limits outside 1 to 5. Do not trust an
-internet-wide network. Prefer exact proxy IPs where practical.
+Outside this Compose example the API defaults to loopback trust. Nonempty
+indexed `Vessel__ForwardedHeaders__KnownNetworks__0` and/or
+`Vessel__ForwardedHeaders__KnownProxies__0` settings **replace** loopback defaults.
+The API rejects malformed CIDRs, `/0`, unspecified proxies and limits outside
+1 to 5. Prefer exact peers and a one-hop chain that sanitizes headers. Every peer
+in a configured network can impersonate clients. Never trust a whole bridge
+just to make TLS work.
+
+## Web response policy
+
+Static documents, deep-link fallbacks, assets and nginx errors carry `nosniff`,
+`DENY`, `no-referrer` and this Content-Security-Policy:
+
+```text
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+```
+
+Style attributes are needed for theme variables and chart positioning. Scripts
+have no inline/eval exception. Blob/data images support captures, uploads and
+markup; fonts and API/SSE connections stay same-origin. API responses use their
+own security headers, without duplicate nginx headers. Nginx gzip is disabled
+for `/api` and `/health`; it passes backend-selected market-data compression
+unchanged and compresses static assets only.
 
 ## Upgrade
 
@@ -227,8 +301,95 @@ PostgreSQL 18 stores its data below the named volume mounted at
 `/var/lib/postgresql`. Do not copy a live data directory as a substitute for
 `pg_dump`. Evidence uses its own named volume at `/var/lib/vessel/evidence`,
 writable by the non-root API. Restore both and the same key ring into a
-disposable deployment before relying on the procedure. A restore is not verified
-by the release packaging checks.
+disposable deployment before relying on the procedure. The local release
+verification exercises the restore below with synthetic records and evidence.
+
+## Isolated restore
+
+Use a new private operator directory, a unique project name and **fresh** named
+volumes, not an existing installation. Copy the deploy files and create a private
+`.env` with a new database password, the **same** `Vessel__Auth__OwnerId`, and the
+saved operator settings. You may rotate the Vessel login token. Select the image
+version that produced the backup first. Bind web to an unused loopback port and
+choose an unused subnet and pinned service IPs. Do not start web/API yet.
+
+The examples use the default mode; add every applicable `-f` overlay to each
+command. `-p vessel-restore-check` must never name the live project.
+
+```sh
+umask 077
+# Verify this project does not already exist before creating any volumes.
+docker compose -p vessel-restore-check ps -a
+docker compose -p vessel-restore-check up -d --wait postgres
+# The fresh database is empty. -Fc dumps require pg_restore, not psql.
+docker compose -p vessel-restore-check exec -T postgres \
+  pg_restore -U vessel -d vessel --no-owner --no-privileges --exit-on-error \
+  < /private/backups/vessel.dump
+# For a plain SQL dump instead, use:
+# docker compose -p vessel-restore-check exec -T postgres \
+#   psql -U vessel -d vessel -v ON_ERROR_STOP=1 < /private/backups/vessel.sql
+
+# Extract only your trusted evidence archive. API is stopped; root fixes ownership.
+docker compose -p vessel-restore-check run --rm --no-deps -T \
+  --user 0 --entrypoint sh api -c \
+  'tar -xzf - -C /var/lib/vessel/evidence && chown -R 1654:1654 /var/lib/vessel/evidence' \
+  < /private/backups/evidence.tar.gz
+```
+
+Place the original credential ring in a separate mode-700 secret directory,
+not the operator directory, database or evidence archive. Preserve every original
+key ID and byte, including retired keys needed by retained credentials. On rootful
+Docker set the file owner to `1654:1654` and mode to `0600`; apply the mapped UID
+for rootless/user-namespace deployments. Use a regular, non-symlink file. Set
+`VESSEL_CREDENTIAL_KEYS_FILE` to that absolute path and include
+`compose.credentials.yaml` on subsequent commands. Generating a new ring cannot
+decrypt the restored credentials.
+
+```sh
+# This is the explicit migration step after restoring, not API startup.
+docker compose -p vessel-restore-check run --rm migrate
+docker compose -p vessel-restore-check up -d
+docker compose -p vessel-restore-check ps -a
+curl --fail http://127.0.0.1:YOUR_UNUSED_PORT/health/live
+curl --fail http://127.0.0.1:YOUR_UNUSED_PORT/health/ready
+```
+
+Authenticate through the UI with the restored installation's login token. Check
+that portfolios/accounts and saved Plays are visible under the unchanged owner,
+that an original evidence image and its markup open, and that credential metadata
+reports configured storage. Readiness confirms database connectivity/migrations,
+not decryption or venue access. To test decryption without exposing tokens, use
+an isolated stub venue or the approved read-only refresh against the real venue;
+do not print ciphertext, keys or plaintext. The local release check tests ring
+placement/startup and exact backup bytes, not a real Lighter token refresh.
+
+After the check, remove **only the disposable project** and its volumes:
+
+```sh
+docker compose -p vessel-restore-check down -v
+```
+
+## Local release verification
+
+From a source checkout, the scripted check builds throwaway amd64 images and
+uses its own temp operator directory, unique project/unused subnet, free loopback ports
+and synthetic owner/token. It never reads the repository `.env`, uses the owner's
+database, pushes images or calls a registry login. Public image pulls are needed.
+
+```sh
+python3 scripts/verify-release.py
+# Optional production browser CSP check, using an already available Playwright:
+python3 scripts/verify-release.py --browser-module /absolute/path/to/playwright
+# When Playwright's default browser is unavailable, set CHROMIUM_PATH to a
+# compatible installed Chromium executable before invoking the same check.
+```
+
+It checks HTTP and internal-CA TLS trust, spoofed scheme/address handling,
+compression, headers, unbuffered SSE via a local fixture, upload limits, unpublished
+web in TLS mode and a fresh-volume restore. The fixture replaces only the upstream
+for its nginx transport test, not production code. Cleanup runs on success/failure.
+The browser check uses synthetic API data and intercepts chart market reads, with
+no real venue call. Run frontend/.NET checks separately as in `docs/development.md`.
 
 ## Logs and troubleshooting
 
