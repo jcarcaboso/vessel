@@ -31,13 +31,18 @@ public sealed class CredentialTransportApiTests
     [InlineData("Development", "http://localhost", "127.0.0.1", "http", "192.0.2.10", true)]
     [InlineData("Staging", "http://vessel.example.invalid", "192.0.2.10", null, null, false)]
     [InlineData("Testing", "http://vessel.example.invalid", "192.0.2.10", null, null, false)]
-    public async Task Token_transport_exception_is_development_only(string environment, string origin, string peer, string? forwardedProto, string? forwardedFor, bool allowed)
+    [InlineData("Production", "http://vessel.example.invalid", "172.30.86.10", "https", "198.51.100.7", true, "172.30.86.0/24")]
+    [InlineData("Production", "http://vessel.example.invalid", "172.30.86.10", "http", "198.51.100.7", false, "172.30.86.0/24")]
+    [InlineData("Production", "http://vessel.example.invalid", "192.0.2.10", "https", "198.51.100.7", false, "172.30.86.0/24")]
+    public async Task Token_transport_exception_is_development_only(string environment, string origin, string peer, string? forwardedProto, string? forwardedFor, bool allowed, string? knownNetwork = null)
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var account = SecurityFixture.Account(owner); store.Accounts.Add(account);
         var credentials = new SecurityCredentialStore(); using var vault = SecurityFixture.Vault();
         var verifier = new CountingVerifier(); var discovery = new SecurityDiscovery([new("123", "Main", "main")]);
         await using var factory = new CoreApiFactory(owner, store, connection: "Host=unused.invalid;Database=synthetic",
-            environment: environment, configure: services =>
+            environment: environment,
+            settings: knownNetwork is null ? null : new() { ["Vessel:ForwardedHeaders:KnownNetworks:0"] = knownNetwork },
+            configure: services =>
         {
             services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry()); services.AddSingleton<ICredentialVault>(vault);
             services.AddSingleton<IAccountCredentialStore>(credentials); services.AddSingleton<IVenueCredentialVerifier>(verifier);

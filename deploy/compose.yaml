@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: vessel
+      POSTGRES_USER: vessel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vessel -d vessel"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  migrate:
+    image: skorcius/vessel:api-${VESSEL_VERSION:-0.1.0}
+    entrypoint: ["/app/migrate"]
+    environment:
+      ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: "no"
+
+  api:
+    image: skorcius/vessel:api-${VESSEL_VERSION:-0.1.0}
+    environment:
+      ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      Vessel__Auth__Token: ${Vessel__Auth__Token:?Set a generated token of at least 32 characters}
+      Vessel__Auth__OwnerId: ${Vessel__Auth__OwnerId:?Set a non-empty GUID}
+      Vessel__Auth__OwnerName: ${Vessel__Auth__OwnerName:-Owner}
+      Vessel__ForwardedHeaders__KnownNetworks__0: ${VESSEL_NETWORK_SUBNET:-172.30.86.0/24}
+      Vessel__ForwardedHeaders__ForwardLimit: "2"
+      # Optional second trusted hop for a host-local TLS proxy. Never trust arbitrary internet clients.
+      Vessel__ForwardedHeaders__KnownProxies__0: ${VESSEL_TLS_PROXY_IP:-172.30.86.1}
+    volumes:
+      - evidence:/var/lib/vessel/evidence
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  web:
+    image: skorcius/vessel:web-${VESSEL_VERSION:-0.1.0}
+    environment:
+      VESSEL_API_UPSTREAM: ${VESSEL_API_UPSTREAM:-http://api:8080}
+    ports:
+      - "${VESSEL_WEB_BIND:-127.0.0.1:8080}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${VESSEL_NETWORK_SUBNET:-172.30.86.0/24}
+          gateway: ${VESSEL_NETWORK_GATEWAY:-172.30.86.1}
+
+volumes:
+  postgres:
+  evidence:

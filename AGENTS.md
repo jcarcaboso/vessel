@@ -38,6 +38,8 @@ October 10, 2026: the owner asked for custom portfolio icons, verified by two So
 
 October 11, 2026: the owner asked for faster chart loading and smoother chart work and authorized PR A (session-only browser candle cache, server tail/historical candle TTLs, catalogue single-flight, restricted compression) and PR B (frame-batched drags, incremental chart rendering) with Sol agents; follow `docs/architecture/performance-plan.md`. Never cache authorization; candles are never stored in the browser across reloads. A TimescaleDB candle archive for longer history and later backtesting is the owner's direction but needs its own plan.
 
+October 13, 2026: first manual release packaging targets v0.1.0 on Linux amd64. API and web images share `skorcius/vessel` with `api-0.1.0`/`web-0.1.0` and moving `api-latest`/`web-latest` tags. Follow `deploy/README.md` and its Compose example for explicit one-shot migrations, private PostgreSQL/evidence volumes, HTTPS and optional mode-600 credential-key mounts. The API never migrates at startup. Forwarded headers still trust loopback by default; container networks/proxies require explicit validated configuration. Never bake secrets into images or expose plain HTTP to the internet. Publication remains the owner's manual step.
+
 ## Project tracking
 
 - Repository: https://github.com/jcarcaboso/vessel

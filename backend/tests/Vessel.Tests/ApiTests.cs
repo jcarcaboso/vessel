@@ -73,9 +73,10 @@ public sealed class ApiTests
         var body = await response.Content.ReadAsStringAsync();
         using var json = JsonDocument.Parse(body);
         var root = json.RootElement;
-        Assert.Equal(new[] { "application", "stage", "owner", "marketScope", "allowsConcurrentPlays", "venues" },
+        Assert.Equal(new[] { "application", "stage", "owner", "marketScope", "allowsConcurrentPlays", "venues", "version" },
             root.EnumerateObject().Select(x => x.Name));
         Assert.Equal("Vessel", root.GetProperty("application").GetString());
+        Assert.Equal("0.1.0", root.GetProperty("version").GetString());
         Assert.Equal("core", root.GetProperty("stage").GetString());
         Assert.Equal("perpetuals", root.GetProperty("marketScope").GetString());
         Assert.True(root.GetProperty("allowsConcurrentPlays").GetBoolean());

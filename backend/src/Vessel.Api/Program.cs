@@ -24,10 +24,9 @@ builder.Services.AddResponseCompression(options =>
 builder.Services.AddSingleton<ResponseCompressionProvider>();
 builder.Services.AddSingleton<IResponseCompressionProvider, MarketDataCompression>();
 
-// Only loopback proxies (the defaults) may report the original scheme and client, so a TLS-terminating
-// proxy on the same host is recognised and a remote client cannot claim HTTPS with a header.
+// Loopback is always trusted. Container deployments must explicitly name their trusted proxies.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto);
+    ForwardedHeadersConfiguration.Configure(options, builder.Configuration));
 
 var app = builder.Build();
 app.UseForwardedHeaders();

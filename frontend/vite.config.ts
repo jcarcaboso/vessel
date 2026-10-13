@@ -9,6 +9,18 @@ export default defineConfig(({ mode }) => {
   const target = loadEnv(mode, process.cwd(), '').VESSEL_API_TARGET ?? 'http://127.0.0.1:5080'
   return {
     plugins: [react(), tailwindcss()],
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              { name: 'chart', test: /node_modules[/\\]lightweight-charts[/\\]/, priority: 10 },
+              { name: 'vendor', test: /node_modules/ },
+            ],
+          },
+        },
+      },
+    },
     resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
     server: {
       port: 5180,
