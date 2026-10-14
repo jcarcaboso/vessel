@@ -17,6 +17,8 @@ This step delivers account/portfolio management and a bounded manual-trigger rea
 
 Keep the existing system route and owner response shape. The API stage may become `core`; Hyperliquid venue status becomes `read-only`, not a claim of order placement or a running background sync. The frontend accepts both the prior foundation/planned metadata and the new core/read-only values during development.
 
+October 14, 2026: each venue may carry an optional `logo` key from a fixed set (`hyperliquid`, `lighter`, `lighter-rh`, `risex`, `manual`). The browser keeps known keys, drops anything else without failing the system contract and shows a generic icon; it maps keys to bundled assets and still never branches on venue IDs. Overview summary rows grouped by account show the venue logo and descriptor name. See the venue logos section of `account-management-contract.md` and `robinhood-lighter-integration.md`.
+
 ## Owner-scoped endpoints
 
 All routes below use the authenticated owner, never an owner ID supplied by the request body. GUIDs are JSON strings; money, price and quantity values are invariant decimal strings, not binary-float JSON numbers. Unknown values remain null.

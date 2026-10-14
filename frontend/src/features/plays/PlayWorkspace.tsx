@@ -4,6 +4,7 @@ import type { SizingDocument } from '@/api/sizing'
 import { ExternalLink, Info, PencilLine, RefreshCw } from 'lucide-react'
 import { statusLabels, type PlayStatus } from '@/api/plays'
 import { useVenues } from '@/api/venues'
+import { VenueBadge } from '@/components/venues/VenueBadge'
 import { Input } from '@/components/ui/input'
 import type { DraftEvidence, PlayDraft } from './draft'
 import { captureFileName, createEvidence, evidenceLimits } from './evidence'
@@ -181,6 +182,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
             {lockInstrument && !account && <option value={draft.accountId}>Unavailable or disabled account</option>}
             {filteredAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {venues.name(account.venueId)}</option>)}
           </select>
+          {account && <VenueBadge venueId={account.venueId} compact className="plays-account-venue" />}
           {onReload && <button type="button" className="plays-reload-accounts" aria-label="Reload accounts" title="Reload accounts"
             onClick={onReload} disabled={loading} aria-busy={loading}>
             <RefreshCw size={13} className={loading ? 'is-spinning' : ''} aria-hidden="true" /></button>}

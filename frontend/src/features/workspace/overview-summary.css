@@ -12,9 +12,9 @@
 .overview-summary-table tbody tr:hover { background: var(--card); }
 .overview-summary-table td > span { display: block; font-variant-numeric: tabular-nums; }
 .overview-summary-table .overview-coverage { white-space: normal; min-width: 96px; max-width: 150px; }
-.overview-summary-name > span { white-space: normal; min-width: 96px; max-width: 180px; overflow-wrap: anywhere; }
+.overview-summary-name > span:not(.venue-logo) { white-space: normal; min-width: 96px; max-width: 180px; overflow-wrap: anywhere; }
 .overview-summary-name { display: flex; gap: 9px; align-items: center; text-align: left; color: var(--foreground); }
-.overview-summary-name svg { width: 17px; height: 17px; color: var(--muted-foreground); flex-shrink: 0; }
+.overview-summary-name > svg { width: 17px; height: 17px; color: var(--muted-foreground); flex-shrink: 0; }
 .overview-summary-name small, .overview-coverage { display: block; color: var(--muted-foreground); font-size: 10px; font-weight: 400; line-height: 1.6; }
 .overview-summary-name:focus-visible, .overview-scope select:focus-visible, .overview-summary-controls select:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
 .overview-share-track { width: 90px; height: 4px; margin-top: 6px; background: var(--muted); border-radius: var(--radius); overflow: hidden; }

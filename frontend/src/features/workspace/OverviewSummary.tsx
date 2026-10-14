@@ -5,6 +5,7 @@ import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { failure } from '@/features/plays/saved'
 import { PortfolioIcon } from './PortfolioIcon'
+import { VenueLogo } from '@/components/venues/VenueBadge'
 import { balanceShare } from './overview-share'
 import { money } from './format'
 import './overview-summary.css'
@@ -59,7 +60,7 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
             const share = balanceShare(row.shareOfBalance)
             return <tr key={row.id} onClick={() => onQuery({ ...query, scope: row.id })}>
               <th scope="row"><button className="overview-summary-name" aria-label={`Scope overview to ${row.name}`} onClick={e => { e.stopPropagation(); onQuery({ ...query, scope: row.id }) }}>
-                {row.icon && <PortfolioIcon icon={row.icon} />}<span>{row.name}<small>{row.venueId ? venues.name(row.venueId) : `${row.totals.accountCount} ${row.totals.accountCount === 1 ? 'account' : 'accounts'}`}</small></span>
+                {row.icon ? <PortfolioIcon icon={row.icon} /> : row.venueId ? <VenueLogo venueId={row.venueId} size="md" /> : null}<span>{row.name}<small>{row.venueId ? venues.name(row.venueId) : `${row.totals.accountCount} ${row.totals.accountCount === 1 ? 'account' : 'accounts'}`}</small></span>
               </button></th>
               <td><span>{money(row.totals.balance.amountUsd)}</span><Coverage value={row.totals.balance} /></td>
               <td><span>{money(row.totals.available.amountUsd)}</span><Coverage value={row.totals.available} /></td>

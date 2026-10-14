@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { amount, money, time } from './format'
+import { amount, money, shortSource, time } from './format'
 
 it('keeps unavailable values distinct from a reported zero', () => {
   expect(money(null)).toBe('—')
@@ -25,4 +25,11 @@ it('formats negative exact totals with the same grouping', () => {
 it('retains a year in historical dates', () => {
   expect(time('2024-02-15T12:00:00Z')).toContain('2024')
   expect(time(null)).toBe('Not refreshed yet')
+})
+it('shortens source identities without losing their kind', () => {
+  expect(shortSource(`0x${'ab'.repeat(20)}`)).toBe('0xabab…abab')
+  expect(shortSource('42')).toBe('#42')
+  expect(shortSource('9007199254740993')).toBe('#9007…0993')
+  expect(shortSource(null)).toBeNull()
+  expect(shortSource('')).toBeNull()
 })
