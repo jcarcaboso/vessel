@@ -61,9 +61,20 @@ Effort: **S** less than half a day, **M** one to two days, **L** several days or
 
 - Every request writes its response when it finishes, so a slow check (up to 45 s, it refreshes the venue first) that started before a Link click can finish after it and overwrite the newer state. The order then shows as unlinked until the next check.
 - `busy` is one boolean: whichever request finishes first clears it, re-enabling Link and Check while another request is still running.
-- Nothing is aborted. Leaving the Play or the page lets a running check continue, and the interval can start a second check while one is in flight.
+- The initial execution read is aborted on cleanup, but checks and link mutations are not. Leaving the Play or the page lets a running check continue, and the interval can start a second check while one is in flight.
 
 **Suggestion.** Number each request; apply a response only if no later-started request has already applied one. Count in-flight requests for `busy`. Give reads and checks an `AbortController` that is aborted when the Play changes or the hook unmounts, and skip the interval tick while a request is running. Add tests for out-of-order completion, busy tracking and abort on Play change (the hook has no tests today).
+
+### S7. The in-chart level editor rounds typed prices and ignores the tick
+
+Promoted to Required during independent Sol verification. The S7 identifier is
+retained so implementation and review references stay valid. Effort: S.
+
+**Where.** `features/plays/LevelEditor.tsx:29` and `:73`; `features/plays/levels.ts:184` (`addChartExit`). `PlayChart.tsx:268` does not pass `priceStep` to `LevelEditor`.
+
+**Problem.** [venue-instruments.md](venue-instruments.md) says prices placed or dragged on the chart round to the instrument's tick, and typed prices are kept as entered. The in-chart editor does neither: a typed 84533.5 is stored as 84534 (five significant figures), and on a tick-size venue the shown and stored price ignores the tick. Stops and targets added from the editor (`addChartExit`) also round to five significant figures instead of the tick.
+
+**Suggestion.** Pass `priceStep` to `LevelEditor` and `addChartExit`. Show the current price with the tick, keep a typed valid decimal exactly as entered (still switching a percentage level to price units), and round only generated prices. Record the decision in the chart plan and add tests.
 
 ---
 
@@ -136,14 +147,6 @@ Some differences are contract rules, most are accidents, and nothing says which.
 **Problem.** The rule "with percentage levels, ask whether prices or percentages follow" lives in two places with slightly different code. A fix to one misses the other, and two dialogs could be pending at once.
 
 **Suggestion.** One `useLeverageChange(draft, onChange)` hook that owns the pending value and the dialog, used by both callers.
-
-### S7. The in-chart level editor rounds typed prices and ignores the tick — S
-
-**Where.** `features/plays/LevelEditor.tsx:29` and `:73`; `features/plays/levels.ts:184` (`addChartExit`). `PlayChart.tsx:268` does not pass `priceStep` to `LevelEditor`.
-
-**Problem.** [venue-instruments.md](venue-instruments.md) says prices placed or dragged on the chart round to the instrument's tick, and typed prices are kept as entered. The in-chart editor does neither: a typed 84533.5 is stored as 84534 (five significant figures), and on a tick-size venue the shown and stored price ignores the tick. Stops and targets added from the editor (`addChartExit`) also round to five significant figures instead of the tick.
-
-**Suggestion.** Pass `priceStep` to `LevelEditor` and `addChartExit`. Show the current price with the tick, keep a typed valid decimal exactly as entered (still switching a percentage level to price units), and round only generated prices. Record the decision in the chart plan and add tests.
 
 ### S8. Light themes keep the `dark` class — S
 

@@ -54,7 +54,11 @@ Dependencies point downward: `features` use `components`, `api` and `lib`; `comp
 3. With a `SystemInfo` and a client, the gate renders `ApplicationShell`. Disconnect drops both, clears the candle cache and returns to the form.
 4. `ApplicationShell` wraps the app in `NotificationProvider` and `VenuesProvider` (the venues from `/api/system`), loads `GET /api/overview` and renders the current page.
 
-A new `WorkspaceApi` object means a new session: everything keyed by the old one (shell memory, the Plays session, the candle cache, in-flight requests) is discarded.
+A new `WorkspaceApi` object means a new session. Shell memory, the Plays session
+and the old client's candle cache are reset. Request cancellation is not yet
+complete: execution checks, link mutations and some Play and account-import
+requests can continue after their caller leaves. Review items R3 and N5 track
+these gaps.
 
 ## Routing and the shell
 
@@ -74,13 +78,19 @@ The page bodies for Overview, Portfolios and Settings are currently inline in th
 
 `api/workspace.ts` defines the `WorkspaceApi` interface and `createWorkspaceApi(token)`, which returns an object of methods closing over the token. Feature code only ever calls these methods.
 
-Every request:
+Ordinary JSON requests:
 
-- sends `Authorization: Bearer …`, `credentials: 'omit'`, `redirect: 'error'` and `cache: 'no-store'`;
-- combines the caller's `AbortSignal` with a timeout (10 to 60 seconds depending on the endpoint);
-- turns network failures, timeouts and caller aborts into `ApiError('unavailable', …)`, so callers check `signal.aborted` before showing an error;
-- maps HTTP failures to safe messages: 401/403 is "token rejected" (and clears the candle cache); 400, 409, 413 and 415 may show the server's Problem Details `detail` (at most 500 characters); 502, 503 and 404 use fixed texts; 5xx adds `Reference: <trace id>` only when `X-Correlation-ID` is 32 hex characters;
-- parses JSON and runs a **runtime guard** before returning. A body that fails its guard is an `ApiError('invalid-response')`; nothing unvalidated reaches React.
+- send `Authorization: Bearer …`, `credentials: 'omit'`, `redirect: 'error'` and `cache: 'no-store'`;
+- combine the caller's `AbortSignal` with a timeout (10 to 60 seconds depending on the endpoint);
+- turn network failures, timeouts and caller aborts into `ApiError('unavailable', …)`, so callers check `signal.aborted` before showing an error;
+- map HTTP failures to safe messages: 401/403 is "token rejected" (and clears the candle cache); 400, 409, 413 and 415 may show the server's Problem Details `detail` (at most 500 characters); 502, 503 and 404 use fixed texts; 5xx adds `Reference: <trace id>` only when `X-Correlation-ID` is 32 hex characters;
+- parse JSON and run a **runtime guard** before returning. A body that fails its guard is an `ApiError('invalid-response')`.
+
+Binary and streaming requests differ. `evidenceImage` returns a `Blob`, not a
+guarded JSON document. `marketStream` validates individual SSE events. Its
+25-second connection timeout ends when response headers arrive, so an established
+stream has no overall timeout. Caller cancellation ends the stream without
+reporting an error. Endpoints without a response body also skip JSON parsing.
 
 `ApiError` (`api/system.ts`) carries a `kind` (`missing-token`, `unauthorized`, `unavailable`, `invalid-response`, `http`), the message to show and the status.
 
@@ -176,11 +186,12 @@ Pages talk to each other only through the shell: opening a Play from Overview or
 | Theme choice, overrides, saved themes | `appearanceStore` → `localStorage['vessel.appearance']` | Persistent; a browser preference, not workspace data. |
 | Chart preferences (interval, favourites, magnet, live, indicators) | `useChartPreferences` → `localStorage['vessel.chart.preferences.v1']` | Persistent; view preferences only. |
 
-Nothing sensitive or financial is stored in the browser.
+Tokens and financial data are not persisted in browser storage. They remain in
+memory for the active session.
 
 **Patterns you will see.**
 
-- *Keyed request state.* A component stores its result with the key it was requested for (API identity, IDs, `reloadGeneration`, a retry counter) and treats any other key as loading. Each effect creates an `AbortController` and aborts it in cleanup.
+- *Keyed request state.* A component stores its result with the key it was requested for (API identity, IDs, `reloadGeneration`, a retry counter) and treats any other key as loading. Many request effects create an `AbortController` and abort it in cleanup. This is the intended pattern, not a guarantee for every request; R3 and N5 list exceptions.
 - *Latest refs.* Async work that finishes later reads `latest.current` (updated in an effect) instead of the render's props, so it applies to the current draft, not the one from the click.
 - *Adjusting state during render.* A few components compare a source prop with stored state and call `setState` during render (React's documented pattern for derived resets), for example when a selection must drop rows that are no longer shown.
 
