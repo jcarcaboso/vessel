@@ -11,6 +11,9 @@ authorized scope and the [verification receipt](verification/2026-10-13-p1.md)
 for current results and application captures. The review itself remains a
 snapshot of the baseline, not a list of unresolved defects in this branch.
 
+[PR #37](https://github.com/jcarcaboso/vessel/pull/37) contains the verified
+delivery and captures. It is open, not merged or deployed.
+
 ## Read first
 
 **LAN summary:** [http://10.1.0.219:5197/](http://10.1.0.219:5197/)
