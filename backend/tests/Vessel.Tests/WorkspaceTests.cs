@@ -1,6 +1,7 @@
 using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Tests;
@@ -22,7 +23,7 @@ public sealed class WorkspaceTests
     [InlineData(".", false)]
     [InlineData(" 1", false)]
     public void Manual_decimal_is_exact_and_invariant(string input, bool valid) =>
-        Assert.Equal(valid, WorkspaceService.TryExactNonnegativeDecimal(input, out _));
+        Assert.Equal(valid, ExactDecimal.TryParseOwnerAmount(input, out _));
 
     [Fact]
     public async Task Overview_excludes_foreign_records_and_reports_all_coverage_states()

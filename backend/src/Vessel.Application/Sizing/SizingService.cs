@@ -1,8 +1,8 @@
-using System.Globalization;
 using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Plays;
 
@@ -25,8 +25,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
 
     public async Task<SizingDto> UpdateSettingsAsync(UpdateSizingSettingsRequest request, CancellationToken ct)
     {
-        if (request.RiskPercent is not { Length: > 0 and <= 16 } text ||
-            !decimal.TryParse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var risk))
+        if (!ExactDecimal.TryParseRiskPercent(request.RiskPercent, out var risk))
             throw new ProblemException(400, "Risk per trade must be a decimal percentage.");
         var now = time.GetUtcNow();
         var settings = await store.SettingsAsync(ct);
@@ -46,22 +45,24 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
         var exposure = Exposure.From(outcomes.Select(x => x.Outcome));
         var limits = SizingLimits.From(risk, record, exposure);
         var recent = outcomes.OrderByDescending(x => x.Outcome.ClosedAtUtc).ThenBy(x => x.Play.Id).Take(record.Window)
-            .Select(x => new PlayOutcomeDto(x.Play.Id, x.Play.Title, x.Play.ContractId, x.Outcome.ClosedAtUtc, Number(x.Outcome.NetResult),
-                Number(x.Outcome.ReturnPercent), Number(x.Outcome.PlannedRisk), Number(x.Outcome.RMultiple), Name(x.Outcome.Kind),
+            .Select(x => new PlayOutcomeDto(x.Play.Id, x.Play.Title, x.Play.ContractId, x.Outcome.ClosedAtUtc,
+                ExactDecimal.FormatEightPlaces(x.Outcome.NetResult), ExactDecimal.FormatEightPlaces(x.Outcome.ReturnPercent),
+                ExactDecimal.FormatEightPlaces(x.Outcome.PlannedRisk), ExactDecimal.FormatEightPlaces(x.Outcome.RMultiple), Name(x.Outcome.Kind),
                 x.Outcome.FeesComplete))
             .ToList();
-        return new SizingDto(new SizingSettingsDto(Number(risk)),
-            new ExposureDto(Name(exposure.Level), Number(exposure.Multiplier), exposure.Reason, exposure.LossStreak, exposure.WinsSinceStepDown),
+        return new SizingDto(new SizingSettingsDto(ExactDecimal.FormatEightPlaces(risk)),
+            new ExposureDto(Name(exposure.Level), ExactDecimal.FormatEightPlaces(exposure.Multiplier), exposure.Reason, exposure.LossStreak,
+                exposure.WinsSinceStepDown),
             new TrackRecordDto(record.ClosedPlays, record.DecidedPlays, record.Window, record.Wins, record.Losses, record.Scratches,
-                Number(record.BattingAverage), Number(record.AverageGainPercent), Number(record.AverageLossPercent), Number(record.WinLossRatio),
-                Number(record.BreakEvenRewardRisk), Number(record.AverageWinR), Number(record.AverageLossR), recent),
-            new SizingLimitsDto(Number(limits.EffectiveRiskPercent), Number(limits.MaxStopPercent), Number(limits.MinRewardRisk),
-                Source(limits.MaxStopSource), Source(limits.MinRewardRiskSource)),
+                ExactDecimal.FormatEightPlaces(record.BattingAverage), ExactDecimal.FormatEightPlaces(record.AverageGainPercent),
+                ExactDecimal.FormatEightPlaces(record.AverageLossPercent), ExactDecimal.FormatEightPlaces(record.WinLossRatio),
+                ExactDecimal.FormatEightPlaces(record.BreakEvenRewardRisk), ExactDecimal.FormatEightPlaces(record.AverageWinR),
+                ExactDecimal.FormatEightPlaces(record.AverageLossR), recent),
+            new SizingLimitsDto(ExactDecimal.FormatEightPlaces(limits.EffectiveRiskPercent), ExactDecimal.FormatEightPlaces(limits.MaxStopPercent),
+                ExactDecimal.FormatEightPlaces(limits.MinRewardRisk), Source(limits.MaxStopSource), Source(limits.MinRewardRiskSource)),
             Notice);
     }
 
-    private static string Number(decimal value) => decimal.Round(value, 8).ToString("0.########", CultureInfo.InvariantCulture);
-    private static string? Number(decimal? value) => value is { } number ? Number(number) : null;
     private static string Name<T>(T value) where T : Enum => value.ToString().ToLowerInvariant();
 
     private static string Source(LimitSource source) => source switch

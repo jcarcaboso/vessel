@@ -2,6 +2,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Numerics;
 
 namespace Vessel.Application.Workspace;
 
@@ -44,9 +45,9 @@ public sealed class AccountDiscoveryService(IWorkspaceStore accounts, IJournalOw
                 : await discovery.DiscoverAsync(address!.ToLowerInvariant(), token, ct);
             if (found.Count > 1000 || found.Any(c => !AccountSource.IsAccountIndex(c.SourceId) ||
                     string.IsNullOrWhiteSpace(c.Name) || c.Name.Length > 200 || c.AccountType is not ("main" or "subaccount") ||
-                    c.AccountValueUsd is { } value && !ExactAmount(value) ||
-                    c.CollateralUsd is { } collateral && !ExactAmount(collateral) ||
-                    c.AvailableBalanceUsd is { } available && !ExactAmount(available)) ||
+                    c.AccountValueUsd is { } value && !ExactDecimal.IsSignedAmountText(value) ||
+                    c.CollateralUsd is { } collateral && !ExactDecimal.IsSignedAmountText(collateral) ||
+                    c.AvailableBalanceUsd is { } available && !ExactDecimal.IsSignedAmountText(available)) ||
                 found.Select(c => c.SourceId).Distinct().Count() != found.Count)
                 throw new VenueReadException("Invalid discovery response.");
         }
@@ -68,15 +69,4 @@ public sealed class AccountDiscoveryService(IWorkspaceStore accounts, IJournalOw
                 c.CollateralUsd, c.AvailableBalanceUsd);
         }).ToList(), "Discovery does not import history. Add selected accounts and refresh them explicitly.");
     }
-
-    private static bool ExactAmount(string value)
-    {
-        if (value.Length is < 1 or > 128) return false;
-        var number = value.AsSpan();
-        if (number[0] == '-') number = number[1..];
-        var dot = number.IndexOf('.');
-        return dot < 0 ? Digits(number) : Digits(number[..dot]) && Digits(number[(dot + 1)..]);
-    }
-
-    private static bool Digits(ReadOnlySpan<char> value) => !value.IsEmpty && value.IndexOfAnyExceptInRange('0', '9') < 0;
 }

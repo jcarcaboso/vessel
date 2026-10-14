@@ -1,12 +1,11 @@
-using System.Globalization;
 using System.Numerics;
-using Vessel.Application.Activity;
 using Vessel.Application.Common;
 using Vessel.Application.Sizing;
 using Vessel.Application.Venues;
 using Vessel.Application.Credentials;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 
@@ -327,7 +326,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             if (play.Status is PlayStatus.Planned or PlayStatus.Paused && entered.Units.Sign > 0)
             {
                 var first = entryFills[0];
-                store.Add(play.MarkOpen($"Entry fill of {Money(first.Quantity)} at {Money(first.Price)} on order {first.OrderId}.", now));
+                store.Add(play.MarkOpen(
+                    $"Entry fill of {ExactDecimal.Format(first.Quantity)} at {ExactDecimal.Format(first.Price)} on order {first.OrderId}.", now));
             }
             var resting = own.Any(l => l.Role == OrderLinkRole.Entry && orders.TryGetValue(l.OrderId, out var o) && o.Status == "open");
             if (play.Status == PlayStatus.Open && entered.Units.Sign > 0 && settlement.Exited == entered && settlement.Problems.Count == 0 && !resting)
@@ -382,13 +382,13 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     private static string PnlBasis(IReadOnlyCollection<ImportedFill> fills) =>
         fills.Select(f => f.PnlBasis).Distinct().ToList() is [var only] ? only : fills.Count == 0 ? ExecutionFacts.PnlGross : "mixed";
 
-    private static string Money(decimal value) => value.ToString("0.############################", CultureInfo.InvariantCulture);
     private static string Name<T>(T value) where T : Enum => value.ToString().ToLowerInvariant();
 
-    private static ExecutionOrderDto OrderDto(ImportedOrder o) => new(o.OrderId, o.Side, o.OrderType, Money(o.LimitPrice),
-        o.TriggerPrice is { } trigger ? Money(trigger) : null, o.ReduceOnly, o.IsPositionTpsl, Money(o.OriginalSize), Money(o.RemainingSize),
-        o.PlacedAtUtc, o.Status, o.VenueStatus, o.StatusAtUtc);
+    private static ExecutionOrderDto OrderDto(ImportedOrder o) => new(o.OrderId, o.Side, o.OrderType, ExactDecimal.Format(o.LimitPrice),
+        ExactDecimal.Format(o.TriggerPrice), o.ReduceOnly, o.IsPositionTpsl, ExactDecimal.Format(o.OriginalSize),
+        ExactDecimal.Format(o.RemainingSize), o.PlacedAtUtc, o.Status, o.VenueStatus, o.StatusAtUtc);
 
-    private static ExecutionFillDto FillDto(ImportedFill f) => new(f.SourceFillId, f.Direction, Money(f.Price), Money(f.Quantity),
-        Money(f.Fee), f.FeeToken, Money(f.ClosedPnlUsd), f.OccurredAtUtc, f.Side, f.PositionEffect, f.PnlBasis);
+    private static ExecutionFillDto FillDto(ImportedFill f) => new(f.SourceFillId, f.Direction, ExactDecimal.Format(f.Price),
+        ExactDecimal.Format(f.Quantity), ExactDecimal.Format(f.Fee), f.FeeToken, ExactDecimal.Format(f.ClosedPnlUsd), f.OccurredAtUtc, f.Side,
+        f.PositionEffect, f.PnlBasis);
 }

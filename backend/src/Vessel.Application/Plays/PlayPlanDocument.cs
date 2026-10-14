@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Vessel.Application.Common;
+using Vessel.Domain.Numerics;
 
 namespace Vessel.Application.Plays;
 
@@ -113,7 +114,7 @@ public static partial class PlayDocuments
 
     private static string Unit(string? unit) => unit is "price" or "percent" ? unit : throw Invalid("Level units are price or percent.");
 
-    private static string Number(string? value) => value is not null && (value.Length == 0 || value.Length <= 64 && NumberPattern().IsMatch(value))
+    private static string Number(string? value) => ExactDecimal.IsPlanText(value)
         ? value : throw Invalid("Plan numbers must be blank or decimal text.");
 
     private static string Note(string? note) => note is not null && note.Length <= MaxNoteLength
@@ -125,6 +126,4 @@ public static partial class PlayDocuments
     private static partial Regex IdPattern();
     [GeneratedRegex("^#[0-9a-fA-F]{6}$")]
     private static partial Regex ColorPattern();
-    [GeneratedRegex(@"^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$")]
-    private static partial Regex NumberPattern();
 }

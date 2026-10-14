@@ -3,12 +3,11 @@ using System.Numerics;
 using System.Reflection;
 using Vessel.Application.Common;
 using Vessel.Application.Plays;
-using Vessel.Application.Plays.Execution;
-using Vessel.Application.Review;
 using Vessel.Application.Sizing;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Common;
+using Vessel.Domain.Numerics;
 using Vessel.Infrastructure.Venues.Common;
 
 namespace Vessel.Tests;
@@ -65,8 +64,7 @@ public sealed class ExactNumberCharacterizationTests
     }
 
     /// <summary>Amount strings an account-discovery adapter returns.</summary>
-    private static string AdapterText(string text) =>
-        (bool)Call(Method(typeof(AccountDiscoveryService), "ExactAmount", typeof(string)), text)! ? "ok" : "x";
+    private static string AdapterText(string text) => ExactDecimal.IsSignedAmountText(text) ? "ok" : "x";
 
     /// <summary>Plan number fields, kept as typed.</summary>
     private static string PlanText(string? text)
@@ -88,38 +86,29 @@ public sealed class ExactNumberCharacterizationTests
     /// <summary>The API formatter of each module that prints exact amounts.</summary>
     private static readonly Dictionary<string, Func<decimal, string>> Formatters = new()
     {
-        ["workspace"] = value => (string)Call(Method(typeof(WorkspaceService), "Money", typeof(decimal?)), (decimal?)value)!,
-        ["execution"] = value => (string)Call(Method(typeof(PlayExecutionService), "Money", typeof(decimal)), value)!,
-        ["review"] = value => (string)Call(Method(typeof(ReviewService), "Number", typeof(decimal)), value)!,
+        ["shared"] = ExactDecimal.Format,
+        ["nullable"] = value => ExactDecimal.Format((decimal?)value)!,
         ["manual ledger"] = ManualLedger.Text,
     };
 
     /// <summary>Sizing estimates, rounded to eight places.</summary>
-    private static string SizingFormat(decimal value) => (string)Call(Method(typeof(SizingService), "Number", typeof(decimal)), value)!;
+    private static string SizingFormat(decimal value) => ExactDecimal.FormatEightPlaces(value);
 
-    private static readonly Type Amount = typeof(WorkspaceService).Assembly.GetType("Vessel.Application.Activity.ExactAmount", true)!;
-    private static string Text(object amount) => amount.ToString()!;
-    private static BigInteger Units(object amount) => (BigInteger)Amount.GetProperty("Units")!.GetValue(amount)!;
-    private static object AmountFrom(decimal value) => Call(Amount.GetMethod("From")!, value)!;
-    private static object AmountParse(string text) => Call(Amount.GetMethod("Parse")!, text)!;
-    private static object AmountOf(BigInteger units) => Activator.CreateInstance(Amount, units)!;
-    private static object AmountDefault() => Activator.CreateInstance(Amount)!;
-    private static string? AmountAverage(BigInteger notional, BigInteger quantityUnits) =>
-        (string?)Call(Amount.GetMethod("Average")!, notional, AmountOf(quantityUnits));
+    private static string Text(ExactAmount amount) => amount.ToString();
+    private static BigInteger Units(ExactAmount amount) => amount.Units;
+    private static ExactAmount AmountFrom(decimal value) => ExactAmount.From(value);
+    private static ExactAmount AmountParse(string text) => ExactAmount.Parse(text);
+    private static ExactAmount AmountDefault() => default;
+    private static string? AmountAverage(BigInteger notional, BigInteger quantityUnits) => ExactAmount.Average(notional, new(quantityUnits));
 
     /// <summary>a + b | a - b | -a | |a| | sign of a.CompareTo(b) | a == b, through the 28-place accumulator.</summary>
     private static string AmountArithmetic(string first, string second)
     {
-        var (a, b) = (AmountParse(first), AmountParse(second));
-        var sum = Call(Amount.GetMethod("op_Addition")!, a, b)!;
-        var difference = Call(Amount.GetMethod("op_Subtraction")!, a, b)!;
-        var negated = Call(Amount.GetMethod("op_UnaryNegation")!, a)!;
-        var magnitude = Amount.GetMethod("Abs")!.Invoke(a, [])!;
-        var order = (int)Amount.GetMethod("CompareTo", [Amount])!.Invoke(a, [b])!;
-        return $"{sum} | {difference} | {negated} | {magnitude} | {Math.Sign(order)} | {a.Equals(b)}";
+        var (a, b) = (ExactAmount.Parse(first), ExactAmount.Parse(second));
+        return $"{a + b} | {a - b} | {-a} | {a.Abs()} | {Math.Sign(a.CompareTo(b))} | {a == b}";
     }
 
-    private static string Sum(params decimal[] values) => StablecoinTotals.Sum(values);
+    private static string Sum(params decimal[] values) => ExactDecimal.Sum(values);
 
     /// <summary>The manual ledger's checked addition: the sum, "overflow" or "inexact" (decimal rounded).</summary>
     private static string LedgerAdd(decimal a, decimal b)

@@ -1,16 +1,15 @@
 using System.Globalization;
 using System.Numerics;
-using System.Text.RegularExpressions;
 using Vessel.Application.Common;
 using Vessel.Application.Sizing;
-using Vessel.Application.Activity;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Plays;
 
 /// <summary>Chronological average-cost accounting of owner-entered facts, never venue-reported PnL.</summary>
-public static partial class ManualLedger
+public static class ManualLedger
 {
     public sealed record Result(decimal Entered, decimal Exited, decimal Gross, decimal? Net, bool FeesComplete,
         IReadOnlyList<LinkedFill> Projection, DateTimeOffset? ClosedAt)
@@ -110,43 +109,22 @@ public static partial class ManualLedger
 
     private static decimal Add(decimal a, decimal b)
     {
+        bool exact;
         decimal value;
-        try { value = a + b; }
+        try { exact = ExactDecimal.TryAdd(a, b, out value); }
         catch (OverflowException) { throw new ProblemException(400, "Manual ledger exceeds the supported decimal range."); }
-        if (ExactAmount.From(value).Units != ExactAmount.From(a).Units + ExactAmount.From(b).Units)
-            throw new ProblemException(400, "Manual ledger amounts exceed exact decimal precision.");
-        return value;
+        return exact ? value : throw new ProblemException(400, "Manual ledger amounts exceed exact decimal precision.");
     }
-    private static decimal Multiply(decimal a, decimal b)
-    {
-        var value = a * b;
-        if (ExactAmount.From(value).Units * BigInteger.Pow(10, 28) != ExactAmount.From(a).Units * ExactAmount.From(b).Units)
-            throw new ProblemException(400, "Manual ledger notional exceeds exact decimal precision.");
-        return value;
-    }
+    private static decimal Multiply(decimal a, decimal b) => ExactDecimal.TryMultiply(a, b, out var value)
+        ? value : throw new ProblemException(400, "Manual ledger notional exceeds exact decimal precision.");
 
     // Reject rounding at input. Preserve the exact submitted string, including scientific notation.
-    public static decimal Number(string text, bool positive)
+    public static decimal Number(string text, bool positive) => ExactDecimal.ParseManualFact(text, positive, out var value) switch
     {
-        if (text is null || text.Length > 96 || !NumberPattern().IsMatch(text) ||
-            !decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ||
-            (positive ? value <= 0 : value < 0))
-            throw new ProblemException(400, positive ? "Quantity and price must be positive decimal strings." : "Fees must be nonnegative decimal strings.");
-        var pieces = text.ToLowerInvariant().Split('e');
-        var mantissa = pieces[0].TrimStart('+');
-        var fraction = mantissa.IndexOf('.') is var dot && dot >= 0 ? mantissa.Length - dot - 1 : 0;
-        var coefficient = BigInteger.Parse(mantissa.Replace(".", ""), CultureInfo.InvariantCulture);
-        var scale = fraction - (pieces.Length == 2 ? int.Parse(pieces[1], CultureInfo.InvariantCulture) : 0);
-        if (scale is < -96 or > 96) throw new ProblemException(400, "Decimal is outside the supported range.");
-        var bits = decimal.GetBits(value);
-        var parsed = (BigInteger)(uint)bits[0] | ((BigInteger)(uint)bits[1] << 32) | ((BigInteger)(uint)bits[2] << 64);
-        var parsedScale = (bits[3] >> 16) & 0xff;
-        if (coefficient * BigInteger.Pow(10, Math.Max(0, parsedScale - scale)) !=
-            parsed * BigInteger.Pow(10, Math.Max(0, scale - parsedScale)))
-            throw new ProblemException(400, "Decimal must be exactly representable, without rounding.");
-        return value;
-    }
-    public static string Text(decimal value) => value.ToString("0.############################", CultureInfo.InvariantCulture);
-    [GeneratedRegex(@"^\+?\d+(?:\.\d+)?(?:[eE][+-]?\d{1,2})?$")]
-    private static partial Regex NumberPattern();
+        ManualFactError.None => value,
+        ManualFactError.OutOfRange => throw new ProblemException(400, "Decimal is outside the supported range."),
+        ManualFactError.Inexact => throw new ProblemException(400, "Decimal must be exactly representable, without rounding."),
+        _ => throw new ProblemException(400, positive ? "Quantity and price must be positive decimal strings." : "Fees must be nonnegative decimal strings.")
+    };
+    public static string Text(decimal value) => ExactDecimal.Format(value);
 }

@@ -1,5 +1,5 @@
-using Vessel.Application.Activity;
 using Vessel.Application.Sizing;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 

@@ -1,8 +1,8 @@
-using System.Globalization;
 using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Workspace;
@@ -20,7 +20,6 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         await store.SaveAsync(ct);
     }
 
-    private static string? Money(decimal? value) => value?.ToString("0.############################", CultureInfo.InvariantCulture);
     private static void ValidateName(string? name)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Length > 200)
@@ -123,7 +122,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
                 throw new ProblemException(400, "Manual accounts do not use a source identity.");
             if (request.ManualAccountValueUsd is { } text)
             {
-                if (!TryExactNonnegativeDecimal(text, out var parsed))
+                if (!ExactDecimal.TryParseOwnerAmount(text, out var parsed))
                     throw new ProblemException(400, "Manual account value must be an exact nonnegative decimal string.");
                 value = parsed;
             }
@@ -210,22 +209,6 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             return true;
         }, ct), ct);
 
-    // decimal.TryParse alone rounds over-precision input. Round-trip the digits to reject loss.
-    public static bool TryExactNonnegativeDecimal(string text, out decimal value)
-    {
-        value = 0;
-        if (text.Length is 0 or > 100 || text.Any(c => c is not (>= '0' and <= '9') and not '.') ||
-            text.Count(c => c == '.') > 1 || !decimal.TryParse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out value)) return false;
-        static string Normalize(string s)
-        {
-            var parts = s.Split('.');
-            var whole = parts[0].TrimStart('0');
-            var fraction = parts.Length == 2 ? parts[1].TrimEnd('0') : "";
-            return (whole.Length == 0 ? "0" : whole) + (fraction.Length == 0 ? "" : "." + fraction);
-        }
-        return Normalize(text) == Normalize(value.ToString(CultureInfo.InvariantCulture));
-    }
-
     public async Task<IReadOnlyList<AccountDto>> AccountsAsync(CancellationToken ct)
     {
         var accounts = await store.AccountsAsync(ct);
@@ -248,11 +231,11 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             var values = enabledMembers.Select(Value).Where(v => v.HasValue).ToList();
             var balances = enabledMembers.Select(a => Balance(a, snapshots.GetValueOrDefault(a.Id))).OfType<IReadOnlyList<decimal>>().ToList();
             var available = enabledMembers.Select(a => AvailableBalance(a, snapshots.GetValueOrDefault(a.Id))).OfType<IReadOnlyList<decimal>>().ToList();
-            return new PortfolioDto(p.Id, p.Name, members.Count, values.Count == 0 ? null : StablecoinTotals.Sum(values.Select(v => v!.Value)),
+            return new PortfolioDto(p.Id, p.Name, members.Count, values.Count == 0 ? null : ExactDecimal.Sum(values.Select(v => v!.Value)),
                 values.Count == 0 ? "unavailable" : values.Count == enabledMembers.Count ? "complete" : "partial",
-                balances.Count == 0 ? null : StablecoinTotals.Sum(balances.SelectMany(v => v!)),
+                balances.Count == 0 ? null : ExactDecimal.Sum(balances.SelectMany(v => v!)),
                 Coverage(balances.Count, enabledMembers.Count), p.Icon,
-                available.Count == 0 ? null : StablecoinTotals.Sum(available.SelectMany(v => v)),
+                available.Count == 0 ? null : ExactDecimal.Sum(available.SelectMany(v => v)),
                 available.Count, Coverage(available.Count, enabledMembers.Count), enabledMembers.Count);
         }).ToList();
     }
@@ -270,11 +253,11 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             .OfType<AccountSnapshot>().Where(s => s.StablecoinsObservedAtUtc.HasValue).ToList();
         var balances = enabled.Select(a => Balance(a, snapshots.GetValueOrDefault(a.Id))).OfType<IReadOnlyList<decimal>>().ToList();
         var available = enabled.Select(a => AvailableBalance(a, snapshots.GetValueOrDefault(a.Id))).OfType<IReadOnlyList<decimal>>().ToList();
-        return new(portfolios, dtos, new(portfolios.Count, accounts.Count, known.Count == 0 ? null : StablecoinTotals.Sum(known.Select(v => v!.Value)),
+        return new(portfolios, dtos, new(portfolios.Count, accounts.Count, known.Count == 0 ? null : ExactDecimal.Sum(known.Select(v => v!.Value)),
             known.Count, dtos.Sum(a => a.PositionCount), await store.FillCountAsync(ct),
-            wallets.Count == 0 ? null : StablecoinTotals.Sum(wallets.SelectMany(s => s.Stablecoins).Select(b => b.Available)), wallets.Count,
-            balances.Count == 0 ? null : StablecoinTotals.Sum(balances.SelectMany(b => b)), balances.Count, Coverage(balances.Count, enabled.Count),
-            available.Count == 0 ? null : StablecoinTotals.Sum(available.SelectMany(b => b)), available.Count, Coverage(available.Count, enabled.Count), enabled.Count),
+            wallets.Count == 0 ? null : ExactDecimal.Sum(wallets.SelectMany(s => s.Stablecoins).Select(b => b.Available)), wallets.Count,
+            balances.Count == 0 ? null : ExactDecimal.Sum(balances.SelectMany(b => b)), balances.Count, Coverage(balances.Count, enabled.Count),
+            available.Count == 0 ? null : ExactDecimal.Sum(available.SelectMany(b => b)), available.Count, Coverage(available.Count, enabled.Count), enabled.Count),
             (await store.FillsAsync(null, 100, ct)).Select(ToDto).ToList(),
             "Enabled accounts across all portfolios and unassigned only. Total balance sums known perps/manual values and supported stablecoin wallet totals; unified and portfolio-margin accounts use the wallet alone. Available balance uses wallet total minus held in unified/portfolio-margin modes, otherwise reported available margin first, then withdrawable funds. Manual value, collateral and equity do not imply availability. Coverage counts accounts with a known amount, not full venue valuation. Nominal USD only: no FX, depeg, lending, EVM or risk adjustment. Availability is not guaranteed free trading margin or withdrawal. Imported fills are recent, not complete lifetime history.");
     }
@@ -283,9 +266,11 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     {
         if (!(await RequireAccount(id, ct)).IsEnabled) return null;
         var s = await store.SnapshotAsync(id, ct);
-        return s is null ? null : new(s.ObservedAtUtc, s.ValueScope, Money(s.AccountValueUsd), Money(s.WithdrawableUsd), Money(s.MarginUsedUsd),
-            s.Positions.OrderBy(p => p.ContractId).Select(p => new PositionDto(p.ContractId, Money(p.SignedQuantity)!, Money(p.EntryPrice)!,
-                Money(p.UnrealizedPnlUsd)!, Money(p.MarginUsedUsd)!, p.Leverage)).ToList(), WalletDto(s), Money(s.AvailableMarginUsd));
+        return s is null ? null : new(s.ObservedAtUtc, s.ValueScope, ExactDecimal.Format(s.AccountValueUsd),
+            ExactDecimal.Format(s.WithdrawableUsd), ExactDecimal.Format(s.MarginUsedUsd),
+            s.Positions.OrderBy(p => p.ContractId).Select(p => new PositionDto(p.ContractId, ExactDecimal.Format(p.SignedQuantity),
+                ExactDecimal.Format(p.EntryPrice), ExactDecimal.Format(p.UnrealizedPnlUsd), ExactDecimal.Format(p.MarginUsedUsd), p.Leverage)).ToList(),
+            WalletDto(s), ExactDecimal.Format(s.AvailableMarginUsd));
     }
 
     public async Task<PortfolioDto> PortfolioAsync(Guid id, CancellationToken ct) =>
@@ -372,13 +357,13 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     private async Task<Account> RequireAccount(Guid id, CancellationToken ct) =>
         await store.AccountAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
     private AccountDto ToDto(Account a, AccountSnapshot? s) => new(a.Id, a.PortfolioId, a.Name, a.VenueId, a.Address,
-        Money(a.VenueId == VenueDescriptor.ManualId ? a.ManualAccountValueUsd : s?.AccountValueUsd), a.LastSyncedAtUtc,
+        ExactDecimal.Format(a.VenueId == VenueDescriptor.ManualId ? a.ManualAccountValueUsd : s?.AccountValueUsd), a.LastSyncedAtUtc,
         a.SyncStatus, a.LastSyncError, a.IsEnabled ? s?.Positions.Count ?? 0 : 0, a.HistoryNotice, a.IsEnabled, a.SettingsRevision,
-        s?.StablecoinsObservedAtUtc is null ? null : StablecoinTotals.Sum(s.Stablecoins.Select(balance => balance.Available)),
+        s?.StablecoinsObservedAtUtc is null ? null : ExactDecimal.Sum(s.Stablecoins.Select(balance => balance.Available)),
         s?.StablecoinScope, s?.AccountMode,
-        s?.StablecoinsObservedAtUtc is null ? null : StablecoinTotals.Sum(s.Stablecoins.Select(balance => balance.Total)),
-        Balance(a, s) is { } balance ? StablecoinTotals.Sum(balance) : null, a.SourceId,
-        AvailableBalance(a, s) is { } available ? StablecoinTotals.Sum(available) : null, AvailableSource(a, s));
+        s?.StablecoinsObservedAtUtc is null ? null : ExactDecimal.Sum(s.Stablecoins.Select(balance => balance.Total)),
+        Balance(a, s) is { } balance ? ExactDecimal.Sum(balance) : null, a.SourceId,
+        AvailableBalance(a, s) is { } available ? ExactDecimal.Sum(available) : null, AvailableSource(a, s));
 
     /// <summary>
     /// What the account holds in nominal USD. Unified and portfolio-margin accounts keep every balance in the spot
@@ -418,12 +403,13 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     private static StablecoinWalletDto? WalletDto(AccountSnapshot snapshot) =>
         snapshot.StablecoinsObservedAtUtc is not { } observed ? null :
         new(observed, snapshot.AccountMode!, snapshot.StablecoinScope!,
-            StablecoinTotals.Sum(snapshot.Stablecoins.Select(balance => balance.Total)),
-            StablecoinTotals.Sum(snapshot.Stablecoins.Select(balance => balance.Available)),
+            ExactDecimal.Sum(snapshot.Stablecoins.Select(balance => balance.Total)),
+            ExactDecimal.Sum(snapshot.Stablecoins.Select(balance => balance.Available)),
             snapshot.Stablecoins.OrderBy(balance => balance.TokenIndex).Select(balance => new StablecoinBalanceDto(
-                balance.Symbol, balance.TokenIndex, balance.TokenId, Money(balance.Total)!, Money(balance.Held)!, Money(balance.Available)!)).ToList(),
+                balance.Symbol, balance.TokenIndex, balance.TokenId, ExactDecimal.Format(balance.Total), ExactDecimal.Format(balance.Held),
+                ExactDecimal.Format(balance.Available))).ToList(),
             "Venue stablecoin wallet only: supported stablecoin token identities, nominal USD-pegged units, no FX/depeg adjustment. Available is total minus held; it is not guaranteed withdrawal capacity or perpetual free margin. Other assets, EVM wallets and lending/borrow accounting are excluded. Perpetual margin is not added again.");
-    private static FillDto ToDto(ImportedFill f) => new(f.Id, f.AccountId, f.ContractId, f.Side, f.Direction, Money(f.Price)!,
-        Money(f.Quantity)!, Money(f.Fee)!, f.FeeToken, Money(f.ClosedPnlUsd)!, f.OccurredAtUtc, f.OrderId, f.SourceFillId, f.TransactionHash,
-        f.PositionEffect, f.FeeBasis, f.PnlBasis);
+    private static FillDto ToDto(ImportedFill f) => new(f.Id, f.AccountId, f.ContractId, f.Side, f.Direction, ExactDecimal.Format(f.Price),
+        ExactDecimal.Format(f.Quantity), ExactDecimal.Format(f.Fee), f.FeeToken, ExactDecimal.Format(f.ClosedPnlUsd), f.OccurredAtUtc,
+        f.OrderId, f.SourceFillId, f.TransactionHash, f.PositionEffect, f.FeeBasis, f.PnlBasis);
 }
