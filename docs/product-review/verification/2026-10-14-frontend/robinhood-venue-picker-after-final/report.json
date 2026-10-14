@@ -1,0 +1,18 @@
+{
+  "source": "2712e9632cef65a612008ad2d55d328e7b0ad429",
+  "status": "passed",
+  "checks": [
+    "graphite-desktop: five bundled venue options, RH selected, USDG label, bounded dialog and no page overflow",
+    "graphite-mobile: five bundled venue options, RH selected, USDG label, bounded dialog and no page overflow",
+    "paper-desktop: five bundled venue options, RH selected, USDG label, bounded dialog and no page overflow",
+    "paper-mobile: five bundled venue options, RH selected, USDG label, bounded dialog and no page overflow"
+  ],
+  "shots": [
+    "graphite-desktop-robinhood-venue-picker.png",
+    "graphite-mobile-robinhood-venue-picker.png",
+    "paper-desktop-robinhood-venue-picker.png",
+    "paper-mobile-robinhood-venue-picker.png"
+  ],
+  "errors": [],
+  "blocked": []
+}

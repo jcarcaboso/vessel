@@ -136,6 +136,13 @@ fallback, never an arbitrary exception message.
 | `fills.ts`, `markup.ts` | shared imported-fill and image-markup contracts and guards |
 | `candles.ts`, `portfolio-icons.ts` | shared interval and portfolio-icon keys without UI dependencies |
 | `venues.ts` | `Venues` lookups and `VenuesProvider`/`useVenues()` |
+| `venue-logos.ts` | Fixed logo-key type, allowlist and guard shared with the UI |
+
+Venue descriptors may carry a bundled logo key. Unknown or malformed keys are
+dropped, so the UI uses its generic icon without rejecting an otherwise valid
+venue. `components/venues/venue-logos.ts` maps accepted keys to local SVG assets
+or an icon; API code never imports that component module. Venue quote-unit
+lookups also come from descriptors, including USDG for Lighter on Robinhood.
 | `workspace.ts` | the client, portfolios, accounts, snapshots, fills, instruments, candles, market context, the live stream, account sync |
 | `account-access.ts` | Lighter discovery and read-only token metadata, token transport rules and messages |
 | `plays.ts` | Play documents, plans, history, status changes, evidence, execution and order links |

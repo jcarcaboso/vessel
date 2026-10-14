@@ -1,0 +1,166 @@
+{
+  "source": "2712e9632cef65a612008ad2d55d328e7b0ad429",
+  "status": "passed",
+  "checks": [
+    "graphite-desktop: clean disconnect has no confirmation",
+    "graphite-desktop: cancelling both disconnect controls retains hidden Plays draft and session",
+    "graphite-desktop: cancelled real reload retains draft across routes",
+    "graphite-desktop: module fallback reload is protected by native unload warning",
+    "graphite-desktop: accepted disconnect clears draft, reconnect starts blank",
+    "graphite-mobile: clean disconnect has no confirmation",
+    "graphite-mobile: cancelling both disconnect controls retains hidden Plays draft and session",
+    "graphite-mobile: cancelled real reload retains draft across routes",
+    "graphite-mobile: module fallback reload is protected by native unload warning",
+    "graphite-mobile: accepted disconnect clears draft, reconnect starts blank",
+    "paper-desktop: clean disconnect has no confirmation",
+    "paper-desktop: cancelling both disconnect controls retains hidden Plays draft and session",
+    "paper-desktop: cancelled real reload retains draft across routes",
+    "paper-desktop: module fallback reload is protected by native unload warning",
+    "paper-desktop: accepted disconnect clears draft, reconnect starts blank",
+    "paper-mobile: clean disconnect has no confirmation",
+    "paper-mobile: cancelling both disconnect controls retains hidden Plays draft and session",
+    "paper-mobile: cancelled real reload retains draft across routes",
+    "paper-mobile: module fallback reload is protected by native unload warning",
+    "paper-mobile: accepted disconnect clears draft, reconnect starts blank"
+  ],
+  "shots": [
+    "graphite-desktop-protected-load-fallback.png",
+    "graphite-desktop-retained-draft.png",
+    "graphite-mobile-protected-load-fallback.png",
+    "graphite-mobile-retained-draft.png",
+    "paper-desktop-protected-load-fallback.png",
+    "paper-desktop-retained-draft.png",
+    "paper-mobile-protected-load-fallback.png",
+    "paper-mobile-retained-draft.png"
+  ],
+  "dialogs": [
+    {
+      "tag": "graphite-desktop",
+      "type": "confirm",
+      "message": "Disconnect and discard unsaved Play work?",
+      "accept": false
+    },
+    {
+      "tag": "graphite-desktop",
+      "type": "confirm",
+      "message": "Disconnect and discard unsaved Play work?",
+      "accept": false
+    },
+    {
+      "tag": "graphite-desktop",
+      "type": "beforeunload",
+      "message": "",
+      "accept": false
+    },
+    {
+      "tag": "graphite-desktop",
+      "type": "beforeunload",
+      "message": "",
+      "accept": false
+    },
+    {
+      "tag": "graphite-desktop",
+      "type": "confirm",
+      "message": "Disconnect and discard unsaved Play work?",
+      "accept": true
+    },
+    {
+      "tag": "graphite-mobile",
+      "type": "confirm",
+      "message": "Disconnect and discard unsaved Play work?",
+      "accept": false
+    },
+    {
+      "tag": "graphite-mobile",
+      "type": "confirm",
+      "message": "Disconnect and discard unsaved Play work?",
+      "accept": false
+    },
+    {
+      "tag": "graphite-mobile",
+      "type": "beforeunload",
+      "message": "",
+      "accept": false
+    },
+    {
+      "tag": "graphite-mobile",
+      "type": "beforeunload",
+      "message": "",
+      "accept": false
+    },
+    {
+      "tag": "graphite-mobile",
+      "type": "confirm",
+      "message": "Disconnect and discard unsaved Play work?",
+      "accept": true
+    },
+    {
+      "tag": "paper-desktop",
+      "type": "confirm",
+      "message": "Disconnect and discard unsaved Play work?",
+      "accept": false
+    },
+    {
+      "tag": "paper-desktop",
+      "type": "confirm",
+      "message": "Disconnect and discard unsaved Play work?",
+      "accept": false
+    },
+    {
+      "tag": "paper-desktop",
+      "type": "beforeunload",
+      "message": "",
+      "accept": false
+    },
+    {
+      "tag": "paper-desktop",
+      "type": "beforeunload",
+      "message": "",
+      "accept": false
+    },
+    {
+      "tag": "paper-desktop",
+      "type": "confirm",
+      "message": "Disconnect and discard unsaved Play work?",
+      "accept": true
+    },
+    {
+      "tag": "paper-mobile",
+      "type": "confirm",
+      "message": "Disconnect and discard unsaved Play work?",
+      "accept": false
+    },
+    {
+      "tag": "paper-mobile",
+      "type": "confirm",
+      "message": "Disconnect and discard unsaved Play work?",
+      "accept": false
+    },
+    {
+      "tag": "paper-mobile",
+      "type": "beforeunload",
+      "message": "",
+      "accept": false
+    },
+    {
+      "tag": "paper-mobile",
+      "type": "beforeunload",
+      "message": "",
+      "accept": false
+    },
+    {
+      "tag": "paper-mobile",
+      "type": "confirm",
+      "message": "Disconnect and discard unsaved Play work?",
+      "accept": true
+    }
+  ],
+  "errors": [],
+  "expectedErrors": [
+    "graphite-desktop: Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "graphite-mobile: Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "paper-desktop: Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "paper-mobile: Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+  ],
+  "blocked": []
+}

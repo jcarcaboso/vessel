@@ -1,0 +1,15 @@
+Production frontend image with loopback-only nginx listener and synthetic upstream.
+Only template listen address changed; production assets and security policy unchanged.
+Image: sha256:040bcecc2d04a92b954f195b572a2f9db65d955a0e902c0bae13f8f13ef8934c
+Build commit: 2712e9632cef65a612008ad2d55d328e7b0ad429
+PASS [browser] login and new Overview summary use real synthetic API data
+PASS [browser] self-hosted fonts load
+PASS [browser] Lightweight Charts lazy script, canvas, indicators and chart capture
+PASS [browser] blob chart capture image renders
+PASS [browser] vector markup and marked data-URL overlay render
+PASS [browser] image upload renders
+PASS [browser] data image URLs permitted
+PASS [browser] built-in light/dark themes, inline styles and named theme builder
+PASS [browser] same-origin SSE fetch passes CSP connect-src
+PASS [browser] zero CSP violations and zero browser console/page errors
+Browser checks: 10; CSP violations: 0; console/page errors: 0

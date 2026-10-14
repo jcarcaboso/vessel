@@ -1,0 +1,2292 @@
+{
+  "browser": "151.0.7922.137",
+  "inputs": [
+    {
+      "label": "robinhood-main-before",
+      "provenance": {
+        "sourceCommit": "87ca53fcc9c0109f242422c0d4adc30cef4820a8",
+        "sourceClaim": "Caller-specified build commit; served asset hashes recorded, not an independent build attestation",
+        "toolingCommit": "7b8d67bbc146e6b274ced986806b17001091e2c8",
+        "toolingDirty": false,
+        "captureScriptSha256": "f9e054c5c6503a7156b84ae17130163bd0dddc36f91eba2076ecf7ffc556025a",
+        "fixtureSha256": "b6e3345bc36ef541c0cbdb32b0e95e9262bf24d6cf52f160b986fde167387053",
+        "browserVersion": "151.0.7922.137",
+        "executablePath": "/nix/store/ll2lvrd9795hpa0yr20p207h8vif1ax0-chromium-151.0.7922.137/bin/chromium",
+        "playwrightVersion": "1.63.0",
+        "locale": "en-US",
+        "timezoneId": "UTC",
+        "deviceScaleFactor": 1,
+        "reducedMotion": "reduce",
+        "screenshotAnimations": "disabled",
+        "screenshotCaret": "hide",
+        "platform": "linux",
+        "node": "v24.21.0",
+        "servedAssets": {
+          "/": "cf5db8f0269e53d438b385d30aaedd9b7dbe623832b6eb344121532c7903407f",
+          "/assets/index-_frup_lx.css": "cca1d093fda93efe7c687c6b12b9b93a480a990b3c342791513a0cf8574f65ff",
+          "/assets/index-49Zl8C8h.js": "f16769fe5ca9d3d959f380e7fbf307de384b218aeea7ef8e1c571bbb0654b4e4",
+          "/assets/inter-latin-wght-normal-Dx4kXJAl.woff2": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
+          "/assets/lightweight-BMnYA3kc.js": "71489a3704e24e85ef50ade80586af4ceb06960c8e1c8b82fedbaa6d8eee48f8"
+        },
+        "isolation": {
+          "verifiedAt": "2026-10-14T23:25:23.264283+00:00",
+          "apiSourceCommit": "87ca53fcc9c0109f242422c0d4adc30cef4820a8",
+          "databaseContainer": "vessel-fe-review-20261014",
+          "databaseName": "vesselfe",
+          "apiBind": "127.0.0.1:47305",
+          "processes": [
+            {
+              "pid": 2786930,
+              "proxyEnvironment": {
+                "HTTP_PROXY": "http://127.0.0.1:9",
+                "HTTPS_PROXY": "http://127.0.0.1:9",
+                "ALL_PROXY": "http://127.0.0.1:9",
+                "NO_PROXY": "127.0.0.1,localhost"
+              }
+            }
+          ],
+          "guard": "HTTP(S) requests use unreachable loopback proxy; browser separately rejects external origins and intercepts venue-touching routes. This is not a network namespace firewall."
+        },
+        "browserEnvironment": {
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+          "locale": "en-US",
+          "timezone": "UTC"
+        }
+      },
+      "clock": {
+        "browserDateOnly": "2026-10-14T16:30:00.000Z",
+        "timersFrozen": false,
+        "serverClockFrozen": false,
+        "evidenceCreatedAtServerUtc": "2026-10-14T17:07:37.919091+00:00",
+        "exceptions": [
+          "Review asOfUtc and request-window dates use live server time.",
+          "Evidence creation time uses server time persisted by the synthetic supplement."
+        ],
+        "masking": "None. Server timestamps and all render/text differences stay visible and must be investigated.",
+        "reviewResponses": [
+          {
+            "tag": "graphite/desktop",
+            "asOfUtc": "2026-10-14T23:25:35.3863824+00:00",
+            "fromUtc": "2026-09-14T23:25:35.3863824+00:00",
+            "observedAtRealUtc": "2026-10-14T23:25:35.513Z"
+          },
+          {
+            "tag": "graphite/mobile",
+            "asOfUtc": "2026-10-14T23:25:47.8279353+00:00",
+            "fromUtc": "2026-09-14T23:25:47.8279353+00:00",
+            "observedAtRealUtc": "2026-10-14T23:25:47.847Z"
+          },
+          {
+            "tag": "paper/desktop",
+            "asOfUtc": "2026-10-14T23:26:00.9139513+00:00",
+            "fromUtc": "2026-09-14T23:26:00.9139513+00:00",
+            "observedAtRealUtc": "2026-10-14T23:26:00.937Z"
+          },
+          {
+            "tag": "paper/mobile",
+            "asOfUtc": "2026-10-14T23:26:13.2962013+00:00",
+            "fromUtc": "2026-09-14T23:26:13.2962013+00:00",
+            "observedAtRealUtc": "2026-10-14T23:26:13.316Z"
+          }
+        ]
+      }
+    },
+    {
+      "label": "robinhood-after",
+      "provenance": {
+        "sourceCommit": "2712e9632cef65a612008ad2d55d328e7b0ad429",
+        "sourceClaim": "Caller-specified build commit; served asset hashes recorded, not an independent build attestation",
+        "toolingCommit": "d41f3f341e3d75f9cfa809aa96a0d83dd81936f4",
+        "toolingDirty": false,
+        "captureScriptSha256": "f9e054c5c6503a7156b84ae17130163bd0dddc36f91eba2076ecf7ffc556025a",
+        "fixtureSha256": "b6e3345bc36ef541c0cbdb32b0e95e9262bf24d6cf52f160b986fde167387053",
+        "browserVersion": "151.0.7922.137",
+        "executablePath": "/nix/store/ll2lvrd9795hpa0yr20p207h8vif1ax0-chromium-151.0.7922.137/bin/chromium",
+        "playwrightVersion": "1.63.0",
+        "locale": "en-US",
+        "timezoneId": "UTC",
+        "deviceScaleFactor": 1,
+        "reducedMotion": "reduce",
+        "screenshotAnimations": "disabled",
+        "screenshotCaret": "hide",
+        "platform": "linux",
+        "node": "v24.21.0",
+        "servedAssets": {
+          "/": "3fd22339e4b5f9054f29d84ec36d899ed301668d8fbc69fbf24547613eacf53a",
+          "/assets/VenueBadge-Dvc4KJ9G.css": "2bd3d9348c7803e2c6bde8576ad98c814bccb45fcdb3169e13f7fba397d36d12",
+          "/assets/index-DNl23u5H.css": "6190a21659b336fdd2241984d7b6bcd02fdcb3336698cbd0f1d7702431f541de",
+          "/assets/VenueBadge-0V9QAkgQ.js": "40ab0bae89c586d14e86b25228a032bd2b59c15d692b77e6ba1474e124cd5852",
+          "/assets/index-SOMmiHXz.js": "816b9f51c89cc9a4239d17677b5e42d74df2e4ffe3f4f8782358a0151a1530e8",
+          "/assets/inter-latin-wght-normal-Dx4kXJAl.woff2": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
+          "/assets/PlaysPage-BYiLQoB4.css": "7bbcfc4bdb445f01481adc42fe66c72ac236fc0193079ba254a0ec4c11076106",
+          "/assets/triangle-alert-xApYaNS3.js": "cda703674ebbd09ef8dfd63b25941f985527c034fba76f7f960fe7b39408137b",
+          "/assets/PlaysPage-C5HtQkh_.js": "28f5234e63f2b4fb3aedce580d47e4afc5fabc7a99f536e22047c4bdab178d82",
+          "/assets/lightweight-D2NuH4wU.js": "e644ec583234b247f11302de92765f586ff1a241c0490160715ad7c69af47e53",
+          "/assets/sliders-horizontal-D88xEtt8.js": "ea1a04f7411ed1eeef4dc33e5c860c4889f4b5579f3227ca3cf89aa724da8d4b",
+          "/assets/ReviewPage-CSnuDNGf.css": "a8084c49c7f61681a20d787d4f17b359d0a934a6c0c97f5ccde5de3946d63eb7",
+          "/assets/ReviewPage-DHQAu2FK.js": "31aeeabdbf2849c39131e5912fc1280345b4b467ba14a4e7779405796294a2ef",
+          "/assets/SettingsPage-DZZtynlx.css": "e456500a77872169fcdca0e44a2cb8d7c8a2cbbd27f202b43c954267e7c50249",
+          "/assets/SettingsPage-LF2dToFm.js": "71aa36d8d4ea418a1a927e0e62346d160380bfddb219dd1ca208ebf0ab1df895"
+        },
+        "isolation": {
+          "verifiedAt": "2026-10-14T23:25:23.264283+00:00",
+          "apiSourceCommit": "87ca53fcc9c0109f242422c0d4adc30cef4820a8",
+          "databaseContainer": "vessel-fe-review-20261014",
+          "databaseName": "vesselfe",
+          "apiBind": "127.0.0.1:47305",
+          "processes": [
+            {
+              "pid": 2786930,
+              "proxyEnvironment": {
+                "HTTP_PROXY": "http://127.0.0.1:9",
+                "HTTPS_PROXY": "http://127.0.0.1:9",
+                "ALL_PROXY": "http://127.0.0.1:9",
+                "NO_PROXY": "127.0.0.1,localhost"
+              }
+            }
+          ],
+          "guard": "HTTP(S) requests use unreachable loopback proxy; browser separately rejects external origins and intercepts venue-touching routes. This is not a network namespace firewall."
+        },
+        "browserEnvironment": {
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+          "locale": "en-US",
+          "timezone": "UTC"
+        }
+      },
+      "clock": {
+        "browserDateOnly": "2026-10-14T16:30:00.000Z",
+        "timersFrozen": false,
+        "serverClockFrozen": false,
+        "evidenceCreatedAtServerUtc": "2026-10-14T17:07:37.919091+00:00",
+        "exceptions": [
+          "Review asOfUtc and request-window dates use live server time.",
+          "Evidence creation time uses server time persisted by the synthetic supplement."
+        ],
+        "masking": "None. Server timestamps and all render/text differences stay visible and must be investigated.",
+        "reviewResponses": [
+          {
+            "tag": "graphite/desktop",
+            "asOfUtc": "2026-10-14T23:37:17.8520464+00:00",
+            "fromUtc": "2026-09-14T23:37:17.8520464+00:00",
+            "observedAtRealUtc": "2026-10-14T23:37:17.903Z"
+          },
+          {
+            "tag": "graphite/mobile",
+            "asOfUtc": "2026-10-14T23:37:31.1471933+00:00",
+            "fromUtc": "2026-09-14T23:37:31.1471933+00:00",
+            "observedAtRealUtc": "2026-10-14T23:37:31.173Z"
+          },
+          {
+            "tag": "paper/desktop",
+            "asOfUtc": "2026-10-14T23:37:45.122994+00:00",
+            "fromUtc": "2026-09-14T23:37:45.122994+00:00",
+            "observedAtRealUtc": "2026-10-14T23:37:45.138Z"
+          },
+          {
+            "tag": "paper/mobile",
+            "asOfUtc": "2026-10-14T23:37:58.3428499+00:00",
+            "fromUtc": "2026-09-14T23:37:58.3428499+00:00",
+            "observedAtRealUtc": "2026-10-14T23:37:58.390Z"
+          }
+        ]
+      }
+    }
+  ],
+  "note": "Exact means decoded pixel equality, not PNG byte equality. Tolerance is not identity. All differences require investigation; no time regions are masked.",
+  "results": [
+    {
+      "file": "graphite-desktop-account-detail.png",
+      "before": [
+        1440,
+        1670
+      ],
+      "after": [
+        1440,
+        1670
+      ],
+      "exact": {
+        "changed": 1,
+        "ratio": 4.1583499667332005e-7,
+        "rows": [
+          511,
+          511
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.00000218313373253493,
+      "maxSummedRgbaDelta": 21
+    },
+    {
+      "file": "graphite-desktop-accounts.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-activity.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 15,
+        "ratio": 0.000011574074074074073,
+        "rows": [
+          379,
+          385
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.000004436728395061728,
+      "maxSummedRgbaDelta": 3
+    },
+    {
+      "file": "graphite-desktop-chart-expanded.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-entry-expanded.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 2,
+        "ratio": 0.0000015432098765432098,
+        "rows": [
+          251,
+          511
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.0000046296296296296296,
+      "maxSummedRgbaDelta": 14
+    },
+    {
+      "file": "graphite-desktop-evidence-marked.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 1,
+        "ratio": 7.716049382716049e-7,
+        "rows": [
+          511,
+          511
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.0000019290123456790124,
+      "maxSummedRgbaDelta": 10
+    },
+    {
+      "file": "graphite-desktop-evidence-markup.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 75,
+        "ratio": 0.00005787037037037037,
+        "rows": [
+          131,
+          764
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.000026813271604938273,
+      "maxSummedRgbaDelta": 10
+    },
+    {
+      "file": "graphite-desktop-evidence-original.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 1,
+        "ratio": 7.716049382716049e-7,
+        "rows": [
+          511,
+          511
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.0000019290123456790124,
+      "maxSummedRgbaDelta": 10
+    },
+    {
+      "file": "graphite-desktop-execution.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 1,
+        "ratio": 7.716049382716049e-7,
+        "rows": [
+          511,
+          511
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.000004050925925925926,
+      "maxSummedRgbaDelta": 21
+    },
+    {
+      "file": "graphite-desktop-keyboard-tooltip.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 1,
+        "ratio": 7.716049382716049e-7,
+        "rows": [
+          511,
+          511
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.000004050925925925926,
+      "maxSummedRgbaDelta": 21
+    },
+    {
+      "file": "graphite-desktop-level-popover.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-leverage-confirmation.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 2520,
+        "ratio": 0.0019444444444444444,
+        "rows": [
+          0,
+          511
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 2300,
+        "ratio": 0.0017746913580246914,
+        "rows": [
+          0,
+          60
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.032344521604938274,
+      "maxSummedRgbaDelta": 325
+    },
+    {
+      "file": "graphite-desktop-overview.png",
+      "before": [
+        1440,
+        1926
+      ],
+      "after": [
+        1440,
+        1926
+      ],
+      "exact": {
+        "changed": 1,
+        "ratio": 3.6056305526710513e-7,
+        "rows": [
+          511,
+          511
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.000001892956040152302,
+      "maxSummedRgbaDelta": 21
+    },
+    {
+      "file": "graphite-desktop-plays-editor.png",
+      "before": [
+        1440,
+        1838
+      ],
+      "after": [
+        1440,
+        1838
+      ],
+      "exact": {
+        "changed": 1,
+        "ratio": 3.778261395236368e-7,
+        "rows": [
+          511,
+          511
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.000001983587232499093,
+      "maxSummedRgbaDelta": 21
+    },
+    {
+      "file": "graphite-desktop-plays-list.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 29,
+        "ratio": 0.000022376543209876542,
+        "rows": [
+          157,
+          210
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.00000945216049382716,
+      "maxSummedRgbaDelta": 4
+    },
+    {
+      "file": "graphite-desktop-plays-manual.png",
+      "before": [
+        1440,
+        1801
+      ],
+      "after": [
+        1440,
+        1801
+      ],
+      "exact": {
+        "changed": 1,
+        "ratio": 3.855882534394472e-7,
+        "rows": [
+          511,
+          511
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.000002024338330557098,
+      "maxSummedRgbaDelta": 21
+    },
+    {
+      "file": "graphite-desktop-portfolios.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-review.png",
+      "before": [
+        1440,
+        1354
+      ],
+      "after": [
+        1440,
+        1354
+      ],
+      "exact": {
+        "changed": 122,
+        "ratio": 0.00006257180370917446,
+        "rows": [
+          365,
+          511
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 110,
+        "ratio": 0.000056417200065649105,
+        "rows": [
+          365,
+          372
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.0021905260134580666,
+      "maxSummedRgbaDelta": 490
+    },
+    {
+      "file": "graphite-desktop-settings.png",
+      "before": [
+        1440,
+        2179
+      ],
+      "after": [
+        1440,
+        2179
+      ],
+      "exact": {
+        "changed": 1,
+        "ratio": 3.1869868951098874e-7,
+        "rows": [
+          511,
+          511
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.0000016731681199326908,
+      "maxSummedRgbaDelta": 21
+    },
+    {
+      "file": "graphite-mobile-account-detail.png",
+      "before": [
+        390,
+        2185
+      ],
+      "after": [
+        390,
+        2185
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-accounts.png",
+      "before": [
+        390,
+        1172
+      ],
+      "after": [
+        390,
+        1172
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-activity.png",
+      "before": [
+        390,
+        1409
+      ],
+      "after": [
+        390,
+        1409
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-chart-expanded.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-entry-expanded.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-evidence-marked.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 748,
+        "ratio": 0.0022724510876169644,
+        "rows": [
+          704,
+          719
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 644,
+        "ratio": 0.0019564953214242314,
+        "rows": [
+          704,
+          719
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.028291712237209866,
+      "maxSummedRgbaDelta": 58
+    },
+    {
+      "file": "graphite-mobile-evidence-markup.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 748,
+        "ratio": 0.0022724510876169644,
+        "rows": [
+          704,
+          719
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 644,
+        "ratio": 0.0019564953214242314,
+        "rows": [
+          704,
+          719
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.027531443674808604,
+      "maxSummedRgbaDelta": 58
+    },
+    {
+      "file": "graphite-mobile-evidence-original.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 748,
+        "ratio": 0.0022724510876169644,
+        "rows": [
+          704,
+          719
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 644,
+        "ratio": 0.0019564953214242314,
+        "rows": [
+          704,
+          719
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.028291712237209866,
+      "maxSummedRgbaDelta": 58
+    },
+    {
+      "file": "graphite-mobile-execution.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-keyboard-tooltip.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-level-popover.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-leverage-confirmation.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 2596,
+        "ratio": 0.007886742009964759,
+        "rows": [
+          0,
+          61
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 2357,
+        "ratio": 0.0071606513549641515,
+        "rows": [
+          1,
+          61
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.13663491918823673,
+      "maxSummedRgbaDelta": 325
+    },
+    {
+      "file": "graphite-mobile-overview.png",
+      "before": [
+        390,
+        3310
+      ],
+      "after": [
+        390,
+        3310
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-plays-editor.png",
+      "before": [
+        390,
+        3977
+      ],
+      "after": [
+        390,
+        3977
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-plays-list.png",
+      "before": [
+        390,
+        907
+      ],
+      "after": [
+        390,
+        907
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-plays-manual.png",
+      "before": [
+        390,
+        3273
+      ],
+      "after": [
+        390,
+        3273
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-portfolios.png",
+      "before": [
+        390,
+        927
+      ],
+      "after": [
+        390,
+        927
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-review.png",
+      "before": [
+        390,
+        1922
+      ],
+      "after": [
+        390,
+        1922
+      ],
+      "exact": {
+        "changed": 121,
+        "ratio": 0.00016142373062248192,
+        "rows": [
+          586,
+          593
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 110,
+        "ratio": 0.00014674884602043812,
+        "rows": [
+          586,
+          593
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.005690853544651672,
+      "maxSummedRgbaDelta": 490
+    },
+    {
+      "file": "graphite-mobile-settings.png",
+      "before": [
+        390,
+        3955
+      ],
+      "after": [
+        390,
+        3955
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-account-detail.png",
+      "before": [
+        1440,
+        1670
+      ],
+      "after": [
+        1440,
+        1670
+      ],
+      "exact": {
+        "changed": 11452,
+        "ratio": 0.004762142381902861,
+        "rows": [
+          58,
+          511
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 10705,
+        "ratio": 0.0044515136393878905,
+        "rows": [
+          59,
+          181
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.042868845642049236,
+      "maxSummedRgbaDelta": 38
+    },
+    {
+      "file": "paper-desktop-accounts.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 16428,
+        "ratio": 0.012675925925925926,
+        "rows": [
+          58,
+          279
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 12613,
+        "ratio": 0.009732253086419753,
+        "rows": [
+          59,
+          278
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.11893055555555555,
+      "maxSummedRgbaDelta": 47
+    },
+    {
+      "file": "paper-desktop-activity.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 6341,
+        "ratio": 0.004892746913580247,
+        "rows": [
+          58,
+          368
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 2711,
+        "ratio": 0.002091820987654321,
+        "rows": [
+          59,
+          92
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.029501157407407406,
+      "maxSummedRgbaDelta": 38
+    },
+    {
+      "file": "paper-desktop-chart-expanded.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 220,
+        "ratio": 0.00016975308641975308,
+        "rows": [
+          864,
+          899
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.00005594135802469136,
+      "maxSummedRgbaDelta": 3
+    },
+    {
+      "file": "paper-desktop-entry-expanded.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 8663,
+        "ratio": 0.006684413580246913,
+        "rows": [
+          140,
+          899
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.024157986111111113,
+      "maxSummedRgbaDelta": 20
+    },
+    {
+      "file": "paper-desktop-evidence-marked.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 6171,
+        "ratio": 0.004761574074074074,
+        "rows": [
+          0,
+          899
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.008338541666666666,
+      "maxSummedRgbaDelta": 15
+    },
+    {
+      "file": "paper-desktop-evidence-markup.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 3041,
+        "ratio": 0.0023464506172839504,
+        "rows": [
+          0,
+          899
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.0008877314814814815,
+      "maxSummedRgbaDelta": 10
+    },
+    {
+      "file": "paper-desktop-evidence-original.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 6177,
+        "ratio": 0.004766203703703704,
+        "rows": [
+          0,
+          899
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.008346836419753086,
+      "maxSummedRgbaDelta": 15
+    },
+    {
+      "file": "paper-desktop-execution.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 27887,
+        "ratio": 0.021517746913580247,
+        "rows": [
+          0,
+          899
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.016643904320987654,
+      "maxSummedRgbaDelta": 19
+    },
+    {
+      "file": "paper-desktop-keyboard-tooltip.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 19179,
+        "ratio": 0.014798611111111111,
+        "rows": [
+          12,
+          899
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 6738,
+        "ratio": 0.005199074074074074,
+        "rows": [
+          13,
+          42
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.05741377314814815,
+      "maxSummedRgbaDelta": 38
+    },
+    {
+      "file": "paper-desktop-level-popover.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 22600,
+        "ratio": 0.01743827160493827,
+        "rows": [
+          271,
+          899
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 1144,
+        "ratio": 0.0008827160493827161,
+        "rows": [
+          461,
+          466
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.0391190200617284,
+      "maxSummedRgbaDelta": 29
+    },
+    {
+      "file": "paper-desktop-leverage-confirmation.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 21551,
+        "ratio": 0.016628858024691356,
+        "rows": [
+          0,
+          899
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 8908,
+        "ratio": 0.006873456790123457,
+        "rows": [
+          4,
+          573
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.08308468364197531,
+      "maxSummedRgbaDelta": 344
+    },
+    {
+      "file": "paper-desktop-overview.png",
+      "before": [
+        1440,
+        1926
+      ],
+      "after": [
+        1440,
+        1926
+      ],
+      "exact": {
+        "changed": 13076,
+        "ratio": 0.004714722510672667,
+        "rows": [
+          58,
+          1428
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 9183,
+        "ratio": 0.003311050536517826,
+        "rows": [
+          59,
+          1428
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.04134170921310719,
+      "maxSummedRgbaDelta": 121
+    },
+    {
+      "file": "paper-desktop-plays-editor.png",
+      "before": [
+        1440,
+        1838
+      ],
+      "after": [
+        1440,
+        1838
+      ],
+      "exact": {
+        "changed": 43876,
+        "ratio": 0.016577499697739088,
+        "rows": [
+          140,
+          1823
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 6738,
+        "ratio": 0.0025457925281102646,
+        "rows": [
+          141,
+          170
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.030581342189578045,
+      "maxSummedRgbaDelta": 38
+    },
+    {
+      "file": "paper-desktop-plays-list.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 38,
+        "ratio": 0.00002932098765432099,
+        "rows": [
+          156,
+          210
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.000012345679012345678,
+      "maxSummedRgbaDelta": 3
+    },
+    {
+      "file": "paper-desktop-plays-manual.png",
+      "before": [
+        1440,
+        1801
+      ],
+      "after": [
+        1440,
+        1801
+      ],
+      "exact": {
+        "changed": 45303,
+        "ratio": 0.017468304645567277,
+        "rows": [
+          79,
+          1786
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 6759,
+        "ratio": 0.002606191004997224,
+        "rows": [
+          80,
+          109
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.03164301082731816,
+      "maxSummedRgbaDelta": 38
+    },
+    {
+      "file": "paper-desktop-portfolios.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 9690,
+        "ratio": 0.007476851851851852,
+        "rows": [
+          58,
+          457
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 2705,
+        "ratio": 0.0020871913580246915,
+        "rows": [
+          59,
+          92
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.0384849537037037,
+      "maxSummedRgbaDelta": 38
+    },
+    {
+      "file": "paper-desktop-review.png",
+      "before": [
+        1440,
+        1354
+      ],
+      "after": [
+        1440,
+        1354
+      ],
+      "exact": {
+        "changed": 175,
+        "ratio": 0.00008975463646807812,
+        "rows": [
+          365,
+          511
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 147,
+        "ratio": 0.00007539389463318562,
+        "rows": [
+          365,
+          372
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.003062556417200066,
+      "maxSummedRgbaDelta": 460
+    },
+    {
+      "file": "paper-desktop-settings.png",
+      "before": [
+        1440,
+        2179
+      ],
+      "after": [
+        1440,
+        2179
+      ],
+      "exact": {
+        "changed": 29578,
+        "ratio": 0.009426469838356025,
+        "rows": [
+          171,
+          2132
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 1721,
+        "ratio": 0.0005484804446484116,
+        "rows": [
+          1476,
+          1505
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.03644789595125185,
+      "maxSummedRgbaDelta": 49
+    },
+    {
+      "file": "paper-mobile-account-detail.png",
+      "before": [
+        390,
+        2185
+      ],
+      "after": [
+        390,
+        2185
+      ],
+      "exact": {
+        "changed": 10687,
+        "ratio": 0.012541219268908057,
+        "rows": [
+          185,
+          322
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 9935,
+        "ratio": 0.011658745526022415,
+        "rows": [
+          186,
+          321
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.11243677756263569,
+      "maxSummedRgbaDelta": 38
+    },
+    {
+      "file": "paper-mobile-accounts.png",
+      "before": [
+        390,
+        1172
+      ],
+      "after": [
+        390,
+        1172
+      ],
+      "exact": {
+        "changed": 16252,
+        "ratio": 0.03555613896910825,
+        "rows": [
+          185,
+          376
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 12411,
+        "ratio": 0.0271527960094513,
+        "rows": [
+          186,
+          375
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.3331096306992211,
+      "maxSummedRgbaDelta": 47
+    },
+    {
+      "file": "paper-mobile-activity.png",
+      "before": [
+        390,
+        1409
+      ],
+      "after": [
+        390,
+        1409
+      ],
+      "exact": {
+        "changed": 6102,
+        "ratio": 0.011104438499754326,
+        "rows": [
+          185,
+          772
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 2489,
+        "ratio": 0.004529489909191825,
+        "rows": [
+          186,
+          219
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.06561436552565013,
+      "maxSummedRgbaDelta": 38
+    },
+    {
+      "file": "paper-mobile-chart-expanded.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 134,
+        "ratio": 0.00040709685259448294,
+        "rows": [
+          0,
+          843
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.00010177421314862073,
+      "maxSummedRgbaDelta": 1
+    },
+    {
+      "file": "paper-mobile-entry-expanded.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 2332,
+        "ratio": 0.00708470044962936,
+        "rows": [
+          0,
+          843
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.002033965244865719,
+      "maxSummedRgbaDelta": 2
+    },
+    {
+      "file": "paper-mobile-evidence-marked.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 5943,
+        "ratio": 0.018055049216186655,
+        "rows": [
+          0,
+          843
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 747,
+        "ratio": 0.002269413051403573,
+        "rows": [
+          704,
+          719
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.12236754162109613,
+      "maxSummedRgbaDelta": 326
+    },
+    {
+      "file": "paper-mobile-evidence-markup.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 3018,
+        "ratio": 0.009168793292016041,
+        "rows": [
+          0,
+          843
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 747,
+        "ratio": 0.002269413051403573,
+        "rows": [
+          704,
+          719
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.09015600315955766,
+      "maxSummedRgbaDelta": 323
+    },
+    {
+      "file": "paper-mobile-evidence-original.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 5938,
+        "ratio": 0.018039859035119697,
+        "rows": [
+          0,
+          843
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 747,
+        "ratio": 0.002269413051403573,
+        "rows": [
+          704,
+          719
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.12235842751245594,
+      "maxSummedRgbaDelta": 326
+    },
+    {
+      "file": "paper-mobile-execution.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 12022,
+        "ratio": 0.03652327135739458,
+        "rows": [
+          0,
+          843
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.043182646737149104,
+      "maxSummedRgbaDelta": 15
+    },
+    {
+      "file": "paper-mobile-keyboard-tooltip.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 8011,
+        "ratio": 0.024337708105480617,
+        "rows": [
+          0,
+          843
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.022341718313282296,
+      "maxSummedRgbaDelta": 20
+    },
+    {
+      "file": "paper-mobile-level-popover.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 23023,
+        "ratio": 0.06994470774091627,
+        "rows": [
+          0,
+          843
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 1144,
+        "ratio": 0.0034755134281200632,
+        "rows": [
+          503,
+          508
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.15591961356179365,
+      "maxSummedRgbaDelta": 29
+    },
+    {
+      "file": "paper-mobile-leverage-confirmation.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 13623,
+        "ratio": 0.041387167335034634,
+        "rows": [
+          0,
+          843
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 8928,
+        "ratio": 0.027123587313160773,
+        "rows": [
+          4,
+          593
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.32421922469315834,
+      "maxSummedRgbaDelta": 344
+    },
+    {
+      "file": "paper-mobile-overview.png",
+      "before": [
+        390,
+        3310
+      ],
+      "after": [
+        390,
+        3310
+      ],
+      "exact": {
+        "changed": 12306,
+        "ratio": 0.009532884034394609,
+        "rows": [
+          185,
+          2809
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 8395,
+        "ratio": 0.006503214811371911,
+        "rows": [
+          186,
+          2809
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.08189654504609187,
+      "maxSummedRgbaDelta": 121
+    },
+    {
+      "file": "paper-mobile-plays-editor.png",
+      "before": [
+        390,
+        3977
+      ],
+      "after": [
+        390,
+        3977
+      ],
+      "exact": {
+        "changed": 39183,
+        "ratio": 0.02526256745517495,
+        "rows": [
+          224,
+          3966
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 6759,
+        "ratio": 0.00435774936654997,
+        "rows": [
+          225,
+          254
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.05002772351276249,
+      "maxSummedRgbaDelta": 38
+    },
+    {
+      "file": "paper-mobile-plays-list.png",
+      "before": [
+        390,
+        907
+      ],
+      "after": [
+        390,
+        907
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-plays-manual.png",
+      "before": [
+        390,
+        3273
+      ],
+      "after": [
+        390,
+        3273
+      ],
+      "exact": {
+        "changed": 36449,
+        "ratio": 0.028554529287801514,
+        "rows": [
+          182,
+          3262
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 6743,
+        "ratio": 0.005282536996560828,
+        "rows": [
+          183,
+          212
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.06065418693741333,
+      "maxSummedRgbaDelta": 38
+    },
+    {
+      "file": "paper-mobile-portfolios.png",
+      "before": [
+        390,
+        927
+      ],
+      "after": [
+        390,
+        927
+      ],
+      "exact": {
+        "changed": 9399,
+        "ratio": 0.02599784250269687,
+        "rows": [
+          185,
+          889
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 2488,
+        "ratio": 0.006881863192542804,
+        "rows": [
+          186,
+          219
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.13158728183000026,
+      "maxSummedRgbaDelta": 38
+    },
+    {
+      "file": "paper-mobile-review.png",
+      "before": [
+        390,
+        1922
+      ],
+      "after": [
+        390,
+        1922
+      ],
+      "exact": {
+        "changed": 174,
+        "ratio": 0.00023212999279596574,
+        "rows": [
+          586,
+          593
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 147,
+        "ratio": 0.00019610982150004003,
+        "rows": [
+          586,
+          593
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.0079597908161904,
+      "maxSummedRgbaDelta": 460
+    },
+    {
+      "file": "paper-mobile-settings.png",
+      "before": [
+        390,
+        3955
+      ],
+      "after": [
+        390,
+        3955
+      ],
+      "exact": {
+        "changed": 29572,
+        "ratio": 0.019172096340237935,
+        "rows": [
+          288,
+          3916
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 1721,
+        "ratio": 0.0011157573989432395,
+        "rows": [
+          2820,
+          2849
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.07415248468345813,
+      "maxSummedRgbaDelta": 49
+    }
+  ]
+}
