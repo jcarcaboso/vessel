@@ -55,7 +55,7 @@ modules, rather than feature components.
 
 1. `main.tsx` calls `initAppearance()` so the stored theme is on `<html>` before the first paint, then renders `WorkspacePage` in `StrictMode` inside a last-resort error boundary.
 2. `ConnectionGate` (`features/connection`) shows the token form. On submit it calls `getSystem(token)` (`GET /api/system`), then creates the client with `createWorkspaceApi(token)`. The field is cleared whether or not it worked.
-3. With a `SystemInfo` and a client, the gate renders `ApplicationShell`. Disconnect drops both, clears the candle cache and returns to the form.
+3. With a `SystemInfo` and a client, the gate renders `ApplicationShell`. Both Disconnect controls ask for confirmation if the Plays session has unsaved work or an in-flight request. Confirming drops the connection, clears the candle cache and returns to the form.
 4. `ApplicationShell` provides tooltips, notifications and venue descriptors from `/api/system`, loads `GET /api/overview` and renders the current page. Polite and assertive notification regions stay mounted so newly inserted messages can be announced.
 
 A new `WorkspaceApi` object means a new session. Shell memory, the Plays session
@@ -216,7 +216,7 @@ Pages talk to each other only through the shell: opening a Play from Overview or
 | `SystemInfo`, venues | `ConnectionGate`, `VenuesProvider` | The session. |
 | Overview document (accounts, portfolios, totals) | `ApplicationShell` | Reloaded on demand; pages read it as props. |
 | Shell memory: account filters, portfolio filter, Activity filters, Overview scope and grouping, selected account, sidebar collapsed | `ApplicationShell` | Survives navigation; resets on a new API identity. Missing scopes and options fall back to "All". |
-| Plays session: list or editor view, the draft, the saved state, the manual execution form, the observed version | `ApplicationShell` (`playsSession`), edited by `PlaysPage` | Survives navigation. Reload and Disconnect discard it. |
+| Plays session: list or editor view, the draft, the saved state, the manual execution form, the observed version | `ApplicationShell` (`playsSession`), edited by `PlaysPage` | Survives navigation. Reload and confirmed Disconnect discard it; unsaved work triggers an exit warning. |
 | Plays mutation guard (`workRef`) | `ApplicationShell`, acquired by `PlaysPage` | One save, status change, open, delete or manual write at a time. |
 | Page data (Activity, Review, account detail, Overview summary, Plays list) | Each page component | Refetched when its key or `reloadGeneration` changes. |
 | Candles | `candleCache` (`features/market`), one per `WorkspaceApi` | The session, at most 20 series of 5,000 candles; never stored in the browser. |
@@ -226,6 +226,16 @@ Pages talk to each other only through the shell: opening a Play from Overview or
 
 Tokens and financial data are not persisted in browser storage. They remain in
 memory for the active session.
+
+`hasUnsavedPlayWork` in `plays/saved.ts` checks dirty saved Plays, populated new
+drafts and manual execution drafts. Both New play and the shell's exit guard use
+it. The shell also checks the current in-flight work ref. Its `beforeunload`
+listener stays attached for the connection lifetime because that ref can change
+without a shell render. It reads the current session only at exit, rather than
+serializing drafts during chart frames. Browsers control whether they show the
+native warning and its wording; this is not a persistence guarantee. Cancelling
+Disconnect leaves the draft and account refresh untouched. Confirming keeps the
+existing cleanup, but cannot promise rollback of a request already sent.
 
 **Patterns you will see.**
 

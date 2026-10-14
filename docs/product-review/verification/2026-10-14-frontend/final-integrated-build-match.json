@@ -1,0 +1,67 @@
+{
+  "status": "passed",
+  "integratedSource": "42fae7eb77a11b27c7533ecbcc0d132571822a9e",
+  "capturedSource": "e1a019abd44c478e6c08a45343b3ef9d3dda1409",
+  "frontendSourceEqual": true,
+  "allDistFilesEqual": 20,
+  "captureAssetsEqual": 14,
+  "assets": [
+    {
+      "asset": "/",
+      "sha256": "82690de16610ad9ca0672a22314c1f16c6f1f76ddf462c2b113949962e789576"
+    },
+    {
+      "asset": "/assets/index-5j8bYsSu.css",
+      "sha256": "f7e87e564a27b81546bf97140a604b38f6b9d9ac90c7574205c034a6761633a9"
+    },
+    {
+      "asset": "/assets/check-zjSo1yBB.js",
+      "sha256": "443672ae66f523ffb71b1c16f3fa823e26a40704899906e936390ac494e3b7bb"
+    },
+    {
+      "asset": "/assets/index-VM3PHKTn.js",
+      "sha256": "e329467fcea68c1132963b9f75f445d96cd8ca79042d360227a692f8f6eaa4f4"
+    },
+    {
+      "asset": "/assets/inter-latin-wght-normal-Dx4kXJAl.woff2",
+      "sha256": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62"
+    },
+    {
+      "asset": "/assets/PlaysPage-DmffgjON.css",
+      "sha256": "2b03b979fc887c034671d6206f99bfa5efb40247a388617847821f4dd98f4641"
+    },
+    {
+      "asset": "/assets/triangle-alert-CZwBSKj3.js",
+      "sha256": "0b5c91a041cf8c6d661d021248505420be22902f672edebb33fbc6847b606a6f"
+    },
+    {
+      "asset": "/assets/PlaysPage-hhsXgMHI.js",
+      "sha256": "ba4ab002d558a06dbe8faef94edb3dc0fe334625ef6a0981c9a7c022aa492deb"
+    },
+    {
+      "asset": "/assets/lightweight-DxQZkG5P.js",
+      "sha256": "d678a88068ef8acf19d9004ff4e0d80d6dc4e1ea767464c7a3209599e01cfd6f"
+    },
+    {
+      "asset": "/assets/ReviewPage-B8bHJDoO.js",
+      "sha256": "7f549b8b04114f94a183003c32f0269242722b736634d2b1d186d871ffaff7b1"
+    },
+    {
+      "asset": "/assets/ReviewPage-CSnuDNGf.css",
+      "sha256": "a8084c49c7f61681a20d787d4f17b359d0a934a6c0c97f5ccde5de3946d63eb7"
+    },
+    {
+      "asset": "/assets/sliders-horizontal-CqB7hEVb.js",
+      "sha256": "7dd0d8c106ae318e770b7c078a2bce3db7a344191847905ac9b95ca359ec462a"
+    },
+    {
+      "asset": "/assets/SettingsPage-ZGBjGipD.js",
+      "sha256": "aa6f40139329ab494a5ded972cbe31541c464b5e6339ca99c027fce435fc28e6"
+    },
+    {
+      "asset": "/assets/SettingsPage-DZZtynlx.css",
+      "sha256": "e456500a77872169fcdca0e44a2cb8d7c8a2cbbd27f202b43c954267e7c50249"
+    }
+  ],
+  "dependencyRepair": "An ignored standalone frontend/node_modules resolved rolldown 1.2.13. Preserved it outside the worktree, installed the frozen workspace lockfile, and reran all four checks using pinned rolldown 1.2.11. No lockfile or source change."
+}
