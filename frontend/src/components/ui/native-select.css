@@ -1,0 +1,7 @@
+.native-select { position: relative; display: block; min-width: 0; }
+.native-select > [data-slot="native-select"] { appearance: none; width: 100%; padding-inline-end: 32px; text-overflow: ellipsis; }
+.native-select > svg { position: absolute; inset-inline-end: 10px; top: 50%; transform: translateY(-50%); color: var(--muted-foreground); pointer-events: none; }
+@media (forced-colors: active) {
+  .native-select > [data-slot="native-select"] { appearance: auto; }
+  .native-select > svg { display: none; }
+}

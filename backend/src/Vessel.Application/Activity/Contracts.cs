@@ -22,6 +22,8 @@ public sealed record ActivityOperationDto(string Id, Guid AccountId, string Cont
     string? NetResultUsd, string PnlBasis, Guid? PlayId, string PlayAssociation,
     IReadOnlyList<string> Coverage, IReadOnlyList<OperationFillDto> Fills, int OmittedFillCount = 0)
 {
+    // Comparable before-fee P&L for display. The venue-reported facts above remain unchanged.
+    public string? GrossClosedPnlUsd { get; init; }
     // Internal partition identity, never the canonical display key or a serialized API field.
     internal ActivityContractKey ContractKey { get; init; }
 }
