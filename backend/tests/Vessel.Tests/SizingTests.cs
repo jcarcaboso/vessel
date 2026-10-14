@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Sizing;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
@@ -110,7 +112,7 @@ public sealed class SizingRuleTests
     [InlineData("1.255")]
     [InlineData("-1")]
     public void Settings_reject_risk_outside_the_range(string risk) =>
-        Assert.Throws<ArgumentException>(() => new SizingSettings(Guid.NewGuid(), decimal.Parse(risk, System.Globalization.CultureInfo.InvariantCulture), Start));
+        Assert.Throws<DomainValidationException>(() => new SizingSettings(Guid.NewGuid(), decimal.Parse(risk, System.Globalization.CultureInfo.InvariantCulture), Start));
 }
 
 internal sealed class MemorySizingStore : ISizingStore
@@ -164,7 +166,7 @@ public sealed class SizingServiceTests
         // Revised two hours after planning; the entry filled 30 minutes after planning, so revision 1 (stop 95) applies.
         var facts = Closed(Plan(), [new(OrderLinkRole.Entry, Fill(100, 2)), new(OrderLinkRole.Target, Fill(110, 2, pnl: 20))],
             revised: Plan(entries: Entry("entry-1", "100", "100", new PlanExit("stop-1", "price", "90", "100"))));
-        var outcome = SizingService.Outcome(facts)!;
+        var outcome = PlayOutcomeCalculator.Outcome(facts)!;
         Assert.Equal((19.8m, 200m, 10m, PlayOutcomeKind.Win, true), (outcome.NetResult, outcome.EntryNotional, outcome.PlannedRisk, outcome.Kind, outcome.FeesComplete));
         Assert.Equal(9.9m, outcome.ReturnPercent);
         Assert.Equal(1.98m, outcome.RMultiple);
@@ -174,7 +176,7 @@ public sealed class SizingServiceTests
     public void Net_of_fee_closed_pnl_is_not_reduced_by_its_fee_again()
     {
         // RISEx-style: every fill's closed PnL already includes its fee (an opening fill reports -fee).
-        var outcome = SizingService.Outcome(Closed(Plan(), [
+        var outcome = PlayOutcomeCalculator.Outcome(Closed(Plan(), [
             new(OrderLinkRole.Entry, Fill(100, 2, pnl: -0.1m, fee: 0.1m, pnlBasis: ExecutionFacts.PnlNetOfFee)),
             new(OrderLinkRole.Target, Fill(110, 2, pnl: 19.9m, fee: 0.1m, pnlBasis: ExecutionFacts.PnlNetOfFee))]))!;
         Assert.Equal((19.8m, true, PlayOutcomeKind.Win), (outcome.NetResult, outcome.FeesComplete, outcome.Kind));
@@ -183,7 +185,7 @@ public sealed class SizingServiceTests
     [Fact]
     public void A_net_of_fee_fill_paid_in_another_token_still_counts_as_complete()
     {
-        var outcome = SizingService.Outcome(Closed(Plan(), [
+        var outcome = PlayOutcomeCalculator.Outcome(Closed(Plan(), [
             new(OrderLinkRole.Entry, Fill(100, 1, pnl: -0.5m, fee: 0.5m, token: "HYPE", pnlBasis: ExecutionFacts.PnlNetOfFee)),
             new(OrderLinkRole.Stop, Fill(95, 1, pnl: -5.1m, pnlBasis: ExecutionFacts.PnlNetOfFee))]))!;
         Assert.Equal((-5.6m, true), (outcome.NetResult, outcome.FeesComplete));
@@ -192,7 +194,7 @@ public sealed class SizingServiceTests
     [Fact]
     public void Fees_in_another_token_are_left_out_and_flagged()
     {
-        var outcome = SizingService.Outcome(Closed(Plan(), [new(OrderLinkRole.Entry, Fill(100, 1, fee: 0.5m, token: "HYPE")),
+        var outcome = PlayOutcomeCalculator.Outcome(Closed(Plan(), [new(OrderLinkRole.Entry, Fill(100, 1, fee: 0.5m, token: "HYPE")),
             new(OrderLinkRole.Stop, Fill(95, 1, pnl: -5))]))!;
         Assert.Equal((-5.1m, false, PlayOutcomeKind.Loss), (outcome.NetResult, outcome.FeesComplete, outcome.Kind));
         Assert.Equal(-1.02m, outcome.RMultiple);
@@ -204,15 +206,15 @@ public sealed class SizingServiceTests
         // Entry 1: 60% at 100, stops 95 (50%) and 90 (50%) → 7.5 per unit. Entry 2: 40% at 90, a 20% stop at 4× → 5% → 4.5.
         var plan = Plan("4", Entry("a", "60", "100", new PlanExit("s1", "price", "95", "50"), new PlanExit("s2", "price", "90", "50")),
             Entry("b", "40", "90", new PlanExit("s3", "percent", "20", "100")));
-        Assert.Equal((0.6m * 7.5m + 0.4m * 4.5m) / (0.6m * 100 + 0.4m * 90), SizingService.StopDistance(plan));
-        Assert.Null(SizingService.StopDistance(Plan(entries: Entry("a", "100", "100"))));
-        Assert.Null(SizingService.StopDistance(Plan(entries: Entry("a", "100", "", new PlanExit("s", "price", "95", "100")))));
+        Assert.Equal((0.6m * 7.5m + 0.4m * 4.5m) / (0.6m * 100 + 0.4m * 90), PlayOutcomeCalculator.StopDistance(plan));
+        Assert.Null(PlayOutcomeCalculator.StopDistance(Plan(entries: Entry("a", "100", "100"))));
+        Assert.Null(PlayOutcomeCalculator.StopDistance(Plan(entries: Entry("a", "100", "", new PlanExit("s", "price", "95", "100")))));
     }
 
     [Fact]
     public void A_play_without_entry_fills_has_no_outcome()
     {
-        Assert.Null(SizingService.Outcome(Closed(Plan(), [new(OrderLinkRole.Exit, Fill(100, 1, pnl: 3))])));
+        Assert.Null(PlayOutcomeCalculator.Outcome(Closed(Plan(), [new(OrderLinkRole.Exit, Fill(100, 1, pnl: 3))])));
     }
 
     [Fact]
@@ -256,8 +258,10 @@ public sealed class SizingServiceTests
         var sizing = await Service.UpdateSettingsAsync(new("2"), default);
         Assert.Equal(("2", owner, 1), (sizing.Settings.RiskPercent, store.Settings!.OwnerId, store.Saves));
         Assert.Equal("1.5", (await Service.UpdateSettingsAsync(new("1.50"), default)).Settings.RiskPercent);
-        foreach (var bad in new[] { "", "abc", "1e2", "-1", "0.05", "6", "1.333", " 1" })
-            Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => Service.UpdateSettingsAsync(new(bad), default))).StatusCode);
+        foreach (var bad in new[] { "", "abc", "1e2", "-1", " 1" })
+            Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Service.UpdateSettingsAsync(new(bad), default))).StatusCode);
+        foreach (var outside in new[] { "0.05", "6", "1.333" })
+            await Assert.ThrowsAsync<DomainValidationException>(() => Service.UpdateSettingsAsync(new(outside), default));
         Assert.Equal(1.5m, store.Settings.RiskPercent);
     }
 }

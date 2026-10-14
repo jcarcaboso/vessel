@@ -1,3 +1,4 @@
+using Vessel.Application.Common;
 using Vessel.Application.Credentials;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
@@ -53,7 +54,7 @@ public sealed class AccountOrderHistoryTests
         accounts.Accounts.Add(account);
         var descriptor = AccountHistoryOrders.Descriptor(orders.VenueId);
         var venues = new VenueRegistry([descriptor with { Capabilities = descriptor.Capabilities with { Orders = supportsOrders } }],
-            [], readerAvailable ? [orders] : [], [], [], []);
+            [], readerAvailable ? [orders] : [], [], [], [], [], []);
         var store = new RetentionStore();
         var workspace = new WorkspaceService(accounts, new CoreOwner(owner), venues);
         return (new(null!, store, workspace, venues, TimeProvider.System, credentials), account, store);
@@ -169,7 +170,7 @@ public sealed class AccountOrderHistoryTests
         var orders = new AccountHistoryOrders("lighter");
         var credential = new AccountHistoryCredential("ro:synthetic-only");
         var (service, account, store) = Harness(orders, credential, enabled, !owned);
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => service.RetainAccountOrdersAsync(account.Id, default));
+        var error = await Assert.ThrowsAsync<ProblemException>(() => service.RetainAccountOrdersAsync(account.Id, default));
         Assert.Equal(status, error.StatusCode);
         Assert.Null(credential.AccountId);
         Assert.Equal(0, orders.Reads);
@@ -193,7 +194,7 @@ public sealed class AccountOrderHistoryTests
     {
         var orders = new AccountHistoryOrders();
         var (service, account, store) = Harness(orders, hasSource: false);
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => service.RetainAccountOrdersAsync(account.Id, default))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.RetainAccountOrdersAsync(account.Id, default))).StatusCode);
         Assert.Equal(0, orders.Reads);
         Assert.Equal(0, store.Writes);
     }
@@ -284,7 +285,7 @@ internal sealed class AccountHistoryOrders(string venueId = "hyperliquid") : IVe
         _ => HyperliquidPerpetualReader.Descriptor
     };
     internal static VenueRegistry Registry(FixtureReader reader, AccountHistoryOrders orders) =>
-        new([VenueDescriptor.Manual, Descriptor(reader.VenueId)], [reader], [orders], [], [], []);
+        new([VenueDescriptor.Manual, Descriptor(reader.VenueId)], [reader], [orders], [], [], [], [], []);
     internal static FixtureReader PublicReader(string venue = "hyperliquid")
     {
         var reader = new FixtureReader { VenueId = venue };

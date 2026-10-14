@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 
@@ -38,7 +38,7 @@ public sealed class PlayStore(VesselDbContext db) : IPlayStore
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException)
         {
-            throw new WorkspaceException(409, "This Play changed elsewhere. Reload it before saving again.");
+            throw new ProblemException(409, "This Play changed elsewhere. Reload it before saving again.");
         }
     }
 
@@ -46,7 +46,7 @@ public sealed class PlayStore(VesselDbContext db) : IPlayStore
     {
         await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         var accountId = await db.Plays.Where(p => p.Id == id).Select(p => (Guid?)p.AccountId).SingleOrDefaultAsync(ct)
-            ?? throw new WorkspaceException(404, "Play not found.");
+            ?? throw new ProblemException(404, "Play not found.");
         if (destinationAccountId is { } destination && destination != accountId)
         {
             // ponytail: moves serialize per owner; use ordered account locks if move throughput requires it.
@@ -63,7 +63,7 @@ public sealed class PlayStore(VesselDbContext db) : IPlayStore
         // A scoped context could already track this Play before waiting on the lock.
         foreach (var play in plays) await db.Entry(play).ReloadAsync(ct);
         if (plays.SingleOrDefault()?.AccountId != accountId)
-            throw new WorkspaceException(409, "The Play moved to another account. Reload before editing.");
+            throw new ProblemException(409, "The Play moved to another account. Reload before editing.");
         var result = await action();
         if (transaction is not null) await transaction.CommitAsync(ct);
         return result;

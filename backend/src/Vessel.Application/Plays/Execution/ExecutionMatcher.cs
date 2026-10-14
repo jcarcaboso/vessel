@@ -99,7 +99,8 @@ public static class ExecutionMatcher
     {
         if (planned <= 0) return false;
         var magnitude = (int)Math.Floor(Math.Log10((double)planned));
-        var step = magnitude >= 4 ? Pow10(magnitude - 4) : 1m / Pow10(4 - magnitude);
+        // Below decimal precision the step is zero: require equality unless a venue tick is coarser.
+        var step = Pow10(magnitude - 4);
         if (tick is > 0 && tick > step) step = tick.Value;
         return Math.Abs(actual - planned) <= step;
     }
@@ -107,7 +108,8 @@ public static class ExecutionMatcher
     private static decimal Pow10(int exponent)
     {
         var value = 1m;
-        for (var i = 0; i < exponent; i++) value *= 10;
+        var factor = exponent < 0 ? 0.1m : 10m;
+        for (var i = 0; i < Math.Abs(exponent); i++) value *= factor;
         return value;
     }
 
@@ -116,8 +118,16 @@ public static class ExecutionMatcher
         if (exit.Unit == "price") return Positive(exit.Value);
         if (entry is not { } price || !TryDecimal(exit.Value, out var percent) || percent < 0) return null;
         var distance = percent / leverage;
-        var resolved = price * (1 + (below ? -distance : distance) / 100);
-        return resolved > 0 ? resolved : null;
+        try
+        {
+            var resolved = price * (1 + (below ? -distance : distance) / 100);
+            return resolved > 0 ? resolved : null;
+        }
+        catch (OverflowException)
+        {
+            // A valid percentage can imply a price outside decimal's range. It cannot match an order.
+            return null;
+        }
     }
 
     private static decimal? Positive(string text) => TryDecimal(text, out var value) && value > 0 ? value : null;

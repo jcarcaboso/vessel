@@ -1,3 +1,4 @@
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Activity;

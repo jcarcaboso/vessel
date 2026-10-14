@@ -1,8 +1,9 @@
 using System.Text.Json;
+using Vessel.Domain.Common;
 
 namespace Vessel.Domain.Plays;
 
-public sealed class PlayReviewRevision
+public sealed class PlayReviewRevision : IOwned
 {
     public Guid Id { get; private set; }
     public Guid OwnerId { get; private set; }
@@ -21,7 +22,7 @@ public sealed class PlayReviewRevision
 }
 
 // These are owner-entered facts. They are never inserted into imported_orders or imported_fills.
-public sealed class ManualExecution
+public sealed class ManualExecution : IOwned
 {
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }
@@ -39,7 +40,7 @@ public sealed class ManualExecution
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }
 
-public sealed class ManualExecutionHistory
+public sealed class ManualExecutionHistory : IOwned
 {
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }
@@ -52,7 +53,7 @@ public sealed class ManualExecutionHistory
 }
 
 // The response snapshot makes a retry return the original result, even after later mutations.
-public sealed class DiaryRequest
+public sealed class DiaryRequest : IOwned
 {
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }

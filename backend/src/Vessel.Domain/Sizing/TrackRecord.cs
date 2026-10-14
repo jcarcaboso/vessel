@@ -1,3 +1,5 @@
+using Vessel.Domain.Common;
+
 namespace Vessel.Domain.Sizing;
 
 public enum PlayOutcomeKind { Win, Loss, Scratch }
@@ -134,7 +136,7 @@ public sealed record SizingLimits(decimal EffectiveRiskPercent, decimal MaxStopP
 }
 
 /// <summary>The owner's sizing preferences. Risk per trade is a percentage of the play's account balance.</summary>
-public sealed class SizingSettings
+public sealed class SizingSettings : IOwned
 {
     public const decimal DefaultRiskPercent = 1.25m;
     public const decimal MinRiskPercent = 0.1m;
@@ -156,7 +158,7 @@ public sealed class SizingSettings
     public void SetRisk(decimal riskPercent, DateTimeOffset now)
     {
         if (riskPercent is < MinRiskPercent or > MaxRiskPercent || decimal.Round(riskPercent, 2) != riskPercent)
-            throw new ArgumentException($"Risk per trade is {MinRiskPercent}% to {MaxRiskPercent}% with at most two decimals.");
+            throw new DomainValidationException($"Risk per trade is {MinRiskPercent}% to {MaxRiskPercent}% with at most two decimals.");
         RiskPercent = riskPercent;
         UpdatedAtUtc = now;
     }

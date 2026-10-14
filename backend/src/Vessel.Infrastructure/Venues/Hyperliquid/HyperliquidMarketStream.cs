@@ -51,7 +51,7 @@ public sealed class HyperliquidMarketStream : IMarketStream, IAsyncDisposable
         this.transports = transports; this.time = time; this.logger = logger;
     }
 
-    public string VenueId => "hyperliquid";
+    public string VenueId => HyperliquidPerpetualReader.Id;
 
     /// <summary>Malformed upstream messages dropped since start.</summary>
     public long Dropped => Interlocked.Read(ref dropped);

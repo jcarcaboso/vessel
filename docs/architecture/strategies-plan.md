@@ -39,7 +39,7 @@ These rest on the domain rules already in [CONTEXT.md](../../CONTEXT.md) and the
 | Need | Reuse | New or changed |
 |---|---|---|
 | Aggregate with frozen revisions and reasons | The `Play`, `PlayPlanRevision` and `PlayStatusChange` patterns (append-only, internal constructors, owner-scoped, `Restrict` FKs), `Version` concurrency token, `expectedVersion` → 409 | `Strategy`, `StrategyVersion`, `StrategyStageChange` |
-| Validated JSON document | The `PlayDocuments` normalisation style (generated-regex IDs, bounded text, `WorkspaceException(400)`), jsonb columns | `StrategyDocuments` for the definition document |
+| Validated JSON document | The `PlayDocuments` normalisation style (generated-regex IDs, bounded text, `ProblemException(400)`), jsonb columns | `StrategyDocuments` for the definition document |
 | API | Minimal-API groups like `PlayEndpoints.cs`, contracts beside the port like `Plays/Contracts.cs`, ProblemDetails mapping in `Program.cs`, owner context from `IJournalOwnerContext` | `StrategyEndpoints.cs`, `Strategies/Contracts.cs` |
 | Persistence | `VesselDbContext` conventions (snake_case, string enums, query filter, `ValidateOwnership`), store pattern of `PlayStore` | Tables and a migration, `StrategyStore` |
 | Frontend API | `api/plays.ts` style (types plus hand-written guards), `createWorkspaceApi` | `api/strategies.ts` |

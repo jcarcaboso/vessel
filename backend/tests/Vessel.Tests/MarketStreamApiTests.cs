@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Vessel.Application.Common;
 using Vessel.Application.MarketData;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
@@ -194,14 +195,14 @@ public sealed class MarketStreamApiTests
         var limiter = new MarketStreamLimiter();
         var leases = Enumerable.Range(0, 8).Select(_ => limiter.TryAcquire()!).ToList();
         var service = Service(store, new FakeMarketStream { VenueId = "other" }, limiter);
-        Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.OpenAsync(Guid.NewGuid(), null, null, default))).StatusCode);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => service.OpenAsync(account.Id, null, null, default))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.OpenAsync(Guid.NewGuid(), null, null, default))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.OpenAsync(account.Id, null, null, default))).StatusCode);
         account.UpdateSettings(account.Name, null, true);
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => service.OpenAsync(account.Id, null, null, default))).StatusCode);
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => service.OpenAsync(account.Id, "BTC", "7m", default))).StatusCode);
-        Assert.Equal(502, (await Assert.ThrowsAsync<WorkspaceException>(() => service.OpenAsync(account.Id, "BTC", "1m", default))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.OpenAsync(account.Id, null, null, default))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.OpenAsync(account.Id, "BTC", "7m", default))).StatusCode);
+        Assert.Equal(502, (await Assert.ThrowsAsync<ProblemException>(() => service.OpenAsync(account.Id, "BTC", "1m", default))).StatusCode);
         service = Service(store, new FakeMarketStream(), limiter);
-        Assert.Equal(429, (await Assert.ThrowsAsync<WorkspaceException>(() => service.OpenAsync(account.Id, "BTC", "1m", default))).StatusCode);
+        Assert.Equal(429, (await Assert.ThrowsAsync<ProblemException>(() => service.OpenAsync(account.Id, "BTC", "1m", default))).StatusCode);
         leases.ForEach(lease => lease.Dispose());
     }
 
@@ -212,7 +213,7 @@ public sealed class MarketStreamApiTests
         var service = Service(store, stream, limiter);
         var sessions = new List<MarketStreamSession>();
         for (var i = 0; i < 8; i++) sessions.Add(await service.OpenAsync(account.Id, "BTC", "1m", default));
-        var busy = await Assert.ThrowsAsync<WorkspaceException>(() => service.OpenAsync(account.Id, "ETH", "1m", default));
+        var busy = await Assert.ThrowsAsync<ProblemException>(() => service.OpenAsync(account.Id, "ETH", "1m", default));
         Assert.Equal(429, busy.StatusCode);
         Assert.Equal(8, stream.Subscriptions.Count);
         sessions[0].Dispose();
