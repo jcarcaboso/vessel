@@ -1,5 +1,5 @@
 using Vessel.Application.Common;
-using Vessel.Application.System;
+using Vessel.Application.Metadata;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
@@ -98,16 +98,16 @@ public sealed class VenueRegistryTests
     public void System_metadata_lists_registered_venues_then_planned_ones_with_manual_last()
     {
         var metadata = SystemMetadata.ForOwner(new JournalOwner(Guid.NewGuid(), "Owner"), Registry());
-        Assert.Equal(["hyperliquid", "other", "lighter", "quantfury", "manual"], metadata.Venues.Select(v => v.Id));
+        Assert.Equal(["hyperliquid", "other", "quantfury", "manual"], metadata.Venues.Select(v => v.Id));
         Assert.True(metadata.Venues.Single(v => v.Id == "other").Capabilities.Sync);
-        Assert.Equal(VenueCapabilities.None, metadata.Venues.Single(v => v.Id == "lighter").Capabilities);
+        Assert.Equal(VenueCapabilities.None, metadata.Venues.Single(v => v.Id == "quantfury").Capabilities);
 
         // A venue that gains an adapter replaces its planned entry instead of duplicating it.
-        var lighter = new VenueDescriptor("lighter", "Lighter", "read-only", VenueSources.None, VenueCapabilities.None);
+        var quantfury = new VenueDescriptor("quantfury", "Quantfury", "read-only", VenueSources.None, VenueCapabilities.None);
         var registered = SystemMetadata.ForOwner(new JournalOwner(Guid.NewGuid(), "Owner"),
-            new VenueRegistry([VenueDescriptor.Manual, lighter], [], [], [], [], []));
-        Assert.Single(registered.Venues, v => v.Id == "lighter");
-        Assert.Equal("read-only", registered.Venues.Single(v => v.Id == "lighter").Status);
+            new VenueRegistry([VenueDescriptor.Manual, quantfury], [], [], [], [], []));
+        Assert.Single(registered.Venues, v => v.Id == "quantfury");
+        Assert.Equal("read-only", registered.Venues.Single(v => v.Id == "quantfury").Status);
     }
 
     private static Play Plan(Account account)

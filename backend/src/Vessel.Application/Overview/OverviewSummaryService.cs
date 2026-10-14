@@ -1,3 +1,4 @@
+using System.Globalization;
 using Vessel.Application.Activity;
 using Vessel.Application.Common;
 using Vessel.Application.Workspace;
@@ -21,7 +22,7 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
         if (period is not ("7" or "30" or "90" or "all")) throw new ProblemException(400, "Choose 7, 30, 90 days or all retained history.");
         var (scopeKind, scopeId) = ParseScope(scope);
         var asOf = time.GetUtcNow();
-        DateTimeOffset? from = period == "all" ? null : asOf.AddDays(-int.Parse(period, global::System.Globalization.CultureInfo.InvariantCulture));
+        DateTimeOffset? from = period == "all" ? null : asOf.AddDays(-int.Parse(period, CultureInfo.InvariantCulture));
         var portfolios = await store.PortfoliosAsync(ct);
         var accounts = await workspace.AccountsAsync(ct);
         if (scopeKind == "portfolio" && !portfolios.Any(p => p.Id == scopeId)) throw new ProblemException(404, "Portfolio not found.");

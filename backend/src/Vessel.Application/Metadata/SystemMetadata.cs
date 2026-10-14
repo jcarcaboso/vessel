@@ -1,6 +1,6 @@
 using Vessel.Application.Venues;
 
-namespace Vessel.Application.System;
+namespace Vessel.Application.Metadata;
 
 public sealed record JournalOwner(Guid Id, string DisplayName);
 public sealed record VenueMetadata(
@@ -16,7 +16,6 @@ public sealed record SystemMetadata(
     // Venues the owner has named but that have no adapter yet. They are listed so the browser can say so.
     private static readonly VenueDescriptor[] Upcoming =
     [
-        new("lighter", "Lighter", "planned", VenueSources.None, VenueCapabilities.None),
         new("quantfury", "Quantfury", "candidate", VenueSources.None, VenueCapabilities.None),
     ];
 

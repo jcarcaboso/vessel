@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Api;
 using Vessel.Application.Common;
-using Vessel.Application.System;
+using Vessel.Application.Metadata;
 using Vessel.Domain.Common;
 using Vessel.Infrastructure;
 using Vessel.Persistence;
