@@ -1,0 +1,71 @@
+{
+  "status": "passed",
+  "integratedSource": "e349a12b423a6ca77430abf1f8ab112d7572685d",
+  "capturedSource": "2712e9632cef65a612008ad2d55d328e7b0ad429",
+  "frontendSourceEqual": true,
+  "backendMatchesUpstream": "87ca53fcc9c0109f242422c0d4adc30cef4820a8",
+  "allDistFilesEqual": 21,
+  "captureAssetsEqual": 15,
+  "assets": [
+    {
+      "asset": "/",
+      "sha256": "3fd22339e4b5f9054f29d84ec36d899ed301668d8fbc69fbf24547613eacf53a"
+    },
+    {
+      "asset": "/assets/VenueBadge-Dvc4KJ9G.css",
+      "sha256": "2bd3d9348c7803e2c6bde8576ad98c814bccb45fcdb3169e13f7fba397d36d12"
+    },
+    {
+      "asset": "/assets/index-DNl23u5H.css",
+      "sha256": "6190a21659b336fdd2241984d7b6bcd02fdcb3336698cbd0f1d7702431f541de"
+    },
+    {
+      "asset": "/assets/VenueBadge-0V9QAkgQ.js",
+      "sha256": "40ab0bae89c586d14e86b25228a032bd2b59c15d692b77e6ba1474e124cd5852"
+    },
+    {
+      "asset": "/assets/index-SOMmiHXz.js",
+      "sha256": "816b9f51c89cc9a4239d17677b5e42d74df2e4ffe3f4f8782358a0151a1530e8"
+    },
+    {
+      "asset": "/assets/inter-latin-wght-normal-Dx4kXJAl.woff2",
+      "sha256": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62"
+    },
+    {
+      "asset": "/assets/PlaysPage-BYiLQoB4.css",
+      "sha256": "7bbcfc4bdb445f01481adc42fe66c72ac236fc0193079ba254a0ec4c11076106"
+    },
+    {
+      "asset": "/assets/triangle-alert-xApYaNS3.js",
+      "sha256": "cda703674ebbd09ef8dfd63b25941f985527c034fba76f7f960fe7b39408137b"
+    },
+    {
+      "asset": "/assets/PlaysPage-C5HtQkh_.js",
+      "sha256": "28f5234e63f2b4fb3aedce580d47e4afc5fabc7a99f536e22047c4bdab178d82"
+    },
+    {
+      "asset": "/assets/lightweight-D2NuH4wU.js",
+      "sha256": "e644ec583234b247f11302de92765f586ff1a241c0490160715ad7c69af47e53"
+    },
+    {
+      "asset": "/assets/sliders-horizontal-D88xEtt8.js",
+      "sha256": "ea1a04f7411ed1eeef4dc33e5c860c4889f4b5579f3227ca3cf89aa724da8d4b"
+    },
+    {
+      "asset": "/assets/ReviewPage-CSnuDNGf.css",
+      "sha256": "a8084c49c7f61681a20d787d4f17b359d0a934a6c0c97f5ccde5de3946d63eb7"
+    },
+    {
+      "asset": "/assets/ReviewPage-DHQAu2FK.js",
+      "sha256": "31aeeabdbf2849c39131e5912fc1280345b4b467ba14a4e7779405796294a2ef"
+    },
+    {
+      "asset": "/assets/SettingsPage-DZZtynlx.css",
+      "sha256": "e456500a77872169fcdca0e44a2cb8d7c8a2cbbd27f202b43c954267e7c50249"
+    },
+    {
+      "asset": "/assets/SettingsPage-LF2dToFm.js",
+      "sha256": "71aa36d8d4ea418a1a927e0e62346d160380bfddb219dd1ca208ebf0ab1df895"
+    }
+  ]
+}
