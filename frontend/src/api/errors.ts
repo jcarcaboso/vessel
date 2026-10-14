@@ -7,3 +7,8 @@ export class ApiError extends Error {
     this.name = 'ApiError'
   }
 }
+
+/** Show only API-safe text, retaining each caller's fallback for other failures. */
+export function errorMessage(cause: unknown, fallback: string): string {
+  return cause instanceof ApiError ? cause.message : fallback
+}

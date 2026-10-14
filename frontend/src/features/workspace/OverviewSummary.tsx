@@ -3,7 +3,7 @@ import type { Overview, WorkspaceApi } from '@/api/workspace'
 import type { OverviewQuery, OverviewSummaryDocument, SummaryAmount } from '@/api/overview-summary'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
-import { failure } from '@/features/plays/saved'
+import { errorMessage } from '@/api/errors'
 import { PortfolioIcon } from './PortfolioIcon'
 import { balanceShare } from './overview-share'
 import { money } from './format'
@@ -29,7 +29,7 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
     const controller = new AbortController()
     api.overviewSummary(query, controller.signal).then(document => {
       if (!controller.signal.aborted) setState({ api, key, document })
-    }).catch(cause => { if (!controller.signal.aborted) setState({ api, key, error: failure(cause) }) })
+    }).catch(cause => { if (!controller.signal.aborted) setState({ api, key, error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
     return () => controller.abort()
   }, [api, key, query])
   const current = state?.api === api && state.key === key ? state : null

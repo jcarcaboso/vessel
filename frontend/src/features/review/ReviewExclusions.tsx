@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReviewExclusions as Exclusions, ReviewQuery } from '@/api/review'
 import type { WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/errors'
+import { errorMessage } from '@/api/errors'
 
 export function ReviewExclusions({ api, initialQuery, onOpenPlay }: {
   api: WorkspaceApi; initialQuery: ReviewQuery; onOpenPlay: (id: string, signal: AbortSignal) => Promise<void>
@@ -16,14 +16,12 @@ export function ReviewExclusions({ api, initialQuery, onOpenPlay }: {
   useEffect(() => {
     const controller = new AbortController()
     const query = { ...initialQuery, offset }
-    if (api.reviewExclusions) {
-      api.reviewExclusions(query, controller.signal).then(value => {
-        if (!controller.signal.aborted) setState({ api, offset, retry, value, error: null })
-      }).catch(cause => {
-        if (!controller.signal.aborted) setState({ api, offset, retry, value: null,
-          error: cause instanceof ApiError ? cause.message : 'Excluded Plays could not be loaded.' })
-      })
-    }
+    api.reviewExclusions(query, controller.signal).then(value => {
+      if (!controller.signal.aborted) setState({ api, offset, retry, value, error: null })
+    }).catch(cause => {
+      if (!controller.signal.aborted) setState({ api, offset, retry, value: null,
+        error: errorMessage(cause, 'Excluded Plays could not be loaded.') })
+    })
     return () => controller.abort()
   }, [api, initialQuery, offset, retry])
   async function open(id: string) {
@@ -32,10 +30,9 @@ export function ReviewExclusions({ api, initialQuery, onOpenPlay }: {
     request.current = controller
     setOpening(id); setOpenError(null)
     try { await onOpenPlay(id, controller.signal) }
-    catch (cause) { if (!controller.signal.aborted) setOpenError(cause instanceof ApiError ? cause.message : 'The Play could not be opened.') }
+    catch (cause) { if (!controller.signal.aborted) setOpenError(errorMessage(cause, 'The Play could not be opened.')) }
     finally { if (!controller.signal.aborted) setOpening(null) }
   }
-  if (!api.reviewExclusions) return <p role="alert">Exclusion inspection is unavailable on this connection. Reload the workspace after updating the server.</p>
   const pending = state === null || state.api !== api || state.offset !== offset || state.retry !== retry
   if (pending) return <p role="status">Loading excluded Plays…</p>
   if (state.error) return <div role="alert"><p>{state.error}</p><button className="pr-outline-button" onClick={() => setRetry(n => n + 1)}>Retry exclusions</button></div>

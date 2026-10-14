@@ -32,18 +32,18 @@ describe('retrospective API contract', () => {
     expect(params.get('operationId')).toBe(op.id)
     expect(params.get('accountId')).toBe(op.accountId)
   })
-  it('uses authenticated no-store reads and sends only server identity/fingerprint on confirmation', async () => {
+  it.each([200, 201, 202])('uses authenticated no-store reads and sends only server identity/fingerprint on confirmation with HTTP %i', async status => {
     const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(retrospectiveFixture)))
-      .mockResolvedValueOnce(new Response(JSON.stringify(retrospectiveSavedFixture)))
+      .mockResolvedValueOnce(new Response(JSON.stringify(retrospectiveSavedFixture), { status }))
     vi.stubGlobal('fetch', fetch)
     const api = createWorkspaceApi('synthetic-token')
     const controller = new AbortController()
-    expect(await api.retrospectivePreview!(op.accountId, op.id, controller.signal)).toEqual(retrospectiveFixture)
+    expect(await api.retrospectivePreview(op.accountId, op.id, controller.signal)).toEqual(retrospectiveFixture)
     expect(fetch).toHaveBeenNthCalledWith(1, retrospectivePreviewPath(op.accountId, op.id), expect.objectContaining({
       cache: 'no-store', credentials: 'omit', headers: { Authorization: 'Bearer synthetic-token', Accept: 'application/json' },
       signal: expect.any(AbortSignal),
     }))
-    await api.createRetrospectivePlay!(request, controller.signal)
+    expect(await api.createRetrospectivePlay(request, controller.signal)).toEqual(retrospectiveSavedFixture)
     expect(JSON.parse(fetch.mock.calls[1]![1].body)).toEqual(request)
     expect(fetch.mock.calls[1]![1].method).toBe('POST')
     controller.abort()
@@ -52,7 +52,7 @@ describe('retrospective API contract', () => {
   it('rejects a valid preview for a different requested account or operation', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify(retrospectiveFixture)))))
     const api = createWorkspaceApi('synthetic-token')
-    await expect(api.retrospectivePreview!('bbbbbbbb-1234-1234-1234-123456789abc', op.id)).rejects.toThrow()
-    await expect(api.retrospectivePreview!(op.accountId, 'bbbbbbbb-1234-1234-1234-123456789abc:long')).rejects.toThrow()
+    await expect(api.retrospectivePreview('bbbbbbbb-1234-1234-1234-123456789abc', op.id)).rejects.toThrow()
+    await expect(api.retrospectivePreview(op.accountId, 'bbbbbbbb-1234-1234-1234-123456789abc:long')).rejects.toThrow()
   })
 })

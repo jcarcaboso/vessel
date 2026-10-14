@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { BrokerAccount, InstrumentCatalog, VenueInstrument, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/errors'
+import { errorMessage } from '@/api/errors'
 import { useVenues } from '@/api/venues'
 
 /** Trading pair label, e.g. BTC/USDC. */
@@ -44,7 +44,7 @@ export function useInstrumentCatalog(api: WorkspaceApi, account: BrokerAccount |
         error: matches ? null : 'The catalogue does not match the selected venue.' })
     }).catch(cause => {
       if (active) setResult({ api, accountId, generation, catalog: null,
-        error: cause instanceof ApiError ? cause.message : 'The venue catalogue could not be loaded.' })
+        error: errorMessage(cause, 'The venue catalogue could not be loaded.') })
     })
     return () => { active = false; controller.abort() }
   }, [api, accountId, generation, venueId])

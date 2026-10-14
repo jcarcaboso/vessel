@@ -4,7 +4,7 @@ import { useState, type FormEvent } from 'react'
 import type { AccountDiscovery, DiscoveredAccount } from '@/api/account-access'
 import { credentialFailureMessage, credentialTransportAllowed } from '@/api/account-access'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/errors'
+import { ApiError, errorMessage } from '@/api/errors'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -103,7 +103,7 @@ export function WalletAccountImport({ venueId, api, portfolios, accounts, onCrea
         setResults(previous => ({ ...previous, [candidate.sourceId]: { account, message } }))
       }
       setSelected([])
-    } catch (cause) { setError(cause instanceof ApiError ? cause.message : 'Could not create the portfolio. No accounts were imported.') }
+    } catch (cause) { setError(errorMessage(cause, 'Could not create the portfolio. No accounts were imported.')) }
     finally { finish() }
   }
   const importable = discovery?.accounts.filter(a => selected.includes(a.sourceId) && !added(a) && !results[a.sourceId]) ?? []

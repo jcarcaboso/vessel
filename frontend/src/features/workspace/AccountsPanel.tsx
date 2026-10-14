@@ -4,7 +4,7 @@ import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ChevronDown, Wallet } from 'lucide-react'
-import { ApiError } from '@/api/errors'
+import { ApiError, errorMessage } from '@/api/errors'
 import { PortfolioDestination } from './PortfolioDestination'
 import { usePortfolioDestination } from './usePortfolioDestination'
 import { AccountRows } from './AccountRows'
@@ -50,7 +50,7 @@ export function AccountsPanel({ accounts, portfolios, portfolioFilter, onPortfol
       if (conflict) choose([])
       setError((portfolioCreated ? 'The new portfolio was created and kept. Retry the move into it; a duplicate portfolio will not be created. ' : '') +
         (conflict ? 'Account settings changed elsewhere. No accounts were moved. Reload and review the rows, then select them again before retrying.' :
-          cause instanceof ApiError ? cause.message : 'The move was not confirmed. Reload before retrying.'))
+          errorMessage(cause, 'The move was not confirmed. Reload before retrying.')))
       onReload()
     } finally { setPending(false) }
   }

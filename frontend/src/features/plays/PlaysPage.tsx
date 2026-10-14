@@ -1,3 +1,4 @@
+import { errorMessage } from '@/api/errors'
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { statusLabels, type PlayStatus, type PlaySummary, type SavedPlay, type StatusRequest } from '@/api/plays'
@@ -19,7 +20,7 @@ import { formatMoney, marginOverBudget } from './sizing'
 import { leverageOf } from './levels'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
 import {
-  createPlaysSession, draftFromSaved, failure, fieldsFromDraft, hasDraftContent, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
+  createPlaysSession, draftFromSaved, fieldsFromDraft, hasDraftContent, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
   observedPlayVersion, startNewPlay, syncEvidence,
   type PlaysSession, type SavedState,
 } from './saved'
@@ -133,7 +134,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     let active = true
     api.play(state.summary.id).then(play => {
       if (active) acceptStoredPlay(play)
-    }).catch(cause => { if (active) setError(failure(cause)) })
+    }).catch(cause => { if (active) setError(errorMessage(cause, 'The change could not be completed. Try again.')) })
     return () => { active = false }
   }, [visible, api, venueStatus, acceptStoredPlay, setError])
   // The server keeps the direction once an entry has filled: it decides which side closes the position.
@@ -208,13 +209,13 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         observedPlay: { api, id: play.summary.id, accountId: play.summary.accountId, version: play.summary.version, conflict: false },
         draft: current === sent ? stored : { ...current, evidence: mergeSavedEvidence(current.evidence, synced.evidence) },
       })
-      if (synced.error) setError(`The play was saved, but an image did not sync: ${failure(synced.error)} Save again to retry.`)
+      if (synced.error) setError(`The play was saved, but an image did not sync: ${errorMessage(synced.error, 'The change could not be completed. Try again.')} Save again to retry.`)
       setDialog(null)
       return next
     } catch (cause) {
       if (started !== epoch.current) return null
-      if (dialog === 'revision') setDialogError(failure(cause))
-      else setError(failure(cause))
+      if (dialog === 'revision') setDialogError(errorMessage(cause, 'The change could not be completed. Try again.'))
+      else setError(errorMessage(cause, 'The change could not be completed. Try again.'))
       return null
     }
   }
@@ -239,8 +240,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       setDialog(null)
     } catch (cause) {
       if (started !== epoch.current) return
-      if (dialog === 'cancel') setDialogError(failure(cause))
-      else setError(failure(cause))
+      if (dialog === 'cancel') setDialogError(errorMessage(cause, 'The change could not be completed. Try again.'))
+      else setError(errorMessage(cause, 'The change could not be completed. Try again.'))
     } finally {
       finish()
     }
@@ -259,7 +260,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       update({ ...createPlaysSession(), manual: emptyManualDraft() })
     } catch (cause) {
       if (started !== epoch.current) return
-      setDialogError(failure(cause))
+      setDialogError(errorMessage(cause, 'The change could not be completed. Try again.'))
     } finally {
       finish()
     }
@@ -295,7 +296,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       setNavigationError(null)
       return true
     } catch (cause) {
-      if (started === epoch.current && !controller.signal.aborted) { setError(failure(cause)); setNavigationError(failure(cause)) }
+      if (started === epoch.current && !controller.signal.aborted) { setError(errorMessage(cause, 'The change could not be completed. Try again.')); setNavigationError(errorMessage(cause, 'The change could not be completed. Try again.')) }
       return false
     } finally {
       finish()
@@ -427,7 +428,7 @@ function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onD
   useEffect(() => {
     const controller = new AbortController()
     api.plays(controller.signal).then(plays => { if (!controller.signal.aborted) setResult({ plays }) })
-      .catch(cause => { if (!controller.signal.aborted) setResult({ error: failure(cause) }) })
+      .catch(cause => { if (!controller.signal.aborted) setResult({ error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
     return () => controller.abort()
   }, [api, generation, busy])
   const plays = result && 'plays' in result ? result.plays : []

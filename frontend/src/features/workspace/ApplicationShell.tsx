@@ -1,6 +1,6 @@
 import { createRef, useCallback, useEffect, useRef, useState } from 'react'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/errors'
+import { errorMessage } from '@/api/errors'
 import type { SystemInfo } from '@/api/system'
 import { Button } from '@/components/ui/button'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
@@ -118,7 +118,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
     const controller = new AbortController()
     let active = true
     api.overview(controller.signal).then(next => { if (active) { setData(next); setOverviewQuery(query => { const scope = resolveOverviewScope(query.scope, next.accounts, next.portfolios); return scope === query.scope ? query : { ...query, scope } }); setLoadError(null); setLoaded({ api, key: reloadKey }) } })
-      .catch(cause => { if (active) { setLoadError(cause instanceof ApiError ? cause.message : 'The workspace could not be loaded.'); setLoaded({ api, key: reloadKey }) } })
+      .catch(cause => { if (active) { setLoadError(errorMessage(cause, 'The workspace could not be loaded.')); setLoaded({ api, key: reloadKey }) } })
     return () => { active = false; controller.abort() }
   }, [api, reloadKey, disconnectedApi])
   useEffect(() => {
@@ -178,7 +178,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
       await api.sync(id, signal)
       if (!signal.aborted) setNotice('Account refreshed. Recent execution facts remain unassigned to plays.')
     } catch (cause) {
-      if (!signal.aborted) notify({ tone: 'error', key: 'account-refresh', message: cause instanceof ApiError ? cause.message : 'The venue refresh did not complete.' })
+      if (!signal.aborted) notify({ tone: 'error', key: 'account-refresh', message: errorMessage(cause, 'The venue refresh did not complete.') })
     } finally {
       session.busy = false
       if (!signal.aborted) { setRefreshState(null); reload() }

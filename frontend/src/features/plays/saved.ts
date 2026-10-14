@@ -5,7 +5,6 @@ import { isChartDrawing, type ChartDrawing } from '@/components/chart/drawings'
 import { createDraft, createEvidenceId, type DraftEvidence, type PlayDraft } from './draft'
 import { hasManualDraft, type ManualExecutionDraft } from './manual'
 
-export const failure = (cause: unknown) => cause instanceof ApiError ? cause.message : 'The change could not be completed. Try again.'
 
 /** What was last saved, to tell unsaved edits and plan changes (which need a reason) apart. */
 export interface SavedState {

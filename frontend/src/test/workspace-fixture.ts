@@ -75,7 +75,7 @@ export const idleMarketStream: WorkspaceApi['marketStream'] = (_id, _query, sign
 
 /** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
 export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' |
-  'deletePlay' | 'playExecution' | 'checkPlayExecution' | 'linkOrder' | 'unlinkOrder' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'review'> {
+  'deletePlay' | 'playExecution' | 'checkPlayExecution' | 'linkOrder' | 'unlinkOrder' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'review' | 'reviewExclusions' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution'> {
   const unexpected = () => Promise.reject(new Error('Unexpected play API call in this test.'))
   return {
     // Tests outside Overview keep this unrelated read pending unless they supply a summary fixture.
@@ -87,6 +87,9 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     uploadEvidence: vi.fn(unexpected), updateEvidenceNote: vi.fn(unexpected), updateEvidenceMarkup: vi.fn(unexpected), deleteEvidence: vi.fn(unexpected),
     sizing: vi.fn().mockResolvedValue(sizingFixture), updateSizingSettings: vi.fn(unexpected),
     review: vi.fn().mockResolvedValue(emptyReview),
+    reviewExclusions: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, nextOffset: null, notice: 'Fixture exclusions.' }),
+    retrospectivePreview: vi.fn(unexpected), createRetrospectivePlay: vi.fn(unexpected),
+    manualExecutions: vi.fn(unexpected), addManualExecution: vi.fn(unexpected), correctManualExecution: vi.fn(unexpected),
   }
 }
 

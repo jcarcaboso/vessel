@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CreateRetrospectivePlayRequest, RetrospectivePreview as Preview } from '@/api/retrospective'
 import type { WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/errors'
+import { ApiError, errorMessage } from '@/api/errors'
 import { newDiaryRequestId } from '@/api/diary'
 import { Button } from '@/components/ui/button'
 import { money, time } from './format'
@@ -25,14 +25,12 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
   useEffect(() => () => mutation.current?.abort(), [api])
   useEffect(() => {
     const controller = new AbortController()
-    if (api.retrospectivePreview) {
-      api.retrospectivePreview(accountId, operationId, controller.signal).then(value => {
-        if (!controller.signal.aborted) setState({ generation, value, error: null })
-      }).catch(cause => {
-        if (!controller.signal.aborted) setState({ generation, value: null,
-          error: cause instanceof ApiError ? cause.message : 'The operation preview could not be loaded.' })
-      })
-    }
+    api.retrospectivePreview(accountId, operationId, controller.signal).then(value => {
+      if (!controller.signal.aborted) setState({ generation, value, error: null })
+    }).catch(cause => {
+      if (!controller.signal.aborted) setState({ generation, value: null,
+        error: errorMessage(cause, 'The operation preview could not be loaded.') })
+    })
     return () => controller.abort()
   }, [api, accountId, operationId, generation])
 
@@ -45,11 +43,11 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
     if (!onOpenPlay) return
     setSaveError(null)
     try { await onOpenPlay(id, controller.signal) }
-    catch (cause) { if (!controller.signal.aborted) setSaveError(cause instanceof ApiError ? cause.message : 'The Play could not be opened. Retry the Play action below; no new creation is needed.') }
+    catch (cause) { if (!controller.signal.aborted) setSaveError(errorMessage(cause, 'The Play could not be opened. Retry the Play action below; no new creation is needed.')) }
   }
   async function create() {
     const preview = state?.value
-    if (!api.createRetrospectivePlay || !preview?.eligible || conflict || saving || createdId) return
+    if (!preview?.eligible || conflict || saving || createdId) return
     // Keep the complete payload and key after an uncertain response. A retry must not create a second Play.
     const body = attempt ?? {
       requestId: newDiaryRequestId(), accountId, operationId, expectedFingerprint: preview.fingerprint,
@@ -70,11 +68,10 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
         const stale = cause instanceof ApiError && cause.status === 409
         setConflict(stale)
         setSaveError(stale ? 'The operation or its associations changed. Refresh the preview and inspect it again before confirming.' :
-          cause instanceof ApiError ? cause.message : 'Creation could not be confirmed. Retry the same request to avoid duplicates.')
+          errorMessage(cause, 'Creation could not be confirmed. Retry the same request to avoid duplicates.'))
       }
     } finally { if (!controller.signal.aborted) setSaving(false) }
   }
-  if (!api.retrospectivePreview) return <p role="alert">Retrospective preview is unavailable on this connection. Reload after updating the server.</p>
   if (state === null || state.generation !== generation) return <p role="status">Loading original operation facts…</p>
   if (state.error) return <div role="alert"><p>{state.error}</p><Button variant="outline" onClick={refresh}>Retry preview</Button></div>
   const preview = state.value!
@@ -109,8 +106,7 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
       <p className="workspace-scope-note">Create a completed retrospective record with today's creation/review time and the original execution times. No pre-trade plan, thesis, stop or initial-risk R is invented. It is excluded from the sizing ladder.</p>
       <label className="retrospective-field">Retrospective title<input maxLength={200} value={title} disabled={attempt !== null} onChange={e => setTitle(e.target.value)} /></label>
       <label className="retrospective-field">Review note, optional<textarea maxLength={10_000} rows={3} value={review} disabled={attempt !== null} onChange={e => setReview(e.target.value)} /></label>
-      {!api.createRetrospectivePlay && <p role="alert">Creation is unavailable on this connection.</p>}
-      <Button disabled={!api.createRetrospectivePlay || !title.trim() || saving || conflict} onClick={() => { void create() }}>{saving ? 'Saving retrospective…' : attempt ? 'Retry same creation' : 'Confirm retrospective Play'}</Button>
+      <Button disabled={!title.trim() || saving || conflict} onClick={() => { void create() }}>{saving ? 'Saving retrospective…' : attempt ? 'Retry same creation' : 'Confirm retrospective Play'}</Button>
       {saving && <p className="workspace-scope-note" role="status">Closing this preview stops waiting, but cannot undo a write already accepted by the server. Refresh Activity before another attempt.</p>}
     </>}
     {saveError && <p className="workspace-alert" role="alert">{saveError}</p>}

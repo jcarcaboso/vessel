@@ -1,6 +1,6 @@
 import type { CandleInterval } from '@/api/candles'
 import type { CandleSeries, VenueCandle, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/errors'
+import { ApiError, errorMessage } from '@/api/errors'
 import { onApiEvent } from '@/api/events'
 import type { ChartCandle } from '@/components/chart/types'
 
@@ -43,7 +43,6 @@ const initial = (): Snapshot => ({ status: 'loading', error: null, olderError: n
 export const candleLimit = 5000
 export const pageLifetime = 24 * 60 * 60 * 1000
 const stores = new WeakMap<WorkspaceApi, CandleCache>()
-const message = (error: unknown) => error instanceof ApiError ? error.message : 'Candles could not be loaded.'
 export const toChartCandle = (candle: VenueCandle): ChartCandle => ({ time: candle.openTime, open: Number(candle.open),
   high: Number(candle.high), low: Number(candle.low), close: Number(candle.close), volume: Number(candle.volume) })
 const sameDisplay = (a: VenueCandle, b: VenueCandle) => a.openTime === b.openTime &&
@@ -260,14 +259,14 @@ export class CandleCache {
       if (!older) this.flush(entry, incoming)
     }, (error: unknown) => {
       if (!this.valid(entry, generation)) return
-      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) { this.invalidate(undefined, message(error)); return }
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) { this.invalidate(undefined, errorMessage(error, 'Candles could not be loaded.')); return }
       // A superseded read's failure says nothing about the newer one.
       if (connectionGeneration !== this.generation || (older ? entry.historyGeneration !== historyGeneration : entry.tailRequest !== request)) return
       // A missing account ends every chart for it; a 409 may name only this market, so other charts keep streaming.
-      if (error instanceof ApiError && error.status === 404) { this.invalidate(entry.accountId, message(error)); return }
-      if (error instanceof ApiError && error.status === 409) { this.drop(entry, message(error)); return }
+      if (error instanceof ApiError && error.status === 404) { this.invalidate(entry.accountId, errorMessage(error, 'Candles could not be loaded.')); return }
+      if (error instanceof ApiError && error.status === 409) { this.drop(entry, errorMessage(error, 'Candles could not be loaded.')); return }
       if (!older) this.flush(entry)
-      this.publish(entry, older ? { olderError: message(error) } : { status: entry.snapshot.candles.length ? 'ready' : 'error', error: message(error), refreshing: false })
+      this.publish(entry, older ? { olderError: errorMessage(error, 'Candles could not be loaded.') } : { status: entry.snapshot.candles.length ? 'ready' : 'error', error: errorMessage(error, 'Candles could not be loaded.'), refreshing: false })
     }).finally(() => {
       entry.controllers.delete(controller)
       if (!this.valid(entry, generation)) return

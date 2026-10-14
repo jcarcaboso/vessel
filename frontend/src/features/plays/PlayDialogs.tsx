@@ -1,9 +1,10 @@
+import { errorMessage } from '@/api/errors'
 import { useEffect, useState, type FormEvent } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
 import { cancelReasonLabels, cancelReasons, statusLabels, type CancelReason, type PlayHistory } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { describePlanChanges, failure } from './saved'
+import { describePlanChanges } from './saved'
 
 /** Asks why a planned Play's plan changed; the reason is kept with the revision. */
 export function RevisionDialog({ revision, pending, error, onSave, onClose }: {
@@ -82,7 +83,7 @@ export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; pla
   useEffect(() => {
     const controller = new AbortController()
     api.playHistory(playId, controller.signal).then(history => setResult({ history }))
-      .catch(cause => { if (!controller.signal.aborted) setResult({ error: failure(cause) }) })
+      .catch(cause => { if (!controller.signal.aborted) setResult({ error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
     return () => controller.abort()
   }, [api, playId])
   const items: HistoryItem[] = result && 'history' in result ? [

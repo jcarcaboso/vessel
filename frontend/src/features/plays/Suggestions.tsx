@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { PlayDraft } from './draft'
 import { formatDraggedPrice } from './levels'
-import { failure } from './saved'
+import { errorMessage } from '@/api/errors'
 import { formatMoney, formatQuantity, formatRewardToRisk, type SizeUnits } from './sizing'
 import { exposureLabels, suggestionCount, type PlanSuggestions } from './suggestions'
 
@@ -193,7 +193,7 @@ function RiskSetting({ sizing, onRiskChange }: { sizing: SizingDocument; onRiskC
       setEditing(false)
       setError('')
     } catch (cause) {
-      setError(failure(cause))
+      setError(errorMessage(cause, 'The change could not be completed. Try again.'))
     } finally {
       setSaving(false)
     }

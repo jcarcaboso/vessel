@@ -6,7 +6,7 @@ import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { instrumentLabel } from '@/features/plays/instruments'
-import { failure } from '@/features/plays/saved'
+import { errorMessage } from '@/api/errors'
 import { time } from './format'
 
 const filters = [
@@ -50,7 +50,7 @@ export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpe
         if (!request.signal.aborted) setResult({ ...generation, plays: [...plays].sort((a, b) =>
           Date.parse(b.updatedAtUtc) - Date.parse(a.updatedAtUtc) || a.id.localeCompare(b.id)) })
       })
-      .catch(cause => { if (!request.signal.aborted) setResult({ ...generation, error: failure(cause) }) })
+      .catch(cause => { if (!request.signal.aborted) setResult({ ...generation, error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
     return () => request.abort()
   }, [api, reloadGeneration, retry])
   const loaded = result?.api === api && result.reloadGeneration === reloadGeneration && result.retry === retry
@@ -60,7 +60,7 @@ export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpe
     const signal = openRequest.current!.signal
     setOpening(id); setOpenError(null)
     try { await onOpen(id, signal) }
-    catch (cause) { if (!signal.aborted) setOpenError(failure(cause)) }
+    catch (cause) { if (!signal.aborted) setOpenError(errorMessage(cause, 'The change could not be completed. Try again.')) }
     finally { if (!signal.aborted) setOpening(null) }
   }
 
