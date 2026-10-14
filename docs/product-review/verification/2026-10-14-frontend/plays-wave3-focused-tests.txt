@@ -1,0 +1,9 @@
+
+ RUN  v5.0.3 /tmp/vessel-fe-review/wt/sol-wave3-plays/frontend
+
+
+ Test Files  9 passed (9)
+      Tests  182 passed (182)
+   Start at  21:45:37
+   Duration  26.01s (tests 71%, environment 13%, transform 8%, import 5%, setup 3%)
+
