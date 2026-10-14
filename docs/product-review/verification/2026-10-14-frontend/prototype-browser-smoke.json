@@ -1,0 +1,48 @@
+{
+  "sourceCommit": "3f5eb16560e62c66765852c5a22301baa599c351",
+  "browser": "151.0.7922.137",
+  "script": "prototype/tests/browser-smoke.mjs",
+  "scope": "Disposable sample prototype only; no production behavior claimed",
+  "results": [
+    {
+      "passed": 9,
+      "checks": [
+        "Chart legend opens the corresponding editor without leaving aggregate",
+        "Full entry header and collapsed summary select the editor",
+        "Shares and removal controls do not accidentally change selection",
+        "Plotted levels, keyboard and dropdown use the same selected entry",
+        "Expanded entry editor reuses the actual editor and persists changes",
+        "Sidebar scroll is bounded and the journal meets it above the summary",
+        "Graphite is configurable without layout or data changes across all themes",
+        "Budget remains read-only with deliberate save/cancel; unknown value stays optional",
+        "Separate journal input, captures and summary still work"
+      ],
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "errors": [],
+      "blocked": []
+    },
+    {
+      "passed": 9,
+      "checks": [
+        "Chart legend opens the corresponding editor without leaving aggregate",
+        "Full entry header and collapsed summary select the editor",
+        "Shares and removal controls do not accidentally change selection",
+        "Plotted levels, keyboard and dropdown use the same selected entry",
+        "Expanded entry editor reuses the actual editor and persists changes",
+        "Sidebar scroll is bounded and the journal meets it above the summary",
+        "Graphite is configurable without layout or data changes across all themes",
+        "Budget remains read-only with deliberate save/cancel; unknown value stays optional",
+        "Separate journal input, captures and summary still work"
+      ],
+      "viewport": {
+        "width": 390,
+        "height": 1000
+      },
+      "errors": [],
+      "blocked": []
+    }
+  ]
+}
