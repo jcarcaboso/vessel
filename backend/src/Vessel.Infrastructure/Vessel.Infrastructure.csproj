@@ -3,4 +3,5 @@
     <ProjectReference Include="../Vessel.Application/Vessel.Application.csproj" />
   </ItemGroup>
   <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup>
+  <ItemGroup><InternalsVisibleTo Include="Vessel.Tests" /></ItemGroup>
 </Project>
