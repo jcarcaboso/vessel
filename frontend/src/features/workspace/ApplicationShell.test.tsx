@@ -207,7 +207,7 @@ describe('Main application shell', () => {
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api()} />)
     await screen.findByText('Start with your accounts.')
     await userEvent.click(screen.getByRole('button', { name: 'New play' }))
-    expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('')
+    expect(await screen.findByRole('textbox', { name: 'Play title' })).toHaveValue('')
     await userEvent.click(screen.getByRole('button', { name: 'Add entry' }))
     await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
     await userEvent.click(screen.getByRole('button', { name: 'New play' }))
@@ -271,7 +271,7 @@ describe('Main application shell', () => {
     expect(client.updateAccount).toHaveBeenLastCalledWith(accountFixture.id, expect.objectContaining({ expectedRevision: 3, isEnabled: true }))
     await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
     await userEvent.click(screen.getByRole('button', { name: 'New play' }))
-    await userEvent.selectOptions(screen.getByLabelText('Account'), accountFixture.id)
+    await userEvent.selectOptions(await screen.findByLabelText('Account'), accountFixture.id)
     expect(screen.getByTestId('capital-context')).toHaveTextContent('Second balance$1,250.12')
   })
   it('resets a portfolio filter whose portfolio disappeared on reload', async () => {

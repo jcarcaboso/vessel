@@ -1,0 +1,2 @@
+.skip-content { position: fixed; top: 8px; left: 8px; z-index: 100; transform: translateY(calc(-100% - 16px)); padding: 12px 16px; border-radius: var(--radius); background: var(--card); color: var(--foreground); outline: 2px solid var(--ring); }
+.skip-content:focus { transform: none; }
