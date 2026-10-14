@@ -1,4 +1,5 @@
 import { createRef, useCallback, useEffect, useRef, useState } from 'react'
+import { Tooltip } from 'radix-ui'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
 import type { SystemInfo } from '@/api/system'
@@ -20,7 +21,7 @@ import { OverviewPlays } from './OverviewPlays'
 import { ReviewPage } from '@/features/review/ReviewPage'
 import { AppearanceSettings, CurrentThemeName } from '@/features/settings/AppearanceSettings'
 import { showAppearanceSection } from '@/features/settings/appearance'
-import { money } from './format'
+import { money } from '@/lib/format'
 import { AccountRows } from './AccountRows'
 import { AccountsPanel } from './AccountsPanel'
 import { emptyAccountFilters } from './account-filters'
@@ -49,7 +50,7 @@ const pageFromHash = (): Page => pages.find(p => p.id === window.location.hash.s
 type ShellProps = { system: SystemInfo; disconnect: () => void; api: WorkspaceApi }
 
 export function ApplicationShell(props: ShellProps) {
-  return <NotificationProvider><VenuesProvider venues={props.system.venues}><Shell {...props} /></VenuesProvider></NotificationProvider>
+  return <Tooltip.Provider delayDuration={250} skipDelayDuration={400}><NotificationProvider><VenuesProvider venues={props.system.venues}><Shell {...props} /></VenuesProvider></NotificationProvider></Tooltip.Provider>
 }
 
 function Shell({ system, disconnect, api }: ShellProps) {

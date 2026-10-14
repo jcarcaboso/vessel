@@ -8,7 +8,7 @@ import { reviewFixture } from '@/test/review-fixture'
 import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, playApiStubs, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { ApplicationShell } from './ApplicationShell'
 import { activityFixture, operationFixture } from '@/test/activity-fixture'
-import { retrospectiveFixture, retrospectiveSavedFixture } from './retrospective.fixtures'
+import { retrospectiveFixture, retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {

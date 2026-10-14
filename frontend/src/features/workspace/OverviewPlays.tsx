@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { instrumentLabel } from '@/features/plays/instruments'
 import { errorMessage } from '@/api/errors'
-import { time } from './format'
+import { time } from '@/lib/format'
 
 const filters = [
   { id: 'progress', label: 'In progress', description: 'Saved drafts, planned, paused and open plays.' },

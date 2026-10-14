@@ -2,7 +2,7 @@ import type { BrokerAccount } from '@/api/workspace'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { ArrowUpRight, Pencil, RefreshCw, Wallet } from 'lucide-react'
-import { money, time } from './format'
+import { money, time } from '@/lib/format'
 
 export function AccountRows({ accounts, portfolioNames, refreshing, selection, onDetail, onSync, onManage }: {
   accounts: BrokerAccount[]; portfolioNames: Record<string, string>; refreshing: string | null

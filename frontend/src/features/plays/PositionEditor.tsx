@@ -6,6 +6,7 @@ import { addEntry as withEntry, createNextEntry, removeEntry as withoutEntry, sp
 import { EntryForm } from './EntryForm'
 import { formatDraggedPrice, keepPercentLevelPrices, leverageOf, percentLevels } from './levels'
 import { LeverageChangeDialog } from './LeverageChangeDialog'
+import { AvailableBudget } from './WorkspacePanels'
 import {
   convertSize, defaultSizeUnits, estimatedLiquidation, formatMoney, formatQuantity, formatRewardToRisk, marginOverBudget, positionSize, rewardToRisk, sizeForBudget, type SizeUnits,
 } from './sizing'
@@ -29,8 +30,6 @@ function allocatedShare(entries: DraftEntry[]) {
   if (!shares.length || shares.some(share => !Number.isFinite(share))) return null
   return Number(shares.reduce((total, share) => total + share, 0).toFixed(2))
 }
-import { AvailableBudget } from './WorkspacePanels'
-
 export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, maintenanceMargin = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null, checkBudget = true,
   marks = null }: {
   draft: PlayDraft

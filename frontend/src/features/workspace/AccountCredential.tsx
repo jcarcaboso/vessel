@@ -8,7 +8,7 @@ import { isHttpsUrl } from '@/api/system'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { time } from './format'
+import { time } from '@/lib/format'
 
 export function ReadOnlyTokenInput({ venueId, value, onChange, disabled = false }: {
   venueId: string; value: string; onChange: (value: string) => void; disabled?: boolean

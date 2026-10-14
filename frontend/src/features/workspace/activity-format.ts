@@ -1,4 +1,5 @@
 import type { ImportedFill } from '@/api/fills'
+import { decimalSign } from '@/lib/decimal'
 
 /** A fill's own trade side from the normalized side, never venue wording: a buy is Long, a sell is Short. */
 export function sideDirection(fill: ImportedFill): 'long' | 'short' {
@@ -6,8 +7,8 @@ export function sideDirection(fill: ImportedFill): 'long' | 'short' {
 }
 /** Classify a decimal string without rounding it to a JavaScript float. */
 export function resultSign(value: string | null): 'positive' | 'negative' | 'neutral' {
-  if (value === null || !/[1-9]/.test(value)) return 'neutral'
-  return value.startsWith('-') ? 'negative' : 'positive'
+  const sign = decimalSign(value)
+  return sign === 0 ? 'neutral' : sign < 0 ? 'negative' : 'positive'
 }
 export function duration(opened: string | null, closed: string | null): string {
   if (opened === null) return 'Unknown duration'

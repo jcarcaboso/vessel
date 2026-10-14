@@ -1,5 +1,6 @@
 import type { PlayDraft } from './draft'
 import { exitsOf, type ExitKind } from './levels'
+import { finitePlanNumber as decimal } from './numbers'
 import { defaultSizeUnits, exitEstimate, positionSize, type SizeUnits } from './sizing'
 
 /** The caller supplies a named reference in the position's quote asset. No conversion is inferred. */
@@ -36,8 +37,7 @@ export interface PositionRisk {
 }
 
 const finite = (value: number) => Number.isFinite(value) ? value : null
-const decimal = (value: string) => /^\d+(\.\d+)?$/.test(value.trim()) ? finite(Number(value)) : null
-// ponytail: match the plan's 64-character share limit; reject longer drafts, never truncate.
+// Match the plan's 64-character share limit; reject longer drafts, never truncate.
 const shareDigits = 64
 const shareScale = 10n ** BigInt(shareDigits)
 const fullShare = 100n * shareScale

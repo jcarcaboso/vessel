@@ -1,7 +1,6 @@
 import type { DraftEntry, DraftExit, PlayDraft } from './draft'
 import { averageEntryPrice, exitsOf, levelPrice, type ExitKind } from './levels'
-
-const positive = (value: string) => /^\d+(\.\d+)?$/.test(value.trim()) && Number(value) > 0 ? Number(value) : null
+import { planShare, positivePlanNumber as positive } from './numbers'
 
 /**
  * Whole-position size at a leverage, before fees. Margin sizing fixes the margin, so leverage changes
@@ -39,7 +38,10 @@ export function exitEstimate(entry: DraftEntry, exit: DraftExit, kind: ExitKind,
   if (entryPrice === null || price === null || !Number.isFinite(entryPrice) || !Number.isFinite(price)) return null
   const distance = (price - entryPrice) * (direction === 'long' ? 1 : -1) * (kind === 'stop' ? -1 : 1)
   if (distance <= 0) return null
-  const fraction = (value: string) => /^\d+(\.\d+)?$/.test(value.trim()) && Number(value) <= 100 ? Number(value) / 100 : null
+  const fraction = (value: string) => {
+    const share = planShare(value)
+    return share === null ? null : share / 100
+  }
   const entryShare = fraction(entry.share)
   const exitShare = fraction(exit.share)
   const amount = quantity !== null && Number.isFinite(quantity) && quantity >= 0 && entryShare !== null && exitShare !== null

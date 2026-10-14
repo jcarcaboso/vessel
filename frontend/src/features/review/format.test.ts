@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { decimalLess, reviewMoney, reviewMultiple, reviewPercent } from './format'
+import { reviewMoney, reviewMultiple, reviewPercent } from '@/lib/format'
+import { decimalLess } from '@/lib/decimal'
+import { negative, tone } from './format'
 
 describe('Exact report formatting', () => {
   it('never converts authoritative money to a floating point number', () => {
@@ -21,5 +23,15 @@ describe('Exact report formatting', () => {
     expect(decimalLess('-0.01', '0')).toBe(true)
     expect(decimalLess('1.01', '1.1')).toBe(true)
     expect(decimalLess('1.00', '1')).toBe(false)
+  })
+  it('uses exact signs and only suppresses genuine zero loss magnitudes', () => {
+    expect(tone(null)).toBe('')
+    expect(tone('-000.00')).toBe('')
+    expect(negative(null)).toBeNull()
+    expect(negative('00.00')).toBe('0')
+    const tiny = `0.${'0'.repeat(324)}1`
+    expect(tone(tiny)).toBe('positive')
+    expect(tone(`-${tiny}`)).toBe('negative')
+    expect(negative(tiny)).toBe(`-${tiny}`)
   })
 })
