@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Activity;
+using Vessel.Application.Common;
 using Vessel.Application.Overview;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
@@ -160,7 +161,7 @@ public sealed class OverviewSummaryTests
     [InlineData("portfolio", "30", "All")]
     [InlineData("portfolio", "30", "")]
     public async Task Invalid_parameters_are_400(string group, string period, string scope) =>
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => service.GetAsync(group, period, scope, default))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.GetAsync(group, period, scope, default))).StatusCode);
 
     [Theory]
     [InlineData("portfolio")]
@@ -171,7 +172,7 @@ public sealed class OverviewSummaryTests
         store.Portfolios.Add(new Portfolio(foreign, Guid.NewGuid(), "Foreign"));
         store.Accounts.Add(new Account(foreign, Guid.NewGuid(), "manual", "Foreign"));
         foreach (var id in new[] { foreign, Guid.NewGuid() })
-            Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.GetAsync("account", "all", $"{kind}:{id}", default))).StatusCode);
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.GetAsync("account", "all", $"{kind}:{id}", default))).StatusCode);
     }
 
     [Theory]

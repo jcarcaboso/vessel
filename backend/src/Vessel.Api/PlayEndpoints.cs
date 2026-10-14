@@ -1,5 +1,6 @@
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
+using static Vessel.Api.EndpointTransport;
 
 namespace Vessel.Api;
 
@@ -15,15 +16,20 @@ public static class PlayEndpoints
             return Results.Created($"/api/plays/{result.Summary.Id}", result);
         });
         api.MapPost("/retrospective", async (CreateRetrospectiveRequest request, DiaryService service, CancellationToken ct) =>
-            Results.Ok(await service.CreateRetrospectiveAsync(request, ct)));
+            Results.Ok(await service.CreateRetrospectiveAsync(request, ct)))
+            .WithBodyLimit(RetrospectiveBodyBytes, DiaryTooLarge);
         api.MapGet("/{id:guid}/manual-executions", async (Guid id, DiaryService service, CancellationToken ct) =>
             Results.Ok(await service.ManualAsync(id, ct)));
         api.MapPost("/{id:guid}/manual-executions", async (Guid id, ManualExecutionRequest request, DiaryService service, CancellationToken ct) =>
-            Results.Ok(await service.RecordAsync(id, null, request, ct)));
+            Results.Ok(await service.RecordAsync(id, null, request, ct)))
+            .WithBodyLimit(ManualExecutionBodyBytes, DiaryTooLarge);
         api.MapPut("/{id:guid}/manual-executions/{executionId:guid}", async (Guid id, Guid executionId, ManualExecutionRequest request,
-            DiaryService service, CancellationToken ct) => Results.Ok(await service.RecordAsync(id, executionId, request, ct)));
-        app.MapGet("/api/activity/retrospective", async (Guid accountId, string operationId, DiaryService service, CancellationToken ct) =>
-            Results.Ok(await service.PreviewAsync(accountId, operationId, ct))).RequireAuthorization();
+            DiaryService service, CancellationToken ct) => Results.Ok(await service.RecordAsync(id, executionId, request, ct)))
+            .WithBodyLimit(ManualExecutionBodyBytes, DiaryTooLarge);
+        // Previewing a retrospective Play starts from an Activity operation, so it lives under /api/activity.
+        var activity = app.MapGroup("/api/activity").RequireAuthorization();
+        activity.MapGet("/retrospective", async (Guid accountId, string operationId, DiaryService service, CancellationToken ct) =>
+            Results.Ok(await service.PreviewAsync(accountId, operationId, ct)));
         api.MapGet("/{id:guid}", async (Guid id, PlayService service, CancellationToken ct) => Results.Ok(await service.GetAsync(id, ct)));
         api.MapPut("/{id:guid}", async (Guid id, UpdatePlayRequest request, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.UpdateAsync(id, request, ct)));

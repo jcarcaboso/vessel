@@ -1,5 +1,7 @@
+using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Tests;
@@ -21,7 +23,7 @@ public sealed class WorkspaceTests
     [InlineData(".", false)]
     [InlineData(" 1", false)]
     public void Manual_decimal_is_exact_and_invariant(string input, bool valid) =>
-        Assert.Equal(valid, WorkspaceService.TryExactNonnegativeDecimal(input, out _));
+        Assert.Equal(valid, ExactDecimal.TryParseOwnerAmount(input, out _));
 
     [Fact]
     public async Task Overview_excludes_foreign_records_and_reports_all_coverage_states()
@@ -47,7 +49,7 @@ public sealed class WorkspaceTests
         Assert.Equal("unavailable", overview.Portfolios.Single(p => p.Id == empty.Id).ValueCoverage);
         Assert.Null(unknown.AccountValueUsd);
         Assert.Null(await service.SnapshotAsync(unknown.Id, default));
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => service.SyncAsync(unknown.Id, default))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.SyncAsync(unknown.Id, default))).StatusCode);
     }
 
     [Fact]
@@ -70,9 +72,9 @@ public sealed class WorkspaceTests
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
         var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()));
         var foreign = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Foreign"); store.Accounts.Add(foreign);
-        Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.SnapshotAsync(foreign.Id, default))).StatusCode);
-        Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.FillsAsync(foreign.Id, default))).StatusCode);
-        Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.SyncAsync(foreign.Id, default))).StatusCode);
-        Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.CreateAccountAsync(new(Guid.NewGuid(), "Foreign", "manual"), default))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.SnapshotAsync(foreign.Id, default))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.FillsAsync(foreign.Id, default))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.SyncAsync(foreign.Id, default))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(Guid.NewGuid(), "Foreign", "manual"), default))).StatusCode);
     }
 }

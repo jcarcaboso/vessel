@@ -9,8 +9,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using Vessel.Application.Common;
 using Vessel.Application.Evidence;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Evidence;
 using Vessel.Domain.Markets;
@@ -95,7 +95,7 @@ public sealed class EvidenceTests : IDisposable
     private EvidenceService Service(EvidenceLimits? limits = null) =>
         new(store, objects, limits ?? EvidenceLimits.Default, new CoreOwner(owner), TimeProvider.System);
 
-    private static async Task<WorkspaceException> Rejects(Func<Task> action) => await Assert.ThrowsAsync<WorkspaceException>(action);
+    private static async Task<ProblemException> Rejects(Func<Task> action) => await Assert.ThrowsAsync<ProblemException>(action);
 
     [Fact]
     public void Detects_formats_from_signatures_only()
@@ -452,7 +452,7 @@ public sealed class EvidenceMarkupTests
 {
     private static MarkupShape Pen(string id = "a") => new(id, "pen", "#ff5c5c", 4, [new(1, 2), new(3.5, 4)]);
     private static ImageMarkup With(params MarkupShape[] shapes) => new(800, 600, shapes);
-    private static string Rejects(ImageMarkup? markup) => Assert.Throws<WorkspaceException>(() => EvidenceMarkup.Normalize(markup)).Message;
+    private static string Rejects(ImageMarkup? markup) => Assert.Throws<ProblemException>(() => EvidenceMarkup.Normalize(markup)).Message;
 
     [Fact]
     public void Keeps_only_the_fields_each_kind_uses()
@@ -492,7 +492,7 @@ public sealed class EvidenceMarkupTests
         Assert.Contains("control characters", Rejects(With(new MarkupShape("a", "text", "#ffffff", At: new(1, 1), Size: 20, Text: "   "))));
         Assert.Contains("control characters", Rejects(With(new MarkupShape("a", "text", "#ffffff", At: new(1, 1), Size: 20, Text: new string('x', 281)))));
         Assert.Contains("kinds are", Rejects(With(Pen() with { Kind = "circle" })));
-        Assert.Equal("Markup must be valid JSON.", Assert.Throws<WorkspaceException>(() => EvidenceMarkup.Parse("{")).Message);
+        Assert.Equal("Markup must be valid JSON.", Assert.Throws<ProblemException>(() => EvidenceMarkup.Parse("{")).Message);
     }
 
     [Fact]
@@ -508,14 +508,14 @@ public sealed class EvidenceMarkupTests
             """{"width":800,"height":600,"shapes":[{"id":"a","kind":"box","color":"#ff5c5c","width":3,"from":{"x":1,"y":1},"to":{"x":9,"y":9},"text":"x"}]}""", default);
         Assert.Equal("box", Assert.Single(created.Markup!.Shapes).Kind);
         Assert.Null(created.Markup.Shapes[0].Text);
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() =>
             service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", null, """{"width":1}""", default))).StatusCode);
 
         var updated = await service.UpdateMarkupAsync(created.Id, With(Pen()), default);
         Assert.Equal("pen", Assert.Single(updated.Markup!.Shapes).Kind);
         Assert.Null((await service.UpdateMarkupAsync(created.Id, null, default)).Markup);
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateMarkupAsync(created.Id, With(Pen() with { Color = "red" }), default))).StatusCode);
-        Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateMarkupAsync(Guid.NewGuid(), null, default))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.UpdateMarkupAsync(created.Id, With(Pen() with { Color = "red" }), default))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.UpdateMarkupAsync(Guid.NewGuid(), null, default))).StatusCode);
         Assert.Equal(EvidenceFixtures.Png, Assert.Single(objects.Objects).Value);
     }
 

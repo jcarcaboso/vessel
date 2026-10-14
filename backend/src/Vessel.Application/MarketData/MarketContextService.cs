@@ -1,3 +1,4 @@
+using Vessel.Application.Common;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 
@@ -46,7 +47,7 @@ public sealed class MarketContextService(IWorkspaceStore store, IVenueRegistry v
         instrument = MarketDataGuard.Instrument(instrument);
         var notice = venues.Descriptor(account.VenueId)?.MarketContextNotice ?? Notice;
         if (venues.MarketContext(account.VenueId) is not { } reader)
-            throw new WorkspaceException(502, VenueFailure);
+            throw new ProblemException(502, VenueFailure);
 
         MarketContextCache.Snapshot snapshot;
         try
@@ -56,11 +57,11 @@ public sealed class MarketContextService(IWorkspaceStore store, IVenueRegistry v
         catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
             ex is OperationCanceledException && !ct.IsCancellationRequested)
         {
-            throw new WorkspaceException(502, VenueFailure);
+            throw new ProblemException(502, VenueFailure);
         }
 
         var match = snapshot.Value.FirstOrDefault(c => c.ContractId == instrument)
-            ?? throw new WorkspaceException(400, "The instrument is not in the venue's perpetual catalogue.");
+            ?? throw new ProblemException(400, "The instrument is not in the venue's perpetual catalogue.");
         return new MarketContextDto(account.VenueId, instrument, match.MarkPrice, match.OraclePrice, match.MidPrice,
             match.PreviousDayPrice, match.DayNotionalVolume, match.OpenInterest, match.FundingRate, match.Premium,
             snapshot.Observed, notice);

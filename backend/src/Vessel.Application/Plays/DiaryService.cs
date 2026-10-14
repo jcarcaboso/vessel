@@ -1,11 +1,12 @@
+using Vessel.Application.Workspace;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Vessel.Application.Activity;
+using Vessel.Application.Common;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
 using Vessel.Application.Venues;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 
@@ -41,22 +42,22 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
             await plays.WithPlayLockAsync(playId, async () =>
             {
                 var play = await RequireManual(playId, ct);
-                if (play.Version != request.ExpectedVersion) throw new WorkspaceException(409, "This Play changed. Reload before recording facts.");
+                if (play.Version != request.ExpectedVersion) throw new ProblemException(409, "This Play changed. Reload before recording facts.");
                 if (executionId is null ? play.Status is not (PlayStatus.Planned or PlayStatus.Open) :
                     play.Status is not (PlayStatus.Open or PlayStatus.Closed))
-                    throw new WorkspaceException(409, "Record facts on Planned/Open Plays; corrections require Open/Closed Plays.");
+                    throw new ProblemException(409, "Record facts on Planned/Open Plays; corrections require Open/Closed Plays.");
                 var rows = await diary.ManualAsync(playId, ct);
                 if (executionId is null && rows.Count >= MaxManualRecords ||
                     (await diary.ManualHistoryAsync(playId, ct)).Count >= MaxManualHistory)
-                    throw new WorkspaceException(409, "This manual ledger reached its explicit record/history limit.");
+                    throw new ProblemException(409, "This manual ledger reached its explicit record/history limit.");
                 var previous = executionId is { } id ? rows.SingleOrDefault(r => r.Id == id)
-                    ?? throw new WorkspaceException(404, "Manual execution not found.") : null;
+                    ?? throw new ProblemException(404, "Manual execution not found.") : null;
                 var before = previous is null ? null : Dto(previous);
                 Validate(request, play, executionId is not null);
                 if (previous is not null && (previous.Role != request.Role || previous.EntryId != request.EntryId || previous.Side != request.Side))
-                    throw new WorkspaceException(409, "A correction keeps execution role, entry and side.");
+                    throw new ProblemException(409, "A correction keeps execution role, entry and side.");
                 if (play.Status == PlayStatus.Closed && previous?.Source != request.Source)
-                    throw new WorkspaceException(409, "Closed corrections keep the source label; correct amounts, prices, costs or times.");
+                    throw new ProblemException(409, "Closed corrections keep the source label; correct amounts, prices, costs or times.");
                 var now = time.GetUtcNow();
                 var row = new ManualExecution
                 {
@@ -69,13 +70,13 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
                 var resulting = rows.Where(r => r.Id != row.Id).Append(row).ToList();
                 var ledger = ManualLedger.Calculate(play, resulting);
                 if (play.Status == PlayStatus.Closed && ledger.ClosedAt is null)
-                    throw new WorkspaceException(409, "A correction cannot reopen a Closed Play.");
+                    throw new ProblemException(409, "A correction cannot reopen a Closed Play.");
                 if (ledger.ClosedAt is { } projectedClose)
                 {
                     var facts = new ClosedPlayFacts(play, await plays.RevisionsAsync(play.Id, ct),
                         ledger.Projection, ManualSource: true, ManualFeesComplete: ledger.FeesComplete);
                     PlayOutcomeCalculator.Outcome(facts, out var problem, projectedClose);
-                    if (problem is not null) throw new WorkspaceException(400, problem);
+                    if (problem is not null) throw new ProblemException(400, problem);
                 }
                 if (previous is null) diary.Add(row);
                 else
@@ -98,11 +99,11 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
 
     private async Task<Play> RequireManual(Guid id, CancellationToken ct)
     {
-        var play = await plays.FindAsync(id, ct) ?? throw new WorkspaceException(404, "Play not found.");
-        var account = await plays.AccountAsync(play.AccountId, ct) ?? throw new WorkspaceException(404, "Account not found.");
-        if (!account.IsEnabled) throw new WorkspaceException(409, "Enable the account before using manual execution facts.");
+        var play = await plays.FindAsync(id, ct) ?? throw new ProblemException(404, "Play not found.");
+        var account = await plays.AccountAsync(play.AccountId, ct) ?? throw new ProblemException(404, "Account not found.");
+        if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before using manual execution facts.");
         if (venues.Descriptor(account.VenueId)?.Capabilities.ManualExecutions != true || play.Origin != PlayOrigin.Planned)
-            throw new WorkspaceException(409, "This account does not support owner-entered manual execution facts.");
+            throw new ProblemException(409, "This account does not support owner-entered manual execution facts.");
         return play;
     }
 
@@ -112,23 +113,23 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         if (request.Role is not ("entry" or "exit") || request.Side is not (ExecutionFacts.Buy or ExecutionFacts.Sell) ||
             request.Role == "entry" && !plan.Entries.Any(e => e.Id == request.EntryId) ||
             request.Role == "exit" && request.EntryId is not null)
-            throw new WorkspaceException(400, "Choose entry with a saved entry ID, or exit without an entry ID, and normalized buy/sell.");
+            throw new ProblemException(400, "Choose entry with a saved entry ID, or exit without an entry ID, and normalized buy/sell.");
         if (request.OccurredAtUtc.Offset != TimeSpan.Zero || request.OccurredAtUtc > time.GetUtcNow() ||
             request.OccurredAtUtc == default)
-            throw new WorkspaceException(400, "Execution time must be a nonfuture UTC timestamp.");
+            throw new ProblemException(400, "Execution time must be a nonfuture UTC timestamp.");
         if (request.OccurredAtUtc.Ticks % TimeSpan.TicksPerMicrosecond != 0)
-            throw new WorkspaceException(400, "Execution time must use whole microseconds; finer precision is not supported.");
+            throw new ProblemException(400, "Execution time must use whole microseconds; finer precision is not supported.");
         ManualLedger.Number(request.Quantity, true); ManualLedger.Number(request.Price, true);
         if ((request.Fee is null) != (request.FeeCurrency is null) ||
             request.FeeCurrency is { } currency && (currency.Length is < 1 or > 32 || currency != currency.Trim() ||
                 currency.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_'))))
-            throw new WorkspaceException(400, "Supply both fee and currency, or leave both null for unknown costs.");
+            throw new ProblemException(400, "Supply both fee and currency, or leave both null for unknown costs.");
         if (request.Fee is not null) ManualLedger.Number(request.Fee, false);
         if (request.Source is null || request.Source.Length is < 1 or > 100 || request.Source != request.Source.Trim() ||
             request.Source.Any(char.IsControl))
-            throw new WorkspaceException(400, "Source must be a short plain label, up to 100 characters.");
+            throw new ProblemException(400, "Source must be a short plain label, up to 100 characters.");
         if (correction && (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Length > 2000 || request.Reason.Any(char.IsControl)))
-            throw new WorkspaceException(400, "A correction requires a plain reason, up to 2000 characters.");
+            throw new ProblemException(400, "A correction requires a plain reason, up to 2000 characters.");
     }
 
     private async Task<ManualExecutionsDto> ManualResult(Play play, IReadOnlyList<ManualExecution> rows, CancellationToken ct)
@@ -136,7 +137,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         var ledger = ManualLedger.Calculate(play, rows);
         var history = await diary.ManualHistoryAsync(play.Id, ct);
         if (rows.Count > MaxManualRecords || history.Count > MaxManualHistory)
-            throw new WorkspaceException(409, "Stored ledger exceeds its explicit response limits.");
+            throw new ProblemException(409, "Stored ledger exceeds its explicit response limits.");
         return new(PlayService.ToDto(play), rows.OrderBy(r => r.OccurredAtUtc).ThenBy(r => r.Id).Select(Dto).ToList(),
             history.Select(h => new ManualHistoryDto(h.Id, h.ExecutionId, h.Reason, h.OccurredAtUtc,
                 h.Before is null ? null : JsonSerializer.Deserialize<ManualExecutionDto>(h.Before, Json),
@@ -153,12 +154,12 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
     private async Task<RetrospectivePreviewDto> PreviewLocked(Guid accountId, string operationId, CancellationToken ct)
     {
         if (accountId == Guid.Empty || string.IsNullOrWhiteSpace(operationId) || operationId.Length > 200)
-            throw new WorkspaceException(400, "Choose a valid account and retained operation.");
-        var account = await plays.AccountAsync(accountId, ct) ?? throw new WorkspaceException(404, "Account not found.");
-        if (!account.IsEnabled) throw new WorkspaceException(409, "Enable the account before reviewing imported operations.");
+            throw new ProblemException(400, "Choose a valid account and retained operation.");
+        var account = await plays.AccountAsync(accountId, ct) ?? throw new ProblemException(404, "Account not found.");
+        if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before reviewing imported operations.");
         var facts = await diary.ActivityAsync(accountId, ct);
         var operation = OperationAggregator.Aggregate(facts.Fills, facts.FillPlayIds, facts.Snapshots).SingleOrDefault(o => o.Id == operationId)
-            ?? throw new WorkspaceException(404, "Retained operation not found. Reload Activity.");
+            ?? throw new ProblemException(404, "Retained operation not found. Reload Activity.");
         var bounded = operation with { Fills = operation.Fills.Take(ActivityService.MaxFillsPerOperation).ToList(),
             OmittedFillCount = operation.OmittedFillCount + Math.Max(0, operation.Fills.Count - ActivityService.MaxFillsPerOperation) };
         if (operation.FillCount > ActivityService.MaxFillsPerOperation || operation.Fills.Count > ActivityService.MaxFillsPerOperation ||
@@ -223,12 +224,12 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         {
             var preview = await PreviewLocked(request.AccountId, request.OperationId, ct);
             if (preview.Fingerprint != request.ExpectedFingerprint)
-                throw new WorkspaceException(409, "The retained operation changed since preview. Reload and review it again.");
-            if (!preview.Eligible) throw new WorkspaceException(409, string.Join(" ", preview.Reasons));
+                throw new ProblemException(409, "The retained operation changed since preview. Reload and review it again.");
+            if (!preview.Eligible) throw new ProblemException(409, string.Join(" ", preview.Reasons));
             var account = (await plays.AccountAsync(request.AccountId, ct))!;
             if (request.Title is null || request.Title.Trim().Length > Play.MaxTitleLength ||
                 request.Review?.Length > Play.MaxReviewLength)
-                throw new WorkspaceException(400, "Retrospective title or review exceeds its text limit.");
+                throw new ProblemException(400, "Retrospective title or review exceeds its text limit.");
             var now = time.GetUtcNow();
             var emptyPlan = new PlayPlanDocument(preview.Operation.Direction!, "margin", "", "0", null, [],
                 new PlanNotes("", "", "", ""));
@@ -247,18 +248,18 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
     private Task<T> Idempotent<T>(Guid requestId, object payload, Func<Task<T>> action, CancellationToken ct) =>
         diary.WithRequestLockAsync(requestId, async () =>
         {
-            if (requestId == Guid.Empty) throw new WorkspaceException(400, "A nonempty requestId is required.");
+            if (requestId == Guid.Empty) throw new ProblemException(400, "A nonempty requestId is required.");
             var hash = Hash(payload);
             if (await diary.RequestAsync(requestId, ct) is { } existing)
             {
-                if (existing.PayloadHash != hash) throw new WorkspaceException(409, "This requestId was already used with a different payload.");
+                if (existing.PayloadHash != hash) throw new ProblemException(409, "This requestId was already used with a different payload.");
                 var cached = JsonSerializer.Deserialize<T>(existing.Response, Json)!;
                 var accountId = cached switch { ManualExecutionsDto m => m.Play.Summary.AccountId, PlayDto p => p.Summary.AccountId,
                     _ => throw new InvalidOperationException() };
                 return await executions.WithAccountLockAsync(accountId, async () =>
                 {
-                    var account = await plays.AccountAsync(accountId, ct) ?? throw new WorkspaceException(404, "Account not found.");
-                    if (!account.IsEnabled) throw new WorkspaceException(409, "Enable the account before accessing diary execution facts.");
+                    var account = await plays.AccountAsync(accountId, ct) ?? throw new ProblemException(404, "Account not found.");
+                    if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before accessing diary execution facts.");
                     return cached;
                 }, ct);
             }

@@ -55,7 +55,7 @@ public sealed class HyperliquidMarketStream : IMarketStream, IAsyncDisposable
         this.endpoint = endpoint ?? DefaultEndpoint;
     }
 
-    public string VenueId => "hyperliquid";
+    public string VenueId => HyperliquidPerpetualReader.Id;
 
     /// <summary>Malformed upstream messages dropped since start.</summary>
     public long Dropped => Interlocked.Read(ref dropped);

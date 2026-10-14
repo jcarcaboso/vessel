@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Persistence;
 
@@ -25,7 +26,7 @@ public sealed class PortfolioMembershipPostgresTests
         await using (var tabB = database.Context(owner))
             await Service(tabB, owner).MoveAccountsAsync(new([account], target), default);
         Assert.Equal(old, displayed.PortfolioId); Assert.Equal(1, displayed.SettingsRevision);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
             Service(tabA, owner).MoveAccountsAsync(new([account], null, [new(account, 1)]), default))).StatusCode);
         await using var verify = database.Context(owner); var retained = await verify.Accounts.SingleAsync();
         Assert.Equal(target, retained.PortfolioId); Assert.Equal(2, retained.SettingsRevision);
@@ -49,7 +50,7 @@ public sealed class PortfolioMembershipPostgresTests
             await using (var db = database.Context(owner))
             {
                 var service = Service(db, owner); var expected = new AccountSettingsExpectation[] { new(first, 1), new(stale, 1) };
-                Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(async () =>
+                Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(async () =>
                 {
                     if (action == "create") await service.CreatePortfolioAsync(new("Rejected", AccountIds: [first, stale], Expected: expected), default);
                     else await service.MoveAccountsAsync(new([first, stale], action == "unlink" ? null : target, expected), default);
@@ -82,7 +83,7 @@ public sealed class PortfolioMembershipPostgresTests
             Assert.Equal(2, moved.Single(a => a.Id == first).SettingsRevision); Assert.Equal(3, moved.Single(a => a.Id == second).SettingsRevision);
             await service.MoveAccountsAsync(new([first, second], target), default);
             Assert.Equal(2, (await service.AccountAsync(first, default)).SettingsRevision);
-            Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateAccountAsync(first, new("Stale", null, true, 1), default))).StatusCode);
+            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.UpdateAccountAsync(first, new("Stale", null, true, 1), default))).StatusCode);
         }
         await using (var db = database.Context(owner))
         {
@@ -126,7 +127,7 @@ public sealed class PortfolioMembershipPostgresTests
             await using (var db = database.Context(owner))
             {
                 var service = Service(db, owner);
-                Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(async () =>
+                Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(async () =>
                 {
                     if (create) await service.CreatePortfolioAsync(new("Rejected", AccountIds: [valid, invalid]), default);
                     else await service.MoveAccountsAsync(new([valid, invalid], target), default);
@@ -164,7 +165,7 @@ public sealed class PortfolioMembershipPostgresTests
         await using (var db = database.Context(owner))
         {
             var service = Service(db, owner); id = (await service.CreateAccountAsync(new(null, "Valid", "manual"), default)).Id;
-            Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.MoveAccountsAsync(new([id], target), default))).StatusCode);
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.MoveAccountsAsync(new([id], target), default))).StatusCode);
         }
         await using var verify = database.Context(owner); Assert.Null((await verify.Accounts.SingleAsync()).PortfolioId);
     }

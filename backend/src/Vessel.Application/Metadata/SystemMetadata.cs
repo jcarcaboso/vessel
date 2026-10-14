@@ -1,6 +1,6 @@
 using Vessel.Application.Venues;
 
-namespace Vessel.Application.System;
+namespace Vessel.Application.Metadata;
 
 public sealed record JournalOwner(Guid Id, string DisplayName);
 public sealed record VenueMetadata(

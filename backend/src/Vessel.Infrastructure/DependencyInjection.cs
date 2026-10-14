@@ -27,21 +27,39 @@ public static class DependencyInjection
         services.Configure<VesselAuthOptions>(config.GetSection("Vessel:Auth"));
         services.AddSingleton(TimeProvider.System);
         AddVenueHosts(services, config);
+        // Venue modules register their descriptor and adapter ports; use cases find them by venue ID.
+        // Catalogue caches hold public data only and outlive the scoped adapters.
+        services.AddSingleton(VenueDescriptor.Manual);
         services.AddSingleton<HyperliquidCatalogueCache>();
-        static void Hyperliquid(IServiceProvider sp, HttpClient client)
+        services.AddVenueModule(HyperliquidPerpetualReader.Descriptor, (sp, client) =>
         {
             client.BaseAddress = Hosts(sp).BaseUri(nameof(VenueHostOptions.Hyperliquid));
             client.Timeout = TimeSpan.FromSeconds(20);
+        }, (sp, client) => ActivatorUtilities.CreateInstance<HyperliquidPerpetualReader>(sp, client));
+        // RISEx: public reads by address, no credential. The API's firewall rejects some default user agents.
+        services.AddSingleton<RisexCatalogueCache>();
+        services.AddVenueModule(RisexReader.Descriptor, (sp, client) =>
+        {
+            client.BaseAddress = Hosts(sp).BaseUri(nameof(VenueHostOptions.Risex));
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Vessel/1.0 (self-hosted trading journal; read-only)");
+        }, (sp, client) => ActivatorUtilities.CreateInstance<RisexReader>(sp, client));
+        // Lighter and Lighter on Robinhood Chain: one protocol module, one configured instance per exchange, each with
+        // its own client, catalogue cache and reader. The read-only token is added per request by the exchange's own
+        // handler. No redirects, so Authorization cannot leave the venue host.
+        foreach (var exchange in LighterExchange.All)
+        {
+            var id = exchange.VenueId;
+            services.AddKeyedSingleton(id, (sp, _) => new LighterCatalogueCache(sp.GetRequiredService<TimeProvider>(), id));
+            services.AddVenueModule(exchange.Descriptor, (sp, client) =>
+            {
+                client.BaseAddress = Hosts(sp).BaseUri(exchange.HostSection);
+                client.Timeout = TimeSpan.FromSeconds(20);
+            }, (sp, client) => new LighterReader(client, sp.GetRequiredService<TimeProvider>(),
+                sp.GetRequiredService<IAccountCredentialReader>(), sp.GetRequiredKeyedService<LighterCatalogueCache>(id), exchange),
+                builder => builder.AddHttpMessageHandler(() => new LighterAuthenticationHandler(exchange.Name))
+                    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false }));
         }
-        services.AddHttpClient<IPerpetualVenueReader, HyperliquidPerpetualReader>(Hyperliquid).RemoveAllLoggers();
-        services.AddHttpClient<ICandleReader, HyperliquidPerpetualReader>(Hyperliquid).RemoveAllLoggers();
-        services.AddHttpClient<IMarketContextReader, HyperliquidPerpetualReader>(Hyperliquid).RemoveAllLoggers();
-        services.AddHttpClient<IVenueOrderReader, HyperliquidPerpetualReader>(Hyperliquid).RemoveAllLoggers();
-        // Venue modules register their descriptor and adapters; use cases find them by venue ID.
-        services.AddSingleton(VenueDescriptor.Manual);
-        services.AddSingleton(HyperliquidPerpetualReader.Descriptor);
-        AddRisex(services);
-        foreach (var exchange in LighterExchange.All) AddLighter(services, exchange);
         services.AddScoped<IVenueRegistry, VenueRegistry>();
         services.AddSingleton<CandleCache>();
         services.AddSingleton<MarketContextCache>();
@@ -67,24 +85,28 @@ public static class DependencyInjection
         return services;
     }
 
+    private static readonly Type[] VenuePorts =
+    [
+        typeof(IPerpetualVenueReader), typeof(IVenueOrderReader), typeof(ICandleReader), typeof(IMarketContextReader),
+        typeof(IVenueAccountDiscovery), typeof(IVenueCredentialVerifier)
+    ];
+
     /// <summary>
-    /// RISEx: public reads by address, no credential. The API's firewall rejects some default user agents. Clients are
-    /// named per venue: a typed client's default name is its interface, so sharing it would mix base addresses.
+    /// Registers a venue module: its descriptor, one logger-free HttpClient named after the venue, and every venue port
+    /// the adapter implements, forwarded to one adapter per scope keyed by venue ID, so several venues may share an
+    /// adapter type (Lighter exchanges). A later registration of a port wins in the registry.
     /// </summary>
-    private static void AddRisex(IServiceCollection services)
+    private static void AddVenueModule<TAdapter>(this IServiceCollection services, VenueDescriptor descriptor,
+        Action<IServiceProvider, HttpClient> configureClient, Func<IServiceProvider, HttpClient, TAdapter> create,
+        Action<IHttpClientBuilder>? configureBuilder = null) where TAdapter : class
     {
-        services.AddSingleton(RisexReader.Descriptor);
-        services.AddSingleton<RisexCatalogueCache>();
-        static void Configure(IServiceProvider sp, HttpClient client)
-        {
-            client.BaseAddress = Hosts(sp).BaseUri(nameof(VenueHostOptions.Risex));
-            client.Timeout = TimeSpan.FromSeconds(20);
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("Vessel/1.0 (self-hosted trading journal; read-only)");
-        }
-        services.AddHttpClient<IPerpetualVenueReader, RisexReader>("risex-IPerpetualVenueReader", Configure).RemoveAllLoggers();
-        services.AddHttpClient<IVenueOrderReader, RisexReader>("risex-IVenueOrderReader", Configure).RemoveAllLoggers();
-        services.AddHttpClient<ICandleReader, RisexReader>("risex-ICandleReader", Configure).RemoveAllLoggers();
-        services.AddHttpClient<IMarketContextReader, RisexReader>("risex-IMarketContextReader", Configure).RemoveAllLoggers();
+        services.AddSingleton(descriptor);
+        var name = descriptor.Id;
+        var client = services.AddHttpClient(name, configureClient).RemoveAllLoggers();
+        configureBuilder?.Invoke(client);
+        services.AddKeyedScoped(name, (sp, _) => create(sp, sp.GetRequiredService<IHttpClientFactory>().CreateClient(name)));
+        foreach (var port in VenuePorts.Where(port => port.IsAssignableFrom(typeof(TAdapter))))
+            services.AddScoped(port, sp => sp.GetRequiredKeyedService<TAdapter>(name));
     }
 
     /// <summary>
@@ -98,33 +120,6 @@ public static class DependencyInjection
     }
 
     private static VenueHostOptions Hosts(IServiceProvider sp) => sp.GetRequiredService<IOptions<VenueHostOptions>>().Value;
-
-    /// <summary>
-    /// One Lighter exchange: its own descriptor, named client (authentication handler, no redirects so Authorization
-    /// cannot leave the host, 20 s), catalogue cache and reader. Each port is registered once per exchange, so the
-    /// registry and the per-venue lookups find exactly one adapter for each venue ID.
-    /// </summary>
-    private static void AddLighter(IServiceCollection services, LighterExchange exchange)
-    {
-        var id = exchange.VenueId;
-        services.AddSingleton(exchange.Descriptor);
-        services.AddKeyedSingleton(id, (sp, _) => new LighterCatalogueCache(sp.GetRequiredService<TimeProvider>(), id));
-        services.AddHttpClient(exchange.ClientName, (sp, client) =>
-        {
-            client.BaseAddress = Hosts(sp).BaseUri(exchange.HostSection);
-            client.Timeout = TimeSpan.FromSeconds(20);
-        }).AddHttpMessageHandler(() => new LighterAuthenticationHandler(exchange.Name))
-            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
-            .RemoveAllLoggers();
-        services.AddKeyedScoped(id, (sp, _) => new LighterReader(
-            sp.GetRequiredService<IHttpClientFactory>().CreateClient(exchange.ClientName), sp.GetRequiredService<TimeProvider>(),
-            sp.GetRequiredService<IAccountCredentialReader>(), sp.GetRequiredKeyedService<LighterCatalogueCache>(id), exchange));
-        services.AddScoped<IPerpetualVenueReader>(sp => sp.GetRequiredKeyedService<LighterReader>(id));
-        services.AddScoped<IVenueOrderReader>(sp => sp.GetRequiredKeyedService<LighterReader>(id));
-        services.AddScoped<ICandleReader>(sp => sp.GetRequiredKeyedService<LighterReader>(id));
-        services.AddScoped<IVenueAccountDiscovery>(sp => sp.GetRequiredKeyedService<LighterReader>(id));
-        services.AddScoped<IVenueCredentialVerifier>(sp => sp.GetRequiredKeyedService<LighterReader>(id));
-    }
 
     private static void AddEvidenceStorage(IServiceCollection services, IConfiguration config)
     {

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Vessel.Application.Common;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
@@ -29,7 +30,7 @@ public sealed class InstrumentCatalogueTests
 
         if (failure)
         {
-            var error = await Assert.ThrowsAsync<WorkspaceException>(() => service.InstrumentsAsync(account.Id, caller.Token));
+            var error = await Assert.ThrowsAsync<ProblemException>(() => service.InstrumentsAsync(account.Id, caller.Token));
             Assert.Equal(502, error.StatusCode);
             Assert.Equal("The venue instrument read failed. Try again later.", error.Message);
         }
@@ -83,7 +84,7 @@ public sealed class InstrumentCatalogueTests
         if (scenario != "missing") store.Accounts.Add(account);
         var reader = new FixtureReader { Fail = true };
         var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader));
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => service.InstrumentsAsync(account.Id, default));
+        var error = await Assert.ThrowsAsync<ProblemException>(() => service.InstrumentsAsync(account.Id, default));
         Assert.Equal(status, error.StatusCode);
         Assert.DoesNotContain("Private", error.Message);
         Assert.Equal(0, reader.InstrumentReads);
@@ -106,7 +107,7 @@ public sealed class InstrumentCatalogueTests
             _ => new OperationCanceledException("private-secret")
         }};
         var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader));
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => service.InstrumentsAsync(account.Id, default));
+        var error = await Assert.ThrowsAsync<ProblemException>(() => service.InstrumentsAsync(account.Id, default));
         Assert.Equal(502, error.StatusCode);
         Assert.Equal("The venue instrument read failed. Try again later.", error.Message);
         Assert.Null(error.InnerException);
@@ -125,7 +126,7 @@ public sealed class InstrumentCatalogueTests
         var account = new Account(Guid.NewGuid(), owner, "unsupported-venue", "Legacy"); store.Accounts.Add(account);
         var reader = new FixtureReader();
         var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader));
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => service.InstrumentsAsync(account.Id, default));
+        var error = await Assert.ThrowsAsync<ProblemException>(() => service.InstrumentsAsync(account.Id, default));
         Assert.Equal(502, error.StatusCode);
         Assert.Equal("The venue instrument read failed. Try again later.", error.Message);
         Assert.Equal(0, reader.InstrumentReads);

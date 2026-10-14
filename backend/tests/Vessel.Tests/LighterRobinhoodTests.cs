@@ -345,8 +345,8 @@ public sealed class LighterRobinhoodTests
             ["Vessel:Venues:LighterRh:BaseUrl"] = "https://rh.example.test/"
         });
         var clients = factory.Services.GetRequiredService<IHttpClientFactory>();
-        Assert.Equal("https://hl.example.test/", clients.CreateClient(nameof(IPerpetualVenueReader)).BaseAddress!.AbsoluteUri);
-        Assert.Equal("https://risex.example.test/", clients.CreateClient("risex-ICandleReader").BaseAddress!.AbsoluteUri);
+        Assert.Equal("https://hl.example.test/", clients.CreateClient("hyperliquid").BaseAddress!.AbsoluteUri);
+        Assert.Equal("https://risex.example.test/", clients.CreateClient("risex").BaseAddress!.AbsoluteUri);
         Assert.Equal("https://lighter.example.test/", clients.CreateClient("lighter").BaseAddress!.AbsoluteUri);
         Assert.Equal("https://rh.example.test/", clients.CreateClient("lighter-rh").BaseAddress!.AbsoluteUri);
         Assert.Equal(TimeSpan.FromSeconds(20), clients.CreateClient("lighter-rh").Timeout);

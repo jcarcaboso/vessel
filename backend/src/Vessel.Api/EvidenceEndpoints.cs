@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Http.Features;
+using Vessel.Application.Common;
 using Vessel.Application.Evidence;
-using Vessel.Application.Workspace;
 
 namespace Vessel.Api;
 
@@ -42,19 +42,19 @@ public static class EvidenceEndpoints
     private static async Task<IResult> UploadAsync(Guid playId, HttpRequest request, EvidenceService service, EvidenceLimits limits, CancellationToken ct)
     {
         var maxBody = limits.MaxUploadBytes + FormOverheadBytes;
-        var tooLarge = new WorkspaceException(413, $"Images are limited to {limits.MaxUploadBytes / (1024 * 1024)} MB.");
+        var tooLarge = new ProblemException(413, $"Images are limited to {limits.MaxUploadBytes / (1024 * 1024)} MB.");
         if (request.HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } size)
             size.MaxRequestBodySize = maxBody;
         if (request.ContentLength > maxBody) throw tooLarge;
-        if (!request.HasFormContentType) throw new WorkspaceException(415, "Send the image as multipart/form-data.");
+        if (!request.HasFormContentType) throw new ProblemException(415, "Send the image as multipart/form-data.");
         IFormCollection form;
         try { form = await request.ReadFormAsync(new FormOptions { MultipartBodyLengthLimit = maxBody }, ct); }
         catch (BadHttpRequestException error) when (error.StatusCode == StatusCodes.Status413PayloadTooLarge) { throw tooLarge; }
-        catch (InvalidDataException) { throw new WorkspaceException(400, "The upload form is invalid."); }
+        catch (InvalidDataException) { throw new ProblemException(400, "The upload form is invalid."); }
         if (form.Files.Count != 1 || form.Files.GetFile("file") is not { } file)
-            throw new WorkspaceException(400, "Attach exactly one image in the file field.");
+            throw new ProblemException(400, "Attach exactly one image in the file field.");
         if (form["note"].Count > 1 || form["source"].Count > 1 || form["markup"].Count > 1)
-            throw new WorkspaceException(400, "Send at most one note, source and markup.");
+            throw new ProblemException(400, "Send at most one note, source and markup.");
         await using var content = file.OpenReadStream();
         var result = await service.UploadAsync(playId, content, form["note"].SingleOrDefault(), form["source"].SingleOrDefault(), form["markup"].SingleOrDefault(), ct);
         return Results.Created($"/api/evidence/{result.Id}", result);

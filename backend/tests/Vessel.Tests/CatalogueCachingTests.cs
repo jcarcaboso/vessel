@@ -1,10 +1,10 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Vessel.Application.Common;
 using Vessel.Application.Credentials;
 using Vessel.Application.MarketData;
 using Vessel.Application.Venues;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 using Vessel.Infrastructure.Venues.Lighter;
@@ -168,7 +168,7 @@ public sealed class CatalogueCachingTests
         using var client = new HttpClient(handler) { BaseAddress = new Uri("https://venue.test/") };
         var reader = Reader(venue, client, clock);
         var descriptor = venue == "lighter" ? LighterReader.Descriptor : RisexReader.Descriptor;
-        var registry = new VenueRegistry([descriptor], [reader], [], [(ICandleReader)reader], [], []);
+        var registry = new VenueRegistry([descriptor], [reader], [], [(ICandleReader)reader], [], [], [], []);
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
         var account = new Account(Guid.NewGuid(), owner, venue, "Test");
         store.Accounts.Add(account);
@@ -185,7 +185,7 @@ public sealed class CatalogueCachingTests
         handler.Meta = Metadata(venue, "2", active: false);
         clock.Now += TimeSpan.FromSeconds(60);
         Assert.NotNull(cache.Get($"{venue}|2|1h|{end - 500 * 3_600_000L}|{end}"));
-        var retired = await Assert.ThrowsAsync<WorkspaceException>(() => service.CandlesAsync(account.Id, "BTC", "1h", end, default));
+        var retired = await Assert.ThrowsAsync<ProblemException>(() => service.CandlesAsync(account.Id, "BTC", "1h", end, default));
         Assert.Equal(409, retired.StatusCode);
         Assert.Equal("This market is no longer listed.", retired.Message);
         Assert.Equal(2, handler.CandleReads);
@@ -206,7 +206,7 @@ public sealed class CatalogueCachingTests
         handler.Meta = Metadata("hyperliquid", active: false);
         clock.Now += TimeSpan.FromSeconds(60);
         Assert.NotNull(cache.Get($"hyperliquid|BTC|1h|{end - 500 * 3_600_000L}|{end}"));
-        var retired = await Assert.ThrowsAsync<WorkspaceException>(() => service.CandlesAsync(account.Id, "BTC", "1h", end, default));
+        var retired = await Assert.ThrowsAsync<ProblemException>(() => service.CandlesAsync(account.Id, "BTC", "1h", end, default));
         Assert.Equal(409, retired.StatusCode);
         Assert.Equal("This market is no longer listed.", retired.Message);
         Assert.Equal(1, handler.CandleReads);

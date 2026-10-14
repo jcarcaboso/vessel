@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Globalization;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Vessel.Application.Credentials;
@@ -8,8 +7,6 @@ using Vessel.Application.MarketData;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Common;
-
-[assembly: InternalsVisibleTo("Vessel.Tests")]
 
 namespace Vessel.Infrastructure.Venues.Lighter;
 

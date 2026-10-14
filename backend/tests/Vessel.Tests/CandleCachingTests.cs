@@ -1,9 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Vessel.Application.Common;
 using Vessel.Application.MarketData;
 using Vessel.Application.Venues;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 
@@ -141,15 +141,19 @@ public sealed class CandleCachingTests
         Enumerable.Range(0, size).Select(i => new CandleDto(i, i, "1", "1", "1", "1", "1", null)).ToArray(),
         0, 500, DateTimeOffset.UnixEpoch, size == 0, "");
 
+    // A refresh load stores the value exactly as a cache miss does, replacing any entry under the key.
+    private static Task Put(CandleCache cache, string key, CandleResponseDto value) =>
+        cache.GetAsync(key, historical: false, refresh: true, _ => Task.FromResult(value), default);
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
-    public void Entry_bound_evicts_one_LRU_entry_even_under_empty_pressure(int size)
+    public async Task Entry_bound_evicts_one_LRU_entry_even_under_empty_pressure(int size)
     {
         var cache = new CandleCache(new Clock()); var result = Response(size);
-        for (var i = 0; i < CandleCache.MaxEntries; i++) cache.Set(i.ToString(), result);
+        for (var i = 0; i < CandleCache.MaxEntries; i++) await Put(cache, i.ToString(), result);
         Assert.NotNull(cache.Get("0"));
-        cache.Set("new", result);
+        await Put(cache, "new", result);
         Assert.Null(cache.Get("1"));
         Assert.NotNull(cache.Get("0"));
         Assert.NotNull(cache.Get("2"));
@@ -157,14 +161,14 @@ public sealed class CandleCachingTests
     }
 
     [Fact]
-    public void Candle_bound_is_200000_and_replacement_updates_weight()
+    public async Task Candle_bound_is_200000_and_replacement_updates_weight()
     {
         var cache = new CandleCache(new Clock()); var result = Response(500);
-        for (var i = 0; i < 400; i++) cache.Set(i.ToString(), result);
-        cache.Set("399", Response(0)); // Free 500 candles without adding an entry.
-        cache.Set("400", result);
+        for (var i = 0; i < 400; i++) await Put(cache, i.ToString(), result);
+        await Put(cache, "399", Response(0)); // Free 500 candles without adding an entry.
+        await Put(cache, "400", result);
         Assert.NotNull(cache.Get("0"));
-        cache.Set("401", result);
+        await Put(cache, "401", result);
         Assert.Null(cache.Get("1"));
         Assert.NotNull(cache.Get("0"));
         Assert.NotNull(cache.Get("2"));
@@ -197,7 +201,7 @@ public sealed class CandleCachingTests
         var (_, store, account) = Setup(); var clock = new Clock();
         var reader = new Reader { Failure = new VenueReadException("private") };
         var service = new CandleService(store, TestVenues.With(reader), new CandleCache(clock), clock);
-        var failure = await Assert.ThrowsAsync<WorkspaceException>(() => service.CandlesAsync(account.Id, "BTC", "1h", null, default));
+        var failure = await Assert.ThrowsAsync<ProblemException>(() => service.CandlesAsync(account.Id, "BTC", "1h", null, default));
         Assert.Equal(502, failure.StatusCode);
         reader.Failure = null;
         Assert.Single((await service.CandlesAsync(account.Id, "BTC", "1h", null, default)).Candles);
@@ -286,7 +290,7 @@ public sealed class CandleCachingTests
         var result = await service.CandlesAsync(account.Id, "1000PEPE", "1h", end, default);
         Assert.Equal("1000PEPE", result.Instrument);
         Assert.Equal("kPEPE", reader.Native);
-        var unknown = await Assert.ThrowsAsync<WorkspaceException>(() => service.CandlesAsync(account.Id, "kPEPE", "1h", end, default));
+        var unknown = await Assert.ThrowsAsync<ProblemException>(() => service.CandlesAsync(account.Id, "kPEPE", "1h", end, default));
         Assert.Equal(409, unknown.StatusCode);
         Assert.Equal("This market is no longer listed.", unknown.Message);
         catalogue.Result = catalogue.Result with { Instruments = [new("1000PEPE", 2, 10, "USDC", VenueContractId: "18")] };
@@ -301,12 +305,12 @@ public sealed class CandleCachingTests
         var (_, store, account) = Setup(); var clock = new Clock(); var reader = new Reader();
         var intervals = new List<string> { "1h" };
         var descriptor = HyperliquidPerpetualReader.Descriptor with { Intervals = intervals };
-        var registry = new VenueRegistry([descriptor], [new FixtureReader()], [], [reader], [], []);
+        var registry = new VenueRegistry([descriptor], [new FixtureReader()], [], [reader], [], [], [], []);
         var service = new CandleService(store, registry, new CandleCache(clock), clock);
         var end = clock.Now.AddDays(-1).ToUnixTimeMilliseconds();
         await service.CandlesAsync(account.Id, "BTC", "1h", end, default);
         intervals.Remove("1h");
-        var unsupported = await Assert.ThrowsAsync<WorkspaceException>(() => service.CandlesAsync(account.Id, "BTC", "1h", end, default));
+        var unsupported = await Assert.ThrowsAsync<ProblemException>(() => service.CandlesAsync(account.Id, "BTC", "1h", end, default));
         Assert.Equal(400, unsupported.StatusCode);
         Assert.Equal(1, reader.Reads);
     }

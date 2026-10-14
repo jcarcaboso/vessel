@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Data.Common;
 using Npgsql;
+using Vessel.Application.Common;
 using Vessel.Domain.Accounts;
 using Vessel.Application.Venues;
 using Vessel.Domain.Plays;
@@ -41,7 +42,7 @@ public sealed class WorkspaceReviewPostgresTests
             await service.UpdateAccountAsync(id, new("First", null, false, 1), default);
         }
         await using var second = database.Context(owner);
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => Service(second, owner).CreateAccountAsync(new(null, "Duplicate", "hyperliquid", "0x" + new string('A', 40)), default));
+        var error = await Assert.ThrowsAsync<ProblemException>(() => Service(second, owner).CreateAccountAsync(new(null, "Duplicate", "hyperliquid", "0x" + new string('A', 40)), default));
         Assert.Equal(409, error.StatusCode); Assert.Equal(id, (await second.Accounts.SingleAsync()).Id);
     }
 
@@ -85,7 +86,7 @@ public sealed class WorkspaceReviewPostgresTests
         {
             await using var db = database.Context(owner);
             try { await Service(db, owner).CreateAccountAsync(new(null, $"Concurrent {i}", "hyperliquid", address), default); return 201; }
-            catch (WorkspaceException error) { return error.StatusCode; }
+            catch (ProblemException error) { return error.StatusCode; }
         }));
         Assert.Equal(1, statuses.Count(s => s == 201)); Assert.Equal(7, statuses.Count(s => s == 409));
         await using (var db = database.Context(owner))
@@ -108,7 +109,7 @@ public sealed class WorkspaceReviewPostgresTests
             await using var db = database.Context(owner); var store = new WorkspaceStore(db);
             var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Source"); account.Configure(null, address, null);
             try { await store.AddAccountAsync(account, default); return 201; }
-            catch (WorkspaceException error)
+            catch (ProblemException error)
             {
                 Assert.DoesNotContain(address, error.Message); Assert.DoesNotContain("23505", error.Message); return error.StatusCode;
             }
@@ -132,12 +133,12 @@ public sealed class WorkspaceReviewPostgresTests
         Assert.True((await staleService.AccountAsync(id, default)).IsEnabled); // Track stale state deliberately.
         await using (var db = database.Context(owner))
             Assert.Equal(2, (await Service(db, owner).UpdateAccountAsync(id, new("Original", first, false, original.SettingsRevision), default)).SettingsRevision);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => staleService.UpdateAccountAsync(id, new("Rename", first, true, original.SettingsRevision), default))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => staleService.UpdateAccountAsync(id, new("Rename", first, true, original.SettingsRevision), default))).StatusCode);
         Assert.False((await staleContext.Accounts.SingleAsync()).IsEnabled);
         await using (var db = database.Context(owner))
             Assert.Equal(3, (await Service(db, owner).UpdateAccountAsync(id, new("Original", second, false, 2), default)).SettingsRevision);
         await using (var db = database.Context(owner))
-            Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => Service(db, owner).UpdateAccountAsync(id, new("Rename", first, false, 2), default))).StatusCode);
+            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => Service(db, owner).UpdateAccountAsync(id, new("Rename", first, false, 2), default))).StatusCode);
         await using var verify = database.Context(owner); var current = await Service(verify, owner).AccountAsync(id, default);
         Assert.Equal(second, current.PortfolioId); Assert.False(current.IsEnabled); Assert.Equal("Original", current.Name); Assert.Equal(3, current.SettingsRevision);
         Assert.NotNull(current.LastSyncedAtUtc); Assert.Single(await verify.Fills.ToListAsync());
@@ -160,8 +161,8 @@ public sealed class WorkspaceReviewPostgresTests
         {
             var service = Service(db, owner); var current = await service.AccountAsync(id, default);
             Assert.Null(current.PortfolioId); Assert.False(current.IsEnabled); Assert.Equal(3, current.SettingsRevision);
-            Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateAccountAsync(id, new("Rename", null, true, 2), default))).StatusCode);
-            Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateAccountAsync(foreignId, new("Foreign", null, false, 1), default))).StatusCode);
+            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.UpdateAccountAsync(id, new("Rename", null, true, 2), default))).StatusCode);
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.UpdateAccountAsync(foreignId, new("Foreign", null, false, 1), default))).StatusCode);
         }
         await using var foreign = database.Context(foreignOwner);
         Assert.Equal(1, (await foreign.Accounts.SingleAsync()).SettingsRevision); Assert.True((await foreign.Accounts.SingleAsync()).IsEnabled);
@@ -176,7 +177,7 @@ public sealed class WorkspaceReviewPostgresTests
         {
             await using var db = database.Context(owner);
             try { await Service(db, owner).UpdateAccountAsync(id, new($"Rename {i}", null, i % 2 == 0, 1), default); return 200; }
-            catch (WorkspaceException error) { return error.StatusCode; }
+            catch (ProblemException error) { return error.StatusCode; }
         }));
         Assert.Equal(1, results.Count(r => r == 200)); Assert.Equal(4, results.Count(r => r == 409));
         await using var verify = database.Context(owner); Assert.Equal(2, (await verify.Accounts.SingleAsync()).SettingsRevision);

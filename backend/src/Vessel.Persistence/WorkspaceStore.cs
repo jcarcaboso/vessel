@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
@@ -32,7 +33,7 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
         catch (DbUpdateException error) when (error.InnerException is PostgresException
         { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "UX_accounts_owner_venue_source" })
         {
-            throw new WorkspaceException(409, "An account for this venue and source already exists. Manage or re-enable that account.");
+            throw new ProblemException(409, "An account for this venue and source already exists. Manage or re-enable that account.");
         }
     }
     public async Task SaveAsync(CancellationToken ct) => await db.SaveChangesAsync(ct);
@@ -56,7 +57,7 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
         // concurrent assignments (even privileged SQL) against this parent deletion.
         var portfolios = await db.Portfolios.FromSqlInterpolated(
             $"SELECT * FROM portfolios WHERE \"Id\" = {id} AND \"OwnerId\" = {db.CurrentOwnerId} FOR UPDATE").ToListAsync(ct);
-        var portfolio = portfolios.SingleOrDefault() ?? throw new WorkspaceException(404, "Portfolio not found.");
+        var portfolio = portfolios.SingleOrDefault() ?? throw new ProblemException(404, "Portfolio not found.");
         var accounts = await db.Accounts.FromSqlInterpolated(
             $"SELECT * FROM accounts WHERE \"PortfolioId\" = {id} AND \"OwnerId\" = {db.CurrentOwnerId} ORDER BY \"Id\" FOR UPDATE").ToListAsync(ct);
         foreach (var account in accounts)
@@ -72,7 +73,7 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
     public async Task DeleteAccountAsync(Account account, CancellationToken ct)
     {
         if (await db.Plays.AnyAsync(p => p.AccountId == account.Id, ct))
-            throw new WorkspaceException(409, "This account has linked Plays and cannot be deleted.");
+            throw new ProblemException(409, "This account has linked Plays and cannot be deleted.");
         // Explicit owner-filtered deletes run under the locked account's transaction.
         // Positions cascade from the snapshot, never from trading intent.
         await db.Fills.Where(f => f.AccountId == account.Id).ExecuteDeleteAsync(ct);
@@ -104,7 +105,7 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
         // Owner is explicit in raw SQL as well as the global query filter.
         var accounts = await db.Accounts.FromSqlInterpolated(
             $"SELECT * FROM accounts WHERE \"Id\" = {id} AND \"OwnerId\" = {db.CurrentOwnerId} FOR UPDATE").ToListAsync(ct);
-        var account = accounts.SingleOrDefault() ?? throw new WorkspaceException(404, "Account not found.");
+        var account = accounts.SingleOrDefault() ?? throw new ProblemException(404, "Account not found.");
         // A scoped context could already track this account before waiting on the lock.
         await db.Entry(account).ReloadAsync(ct);
         var result = await action(account);

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
@@ -71,13 +72,13 @@ internal sealed class MemoryWorkspaceStore(Guid ownerId) : IWorkspaceStore
     public Task AddPortfolioAsync(Portfolio portfolio, CancellationToken ct) { Portfolios.Add(portfolio); return Task.CompletedTask; }
     public Task AddAccountAsync(Account account, CancellationToken ct) { Accounts.Add(account); return Task.CompletedTask; }
     public async Task<T> WithAccountLockAsync<T>(Guid id, Func<Account, Task<T>> action, CancellationToken ct) =>
-        await action(await AccountAsync(id, ct) ?? throw new WorkspaceException(404, "Account not found."));
+        await action(await AccountAsync(id, ct) ?? throw new ProblemException(404, "Account not found."));
     public Task SaveRefreshAsync(Account account, PerpetualVenueReadResult result, CancellationToken ct) => throw new NotSupportedException("Refresh tests use real PostgreSQL.");
     public Task<T> WithManagementLockAsync<T>(Func<Task<T>> action, CancellationToken ct) => action();
     public Task DeletePortfolioAsync(Guid id, CancellationToken ct)
     {
         var portfolio = Portfolios.SingleOrDefault(p => p.Id == id && p.OwnerId == ownerId)
-            ?? throw new WorkspaceException(404, "Portfolio not found.");
+            ?? throw new ProblemException(404, "Portfolio not found.");
         foreach (var account in Accounts.Where(a => a.OwnerId == ownerId && a.PortfolioId == id))
             account.UpdateSettings(account.Name, null, account.IsEnabled);
         Portfolios.Remove(portfolio);

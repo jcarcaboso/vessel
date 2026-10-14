@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Vessel.Application.Common;
 using Vessel.Application.Credentials;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
@@ -49,7 +50,7 @@ public sealed class AccountSecurityApiTests
         account.UpdateSettings(account.Name, null, false);
         using var disabled = await client.PutAsJsonAsync($"/api/accounts/{account.Id}/credential", new { token = SecurityFixture.Token });
         Assert.Equal(HttpStatusCode.Conflict, disabled.StatusCode);
-        Assert.Equal(409, (await Assert.ThrowsAsync<Vessel.Application.Workspace.WorkspaceException>(() =>
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
             new AccountCredentialReader(store, credentials, new CoreOwner(owner), vault, SecurityFixture.Clock).ReadAsync(account.Id, default))).StatusCode);
         using var removed = await client.DeleteAsync($"/api/accounts/{account.Id}/credential");
         Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode); Assert.Null(credentials.Stored);
@@ -197,9 +198,9 @@ public sealed class AccountSecurityApiTests
     private static CoreApiFactory Factory(Guid owner, MemoryWorkspaceStore accounts, SecurityCredentialStore credentials, ICredentialVault vault,
         SecurityVerifier? verifier = null, SecurityLogs? logs = null, SecurityDiscovery? discovery = null) => new(owner, accounts, configure: services =>
     {
-        services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry()); services.AddSingleton<ICredentialVault>(vault);
-        services.AddSingleton<IAccountCredentialStore>(credentials); services.AddSingleton<IVenueCredentialVerifier>(verifier ?? new());
-        services.AddSingleton<IVenueAccountDiscovery>(discovery ?? new SecurityDiscovery([new("9223372036854775807", "Main", "main")]));
+        services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry(verifier ?? new(),
+            discovery ?? new SecurityDiscovery([new("9223372036854775807", "Main", "main")])));
+        services.AddSingleton<ICredentialVault>(vault); services.AddSingleton<IAccountCredentialStore>(credentials);
         services.AddSingleton(SecurityFixture.Clock);
         if (logs is not null) services.AddLogging(b => b.AddProvider(logs));
     });

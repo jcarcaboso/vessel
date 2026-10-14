@@ -1,5 +1,7 @@
 # Vessel backend core workspace
 
+> **New to the backend?** Start with the [backend guide](../docs/architecture/backend-guide.md), which covers the current structure, modules, flows and conventions. Parts of this file record the October 1 core phase and are out of date (see item R3 in the [backend review](../docs/architecture/backend-review.md)).
+
 This is the bounded account/portfolio workspace, not a complete journal implementation. The API exposes anonymous `GET /health/live` and bearer-protected `GET /api/system` with the same camelCase response shape, stage `core` and Hyperliquid status `read-only`. No database connection is needed to start the API or serve those two routes. Core workspace routes require PostgreSQL with explicit migrations.
 
 The shared contracts are `docs/architecture/core-workspace-contract.md` and `docs/architecture/account-management-contract.md`. Financial DTO fields are invariant exact decimal strings, with null for unknown balances. Portfolio/overview account-value totals reuse the coefficient/scale `StablecoinTotals.Sum` helper: it returns an exact `BigInteger`-based string, including negative equity and totals beyond .NET decimal range, without rounding or concealing known values. Individual input/storage values remain bounded by .NET decimal. A known zero remains zero; partial portfolio coverage stays explicit. Account record counts include disabled accounts; portfolio values and coverage use enabled accounts only.

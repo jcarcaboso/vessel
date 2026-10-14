@@ -1,4 +1,5 @@
 using Vessel.Application.Workspace;
+using Vessel.Application.Common;
 
 namespace Vessel.Application.Activity;
 
@@ -29,7 +30,7 @@ public sealed class ActivityService(IActivityStore store)
     // Overview needs all aggregate results, not the bounded activity display or constituent DTOs.
     internal async Task<ActivitySummaries> ReadSummariesAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
     {
-        if (accountId == Guid.Empty) throw new WorkspaceException(400, "Choose a valid account.");
+        if (accountId == Guid.Empty) throw new ProblemException(400, "Choose a valid account.");
         if (accountIds is { Count: 0 }) return new([], [], new([], [], [], new Dictionary<Guid, Guid>()));
         var facts = await store.ReadAsync(accountId, ct, accountIds);
         var accounts = facts.Accounts.Where(a => a.IsEnabled && (accountId == null || a.Id == accountId) &&
