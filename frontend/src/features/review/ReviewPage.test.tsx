@@ -14,7 +14,7 @@ function setup(review = vi.fn().mockResolvedValue(reviewFixture)) {
 }
 
 describe('Production portfolio review', () => {
-  it('names period and breakdown toggle groups and keeps pressed state and keyboard operation', async () => {
+  it('names all three toggle groups and keeps pressed state and keyboard operation', async () => {
     const { user } = setup()
     const periods = await screen.findByRole('group', { name: 'Performance period' })
     const grouping = screen.getByRole('group', { name: 'Break down results by' })
@@ -24,6 +24,13 @@ describe('Production portfolio review', () => {
     await user.keyboard('{Enter}')
     expect(accounts).toHaveAttribute('aria-pressed', 'true')
     expect(within(grouping).getAllByRole('button', { pressed: true })).toEqual([accounts])
+    const chart = screen.getByRole('group', { name: 'Chart view' })
+    expect(within(chart).getByRole('button', { name: 'P&L' })).toHaveAttribute('aria-pressed', 'true')
+    const drawdown = within(chart).getByRole('button', { name: 'Drawdown' })
+    drawdown.focus()
+    await user.keyboard('{Enter}')
+    expect(within(chart).getAllByRole('button', { pressed: true })).toEqual([drawdown])
+    expect(screen.getByRole('img', { name: /drawdown closed-play/ })).toBeInTheDocument()
   })
   it('renders server statistics and discloses coverage without proposal-only labels', async () => {
     const { user } = setup()

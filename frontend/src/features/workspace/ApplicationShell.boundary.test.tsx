@@ -60,7 +60,7 @@ describe('shell page isolation', () => {
     expect(await screen.findByText('This page could not be displayed.')).toBeInTheDocument()
     faults.plays = false
     await user.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(screen.getByRole('textbox', { name: 'Draft title' })).toHaveValue('Kept outside the page')
+    expect(await screen.findByRole('textbox', { name: 'Draft title' })).toHaveValue('Kept outside the page')
     view.rerender(<ApplicationShell system={systemFixture} api={client()} disconnect={vi.fn()} />)
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'Draft title' })).toHaveValue(''))
   })

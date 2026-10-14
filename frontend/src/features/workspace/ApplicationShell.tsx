@@ -1,4 +1,4 @@
-import { createRef, lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { createRef, Suspense, useCallback, useEffect, useState } from 'react'
 import { Tooltip } from 'radix-ui'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
@@ -27,13 +27,14 @@ import { OverviewPage } from './OverviewPage'
 import { PortfoliosPage } from './PortfoliosPage'
 import { useHashPage, type Page } from './useHashPage'
 import { useAccountRefresh } from './useAccountRefresh'
+import { lazyPage } from './lazy-page'
 import type { ManagementEvent } from './management-events'
 import './application-shell.css'
 import './skip-content.css'
 
-const PlaysPage = lazy(() => import('@/features/plays/PlaysPage').then(module => ({ default: module.PlaysPage })))
-const ReviewPage = lazy(() => import('@/features/review/ReviewPage').then(module => ({ default: module.ReviewPage })))
-const SettingsPage = lazy(() => import('./SettingsPage').then(module => ({ default: module.SettingsPage })))
+const { Page: PlaysPage, reset: resetPlaysPage } = lazyPage(async () => ({ default: (await import('@/features/plays/PlaysPage')).PlaysPage }))
+const { Page: ReviewPage, reset: resetReviewPage } = lazyPage(async () => ({ default: (await import('@/features/review/ReviewPage')).ReviewPage }))
+const { Page: SettingsPage, reset: resetSettingsPage } = lazyPage(async () => ({ default: (await import('./SettingsPage')).SettingsPage }))
 
 function PageLoading() {
   return <div className="workspace-loading" role="status">Loading your workspace…</div>
@@ -216,7 +217,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
         {!pending && !data && !error && <div className="workspace-alert">No workspace data is available.</div>}
 
         {playsLifetime.visited && <div hidden={page !== 'plays'}>
-          <PageErrorBoundary resetKey={page} key={playsLifetime.generation}>
+          <PageErrorBoundary resetKey={page} key={playsLifetime.generation} onError={resetPlaysPage}>
             <Suspense fallback={<PageLoading />}>
               <PlaysPage workRef={playsLifetime.work} active={page === 'plays'} accounts={accounts} portfolios={portfolios}
                 api={api} session={playsSession} onSession={setPlaysSession} onReload={reload} loading={loading}
@@ -224,7 +225,10 @@ function Shell({ system, disconnect, api }: ShellProps) {
             </Suspense>
           </PageErrorBoundary>
         </div>}
-        <PageErrorBoundary key={page}>
+        <PageErrorBoundary key={page} onError={() => {
+          if (page === 'review') resetReviewPage()
+          if (page === 'settings') resetSettingsPage()
+        }}>
         {page === 'review' && <Suspense fallback={<PageLoading />}><ReviewPage api={api} reloadGeneration={reloadKey} onOpenPlay={viewPlay} /></Suspense>}
 
         {page === 'overview' && data && <OverviewPage data={data} api={api} overviewQuery={overviewQuery} setOverviewQuery={setOverviewQuery}
