@@ -4,6 +4,7 @@ using Vessel.Application.Plays;
 using Vessel.Application.Sizing;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
@@ -111,7 +112,7 @@ public sealed class SizingRuleTests
     [InlineData("1.255")]
     [InlineData("-1")]
     public void Settings_reject_risk_outside_the_range(string risk) =>
-        Assert.Throws<ArgumentException>(() => new SizingSettings(Guid.NewGuid(), decimal.Parse(risk, System.Globalization.CultureInfo.InvariantCulture), Start));
+        Assert.Throws<DomainValidationException>(() => new SizingSettings(Guid.NewGuid(), decimal.Parse(risk, System.Globalization.CultureInfo.InvariantCulture), Start));
 }
 
 internal sealed class MemorySizingStore : ISizingStore
@@ -257,8 +258,10 @@ public sealed class SizingServiceTests
         var sizing = await Service.UpdateSettingsAsync(new("2"), default);
         Assert.Equal(("2", owner, 1), (sizing.Settings.RiskPercent, store.Settings!.OwnerId, store.Saves));
         Assert.Equal("1.5", (await Service.UpdateSettingsAsync(new("1.50"), default)).Settings.RiskPercent);
-        foreach (var bad in new[] { "", "abc", "1e2", "-1", "0.05", "6", "1.333", " 1" })
+        foreach (var bad in new[] { "", "abc", "1e2", "-1", " 1" })
             Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Service.UpdateSettingsAsync(new(bad), default))).StatusCode);
+        foreach (var outside in new[] { "0.05", "6", "1.333" })
+            await Assert.ThrowsAsync<DomainValidationException>(() => Service.UpdateSettingsAsync(new(outside), default));
         Assert.Equal(1.5m, store.Settings.RiskPercent);
     }
 }

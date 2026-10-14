@@ -1,3 +1,5 @@
+using Vessel.Domain.Common;
+
 namespace Vessel.Domain.Accounts;
 
 public sealed class Account
@@ -22,7 +24,7 @@ public sealed class Account
     public void Configure(Guid? portfolioId, string? address, decimal? manualAccountValueUsd, string? sourceId = null)
     {
         if (portfolioId == Guid.Empty || manualAccountValueUsd < 0)
-            throw new ArgumentException("Invalid account configuration.");
+            throw new DomainValidationException("Invalid account configuration.");
         PortfolioId = portfolioId; Address = address?.ToLowerInvariant(); ManualAccountValueUsd = manualAccountValueUsd;
         SourceId = sourceId ?? Address;
         SyncStatus = VenueId == "manual" ? "manual" : "not-synced";
@@ -32,7 +34,7 @@ public sealed class Account
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         if (name.Length > 200 || portfolioId == Guid.Empty)
-            throw new ArgumentException("Invalid account settings.");
+            throw new DomainValidationException("Invalid account settings.");
         var nextRevision = checked(SettingsRevision + 1);
         Name = name.Trim(); PortfolioId = portfolioId; IsEnabled = isEnabled;
         SettingsRevision = nextRevision;
@@ -67,7 +69,7 @@ public sealed class Account
         ArgumentException.ThrowIfNullOrWhiteSpace(venueId);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         if (venueId.Length > 64 || name.Length > 200)
-            throw new ArgumentException("Account text exceeds storage limits.");
+            throw new DomainValidationException("Account text exceeds storage limits.");
         Id = id;
         OwnerId = ownerId;
         VenueId = venueId;

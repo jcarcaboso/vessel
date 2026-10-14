@@ -26,8 +26,8 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var plan = PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan));
         var now = time.GetUtcNow();
         var play = new Play(Guid.NewGuid(), account, instrument, source, plan, now);
-        var review = Apply(() => play.Annotate(request.Title ?? "", PlayDocuments.NormalizeDrawings(request.Drawings),
-            request.Review ?? "", now, request.StructuredReview));
+        var review = play.Annotate(request.Title ?? "", PlayDocuments.NormalizeDrawings(request.Drawings),
+            request.Review ?? "", now, request.StructuredReview);
         store.Add(play);
         if (review is not null) store.Add(review);
         await store.SaveAsync(ct);
@@ -51,11 +51,11 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             var account = play.Status == PlayStatus.Draft ? await EnabledAccount(request.AccountId, ct)
                 : throw new ProblemException(409, "The account and instrument are fixed once a Play is planned.");
             var (instrument, source) = Instrument(account, request.Instrument, request.InstrumentSource);
-            Apply(() => play.MoveTo(account, instrument, source, now));
+            play.MoveTo(account, instrument, source, now);
         }
         if (play.Status != PlayStatus.Draft && plan != play.Plan) await RequireFilledEntriesKept(play, request.Plan, ct);
-        var revision = Apply(() => play.ChangePlan(plan, request.RevisionReason, now));
-        var review = Apply(() => play.Annotate(request.Title ?? "", drawings, request.Review ?? "", now, request.StructuredReview));
+        var revision = play.ChangePlan(plan, request.RevisionReason, now);
+        var review = play.Annotate(request.Title ?? "", drawings, request.Review ?? "", now, request.StructuredReview);
         if (revision is not null) store.Add(revision);
         if (review is not null) store.Add(review);
         await store.SaveAsync(ct);
@@ -73,15 +73,15 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             case ("planned", PlayStatus.Draft):
                 await EnabledAccount(play.AccountId, ct);
                 PlayDocuments.RequirePlannable(PlayDocuments.Read(play.Plan));
-                var (change, revision) = Apply(() => play.MarkPlanned(now));
+                var (change, revision) = play.MarkPlanned(now);
                 store.Add(change);
                 store.Add(revision);
                 break;
             case ("planned", _):
-                store.Add(Apply(() => play.Resume(now)));
+                store.Add(play.Resume(now));
                 break;
             case ("paused", _):
-                store.Add(Apply(() => play.Pause(now)));
+                store.Add(play.Pause(now));
                 break;
             case ("cancelled", _):
                 var reason = request.Reason switch
@@ -94,7 +94,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
                     "other" => CancelReason.Other,
                     _ => throw new ProblemException(400, "Cancel reasons are invalidated, missed, changed-mind, expired, mistake or other.")
                 };
-                store.Add(Apply(() => play.Cancel(reason, request.Note, now)));
+                store.Add(play.Cancel(reason, request.Note, now));
                 break;
             default:
                 throw new ProblemException(400, "Status must be planned, paused or cancelled.");
@@ -191,15 +191,6 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             : throw new ProblemException(400, kind == InstrumentSource.Venue ? "Venue instruments use their contract ID."
                 : "Manual instrument labels have at most 64 characters without surrounding spaces.");
     }
-
-    private static T Apply<T>(Func<T> action)
-    {
-        try { return action(); }
-        catch (PlayRuleException error) { throw new ProblemException(409, error.Message); }
-        catch (ArgumentException error) { throw new ProblemException(400, error.Message); }
-    }
-
-    private static void Apply(Action action) => Apply(() => { action(); return true; });
 
     public static string StatusName(PlayStatus status) => status.ToString().ToLowerInvariant();
     private static string SourceName(InstrumentSource source) => source == InstrumentSource.Venue ? "venue" : "manual";

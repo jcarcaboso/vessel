@@ -1,6 +1,7 @@
 using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Tests;
@@ -39,11 +40,11 @@ public sealed class AccountManagementTests
     public void Domain_rejects_long_names_and_empty_portfolio_ID_without_changes()
     {
         var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Account");
-        Assert.Throws<ArgumentException>(() => account.UpdateSettings(new string('x', 201), null, false));
-        Assert.Throws<ArgumentException>(() => account.UpdateSettings("Name", Guid.Empty, false));
+        Assert.Throws<DomainValidationException>(() => account.UpdateSettings(new string('x', 201), null, false));
+        Assert.Throws<DomainValidationException>(() => account.UpdateSettings("Name", Guid.Empty, false));
         Assert.True(account.IsEnabled); Assert.Null(account.PortfolioId);
         var portfolio = new Portfolio(Guid.NewGuid(), account.OwnerId, "Portfolio");
-        Assert.Throws<ArgumentException>(() => portfolio.Rename(new string('x', 201)));
+        Assert.Throws<DomainValidationException>(() => portfolio.Rename(new string('x', 201)));
         portfolio.Rename(" Trimmed "); Assert.Equal("Trimmed", portfolio.Name);
     }
 

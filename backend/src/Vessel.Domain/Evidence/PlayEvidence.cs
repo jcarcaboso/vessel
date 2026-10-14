@@ -1,3 +1,4 @@
+using Vessel.Domain.Common;
 using Vessel.Domain.Plays;
 
 namespace Vessel.Domain.Evidence;
@@ -62,7 +63,7 @@ public sealed class PlayEvidence
     private static string ValidNote(string note)
     {
         ArgumentNullException.ThrowIfNull(note);
-        if (note.Length > MaxNoteLength) throw new ArgumentException($"Notes are limited to {MaxNoteLength} characters.");
+        if (note.Length > MaxNoteLength) throw new DomainValidationException($"Notes are limited to {MaxNoteLength} characters.");
         return note;
     }
 }

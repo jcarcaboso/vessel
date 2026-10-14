@@ -30,12 +30,8 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
             throw new ProblemException(400, "Risk per trade must be a decimal percentage.");
         var now = time.GetUtcNow();
         var settings = await store.SettingsAsync(ct);
-        try
-        {
-            if (settings is null) store.Add(new SizingSettings(owner.OwnerId, risk, now));
-            else settings.SetRisk(risk, now);
-        }
-        catch (ArgumentException ex) { throw new ProblemException(400, ex.Message); }
+        if (settings is null) store.Add(new SizingSettings(owner.OwnerId, risk, now));
+        else settings.SetRisk(risk, now);
         await store.SaveAsync(ct);
         return ToDto(risk, await store.ClosedPlaysAsync(ct));
     }

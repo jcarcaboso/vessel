@@ -7,6 +7,7 @@ using Npgsql;
 using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 using Vessel.Domain.Evidence;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
@@ -80,7 +81,7 @@ public sealed class PlayDomainTests
         var play = TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC"));
         play.MarkPlanned(Now);
         var moved = PlayDocuments.Serialize(TestPlays.Plan(stop: "97"));
-        Assert.Throws<PlayRuleException>(() => play.ChangePlan(moved, " ", Now));
+        Assert.Throws<DomainRuleException>(() => play.ChangePlan(moved, " ", Now));
         var revision = play.ChangePlan(moved, "  Tightened the stop under the new low ", Now)!;
         Assert.Equal((2, "Tightened the stop under the new low"), (revision.Number, revision.Reason));
         Assert.Null(play.ChangePlan(moved, null, Now));
@@ -92,10 +93,10 @@ public sealed class PlayDomainTests
     public void Account_and_instrument_are_fixed_after_planning()
     {
         var play = TestPlays.Create(account, null);
-        Assert.Throws<PlayRuleException>(() => play.MarkPlanned(Now));
+        Assert.Throws<DomainRuleException>(() => play.MarkPlanned(Now));
         play.MoveTo(account, new PerpetualInstrument("hyperliquid", "ETH"), InstrumentSource.Venue, Now);
         play.MarkPlanned(Now);
-        Assert.Throws<PlayRuleException>(() => play.MoveTo(account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue, Now));
+        Assert.Throws<DomainRuleException>(() => play.MoveTo(account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue, Now));
         Assert.Throws<ArgumentException>(() => TestPlays.Create(account, new PerpetualInstrument("manual", "BTC")));
     }
 
@@ -103,17 +104,17 @@ public sealed class PlayDomainTests
     public void Pause_resume_and_cancel_follow_the_lifecycle()
     {
         var play = TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC"));
-        Assert.Throws<PlayRuleException>(() => play.Pause(Now));
+        Assert.Throws<DomainRuleException>(() => play.Pause(Now));
         play.MarkPlanned(Now);
         play.Pause(Now);
-        Assert.Throws<PlayRuleException>(() => play.MarkPlanned(Now));
+        Assert.Throws<DomainRuleException>(() => play.MarkPlanned(Now));
         Assert.Equal(PlayStatus.Planned, play.Resume(Now).To);
         var cancelled = play.Cancel(CancelReason.Missed, " Price ran away ", Now);
         Assert.Equal((PlayStatus.Cancelled, CancelReason.Missed, "Price ran away"), (play.Status, cancelled.Reason, cancelled.Note));
         Assert.Equal(Now, play.EndedAtUtc);
-        Assert.Throws<PlayRuleException>(() => play.Resume(Now));
-        Assert.Throws<PlayRuleException>(() => play.ChangePlan(PlayDocuments.Serialize(TestPlays.Plan("1")), "late", Now));
-        Assert.Throws<PlayRuleException>(() => play.Annotate("New title", "{}", "", Now));
+        Assert.Throws<DomainRuleException>(() => play.Resume(Now));
+        Assert.Throws<DomainRuleException>(() => play.ChangePlan(PlayDocuments.Serialize(TestPlays.Plan("1")), "late", Now));
+        Assert.Throws<DomainRuleException>(() => play.Annotate("New title", "{}", "", Now));
         play.Annotate(play.Title, play.Drawings, "Should have waited for the retest.", Now);
         Assert.Equal("Should have waited for the retest.", play.Review);
     }
@@ -270,8 +271,7 @@ public sealed class PlayServiceTests
         Assert.Equal(("planned", 1), (play.Summary.Status, play.Summary.PlanRevision));
 
         var moved = TestPlays.Plan(stop: "97");
-        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
-            service.UpdateAsync(play.Summary.Id, Update(play, moved), default))).StatusCode);
+        await Assert.ThrowsAsync<DomainRuleException>(() => service.UpdateAsync(play.Summary.Id, Update(play, moved), default));
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
             service.UpdateAsync(play.Summary.Id, Update(play, instrument: "ETH"), default))).StatusCode);
         play = await service.UpdateAsync(play.Summary.Id, Update(play, moved, "Stop under the new swing low"), default);
@@ -291,8 +291,7 @@ public sealed class PlayServiceTests
         play = await service.UpdateAsync(play.Summary.Id, Update(play) with { Title = "Renamed" }, default);
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
             service.UpdateAsync(play.Summary.Id, Update(play) with { ExpectedVersion = stale }, default))).StatusCode);
-        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
-            service.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "paused"), default))).StatusCode);
+        await Assert.ThrowsAsync<DomainRuleException>(() => service.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "paused"), default));
         Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() =>
             service.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "open"), default))).StatusCode);
         Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() =>
@@ -345,6 +344,14 @@ public sealed class PlayPostgresTests
 
         var planned = await client.PostAsJsonAsync($"/api/plays/{play.Summary.Id}/status", new { expectedVersion = play.Summary.Version, status = "planned" });
         play = (await planned.Content.ReadFromJsonAsync<PlayDto>())!;
+        // Entity rules reach the owner as their status and exact message.
+        var resumed = await client.PostAsJsonAsync($"/api/plays/{play.Summary.Id}/status", new { expectedVersion = play.Summary.Version, status = "planned" });
+        Assert.Equal((HttpStatusCode.Conflict, "Only a paused Play can be resumed."),
+            (resumed.StatusCode, (await resumed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("detail").GetString()));
+        var longReason = await client.PutAsJsonAsync($"/api/plays/{play.Summary.Id}", new UpdatePlayRequest(play.Summary.Version, account.Id,
+            "BTC", "venue", "Breakout", TestPlays.Plan(stop: "97"), play.Drawings, "", new string('r', PlayPlanRevision.MaxReasonLength + 1)));
+        Assert.Equal((HttpStatusCode.BadRequest, "Reasons are limited to 2000 characters."),
+            (longReason.StatusCode, (await longReason.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("detail").GetString()));
         var update = new UpdatePlayRequest(play.Summary.Version, account.Id, "BTC", "venue", "Breakout", TestPlays.Plan(stop: "97"), play.Drawings, "", "Moved stop");
         var revised = await client.PutAsJsonAsync($"/api/plays/{play.Summary.Id}", update);
         Assert.Equal(HttpStatusCode.OK, revised.StatusCode);

@@ -1,3 +1,5 @@
+using Vessel.Domain.Common;
+
 namespace Vessel.Domain.Workspace;
 
 public sealed class Portfolio
@@ -10,20 +12,20 @@ public sealed class Portfolio
     public void Rename(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        if (name.Length > 200) throw new ArgumentException("Name exceeds storage limit.");
+        if (name.Length > 200) throw new DomainValidationException("Name exceeds storage limit.");
         Name = name.Trim();
     }
     public void ChangeIcon(string icon)
     {
-        if (!PortfolioIcons.IsKnown(icon)) throw new ArgumentException("Unknown portfolio icon.");
+        if (!PortfolioIcons.IsKnown(icon)) throw new DomainValidationException("Unknown portfolio icon.");
         Icon = icon;
     }
     public Portfolio(Guid id, Guid ownerId, string name, string icon = PortfolioIcons.Default)
     {
         if (id == Guid.Empty || ownerId == Guid.Empty) throw new ArgumentException("IDs must be nonempty.");
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        if (name.Length > 200) throw new ArgumentException("Name exceeds storage limit.");
-        if (!PortfolioIcons.IsKnown(icon)) throw new ArgumentException("Unknown portfolio icon.");
+        if (name.Length > 200) throw new DomainValidationException("Name exceeds storage limit.");
+        if (!PortfolioIcons.IsKnown(icon)) throw new DomainValidationException("Unknown portfolio icon.");
         Id = id; OwnerId = ownerId; Name = name.Trim(); Icon = icon;
     }
 }

@@ -1,4 +1,5 @@
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 using Vessel.Domain.Markets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -89,7 +90,7 @@ public sealed class Play
         ArgumentNullException.ThrowIfNull(account);
         if (account.OwnerId != OwnerId) throw new ArgumentException("Account belongs to another owner.");
         if (account.Id == AccountId && instrument == Instrument && source == InstrumentSource) return;
-        if (Status != PlayStatus.Draft) throw new PlayRuleException("The account and instrument are fixed once a Play is planned.");
+        if (Status != PlayStatus.Draft) throw new DomainRuleException("The account and instrument are fixed once a Play is planned.");
         AccountId = account.Id;
         VenueId = account.VenueId;
         SetInstrument(instrument, source);
@@ -102,24 +103,24 @@ public sealed class Play
         ArgumentNullException.ThrowIfNull(review);
         ArgumentException.ThrowIfNullOrWhiteSpace(drawings);
         title = title.Trim();
-        if (title.Length > MaxTitleLength) throw new ArgumentException($"Titles are limited to {MaxTitleLength} characters.");
-        if (review.Length > MaxReviewLength) throw new ArgumentException($"Reviews are limited to {MaxReviewLength} characters.");
+        if (title.Length > MaxTitleLength) throw new DomainValidationException($"Titles are limited to {MaxTitleLength} characters.");
+        if (review.Length > MaxReviewLength) throw new DomainValidationException($"Reviews are limited to {MaxReviewLength} characters.");
         answers ??= Answers;
         if (answers.Lesson is null || answers.NextAction is null ||
             answers.Adherence is not (null or "followed" or "deviated" or "not-applicable") ||
             answers.MistakeTag?.Length > 100 || answers.Lesson.Length > 4000 || answers.NextAction.Length > 4000 ||
             answers.MistakeTag?.Any(char.IsControl) == true ||
             new[] { answers.Lesson, answers.NextAction }.Any(s => s.Any(c => char.IsControl(c) && c is not ('\r' or '\n'))))
-            throw new ArgumentException("Review answers must be bounded plain text with a valid adherence.");
+            throw new DomainValidationException("Review answers must be bounded plain text with a valid adherence.");
         if (answers.IsAnswered && Status is not (PlayStatus.Closed or PlayStatus.Cancelled))
-            throw new PlayRuleException("Structured review answers are only available for closed or cancelled Plays.");
+            throw new DomainRuleException("Structured review answers are only available for closed or cancelled Plays.");
         if (Origin == PlayOrigin.Retrospective && answers.Adherence is not (null or "not-applicable"))
-            throw new PlayRuleException("A retrospective Play has no contemporaneous plan to assess adherence against.");
+            throw new DomainRuleException("A retrospective Play has no contemporaneous plan to assess adherence against.");
         var changedReview = review != Review || answers != Answers;
         var sameDrawings = SameDocument(drawings, Drawings);
         if (title == Title && sameDrawings && !changedReview) return null;
         if (!IsEditable && (title != Title || !sameDrawings))
-            throw new PlayRuleException("Closed and cancelled Plays keep their plan; only the review can change.");
+            throw new DomainRuleException("Closed and cancelled Plays keep their plan; only the review can change.");
         Title = title;
         Drawings = drawings;
         Review = review;
@@ -142,18 +143,18 @@ public sealed class Play
         play.EndedAtUtc = closedAt;
         ArgumentNullException.ThrowIfNull(title);
         title = title.Trim();
-        if (title.Length > MaxTitleLength) throw new ArgumentException($"Titles are limited to {MaxTitleLength} characters.");
+        if (title.Length > MaxTitleLength) throw new DomainValidationException($"Titles are limited to {MaxTitleLength} characters.");
         play.Title = title;
         return play;
     }
 
     public PlayStatusChange RecordManualOpen(DateTimeOffset now) => Status == PlayStatus.Planned
         ? Transition(PlayStatus.Open, null, "Owner-recorded manual entry, not a venue observation.", now)
-        : throw new PlayRuleException("Only a planned Play can open from manual facts.");
+        : throw new DomainRuleException("Only a planned Play can open from manual facts.");
 
     public PlayStatusChange RecordManualClose(DateTimeOffset closedAt, DateTimeOffset now)
     {
-        if (Status != PlayStatus.Open) throw new PlayRuleException("Only an open Play can close from manual facts.");
+        if (Status != PlayStatus.Open) throw new DomainRuleException("Only an open Play can close from manual facts.");
         var change = Transition(PlayStatus.Closed, null, "Owner-recorded manual ledger is flat.", now);
         EndedAtUtc = closedAt;
         return change;
@@ -161,7 +162,7 @@ public sealed class Play
 
     public void RecordManualCorrection(DateTimeOffset? closedAt, DateTimeOffset now)
     {
-        if (Status == PlayStatus.Closed) EndedAtUtc = closedAt ?? throw new PlayRuleException("A closed manual ledger must stay closed.");
+        if (Status == PlayStatus.Closed) EndedAtUtc = closedAt ?? throw new DomainRuleException("A closed manual ledger must stay closed.");
         Touch(now);
     }
 
@@ -170,14 +171,14 @@ public sealed class Play
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(plan);
         if (SameDocument(plan, Plan)) return null;
-        if (!IsEditable) throw new PlayRuleException("Closed and cancelled Plays keep their plan.");
+        if (!IsEditable) throw new DomainRuleException("Closed and cancelled Plays keep their plan.");
         if (Status == PlayStatus.Draft)
         {
             Plan = plan;
             Touch(now);
             return null;
         }
-        if (string.IsNullOrWhiteSpace(reason)) throw new PlayRuleException("Say why the plan changed. The reason is kept with the revision.");
+        if (string.IsNullOrWhiteSpace(reason)) throw new DomainRuleException("Say why the plan changed. The reason is kept with the revision.");
         Plan = plan;
         Touch(now);
         return new PlayPlanRevision(this, checked(++PlanRevision), reason, now);
@@ -185,8 +186,8 @@ public sealed class Play
 
     public (PlayStatusChange Change, PlayPlanRevision Revision) MarkPlanned(DateTimeOffset now)
     {
-        if (Status != PlayStatus.Draft) throw new PlayRuleException("Only a Draft can be planned.");
-        if (ContractId is null) throw new PlayRuleException("Choose an instrument before planning.");
+        if (Status != PlayStatus.Draft) throw new DomainRuleException("Only a Draft can be planned.");
+        if (ContractId is null) throw new DomainRuleException("Choose an instrument before planning.");
         var change = Transition(PlayStatus.Planned, null, null, now);
         PlannedAtUtc = now;
         PlanRevision = 1;
@@ -195,21 +196,21 @@ public sealed class Play
 
     public PlayStatusChange Pause(DateTimeOffset now) => Status == PlayStatus.Planned
         ? Transition(PlayStatus.Paused, null, null, now)
-        : throw new PlayRuleException("Only a planned Play without fills can be paused.");
+        : throw new DomainRuleException("Only a planned Play without fills can be paused.");
 
     public PlayStatusChange Resume(DateTimeOffset now) => Status == PlayStatus.Paused
         ? Transition(PlayStatus.Planned, null, null, now)
-        : throw new PlayRuleException("Only a paused Play can be resumed.");
+        : throw new DomainRuleException("Only a paused Play can be resumed.");
 
     /// <summary>The first linked entry fill. A fill while paused still opens the Play; the note says so.</summary>
     public PlayStatusChange MarkOpen(string note, DateTimeOffset now) => Status is PlayStatus.Planned or PlayStatus.Paused
         ? Transition(PlayStatus.Open, null, Status == PlayStatus.Paused ? $"{note} Filled while paused." : note, now, StatusChangeSource.Venue)
-        : throw new PlayRuleException("Only a planned or paused Play can open.");
+        : throw new DomainRuleException("Only a planned or paused Play can open.");
 
     /// <summary>All linked entry quantity has exited and no linked entry order rests.</summary>
     public PlayStatusChange MarkClosed(string note, DateTimeOffset now)
     {
-        if (Status != PlayStatus.Open) throw new PlayRuleException("Only an open Play can close.");
+        if (Status != PlayStatus.Open) throw new DomainRuleException("Only an open Play can close.");
         var change = Transition(PlayStatus.Closed, null, note, now, StatusChangeSource.Venue);
         EndedAtUtc = now;
         return change;
@@ -218,8 +219,8 @@ public sealed class Play
     public PlayStatusChange Cancel(CancelReason reason, string? note, DateTimeOffset now)
     {
         if (Status is not (PlayStatus.Draft or PlayStatus.Planned or PlayStatus.Paused))
-            throw new PlayRuleException("Only a Play without fills can be cancelled.");
-        if (!Enum.IsDefined(reason)) throw new ArgumentException("Unknown cancel reason.");
+            throw new DomainRuleException("Only a Play without fills can be cancelled.");
+        if (!Enum.IsDefined(reason)) throw new DomainValidationException("Unknown cancel reason.");
         var change = Transition(PlayStatus.Cancelled, reason, note, now);
         CancelReason = reason;
         EndedAtUtc = now;
@@ -239,7 +240,7 @@ public sealed class Play
     {
         if (instrument is not null && instrument.VenueId != VenueId)
             throw new ArgumentException("Instrument must belong to the account venue.");
-        if (!Enum.IsDefined(source)) throw new ArgumentException("Unknown instrument source.");
+        if (!Enum.IsDefined(source)) throw new DomainValidationException("Unknown instrument source.");
         ContractId = instrument?.ContractId;
         InstrumentSource = source;
     }
@@ -259,9 +260,6 @@ public sealed class Play
     }
 }
 
-/// <summary>A lifecycle rule the request broke, as opposed to malformed input.</summary>
-public sealed class PlayRuleException(string message) : Exception(message);
-
 /// <summary>An append-only snapshot of a planned Play's plan and the reason it changed.</summary>
 public sealed class PlayPlanRevision
 {
@@ -280,7 +278,7 @@ public sealed class PlayPlanRevision
     internal PlayPlanRevision(Play play, int number, string reason, DateTimeOffset now)
     {
         reason = reason.Trim();
-        if (reason.Length > MaxReasonLength) throw new ArgumentException($"Reasons are limited to {MaxReasonLength} characters.");
+        if (reason.Length > MaxReasonLength) throw new DomainValidationException($"Reasons are limited to {MaxReasonLength} characters.");
         Id = Guid.NewGuid();
         OwnerId = play.OwnerId;
         PlayId = play.Id;
@@ -309,7 +307,7 @@ public sealed class PlayStatusChange
         StatusChangeSource source)
     {
         note = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
-        if (note?.Length > Play.MaxCancelNoteLength) throw new ArgumentException($"Notes are limited to {Play.MaxCancelNoteLength} characters.");
+        if (note?.Length > Play.MaxCancelNoteLength) throw new DomainValidationException($"Notes are limited to {Play.MaxCancelNoteLength} characters.");
         Id = Guid.NewGuid();
         OwnerId = play.OwnerId;
         PlayId = play.Id;

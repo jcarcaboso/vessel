@@ -1,3 +1,5 @@
+using Vessel.Domain.Common;
+
 namespace Vessel.Domain.Sizing;
 
 public enum PlayOutcomeKind { Win, Loss, Scratch }
@@ -156,7 +158,7 @@ public sealed class SizingSettings
     public void SetRisk(decimal riskPercent, DateTimeOffset now)
     {
         if (riskPercent is < MinRiskPercent or > MaxRiskPercent || decimal.Round(riskPercent, 2) != riskPercent)
-            throw new ArgumentException($"Risk per trade is {MinRiskPercent}% to {MaxRiskPercent}% with at most two decimals.");
+            throw new DomainValidationException($"Risk per trade is {MinRiskPercent}% to {MaxRiskPercent}% with at most two decimals.");
         RiskPercent = riskPercent;
         UpdatedAtUtc = now;
     }

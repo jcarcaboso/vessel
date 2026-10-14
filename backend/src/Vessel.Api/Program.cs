@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Vessel.Api;
 using Vessel.Application.Common;
 using Vessel.Application.System;
+using Vessel.Domain.Common;
 using Vessel.Infrastructure;
 using Vessel.Persistence;
 
@@ -54,12 +55,14 @@ app.Use(async (context, next) =>
     catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { }
     catch (Exception ex)
     {
-        var expected = ex is ProblemException or BadHttpRequestException;
+        var expected = ex is ProblemException or DomainValidationException or DomainRuleException or BadHttpRequestException;
         // Generate locally: neither a correlation header nor a raw URL is diagnostic input.
         var traceId = System.Diagnostics.ActivityTraceId.CreateRandom().ToString();
         var (status, detail) = ex switch
         {
             ProblemException error => (error.StatusCode, error.Message),
+            DomainValidationException error => (400, error.Message),
+            DomainRuleException error => (409, error.Message),
             BadHttpRequestException { StatusCode: 413 } => (413, "The request body is too large."),
             BadHttpRequestException => (400, "The request body or parameters are invalid."),
             _ when SafeExceptionDiagnostics.IsDependencyOutage(ex) => (503, "The service is unavailable. Try again later."),
