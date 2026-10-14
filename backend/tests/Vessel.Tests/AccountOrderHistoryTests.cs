@@ -242,7 +242,7 @@ public sealed class AccountOrderHistoryTests
     [InlineData("hyperliquid", 516)]
     [InlineData("risex", 340)]
     [InlineData("lighter", 902)]
-    [InlineData("lighter-rh", 869)]
+    [InlineData("lighter-rh", 902)]
     public async Task Optional_failure_notice_fits_with_each_venues_maximum_public_coverage(string venue, int combinedLength)
     {
         var coverage = AccountHistoryNoticeBudget.CombinedCases().Where(c => c.Venue == venue).MaxBy(c => c.Public.Length);
@@ -251,6 +251,7 @@ public sealed class AccountOrderHistoryTests
         account.RecordSync(AccountHistoryOrders.At, coverage.Public);
         account.RecordOrderHistoryNotice(coverage.Orders);
         var notice = await service.RetainAccountOrdersAsync(account.Id, default);
+        Assert.Equal(1, orders.Reads);
         Assert.Equal(coverage.Public + "\nOrder history: " + notice, account.HistoryNotice);
         Assert.Equal(combinedLength, account.HistoryNotice!.Length);
         Assert.True(account.HistoryNotice.Length <= 1000);
@@ -282,6 +283,7 @@ internal sealed class AccountHistoryOrders(string venueId = "hyperliquid") : IVe
     internal static VenueDescriptor Descriptor(string venue) => venue switch
     {
         "lighter" => LighterReader.Descriptor,
+        "lighter-rh" => LighterExchange.Robinhood.Descriptor,
         "risex" => RisexReader.Descriptor,
         _ => HyperliquidPerpetualReader.Descriptor
     };

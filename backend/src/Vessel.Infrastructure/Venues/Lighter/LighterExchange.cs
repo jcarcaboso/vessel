@@ -66,7 +66,7 @@ public sealed class LighterExchange
     /// </summary>
     public static readonly LighterExchange Robinhood = new("lighter-rh", "Lighter · Robinhood", "LighterRh", "USDG",
         "https://robinhoodchain.lighter.xyz/read-only-tokens", "https://robinhoodchain.lighter.xyz/trade/{instrument}",
-        VenueLogos.LighterRh, 2, "lighter-rh-perps-account", "Lighter RH");
+        VenueLogos.LighterRh, 2, "lighter-rh-perps-account", "Lighter");
 
     public static readonly IReadOnlyList<LighterExchange> All = [Mainnet, Robinhood];
 

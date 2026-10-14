@@ -92,6 +92,15 @@ public sealed class LighterRobinhoodTests
             new Clock(), new NoCredentials(), cache, exchange ?? Rh);
 
     [Fact]
+    public void Longest_combined_stored_notice_keeps_the_same_margin_as_mainnet()
+    {
+        int Longest(string venue) => AccountHistoryNoticeBudget.CombinedCases().Where(c => c.Venue == venue)
+            .Max(c => (c.Public + "\nOrder history: " + c.Orders).Length);
+        Assert.True(Longest("lighter-rh") <= Longest("lighter"), $"{Longest("lighter-rh")} > {Longest("lighter")}");
+        Assert.True(Longest("lighter-rh") <= 1000);
+    }
+
+    [Fact]
     public void Mainnet_keeps_its_exact_identity_and_wording()
     {
         var mainnet = LighterExchange.Mainnet;
@@ -153,10 +162,10 @@ public sealed class LighterRobinhoodTests
         Assert.Equal("lighter-rh-perps-account", Rh.SnapshotScope);
         // The trades weight is three times mainnet's, so the history budget is smaller and the notice says so.
         Assert.Equal(2, Rh.TradePages);
-        Assert.StartsWith("Incomplete Lighter RH history: at most the latest 200 perpetual executions", Rh.HistoryNotice);
+        Assert.StartsWith("Incomplete Lighter history: at most the latest 200 perpetual executions", Rh.HistoryNotice);
         Assert.Contains("USDG perpetual equity only", Rh.HistoryNotice);
         Assert.Equal("The two-page history limit was reached; older executions remain unimported.", Rh.PageLimitNotice);
-        Assert.StartsWith("Lighter RH perpetual orders:", Rh.OrdersNotice);
+        Assert.StartsWith("Lighter perpetual orders:", Rh.OrdersNotice);
         Assert.True(Rh.HistoryNotice.Length <= LighterReader.HistoryNotice.Length + 40);
         Assert.Equal(["lighter", "lighter-rh"], LighterExchange.All.Select(e => e.VenueId));
     }

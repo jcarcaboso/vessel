@@ -92,7 +92,7 @@ October 14, 2026. All five delivery contract items are implemented: the backend 
 | Credential purpose | `lighter-read-token` | `lighter-rh-read-token` |
 | Setup URL | `https://app.lighter.xyz/read-only-tokens` | `https://robinhoodchain.lighter.xyz/read-only-tokens` |
 | Trade URL | none (unchanged) | `https://robinhoodchain.lighter.xyz/trade/{instrument}` |
-| Stored-notice name | Lighter | Lighter RH (keeps combined public and order coverage within the 1,000-character `HistoryNotice` column) |
+| Stored-notice name | Lighter | Lighter (stored history notices keep mainnet's length so combined public and order coverage fits the 1,000-character `HistoryNotice` column; interactive messages say Lighter · Robinhood) |
 | History budget | 5 pages, 500 executions | 2 pages, 200 executions (`trades` weight 600 vs 200) |
 | Snapshot scope | `lighter-perps-account` | `lighter-rh-perps-account` |
 | Logo | `lighter` | `lighter-rh` |
@@ -115,6 +115,6 @@ The mainnet ID, host, strings, scope, notices and descriptor are unchanged, and 
 
 Verification: the Release build had no warnings. 1,465 backend tests passed against a disposable PostgreSQL 18 container; 3 opt-in live tests were skipped in that run. Both Lighter live tests passed separately against the public mainnet and RH hosts. No owner database, `.env` or credential was used.
 
-The combined history-notice budget test covers every Lighter exchange; the longest Lighter RH combination is 869 characters, mainnet's is unchanged.
+The combined history-notice budget test covers every Lighter exchange, and a test keeps the longest Lighter RH combination no longer than mainnet's (994 characters, unchanged). The optional order-failure case is exercised through the RH descriptor (902 characters).
 
 Open: RH read-only tokens were not tested with a real token.
