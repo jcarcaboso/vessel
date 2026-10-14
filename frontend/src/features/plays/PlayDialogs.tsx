@@ -1,5 +1,5 @@
 import { errorMessage } from '@/api/errors'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
 import { cancelReasonLabels, cancelReasons, statusLabels, type CancelReason, type PlayHistory } from '@/api/plays'
 import { Button } from '@/components/ui/button'
@@ -79,13 +79,15 @@ type HistoryItem = { at: string; key: string; title: string; detail: string[] }
 
 /** Plan revisions with what changed, and status changes, newest first. */
 export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; playId: string; onClose: () => void }) {
-  const [result, setResult] = useState<{ history: PlayHistory } | { error: string } | null>(null)
+  const key = useMemo(() => ({ api, playId }), [api, playId])
+  const [loaded, setLoaded] = useState<{ key: typeof key; result: { history: PlayHistory } | { error: string } } | null>(null)
+  const result = loaded?.key === key ? loaded.result : null
   useEffect(() => {
     const controller = new AbortController()
-    api.playHistory(playId, controller.signal).then(history => setResult({ history }))
-      .catch(cause => { if (!controller.signal.aborted) setResult({ error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
+    api.playHistory(playId, controller.signal).then(history => { if (!controller.signal.aborted) setLoaded({ key, result: { history } }) })
+      .catch(cause => { if (!controller.signal.aborted) setLoaded({ key, result: { error: errorMessage(cause, 'The change could not be completed. Try again.') } }) })
     return () => controller.abort()
-  }, [api, playId])
+  }, [api, playId, key])
   const items: HistoryItem[] = result && 'history' in result ? [
     ...result.history.revisions.map((revision, index, all): HistoryItem => ({
       at: revision.createdAtUtc, key: `r${revision.number}`, title: `Plan revision ${revision.number} · ${revision.reason}`,

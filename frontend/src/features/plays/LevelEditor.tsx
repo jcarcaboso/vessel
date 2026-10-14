@@ -3,30 +3,32 @@ import { Plus, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { DraftEntry, PlayDraft } from './draft'
 import { levelName } from './execution'
-import { planShare, positivePlanNumber } from './numbers'
+import { planShare, positiveFinitePlanNumber } from './numbers'
 import {
-  addChartExit, applyLevelDrag, exitsOf, formatDraggedPrice, levelTag, overlayPrice, parseOverlayId, removeExit, setExitShare,
+  addChartExit, exitsOf, formatDraggedPrice, levelTag, overlayPrice, parseOverlayId, removeExit, setExitShare, withExits,
 } from './levels'
 
 /**
  * In-chart editor for one planned level. Changing a price switches percentage levels to price
  * units, as dragging does. A share-only edit leaves the level's unit and value unchanged.
  */
-export function LevelEditor({ entries, entry, overlayId, anchor, direction, leverage, onApply, onClose }: {
+export function LevelEditor({ entries, entry, overlayId, anchor, direction, leverage, priceStep = null, onApply, onClose }: {
   entries: readonly DraftEntry[]
   entry: DraftEntry
   overlayId: string
   anchor: { x: number; y: number }
   direction: PlayDraft['direction']
   leverage: number
+  priceStep?: number | null
   onApply: (next: DraftEntry, label: string) => void
   onClose: () => void
 }) {
   const ref = parseOverlayId(overlayId)
   const exit = ref && ref.kind !== 'entry' ? exitsOf(entry, ref.kind).find(current => current.id === ref.levelId) ?? null : null
   const current = overlayPrice(entry, overlayId, direction, leverage)
-  const [initialPrice] = useState(current === null ? '' : formatDraggedPrice(current))
+  const [initialPrice] = useState(ref?.kind === 'entry' ? entry.price : exit?.unit === 'price' ? exit.value : current === null ? '' : formatDraggedPrice(current, priceStep))
   const [price, setPrice] = useState(initialPrice)
+  const [priceEdited, setPriceEdited] = useState(false)
   const [share, setShare] = useState(exit?.share ?? '')
   const [error, setError] = useState('')
   const input = useRef<HTMLInputElement>(null)
@@ -67,10 +69,14 @@ export function LevelEditor({ entries, entry, overlayId, anchor, direction, leve
 
   function save(event: FormEvent) {
     event.preventDefault()
-    const parsedPrice = positivePlanNumber(price)
+    const parsedPrice = positiveFinitePlanNumber(price)
     if (parsedPrice === null) { setError('Enter a price above zero.'); return }
     if (exit && share.trim() !== '' && planShare(share) === null) { setError('Share must be 0 to 100%.'); return }
-    let next = parsedPrice === Number(initialPrice) ? entry : applyLevelDrag([entry], overlayId, parsedPrice)[0]!
+    let next = entry
+    if (priceEdited) {
+      next = ref?.kind === 'entry' ? { ...entry, price } : ref ? withExits(entry, ref.kind, exitsOf(entry, ref.kind).map(level =>
+        level.id === ref.levelId ? { ...level, unit: 'price', value: price } : level)) : entry
+    }
     if (exit && ref?.kind !== 'entry') next = setExitShare(next, ref!.kind, exit.id, share.trim())
     onApply(next, `Edit ${readable.toLowerCase()}`)
     onClose()
@@ -89,7 +95,7 @@ export function LevelEditor({ entries, entry, overlayId, anchor, direction, leve
       <button type="button" className="level-editor-close" aria-label="Close level editor" onClick={onClose}><X size={13} aria-hidden="true" /></button>
     </header>
     <div className="level-editor-fields">
-      <label>Price<input ref={input} inputMode="decimal" value={price} aria-invalid={error !== ''} onChange={event => { setPrice(event.target.value); setError('') }} /></label>
+      <label>Price<input ref={input} inputMode="decimal" value={price} aria-invalid={error !== ''} onChange={event => { setPrice(event.target.value); setPriceEdited(true); setError('') }} /></label>
       {exit && <label>Share <small>% of entry</small><input inputMode="decimal" value={share} onChange={event => { setShare(event.target.value); setError('') }} /></label>}
     </div>
     {percentUnit && <p className="level-editor-note">Editing this price switches the level from % to price units. Editing only its share keeps %.</p>}
@@ -100,7 +106,7 @@ export function LevelEditor({ entries, entry, overlayId, anchor, direction, leve
     </div>
     <div className="level-editor-more">
       {(['target', 'stop'] as const).map(kind => <button key={kind} type="button" disabled={!entryPriced} title={entryPriced ? undefined : 'Set the entry price first'}
-        onClick={() => act(addChartExit(entry, kind, direction, leverage), `Add ${entryTag} ${kind}`)}><Plus size={12} aria-hidden="true" />Add {kind}</button>)}
+        onClick={() => act(addChartExit(entry, kind, direction, leverage, priceStep), `Add ${entryTag} ${kind}`)}><Plus size={12} aria-hidden="true" />Add {kind}</button>)}
       {exit && ref.kind !== 'entry' && <button type="button" onClick={() => act(removeExit(entry, ref.kind, exit.id), `Remove ${tag}`)}>
         <Trash2 size={12} aria-hidden="true" />Remove {ref.kind}</button>}
     </div>

@@ -18,6 +18,7 @@ import { emptyManualDraft } from './manual'
 import { createPlaysSession, draftFromSaved, savedState, type PlaysSession } from './saved'
 import { ApplicationShell } from '@/features/workspace/ApplicationShell'
 import * as overviewActions from '@/features/workspace/OverviewActions'
+import * as savedChecks from './saved'
 
 const at = '2026-10-13T10:00:00Z'
 const otherId = '00000000-0000-4000-8000-000000000002'
@@ -1097,5 +1098,143 @@ describe('diary mutation ownership in the actual shell', () => {
     expect(screen.queryByText('Entry · buy 1 at 100')).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Plays' })).not.toBeInTheDocument()
     if (action === 'disconnect') expect(disconnect).toHaveBeenCalledOnce()
+  })
+})
+
+
+describe('Plays review wave request regressions', () => {
+  it('memoizes draft checks across unrelated renders and recomputes them for real edits', async () => {
+    const { api } = client(planned)
+    api.playHistory = vi.fn().mockResolvedValue({ revisions: [], statusChanges: [] })
+    const dirty = vi.spyOn(savedChecks, 'isDirty')
+    const changed = vi.spyOn(savedChecks, 'planChanged')
+    try {
+      render(<Harness api={api} initial={sessionFor(planned)} />)
+      const user = userEvent.setup()
+      await act(async () => {})
+      const initialDirtyCalls = dirty.mock.calls.length
+      const initialChangedCalls = changed.mock.calls.length
+      await user.click(screen.getByRole('button', { name: 'History' }))
+      await screen.findByText(/History starts when the play is planned/)
+      await user.keyboard('{Escape}')
+      expect(dirty).toHaveBeenCalledTimes(initialDirtyCalls)
+      expect(changed).toHaveBeenCalledTimes(initialChangedCalls)
+      await user.type(screen.getByRole('textbox', { name: 'Play title' }), ' revised')
+      expect(dirty.mock.calls.length).toBeGreaterThan(initialDirtyCalls)
+      expect(changed.mock.calls.length).toBeGreaterThan(initialChangedCalls)
+      expect(screen.getByRole('button', { name: /^Save$/ })).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled()
+      // A plan edit must still request a revision reason; memoization cannot hide it.
+      await user.type(screen.getByRole('spinbutton', { name: /Entry 1 planned entry price/ }), '100')
+      await user.click(screen.getByRole('button', { name: /^Save$/ }))
+      expect(screen.getByRole('dialog', { name: 'Why did the plan change?' })).toBeInTheDocument()
+    } finally { dirty.mockRestore(); changed.mockRestore() }
+  })
+
+  it('does not reload an already mounted list when work starts, but reloads once after a failed saved-Play read', async () => {
+    const { api, methods } = client()
+    const read = deferred<SavedPlay>()
+    methods.play.mockReturnValueOnce(read.promise)
+    render(<Harness api={api} />)
+    await waitFor(() => expect(methods.plays).toHaveBeenCalledOnce())
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Request another Play' }))
+    await waitFor(() => expect(methods.play).toHaveBeenCalledOnce())
+    expect(methods.plays).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: 'New play' })).toBeDisabled()
+    await act(async () => { read.reject(new ApiError('unavailable', 'Synthetic read failed.')) })
+    await waitFor(() => expect(methods.plays).toHaveBeenCalledTimes(2))
+    expect(methods.play.mock.calls[0]![1]!.aborted).toBe(true)
+    expect(screen.getByRole('button', { name: 'New play' })).toBeEnabled()
+  })
+
+  it('starts no extra list request at successful open start or when the editor replaces the list', async () => {
+    const { api, methods } = client()
+    const read = deferred<SavedPlay>()
+    const target = { ...terminal, summary: { ...terminal.summary, title: 'Opened Play' } }
+    methods.play.mockReturnValueOnce(read.promise)
+    render(<Harness api={api} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'All' }))
+    const row = await screen.findByRole('button', { name: `Open ${terminal.summary.title}` })
+    expect(methods.plays).toHaveBeenCalledOnce()
+    await user.click(row)
+    await waitFor(() => expect(methods.play).toHaveBeenCalledOnce())
+    expect(row).toBeDisabled()
+    expect(methods.plays).toHaveBeenCalledOnce()
+    await act(async () => { read.resolve(target) })
+    expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Opened Play')
+    expect(methods.plays).toHaveBeenCalledOnce()
+  })
+
+  it.each(['revision', 'cancel'] as const)('shows a %s failure in its current intended dialog after intervening renders', async kind => {
+    const { api, methods } = client(planned)
+    const pending = deferred<SavedPlay>()
+    methods.updatePlay.mockReturnValueOnce(pending.promise)
+    api.changePlayStatus = vi.fn().mockReturnValue(pending.promise)
+    render(<Harness api={api} initial={sessionFor(planned)} />)
+    const user = userEvent.setup()
+    if (kind === 'revision') {
+      await user.type(screen.getByRole('spinbutton', { name: /Entry 1 planned entry price/ }), '100')
+      await user.click(screen.getByRole('button', { name: /^Save$/ }))
+      await user.type(screen.getByRole('textbox', { name: 'Reason' }), 'Synthetic revision')
+      await user.click(screen.getByRole('button', { name: 'Save revision' }))
+    } else {
+      await user.click(screen.getByRole('button', { name: 'Cancel play' }))
+      await user.selectOptions(screen.getByRole('combobox', { name: 'Reason' }), 'missed')
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel play' }))
+    }
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByRole('button', { name: kind === 'revision' ? 'Saving…' : 'Cancelling…' })).toBeDisabled()
+    await act(async () => { pending.reject(new ApiError('unavailable', 'Current dialog failure.')) })
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('Current dialog failure.')
+    expect(document.querySelector('[aria-label="Notifications"]')).not.toHaveTextContent('Current dialog failure.')
+  })
+
+  it.each(['revision', 'cancel'] as const)('does not send a %s error to a dialog from an old render after History replaces it', async kind => {
+    const { api, methods } = client(planned)
+    const pending = deferred<SavedPlay>()
+    methods.updatePlay.mockReturnValueOnce(pending.promise)
+    api.changePlayStatus = vi.fn().mockReturnValue(pending.promise)
+    api.playHistory = vi.fn().mockResolvedValue({ revisions: [], statusChanges: [] })
+    render(<Harness api={api} initial={sessionFor(planned)} />)
+    const user = userEvent.setup()
+    const historyButton = screen.getByRole('button', { name: 'History' })
+    if (kind === 'revision') {
+      await user.type(screen.getByRole('spinbutton', { name: /Entry 1 planned entry price/ }), '100')
+      await user.click(screen.getByRole('button', { name: /^Save$/ }))
+      await user.type(screen.getByRole('textbox', { name: 'Reason' }), 'Synthetic revision')
+      await user.click(screen.getByRole('button', { name: 'Save revision' }))
+    } else {
+      await user.click(screen.getByRole('button', { name: 'Cancel play' }))
+      await user.selectOptions(screen.getByRole('combobox', { name: 'Reason' }), 'missed')
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel play' }))
+    }
+    // Exercise replacement directly, without bypassing pending mutation ownership.
+    fireEvent.click(historyButton)
+    expect(screen.getByRole('dialog', { name: 'Play history' })).toBeInTheDocument()
+    await act(async () => { pending.reject(new ApiError('unavailable', 'Previous dialog failed.')) })
+    expect(document.querySelector('[aria-label="Notifications"]')).toHaveTextContent('Previous dialog failed.')
+    expect(within(screen.getByRole('dialog', { name: 'Play history' })).queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it.each(['replace', 'unmount'] as const)('aborts the saved-Play read triggered by a venue status change on %s and ignores its late result', async mode => {
+    const { api, methods } = client(planned)
+    const read = deferred<SavedPlay>()
+    const other = { ...planned, summary: { ...planned.summary, id: otherId, title: 'Replacement Play' } }
+    methods.playExecution.mockImplementation(async () => ({ ...execution(planned), status: 'closed' }))
+    methods.play.mockReturnValueOnce(read.promise)
+    const nextSession = vi.fn()
+    const view = render(<Harness api={api} initial={sessionFor(planned)} onSession={nextSession} />)
+    await waitFor(() => expect(methods.play).toHaveBeenCalledWith(planned.summary.id, expect.any(AbortSignal)))
+    const signal = methods.play.mock.calls[0]![1]!
+    if (mode === 'replace') {
+      const replacement = client(other)
+      replacement.methods.playExecution.mockResolvedValue(execution(other))
+      view.rerender(<Harness api={replacement.api} initial={sessionFor(other)} onSession={nextSession} />)
+    } else view.unmount()
+    expect(signal.aborted).toBe(true)
+    await act(async () => { read.resolve({ ...planned, summary: { ...planned.summary, status: 'closed', version: 5 } }) })
+    expect(nextSession).not.toHaveBeenCalled()
   })
 })

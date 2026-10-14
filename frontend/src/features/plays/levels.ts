@@ -25,7 +25,7 @@ export function leverageOf(leverage: string) {
 }
 
 export const exitsOf = (entry: DraftEntry, kind: ExitKind) => kind === 'stop' ? entry.stops : entry.targets
-const withExits = (entry: DraftEntry, kind: ExitKind, exits: DraftExit[]): DraftEntry =>
+export const withExits = (entry: DraftEntry, kind: ExitKind, exits: DraftExit[]): DraftEntry =>
   kind === 'stop' ? { ...entry, stops: exits } : { ...entry, targets: exits }
 
 /** True when a target sits above the entry: long targets and short stops. */
@@ -171,12 +171,12 @@ export function placeLevel(entry: DraftEntry, kind: 'entry' | ExitKind, price: n
 }
 
 /** Adds a stop or target a step beyond the last one, or null without an entry price. */
-export function addChartExit(entry: DraftEntry, kind: ExitKind, direction: PlayDraft['direction'], leverage = 1): DraftEntry | null {
+export function addChartExit(entry: DraftEntry, kind: ExitKind, direction: PlayDraft['direction'], leverage = 1, step?: number | null): DraftEntry | null {
   const entryPrice = positive(entry.price)
   if (entryPrice === null) return null
   const plotted = exitsOf(entry, kind).filter(exit => levelPrice(entryPrice, exit, kind, direction, leverage) !== null).length
   const sign = above(kind, direction) ? 1 : -1
-  return placeExit(entry, kind, entryPrice * (1 + sign * addedLevelDistance * (plotted + 1)))
+  return placeExit(entry, kind, entryPrice * (1 + sign * addedLevelDistance * (plotted + 1)), step)
 }
 
 export function removeExit(entry: DraftEntry, kind: ExitKind, id: string): DraftEntry {

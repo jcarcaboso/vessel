@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { StrictMode, useState } from 'react'
 import { screen, within } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
@@ -102,5 +102,42 @@ describe('Journal evidence tab', () => {
     expect(tab).toHaveTextContent('Evidence1')
     expect(screen.getByRole('list', { name: 'Evidence images' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Evidence' })).toBeInTheDocument()
+  })
+})
+
+
+describe('evidence consumer cleanup', () => {
+  it('keeps the thumbnail alive when its viewer closes, and revokes all leases on draft replacement/disconnect under StrictMode', async () => {
+    let next = 0
+    vi.mocked(URL.createObjectURL).mockClear().mockImplementation(() => `blob:panel-${++next}`)
+    vi.mocked(URL.revokeObjectURL).mockClear()
+    const item = createEvidence('upload', png(), 'first.png')
+    const replacement = { ...item, image: jpeg(), name: 'second.jpg' }
+    const change = vi.fn()
+    const ui = (evidence: DraftEvidence[]) => <StrictMode><EvidencePanel evidence={evidence} onChange={change} /></StrictMode>
+    const view = render(ui([item]))
+    const thumbUrl = document.querySelector('.evidence-thumb img')!.getAttribute('src')!
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(thumbUrl)
+    await userEvent.click(screen.getByRole('button', { name: 'Open Image 1: first.png' }))
+    const viewer = screen.getByRole('dialog')
+    const viewerUrl = within(viewer).getByRole('img', { name: 'first.png' }).getAttribute('src')!
+    expect(viewerUrl).not.toBe(thumbUrl)
+    await userEvent.keyboard('{Escape}')
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(viewerUrl)
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(thumbUrl)
+    await userEvent.click(screen.getByRole('button', { name: 'Open Image 1: first.png' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark up' }))
+    const markupUrl = document.querySelector('.markup-stage > img')!.getAttribute('src')!
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(markupUrl)
+    view.rerender(ui([replacement]))
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(thumbUrl)
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(markupUrl)
+    view.rerender(ui([]))
+    view.unmount()
+    const created = vi.mocked(URL.createObjectURL).mock.results.map(result => result.value)
+    // A download in an earlier test can finish its one-second cleanup here. Count only this test's leases.
+    const revoked = vi.mocked(URL.revokeObjectURL).mock.calls.map(([url]) => url).filter(url => url.startsWith('blob:panel-'))
+    expect(revoked.sort()).toEqual(created.sort())
+    vi.mocked(URL.createObjectURL).mockImplementation(() => 'blob:test-image')
   })
 })

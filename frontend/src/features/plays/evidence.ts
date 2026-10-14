@@ -36,15 +36,3 @@ export function captureFileName(now: Date) {
 }
 
 export const formatBytes = (bytes: number) => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
-
-// Object URLs live as long as their image is in the draft; removing an image revokes its URL.
-const urls = new WeakMap<Blob, string>()
-export function imageUrl(image: Blob) {
-  let url = urls.get(image)
-  if (!url) { url = URL.createObjectURL(image); urls.set(image, url) }
-  return url
-}
-export function releaseImageUrl(image: Blob) {
-  const url = urls.get(image)
-  if (url) { URL.revokeObjectURL(url); urls.delete(image) }
-}
