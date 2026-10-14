@@ -27,7 +27,8 @@ function comparisonInputs(before, after) {
     const names = report.matrix?.expected ?? matrix(pages)
     assert.deepEqual(names, report.matrix ? expected : matrix(pages), 'Unknown capture matrix')
     validateReport(report, names)
-    assert.notEqual(report.status, 'failed', 'Failed capture report')
+    assert.ok(report.status === 'passed' || (!report.matrix && report.status === undefined),
+      'Capture report must have passed status; only legacy reports may omit it')
     assert.deepEqual(files, names, 'PNG files do not match capture report/matrix')
     return { files, report }
   }

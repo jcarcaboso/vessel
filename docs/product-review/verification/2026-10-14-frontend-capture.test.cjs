@@ -41,7 +41,28 @@ test('comparison accepts complete extended or retained legacy matrices', t => {
   assert.equal(comparisonInputs(...directories(t)).files.length, 76)
   assert.equal(comparisonInputs(...directories(t, matrix(pages))).files.length, 40)
 })
+test('comparison accepts retained legacy reports without status', t => {
+  const dirs = directories(t, matrix(pages))
+  for (const dir of dirs) {
+    const value = JSON.parse(fs.readFileSync(path.join(dir, 'report.json'), 'utf8'))
+    delete value.status
+    fs.writeFileSync(path.join(dir, 'report.json'), JSON.stringify(value))
+  }
+  assert.equal(comparisonInputs(...dirs).files.length, 40)
+})
 for (const where of [0, 1]) {
+  for (const status of [undefined, 'running']) test(`comparison rejects complete extended ${status ?? 'missing'} status in input ${where}`, t => {
+    const dirs = directories(t)
+    const value = report(); value.status = status
+    fs.writeFileSync(path.join(dirs[where], 'report.json'), JSON.stringify(value))
+    assert.throws(() => comparisonInputs(...dirs), /must have passed status/)
+  })
+  for (const status of ['running', 'failed']) test(`comparison rejects complete legacy ${status} status in input ${where}`, t => {
+    const dirs = directories(t, matrix(pages))
+    const value = report(matrix(pages)); delete value.matrix; value.status = status
+    fs.writeFileSync(path.join(dirs[where], 'report.json'), JSON.stringify(value))
+    assert.throws(() => comparisonInputs(...dirs), /must have passed status/)
+  })
   test(`comparison fails a missing image in input ${where}`, t => {
     const dirs = directories(t); fs.unlinkSync(path.join(dirs[where], expected[0]))
     assert.throws(() => comparisonInputs(...dirs))
@@ -66,7 +87,7 @@ test('comparison rejects a failed or incomplete report, not just files', t => {
   const dirs = directories(t)
   const value = report(); value.status = 'failed'
   fs.writeFileSync(path.join(dirs[1], 'report.json'), JSON.stringify(value))
-  assert.throws(() => comparisonInputs(...dirs), /Failed capture/)
+  assert.throws(() => comparisonInputs(...dirs), /must have passed status/)
   delete value.status; value.matrix.expected.pop()
   fs.writeFileSync(path.join(dirs[1], 'report.json'), JSON.stringify(value))
   assert.throws(() => comparisonInputs(...dirs), /Unknown capture matrix/)
