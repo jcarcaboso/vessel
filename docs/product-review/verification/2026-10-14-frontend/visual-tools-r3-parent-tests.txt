@@ -1,0 +1,84 @@
+✔ matrix preserves 40 pages and adds 36 controls across both themes and viewports (1.437966ms)
+✔ capture rejects missing capture (0.681243ms)
+✔ capture rejects duplicate capture (0.66101ms)
+✔ capture rejects unexpected capture (0.325576ms)
+✔ capture rejects console error (0.738571ms)
+✔ capture rejects page/readiness error (0.198363ms)
+✔ capture rejects external request (0.203185ms)
+✔ capture rejects overflow (0.128556ms)
+✔ comparison accepts complete extended or retained legacy matrices (6.754356ms)
+✔ comparison accepts retained legacy reports without status (4.271056ms)
+✔ comparison rejects complete extended missing status in input 0 (4.905703ms)
+✔ comparison rejects complete extended running status in input 0 (3.823224ms)
+✔ comparison rejects complete legacy running status in input 0 (2.466152ms)
+✔ comparison rejects complete legacy failed status in input 0 (2.3174ms)
+✔ comparison fails a missing image in input 0 (3.975444ms)
+✔ comparison fails an empty image in input 0 (3.902903ms)
+✔ comparison fails an empty folder in input 0 (3.008509ms)
+✔ comparison rejects complete extended missing status in input 1 (3.249018ms)
+✔ comparison rejects complete extended running status in input 1 (3.824306ms)
+✔ comparison rejects complete legacy running status in input 1 (3.907387ms)
+✔ comparison rejects complete legacy failed status in input 1 (3.138391ms)
+✔ comparison fails a missing image in input 1 (2.834912ms)
+✔ comparison fails an empty image in input 1 (2.174016ms)
+✔ comparison fails an empty folder in input 1 (2.57678ms)
+✔ comparison fails missing directory and extra after image (10.643431ms)
+✔ comparison rejects a failed or incomplete report, not just files (9.230842ms)
+✔ metrics distinguish exact equality, below-threshold changes and summed alpha differences (0.969938ms)
+✔ exact delta 24 is not identical even with zero tolerance changes (0.213198ms)
+✔ dimension changes are never labeled identical; invalid buffers fail (0.240743ms)
+✔ CLI rejects nonexistent/empty inputs before requiring Playwright (34.762128ms)
+✔ fixture import performs no config or database reads; diagnostic PNG is deterministic (174.50275ms)
+✔ fixture supplement reuses normalized server marks and refuses altered evidence (241.763819ms)
+✔ actual browser decoder rejects corrupt PNG inputs (724.53077ms)
+graphite-desktop-account-detail.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-accounts.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-activity.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-overview.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-plays-editor.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-plays-list.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-plays-manual.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-portfolios.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-review.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-settings.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-account-detail.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-accounts.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-activity.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-overview.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-plays-editor.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-plays-list.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-plays-manual.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-portfolios.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-review.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-settings.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-account-detail.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-accounts.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-activity.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-overview.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-plays-editor.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-plays-list.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-plays-manual.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-portfolios.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-review.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-settings.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-account-detail.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-accounts.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-activity.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-overview.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-plays-editor.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-plays-list.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-plays-manual.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-portfolios.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-review.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-settings.png: exact 100.000% changed; tolerance >24: 0.000% changed
+✔ actual browser comparison reports low-delta differences and emits exact diff images (634.736629ms)
+✔ comparison rejects a missing report and a legacy/extended matrix mismatch (22.931361ms)
+✔ CLI refuses to overwrite an input folder (39.604863ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2026.189593
