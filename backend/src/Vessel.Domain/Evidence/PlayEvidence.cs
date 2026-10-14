@@ -7,7 +7,7 @@ public enum EvidenceSource { Capture, Upload }
 
 // An image attached to a saved Play with the owner's note. The bytes live in evidence storage
 // under ObjectKey; this record holds what the application needs to authorize and verify them.
-public sealed class PlayEvidence
+public sealed class PlayEvidence : IOwned
 {
     public const int MaxNoteLength = 4000;
 

@@ -26,7 +26,7 @@ public enum StatusChangeSource { Owner, Venue }
 
 // One trading idea. The plan is an application-validated JSON document; after planning, every plan
 // change is an append-only revision. It contains neither inferred executions nor an invented thesis.
-public sealed class Play
+public sealed class Play : IOwned
 {
     public const int MaxTitleLength = 200;
     public const int MaxReviewLength = 20000;
@@ -261,7 +261,7 @@ public sealed class Play
 }
 
 /// <summary>An append-only snapshot of a planned Play's plan and the reason it changed.</summary>
-public sealed class PlayPlanRevision
+public sealed class PlayPlanRevision : IOwned
 {
     public const int MaxReasonLength = 2000;
 
@@ -290,7 +290,7 @@ public sealed class PlayPlanRevision
     }
 }
 
-public sealed class PlayStatusChange
+public sealed class PlayStatusChange : IOwned
 {
     public Guid Id { get; private set; }
     public Guid OwnerId { get; private set; }

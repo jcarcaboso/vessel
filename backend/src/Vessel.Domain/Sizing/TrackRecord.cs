@@ -136,7 +136,7 @@ public sealed record SizingLimits(decimal EffectiveRiskPercent, decimal MaxStopP
 }
 
 /// <summary>The owner's sizing preferences. Risk per trade is a percentage of the play's account balance.</summary>
-public sealed class SizingSettings
+public sealed class SizingSettings : IOwned
 {
     public const decimal DefaultRiskPercent = 1.25m;
     public const decimal MinRiskPercent = 0.1m;

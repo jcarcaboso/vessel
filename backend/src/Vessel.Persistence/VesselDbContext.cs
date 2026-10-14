@@ -1,6 +1,8 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Ownership;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 using Vessel.Domain.Credentials;
 using Vessel.Domain.Evidence;
 using Vessel.Domain.Plays;
@@ -46,7 +48,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         account.HasAlternateKey(x => new { x.OwnerId, x.Id });
         account.Property(x => x.VenueId).HasMaxLength(64);
         account.Property(x => x.Name).HasMaxLength(200);
-        account.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
 
         var portfolio = modelBuilder.Entity<Portfolio>();
         portfolio.ToTable("portfolios");
@@ -54,7 +55,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         portfolio.HasAlternateKey(x => new { x.OwnerId, x.Id });
         portfolio.Property(x => x.Name).HasMaxLength(200);
         portfolio.Property(x => x.Icon).HasMaxLength(PortfolioIcons.MaxLength).HasDefaultValue(PortfolioIcons.Default);
-        portfolio.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         account.HasOne<Portfolio>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PortfolioId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         account.HasIndex(x => new { x.OwnerId, x.VenueId, x.SourceId }).IsUnique()
@@ -77,7 +77,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
             table.HasCheckConstraint("CK_account_credentials_scope", "\"Scope\" IN ('single', 'all')");
         });
         credential.HasKey(x => new { x.OwnerId, x.AccountId, x.Purpose });
-        credential.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         credential.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Cascade);
         credential.Property(x => x.Purpose).HasMaxLength(128);
@@ -90,7 +89,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         snapshot.HasKey(x => new { x.OwnerId, x.AccountId });
         snapshot.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
-        snapshot.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         snapshot.Property(x => x.ValueScope).HasMaxLength(128);
         snapshot.Property(x => x.AccountMode).HasMaxLength(64);
         snapshot.Property(x => x.StablecoinScope).HasMaxLength(128);
@@ -101,7 +99,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         stablecoin.Property(x => x.Symbol).HasMaxLength(32);
         snapshot.HasMany(x => x.Stablecoins).WithOne().HasForeignKey(x => new { x.OwnerId, x.AccountId })
             .OnDelete(DeleteBehavior.Cascade);
-        stablecoin.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         var position = modelBuilder.Entity<AccountPosition>();
         position.ToTable("account_positions");
         position.HasKey(x => new { x.OwnerId, x.AccountId, x.ContractId });
@@ -109,14 +106,12 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         position.Property(x => x.VenueContractId).HasMaxLength(128);
         snapshot.HasMany(x => x.Positions).WithOne().HasForeignKey(x => new { x.OwnerId, x.AccountId })
             .OnDelete(DeleteBehavior.Cascade);
-        position.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
 
         var fill = modelBuilder.Entity<ImportedFill>();
         fill.ToTable("imported_fills");
         fill.HasKey(x => x.Id);
         fill.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
-        fill.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         fill.HasIndex(x => new { x.OwnerId, x.AccountId, x.ContractId, x.SourceFillId }).IsUnique();
         fill.HasIndex(x => new { x.OwnerId, x.OccurredAtUtc });
         fill.Property(x => x.ContractId).HasMaxLength(128);
@@ -164,7 +159,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         play.HasIndex(x => new { x.OwnerId, x.UpdatedAtUtc });
         play.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
-        play.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         play.Ignore(x => x.Instrument);
         play.Property(x => x.VenueId).HasMaxLength(64);
         play.Property(x => x.ContractId).HasMaxLength(128);
@@ -178,7 +172,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         // History is deleted only with its Draft, explicitly; it never cascades.
         revision.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
-        revision.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         revision.HasIndex(x => new { x.OwnerId, x.PlayId, x.Number }).IsUnique();
         revision.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
         revision.Property(x => x.Plan).HasColumnType("jsonb");
@@ -189,7 +182,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         statusChange.HasKey(x => x.Id);
         statusChange.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
-        statusChange.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         statusChange.HasIndex(x => new { x.OwnerId, x.PlayId, x.OccurredAtUtc });
         statusChange.Property(x => x.From).HasConversion<string>().HasMaxLength(16);
         statusChange.Property(x => x.To).HasConversion<string>().HasMaxLength(16);
@@ -200,7 +192,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         reviewRevision.HasKey(x => x.Id);
         reviewRevision.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Cascade);
-        reviewRevision.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         reviewRevision.HasIndex(x => new { x.OwnerId, x.PlayId, x.Number }).IsUnique();
         reviewRevision.Property(x => x.StructuredReview).HasColumnType("jsonb");
         reviewRevision.Property(x => x.Review).HasMaxLength(Play.MaxReviewLength);
@@ -210,7 +201,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         manual.HasKey(x => x.Id);
         manual.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Cascade);
-        manual.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         manual.HasIndex(x => new { x.OwnerId, x.PlayId, x.OccurredAtUtc });
         manual.Property(x => x.Role).HasMaxLength(16); manual.Property(x => x.EntryId).HasMaxLength(100);
         manual.Property(x => x.Side).HasMaxLength(8); manual.Property(x => x.Source).HasMaxLength(100);
@@ -222,7 +212,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         manualHistory.HasKey(x => x.Id);
         manualHistory.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Cascade);
-        manualHistory.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         manualHistory.HasIndex(x => new { x.OwnerId, x.PlayId, x.OccurredAtUtc });
         manualHistory.Property(x => x.Before).HasColumnType("jsonb");
         manualHistory.Property(x => x.After).HasColumnType("jsonb");
@@ -231,7 +220,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         var request = modelBuilder.Entity<DiaryRequest>();
         request.ToTable("diary_requests");
         request.HasKey(x => new { x.OwnerId, x.Id });
-        request.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         request.Property(x => x.PayloadHash).HasMaxLength(64);
         request.Property(x => x.Response).HasColumnType("jsonb");
         statusChange.Property(x => x.Source).HasConversion<string>().HasMaxLength(16).HasDefaultValue(StatusChangeSource.Owner)
@@ -242,7 +230,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         order.HasKey(x => x.Id);
         order.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
-        order.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         order.HasIndex(x => new { x.OwnerId, x.AccountId, x.OrderId }).IsUnique();
         order.Property(x => x.ContractId).HasMaxLength(128);
         order.Property(x => x.OrderId).HasMaxLength(128);
@@ -258,7 +245,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         link.HasKey(x => x.Id);
         link.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
-        link.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         link.Ignore(x => x.LevelKey);
         link.Property(x => x.OrderId).HasMaxLength(128);
         link.Property(x => x.EntryId).HasMaxLength(64);
@@ -282,7 +268,6 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         // Deleting a Play must deal with its stored images explicitly, so it never cascades.
         evidence.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
-        evidence.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         evidence.HasIndex(x => new { x.OwnerId, x.PlayId, x.CreatedAtUtc });
         evidence.HasIndex(x => x.ObjectKey).IsUnique();
         evidence.Property(x => x.ObjectKey).HasMaxLength(256);
@@ -296,42 +281,39 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         sizing.ToTable("sizing_settings", table => table.HasCheckConstraint("CK_sizing_settings_risk",
             "\"RiskPercent\" >= 0.1 AND \"RiskPercent\" <= 5"));
         sizing.HasKey(x => x.OwnerId);
-        sizing.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
         sizing.Property(x => x.RiskPercent).HasPrecision(5, 2);
+        ApplyOwnerFilters(modelBuilder);
+    }
+
+    // Every entity type is owned and filtered to the current owner. A type that is not IOwned fails model
+    // building, so a new table cannot silently miss the read filter or the save guard.
+    private void ApplyOwnerFilters(ModelBuilder modelBuilder)
+    {
+        // The context constant becomes a per-query parameter, exactly as with HasQueryFilter(x => x.OwnerId == CurrentOwnerId).
+        var currentOwnerId = Expression.Property(Expression.Constant(this), nameof(CurrentOwnerId));
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            if (!typeof(IOwned).IsAssignableFrom(entityType.ClrType))
+                throw new InvalidOperationException(
+                    $"Entity type '{entityType.DisplayName()}' must implement {nameof(IOwned)} to be filtered and guarded by owner.");
+            var entity = Expression.Parameter(entityType.ClrType, "e");
+            var ownerId = Expression.Property(Expression.Convert(entity, typeof(IOwned)), nameof(IOwned.OwnerId));
+            entityType.SetQueryFilter(Expression.Lambda(Expression.Equal(ownerId, currentOwnerId), entity));
+        }
     }
 
     private void ValidateOwnership()
     {
-        // Reject foreign tracked heads even if loaded with an explicit filter bypass.
+        // Reject foreign tracked records even if loaded with an explicit filter bypass.
         foreach (var entry in ChangeTracker.Entries())
         {
             if (entry.State == EntityState.Modified &&
                 entry.Entity is Vessel.Domain.Plays.ManualExecutionHistory or PlayReviewRevision or DiaryRequest)
                 throw new InvalidOperationException("Diary audit and request records are append-only.");
-            var ownerId = entry.Entity switch
-            {
-                Account account => account.OwnerId,
-                AccountCredential credential => credential.OwnerId,
-                Play play => play.OwnerId,
-                Portfolio portfolio => portfolio.OwnerId,
-                AccountSnapshot snapshot => snapshot.OwnerId,
-                AccountPosition position => position.OwnerId,
-                AccountStablecoin stablecoin => stablecoin.OwnerId,
-                ImportedFill fill => fill.OwnerId,
-                PlayEvidence evidence => evidence.OwnerId,
-                PlayPlanRevision revision => revision.OwnerId,
-                PlayStatusChange change => change.OwnerId,
-                ImportedOrder importedOrder => importedOrder.OwnerId,
-                PlayOrderLink orderLink => orderLink.OwnerId,
-                ManualExecution manual => manual.OwnerId,
-                ManualExecutionHistory manualHistory => manualHistory.OwnerId,
-                PlayReviewRevision reviewRevision => reviewRevision.OwnerId,
-                DiaryRequest request => request.OwnerId,
-                SizingSettings sizing => sizing.OwnerId,
-                _ => (Guid?)null
-            };
-            if (ownerId.HasValue && (ownerId != CurrentOwnerId ||
-                entry.Property(nameof(Account.OwnerId)).OriginalValue is Guid original && original != CurrentOwnerId))
+            var owned = entry.Entity as IOwned ?? throw new InvalidOperationException(
+                $"Entity type '{entry.Metadata.DisplayName()}' has no owner and cannot be saved.");
+            if (owned.OwnerId != CurrentOwnerId ||
+                entry.Property(nameof(IOwned.OwnerId)).OriginalValue is Guid original && original != CurrentOwnerId)
                 throw new UnauthorizedAccessException("Cannot write another owner's records.");
         }
     }

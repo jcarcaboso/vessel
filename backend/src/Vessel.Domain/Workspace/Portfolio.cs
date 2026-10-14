@@ -2,7 +2,7 @@ using Vessel.Domain.Common;
 
 namespace Vessel.Domain.Workspace;
 
-public sealed class Portfolio
+public sealed class Portfolio : IOwned
 {
     public Guid Id { get; private set; }
     public Guid OwnerId { get; private set; }

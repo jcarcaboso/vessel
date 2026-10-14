@@ -2,7 +2,7 @@ using Vessel.Domain.Common;
 
 namespace Vessel.Domain.Accounts;
 
-public sealed class Account
+public sealed class Account : IOwned
 {
     private const string OrderHistorySection = "\nOrder history: ";
     public Guid Id { get; private set; }
