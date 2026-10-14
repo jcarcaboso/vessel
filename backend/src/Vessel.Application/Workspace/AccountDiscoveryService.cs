@@ -1,3 +1,4 @@
+using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
@@ -23,19 +24,19 @@ public sealed class AccountDiscoveryService(IWorkspaceStore accounts, IJournalOw
     {
         var token = request.Token?.Trim();
         if (string.IsNullOrEmpty(token) || request.Token!.Length > 512)
-            throw new WorkspaceException(400, "Enter a read-only token of at most 512 characters.");
+            throw new ProblemException(400, "Enter a read-only token of at most 512 characters.");
         if (venues.Descriptor(venueId)?.Capabilities.ReadOnlyCredential != true)
-            throw new WorkspaceException(400, "This venue does not support read-only credentials.");
+            throw new ProblemException(400, "This venue does not support read-only credentials.");
         return DiscoverCoreAsync(venueId, request.Address, token, ct);
     }
 
     private async Task<AccountDiscoveryDto> DiscoverCoreAsync(string venueId, string? address, string? token, CancellationToken ct)
     {
         if (venues.Descriptor(venueId)?.Capabilities.AccountDiscovery != true)
-            throw new WorkspaceException(400, "This venue does not support account discovery.");
-        if (!AccountSource.IsEvmAddress(address)) throw new WorkspaceException(400, "A 42-character public hexadecimal address is required.");
+            throw new ProblemException(400, "This venue does not support account discovery.");
+        if (!AccountSource.IsEvmAddress(address)) throw new ProblemException(400, "A 42-character public hexadecimal address is required.");
         var discovery = discoveries.SingleOrDefault(d => d.VenueId == venueId)
-            ?? throw new WorkspaceException(503, "Venue discovery is unavailable.");
+            ?? throw new ProblemException(503, "Venue discovery is unavailable.");
         IReadOnlyList<VenueAccountCandidate> found;
         try
         {
@@ -52,9 +53,9 @@ public sealed class AccountDiscoveryService(IWorkspaceStore accounts, IJournalOw
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (VenueCredentialRejectedException) when (token is not null)
         {
-            throw new WorkspaceException(400, "The read-only token is not valid for this wallet. Check its format, wallet, scope and expiry.");
+            throw new ProblemException(400, "The read-only token is not valid for this wallet. Check its format, wallet, scope and expiry.");
         }
-        catch (Exception) { throw new WorkspaceException(502, token is null
+        catch (Exception) { throw new ProblemException(502, token is null
             ? "Venue accounts could not be discovered. Try again later."
             : "Venue names could not be loaded. Check the read-only token's wallet, scope and expiry."); }
         // Include disabled accounts so discovery cannot suggest importing the same source again.

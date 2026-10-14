@@ -1,7 +1,7 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Activity;
-using Vessel.Application.Workspace;
+using Vessel.Application.Common;
 using Vessel.Domain.Plays;
 
 namespace Vessel.Persistence;
@@ -13,7 +13,7 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         if (accountIds is { Count: 0 }) return new([], [], [], new Dictionary<Guid, Guid>());
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
         if (accountId is { } id && !await db.Accounts.AnyAsync(a => a.Id == id, ct))
-            throw new WorkspaceException(404, "Account not found.");
+            throw new ProblemException(404, "Account not found.");
         var query = db.Accounts.Where(a => a.IsEnabled && (accountId == null || a.Id == accountId));
         if (accountIds is not null)
         {

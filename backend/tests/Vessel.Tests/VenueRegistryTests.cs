@@ -1,3 +1,4 @@
+using Vessel.Application.Common;
 using Vessel.Application.System;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
@@ -48,9 +49,9 @@ public sealed class VenueRegistryTests
         var service = new WorkspaceService(store, new CoreOwner(owner), Registry(new FixtureReader(), new OtherReader()));
         const string address = "0x0123456789abcdef0123456789abcdef01234567";
 
-        var bad = await Assert.ThrowsAsync<WorkspaceException>(() => service.CreateAccountAsync(new(null, "Bad", "other", "0x12"), default));
+        var bad = await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(null, "Bad", "other", "0x12"), default));
         Assert.Equal((400, "A matching 42-character public hexadecimal address is required."), (bad.StatusCode, bad.Message));
-        var unknown = await Assert.ThrowsAsync<WorkspaceException>(() => service.CreateAccountAsync(new(null, "Nope", "lighter", address), default));
+        var unknown = await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(null, "Nope", "lighter", address), default));
         Assert.Equal((400, "Choose manual, hyperliquid or other."), (unknown.StatusCode, unknown.Message));
 
         var account = await service.CreateAccountAsync(new(null, "Second", "other", address), default);
@@ -58,7 +59,7 @@ public sealed class VenueRegistryTests
         var catalogue = await service.InstrumentsAsync(account.Id, default);
         Assert.Equal("other", catalogue.VenueId);
         Assert.Equal("ABC", Assert.Single(catalogue.Instruments).ContractId);
-        var duplicate = await Assert.ThrowsAsync<WorkspaceException>(() => service.CreateAccountAsync(new(null, "Again", "other", address.ToUpperInvariant().Replace("0X", "0x")), default));
+        var duplicate = await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(null, "Again", "other", address.ToUpperInvariant().Replace("0X", "0x")), default));
         Assert.Equal(409, duplicate.StatusCode);
     }
 
@@ -71,13 +72,13 @@ public sealed class VenueRegistryTests
         var registry = new VenueRegistry([VenueDescriptor.Manual, HyperliquidPerpetualReader.Descriptor, noSync], [new FixtureReader()], [], [], [], []);
         var service = new WorkspaceService(store, new CoreOwner(owner), registry);
         var manual = await service.CreateAccountAsync(new(null, "Manual", "manual"), default);
-        var refused = await Assert.ThrowsAsync<WorkspaceException>(() => service.SyncAsync(manual.Id, default));
+        var refused = await Assert.ThrowsAsync<ProblemException>(() => service.SyncAsync(manual.Id, default));
         Assert.Equal((400, "Only Hyperliquid accounts can be refreshed."), (refused.StatusCode, refused.Message));
 
         // Sync is allowed for the venue but its adapter is not registered.
         var missing = new WorkspaceService(store, new CoreOwner(owner), Registry());
         var account = await missing.CreateAccountAsync(new(null, "Second", "other", address), default);
-        var unavailable = await Assert.ThrowsAsync<WorkspaceException>(() => missing.SyncAsync(account.Id, default));
+        var unavailable = await Assert.ThrowsAsync<ProblemException>(() => missing.SyncAsync(account.Id, default));
         Assert.Equal((503, "Venue reader is unavailable."), (unavailable.StatusCode, unavailable.Message));
     }
 

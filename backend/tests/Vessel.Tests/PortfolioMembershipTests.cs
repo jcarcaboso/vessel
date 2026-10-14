@@ -1,3 +1,4 @@
+using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
@@ -39,7 +40,7 @@ public sealed class PortfolioMembershipTests
         store.Accounts.AddRange(accounts); var first = accounts[0]; var stale = accounts[1];
         stale.UpdateSettings(stale.Name, target.Id, stale.IsEnabled);
         var expected = new AccountSettingsExpectation[] { new(first.Id, 1), new(stale.Id, 1) };
-        var error = await Assert.ThrowsAsync<WorkspaceException>(async () =>
+        var error = await Assert.ThrowsAsync<ProblemException>(async () =>
         {
             if (create) await Service(store).CreatePortfolioAsync(new("Rejected", AccountIds: [first.Id, stale.Id], Expected: expected), default);
             else await Service(store).MoveAccountsAsync(new([first.Id, stale.Id], unlink ? null : target.Id, expected), default);
@@ -71,9 +72,9 @@ public sealed class PortfolioMembershipTests
             "negative" => [new(first.Id, -1), new(second.Id, 1)],
             _ => [new(first.Id, 1), null!]
         };
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() =>
             Service(store).MoveAccountsAsync(new([first.Id, second.Id], null, expected), default))).StatusCode);
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() =>
             Service(store).CreatePortfolioAsync(new("Rejected", AccountIds: [first.Id, second.Id], Expected: expected), default))).StatusCode);
         Assert.Empty(store.Portfolios); Assert.Equal(0, store.Saves);
     }
@@ -82,7 +83,7 @@ public sealed class PortfolioMembershipTests
     public async Task Expectations_without_selected_accounts_cannot_create_a_portfolio()
     {
         var store = new MemoryWorkspaceStore(Owner);
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() =>
             Service(store).CreatePortfolioAsync(new("Rejected", Expected: [new(Guid.NewGuid(), 1)]), default))).StatusCode);
         Assert.Empty(store.Portfolios);
     }
@@ -99,7 +100,7 @@ public sealed class PortfolioMembershipTests
         Assert.False(disabled.IsEnabled); Assert.Equal("Disabled", disabled.Name); Assert.Equal(123.456m, disabled.ManualAccountValueUsd);
         await Service(store).MoveAccountsAsync(new([first.Id, disabled.Id], null), default);
         Assert.Null(first.PortfolioId); Assert.Null(disabled.PortfolioId); Assert.Equal(3, first.SettingsRevision);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => Service(store).UpdateAccountAsync(first.Id, new("Stale", null, true, 1), default))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => Service(store).UpdateAccountAsync(first.Id, new("Stale", null, true, 1), default))).StatusCode);
     }
 
     [Fact]
@@ -122,7 +123,7 @@ public sealed class PortfolioMembershipTests
         var target = new Portfolio(Guid.NewGuid(), Owner, "Target"); store.Portfolios.Add(target); store.Accounts.Add(valid);
         if (foreign) store.Accounts.Add(invalid);
         var ids = new[] { valid.Id, invalid.Id };
-        var error = await Assert.ThrowsAsync<WorkspaceException>(async () =>
+        var error = await Assert.ThrowsAsync<ProblemException>(async () =>
         {
             if (create) await Service(store).CreatePortfolioAsync(new("Rejected", AccountIds: ids), default);
             else await Service(store).MoveAccountsAsync(new(ids, target.Id), default);
@@ -138,7 +139,7 @@ public sealed class PortfolioMembershipTests
     {
         var store = new MemoryWorkspaceStore(Owner); var account = Account(); store.Accounts.Add(account);
         var target = new Portfolio(Guid.NewGuid(), Guid.NewGuid(), "Foreign"); if (foreign) store.Portfolios.Add(target);
-        Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => Service(store).MoveAccountsAsync(new([account.Id], target.Id), default))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => Service(store).MoveAccountsAsync(new([account.Id], target.Id), default))).StatusCode);
         Assert.Null(account.PortfolioId); Assert.Equal(1, account.SettingsRevision);
     }
 
@@ -151,9 +152,9 @@ public sealed class PortfolioMembershipTests
     {
         var store = new MemoryWorkspaceStore(Owner);
         Guid[]? ids = count < 0 ? null : count == 2 ? [Guid.Empty, Guid.Empty] : Enumerable.Range(0, count).Select(_ => Guid.NewGuid()).ToArray();
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => Service(store).MoveAccountsAsync(new(ids, null), default))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Service(store).MoveAccountsAsync(new(ids, null), default))).StatusCode);
         if (ids is not null)
-            Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => Service(store).CreatePortfolioAsync(new("Rejected", AccountIds: ids), default))).StatusCode);
+            Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Service(store).CreatePortfolioAsync(new("Rejected", AccountIds: ids), default))).StatusCode);
         Assert.Empty(store.Portfolios);
     }
 }

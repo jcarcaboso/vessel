@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Vessel.Application.Common;
 using Vessel.Application.Credentials;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
@@ -37,13 +38,13 @@ public sealed class AccountSecurityPostgresTests
         Assert.Equal("1000PEPE", position.ContractId); Assert.Equal("kPEPE", position.VenueContractId);
         Assert.False(db.Database.HasPendingModelChanges());
         var service = new WorkspaceService(new WorkspaceStore(db), new CoreOwner(owner), SecurityFixture.Registry());
-        var duplicate = await Assert.ThrowsAsync<WorkspaceException>(() => service.CreateAccountAsync(new(null, "Duplicate", "hyperliquid", Address: SecurityFixture.Address), default));
+        var duplicate = await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(null, "Duplicate", "hyperliquid", Address: SecurityFixture.Address), default));
         Assert.Equal(409, duplicate.StatusCode);
         var created = await service.CreateAccountAsync(new(null, "Index", SecurityFixture.Venue.Id, SourceId: "9223372036854775807"), default);
         Assert.Equal("9223372036854775807", created.SourceId);
         var disabled = await service.UpdateAccountAsync(created.Id, new("Index", null, false, 1), default);
         Assert.False(disabled.IsEnabled);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => service.CreateAccountAsync(new(null, "Again", SecurityFixture.Venue.Id, SourceId: created.SourceId), default))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(null, "Again", SecurityFixture.Venue.Id, SourceId: created.SourceId), default))).StatusCode);
         await using var other = database.Context(Guid.NewGuid());
         var otherService = new WorkspaceService(new WorkspaceStore(other), new CoreOwner(other.CurrentOwnerId), SecurityFixture.Registry());
         Assert.NotNull(await otherService.CreateAccountAsync(new(null, "Other owner", SecurityFixture.Venue.Id, SourceId: created.SourceId), default));
@@ -85,7 +86,7 @@ public sealed class AccountSecurityPostgresTests
         Assert.Empty(await foreign.AccountCredentials.ToListAsync());
         Assert.Null(await new AccountCredentialStore(foreign).FindAsync(account.Id, row.Purpose, default));
         var foreignService = SecurityFixture.Service(foreign.CurrentOwnerId, new WorkspaceStore(foreign), new AccountCredentialStore(foreign), vault);
-        Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => foreignService.GetAsync(account.Id, default))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => foreignService.GetAsync(account.Id, default))).StatusCode);
         await Assert.ThrowsAsync<PostgresException>(() => foreign.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO account_credentials ("OwnerId", "AccountId", "Purpose", "KeyId", "Nonce", "Ciphertext", "Tag", "Scope", "ExpiresAt", "CreatedAt", "LastVerifiedAt")
             VALUES ({foreign.CurrentOwnerId}, {account.Id}, {row.Purpose}, {row.KeyId}, {row.Nonce}, {row.Ciphertext}, {row.Tag}, 'single', now(), now(), now())
@@ -120,7 +121,7 @@ public sealed class AccountSecurityPostgresTests
         await using var check = database.Context(owner);
         Assert.False((await check.Accounts.SingleAsync()).IsEnabled); Assert.Single(await check.AccountCredentials.ToListAsync());
         var reader = new AccountCredentialReader(new WorkspaceStore(check), new AccountCredentialStore(check), new CoreOwner(owner), vault, SecurityFixture.Clock);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => reader.ReadAsync(account.Id, default))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => reader.ReadAsync(account.Id, default))).StatusCode);
         await management.DeleteAccountAsync(account.Id, default); Assert.Empty(await check.AccountCredentials.AsNoTracking().ToListAsync());
     }
 

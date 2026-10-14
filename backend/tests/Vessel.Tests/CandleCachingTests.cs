@@ -1,9 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Vessel.Application.Common;
 using Vessel.Application.MarketData;
 using Vessel.Application.Venues;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 
@@ -197,7 +197,7 @@ public sealed class CandleCachingTests
         var (_, store, account) = Setup(); var clock = new Clock();
         var reader = new Reader { Failure = new VenueReadException("private") };
         var service = new CandleService(store, TestVenues.With(reader), new CandleCache(clock), clock);
-        var failure = await Assert.ThrowsAsync<WorkspaceException>(() => service.CandlesAsync(account.Id, "BTC", "1h", null, default));
+        var failure = await Assert.ThrowsAsync<ProblemException>(() => service.CandlesAsync(account.Id, "BTC", "1h", null, default));
         Assert.Equal(502, failure.StatusCode);
         reader.Failure = null;
         Assert.Single((await service.CandlesAsync(account.Id, "BTC", "1h", null, default)).Candles);
@@ -286,7 +286,7 @@ public sealed class CandleCachingTests
         var result = await service.CandlesAsync(account.Id, "1000PEPE", "1h", end, default);
         Assert.Equal("1000PEPE", result.Instrument);
         Assert.Equal("kPEPE", reader.Native);
-        var unknown = await Assert.ThrowsAsync<WorkspaceException>(() => service.CandlesAsync(account.Id, "kPEPE", "1h", end, default));
+        var unknown = await Assert.ThrowsAsync<ProblemException>(() => service.CandlesAsync(account.Id, "kPEPE", "1h", end, default));
         Assert.Equal(409, unknown.StatusCode);
         Assert.Equal("This market is no longer listed.", unknown.Message);
         catalogue.Result = catalogue.Result with { Instruments = [new("1000PEPE", 2, 10, "USDC", VenueContractId: "18")] };
@@ -306,7 +306,7 @@ public sealed class CandleCachingTests
         var end = clock.Now.AddDays(-1).ToUnixTimeMilliseconds();
         await service.CandlesAsync(account.Id, "BTC", "1h", end, default);
         intervals.Remove("1h");
-        var unsupported = await Assert.ThrowsAsync<WorkspaceException>(() => service.CandlesAsync(account.Id, "BTC", "1h", end, default));
+        var unsupported = await Assert.ThrowsAsync<ProblemException>(() => service.CandlesAsync(account.Id, "BTC", "1h", end, default));
         Assert.Equal(400, unsupported.StatusCode);
         Assert.Equal(1, reader.Reads);
     }

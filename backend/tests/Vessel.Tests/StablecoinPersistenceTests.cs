@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Application.Venues;
 
@@ -87,7 +88,7 @@ public sealed class StablecoinPersistenceTests
         await service.UpdateAccountAsync(account.Id, new("Wallet", null, true, 2), default);
         Assert.Equal("14.00000000000000000000000001", (await service.AccountAsync(account.Id, default)).AvailableStablecoinNominalUsd);
         reader.Fail = true;
-        await Assert.ThrowsAsync<WorkspaceException>(() => service.SyncAsync(account.Id, default));
+        await Assert.ThrowsAsync<ProblemException>(() => service.SyncAsync(account.Id, default));
         Assert.Equal("14.00000000000000000000000001", (await service.SnapshotAsync(account.Id, default))!.StablecoinWallet!.AvailableNominalUsd);
         await service.DeleteAccountAsync(account.Id, default);
         Assert.Empty(await db.Stablecoins.ToListAsync());
@@ -117,7 +118,7 @@ public sealed class StablecoinPersistenceTests
         {
             Assert.Empty(await foreign.Stablecoins.ToListAsync());
             var foreignService = new WorkspaceService(new Vessel.Persistence.WorkspaceStore(foreign), new CoreOwner(foreign.CurrentOwnerId), TestVenues.With(reader));
-            Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => foreignService.SnapshotAsync(account.Id, default))).StatusCode);
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => foreignService.SnapshotAsync(account.Id, default))).StatusCode);
         }
         reader.Result = reader.Result with
         {

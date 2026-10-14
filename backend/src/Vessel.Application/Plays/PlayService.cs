@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 using System.Text.Json;
+using Vessel.Application.Common;
 using Vessel.Application.Evidence;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
@@ -39,7 +39,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     {
         var play = await Find(id, ct);
         RequireVersion(play, request.ExpectedVersion);
-        if (request.Plan is null) throw new WorkspaceException(400, "A plan compatibility document is required.");
+        if (request.Plan is null) throw new ProblemException(400, "A plan compatibility document is required.");
         // Retrospectives keep an empty compatibility document, not a manufactured plan.
         var plan = play.Origin == PlayOrigin.Retrospective
             ? PlayDocuments.Serialize(request.Plan) : PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan));
@@ -49,7 +49,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             request.InstrumentSource != SourceName(play.InstrumentSource))
         {
             var account = play.Status == PlayStatus.Draft ? await EnabledAccount(request.AccountId, ct)
-                : throw new WorkspaceException(409, "The account and instrument are fixed once a Play is planned.");
+                : throw new ProblemException(409, "The account and instrument are fixed once a Play is planned.");
             var (instrument, source) = Instrument(account, request.Instrument, request.InstrumentSource);
             Apply(() => play.MoveTo(account, instrument, source, now));
         }
@@ -92,12 +92,12 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
                     "expired" => CancelReason.Expired,
                     "mistake" => CancelReason.Mistake,
                     "other" => CancelReason.Other,
-                    _ => throw new WorkspaceException(400, "Cancel reasons are invalidated, missed, changed-mind, expired, mistake or other.")
+                    _ => throw new ProblemException(400, "Cancel reasons are invalidated, missed, changed-mind, expired, mistake or other.")
                 };
                 store.Add(Apply(() => play.Cancel(reason, request.Note, now)));
                 break;
             default:
-                throw new WorkspaceException(400, "Status must be planned, paused or cancelled.");
+                throw new ProblemException(400, "Status must be planned, paused or cancelled.");
         }
         await store.SaveAsync(ct);
         return ToDto(play);
@@ -120,7 +120,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     {
         var play = await Find(id, ct);
         if (play.Status != PlayStatus.Draft)
-            throw new WorkspaceException(409, "Only Drafts can be deleted. Cancel a planned Play instead, so its history is kept.");
+            throw new ProblemException(409, "Only Drafts can be deleted. Cancel a planned Play instead, so its history is kept.");
         foreach (var key in await store.DeleteAsync(play, ct))
         {
             try { await objects.DeleteAsync(key, CancellationToken.None); }
@@ -138,7 +138,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var current = PlayDocuments.Read(play.Plan);
         var linked = await store.LinkedPlanReferencesAsync(play.Id, ct);
         if ((filled.Count > 0 || linked.Count > 0) && next.Direction != current.Direction)
-            throw new WorkspaceException(409, $"This play has entry fills or linked orders, so it stays {current.Direction}. Start a new play for the opposite idea.");
+            throw new ProblemException(409, $"This play has entry fills or linked orders, so it stays {current.Direction}. Start a new play for the opposite idea.");
         foreach (var link in linked.Where(l => l.Role is OrderLinkRole.Stop or OrderLinkRole.Target))
         {
             var oldEntry = current.Entries.FirstOrDefault(e => e.Id == link.EntryId);
@@ -148,7 +148,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             if (nextEntry is null || nextLevel is null || nextLevel != oldLevel || nextEntry.Price != oldEntry?.Price ||
                 nextEntry.Share != oldEntry?.Share ||
                 next.Leverage != current.Leverage && oldLevel?.Unit == "percent")
-                throw new WorkspaceException(409, $"Order {link.OrderId} still references this plan level. Unlink it before changing or removing the level.");
+                throw new ProblemException(409, $"Order {link.OrderId} still references this plan level. Unlink it before changing or removing the level.");
         }
         var before = current.Entries.ToDictionary(e => e.Id);
         foreach (var id in filled)
@@ -156,23 +156,23 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             if (!before.TryGetValue(id, out var old)) continue;
             var now = next.Entries.FirstOrDefault(e => e.Id == id);
             if (now is null || now.Price != old.Price || now.Share != old.Share)
-                throw new WorkspaceException(409, $"{old.Name} has fills or linked orders, so its price and share stay as planned. Unlinked stops and targets can still change.");
+                throw new ProblemException(409, $"{old.Name} has fills or linked orders, so its price and share stay as planned. Unlinked stops and targets can still change.");
         }
     }
 
     private async Task<Play> Find(Guid id, CancellationToken ct) =>
-        await store.FindAsync(id, ct) ?? throw new WorkspaceException(404, "Play not found.");
+        await store.FindAsync(id, ct) ?? throw new ProblemException(404, "Play not found.");
 
     private async Task<Account> EnabledAccount(Guid id, CancellationToken ct)
     {
-        var account = await store.AccountAsync(id, ct) ?? throw new WorkspaceException(404, "Account not found.");
-        return account.IsEnabled ? account : throw new WorkspaceException(409, "Enable the account before using it for a Play.");
+        var account = await store.AccountAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
+        return account.IsEnabled ? account : throw new ProblemException(409, "Enable the account before using it for a Play.");
     }
 
     private static void RequireVersion(Play play, long expected)
     {
         if (play.Version != expected)
-            throw new WorkspaceException(409, "This Play changed elsewhere. Reload it before saving again.");
+            throw new ProblemException(409, "This Play changed elsewhere. Reload it before saving again.");
     }
 
     private static (PerpetualInstrument?, InstrumentSource) Instrument(Account account, string? instrument, string? source)
@@ -180,23 +180,23 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var kind = source switch
         {
             "venue" when account.VenueId != "manual" => InstrumentSource.Venue,
-            "venue" => throw new WorkspaceException(400, "Manual accounts use manual instrument labels."),
+            "venue" => throw new ProblemException(400, "Manual accounts use manual instrument labels."),
             "manual" => InstrumentSource.Manual,
-            _ => throw new WorkspaceException(400, "Instrument source must be venue or manual.")
+            _ => throw new ProblemException(400, "Instrument source must be venue or manual.")
         };
         if (string.IsNullOrEmpty(instrument)) return (null, kind);
         var valid = kind == InstrumentSource.Venue ? ContractPattern().IsMatch(instrument)
             : instrument.Length <= 64 && instrument == instrument.Trim() && !instrument.Any(char.IsControl);
         return valid ? (new PerpetualInstrument(account.VenueId, instrument), kind)
-            : throw new WorkspaceException(400, kind == InstrumentSource.Venue ? "Venue instruments use their contract ID."
+            : throw new ProblemException(400, kind == InstrumentSource.Venue ? "Venue instruments use their contract ID."
                 : "Manual instrument labels have at most 64 characters without surrounding spaces.");
     }
 
     private static T Apply<T>(Func<T> action)
     {
         try { return action(); }
-        catch (PlayRuleException error) { throw new WorkspaceException(409, error.Message); }
-        catch (ArgumentException error) { throw new WorkspaceException(400, error.Message); }
+        catch (PlayRuleException error) { throw new ProblemException(409, error.Message); }
+        catch (ArgumentException error) { throw new ProblemException(400, error.Message); }
     }
 
     private static void Apply(Action action) => Apply(() => { action(); return true; });

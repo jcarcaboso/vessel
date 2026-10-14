@@ -4,8 +4,8 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Npgsql;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Evidence;
 using Vessel.Domain.Markets;
@@ -150,7 +150,7 @@ public sealed class PlayDocumentTests
             // Stop and target IDs share one namespace with entries.
             TestPlays.Plan() with { Entries = [TestPlays.Plan().Entries[0] with { Stops = [new PlanExit("target-1", "price", "90", "100")] }] },
         })
-            Assert.Equal(400, Assert.Throws<WorkspaceException>(() => PlayDocuments.Normalize(invalid)).StatusCode);
+            Assert.Equal(400, Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(invalid)).StatusCode);
     }
 
     [Fact]
@@ -158,8 +158,8 @@ public sealed class PlayDocumentTests
     {
         var reversed = TestPlays.Plan(stop: "105");
         Assert.Equal("Entry 1: a long stop goes below the entry price.",
-            Assert.Throws<WorkspaceException>(() => PlayDocuments.Normalize(reversed)).Message);
-        Assert.Throws<WorkspaceException>(() => PlayDocuments.Normalize(TestPlays.Plan(stop: "100")));
+            Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(reversed)).Message);
+        Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(TestPlays.Plan(stop: "100")));
         // The same levels describe a short with the stop and target swapped.
         var entry = reversed.Entries[0];
         PlayDocuments.Normalize(reversed with { Direction = "short", Entries = [entry with { Targets = [new PlanExit("target-1", "price", "90", "100")] }] });
@@ -172,7 +172,7 @@ public sealed class PlayDocumentTests
     [Fact]
     public void Planning_requires_a_priced_entry()
     {
-        Assert.Equal(409, Assert.Throws<WorkspaceException>(() => PlayDocuments.RequirePlannable(TestPlays.Plan(""))).StatusCode);
+        Assert.Equal(409, Assert.Throws<ProblemException>(() => PlayDocuments.RequirePlannable(TestPlays.Plan(""))).StatusCode);
         PlayDocuments.RequirePlannable(TestPlays.Plan("1e-5"));
     }
 
@@ -183,9 +183,9 @@ public sealed class PlayDocumentTests
         Assert.Equal("""{"hyperliquid:BTC":[{"id":"a"}]}""",
             PlayDocuments.NormalizeDrawings(JsonDocument.Parse("""{ "hyperliquid:BTC": [ { "id": "a" } ] }""").RootElement));
         foreach (var invalid in new[] { "[]", """{"a":{}}""", """{"a":[1]}""", """{"":[]}""" })
-            Assert.Throws<WorkspaceException>(() => PlayDocuments.NormalizeDrawings(JsonDocument.Parse(invalid).RootElement));
+            Assert.Throws<ProblemException>(() => PlayDocuments.NormalizeDrawings(JsonDocument.Parse(invalid).RootElement));
         var many = "{\"a\":[" + string.Join(',', Enumerable.Repeat("{}", 201)) + "]}";
-        Assert.Throws<WorkspaceException>(() => PlayDocuments.NormalizeDrawings(JsonDocument.Parse(many).RootElement));
+        Assert.Throws<ProblemException>(() => PlayDocuments.NormalizeDrawings(JsonDocument.Parse(many).RootElement));
     }
 }
 
@@ -247,22 +247,22 @@ public sealed class PlayServiceTests
     [Fact]
     public async Task Validates_accounts_and_instruments()
     {
-        Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => Create(new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Foreign")))).StatusCode);
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => Create(manual, "BTC", "venue"))).StatusCode);
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => Create(instrument: "dex:BTC"))).StatusCode);
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => Create(manual, " BTC", "manual"))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => Create(new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Foreign")))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Create(manual, "BTC", "venue"))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Create(instrument: "dex:BTC"))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Create(manual, " BTC", "manual"))).StatusCode);
         Assert.Equal("BTC-PERP", (await Create(manual, "BTC-PERP", "manual")).Summary.Instrument);
         Assert.Equal("manual", (await Create(venue, "Some label", "manual")).Summary.InstrumentSource);
         Assert.Null((await Create(instrument: null)).Summary.Instrument);
         venue.UpdateSettings(venue.Name, null, false);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => Create())).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => Create())).StatusCode);
     }
 
     [Fact]
     public async Task Planning_then_revising_keeps_the_history()
     {
         var play = await Create(plan: TestPlays.Plan(""));
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
             service.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "planned"), default))).StatusCode);
         play = await service.UpdateAsync(play.Summary.Id, Update(play, TestPlays.Plan("100")), default);
         Assert.Empty(store.Revisions);
@@ -270,9 +270,9 @@ public sealed class PlayServiceTests
         Assert.Equal(("planned", 1), (play.Summary.Status, play.Summary.PlanRevision));
 
         var moved = TestPlays.Plan(stop: "97");
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
             service.UpdateAsync(play.Summary.Id, Update(play, moved), default))).StatusCode);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
             service.UpdateAsync(play.Summary.Id, Update(play, instrument: "ETH"), default))).StatusCode);
         play = await service.UpdateAsync(play.Summary.Id, Update(play, moved, "Stop under the new swing low"), default);
         Assert.Equal(2, play.Summary.PlanRevision);
@@ -289,13 +289,13 @@ public sealed class PlayServiceTests
         var play = await Create();
         var stale = play.Summary.Version;
         play = await service.UpdateAsync(play.Summary.Id, Update(play) with { Title = "Renamed" }, default);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
             service.UpdateAsync(play.Summary.Id, Update(play) with { ExpectedVersion = stale }, default))).StatusCode);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
             service.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "paused"), default))).StatusCode);
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() =>
             service.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "open"), default))).StatusCode);
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() =>
             service.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "cancelled", "bored"), default))).StatusCode);
         play = await service.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "cancelled", "changed-mind", "Not my setup"), default);
         Assert.Equal(("cancelled", "changed-mind"), (play.Summary.Status, play.Summary.CancelReason));
@@ -315,8 +315,8 @@ public sealed class PlayServiceTests
 
         var planned = await Create();
         planned = await service.ChangeStatusAsync(planned.Summary.Id, new(planned.Summary.Version, "planned"), default);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => service.DeleteAsync(planned.Summary.Id, default))).StatusCode);
-        Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.GetAsync(Guid.NewGuid(), default))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.DeleteAsync(planned.Summary.Id, default))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.GetAsync(Guid.NewGuid(), default))).StatusCode);
     }
 }
 

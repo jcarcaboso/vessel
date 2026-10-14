@@ -1,12 +1,12 @@
 using System.Globalization;
 using System.Text.Json;
 using Vessel.Application.Activity;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Review;
 using Vessel.Application.Sizing;
 using Vessel.Application.Venues;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
@@ -40,7 +40,7 @@ public sealed class ManualLedgerPrecisionTests
         var partial = ManualLedger.Calculate(play, rows[..^1]);
         Assert.Equal(1, partial.Open);
         Assert.Null(partial.ClosedAt);
-        var error = Assert.Throws<WorkspaceException>(() => ManualLedger.Calculate(play, rows));
+        var error = Assert.Throws<ProblemException>(() => ManualLedger.Calculate(play, rows));
         Assert.Equal(400, error.StatusCode);
         Assert.Contains("exact decimal precision", error.Message);
     }
@@ -79,7 +79,7 @@ public sealed class ManualLedgerPrecisionTests
     public void Completed_gross_that_requires_rounding_is_rejected(string direction)
     {
         var play = CreatePlay(direction);
-        var error = Assert.Throws<WorkspaceException>(() => ManualLedger.Calculate(play,
+        var error = Assert.Throws<ProblemException>(() => ManualLedger.Calculate(play,
         [
             Row(play, "entry", "3", "1", 0),
             Row(play, "exit", "1", "1.1", 1),
@@ -98,7 +98,7 @@ public sealed class ManualLedgerPrecisionTests
         var play = CreatePlay(direction);
         var exit = Row(play, "exit", "1", TwiceLarge, 1);
         exit.Fee = "0.1";
-        var error = Assert.Throws<WorkspaceException>(() => ManualLedger.Calculate(play,
+        var error = Assert.Throws<ProblemException>(() => ManualLedger.Calculate(play,
             [Row(play, "entry", "1", Large, 0), exit]));
         Assert.Equal(400, error.StatusCode);
         Assert.Contains("exact decimal precision", error.Message);
@@ -116,7 +116,7 @@ public sealed class ManualLedgerPrecisionTests
         var before = f.Snapshot();
         var request = f.Request("exit", "1", TwiceLarge, 1) with { Fee = "0.1", Reason = "Correct fee" };
 
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() =>
+        var error = await Assert.ThrowsAsync<ProblemException>(() =>
             f.Service.RecordAsync(f.Play.Id, last.Id, request, default));
         Assert.Equal(400, error.StatusCode);
         Assert.Contains("exact decimal precision", error.Message);
@@ -151,7 +151,7 @@ public sealed class ManualLedgerPrecisionTests
         var beforeDto = JsonSerializer.Serialize(await f.Service.ManualAsync(f.Play.Id, default));
         var request = f.Request("exit", "1", finalPrice, 4) with { Reason = correction ? "Correct closing price" : null };
 
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() =>
+        var error = await Assert.ThrowsAsync<ProblemException>(() =>
             f.Service.RecordAsync(f.Play.Id, last?.Id, request, default));
         Assert.Equal(400, error.StatusCode);
         Assert.Contains("exact decimal precision", error.Message);

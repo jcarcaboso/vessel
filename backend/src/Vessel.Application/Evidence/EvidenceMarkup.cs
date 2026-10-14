@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using Vessel.Application.Workspace;
+using Vessel.Application.Common;
 
 namespace Vessel.Application.Evidence;
 
@@ -67,7 +67,7 @@ public static partial class EvidenceMarkup
     public static string Serialize(ImageMarkup markup) => JsonSerializer.Serialize(markup, Json);
     public static ImageMarkup? Read(string? stored) => stored is null ? null : JsonSerializer.Deserialize<ImageMarkup>(stored, Json);
 
-    private static WorkspaceException Invalid(string detail) => new(400, detail);
+    private static ProblemException Invalid(string detail) => new(400, detail);
 
     [GeneratedRegex("^[A-Za-z0-9_-]{1,64}$")]
     private static partial Regex IdPattern();

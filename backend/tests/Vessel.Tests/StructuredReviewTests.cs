@@ -1,6 +1,6 @@
 using System.Text.Json;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 
@@ -43,7 +43,7 @@ public sealed class StructuredReviewTests
     {
         var before = (play.Answers, play.Review, play.Version, play.ReviewRevision, play.PlanRevision,
             play.UpdatedAtUtc, play.ReviewedAtUtc, store.Saves, store.Reviews.Count);
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => Save(answers, "Rejected review"));
+        var error = await Assert.ThrowsAsync<ProblemException>(() => Save(answers, "Rejected review"));
         Assert.Equal(400, error.StatusCode);
         Assert.Equal(before, (play.Answers, play.Review, play.Version, play.ReviewRevision, play.PlanRevision,
             play.UpdatedAtUtc, play.ReviewedAtUtc, store.Saves, store.Reviews.Count));

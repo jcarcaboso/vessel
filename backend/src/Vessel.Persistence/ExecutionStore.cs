@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Vessel.Application.Common;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
@@ -71,7 +71,7 @@ public sealed class ExecutionStore(VesselDbContext db) : IPlayExecutionStore
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException)
         {
-            throw new WorkspaceException(409, "This Play changed elsewhere. Reload it and check the venue again.");
+            throw new ProblemException(409, "This Play changed elsewhere. Reload it and check the venue again.");
         }
     }
 
@@ -80,7 +80,7 @@ public sealed class ExecutionStore(VesselDbContext db) : IPlayExecutionStore
         await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         var accounts = await db.Accounts.FromSqlInterpolated(
             $"SELECT * FROM accounts WHERE \"Id\" = {accountId} AND \"OwnerId\" = {db.CurrentOwnerId} FOR UPDATE").ToListAsync(ct);
-        var account = accounts.SingleOrDefault() ?? throw new WorkspaceException(404, "Account not found.");
+        var account = accounts.SingleOrDefault() ?? throw new ProblemException(404, "Account not found.");
         await db.Entry(account).ReloadAsync(ct);
         var key = "vessel-execution:" + accountId;
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);

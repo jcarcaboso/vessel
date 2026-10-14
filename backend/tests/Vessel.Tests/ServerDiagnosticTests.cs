@@ -11,6 +11,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using Vessel.Application.Common;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
@@ -92,7 +93,7 @@ public sealed class ServerDiagnosticTests
     [InlineData(503)]
     public async Task Expected_workspace_errors_do_not_log_errors(int status)
     {
-        await using var factory = new DiagnosticFactory(new WorkspaceException(status, "Expected safe detail."));
+        await using var factory = new DiagnosticFactory(new ProblemException(status, "Expected safe detail."));
         using var client = factory.AuthorizedClient();
         using var response = await client.GetAsync($"/api/accounts/{PrivateId}");
         Assert.Equal((HttpStatusCode)status, response.StatusCode);

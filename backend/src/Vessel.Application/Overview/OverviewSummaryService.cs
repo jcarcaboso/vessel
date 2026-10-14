@@ -1,4 +1,5 @@
 using Vessel.Application.Activity;
+using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Workspace;
 
@@ -16,15 +17,15 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
     public async Task<OverviewSummaryDto> GetAsync(string? groupBy, string? period, string? scope, CancellationToken ct)
     {
         groupBy ??= "portfolio"; period ??= "30"; scope ??= "all";
-        if (groupBy is not ("portfolio" or "account")) throw new WorkspaceException(400, "Group by portfolio or account.");
-        if (period is not ("7" or "30" or "90" or "all")) throw new WorkspaceException(400, "Choose 7, 30, 90 days or all retained history.");
+        if (groupBy is not ("portfolio" or "account")) throw new ProblemException(400, "Group by portfolio or account.");
+        if (period is not ("7" or "30" or "90" or "all")) throw new ProblemException(400, "Choose 7, 30, 90 days or all retained history.");
         var (scopeKind, scopeId) = ParseScope(scope);
         var asOf = time.GetUtcNow();
         DateTimeOffset? from = period == "all" ? null : asOf.AddDays(-int.Parse(period, global::System.Globalization.CultureInfo.InvariantCulture));
         var portfolios = await store.PortfoliosAsync(ct);
         var accounts = await workspace.AccountsAsync(ct);
-        if (scopeKind == "portfolio" && !portfolios.Any(p => p.Id == scopeId)) throw new WorkspaceException(404, "Portfolio not found.");
-        if (scopeKind == "account" && !accounts.Any(a => a.Id == scopeId)) throw new WorkspaceException(404, "Account not found.");
+        if (scopeKind == "portfolio" && !portfolios.Any(p => p.Id == scopeId)) throw new ProblemException(404, "Portfolio not found.");
+        if (scopeKind == "account" && !accounts.Any(a => a.Id == scopeId)) throw new ProblemException(404, "Account not found.");
         var members = accounts.Where(a => a.IsEnabled && (scopeKind switch
         {
             "portfolio" => a.PortfolioId == scopeId,
@@ -95,7 +96,7 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
         if (scope is "all" or "unassigned") return (scope, null);
         var parts = scope.Split(':');
         if (parts.Length != 2 || parts[0] is not ("portfolio" or "account") || !Guid.TryParseExact(parts[1], "D", out var id) || id == Guid.Empty)
-            throw new WorkspaceException(400, "Choose all, unassigned, portfolio:<id> or account:<id>.");
+            throw new ProblemException(400, "Choose all, unassigned, portfolio:<id> or account:<id>.");
         return (parts[0], id);
     }
 }

@@ -1,12 +1,12 @@
 using System.Globalization;
 using System.Text.Json;
 using Vessel.Application.Activity;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Review;
 using Vessel.Application.Sizing;
 using Vessel.Application.Venues;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
@@ -95,7 +95,7 @@ public sealed class DiaryArithmeticRegressionTests
         var previous = correction ? f.Rows.Single(r => r.Role == "exit") : null;
         var before = f.Snapshot();
         var request = f.Request("exit", "1e-28", "1", 1, "1") with { Reason = correction ? "Correct fee" : null };
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() =>
+        var error = await Assert.ThrowsAsync<ProblemException>(() =>
             f.Service.RecordAsync(f.Play.Id, previous?.Id, request, default));
         Assert.Equal(400, error.StatusCode);
         Assert.Contains("supported decimal range", error.Message);
@@ -178,7 +178,7 @@ public sealed class DiaryArithmeticRegressionTests
         Assert.False(preview.Eligible);
         Assert.Contains(preview.Reasons, r => r.Contains("in", StringComparison.Ordinal) &&
             r.Contains("reduce-only or position TP/SL", StringComparison.Ordinal));
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => f.Service.CreateRetrospectiveAsync(
+        var error = await Assert.ThrowsAsync<ProblemException>(() => f.Service.CreateRetrospectiveAsync(
             new(Guid.NewGuid(), f.Account.Id, operation.Id, preview.Fingerprint, "Retrospective"), default));
         Assert.Equal(409, error.StatusCode);
         Assert.Equal(before, f.Snapshot());
@@ -194,7 +194,7 @@ public sealed class DiaryArithmeticRegressionTests
         Assert.True(preview.Eligible);
         f.Orders.Single(o => o.OrderId == "in").IsPositionTpsl = true;
         var before = f.Snapshot();
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => f.Service.CreateRetrospectiveAsync(
+        var error = await Assert.ThrowsAsync<ProblemException>(() => f.Service.CreateRetrospectiveAsync(
             new(Guid.NewGuid(), f.Account.Id, operation.Id, preview.Fingerprint, "Retrospective"), default));
         Assert.Equal(409, error.StatusCode);
         Assert.Equal(before, f.Snapshot());
@@ -355,7 +355,7 @@ public sealed class DiaryArithmeticRegressionTests
         Assert.False(after.Eligible);
         Assert.NotEqual(preview.Fingerprint, after.Fingerprint);
         Assert.Contains(after.Reasons, reason => reason.Contains("Order in crosses operation boundaries", StringComparison.Ordinal));
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => f.Service.CreateRetrospectiveAsync(
+        var error = await Assert.ThrowsAsync<ProblemException>(() => f.Service.CreateRetrospectiveAsync(
             new(Guid.NewGuid(), f.Account.Id, operation.Id, preview.Fingerprint, "BTC retrospective"), default));
         Assert.Equal(409, error.StatusCode);
         Assert.Equal(before, f.Snapshot());

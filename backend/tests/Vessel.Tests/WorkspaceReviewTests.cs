@@ -1,4 +1,5 @@
 using System.Globalization;
+using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
@@ -71,7 +72,7 @@ public sealed class WorkspaceReviewTests
         Assert.Equal(1, original.SettingsRevision);
         var disabled = await service.UpdateAccountAsync(original.Id, new("Manual", null, false, original.SettingsRevision), default);
         Assert.Equal(2, disabled.SettingsRevision);
-        var conflict = await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateAccountAsync(original.Id, new("Stale rename", null, true, original.SettingsRevision), default));
+        var conflict = await Assert.ThrowsAsync<ProblemException>(() => service.UpdateAccountAsync(original.Id, new("Stale rename", null, true, original.SettingsRevision), default));
         Assert.Equal(409, conflict.StatusCode);
         var current = await service.AccountAsync(original.Id, default); Assert.Equal("Manual", current.Name); Assert.False(current.IsEnabled); Assert.Equal(2, current.SettingsRevision);
         Assert.Null(current.LastSyncedAtUtc);

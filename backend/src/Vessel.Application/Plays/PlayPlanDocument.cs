@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Vessel.Application.Workspace;
+using Vessel.Application.Common;
 
 namespace Vessel.Application.Plays;
 
@@ -85,7 +85,7 @@ public static partial class PlayDocuments
     public static void RequirePlannable(PlayPlanDocument plan)
     {
         if (!plan.Entries.Any(entry => decimal.TryParse(entry.Price, NumberStyles.Float, CultureInfo.InvariantCulture, out var price) && price > 0))
-            throw new WorkspaceException(409, "Give at least one entry a price before planning.");
+            throw new ProblemException(409, "Give at least one entry a price before planning.");
     }
 
     public static string Serialize(PlayPlanDocument plan) => JsonSerializer.Serialize(plan, Json);
@@ -119,7 +119,7 @@ public static partial class PlayDocuments
     private static string Note(string? note) => note is not null && note.Length <= MaxNoteLength
         ? note : throw Invalid($"Notes are limited to {MaxNoteLength} characters.");
 
-    private static WorkspaceException Invalid(string detail) => new(400, detail);
+    private static ProblemException Invalid(string detail) => new(400, detail);
 
     [GeneratedRegex("^[A-Za-z0-9_-]{1,64}$")]
     private static partial Regex IdPattern();

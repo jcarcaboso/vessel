@@ -1,3 +1,4 @@
+using Vessel.Application.Common;
 using Vessel.Application.Venues;
 using System.Text.RegularExpressions;
 using Vessel.Application.Workspace;
@@ -22,18 +23,18 @@ internal static partial class MarketDataGuard
     public static async Task<MarketDataAccount> AccountAsync(IWorkspaceStore store, Guid accountId, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var account = await store.MarketDataAccountAsync(accountId, ct) ?? throw new WorkspaceException(404, "Account not found.");
+        var account = await store.MarketDataAccountAsync(accountId, ct) ?? throw new ProblemException(404, "Account not found.");
         if (!account.IsEnabled)
-            throw new WorkspaceException(409, "Enable the account before reading market data.");
+            throw new ProblemException(409, "Enable the account before reading market data.");
         if (account.VenueId == "manual")
-            throw new WorkspaceException(409, "No market data provider for manual accounts.");
+            throw new ProblemException(409, "No market data provider for manual accounts.");
         return account;
     }
 
     public static string Instrument(string? instrument) =>
         instrument is not null && InstrumentPattern().IsMatch(instrument)
             ? instrument
-            : throw new WorkspaceException(400, "Instrument must be 1 to 32 letters, digits, hyphens or underscores.");
+            : throw new ProblemException(400, "Instrument must be 1 to 32 letters, digits, hyphens or underscores.");
 
     /// <summary>An interval the venue serves natively. Others are refused rather than approximated.</summary>
     public static (string Interval, long Step) Interval(string? interval, VenueDescriptor? venue)
@@ -41,7 +42,7 @@ internal static partial class MarketDataGuard
         var supported = IntervalMs.Keys.Where(known => venue?.CandleIntervals.Contains(known) == true).ToList();
         return interval is not null && supported.Contains(interval) && IntervalMs.TryGetValue(interval, out var step)
             ? (interval, step)
-            : throw new WorkspaceException(400, supported.Count == 0
+            : throw new ProblemException(400, supported.Count == 0
                 ? "This venue has no candle intervals."
                 : $"Interval must be one of {string.Join(", ", supported)}.");
     }

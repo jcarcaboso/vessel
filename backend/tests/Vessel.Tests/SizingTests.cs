@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Sizing;
 using Vessel.Application.Workspace;
@@ -257,7 +258,7 @@ public sealed class SizingServiceTests
         Assert.Equal(("2", owner, 1), (sizing.Settings.RiskPercent, store.Settings!.OwnerId, store.Saves));
         Assert.Equal("1.5", (await Service.UpdateSettingsAsync(new("1.50"), default)).Settings.RiskPercent);
         foreach (var bad in new[] { "", "abc", "1e2", "-1", "0.05", "6", "1.333", " 1" })
-            Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => Service.UpdateSettingsAsync(new(bad), default))).StatusCode);
+            Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Service.UpdateSettingsAsync(new(bad), default))).StatusCode);
         Assert.Equal(1.5m, store.Settings.RiskPercent);
     }
 }

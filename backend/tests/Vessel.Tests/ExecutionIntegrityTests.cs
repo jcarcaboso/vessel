@@ -1,7 +1,7 @@
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
@@ -94,7 +94,7 @@ public sealed class ExecutionIntegrityTests
         Assert.Equal("open", (await Link("in", "entry")).Status);
 
         foreach (var (order, role) in new[] { ("increase", "exit"), ("short", "exit"), ("flip", "target"), ("cover", "entry"), ("reduce", "entry") })
-            Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => Link(order, role))).StatusCode);
+            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => Link(order, role))).StatusCode);
         var execution = await Service.GetAsync(play.Id, default);
         Assert.Equal(("open", "1", "0", "1"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity,
             execution.Totals.OpenQuantity));
@@ -179,7 +179,7 @@ public sealed class ExecutionIntegrityTests
         await Link("in", "entry");
         Assert.Equal("closed", (await Link("out", "target")).Status);
         foreach (var link in store.Links.ToList())
-            Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => Service.UnlinkAsync(play.Id, link.Id, default))).StatusCode);
+            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => Service.UnlinkAsync(play.Id, link.Id, default))).StatusCode);
         var execution = await Service.GetAsync(play.Id, default);
         Assert.Equal(("closed", 2, "0"), (execution.Status, execution.Links.Count, execution.Totals.OpenQuantity));
         Assert.All(store.Links, l => Assert.Equal(OrderLinkState.Linked, l.State));

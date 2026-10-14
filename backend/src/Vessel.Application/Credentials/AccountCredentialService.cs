@@ -1,3 +1,4 @@
+using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
@@ -13,7 +14,7 @@ public sealed class AccountCredentialService(
     // Read-only: no row lock, so opening Manage account does not wait behind a running refresh.
     public async Task<AccountCredentialDto> GetAsync(Guid id, CancellationToken ct)
     {
-        var account = await accounts.AccountAsync(id, ct) ?? throw new WorkspaceException(404, "Account not found.");
+        var account = await accounts.AccountAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
         Guard(account, requireEnabled: false);
         var credential = await credentials.FindAsync(id, Purpose(account), ct);
         return Metadata(account, credential);
@@ -23,12 +24,12 @@ public sealed class AccountCredentialService(
         accounts.WithAccountLockAsync(id, async account =>
         {
             Guard(account, requireEnabled: true);
-            if (!vault.IsConfigured) throw new WorkspaceException(503, "Credential storage is not configured.");
+            if (!vault.IsConfigured) throw new ProblemException(503, "Credential storage is not configured.");
             var token = request.Token?.Trim();
             if (string.IsNullOrEmpty(token) || request.Token!.Length > 512)
-                throw new WorkspaceException(400, "Enter a read-only token of at most 512 characters.");
+                throw new ProblemException(400, "Enter a read-only token of at most 512 characters.");
             var verifier = verifiers.SingleOrDefault(v => v.VenueId == account.VenueId)
-                ?? throw new WorkspaceException(503, "Credential verification is unavailable.");
+                ?? throw new ProblemException(503, "Credential verification is unavailable.");
             VerifiedVenueCredential verified;
             try
             {
@@ -37,16 +38,16 @@ public sealed class AccountCredentialService(
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception)
             {
-                // Adapters are an external boundary. Never forward even a WorkspaceException from them.
-                throw new WorkspaceException(400, "The venue did not accept this read-only token.");
+                // Adapters are an external boundary. Never forward even a ProblemException from them.
+                throw new ProblemException(400, "The venue did not accept this read-only token.");
             }
             var now = time.GetUtcNow();
             if (verified.Scope is not ("single" or "all") || verified.ExpiresAt <= now)
-                throw new WorkspaceException(400, "The venue did not accept this read-only token.");
+                throw new ProblemException(400, "The venue did not accept this read-only token.");
             var purpose = Purpose(account);
             SealedCredential sealedCredential;
             try { sealedCredential = vault.Seal(owner.OwnerId, id, purpose, token); }
-            catch (CredentialStorageException) { throw new WorkspaceException(503, "Credential storage is unavailable."); }
+            catch (CredentialStorageException) { throw new ProblemException(503, "Credential storage is unavailable."); }
             var previous = await credentials.FindAsync(id, purpose, ct);
             var credential = new AccountCredential
             {
@@ -70,10 +71,10 @@ public sealed class AccountCredentialService(
 
     private void Guard(Account account, bool requireEnabled)
     {
-        if (account.OwnerId != owner.OwnerId) throw new WorkspaceException(404, "Account not found.");
-        if (requireEnabled && !account.IsEnabled) throw new WorkspaceException(409, "Enable the account before reading or changing its credential.");
+        if (account.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
+        if (requireEnabled && !account.IsEnabled) throw new ProblemException(409, "Enable the account before reading or changing its credential.");
         if (venues.Descriptor(account.VenueId)?.Capabilities.ReadOnlyCredential != true || account.SourceId is null)
-            throw new WorkspaceException(400, "This account does not support read-only credentials.");
+            throw new ProblemException(400, "This account does not support read-only credentials.");
     }
 
     private AccountCredentialDto Metadata(Account account, AccountCredential? credential)

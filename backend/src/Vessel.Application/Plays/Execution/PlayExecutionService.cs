@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Numerics;
 using Vessel.Application.Activity;
+using Vessel.Application.Common;
 using Vessel.Application.Sizing;
 using Vessel.Application.Venues;
 using Vessel.Application.Credentials;
@@ -34,10 +35,10 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     private async Task<string?> RetainAccountOrdersLockedAsync(Account account, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (!account.IsEnabled) throw new WorkspaceException(400, "Enable the account before refreshing it.");
+        if (!account.IsEnabled) throw new ProblemException(400, "Enable the account before refreshing it.");
         if (venues.Descriptor(account.VenueId) is not { Capabilities.Orders: true })
             return "This venue does not provide order history; execution completeness cannot be checked.";
-        if (account.SourceId is null) throw new WorkspaceException(400, "A source identity is required before refresh.");
+        if (account.SourceId is null) throw new ProblemException(400, "A source identity is required before refresh.");
         if (venues.Orders(account.VenueId) is not { } reader)
             return "Order history was not refreshed because the venue order reader is unavailable.";
         VenueOrderReadResult read;
@@ -69,16 +70,16 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     /// <summary>Refreshes the account's fills and orders, links what matches and applies status changes.</summary>
     public async Task<PlayExecutionDto> CheckAsync(Guid playId, CancellationToken ct)
     {
-        var play = await plays.FindAsync(playId, ct) ?? throw new WorkspaceException(404, "Play not found.");
+        var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
         var account = await store.AccountAsync(play.AccountId, ct);
-        if (UntrackedReason(play, account, account is null ? null : venues.Descriptor(account.VenueId)) is { } reason) throw new WorkspaceException(409, reason);
-        if (venues.Orders(account!.VenueId) is not { } orderReader) throw new WorkspaceException(503, "Venue reader is unavailable.");
+        if (UntrackedReason(play, account, account is null ? null : venues.Descriptor(account.VenueId)) is { } reason) throw new ProblemException(409, reason);
+        if (venues.Orders(account!.VenueId) is not { } orderReader) throw new ProblemException(503, "Venue reader is unavailable.");
         await workspace.SyncAsync(account.Id, ct);
         await workspace.WithAccountLockAsync(account.Id, async lockedAccount =>
         {
-            if (!lockedAccount.IsEnabled) throw new WorkspaceException(409, "Enable the account to track its orders.");
+            if (!lockedAccount.IsEnabled) throw new ProblemException(409, "Enable the account to track its orders.");
             if (await CredentialReasonAsync(lockedAccount, usableOnly: false, ct) is { } credentialReason)
-                throw new WorkspaceException(409, credentialReason);
+                throw new ProblemException(409, credentialReason);
             VenueOrderReadResult read;
             try
             {
@@ -88,7 +89,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             }
             catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
             {
-                throw new WorkspaceException(502, "Venue orders could not be read. Try again later.");
+                throw new ProblemException(502, "Venue orders could not be read. Try again later.");
             }
             var ticks = await TicksAsync(lockedAccount, ct);
             await store.WithAccountLockAsync(lockedAccount.Id, async () => { await ReconcileAsync(lockedAccount, read, ticks, ct); return true; }, ct);
@@ -100,7 +101,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
 
     public async Task<PlayExecutionDto> GetAsync(Guid playId, CancellationToken ct)
     {
-        var play = await plays.FindAsync(playId, ct) ?? throw new WorkspaceException(404, "Play not found.");
+        var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
         var account = await store.AccountAsync(play.AccountId, ct);
         var links = (await store.LinksAsync(play.AccountId, ct)).Where(l => l.State != OrderLinkState.Dismissed).ToList();
         var orders = (await store.OrdersAsync(play.AccountId, ct)).ToDictionary(o => o.OrderId, StringComparer.Ordinal);
@@ -149,12 +150,12 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     /// <summary>The owner links an order (or confirms a suggestion). It must not belong to another level already.</summary>
     public async Task<PlayExecutionDto> LinkAsync(Guid playId, LinkOrderRequest request, CancellationToken ct)
     {
-        var play = await plays.FindAsync(playId, ct) ?? throw new WorkspaceException(404, "Play not found.");
-        if (!ExecutionMatcher.IsActive(play)) throw new WorkspaceException(409, NotLinkable);
+        var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+        if (!ExecutionMatcher.IsActive(play)) throw new ProblemException(409, NotLinkable);
         var role = request.Role switch
         {
             "entry" => OrderLinkRole.Entry, "stop" => OrderLinkRole.Stop, "target" => OrderLinkRole.Target, "exit" => OrderLinkRole.Exit,
-            _ => throw new WorkspaceException(400, "Role must be entry, stop, target or exit.")
+            _ => throw new ProblemException(400, "Role must be entry, stop, target or exit.")
         };
         await store.WithAccountLockAsync(play.AccountId, async () =>
         {
@@ -162,20 +163,20 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             // The committed plan decides, not the one this request read first.
             var plan = PlayDocuments.Read(play.Plan);
             var entry = role == OrderLinkRole.Exit ? null : plan.Entries.FirstOrDefault(e => e.Id == request.EntryId)
-                ?? throw new WorkspaceException(400, "Choose an entry of this play.");
+                ?? throw new ProblemException(400, "Choose an entry of this play.");
             var levelId = role switch
             {
-                OrderLinkRole.Stop => entry!.Stops.FirstOrDefault(s => s.Id == request.LevelId)?.Id ?? throw new WorkspaceException(400, "Choose a stop of this entry."),
-                OrderLinkRole.Target => entry!.Targets.FirstOrDefault(t => t.Id == request.LevelId)?.Id ?? throw new WorkspaceException(400, "Choose a target of this entry."),
+                OrderLinkRole.Stop => entry!.Stops.FirstOrDefault(s => s.Id == request.LevelId)?.Id ?? throw new ProblemException(400, "Choose a stop of this entry."),
+                OrderLinkRole.Target => entry!.Targets.FirstOrDefault(t => t.Id == request.LevelId)?.Id ?? throw new ProblemException(400, "Choose a target of this entry."),
                 _ => null
             };
             var order = (await store.OrdersAsync(play.AccountId, ct)).FirstOrDefault(o => o.OrderId == request.OrderId && o.ContractId == play.ContractId)
-                ?? throw new WorkspaceException(404, "This order is not known for the play's instrument. Check the venue first.");
+                ?? throw new ProblemException(404, "This order is not known for the play's instrument. Check the venue first.");
             var links = await store.LinksAsync(play.AccountId, ct);
             if (links.Any(l => l.OrderId == order.OrderId && l.State == OrderLinkState.Linked))
-                throw new WorkspaceException(409, "This order is already linked. Unlink it first.");
+                throw new ProblemException(409, "This order is already linked. Unlink it first.");
             if (ExecutionIntegrity.RoleConflict(role, plan, order, await store.FillsAsync(play.AccountId, [order.OrderId], ct)) is { } conflict)
-                throw new WorkspaceException(409, conflict);
+                throw new ProblemException(409, conflict);
             var now = time.GetUtcNow();
             var key = PlayOrderLink.Key(role, entry?.Id, levelId);
             var existing = links.FirstOrDefault(l => l.PlayId == play.Id && l.OrderId == order.OrderId && l.LevelKey == key);
@@ -196,11 +197,11 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     /// </summary>
     public async Task<PlayExecutionDto> UnlinkAsync(Guid playId, Guid linkId, CancellationToken ct)
     {
-        var play = await plays.FindAsync(playId, ct) ?? throw new WorkspaceException(404, "Play not found.");
+        var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
         await store.WithAccountLockAsync(play.AccountId, async () =>
         {
             var link = (await store.LinksAsync(play.AccountId, ct)).FirstOrDefault(l => l.Id == linkId && l.PlayId == play.Id &&
-                l.State != OrderLinkState.Dismissed) ?? throw new WorkspaceException(404, "Link not found.");
+                l.State != OrderLinkState.Dismissed) ?? throw new ProblemException(404, "Link not found.");
             if (link.State == OrderLinkState.Linked) await RequireActiveAsync(play, "Closed and cancelled plays keep their linked orders.", ct);
             link.Dismiss(time.GetUtcNow());
             await store.SaveAsync(ct);
@@ -218,7 +219,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     /// </summary>
     private async Task RequireActiveAsync(Play play, string message, CancellationToken ct)
     {
-        if (!(await store.ActivePlaysAsync(play.AccountId, ct)).Any(p => p.Id == play.Id)) throw new WorkspaceException(409, message);
+        if (!(await store.ActivePlaysAsync(play.AccountId, ct)).Any(p => p.Id == play.Id)) throw new ProblemException(409, message);
     }
 
     /// <summary>

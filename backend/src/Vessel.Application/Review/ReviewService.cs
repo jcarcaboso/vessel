@@ -1,9 +1,9 @@
 using System.Globalization;
 using Vessel.Application.Activity;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Workspace;
@@ -27,7 +27,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
     {
         "day" => now.AddDays(-1), "week" => now.AddDays(-7), "month" => now.AddDays(-30),
         "year" => now.AddDays(-365), "all" => null,
-        _ => throw new WorkspaceException(400, "Choose day, week, month, year or all."),
+        _ => throw new ProblemException(400, "Choose day, week, month, year or all."),
     };
 
     public async Task<ReviewDto> GetAsync(ReviewQuery query, CancellationToken ct)
@@ -36,11 +36,11 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         var from = From(query.Period, now);
         if (query.Portfolio is not ("all" or "unassigned") &&
             (!Guid.TryParse(query.Portfolio, out var portfolio) || portfolio == Guid.Empty))
-            throw new WorkspaceException(400, "Choose a valid portfolio.");
+            throw new ProblemException(400, "Choose a valid portfolio.");
         if (Guid.TryParse(query.Portfolio, out var normalized)) query = query with { Portfolio = normalized.ToString() };
         if (query.AccountId == Guid.Empty || query.Offset is < 0 or > 1_000_000 ||
             query.Instrument is { } instrument && (string.IsNullOrWhiteSpace(instrument) || instrument.Length > 128 || instrument != instrument.Trim()))
-            throw new WorkspaceException(400, "Invalid review filters.");
+            throw new ProblemException(400, "Invalid review filters.");
 
         var facts = await store.ReadAsync(query, now, ct);
         var accounts = facts.Accounts.Where(a => a.IsEnabled).ToDictionary(a => a.Id);
@@ -106,11 +106,11 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         var from = From(query.Period, now);
         if (query.Portfolio is not ("all" or "unassigned") &&
             (!Guid.TryParse(query.Portfolio, out var portfolio) || portfolio == Guid.Empty))
-            throw new WorkspaceException(400, "Choose a valid portfolio.");
+            throw new ProblemException(400, "Choose a valid portfolio.");
         if (Guid.TryParse(query.Portfolio, out var normalized)) query = query with { Portfolio = normalized.ToString() };
         if (query.AccountId == Guid.Empty || query.Offset is < 0 or > 1_000_000 ||
             query.Instrument is { } instrument && (string.IsNullOrWhiteSpace(instrument) || instrument.Length > 128 || instrument != instrument.Trim()))
-            throw new WorkspaceException(400, "Invalid review filters.");
+            throw new ProblemException(400, "Invalid review filters.");
         var facts = await store.ReadAsync(query, now, ct);
         var accounts = facts.Accounts.Where(a => a.IsEnabled && (query.AccountId is null || a.Id == query.AccountId) &&
             (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||

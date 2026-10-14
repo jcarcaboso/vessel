@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Activity;
+using Vessel.Application.Common;
 using Vessel.Application.Credentials;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
@@ -386,7 +387,7 @@ public sealed class AccountOrderHistoryApiTests
             var workspace = new WorkspaceService(new WorkspaceStore(newer), new CoreOwner(owner), venues);
             await workspace.SyncAsync(account.Id, default);
             reader.Fail = true;
-            Assert.Equal(502, (await Assert.ThrowsAsync<WorkspaceException>(() => workspace.SyncAsync(account.Id, default))).StatusCode);
+            Assert.Equal(502, (await Assert.ThrowsAsync<ProblemException>(() => workspace.SyncAsync(account.Id, default))).StatusCode);
         }
         var failed = (await client.GetFromJsonAsync<AccountDto>($"/api/accounts/{account.Id}"))!;
         Assert.Equal("error", failed.SyncStatus);

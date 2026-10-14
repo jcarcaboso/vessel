@@ -1,3 +1,4 @@
+using Vessel.Application.Common;
 using Vessel.Application.Credentials;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
@@ -169,7 +170,7 @@ public sealed class AccountOrderHistoryTests
         var orders = new AccountHistoryOrders("lighter");
         var credential = new AccountHistoryCredential("ro:synthetic-only");
         var (service, account, store) = Harness(orders, credential, enabled, !owned);
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => service.RetainAccountOrdersAsync(account.Id, default));
+        var error = await Assert.ThrowsAsync<ProblemException>(() => service.RetainAccountOrdersAsync(account.Id, default));
         Assert.Equal(status, error.StatusCode);
         Assert.Null(credential.AccountId);
         Assert.Equal(0, orders.Reads);
@@ -193,7 +194,7 @@ public sealed class AccountOrderHistoryTests
     {
         var orders = new AccountHistoryOrders();
         var (service, account, store) = Harness(orders, hasSource: false);
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => service.RetainAccountOrdersAsync(account.Id, default))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.RetainAccountOrdersAsync(account.Id, default))).StatusCode);
         Assert.Equal(0, orders.Reads);
         Assert.Equal(0, store.Writes);
     }

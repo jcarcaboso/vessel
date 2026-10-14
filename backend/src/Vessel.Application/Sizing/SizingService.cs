@@ -1,8 +1,8 @@
 using System.Globalization;
+using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Plays;
 
@@ -27,7 +27,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
     {
         if (request.RiskPercent is not { Length: > 0 and <= 16 } text ||
             !decimal.TryParse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var risk))
-            throw new WorkspaceException(400, "Risk per trade must be a decimal percentage.");
+            throw new ProblemException(400, "Risk per trade must be a decimal percentage.");
         var now = time.GetUtcNow();
         var settings = await store.SettingsAsync(ct);
         try
@@ -35,7 +35,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
             if (settings is null) store.Add(new SizingSettings(owner.OwnerId, risk, now));
             else settings.SetRisk(risk, now);
         }
-        catch (ArgumentException ex) { throw new WorkspaceException(400, ex.Message); }
+        catch (ArgumentException ex) { throw new ProblemException(400, ex.Message); }
         await store.SaveAsync(ct);
         return ToDto(risk, await store.ClosedPlaysAsync(ct));
     }

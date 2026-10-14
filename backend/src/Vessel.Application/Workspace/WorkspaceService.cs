@@ -1,4 +1,5 @@
 using System.Globalization;
+using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
@@ -23,13 +24,13 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     private static void ValidateName(string? name)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Length > 200)
-            throw new WorkspaceException(400, "Name is required and must be at most 200 characters.");
+            throw new ProblemException(400, "Name is required and must be at most 200 characters.");
     }
 
     private static void ValidateIcon(string? icon)
     {
         if (icon is not null && !PortfolioIcons.IsKnown(icon))
-            throw new WorkspaceException(400, "Choose one of the available portfolio icons.");
+            throw new ProblemException(400, "Choose one of the available portfolio icons.");
     }
 
     public async Task<PortfolioDto> CreatePortfolioAsync(CreatePortfolioRequest request, CancellationToken ct)
@@ -53,7 +54,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     private static void ValidateAccountIds(IReadOnlyList<Guid>? ids)
     {
         if (ids is null || ids.Count is 0 or > 200 || ids.Distinct().Count() != ids.Count)
-            throw new WorkspaceException(400, "Choose between 1 and 200 distinct accounts.");
+            throw new ProblemException(400, "Choose between 1 and 200 distinct accounts.");
     }
 
     private static void ValidateExpected(IReadOnlyList<Guid>? ids, IReadOnlyList<AccountSettingsExpectation>? expected)
@@ -62,7 +63,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         if (ids is null || expected.Count == 0 || expected.Count != ids.Count ||
             expected.Any(e => e is null || e.SettingsRevision < 1 || !ids.Contains(e.AccountId)) ||
             expected.Select(e => e.AccountId).Distinct().Count() != expected.Count)
-            throw new WorkspaceException(400, "Provide exactly one positive settings revision for each selected account.");
+            throw new ProblemException(400, "Provide exactly one positive settings revision for each selected account.");
     }
 
     private static void CheckExpected(IReadOnlyList<Account> accounts, IReadOnlyList<AccountSettingsExpectation>? expected)
@@ -70,7 +71,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         if (expected is null) return;
         var revisions = expected.ToDictionary(e => e.AccountId, e => e.SettingsRevision);
         if (accounts.Any(a => a.SettingsRevision != revisions[a.Id]))
-            throw new WorkspaceException(409, "Account settings changed elsewhere. No accounts were moved. Reload accounts and review the membership before retrying.");
+            throw new ProblemException(409, "Account settings changed elsewhere. No accounts were moved. Reload accounts and review the membership before retrying.");
     }
 
     private async Task<List<Account>> LockAccounts(IReadOnlyList<Guid> ids, CancellationToken ct)
@@ -111,40 +112,40 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     {
         ValidateName(request.Name);
         var descriptor = venues.Descriptor(request.VenueId)
-            ?? throw new WorkspaceException(400, $"Choose {OrList(venues.Descriptors.Select(d => d.Id))}.");
+            ?? throw new ProblemException(400, $"Choose {OrList(venues.Descriptors.Select(d => d.Id))}.");
 
-        if (request.PortfolioId == Guid.Empty) throw new WorkspaceException(404, "Portfolio not found.");
+        if (request.PortfolioId == Guid.Empty) throw new ProblemException(404, "Portfolio not found.");
         decimal? value = null;
         string? sourceId = null, address = null;
         if (descriptor.Id == VenueDescriptor.ManualId)
         {
             if (request.Address is not null || request.SourceId is not null)
-                throw new WorkspaceException(400, "Manual accounts do not use a source identity.");
+                throw new ProblemException(400, "Manual accounts do not use a source identity.");
             if (request.ManualAccountValueUsd is { } text)
             {
                 if (!TryExactNonnegativeDecimal(text, out var parsed))
-                    throw new WorkspaceException(400, "Manual account value must be an exact nonnegative decimal string.");
+                    throw new ProblemException(400, "Manual account value must be an exact nonnegative decimal string.");
                 value = parsed;
             }
         }
         else
         {
-            if (request.ManualAccountValueUsd is not null) throw new WorkspaceException(400, "Venue balances cannot be supplied manually.");
+            if (request.ManualAccountValueUsd is not null) throw new ProblemException(400, "Venue balances cannot be supplied manually.");
             if (descriptor.Source == VenueSources.EvmAddress)
             {
                 sourceId = request.SourceId ?? request.Address;
                 if (!AccountSource.IsEvmAddress(sourceId) ||
                     request.Address is not null && !string.Equals(request.Address, sourceId, StringComparison.OrdinalIgnoreCase))
-                    throw new WorkspaceException(400, "A matching 42-character public hexadecimal address is required.");
+                    throw new ProblemException(400, "A matching 42-character public hexadecimal address is required.");
                 address = sourceId = sourceId!.ToLowerInvariant();
             }
             else if (descriptor.Source == VenueSources.AccountIndex)
             {
                 if (request.Address is not null || !AccountSource.IsAccountIndex(request.SourceId))
-                    throw new WorkspaceException(400, "Source ID must be a canonical nonnegative int64 account index string, without an address.");
+                    throw new ProblemException(400, "Source ID must be a canonical nonnegative int64 account index string, without an address.");
                 sourceId = request.SourceId;
             }
-            else throw new WorkspaceException(400, "The venue source identity is unsupported.");
+            else throw new ProblemException(400, "The venue source identity is unsupported.");
         }
         var account = new Account(Guid.NewGuid(), owner.OwnerId, request.VenueId, request.Name);
         account.Configure(request.PortfolioId, address, value, sourceId);
@@ -152,7 +153,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         {
             await ValidatePortfolio(request.PortfolioId, ct);
             if (account.SourceId is { } source && await store.SourceExistsAsync(account.VenueId, source, ct))
-                throw new WorkspaceException(409, "An account for this venue and source already exists. Manage or re-enable that account.");
+                throw new ProblemException(409, "An account for this venue and source already exists. Manage or re-enable that account.");
             await store.AddAccountAsync(account, ct);
             return true;
         }, ct);
@@ -162,7 +163,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     private async Task ValidatePortfolio(Guid? id, CancellationToken ct)
     {
         if (id.HasValue && !(await store.PortfoliosAsync(ct)).Any(p => p.Id == id))
-            throw new WorkspaceException(404, "Portfolio not found.");
+            throw new ProblemException(404, "Portfolio not found.");
     }
 
     public async Task<PortfolioDto> UpdatePortfolioAsync(Guid id, UpdatePortfolioRequest request, CancellationToken ct)
@@ -172,7 +173,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         await store.WithManagementLockAsync(async () =>
         {
             var portfolio = (await store.PortfoliosAsync(ct)).SingleOrDefault(p => p.Id == id)
-                ?? throw new WorkspaceException(404, "Portfolio not found.");
+                ?? throw new ProblemException(404, "Portfolio not found.");
             portfolio.Rename(request.Name);
             if (request.Icon is not null) portfolio.ChangeIcon(request.Icon);
             await store.SaveAsync(ct);
@@ -194,7 +195,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         return await store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
         {
             if (request.ExpectedRevision != account.SettingsRevision)
-                throw new WorkspaceException(409, "Account settings changed. Reload the current settings before saving.");
+                throw new ProblemException(409, "Account settings changed. Reload the current settings before saving.");
             await ValidatePortfolio(request.PortfolioId, ct);
             account.UpdateSettings(request.Name, request.PortfolioId, request.IsEnabled);
             await store.SaveAsync(ct);
@@ -289,7 +290,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
 
     public async Task<PortfolioDto> PortfolioAsync(Guid id, CancellationToken ct) =>
         (await PortfoliosAsync(ct)).SingleOrDefault(p => p.Id == id) ??
-        throw new WorkspaceException(404, "Portfolio not found.");
+        throw new ProblemException(404, "Portfolio not found.");
 
     public async Task<AccountDto> AccountAsync(Guid id, CancellationToken ct)
     {
@@ -307,14 +308,14 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     public async Task<AccountInstrumentsDto> InstrumentsAsync(Guid id, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var account = await store.MarketDataAccountAsync(id, ct) ?? throw new WorkspaceException(404, "Account not found.");
+        var account = await store.MarketDataAccountAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
         if (!account.IsEnabled)
-            throw new WorkspaceException(409, "Enable the account before reading its instrument catalogue.");
+            throw new ProblemException(409, "Enable the account before reading its instrument catalogue.");
         if (account.VenueId == "manual")
             return new(account.VenueId, "perpetuals", InstrumentCatalogScopes.Manual, [],
                 "Manual catalogue: enter a perpetual contract manually. No venue metadata is available.");
         if (venues.Reader(account.VenueId) is not { } reader)
-            throw new WorkspaceException(502, "The venue instrument read failed. Try again later.");
+            throw new ProblemException(502, "The venue instrument read failed. Try again later.");
 
         IReadOnlyList<VenueInstrument> instruments;
         try
@@ -325,7 +326,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
             ex is OperationCanceledException && !ct.IsCancellationRequested)
         {
-            throw new WorkspaceException(502, "The venue instrument read failed. Try again later.");
+            throw new ProblemException(502, "The venue instrument read failed. Try again later.");
         }
         return new(account.VenueId, "perpetuals", InstrumentCatalogScopes.Venue, instruments,
             "Venue perpetual contract metadata only. No orders, balances or execution refresh.");
@@ -335,11 +336,11 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     {
         var failed = await store.WithAccountLockAsync(id, async account =>
         {
-            if (!account.IsEnabled) throw new WorkspaceException(400, "Enable the account before refreshing it.");
+            if (!account.IsEnabled) throw new ProblemException(400, "Enable the account before refreshing it.");
             if (venues.Descriptor(account.VenueId) is not { Capabilities.Sync: true })
-                throw new WorkspaceException(400, $"Only {OrList(venues.Descriptors.Where(d => d.Capabilities.Sync).Select(d => d.Name), "and")} accounts can be refreshed.");
-            if (account.SourceId is null) throw new WorkspaceException(400, "A source identity is required before refresh.");
-            if (venues.Reader(account.VenueId) is not { } reader) throw new WorkspaceException(503, "Venue reader is unavailable.");
+                throw new ProblemException(400, $"Only {OrList(venues.Descriptors.Where(d => d.Capabilities.Sync).Select(d => d.Name), "and")} accounts can be refreshed.");
+            if (account.SourceId is null) throw new ProblemException(400, "A source identity is required before refresh.");
+            if (venues.Reader(account.VenueId) is not { } reader) throw new ProblemException(503, "Venue reader is unavailable.");
             PerpetualVenueReadResult result;
             try
             {
@@ -356,7 +357,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             await store.SaveRefreshAsync(account, result, ct);
             return false;
         }, ct);
-        if (failed) throw new WorkspaceException(502, "The venue refresh failed. Try again later.");
+        if (failed) throw new ProblemException(502, "The venue refresh failed. Try again later.");
         var updated = await RequireAccount(id, ct);
         return ToDto(updated, await store.SnapshotAsync(id, ct));
     }
@@ -369,7 +370,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     }
 
     private async Task<Account> RequireAccount(Guid id, CancellationToken ct) =>
-        await store.AccountAsync(id, ct) ?? throw new WorkspaceException(404, "Account not found.");
+        await store.AccountAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
     private AccountDto ToDto(Account a, AccountSnapshot? s) => new(a.Id, a.PortfolioId, a.Name, a.VenueId, a.Address,
         Money(a.VenueId == "manual" ? a.ManualAccountValueUsd : s?.AccountValueUsd), a.LastSyncedAtUtc,
         a.SyncStatus, a.LastSyncError, a.IsEnabled ? s?.Positions.Count ?? 0 : 0, a.HistoryNotice, a.IsEnabled, a.SettingsRevision,

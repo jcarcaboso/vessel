@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Vessel.Application.Common;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 
@@ -52,10 +53,10 @@ public sealed class MarketStreamService(IWorkspaceStore store, IVenueRegistry ve
         var venue = venues.Descriptor(account.VenueId);
         var (validInterval, _) = MarketDataGuard.Interval(interval, venue);
         if (venues.Stream(account.VenueId) is not { } stream)
-            throw new WorkspaceException(502, VenueFailure);
+            throw new ProblemException(502, VenueFailure);
         ct.ThrowIfCancellationRequested();
 
-        var lease = limiter.TryAcquire() ?? throw new WorkspaceException(429, Busy);
+        var lease = limiter.TryAcquire() ?? throw new ProblemException(429, Busy);
         try
         {
             var subscription = stream.Subscribe(instrument, validInterval);
@@ -65,12 +66,12 @@ public sealed class MarketStreamService(IWorkspaceStore store, IVenueRegistry ve
         catch (MarketStreamCapacityException)
         {
             lease.Dispose();
-            throw new WorkspaceException(429, Busy);
+            throw new ProblemException(429, Busy);
         }
         catch (VenueReadException)
         {
             lease.Dispose();
-            throw new WorkspaceException(502, VenueFailure);
+            throw new ProblemException(502, VenueFailure);
         }
         catch
         {

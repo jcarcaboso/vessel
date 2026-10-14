@@ -2,6 +2,7 @@ using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
@@ -286,7 +287,7 @@ public sealed class ExecutionPostgresTests
         execution = await h.Execution.LinkAsync(first.Summary.Id, new("21", "entry", "entry-1"), default);
         Assert.Equal(("linked", "owner"), (execution.Links.Single().State, execution.Links.Single().Source));
         Assert.Empty((await h.Execution.GetAsync(second.Summary.Id, default)).Suggestions);
-        await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.LinkAsync(second.Summary.Id, new("21", "entry", "entry-1"), default));
+        await Assert.ThrowsAsync<ProblemException>(() => h.Execution.LinkAsync(second.Summary.Id, new("21", "entry", "entry-1"), default));
 
         // Unlinking is remembered: the next check does not link it again.
         execution = await h.Execution.UnlinkAsync(first.Summary.Id, execution.Links.Single().Id, default);
@@ -313,7 +314,7 @@ public sealed class ExecutionPostgresTests
         var automatic = Assert.Single(execution.Links);
         Assert.Equal(("41", "stop", "stop-2"), (automatic.Order!.OrderId, automatic.Role, automatic.LevelId));
 
-        await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.LinkAsync(play.Summary.Id, new("42", "stop", "entry-1", "target-1"), default));
+        await Assert.ThrowsAsync<ProblemException>(() => h.Execution.LinkAsync(play.Summary.Id, new("42", "stop", "entry-1", "target-1"), default));
         execution = await h.Execution.LinkAsync(play.Summary.Id, new("42", "stop", "entry-1", "stop-1"), default);
         Assert.Equal(["stop-1", "stop-2"], execution.Links.Select(l => l.LevelId));
     }
@@ -334,7 +335,7 @@ public sealed class ExecutionPostgresTests
         var current = await h.Plays.GetAsync(play.Summary.Id, default);
         Assert.Equal("closed", current.Summary.Status);
         var moved = TestPlays.Plan("101");
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => h.Plays.UpdateAsync(play.Summary.Id,
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Plays.UpdateAsync(play.Summary.Id,
             new(current.Summary.Version, account, "BTC", "venue", current.Summary.Title, moved, current.Drawings, "", "Chased"), default))).StatusCode);
     }
 
@@ -348,7 +349,7 @@ public sealed class ExecutionPostgresTests
         h.Reader.Result = h.Reader.Result with { Fills = [Fill("f1", "41", "Open Long", 100m, 0.2m)] };
         Assert.Equal("open", (await h.Execution.CheckAsync(play.Summary.Id, default)).Status);
         var current = await h.Plays.GetAsync(play.Summary.Id, default);
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => h.Plays.UpdateAsync(play.Summary.Id,
+        var error = await Assert.ThrowsAsync<ProblemException>(() => h.Plays.UpdateAsync(play.Summary.Id,
             new(current.Summary.Version, account, "BTC", "venue", current.Summary.Title, TestPlays.Plan("101"), current.Drawings, "", "Chased"), default));
         Assert.Contains("has fills", error.Message);
         var revised = await h.Plays.UpdateAsync(play.Summary.Id,
@@ -438,8 +439,8 @@ public sealed class ExecutionPostgresTests
         AddFills(h, Fill("k4", "74", "Open Long", 102m, 1m, at.AddMinutes(8)));
         await h.Execution.CheckAsync(play.Summary.Id, default);
         foreach (var order in new[] { "74", "73" })
-            Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.LinkAsync(play.Summary.Id, new(order, "exit"), default))).StatusCode);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.LinkAsync(play.Summary.Id, new("71", "entry", "entry-1"), default))).StatusCode);
+            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.LinkAsync(play.Summary.Id, new(order, "exit"), default))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.LinkAsync(play.Summary.Id, new("71", "entry", "entry-1"), default))).StatusCode);
         execution = await h.Execution.GetAsync(play.Summary.Id, default);
         Assert.Equal(("open", "1", "0", "1"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity, execution.Totals.OpenQuantity));
         Assert.Equal(["72"], execution.Links.Select(l => l.Order!.OrderId));
@@ -467,10 +468,10 @@ public sealed class ExecutionPostgresTests
 
         foreach (var link in closed.Links)
         {
-            Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.UnlinkAsync(play.Summary.Id, link.Id, default))).StatusCode);
-            Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => stale.Execution.UnlinkAsync(play.Summary.Id, link.Id, default))).StatusCode);
+            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.UnlinkAsync(play.Summary.Id, link.Id, default))).StatusCode);
+            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => stale.Execution.UnlinkAsync(play.Summary.Id, link.Id, default))).StatusCode);
         }
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
             stale.Execution.LinkAsync(play.Summary.Id, new("83", "entry", "entry-1"), default))).StatusCode);
         var after = await h.Execution.GetAsync(play.Summary.Id, default);
         Assert.Equal(("closed", 2, "0"), (after.Status, after.Links.Count, after.Totals.OpenQuantity));
@@ -495,7 +496,7 @@ public sealed class ExecutionPostgresTests
         AddFills(h, Fill("n1", "91", "Open Long", 100m, 1m, at.AddMinutes(2)));
         Assert.Equal("open", (await h.Execution.CheckAsync(play.Summary.Id, default)).Status);
         var current = await h.Plays.GetAsync(play.Summary.Id, default);
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => h.Plays.UpdateAsync(play.Summary.Id,
+        var error = await Assert.ThrowsAsync<ProblemException>(() => h.Plays.UpdateAsync(play.Summary.Id,
             new(current.Summary.Version, account, "BTC", "venue", current.Summary.Title, shortPlan, current.Drawings, "", "Changed my mind"), default));
         Assert.Equal(409, error.StatusCode);
         Assert.Equal(("long", 1), ((await h.Plays.GetAsync(play.Summary.Id, default)).Summary.Direction,
@@ -552,8 +553,8 @@ public sealed class ExecutionPostgresTests
         var kept = Assert.Single((await verify.Execution.GetAsync(linking.Summary.Id, default)).Links);
         Assert.Equal(("101", "cancelled"), (kept.Order!.OrderId, (await verify.Plays.GetAsync(linking.Summary.Id, default)).Summary.Status));
         Assert.Empty((await verify.Execution.GetAsync(unlinking.Summary.Id, default)).Links);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => verify.Execution.UnlinkAsync(linking.Summary.Id, kept.Id, default))).StatusCode);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => verify.Execution.UnlinkAsync(linking.Summary.Id, kept.Id, default))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
             verify.Execution.LinkAsync(unlinking.Summary.Id, new("102", "entry", "entry-1"), default))).StatusCode);
     }
 
@@ -586,7 +587,7 @@ public sealed class ExecutionPostgresTests
                 await change(other, await other.Plays.GetAsync(play, default));
             }
             finally { gate.Release.TrySetResult(); }
-            return (await Assert.ThrowsAsync<WorkspaceException>(() => pending)).StatusCode;
+            return (await Assert.ThrowsAsync<ProblemException>(() => pending)).StatusCode;
         }
         // The play turned short: a buy is no longer an entry.
         Assert.Equal(409, await ChangedBeforeLock(turning.Summary.Id, new("111", "entry", "entry-1"), (other, current) => Revise(other, current, ShortPlan())));
@@ -642,7 +643,7 @@ public sealed class ExecutionPostgresTests
         var (revision, link) = await Turns("UPDATE plays", (a, current) => Revise(a, current, firstOnly),
             (b, _) => b.Execution.LinkAsync(scaling, new("121", "entry", "entry-2"), default));
         await revision;
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => link)).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => link)).StatusCode);
 
         // A link that already checked the plan holds the play: the revision then finds entry 2 filled.
         var (restore, _) = await Request(database, h);
@@ -650,7 +651,7 @@ public sealed class ExecutionPostgresTests
         (link, revision) = await Turns("INSERT INTO play_order_links", (a, _) => a.Execution.LinkAsync(scaling, new("122", "entry", "entry-2"), default),
             (b, current) => Revise(b, current, firstOnly));
         await link;
-        Assert.Contains("has fills", (await Assert.ThrowsAsync<WorkspaceException>(() => revision)).Message);
+        Assert.Contains("has fills", (await Assert.ThrowsAsync<ProblemException>(() => revision)).Message);
 
         var (verify, _) = await Request(database, h);
         await using var verifyDb = verify.Db;
@@ -724,11 +725,11 @@ public sealed class ExecutionPostgresTests
         manual = await h.Plays.ChangeStatusAsync(manual.Summary.Id, new(manual.Summary.Version, "planned"), default);
         var execution = await h.Execution.GetAsync(manual.Summary.Id, default);
         Assert.False(execution.Tracked);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.CheckAsync(manual.Summary.Id, default))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.CheckAsync(manual.Summary.Id, default))).StatusCode);
 
         var play = await PlannedPlay(h, account);
         h.Orders.Fail = true;
-        var failure = await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.CheckAsync(play.Summary.Id, default));
+        var failure = await Assert.ThrowsAsync<ProblemException>(() => h.Execution.CheckAsync(play.Summary.Id, default));
         Assert.Equal(502, failure.StatusCode);
         Assert.DoesNotContain("secret", failure.Message);
     }

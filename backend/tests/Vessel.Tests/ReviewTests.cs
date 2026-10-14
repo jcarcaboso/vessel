@@ -1,10 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Review;
 using Vessel.Application.Sizing;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
@@ -243,7 +243,7 @@ public sealed class ReviewTests
     [InlineData("all", "all", 0, " BTC")]
     public async Task Invalid_queries_fail_before_store_access(string period, string portfolio, int offset, string? instrument)
     {
-        await Assert.ThrowsAsync<WorkspaceException>(() => Read(new(period, portfolio, Instrument: instrument, Offset: offset)));
+        await Assert.ThrowsAsync<ProblemException>(() => Read(new(period, portfolio, Instrument: instrument, Offset: offset)));
         Assert.Null(f.LastQuery);
     }
 

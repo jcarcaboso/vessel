@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Api;
-using Vessel.Application.Workspace;
+using Vessel.Application.Common;
 using Vessel.Application.System;
 using Vessel.Infrastructure;
 using Vessel.Persistence;
@@ -54,12 +54,12 @@ app.Use(async (context, next) =>
     catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { }
     catch (Exception ex)
     {
-        var expected = ex is WorkspaceException or BadHttpRequestException;
+        var expected = ex is ProblemException or BadHttpRequestException;
         // Generate locally: neither a correlation header nor a raw URL is diagnostic input.
         var traceId = System.Diagnostics.ActivityTraceId.CreateRandom().ToString();
         var (status, detail) = ex switch
         {
-            WorkspaceException error => (error.StatusCode, error.Message),
+            ProblemException error => (error.StatusCode, error.Message),
             BadHttpRequestException { StatusCode: 413 } => (413, "The request body is too large."),
             BadHttpRequestException => (400, "The request body or parameters are invalid."),
             _ when SafeExceptionDiagnostics.IsDependencyOutage(ex) => (503, "The service is unavailable. Try again later."),
@@ -90,11 +90,11 @@ app.Use(async (context, next) =>
         if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsDelete(context.Request.Method) &&
             !app.Environment.IsDevelopment() &&
             !CredentialTransport.IsAllowed(context))
-            throw new WorkspaceException(403, "Credential entry requires HTTPS outside localhost.");
+            throw new ProblemException(403, "Credential entry requires HTTPS outside localhost.");
         var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
         if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = 4096;
         if (context.Request.ContentLength > 4096)
-            throw new WorkspaceException(413, "Credential request is too large.");
+            throw new ProblemException(413, "Credential request is too large.");
     }
     else if (!HttpMethods.IsGet(context.Request.Method) &&
         (context.Request.Path.StartsWithSegments("/api/plays") &&
@@ -104,7 +104,7 @@ app.Use(async (context, next) =>
         var max = context.Request.Path.Value?.Contains("/manual-executions", StringComparison.OrdinalIgnoreCase) == true ? 16_384 : 131_072;
         var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
         if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = max;
-        if (context.Request.ContentLength > max) throw new WorkspaceException(413, "Diary request is too large.");
+        if (context.Request.ContentLength > max) throw new ProblemException(413, "Diary request is too large.");
     }
     await next(context);
 });
