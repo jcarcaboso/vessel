@@ -27,6 +27,7 @@ export interface ActivityOperation {
   exitOrderCount: number
   fillCount: number
   reportedClosedPnlUsd: string
+  grossClosedPnlUsd: string | null
   stablecoinFeesNominalUsd: string
   otherFees: { token: string; amount: string }[]
   netResultUsd: string | null
@@ -69,7 +70,8 @@ export function isActivityDocument(value: unknown, isFill: (value: unknown) => v
       !(op.openedAtUtc === null || date(op.openedAtUtc)) || !(op.closedAtUtc === null || date(op.closedAtUtc)) ||
       !['quantity', 'totalEnteredQuantity', 'totalExitedQuantity', 'openQuantity', 'averageEntryPrice', 'averageExitPrice'].every(k => nullableDecimal(op[k])) ||
       !['entryOrderCount', 'exitOrderCount', 'fillCount', 'omittedFillCount'].every(k => count(op[k])) ||
-      !decimal(op.reportedClosedPnlUsd) || !decimal(op.stablecoinFeesNominalUsd) || !(op.netResultUsd === null || decimal(op.netResultUsd)) ||
+      !decimal(op.reportedClosedPnlUsd) || !(op.grossClosedPnlUsd === null || decimal(op.grossClosedPnlUsd)) ||
+      !decimal(op.stablecoinFeesNominalUsd) || !(op.netResultUsd === null || decimal(op.netResultUsd)) ||
       !['gross', 'net-of-fee', 'mixed'].includes(String(op.pnlBasis)) || !(op.playId === null || guid(op.playId)) ||
       !['linked', 'unassigned', 'mixed'].includes(String(op.playAssociation)) || !notices(op.coverage) ||
       !Array.isArray(op.otherFees) || !op.otherFees.every(f => object(f) && text(f.token, 64) && decimal(f.amount)) ||

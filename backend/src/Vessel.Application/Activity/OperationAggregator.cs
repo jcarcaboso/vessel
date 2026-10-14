@@ -243,8 +243,8 @@ public static class OperationAggregator
         private readonly HashSet<string> bases = [];
         private readonly Dictionary<string, ExactAmount> fees = new(StringComparer.Ordinal);
         private readonly HashSet<Guid> plays = [];
-        private bool unassigned, unsupportedGrossFee;
-        private ExactAmount entered, exited, pnl, grossFees;
+        private bool unassigned, unsupportedGrossFee, unsupportedNetFee;
+        private ExactAmount entered, exited, pnl, grossFees, netFees;
         private BigInteger entryNotional, exitNotional;
         public void Add(ImportedFill fill, string role, ExactAmount quantity, bool monetary, IReadOnlyDictionary<Guid, Guid>? links)
         {
@@ -260,6 +260,11 @@ public static class OperationAggregator
                 if (fill.FeeToken == "USDC") grossFees += fee;
                 else if (!fee.Units.IsZero) unsupportedGrossFee = true;
             }
+            else if (fill.PnlBasis == ExecutionFacts.PnlNetOfFee)
+            {
+                if (fill.FeeToken == "USDC") netFees += fee;
+                else if (!fee.Units.IsZero) unsupportedNetFee = true;
+            }
             if (role == "entry") { entered += quantity; entryNotional += quantity.Units * ExactAmount.From(fill.Price).Units; if (!string.IsNullOrWhiteSpace(fill.OrderId)) entries.Add(fill.OrderId); }
             if (role == "exit") { exited += quantity; exitNotional += quantity.Units * ExactAmount.From(fill.Price).Units; if (!string.IsNullOrWhiteSpace(fill.OrderId)) exits.Add(fill.OrderId); }
             parts.Add(new(fill, role, quantity, fee, closedPnl, play));
@@ -267,6 +272,7 @@ public static class OperationAggregator
         public ActivityOperationDto Build(ExactAmount position)
         {
             if (unsupportedGrossFee) Coverage.Add("Net result is unknown: a gross fill has a non-USDC fee; no fee conversion is performed.");
+            if (unsupportedNetFee) Coverage.Add("Before-fee P&L is unknown: a net-of-fee fill has a non-USDC fee; no fee conversion is performed.");
             if (parts.Any(p => string.IsNullOrWhiteSpace(p.Fill.OrderId))) Coverage.Add("Some order IDs are missing; distinct order counts include known IDs only.");
             var association = plays.Count == 0 ? "unassigned" : plays.Count == 1 && !unassigned ? "linked" : "mixed";
             var stableFees = fees.Where(f => Stablecoins.Contains(f.Key)).Aggregate(default(ExactAmount), (sum, f) => sum + f.Value);
@@ -278,7 +284,10 @@ public static class OperationAggregator
                 UnknownBoundaries ? null : ExactAmount.Average(exitNotional, exited), entries.Count, exits.Count, parts.Count,
                 pnl.ToString(), stableFees.ToString(), fees.Where(f => !Stablecoins.Contains(f.Key)).OrderBy(f => f.Key, StringComparer.Ordinal)
                     .Select(f => new OperationFeeDto(f.Key, f.Value.ToString())).ToList(), unsupportedGrossFee ? null : (pnl - grossFees).ToString(),
-                bases.Count == 1 ? bases.Single() : "mixed", association == "linked" ? plays.Single() : null, association, Coverage, new AllocationRows(parts));
+                bases.Count == 1 ? bases.Single() : "mixed", association == "linked" ? plays.Single() : null, association, Coverage, new AllocationRows(parts))
+            {
+                GrossClosedPnlUsd = unsupportedNetFee ? null : (pnl + netFees).ToString()
+            };
         }
     }
 
