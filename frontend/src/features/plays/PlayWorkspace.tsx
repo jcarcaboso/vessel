@@ -19,6 +19,7 @@ import { PlanNotices } from './PlanNotices'
 import { PositionEditor, defaultMaxLeverage, type SuggestionMarks } from './PositionEditor'
 import { ChartPanel } from './PlayChart'
 import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
+import { isNominalUsdQuote } from './stablecoins'
 import './plays-workspace.css'
 
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, notice,
@@ -87,8 +88,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const riskAmount = account?.accountValueUsd && Number(account.accountValueUsd) > 0 ? account.accountValueUsd
     : draft.budgetOverride && Number(draft.budgetOverride) > 0 ? draft.budgetOverride : null
   const riskName = account?.accountValueUsd && Number(account.accountValueUsd) > 0 ? `${account.name} account value` : 'Explicit manual budget'
-  const riskReference = riskAmount && (units.quote === 'USD' || units.quote === 'USDC')
-    ? { name: units.quote === 'USDC' ? `${riskName} · nominal USD/USDC at 1:1` : riskName, amount: riskAmount, quote: units.quote } : null
+  // Listed stablecoins count as nominal USD at 1:1, with no FX or depeg valuation.
+  const riskReference = riskAmount && isNominalUsdQuote(units.quote)
+    ? { name: units.quote === 'USD' ? riskName : `${riskName} · nominal USD/${units.quote} at 1:1`, amount: riskAmount, quote: units.quote } : null
 
   const tradeUrl = account ? venues.tradeUrl(account.venueId, draft.instrument, draft.instrumentSource, instrumentInfo?.venueContractId) : null
   // In a read-only Play, the chart can still be viewed but not edited.

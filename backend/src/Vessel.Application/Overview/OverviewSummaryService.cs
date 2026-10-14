@@ -8,9 +8,10 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
 {
     public const int MaxGroups = 200;
     public const string ScopeNote = "Enabled owner accounts only, including Unassigned. Nominal USD, no FX/depeg valuation. " +
+        NominalStablecoins.Caveat + " Venues with different quote stablecoins are pooled nominally. " +
         "Balance and availability use the workspace's reported ledgers, never inferred funds. Positions and unrealized P&L use latest retained snapshots, not live prices. " +
         "Realized result uses closed retained position operations and actual exit times, not Plays; incomplete boundaries and unknown net results are excluded. " +
-        "No closed result is unknown, not zero. Retained imports do not prove complete history. USDC gross fees are deducted once; separate funding is not added and reported funding inclusion is unverified. " +
+        "No closed result is unknown, not zero. Retained imports do not prove complete history. Listed stablecoin gross fees are deducted once; separate funding is not added and reported funding inclusion is unverified. " +
         "Shares are exact ratios of known balance subtotals, not claims of complete valuation. At most 200 groups; totals include omitted groups.";
 
     public async Task<OverviewSummaryDto> GetAsync(string? groupBy, string? period, string? scope, CancellationToken ct)

@@ -21,7 +21,8 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         "Not venue imports, Activity operations or reported account balances. Unknown costs are not zero. " +
         "Execution times must use whole microseconds; finer precision is rejected, never rounded. " +
         "Derived partial average-cost allocations use rounded decimal precision; residual cost carries to the final close. " +
-        "Net results subtract known USDC execution fees; funding and slippage are not added. " +
+        "Net results subtract known execution fees in listed USD stablecoins; other fee currencies leave net unknown. " +
+        NominalStablecoins.Caveat + " Funding and slippage are not added. " +
         "At most 200 records and 1000 history revisions per Play; further writes are rejected, never silently omitted.";
     public const string RetrospectiveNotice = "Owner-confirmed completed imported operation, not a contemporaneous thesis or plan. " +
         "Whole-order associations only. No inferred leverage or initial-risk R; excluded from the sizing ladder. " +

@@ -180,6 +180,20 @@ public sealed class ReviewTests
     }
 
     [Fact]
+    public async Task Listed_stablecoin_fees_pool_nominally_and_other_tokens_stay_unknown()
+    {
+        var usdg = f.Add(10);
+        foreach (var fill in usdg.Fills) { fill.Fill.Fee = .25m; fill.Fill.FeeToken = "USDG"; }
+        var mixed = f.Add(10);
+        mixed.Fills[0].Fill.Fee = .1m; mixed.Fills[0].Fill.FeeToken = "USDC";
+        mixed.Fills[1].Fill.Fee = .2m; mixed.Fills[1].Fill.FeeToken = "USDG";
+        var unknown = f.Add(10);
+        unknown.Fills[0].Fill.Fee = 1; unknown.Fills[0].Fill.FeeToken = "usdg";
+        var report = await Read();
+        Assert.Equal(("19.2", 2, 1), (report.Metrics.Net, report.Metrics.Count, report.Coverage.IncompleteFees));
+    }
+
+    [Fact]
     public async Task R_is_unknown_without_a_pre_entry_revision_or_complete_protective_stops()
     {
         var retrospective = f.Add(10);

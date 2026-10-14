@@ -77,8 +77,8 @@ public static partial class ManualLedger
                     }
                     var known = row.Fee is not null && row.FeeCurrency is not null;
                     var fee = known ? Number(row.Fee!, positive: false) : 0;
-                    complete &= known && (row.FeeCurrency == "USDC" || fee == 0);
-                    if (row.FeeCurrency == "USDC") fees = Add(fees, fee);
+                    complete &= known && (NominalStablecoins.Contains(row.FeeCurrency) || fee == 0);
+                    if (NominalStablecoins.Contains(row.FeeCurrency)) fees = Add(fees, fee);
                     projection.Add(new(entry ? OrderLinkRole.Entry : OrderLinkRole.Exit, new ImportedFill
                     {
                         Id = row.Id, OwnerId = play.OwnerId, AccountId = play.AccountId, ContractId = play.ContractId!,

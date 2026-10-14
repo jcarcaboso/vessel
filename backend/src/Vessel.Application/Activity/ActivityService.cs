@@ -9,7 +9,7 @@ public sealed class ActivityService(IActivityStore store)
         "Retained history is bounded by venue imports; balanced fills do not prove lifetime coverage. Newest activity first. " +
         "At most 500 operations and 10,000 allocated fill rows, up to 200 per operation. Totals include omitted rows. " +
         "Quantities, sums and flip allocations are exact. Weighted prices round only when necessary to 28 decimal places, halfway away from zero. " +
-        "Stablecoin fees are nominal token units, not FX values. Net result subtracts only USDC fees on gross fills; net-of-fee P&L is not charged twice. " +
+        NominalStablecoins.Caveat + " Net result subtracts listed stablecoin fees on gross fills; other fee tokens leave it unknown. Net-of-fee P&L is not charged twice. " +
         "Separate funding cashflows are not added, and RISEx reported funding inclusion remains unverified.";
 
     public async Task<ActivityDto> GetAsync(Guid? accountId, CancellationToken ct)

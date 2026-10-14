@@ -19,7 +19,8 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         "Manual facts are estimates, not venue balance reconciliation or imported Activity. Retrospective Plays have no contemporaneous " +
         "plan or initial-risk R and are excluded from the sizing ladder. Return percent is net/executed entry notional, not return on margin. " +
         "Unassigned imported fills are not Plays. Retained venue history can be incomplete; All is not lifetime history. " +
-        "Results are nominal USD and include reported execution fees once. Separate funding cashflows are not added; " +
+        "Results are nominal USD and include reported execution fees once. " + NominalStablecoins.Caveat +
+        " Venues with different quote stablecoins are pooled nominally. Separate funding cashflows are not added; " +
         "whether RISEx reported realized P&L includes funding remains unverified. Balanced retained fills are not proof of full venue history. " +
         "Accounts use current portfolio membership; disabled accounts are excluded. Open-play counts are current, not a historical cohort.";
 
@@ -134,11 +135,11 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         if (arithmeticProblem is not null) reasons.Add(arithmeticProblem);
         if (exclusion == "fees" || facts.Fills.Any(f => !ExecutionFacts.IsFeeBasis(f.Fill.FeeBasis) ||
             string.IsNullOrWhiteSpace(f.Fill.FeeToken) || f.Fill.PnlBasis == ExecutionFacts.PnlGross &&
-                f.Fill.Fee != 0 && f.Fill.FeeToken != "USDC"))
+                f.Fill.Fee != 0 && !NominalStablecoins.Contains(f.Fill.FeeToken)))
         {
             reasons.AddRange(facts.Fills.Where(f => !ExecutionFacts.IsFeeBasis(f.Fill.FeeBasis) ||
                 string.IsNullOrWhiteSpace(f.Fill.FeeToken) || f.Fill.PnlBasis == ExecutionFacts.PnlGross &&
-                f.Fill.Fee != 0 && f.Fill.FeeToken != "USDC").Select(f =>
+                f.Fill.Fee != 0 && !NominalStablecoins.Contains(f.Fill.FeeToken)).Select(f =>
                     $"Fill {f.Fill.SourceFillId} of order {f.Fill.OrderId} has missing or unsupported fee inputs ({f.Fill.FeeToken}, {f.Fill.FeeBasis})."));
             if (!facts.ManualFeesComplete) reasons.Add("Manual costs are unknown or lack supported USD conversion; they are not treated as zero.");
         }

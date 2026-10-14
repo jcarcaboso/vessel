@@ -203,6 +203,18 @@ public sealed class OverviewSummaryTests
     }
 
     [Fact]
+    public async Task Listed_stablecoin_fees_pool_nominally_across_venues_with_the_caveat_visible()
+    {
+        var usdc = Account(); var usdg = Account(); var lower = Account();
+        Operation(usdc, Now.AddHours(-1), 10, 1); Operation(usdg, Now.AddHours(-1), 5, 0.5m, "USDG");
+        Operation(lower, Now.AddHours(-1), 100, 1, "usdg");
+        var result = await service.GetAsync("account", "30", "all", default);
+        Assert.Equal("13.5", result.Totals.RealizedResult.AmountUsd);
+        Assert.Equal((2, 1), (result.Totals.RealizedResult.Coverage.ContributingOperationCount, result.Totals.RealizedResult.Coverage.ExcludedOperationCount));
+        Assert.Contains(NominalStablecoins.Caveat, result.ScopeNote);
+    }
+
+    [Fact]
     public async Task Snapshot_pnl_counts_only_open_positions_and_preserves_missing_snapshots()
     {
         var a = Account(venue: "hyperliquid"); Snapshot(a, 100, -2, -1.0000000000000000000000000001m, 2);

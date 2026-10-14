@@ -101,7 +101,7 @@ within the selected time and account/asset scope.
 
 | Metric | Rule |
 | --- | --- |
-| Net P&L | Sum reported closed P&L, subtracting USDC fees only for gross-basis fills. Net-of-fee fills are never charged twice. Nonzero gross fees in unsupported tokens exclude the Play. |
+| Net P&L | Sum reported closed P&L, subtracting listed nominal stablecoin fees (see below) only for gross-basis fills. Net-of-fee fills are never charged twice. Nonzero gross fees in unsupported tokens exclude the Play. |
 | Win / loss / scratch | Positive / negative / exactly zero net result. |
 | Batting average | Wins / (wins + losses). Scratches excluded. |
 | Play return | Net P&L / executed entry notional × 100, not return on margin or account equity. |
@@ -178,3 +178,7 @@ with only the opt-in live RISEx test skipped; 483 frontend tests and 76
 prototype tests passed. Locked .NET restore, Release build, frontend build,
 TypeScript and lint passed. Vite still reports its large-main-chunk warning.
 Both Sol reviewers confirmed their findings closed on targeted recheck.
+
+## Nominal stablecoin pooling (October 14, 2026)
+
+Fees in any stablecoin of the Application `NominalStablecoins` list (USDC, USDG, USDT, USDT0, USDE, USDe and USDH) are deducted one-for-one, so USDG fees from Lighter Robinhood no longer exclude a Play; other tokens remain unsupported. Results from venues settling in different listed stablecoins pool at nominal 1:1. The review notice and the Scope explanation state the caveat: no FX or depeg valuation.
