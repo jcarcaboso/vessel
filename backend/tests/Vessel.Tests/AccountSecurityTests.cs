@@ -191,7 +191,7 @@ public sealed class AccountSecurityTests
         store.Accounts.Add(SecurityFixture.Account(Guid.NewGuid(), "2"));
         var discovery = new SecurityDiscovery([new("9223372036854775807", "Main", "main", "-12.000000000000000000001",
             "15.000000000000000001", "-0.01"), new("2", "Sub", "subaccount")]);
-        var service = new AccountDiscoveryService(store, new CoreOwner(owner), SecurityFixture.Registry(), [discovery]);
+        var service = new AccountDiscoveryService(store, new CoreOwner(owner), SecurityFixture.Registry(discovery));
         var result = await service.DiscoverAsync(SecurityFixture.Venue.Id, SecurityFixture.Address, default);
         Assert.Equal(added.Id, result.Accounts[0].ExistingAccountId); Assert.False(result.Accounts[0].IsEnabled);
         Assert.Equal("-12.000000000000000000001", result.Accounts[0].AccountValueUsd);
@@ -219,7 +219,7 @@ public sealed class AccountSecurityTests
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
         var discovery = new SecurityDiscovery([new("123", "Main", "main")]);
-        var service = new AccountDiscoveryService(store, new CoreOwner(owner), SecurityFixture.Registry(), [discovery]);
+        var service = new AccountDiscoveryService(store, new CoreOwner(owner), SecurityFixture.Registry(discovery));
         await service.DiscoverAsync(SecurityFixture.Venue.Id,
             new CredentialDiscoveryRequest { Address = SecurityFixture.Address, Token = " \r\n" + SecurityFixture.Token + "\t " }, default);
         Assert.Equal(SecurityFixture.Token, discovery.ReceivedToken);
@@ -238,7 +238,7 @@ public sealed class AccountSecurityTests
             service.PutAsync(account.Id, new() { Token = token }, default))).StatusCode);
         Assert.Null(verifier.ReceivedToken); Assert.Null(credentials.Stored);
         var discovery = new SecurityDiscovery([new("123", "Main", "main")]);
-        var discover = new AccountDiscoveryService(store, new CoreOwner(owner), SecurityFixture.Registry(), [discovery]);
+        var discover = new AccountDiscoveryService(store, new CoreOwner(owner), SecurityFixture.Registry(discovery));
         Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() =>
             discover.DiscoverAsync(SecurityFixture.Venue.Id,
                 new CredentialDiscoveryRequest { Address = SecurityFixture.Address, Token = token }, default))).StatusCode);
@@ -335,14 +335,15 @@ internal static class SecurityFixture
     public static readonly VenueDescriptor Venue = new("index-fixture", "Index venue", "read-only", VenueSources.AccountIndex,
         new(true, false, true, false, false, false, false, AccountDiscovery: true, ReadOnlyCredential: true));
     public static VenueRegistry Registry(params object[] adapters) => new([VenueDescriptor.Manual, HyperliquidPerpetualReader.Descriptor, Venue],
-        adapters.OfType<IPerpetualVenueReader>(), adapters.OfType<IVenueOrderReader>(), [], [], []);
+        adapters.OfType<IPerpetualVenueReader>(), adapters.OfType<IVenueOrderReader>(), [], [], [],
+        adapters.OfType<IVenueAccountDiscovery>(), adapters.OfType<IVenueCredentialVerifier>());
     public static AesGcmCredentialVault Vault() => new(new() { ActiveKeyId = "v1", Keys = new() { ["v1"] = Key } });
     public static Account Account(Guid owner, string source = "123")
     {
         var account = new Account(Guid.NewGuid(), owner, Venue.Id, "Index account"); account.Configure(null, null, null, source); return account;
     }
     public static AccountCredentialService Service(Guid owner, IWorkspaceStore accounts, IAccountCredentialStore credentials, ICredentialVault vault, SecurityVerifier? verifier = null) =>
-        new(accounts, credentials, new CoreOwner(owner), Registry(), [verifier ?? new()], vault, Clock);
+        new(accounts, credentials, new CoreOwner(owner), Registry(verifier ?? new()), vault, Clock);
     private sealed class SecurityClock : TimeProvider { public override DateTimeOffset GetUtcNow() => Now; }
 }
 

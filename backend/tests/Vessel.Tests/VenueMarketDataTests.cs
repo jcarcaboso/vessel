@@ -45,7 +45,7 @@ public sealed class VenueMarketDataTests
     private static VenueRegistry Registry(params object[] adapters) => new(
         [VenueDescriptor.Manual, HyperliquidPerpetualReader.Descriptor, Tick],
         [new FixtureReader { VenueId = "tick", Result = new FixtureReader().Result with { Instruments = [new("DOGE", 5, 10, "USDC", VenueContractId: "17")] } }], [],
-        adapters.OfType<ICandleReader>(), adapters.OfType<IMarketContextReader>(), []);
+        adapters.OfType<ICandleReader>(), adapters.OfType<IMarketContextReader>(), [], [], []);
 
     [Fact]
     public async Task Candles_use_the_venues_own_intervals_and_notice_and_allow_a_missing_trade_count()

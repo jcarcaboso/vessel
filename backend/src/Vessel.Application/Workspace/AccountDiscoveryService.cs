@@ -15,8 +15,7 @@ public sealed class CredentialDiscoveryRequest
     public string? Token { get; init; }
 }
 
-public sealed class AccountDiscoveryService(IWorkspaceStore accounts, IJournalOwnerContext owner, IVenueRegistry venues,
-    IEnumerable<IVenueAccountDiscovery> discoveries)
+public sealed class AccountDiscoveryService(IWorkspaceStore accounts, IJournalOwnerContext owner, IVenueRegistry venues)
 {
     public Task<AccountDiscoveryDto> DiscoverAsync(string venueId, string? address, CancellationToken ct) =>
         DiscoverCoreAsync(venueId, address, null, ct);
@@ -36,8 +35,7 @@ public sealed class AccountDiscoveryService(IWorkspaceStore accounts, IJournalOw
         if (venues.Descriptor(venueId)?.Capabilities.AccountDiscovery != true)
             throw new ProblemException(400, "This venue does not support account discovery.");
         if (!AccountSource.IsEvmAddress(address)) throw new ProblemException(400, "A 42-character public hexadecimal address is required.");
-        var discovery = discoveries.SingleOrDefault(d => d.VenueId == venueId)
-            ?? throw new ProblemException(503, "Venue discovery is unavailable.");
+        var discovery = venues.Discovery(venueId) ?? throw new ProblemException(503, "Venue discovery is unavailable.");
         IReadOnlyList<VenueAccountCandidate> found;
         try
         {

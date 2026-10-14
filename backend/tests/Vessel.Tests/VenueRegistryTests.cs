@@ -1,4 +1,5 @@
 using Vessel.Application.Common;
+using Vessel.Application.Credentials;
 using Vessel.Application.Metadata;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
@@ -26,7 +27,7 @@ public sealed class VenueRegistryTests
 
     private static VenueRegistry Registry(params object[] adapters) => new(
         [VenueDescriptor.Manual, HyperliquidPerpetualReader.Descriptor, Other],
-        adapters.OfType<IPerpetualVenueReader>(), [], [], [], []);
+        adapters.OfType<IPerpetualVenueReader>(), [], [], [], [], [], []);
 
     [Fact]
     public void Adapters_are_found_by_venue_id_and_the_last_registration_wins()
@@ -40,6 +41,29 @@ public sealed class VenueRegistryTests
         Assert.Equal("Other", registry.Descriptor("other")!.Name);
         Assert.Null(registry.Descriptor("lighter"));
         Assert.Equal(["manual", "hyperliquid", "other"], registry.Descriptors.Select(d => d.Id));
+    }
+
+    [Fact]
+    public async Task Discovery_and_credential_verification_follow_the_same_last_registration_rule()
+    {
+        var firstDiscovery = new SecurityDiscovery([new("1", "First", "main")]);
+        var lastDiscovery = new SecurityDiscovery([new("2", "Last", "main")]);
+        var firstVerifier = new SecurityVerifier(); var lastVerifier = new SecurityVerifier();
+        var registry = SecurityFixture.Registry(firstDiscovery, firstVerifier, lastDiscovery, lastVerifier);
+        Assert.Same(lastDiscovery, registry.Discovery(SecurityFixture.Venue.Id));
+        Assert.Same(lastVerifier, registry.CredentialVerifier(SecurityFixture.Venue.Id));
+        Assert.Null(registry.Discovery("hyperliquid")); Assert.Null(registry.CredentialVerifier("hyperliquid"));
+
+        // A duplicate registration no longer fails the use case; it reads through the registry's choice.
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
+        var found = await new AccountDiscoveryService(store, new CoreOwner(owner), registry)
+            .DiscoverAsync(SecurityFixture.Venue.Id, SecurityFixture.Address, default);
+        Assert.Equal("Last", Assert.Single(found.Accounts).Name);
+        var account = SecurityFixture.Account(owner); store.Accounts.Add(account);
+        using var vault = SecurityFixture.Vault();
+        await new AccountCredentialService(store, new SecurityCredentialStore(), new CoreOwner(owner), registry, vault, SecurityFixture.Clock)
+            .PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
+        Assert.Null(firstVerifier.ReceivedToken); Assert.Equal(SecurityFixture.Token, lastVerifier.ReceivedToken);
     }
 
     [Fact]
@@ -69,7 +93,7 @@ public sealed class VenueRegistryTests
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
         const string address = "0x0123456789abcdef0123456789abcdef01234567";
         var noSync = Other with { Capabilities = Other.Capabilities with { Sync = false } };
-        var registry = new VenueRegistry([VenueDescriptor.Manual, HyperliquidPerpetualReader.Descriptor, noSync], [new FixtureReader()], [], [], [], []);
+        var registry = new VenueRegistry([VenueDescriptor.Manual, HyperliquidPerpetualReader.Descriptor, noSync], [new FixtureReader()], [], [], [], [], [], []);
         var service = new WorkspaceService(store, new CoreOwner(owner), registry);
         var manual = await service.CreateAccountAsync(new(null, "Manual", "manual"), default);
         var refused = await Assert.ThrowsAsync<ProblemException>(() => service.SyncAsync(manual.Id, default));
@@ -105,7 +129,7 @@ public sealed class VenueRegistryTests
         // A venue that gains an adapter replaces its planned entry instead of duplicating it.
         var quantfury = new VenueDescriptor("quantfury", "Quantfury", "read-only", VenueSources.None, VenueCapabilities.None);
         var registered = SystemMetadata.ForOwner(new JournalOwner(Guid.NewGuid(), "Owner"),
-            new VenueRegistry([VenueDescriptor.Manual, quantfury], [], [], [], [], []));
+            new VenueRegistry([VenueDescriptor.Manual, quantfury], [], [], [], [], [], [], []));
         Assert.Single(registered.Venues, v => v.Id == "quantfury");
         Assert.Equal("read-only", registered.Venues.Single(v => v.Id == "quantfury").Status);
     }

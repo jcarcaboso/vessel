@@ -305,7 +305,7 @@ public sealed class CandleCachingTests
         var (_, store, account) = Setup(); var clock = new Clock(); var reader = new Reader();
         var intervals = new List<string> { "1h" };
         var descriptor = HyperliquidPerpetualReader.Descriptor with { Intervals = intervals };
-        var registry = new VenueRegistry([descriptor], [new FixtureReader()], [], [reader], [], []);
+        var registry = new VenueRegistry([descriptor], [new FixtureReader()], [], [reader], [], [], [], []);
         var service = new CandleService(store, registry, new CandleCache(clock), clock);
         var end = clock.Now.AddDays(-1).ToUnixTimeMilliseconds();
         await service.CandlesAsync(account.Id, "BTC", "1h", end, default);

@@ -345,7 +345,7 @@ public sealed class ManualLedgerPrecisionTests
         private readonly List<ManualExecutionHistory> history = [];
         private readonly List<DiaryRequest> requests = [];
         public DiaryService Service => new(Plays, this, this,
-            new VenueRegistry([VenueDescriptor.Manual], [], [], [], [], []), new ReviewClock());
+            new VenueRegistry([VenueDescriptor.Manual], [], [], [], [], [], [], []), new ReviewClock());
         public ReviewService Review => new(this, new ReviewClock());
 
         public PrecisionFixture(string direction)

@@ -9,7 +9,7 @@ namespace Vessel.Application.Credentials;
 
 public sealed class AccountCredentialService(
     IWorkspaceStore accounts, IAccountCredentialStore credentials, IJournalOwnerContext owner,
-    IVenueRegistry venues, IEnumerable<IVenueCredentialVerifier> verifiers, ICredentialVault vault, TimeProvider time)
+    IVenueRegistry venues, ICredentialVault vault, TimeProvider time)
 {
     // Read-only: no row lock, so opening Manage account does not wait behind a running refresh.
     public async Task<AccountCredentialDto> GetAsync(Guid id, CancellationToken ct)
@@ -28,7 +28,7 @@ public sealed class AccountCredentialService(
             var token = request.Token?.Trim();
             if (string.IsNullOrEmpty(token) || request.Token!.Length > 512)
                 throw new ProblemException(400, "Enter a read-only token of at most 512 characters.");
-            var verifier = verifiers.SingleOrDefault(v => v.VenueId == account.VenueId)
+            var verifier = venues.CredentialVerifier(account.VenueId)
                 ?? throw new ProblemException(503, "Credential verification is unavailable.");
             VerifiedVenueCredential verified;
             try

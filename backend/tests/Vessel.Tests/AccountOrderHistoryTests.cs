@@ -54,7 +54,7 @@ public sealed class AccountOrderHistoryTests
         accounts.Accounts.Add(account);
         var descriptor = AccountHistoryOrders.Descriptor(orders.VenueId);
         var venues = new VenueRegistry([descriptor with { Capabilities = descriptor.Capabilities with { Orders = supportsOrders } }],
-            [], readerAvailable ? [orders] : [], [], [], []);
+            [], readerAvailable ? [orders] : [], [], [], [], [], []);
         var store = new RetentionStore();
         var workspace = new WorkspaceService(accounts, new CoreOwner(owner), venues);
         return (new(null!, store, workspace, venues, TimeProvider.System, credentials), account, store);
@@ -285,7 +285,7 @@ internal sealed class AccountHistoryOrders(string venueId = "hyperliquid") : IVe
         _ => HyperliquidPerpetualReader.Descriptor
     };
     internal static VenueRegistry Registry(FixtureReader reader, AccountHistoryOrders orders) =>
-        new([VenueDescriptor.Manual, Descriptor(reader.VenueId)], [reader], [orders], [], [], []);
+        new([VenueDescriptor.Manual, Descriptor(reader.VenueId)], [reader], [orders], [], [], [], [], []);
     internal static FixtureReader PublicReader(string venue = "hyperliquid")
     {
         var reader = new FixtureReader { VenueId = venue };

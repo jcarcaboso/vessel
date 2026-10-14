@@ -198,9 +198,9 @@ public sealed class AccountSecurityApiTests
     private static CoreApiFactory Factory(Guid owner, MemoryWorkspaceStore accounts, SecurityCredentialStore credentials, ICredentialVault vault,
         SecurityVerifier? verifier = null, SecurityLogs? logs = null, SecurityDiscovery? discovery = null) => new(owner, accounts, configure: services =>
     {
-        services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry()); services.AddSingleton<ICredentialVault>(vault);
-        services.AddSingleton<IAccountCredentialStore>(credentials); services.AddSingleton<IVenueCredentialVerifier>(verifier ?? new());
-        services.AddSingleton<IVenueAccountDiscovery>(discovery ?? new SecurityDiscovery([new("9223372036854775807", "Main", "main")]));
+        services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry(verifier ?? new(),
+            discovery ?? new SecurityDiscovery([new("9223372036854775807", "Main", "main")])));
+        services.AddSingleton<ICredentialVault>(vault); services.AddSingleton<IAccountCredentialStore>(credentials);
         services.AddSingleton(SecurityFixture.Clock);
         if (logs is not null) services.AddLogging(b => b.AddProvider(logs));
     });

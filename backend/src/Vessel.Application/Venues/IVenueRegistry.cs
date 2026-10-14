@@ -15,6 +15,8 @@ public interface IVenueRegistry
     ICandleReader? Candles(string venueId);
     IMarketContextReader? MarketContext(string venueId);
     IMarketStream? Stream(string venueId);
+    IVenueAccountDiscovery? Discovery(string venueId);
+    IVenueCredentialVerifier? CredentialVerifier(string venueId);
 }
 
 /// <summary>
@@ -24,7 +26,8 @@ public interface IVenueRegistry
 public sealed class VenueRegistry(
     IEnumerable<VenueDescriptor> descriptors, IEnumerable<IPerpetualVenueReader> readers,
     IEnumerable<IVenueOrderReader> orders, IEnumerable<ICandleReader> candles,
-    IEnumerable<IMarketContextReader> contexts, IEnumerable<IMarketStream> streams) : IVenueRegistry
+    IEnumerable<IMarketContextReader> contexts, IEnumerable<IMarketStream> streams,
+    IEnumerable<IVenueAccountDiscovery> discoveries, IEnumerable<IVenueCredentialVerifier> verifiers) : IVenueRegistry
 {
     private readonly IReadOnlyList<VenueDescriptor> descriptors = descriptors.GroupBy(d => d.Id).Select(g => g.Last()).ToList();
     private readonly Dictionary<string, IPerpetualVenueReader> readers = Last(readers, r => r.VenueId);
@@ -32,6 +35,8 @@ public sealed class VenueRegistry(
     private readonly Dictionary<string, ICandleReader> candles = Last(candles, r => r.VenueId);
     private readonly Dictionary<string, IMarketContextReader> contexts = Last(contexts, r => r.VenueId);
     private readonly Dictionary<string, IMarketStream> streams = Last(streams, r => r.VenueId);
+    private readonly Dictionary<string, IVenueAccountDiscovery> discoveries = Last(discoveries, r => r.VenueId);
+    private readonly Dictionary<string, IVenueCredentialVerifier> verifiers = Last(verifiers, r => r.VenueId);
 
     public IReadOnlyList<VenueDescriptor> Descriptors => descriptors;
     public VenueDescriptor? Descriptor(string venueId) => descriptors.FirstOrDefault(d => d.Id == venueId);
@@ -40,6 +45,8 @@ public sealed class VenueRegistry(
     public ICandleReader? Candles(string venueId) => candles.GetValueOrDefault(venueId);
     public IMarketContextReader? MarketContext(string venueId) => contexts.GetValueOrDefault(venueId);
     public IMarketStream? Stream(string venueId) => streams.GetValueOrDefault(venueId);
+    public IVenueAccountDiscovery? Discovery(string venueId) => discoveries.GetValueOrDefault(venueId);
+    public IVenueCredentialVerifier? CredentialVerifier(string venueId) => verifiers.GetValueOrDefault(venueId);
 
     private static Dictionary<string, T> Last<T>(IEnumerable<T> items, Func<T, string> venue) =>
         items.GroupBy(venue, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Last(), StringComparer.Ordinal);

@@ -168,7 +168,7 @@ public sealed class CatalogueCachingTests
         using var client = new HttpClient(handler) { BaseAddress = new Uri("https://venue.test/") };
         var reader = Reader(venue, client, clock);
         var descriptor = venue == "lighter" ? LighterReader.Descriptor : RisexReader.Descriptor;
-        var registry = new VenueRegistry([descriptor], [reader], [], [(ICandleReader)reader], [], []);
+        var registry = new VenueRegistry([descriptor], [reader], [], [(ICandleReader)reader], [], [], [], []);
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
         var account = new Account(Guid.NewGuid(), owner, venue, "Test");
         store.Accounts.Add(account);

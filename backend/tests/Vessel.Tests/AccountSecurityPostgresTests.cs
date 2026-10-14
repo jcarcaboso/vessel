@@ -110,7 +110,7 @@ public sealed class AccountSecurityPostgresTests
         await using var writerDb = database.Context(owner); await using var managementDb = database.Context(owner);
         using var vault = SecurityFixture.Vault(); var verifier = new BlockingVerifier();
         var writer = new AccountCredentialService(new WorkspaceStore(writerDb), new AccountCredentialStore(writerDb), new CoreOwner(owner),
-            SecurityFixture.Registry(), [verifier], vault, SecurityFixture.Clock);
+            SecurityFixture.Registry(verifier), vault, SecurityFixture.Clock);
         var saving = writer.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
         await verifier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var management = new WorkspaceService(new WorkspaceStore(managementDb), new CoreOwner(owner), SecurityFixture.Registry());
@@ -134,11 +134,11 @@ public sealed class AccountSecurityPostgresTests
         using var vault = SecurityFixture.Vault();
         var syncStore = new WorkspaceStore(syncDb);
         var reader = new BlockingReader(new AccountCredentialReader(syncStore, new AccountCredentialStore(syncDb), new CoreOwner(owner), vault, SecurityFixture.Clock));
-        var registry = SecurityFixture.Registry(reader);
+        var verifier = new BlockingVerifier(); verifier.Release.SetResult();
+        var registry = SecurityFixture.Registry(reader, verifier);
         var syncing = new WorkspaceService(syncStore, new CoreOwner(owner), registry).SyncAsync(account.Id, default);
         await reader.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var verifier = new BlockingVerifier(); verifier.Release.SetResult();
-        var writer = new AccountCredentialService(new WorkspaceStore(writeDb), new AccountCredentialStore(writeDb), new CoreOwner(owner), registry, [verifier], vault, SecurityFixture.Clock);
+        var writer = new AccountCredentialService(new WorkspaceStore(writeDb), new AccountCredentialStore(writeDb), new CoreOwner(owner), registry, vault, SecurityFixture.Clock);
         var saving = writer.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
         await Task.Delay(100); Assert.False(verifier.Entered.Task.IsCompleted); Assert.False(saving.IsCompleted);
         reader.Release.SetResult(); await syncing.WaitAsync(TimeSpan.FromSeconds(5)); await saving.WaitAsync(TimeSpan.FromSeconds(5));

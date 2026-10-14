@@ -47,9 +47,8 @@ public sealed class CredentialTransportApiTests
             settings: knownProxy is null ? null : new() { ["Vessel:ForwardedHeaders:KnownProxies:0"] = knownProxy },
             configure: services =>
         {
-            services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry()); services.AddSingleton<ICredentialVault>(vault);
-            services.AddSingleton<IAccountCredentialStore>(credentials); services.AddSingleton<IVenueCredentialVerifier>(verifier);
-            services.AddSingleton<IVenueAccountDiscovery>(discovery); services.AddSingleton(SecurityFixture.Clock);
+            services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry(verifier, discovery)); services.AddSingleton<ICredentialVault>(vault);
+            services.AddSingleton<IAccountCredentialStore>(credentials); services.AddSingleton(SecurityFixture.Clock);
             services.AddSingleton<IStartupFilter>(new Peer(IPAddress.Parse(peer)));
         });
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri(origin), AllowAutoRedirect = false });
