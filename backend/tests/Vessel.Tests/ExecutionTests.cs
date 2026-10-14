@@ -1,7 +1,9 @@
 using System.Data.Common;
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
@@ -183,6 +185,45 @@ public sealed class ExecutionMatcherTests
         Assert.Equal(near, ExecutionMatcher.Near((decimal)actual, (decimal)planned));
 
     [Theory]
+    [InlineData("1.0001e-24", "1e-24", null, true)]
+    [InlineData("1.0002e-24", "1e-24", null, false)]
+    [InlineData("1e-25", "1e-25", null, true)]
+    [InlineData("1.001e-25", "1e-25", null, false)]
+    [InlineData("1e-26", "1e-26", null, true)]
+    [InlineData("1e-27", "1e-27", null, true)]
+    [InlineData("1e-28", "1e-28", null, true)]
+    [InlineData("2e-28", "1e-28", null, false)]
+    [InlineData("1.001e-25", "1e-25", "1e-28", true)]
+    [InlineData("1.002e-25", "1e-25", "1e-28", false)]
+    [InlineData("0.01", "1e-25", "0.01", true)]
+    [InlineData("0.02", "1e-25", "0.01", false)]
+    [InlineData("79228162514264337593543950335", "79228162514264337593543950335", null, true)]
+    public void Matching_handles_decimal_precision_boundaries_and_coarser_ticks(string actual, string planned, string? tick, bool near)
+    {
+        static decimal Parse(string text) => decimal.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture);
+        Assert.Equal(near, ExecutionMatcher.Near(Parse(actual), Parse(planned), tick is null ? null : Parse(tick)));
+    }
+
+    [Theory]
+    [InlineData("long")]
+    [InlineData("short")]
+    public void Overflowing_percentage_stops_and_targets_keep_their_keys_but_have_no_resolved_price(string direction)
+    {
+        var plan = PlayDocuments.Normalize(TestPlays.Plan("100000") with
+        {
+            Direction = direction, Leverage = "1",
+            Entries = [TestPlays.Plan("100000").Entries[0] with
+            {
+                Stops = [new PlanExit("stop-1", "percent", "1e28", "100")],
+                Targets = [new PlanExit("target-1", "percent", "1e28", "100")]
+            }]
+        });
+        var levels = ExecutionMatcher.Levels(plan).ToList();
+        Assert.Equal(["entry|entry-1", "stop|entry-1|stop-1", "target|entry-1|target-1"], levels.Select(l => l.Key));
+        Assert.Equal(new decimal?[] { 100000m, null, null }, levels.Select(l => l.Price));
+    }
+
+    [Theory]
     [InlineData("open", VenueOrderStatus.Open)]
     [InlineData("filled", VenueOrderStatus.Filled)]
     [InlineData("canceled", VenueOrderStatus.Canceled)]
@@ -237,6 +278,61 @@ public sealed class ExecutionPostgresTests
     private static void AddFills(Harness h, params VenueFill[] fills) => h.Reader.Result = h.Reader.Result with { Fills = [.. h.Reader.Result.Fills, .. fills] };
 
     [PostgresFact]
+    public async Task Accepted_percentage_overflow_does_not_break_execution_reads_or_link_an_unresolved_target()
+    {
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var plan = TestPlays.Plan("100000") with
+        {
+            Leverage = "1",
+            Entries = [TestPlays.Plan("100000").Entries[0] with
+            {
+                Targets = [new PlanExit("target-1", "percent", "1e28", "100")]
+            }]
+        };
+        var play = await h.Plays.CreateAsync(new(account, "BTC", "venue", "Extreme target", plan), default);
+        play = await h.Plays.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "planned"), default);
+
+        var execution = await h.Execution.GetAsync(play.Summary.Id, default);
+        Assert.Equal("planned", execution.Status);
+        Assert.Empty(execution.Links);
+        Assert.Equal("0", execution.Totals.EnteredQuantity);
+        Assert.Equal("1e28", play.Plan.Entries[0].Targets[0].Value);
+        Assert.Null(ExecutionMatcher.Levels(play.Plan).Single(l => l.Role == OrderLinkRole.Target).Price);
+
+        h.Orders.Orders.AddRange([Order("entry", "buy", 100000m), Order("exit", "sell", 1000000m, reduceOnly: true)]);
+        execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        Assert.Equal(("entry", "entry"), (Assert.Single(execution.Links).Role, execution.Links[0].Order!.OrderId));
+        Assert.Equal("exit", Assert.Single(execution.UnlinkedOrders).OrderId);
+        Assert.Empty(execution.Suggestions);
+    }
+
+    [PostgresFact]
+    public async Task Accepted_tiny_entry_does_not_block_another_plays_account_reconciliation()
+    {
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var ordinary = await PlannedPlay(h, account);
+        var plan = TestPlays.Plan("1e-25") with
+        {
+            Entries = [TestPlays.Plan("1e-25").Entries[0] with { Stops = [], Targets = [] }]
+        };
+        var tiny = await h.Plays.CreateAsync(new(account, "BTC", "venue", "Tiny entry", plan), default);
+        tiny = await h.Plays.ChangeStatusAsync(tiny.Summary.Id, new(tiny.Summary.Version, "planned"), default);
+        h.Orders.Orders.AddRange([Order("ordinary", "buy", 100m), Order("tiny", "buy", 0.0000000000000000000000001m)]);
+
+        var execution = await h.Execution.CheckAsync(ordinary.Summary.Id, default);
+        Assert.Equal("ordinary", Assert.Single(execution.Links).Order!.OrderId);
+        Assert.Empty(execution.Suggestions);
+        var tinyExecution = await h.Execution.GetAsync(tiny.Summary.Id, default);
+        Assert.Equal("tiny", Assert.Single(tinyExecution.Links).Order!.OrderId);
+        Assert.Empty(tinyExecution.Suggestions);
+        Assert.Equal("planned", tinyExecution.Status);
+        Assert.Equal("0", tinyExecution.Totals.EnteredQuantity);
+        Assert.Equal("1e-25", tiny.Plan.Entries[0].Price);
+    }
+
+    [PostgresFact]
     public async Task Links_orders_automatically_and_opens_then_closes_from_linked_fills()
     {
         var (database, h, account) = await SetUp();
@@ -286,7 +382,7 @@ public sealed class ExecutionPostgresTests
         execution = await h.Execution.LinkAsync(first.Summary.Id, new("21", "entry", "entry-1"), default);
         Assert.Equal(("linked", "owner"), (execution.Links.Single().State, execution.Links.Single().Source));
         Assert.Empty((await h.Execution.GetAsync(second.Summary.Id, default)).Suggestions);
-        await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.LinkAsync(second.Summary.Id, new("21", "entry", "entry-1"), default));
+        await Assert.ThrowsAsync<ProblemException>(() => h.Execution.LinkAsync(second.Summary.Id, new("21", "entry", "entry-1"), default));
 
         // Unlinking is remembered: the next check does not link it again.
         execution = await h.Execution.UnlinkAsync(first.Summary.Id, execution.Links.Single().Id, default);
@@ -313,7 +409,7 @@ public sealed class ExecutionPostgresTests
         var automatic = Assert.Single(execution.Links);
         Assert.Equal(("41", "stop", "stop-2"), (automatic.Order!.OrderId, automatic.Role, automatic.LevelId));
 
-        await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.LinkAsync(play.Summary.Id, new("42", "stop", "entry-1", "target-1"), default));
+        await Assert.ThrowsAsync<ProblemException>(() => h.Execution.LinkAsync(play.Summary.Id, new("42", "stop", "entry-1", "target-1"), default));
         execution = await h.Execution.LinkAsync(play.Summary.Id, new("42", "stop", "entry-1", "stop-1"), default);
         Assert.Equal(["stop-1", "stop-2"], execution.Links.Select(l => l.LevelId));
     }
@@ -334,7 +430,7 @@ public sealed class ExecutionPostgresTests
         var current = await h.Plays.GetAsync(play.Summary.Id, default);
         Assert.Equal("closed", current.Summary.Status);
         var moved = TestPlays.Plan("101");
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => h.Plays.UpdateAsync(play.Summary.Id,
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Plays.UpdateAsync(play.Summary.Id,
             new(current.Summary.Version, account, "BTC", "venue", current.Summary.Title, moved, current.Drawings, "", "Chased"), default))).StatusCode);
     }
 
@@ -348,7 +444,7 @@ public sealed class ExecutionPostgresTests
         h.Reader.Result = h.Reader.Result with { Fills = [Fill("f1", "41", "Open Long", 100m, 0.2m)] };
         Assert.Equal("open", (await h.Execution.CheckAsync(play.Summary.Id, default)).Status);
         var current = await h.Plays.GetAsync(play.Summary.Id, default);
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => h.Plays.UpdateAsync(play.Summary.Id,
+        var error = await Assert.ThrowsAsync<ProblemException>(() => h.Plays.UpdateAsync(play.Summary.Id,
             new(current.Summary.Version, account, "BTC", "venue", current.Summary.Title, TestPlays.Plan("101"), current.Drawings, "", "Chased"), default));
         Assert.Contains("has fills", error.Message);
         var revised = await h.Plays.UpdateAsync(play.Summary.Id,
@@ -438,8 +534,8 @@ public sealed class ExecutionPostgresTests
         AddFills(h, Fill("k4", "74", "Open Long", 102m, 1m, at.AddMinutes(8)));
         await h.Execution.CheckAsync(play.Summary.Id, default);
         foreach (var order in new[] { "74", "73" })
-            Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.LinkAsync(play.Summary.Id, new(order, "exit"), default))).StatusCode);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.LinkAsync(play.Summary.Id, new("71", "entry", "entry-1"), default))).StatusCode);
+            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.LinkAsync(play.Summary.Id, new(order, "exit"), default))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.LinkAsync(play.Summary.Id, new("71", "entry", "entry-1"), default))).StatusCode);
         execution = await h.Execution.GetAsync(play.Summary.Id, default);
         Assert.Equal(("open", "1", "0", "1"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity, execution.Totals.OpenQuantity));
         Assert.Equal(["72"], execution.Links.Select(l => l.Order!.OrderId));
@@ -467,10 +563,10 @@ public sealed class ExecutionPostgresTests
 
         foreach (var link in closed.Links)
         {
-            Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.UnlinkAsync(play.Summary.Id, link.Id, default))).StatusCode);
-            Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => stale.Execution.UnlinkAsync(play.Summary.Id, link.Id, default))).StatusCode);
+            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.UnlinkAsync(play.Summary.Id, link.Id, default))).StatusCode);
+            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => stale.Execution.UnlinkAsync(play.Summary.Id, link.Id, default))).StatusCode);
         }
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
             stale.Execution.LinkAsync(play.Summary.Id, new("83", "entry", "entry-1"), default))).StatusCode);
         var after = await h.Execution.GetAsync(play.Summary.Id, default);
         Assert.Equal(("closed", 2, "0"), (after.Status, after.Links.Count, after.Totals.OpenQuantity));
@@ -495,7 +591,7 @@ public sealed class ExecutionPostgresTests
         AddFills(h, Fill("n1", "91", "Open Long", 100m, 1m, at.AddMinutes(2)));
         Assert.Equal("open", (await h.Execution.CheckAsync(play.Summary.Id, default)).Status);
         var current = await h.Plays.GetAsync(play.Summary.Id, default);
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => h.Plays.UpdateAsync(play.Summary.Id,
+        var error = await Assert.ThrowsAsync<ProblemException>(() => h.Plays.UpdateAsync(play.Summary.Id,
             new(current.Summary.Version, account, "BTC", "venue", current.Summary.Title, shortPlan, current.Drawings, "", "Changed my mind"), default));
         Assert.Equal(409, error.StatusCode);
         Assert.Equal(("long", 1), ((await h.Plays.GetAsync(play.Summary.Id, default)).Summary.Direction,
@@ -552,8 +648,8 @@ public sealed class ExecutionPostgresTests
         var kept = Assert.Single((await verify.Execution.GetAsync(linking.Summary.Id, default)).Links);
         Assert.Equal(("101", "cancelled"), (kept.Order!.OrderId, (await verify.Plays.GetAsync(linking.Summary.Id, default)).Summary.Status));
         Assert.Empty((await verify.Execution.GetAsync(unlinking.Summary.Id, default)).Links);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => verify.Execution.UnlinkAsync(linking.Summary.Id, kept.Id, default))).StatusCode);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() =>
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => verify.Execution.UnlinkAsync(linking.Summary.Id, kept.Id, default))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
             verify.Execution.LinkAsync(unlinking.Summary.Id, new("102", "entry", "entry-1"), default))).StatusCode);
     }
 
@@ -586,7 +682,7 @@ public sealed class ExecutionPostgresTests
                 await change(other, await other.Plays.GetAsync(play, default));
             }
             finally { gate.Release.TrySetResult(); }
-            return (await Assert.ThrowsAsync<WorkspaceException>(() => pending)).StatusCode;
+            return (await Assert.ThrowsAsync<ProblemException>(() => pending)).StatusCode;
         }
         // The play turned short: a buy is no longer an entry.
         Assert.Equal(409, await ChangedBeforeLock(turning.Summary.Id, new("111", "entry", "entry-1"), (other, current) => Revise(other, current, ShortPlan())));
@@ -642,7 +738,7 @@ public sealed class ExecutionPostgresTests
         var (revision, link) = await Turns("UPDATE plays", (a, current) => Revise(a, current, firstOnly),
             (b, _) => b.Execution.LinkAsync(scaling, new("121", "entry", "entry-2"), default));
         await revision;
-        Assert.Equal(400, (await Assert.ThrowsAsync<WorkspaceException>(() => link)).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => link)).StatusCode);
 
         // A link that already checked the plan holds the play: the revision then finds entry 2 filled.
         var (restore, _) = await Request(database, h);
@@ -650,7 +746,7 @@ public sealed class ExecutionPostgresTests
         (link, revision) = await Turns("INSERT INTO play_order_links", (a, _) => a.Execution.LinkAsync(scaling, new("122", "entry", "entry-2"), default),
             (b, current) => Revise(b, current, firstOnly));
         await link;
-        Assert.Contains("has fills", (await Assert.ThrowsAsync<WorkspaceException>(() => revision)).Message);
+        Assert.Contains("has fills", (await Assert.ThrowsAsync<ProblemException>(() => revision)).Message);
 
         var (verify, _) = await Request(database, h);
         await using var verifyDb = verify.Db;
@@ -724,11 +820,11 @@ public sealed class ExecutionPostgresTests
         manual = await h.Plays.ChangeStatusAsync(manual.Summary.Id, new(manual.Summary.Version, "planned"), default);
         var execution = await h.Execution.GetAsync(manual.Summary.Id, default);
         Assert.False(execution.Tracked);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.CheckAsync(manual.Summary.Id, default))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.CheckAsync(manual.Summary.Id, default))).StatusCode);
 
         var play = await PlannedPlay(h, account);
         h.Orders.Fail = true;
-        var failure = await Assert.ThrowsAsync<WorkspaceException>(() => h.Execution.CheckAsync(play.Summary.Id, default));
+        var failure = await Assert.ThrowsAsync<ProblemException>(() => h.Execution.CheckAsync(play.Summary.Id, default));
         Assert.Equal(502, failure.StatusCode);
         Assert.DoesNotContain("secret", failure.Message);
     }

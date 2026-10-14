@@ -1,3 +1,5 @@
+using Vessel.Domain.Common;
+
 namespace Vessel.Domain.Credentials;
 
 // Classes deliberately do not print their contents through a generated record ToString().
@@ -9,7 +11,7 @@ public sealed class SealedCredential(string keyId, byte[] nonce, byte[] cipherte
     public byte[] Tag { get; } = tag;
 }
 
-public sealed class AccountCredential
+public sealed class AccountCredential : IOwned
 {
     public Guid OwnerId { get; set; }
     public Guid AccountId { get; set; }

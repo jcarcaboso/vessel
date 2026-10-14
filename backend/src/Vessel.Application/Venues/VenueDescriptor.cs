@@ -1,3 +1,5 @@
+using Vessel.Domain.Accounts;
+
 namespace Vessel.Application.Venues;
 
 /// <summary>How an account at a venue is identified. Adapters validate and normalize it.</summary>
@@ -37,7 +39,7 @@ public sealed record VenueDescriptor(
 {
     public IReadOnlyList<string> CandleIntervals => Intervals ?? [];
 
-    public const string ManualId = "manual";
+    public const string ManualId = ManualVenue.Id;
 
     /// <summary>Manual accounts hold owner-entered values: no venue adapter, no source identity.</summary>
     public static readonly VenueDescriptor Manual = new(ManualId, "Manual", "manual", VenueSources.None,

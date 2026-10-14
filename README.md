@@ -11,6 +11,7 @@ Both images use `skorcius/vessel` with `api-` and `web-` tags.
 
 This repository contains the approved Graphite prototype and the React/Vite/TypeScript plus modular ASP.NET Core 10/PostgreSQL application. The default page is Overview. The app includes account/portfolio management, saved Plays and bounded read-only Hyperliquid, Lighter and RISEx integration. The disposable prototype is separate from the application.
 
+- [App today: current capabilities and diagrams](docs/app-status.md)
 - [Project brief](docs/project-brief.md)
 - [Working glossary](CONTEXT.md)
 - [Original sketches](docs/references/)
@@ -18,6 +19,7 @@ This repository contains the approved Graphite prototype and the React/Vite/Type
 - [Approved baseline and implementation handoff](docs/design/approved-baseline.md)
 - [Prototype scope and LAN operation](docs/prototype.md)
 - [Frontend guide for newcomers](docs/architecture/frontend-guide.md) and [frontend review and improvement backlog](docs/architecture/frontend-review.md)
+- [Backend guide for newcomers](docs/architecture/backend-guide.md) and [backend review and improvement backlog](docs/architecture/backend-review.md)
 - [Stack and architecture discussion draft](docs/architecture/proposal.md)
 - [Runtime and persistence research](docs/architecture/runtime-persistence-research.md)
 - [MVP alignment, monitoring and ownership](docs/architecture/mvp-alignment.md)

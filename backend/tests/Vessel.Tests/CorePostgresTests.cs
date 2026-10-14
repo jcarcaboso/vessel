@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
@@ -50,7 +51,7 @@ public sealed class CorePostgresTests
             Assert.Equal(exact, (await db.Snapshots.SingleAsync(s => s.AccountId == synced)).AvailableMarginUsd);
             Assert.Equal("-0.1234567890123456789012345678", (await Service(db, owner, reader).SnapshotAsync(synced, default))!.AvailableMarginUsd);
             reader.Fail = true;
-            await Assert.ThrowsAsync<WorkspaceException>(() => Service(db, owner, reader).SyncAsync(synced, default));
+            await Assert.ThrowsAsync<ProblemException>(() => Service(db, owner, reader).SyncAsync(synced, default));
             Assert.Equal(exact, (await db.Snapshots.SingleAsync(s => s.AccountId == synced)).AvailableMarginUsd);
         }
         reader.Fail = false;
@@ -105,7 +106,7 @@ public sealed class CorePostgresTests
         reader.Fail = true;
         await using (var db = database.Context(owner))
         {
-            var error = await Assert.ThrowsAsync<WorkspaceException>(() => Service(db, owner, reader).SyncAsync(id, default)); Assert.Equal(502, error.StatusCode);
+            var error = await Assert.ThrowsAsync<ProblemException>(() => Service(db, owner, reader).SyncAsync(id, default)); Assert.Equal(502, error.StatusCode);
             Assert.DoesNotContain("secret", error.Message);
         }
         await using (var db = database.Context(owner))
@@ -157,8 +158,8 @@ public sealed class CorePostgresTests
             Assert.Empty(await db.Portfolios.ToListAsync()); Assert.Empty(await db.Accounts.ToListAsync()); Assert.Empty(await db.Snapshots.ToListAsync());
             Assert.Empty(await db.Positions.ToListAsync()); Assert.Empty(await db.Fills.ToListAsync());
             var service = Service(db, foreign, reader);
-            Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.CreateAccountAsync(new(portfolioId, "Foreign", "manual"), default))).StatusCode);
-            Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => service.SyncAsync(id, default))).StatusCode);
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(portfolioId, "Foreign", "manual"), default))).StatusCode);
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.SyncAsync(id, default))).StatusCode);
             var ownedBySecondOwner = await CreateVenueAccount(service);
             await service.SyncAsync(ownedBySecondOwner, default);
             Assert.Single(await db.Portfolios.ToListAsync()); Assert.Single(await db.Accounts.ToListAsync());

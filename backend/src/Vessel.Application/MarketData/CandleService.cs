@@ -1,3 +1,4 @@
+using Vessel.Application.Common;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 
@@ -19,7 +20,6 @@ public sealed class CandleCache(TimeProvider time)
     private readonly BoundedMarketDataCache<CandleResponseDto> entries = new(time, MaxEntries, MaxStoredCandles, v => v.Candles.Count);
 
     public CandleResponseDto? Get(string key) => entries.Get(key);
-    public void Set(string key, CandleResponseDto value) => entries.Set(key, value, value.Candles.Count == 0 ? EmptyLifetime : Lifetime);
     public Task<CandleResponseDto> GetAsync(string key, bool historical, bool refresh,
         Func<CancellationToken, Task<CandleResponseDto>> load, CancellationToken ct) =>
         entries.GetAsync(key, load, value => value.Candles.Count == 0 ? EmptyLifetime :
@@ -43,23 +43,23 @@ public sealed class CandleService(IWorkspaceStore store, IVenueRegistry venues, 
         (interval, var step) = MarketDataGuard.Interval(interval, venue);
         var now = time.GetUtcNow();
         if (endTime is <= 0 || endTime > now.Add(MaxFuture).ToUnixTimeMilliseconds())
-            throw new WorkspaceException(400, "endTime must be a positive UTC millisecond timestamp, at most one day ahead.");
+            throw new ProblemException(400, "endTime must be a positive UTC millisecond timestamp, at most one day ahead.");
         if (refresh is not (null or "true" or "false"))
-            throw new WorkspaceException(400, "refresh must be true or false.");
+            throw new ProblemException(400, "refresh must be true or false.");
         if (venues.Candles(account.VenueId) is not { } reader)
-            throw new WorkspaceException(502, VenueFailure);
+            throw new ProblemException(502, VenueFailure);
 
         VenueInstrument market;
         try
         {
             if (venues.Reader(account.VenueId) is not { } catalogue) throw new VenueReadException(VenueFailure);
             market = (await catalogue.ReadInstrumentsAsync(ct)).FirstOrDefault(i => i.ContractId == instrument)
-                ?? throw new WorkspaceException(409, "This market is no longer listed.");
+                ?? throw new ProblemException(409, "This market is no longer listed.");
         }
         catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
             ex is OperationCanceledException && !ct.IsCancellationRequested)
         {
-            throw new WorkspaceException(502, VenueFailure);
+            throw new ProblemException(502, VenueFailure);
         }
 
         var to = endTime ?? now.ToUnixTimeMilliseconds() / CacheBucketMs * CacheBucketMs;
@@ -84,7 +84,7 @@ public sealed class CandleService(IWorkspaceStore store, IVenueRegistry venues, 
         catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
             ex is OperationCanceledException && !ct.IsCancellationRequested)
         {
-            throw new WorkspaceException(502, VenueFailure);
+            throw new ProblemException(502, VenueFailure);
         }
     }
 

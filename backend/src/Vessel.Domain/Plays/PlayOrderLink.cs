@@ -1,3 +1,5 @@
+using Vessel.Domain.Common;
+
 namespace Vessel.Domain.Plays;
 
 public enum OrderLinkRole { Entry, Stop, Target, Exit }
@@ -9,7 +11,7 @@ public enum OrderLinkSource { Automatic, Owner }
 /// Ties a venue order to one level of a Play: an entry, one of its stops or targets, or an unplanned exit.
 /// Fills reach a Play only through linked orders.
 /// </summary>
-public sealed class PlayOrderLink
+public sealed class PlayOrderLink : IOwned
 {
     public Guid Id { get; private set; }
     public Guid OwnerId { get; private set; }

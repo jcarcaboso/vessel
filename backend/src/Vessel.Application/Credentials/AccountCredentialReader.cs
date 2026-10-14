@@ -1,3 +1,4 @@
+using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
@@ -11,8 +12,8 @@ public sealed class AccountCredentialReader(IWorkspaceStore accounts, IAccountCr
     public Task<string?> ReadAsync(Guid accountId, CancellationToken cancellationToken) =>
         accounts.WithAccountLockAsync(accountId, async account =>
         {
-            if (account.OwnerId != owner.OwnerId) throw new WorkspaceException(404, "Account not found.");
-            if (!account.IsEnabled) throw new WorkspaceException(409, "Enable the account before reading its credential.");
+            if (account.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
+            if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before reading its credential.");
             var purpose = account.VenueId + "-read-token";
             var credential = await credentials.FindAsync(accountId, purpose, cancellationToken);
             if (credential is null || credential.ExpiresAt <= time.GetUtcNow() || credential.LastError is not null || !vault.IsConfigured)
@@ -26,7 +27,7 @@ public sealed class AccountCredentialReader(IWorkspaceStore accounts, IAccountCr
     public Task MarkRefusedAsync(Guid accountId, CancellationToken cancellationToken) =>
         accounts.WithAccountLockAsync(accountId, async account =>
         {
-            if (account.OwnerId != owner.OwnerId) throw new WorkspaceException(404, "Account not found.");
+            if (account.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
             var credential = await credentials.FindAsync(accountId, account.VenueId + "-read-token", cancellationToken);
             if (credential is null || credential.LastError is not null) return false;
             // A fixed application status; the venue response is never persisted.

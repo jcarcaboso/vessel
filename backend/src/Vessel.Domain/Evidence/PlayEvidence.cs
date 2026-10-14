@@ -1,3 +1,4 @@
+using Vessel.Domain.Common;
 using Vessel.Domain.Plays;
 
 namespace Vessel.Domain.Evidence;
@@ -6,7 +7,7 @@ public enum EvidenceSource { Capture, Upload }
 
 // An image attached to a saved Play with the owner's note. The bytes live in evidence storage
 // under ObjectKey; this record holds what the application needs to authorize and verify them.
-public sealed class PlayEvidence
+public sealed class PlayEvidence : IOwned
 {
     public const int MaxNoteLength = 4000;
 
@@ -62,7 +63,7 @@ public sealed class PlayEvidence
     private static string ValidNote(string note)
     {
         ArgumentNullException.ThrowIfNull(note);
-        if (note.Length > MaxNoteLength) throw new ArgumentException($"Notes are limited to {MaxNoteLength} characters.");
+        if (note.Length > MaxNoteLength) throw new DomainValidationException($"Notes are limited to {MaxNoteLength} characters.");
         return note;
     }
 }

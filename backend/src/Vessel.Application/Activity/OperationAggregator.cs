@@ -1,5 +1,7 @@
+using System.Collections;
 using System.Numerics;
 using Vessel.Application.Workspace;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Activity;
@@ -311,6 +313,6 @@ public static class OperationAggregator
         {
             for (var i = 0; i < Count; i++) yield return this[i];
         }
-        global::System.Collections.IEnumerator global::System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }

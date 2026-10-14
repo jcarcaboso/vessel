@@ -1,7 +1,7 @@
-using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
 using Vessel.Application.Venues;
+using Vessel.Domain.Numerics;
 
 namespace Vessel.Infrastructure.Venues.Common;
 
@@ -105,34 +105,14 @@ public sealed class StrictJson(string invalidResponse)
     public string DecimalText(JsonElement element, bool numbers) =>
         numbers && element.ValueKind == JsonValueKind.Number ? element.GetRawText() : Text(element);
 
-    public decimal ParseDecimal(string text)
-    {
-        var unsigned = text.StartsWith('-') ? text[1..] : text;
-        var parts = unsigned.Split('.');
-        if (parts.Length > 2 || parts.Any(part => part.Length == 0 || !part.All(char.IsAsciiDigit)))
-            throw Invalid();
-        var fraction = parts.Length == 2 ? parts[1].TrimEnd('0') : "";
-        var coefficient = (parts[0] + fraction).TrimStart('0');
-        const string maxCoefficient = "79228162514264337593543950335";
-        // decimal.TryParse alone rounds excess precision. Reject values that cannot
-        // be represented exactly by a 96-bit coefficient and a scale of at most 28.
-        if (fraction.Length > 28 || coefficient.Length > maxCoefficient.Length ||
-            (coefficient.Length == maxCoefficient.Length &&
-             string.CompareOrdinal(coefficient, maxCoefficient) > 0) ||
-            !decimal.TryParse(text, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
-                CultureInfo.InvariantCulture, out var value))
-            throw Invalid();
-        return value;
-    }
+    /// <summary>A venue amount under the <see cref="ExactDecimal.TryParseVenue"/> profile.</summary>
+    public decimal ParseDecimal(string text) => ExactDecimal.TryParseVenue(text, out var value) ? value : throw Invalid();
 
-    /// <summary>The value at a common scale, for checking that decimal arithmetic did not round.</summary>
-    public static BigInteger DecimalUnits(decimal value)
-    {
-        var bits = decimal.GetBits(value);
-        var coefficient = ((BigInteger)(uint)bits[2] << 64) | ((BigInteger)(uint)bits[1] << 32) | (uint)bits[0];
-        var scale = (bits[3] >> 16) & 0xff;
-        return coefficient * BigInteger.Pow(10, 28 - scale);
-    }
+    /// <summary>
+    /// The magnitude at a common scale, for checking that decimal arithmetic did not round. The sign is dropped, as it
+    /// always was: callers compare nonnegative amounts. <see cref="ExactDecimal.Units"/> keeps the sign.
+    /// </summary>
+    public static BigInteger DecimalUnits(decimal value) => BigInteger.Abs(ExactDecimal.Units(value));
 
     public void RejectDuplicateProperties(JsonElement element)
     {

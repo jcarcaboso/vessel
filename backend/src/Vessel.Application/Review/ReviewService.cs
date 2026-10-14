@@ -1,9 +1,9 @@
 using System.Globalization;
-using Vessel.Application.Activity;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
-using Vessel.Application.Workspace;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Workspace;
@@ -27,7 +27,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
     {
         "day" => now.AddDays(-1), "week" => now.AddDays(-7), "month" => now.AddDays(-30),
         "year" => now.AddDays(-365), "all" => null,
-        _ => throw new WorkspaceException(400, "Choose day, week, month, year or all."),
+        _ => throw new ProblemException(400, "Choose day, week, month, year or all."),
     };
 
     public async Task<ReviewDto> GetAsync(ReviewQuery query, CancellationToken ct)
@@ -36,11 +36,11 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         var from = From(query.Period, now);
         if (query.Portfolio is not ("all" or "unassigned") &&
             (!Guid.TryParse(query.Portfolio, out var portfolio) || portfolio == Guid.Empty))
-            throw new WorkspaceException(400, "Choose a valid portfolio.");
+            throw new ProblemException(400, "Choose a valid portfolio.");
         if (Guid.TryParse(query.Portfolio, out var normalized)) query = query with { Portfolio = normalized.ToString() };
         if (query.AccountId == Guid.Empty || query.Offset is < 0 or > 1_000_000 ||
             query.Instrument is { } instrument && (string.IsNullOrWhiteSpace(instrument) || instrument.Length > 128 || instrument != instrument.Trim()))
-            throw new WorkspaceException(400, "Invalid review filters.");
+            throw new ProblemException(400, "Invalid review filters.");
 
         var facts = await store.ReadAsync(query, now, ct);
         var accounts = facts.Accounts.Where(a => a.IsEnabled).ToDictionary(a => a.Id);
@@ -85,13 +85,14 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         var page = current.OrderByDescending(e => e.ClosedAt).ThenBy(e => e.Facts.Play.Id).Skip(query.Offset).Take(PageSize)
             .Select(e => new ReviewPlayDto(e.Facts.Play.Id, e.Facts.Play.Title, e.Facts.Play.AccountId,
                 accounts[e.Facts.Play.AccountId].Name, e.Facts.Play.VenueId, e.Facts.Play.ContractId!, e.ClosedAt,
-                Number(e.Result!.NetResult), Number(e.Result.ReturnPercent), Number(e.Result.RMultiple),
+                ExactDecimal.Format(e.Result!.NetResult), ExactDecimal.Format(e.Result.ReturnPercent), ExactDecimal.Format(e.Result.RMultiple),
                 e.Facts.Play.HasReview, e.Facts.Play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned",
                 e.Facts.ManualSource ? "manual" : "imported")).ToList();
         return new ReviewDto(now, from ?? current.FirstOrDefault()?.ClosedAt, query.Period, "USD",
             options, Periods.Select(period => {
                 var selected = accepted.Where(e => InPeriod(e.ClosedAt, From(period, now), now)).ToList();
-                return new ReviewPeriodDto(period, selected.Count, selected.Count == 0 ? null : Number(Sum(selected.Select(e => e.Result!.NetResult))));
+                return new ReviewPeriodDto(period, selected.Count,
+                    selected.Count == 0 ? null : ExactDecimal.Format(Sum(selected.Select(e => e.Result!.NetResult))));
             }).ToList(),
             Metrics(current), series.Points, series.BucketDays, groups,
             new ReviewCoverageDto(candidates.Count, candidates.Count(e => e.Exclusion == "fees"),
@@ -106,11 +107,11 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         var from = From(query.Period, now);
         if (query.Portfolio is not ("all" or "unassigned") &&
             (!Guid.TryParse(query.Portfolio, out var portfolio) || portfolio == Guid.Empty))
-            throw new WorkspaceException(400, "Choose a valid portfolio.");
+            throw new ProblemException(400, "Choose a valid portfolio.");
         if (Guid.TryParse(query.Portfolio, out var normalized)) query = query with { Portfolio = normalized.ToString() };
         if (query.AccountId == Guid.Empty || query.Offset is < 0 or > 1_000_000 ||
             query.Instrument is { } instrument && (string.IsNullOrWhiteSpace(instrument) || instrument.Length > 128 || instrument != instrument.Trim()))
-            throw new WorkspaceException(400, "Invalid review filters.");
+            throw new ProblemException(400, "Invalid review filters.");
         var facts = await store.ReadAsync(query, now, ct);
         var accounts = facts.Accounts.Where(a => a.IsEnabled && (query.AccountId is null || a.Id == query.AccountId) &&
             (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
@@ -225,11 +226,14 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
             maxLosses = Math.Max(maxLosses, -streak);
         }
         return new(plays.Count, wins.Count, losses.Count, plays.Count - wins.Count - losses.Count,
-            plays.Count == 0 ? null : Number(running), Number(Ratio(ExactAmount.From(wins.Count), ExactAmount.From(wins.Count + losses.Count))),
-            Number(gain), Number(loss), Number(Ratio(gain, loss)), Number(Ratio(Sum(wins.Select(o => o.NetResult)), -Sum(losses.Select(o => o.NetResult)))),
-            Number(Average(wins.Select(o => o.NetResult))), Number(Average(losses.Select(o => -o.NetResult))),
-            Number(Ratio(running, ExactAmount.From(plays.Count))), Number(Average(risks.Select(o => o.RMultiple!.Value))), risks.Count,
-            plays.Count(p => p.Facts.Play.HasReview), plays.Count == 0 ? null : Number(drawdown),
+            plays.Count == 0 ? null : ExactDecimal.Format(running),
+            ExactDecimal.Format(Ratio(ExactAmount.From(wins.Count), ExactAmount.From(wins.Count + losses.Count))),
+            ExactDecimal.Format(gain), ExactDecimal.Format(loss), ExactDecimal.Format(Ratio(gain, loss)),
+            ExactDecimal.Format(Ratio(Sum(wins.Select(o => o.NetResult)), -Sum(losses.Select(o => o.NetResult)))),
+            ExactDecimal.Format(Average(wins.Select(o => o.NetResult))), ExactDecimal.Format(Average(losses.Select(o => -o.NetResult))),
+            ExactDecimal.Format(Ratio(running, ExactAmount.From(plays.Count))),
+            ExactDecimal.Format(Average(risks.Select(o => o.RMultiple!.Value))), risks.Count,
+            plays.Count(p => p.Facts.Play.HasReview), plays.Count == 0 ? null : ExactDecimal.Format(drawdown),
             maxWins, maxLosses);
     }
 
@@ -250,7 +254,8 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
             cumulative += net;
             peak = Max(peak, cumulative);
             var end = first.AddDays(Math.Min((index + 1) * bucketDays, days) - 1);
-            points.Add(new(new DateTimeOffset(end, TimeSpan.Zero), Number(net), Number(cumulative), Number(cumulative - peak), items.Count));
+            points.Add(new(new DateTimeOffset(end, TimeSpan.Zero), ExactDecimal.Format(net), ExactDecimal.Format(cumulative),
+                ExactDecimal.Format(cumulative - peak), items.Count));
         }
         return (points, bucketDays);
     }
@@ -267,8 +272,4 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
     private static ExactAmount? Ratio(ExactAmount? a, ExactAmount? b) =>
         a is { } numerator && b is { } denominator && denominator.Units.Sign > 0
             ? ExactAmount.Parse(ExactAmount.Average(numerator.Units * ExactAmount.From(1).Units, denominator)!) : null;
-    private static string Number(ExactAmount value) => value.ToString();
-    private static string? Number(ExactAmount? value) => value?.ToString();
-    private static string Number(decimal value) => value.ToString("0.############################", CultureInfo.InvariantCulture);
-    private static string? Number(decimal? value) => value is { } number ? Number(number) : null;
 }

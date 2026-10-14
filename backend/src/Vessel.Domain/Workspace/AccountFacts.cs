@@ -1,3 +1,5 @@
+using Vessel.Domain.Common;
+
 namespace Vessel.Domain.Workspace;
 
 /// <summary>
@@ -27,7 +29,7 @@ public static class ExecutionFacts
 }
 
 // Only the latest coherent observation is retained. Unknown balances remain null.
-public sealed class AccountSnapshot
+public sealed class AccountSnapshot : IOwned
 {
     public Guid OwnerId { get; set; }
     public Guid AccountId { get; set; }
@@ -45,7 +47,7 @@ public sealed class AccountSnapshot
     public List<AccountStablecoin> Stablecoins { get; set; } = [];
 }
 
-public sealed class AccountStablecoin
+public sealed class AccountStablecoin : IOwned
 {
     public Guid OwnerId { get; set; }
     public Guid AccountId { get; set; }
@@ -57,7 +59,7 @@ public sealed class AccountStablecoin
     public decimal Available { get; set; }
 }
 
-public sealed class AccountPosition
+public sealed class AccountPosition : IOwned
 {
     public Guid OwnerId { get; set; }
     public Guid AccountId { get; set; }
@@ -70,7 +72,7 @@ public sealed class AccountPosition
     public int? Leverage { get; set; }
 }
 
-public sealed class ImportedFill
+public sealed class ImportedFill : IOwned
 {
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }
@@ -98,7 +100,7 @@ public sealed class ImportedFill
 }
 
 // The latest known state of a venue order that could belong to a Play. A fact, not trading intent.
-public sealed class ImportedOrder
+public sealed class ImportedOrder : IOwned
 {
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }

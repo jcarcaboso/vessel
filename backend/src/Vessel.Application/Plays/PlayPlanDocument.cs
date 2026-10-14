@@ -1,7 +1,8 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Vessel.Application.Workspace;
+using Vessel.Application.Common;
+using Vessel.Domain.Numerics;
 
 namespace Vessel.Application.Plays;
 
@@ -85,7 +86,7 @@ public static partial class PlayDocuments
     public static void RequirePlannable(PlayPlanDocument plan)
     {
         if (!plan.Entries.Any(entry => decimal.TryParse(entry.Price, NumberStyles.Float, CultureInfo.InvariantCulture, out var price) && price > 0))
-            throw new WorkspaceException(409, "Give at least one entry a price before planning.");
+            throw new ProblemException(409, "Give at least one entry a price before planning.");
     }
 
     public static string Serialize(PlayPlanDocument plan) => JsonSerializer.Serialize(plan, Json);
@@ -109,22 +110,25 @@ public static partial class PlayDocuments
         return text.Length <= MaxDrawingsLength ? text : throw Invalid("Drawings are too large to save.");
     }
 
-    public static JsonElement ReadDrawings(string stored) => JsonDocument.Parse(stored).RootElement.Clone();
+    /// <summary>The stored drawings as a standalone element; the parsed document returns its pooled buffers.</summary>
+    public static JsonElement ReadDrawings(string stored)
+    {
+        using var document = JsonDocument.Parse(stored);
+        return document.RootElement.Clone();
+    }
 
     private static string Unit(string? unit) => unit is "price" or "percent" ? unit : throw Invalid("Level units are price or percent.");
 
-    private static string Number(string? value) => value is not null && (value.Length == 0 || value.Length <= 64 && NumberPattern().IsMatch(value))
+    private static string Number(string? value) => ExactDecimal.IsPlanText(value)
         ? value : throw Invalid("Plan numbers must be blank or decimal text.");
 
     private static string Note(string? note) => note is not null && note.Length <= MaxNoteLength
         ? note : throw Invalid($"Notes are limited to {MaxNoteLength} characters.");
 
-    private static WorkspaceException Invalid(string detail) => new(400, detail);
+    private static ProblemException Invalid(string detail) => new(400, detail);
 
     [GeneratedRegex("^[A-Za-z0-9_-]{1,64}$")]
     private static partial Regex IdPattern();
     [GeneratedRegex("^#[0-9a-fA-F]{6}$")]
     private static partial Regex ColorPattern();
-    [GeneratedRegex(@"^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$")]
-    private static partial Regex NumberPattern();
 }

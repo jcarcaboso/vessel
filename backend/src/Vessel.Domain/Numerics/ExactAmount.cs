@@ -1,20 +1,21 @@
 using System.Globalization;
 using System.Numerics;
 
-namespace Vessel.Application.Activity;
+namespace Vessel.Domain.Numerics;
 
-// Fixed 28-place integer arithmetic preserves every retained decimal, even across differing scales.
-// Products keep 56 places until division. Only a non-terminating weighted average needs rounding.
-internal readonly record struct ExactAmount(BigInteger Units) : IComparable<ExactAmount>
+/// <summary>
+/// A signed amount as a whole number of 10^-28 units. Fixed 28-place integer arithmetic preserves every retained
+/// decimal, even across differing scales, and sums never round or overflow. Products keep 56 places until
+/// <see cref="Average"/> divides them; only a non-terminating weighted average needs rounding.
+/// </summary>
+public readonly record struct ExactAmount(BigInteger Units) : IComparable<ExactAmount>
 {
     private static readonly BigInteger Factor = BigInteger.Pow(10, 28);
-    public static ExactAmount From(decimal value)
-    {
-        var bits = decimal.GetBits(value);
-        var coefficient = (BigInteger)(uint)bits[0] | ((BigInteger)(uint)bits[1] << 32) | ((BigInteger)(uint)bits[2] << 64);
-        return new(((bits[3] & int.MinValue) == 0 ? coefficient : -coefficient) * BigInteger.Pow(10, 28 - ((bits[3] >> 16) & 0xff)));
-    }
-    // Trusted exact DTO strings can exceed decimal's coefficient range after summing.
+    public static ExactAmount From(decimal value) => new(ExactDecimal.Units(value));
+    /// <summary>
+    /// Trusted exact DTO strings, which can exceed decimal's coefficient range after summing. This does not validate:
+    /// pass only text this type or <see cref="ExactDecimal.Format(decimal)"/> printed.
+    /// </summary>
     public static ExactAmount Parse(string value)
     {
         var negative = value.StartsWith('-');
@@ -28,6 +29,7 @@ internal readonly record struct ExactAmount(BigInteger Units) : IComparable<Exac
     public static ExactAmount operator -(ExactAmount a) => new(-a.Units);
     public ExactAmount Abs() => new(BigInteger.Abs(Units));
     public int CompareTo(ExactAmount other) => Units.CompareTo(other.Units);
+    /// <summary>A 56-place notional over a quantity, rounded half away from zero to 28 places; null for a zero quantity.</summary>
     public static string? Average(BigInteger notional, ExactAmount quantity)
     {
         if (quantity.Units.IsZero) return null;

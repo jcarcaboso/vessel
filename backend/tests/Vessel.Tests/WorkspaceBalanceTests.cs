@@ -19,7 +19,7 @@ public sealed class WorkspaceBalanceTests
             VenueCapabilities.None with { Sync = true });
         service = new(store, new CoreOwner(owner),
             new VenueRegistry([VenueDescriptor.Manual, Vessel.Infrastructure.Venues.Hyperliquid.HyperliquidPerpetualReader.Descriptor, nonWallet],
-                [], [], [], [], []));
+                [], [], [], [], [], [], []));
     }
 
     private Account Add(Guid? portfolio, string venue, decimal? equity, decimal? withdrawable = null,

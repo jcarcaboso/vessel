@@ -3,11 +3,11 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Activity;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Review;
 using Vessel.Application.Sizing;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
@@ -79,7 +79,7 @@ public sealed class ManualLedgerTests
         var entry = Row("entry", "1", "100", 1);
         foreach (var exit in new[] { Row("exit", "2", "110", 2, side: "sell"), Row("exit", "1", "110", 0, side: "sell"),
             Row("exit", "1", "110", 1, side: "sell") })
-            Assert.Equal(409, Assert.Throws<WorkspaceException>(() => ManualLedger.Calculate(Play(), [entry, exit])).StatusCode);
+            Assert.Equal(409, Assert.Throws<ProblemException>(() => ManualLedger.Calculate(Play(), [entry, exit])).StatusCode);
     }
 
     [Theory]
@@ -89,7 +89,7 @@ public sealed class ManualLedgerTests
     [InlineData(" 1")]
     [InlineData("-1")]
     public void Input_never_silently_rounds(string input) =>
-        Assert.Equal(400, Assert.Throws<WorkspaceException>(() => ManualLedger.Number(input, true)).StatusCode);
+        Assert.Equal(400, Assert.Throws<ProblemException>(() => ManualLedger.Number(input, true)).StatusCode);
 
     [Fact]
     public void Scientific_notation_is_exact_and_structured_review_shape_has_no_derived_fields()
@@ -103,16 +103,16 @@ public sealed class ManualLedgerTests
     [Fact]
     public void Quantity_totals_and_notional_cannot_silently_discard_small_units()
     {
-        Assert.Equal(400, Assert.Throws<WorkspaceException>(() => ManualLedger.Calculate(Play(),
+        Assert.Equal(400, Assert.Throws<ProblemException>(() => ManualLedger.Calculate(Play(),
             [Row("entry", "10000000000000000000000000000", "1", 0), Row("entry", "0.1", "1", 1)])).StatusCode);
-        Assert.Equal(400, Assert.Throws<WorkspaceException>(() => ManualLedger.Calculate(Play(),
+        Assert.Equal(400, Assert.Throws<ProblemException>(() => ManualLedger.Calculate(Play(),
             [Row("entry", "0.0000000000000000000000000001", "0.0000000000000000000000000001", 0)])).StatusCode);
     }
 
     [Fact]
     public void Corrected_ledger_cannot_reopen_an_intermediate_completed_round_trip()
     {
-        Assert.Equal(409, Assert.Throws<WorkspaceException>(() => ManualLedger.Calculate(Play(),
+        Assert.Equal(409, Assert.Throws<ProblemException>(() => ManualLedger.Calculate(Play(),
             [Row("entry", "1", "100", 0), Row("exit", "1", "110", 1, side: "sell"),
                 Row("entry", "1", "100", 2), Row("exit", "1", "110", 3, side: "sell")])).StatusCode);
     }
@@ -416,7 +416,7 @@ public sealed class DiaryPostgresTests
             (await db.Orders.SingleAsync(o => o.OrderId == "x")).OriginalSize = 2; await db.SaveChangesAsync();
         }
         await using var writing = database.Context(owner);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => Service(writing).CreateRetrospectiveAsync(
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => Service(writing).CreateRetrospectiveAsync(
             new(Guid.NewGuid(), account.Id, preview.Operation.Id, preview.Fingerprint, "Stale"), default))).StatusCode);
         await using var verify = database.Context(owner);
         Assert.Empty(await verify.Plays.ToListAsync()); Assert.Empty(await verify.OrderLinks.ToListAsync());
@@ -444,7 +444,7 @@ public sealed class DiaryPostgresTests
         {
             await using var db = database.Context(owner);
             try { return (await Service(db).CreateRetrospectiveAsync(body, default), null); }
-            catch (WorkspaceException error) { return (null, error.StatusCode); }
+            catch (ProblemException error) { return (null, error.StatusCode); }
         }
         var results = await Task.WhenAll(Create(request), Create(request with { RequestId = Guid.NewGuid() }));
         Assert.Single(results, r => r.Play is not null); Assert.Equal(409, Assert.Single(results, r => r.Status is not null).Status);
@@ -476,7 +476,7 @@ public sealed class DiaryPostgresTests
         {
             var service = new PlayService(new PlayStore(editing), new MemoryObjectStore(), TimeProvider.System);
             var dto = await service.GetAsync(play.Id, default);
-            Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => service.UpdateAsync(play.Id,
+            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.UpdateAsync(play.Id,
                 new(dto.Summary.Version, account.Id, "BTC", "venue", dto.Summary.Title, dto.Plan with
                 { Entries = [dto.Plan.Entries[0] with { Price = "101" }] }, dto.Drawings, "", "Edit pending entry"), default))).StatusCode);
         }

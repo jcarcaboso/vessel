@@ -11,9 +11,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using Vessel.Application.Common;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Tests;
@@ -26,6 +28,7 @@ public sealed class ServerDiagnosticTests
     [Theory]
     [InlineData("overflow", 500)]
     [InlineData("invalid-operation", 500)]
+    [InlineData("argument", 500)]
     [InlineData("database-network", 503)]
     [InlineData("database-update-network", 503)]
     [InlineData("database-query-bug", 500)]
@@ -39,6 +42,7 @@ public sealed class ServerDiagnosticTests
         {
             "overflow" => new OverflowException(Secret),
             "invalid-operation" => new InvalidOperationException(Secret),
+            "argument" => new ArgumentException(Secret),
             "database-network" => new NpgsqlException(Secret, new IOException(Secret)),
             "database-update-network" => new DbUpdateException(Secret, new NpgsqlException(Secret, new IOException(Secret))),
             "database-query-bug" => new PostgresException(Secret, "ERROR", "ERROR", "42601", detail: Secret),
@@ -92,10 +96,25 @@ public sealed class ServerDiagnosticTests
     [InlineData(503)]
     public async Task Expected_workspace_errors_do_not_log_errors(int status)
     {
-        await using var factory = new DiagnosticFactory(new WorkspaceException(status, "Expected safe detail."));
+        await using var factory = new DiagnosticFactory(new ProblemException(status, "Expected safe detail."));
         using var client = factory.AuthorizedClient();
         using var response = await client.GetAsync($"/api/accounts/{PrivateId}");
         Assert.Equal((HttpStatusCode)status, response.StatusCode);
+        Assert.Empty(factory.Logs.Entries);
+    }
+
+    [Theory]
+    [InlineData(false, 400)]
+    [InlineData(true, 409)]
+    public async Task Domain_failures_return_their_message_without_logging(bool rule, int status)
+    {
+        var detail = rule ? "Only a paused Play can be resumed." : "Titles are limited to 200 characters.";
+        await using var factory = new DiagnosticFactory(rule ? new DomainRuleException(detail) : new DomainValidationException(detail));
+        using var client = factory.AuthorizedClient();
+        using var response = await client.GetAsync($"/api/accounts/{PrivateId}");
+        Assert.Equal((HttpStatusCode)status, response.StatusCode);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(detail, problem.RootElement.GetProperty("detail").GetString());
         Assert.Empty(factory.Logs.Entries);
     }
 

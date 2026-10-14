@@ -1,7 +1,7 @@
+using Vessel.Application.Common;
 using Vessel.Application.MarketData;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 
@@ -45,7 +45,7 @@ public sealed class VenueMarketDataTests
     private static VenueRegistry Registry(params object[] adapters) => new(
         [VenueDescriptor.Manual, HyperliquidPerpetualReader.Descriptor, Tick],
         [new FixtureReader { VenueId = "tick", Result = new FixtureReader().Result with { Instruments = [new("DOGE", 5, 10, "USDC", VenueContractId: "17")] } }], [],
-        adapters.OfType<ICandleReader>(), adapters.OfType<IMarketContextReader>(), []);
+        adapters.OfType<ICandleReader>(), adapters.OfType<IMarketContextReader>(), [], [], []);
 
     [Fact]
     public async Task Candles_use_the_venues_own_intervals_and_notice_and_allow_a_missing_trade_count()
@@ -53,7 +53,7 @@ public sealed class VenueMarketDataTests
         var (store, account) = Setup(); var reader = new TickCandles();
         var service = new CandleService(store, Registry(reader), new CandleCache(TimeProvider.System), TimeProvider.System);
 
-        var refused = await Assert.ThrowsAsync<WorkspaceException>(() => service.CandlesAsync(account.Id, "DOGE", "4h", null, default));
+        var refused = await Assert.ThrowsAsync<ProblemException>(() => service.CandlesAsync(account.Id, "DOGE", "4h", null, default));
         Assert.Equal((400, "Interval must be one of 1m, 1h, 1d."), (refused.StatusCode, refused.Message));
         Assert.Null(reader.LastInterval);
 
@@ -70,7 +70,7 @@ public sealed class VenueMarketDataTests
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "HL");
         store.Accounts.Add(account);
         var service = new CandleService(store, TestVenues.With(), new CandleCache(TimeProvider.System), TimeProvider.System);
-        var refused = await Assert.ThrowsAsync<WorkspaceException>(() => service.CandlesAsync(account.Id, "BTC", "2M", null, default));
+        var refused = await Assert.ThrowsAsync<ProblemException>(() => service.CandlesAsync(account.Id, "BTC", "2M", null, default));
         Assert.Equal("Interval must be one of 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 8h, 12h, 1d, 3d, 1w, 1M.", refused.Message);
         Assert.Equal("Hyperliquid exposes only the latest 5,000 candles per interval. Prices are trade candles, not fills.",
             HyperliquidPerpetualReader.Descriptor.CandleNotice);

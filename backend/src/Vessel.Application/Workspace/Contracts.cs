@@ -67,11 +67,6 @@ public sealed record OverviewTotals(int PortfolioCount, int AccountCount, string
 public sealed record OverviewDto(IReadOnlyList<PortfolioDto> Portfolios, IReadOnlyList<AccountDto> Accounts,
     OverviewTotals Totals, IReadOnlyList<FillDto> RecentActivity, string ScopeNote);
 
-public sealed class WorkspaceException(int statusCode, string detail) : Exception(detail)
-{
-    public int StatusCode { get; } = statusCode;
-}
-
 // Application owns this bounded use-case port; EF and transaction details stay in Persistence.
 public sealed record MarketDataAccount(bool IsEnabled, string VenueId);
 

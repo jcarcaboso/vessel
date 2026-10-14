@@ -3,8 +3,8 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
-using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Persistence;
@@ -91,12 +91,12 @@ public sealed class DraftMovePostgresTests
         foreach (var target in new[] { foreign.Id, Guid.NewGuid() })
         {
             await using var db = database.Context(owner);
-            var error = await Assert.ThrowsAsync<WorkspaceException>(() => Service(db).UpdateAsync(first.Summary.Id,
+            var error = await Assert.ThrowsAsync<ProblemException>(() => Service(db).UpdateAsync(first.Summary.Id,
                 Update(first, target, "Rejected title", "Rejected review"), default));
             Assert.Equal(404, error.StatusCode);
         }
         await using (var db = database.Context(other))
-            Assert.Equal(404, (await Assert.ThrowsAsync<WorkspaceException>(() => Service(db).UpdateAsync(first.Summary.Id,
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => Service(db).UpdateAsync(first.Summary.Id,
                 Update(first, foreign.Id), default))).StatusCode);
         await AssertUnchanged(database, owner, first);
     }
@@ -115,7 +115,7 @@ public sealed class DraftMovePostgresTests
             account.UpdateSettings(account.Name, account.PortfolioId, false);
             await disabling.SaveChangesAsync();
         }
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => Service(moving).UpdateAsync(first.Summary.Id,
+        var error = await Assert.ThrowsAsync<ProblemException>(() => Service(moving).UpdateAsync(first.Summary.Id,
             Update(first, second.Summary.AccountId, "Rejected title", "Rejected review"), default));
         Assert.Equal(409, error.StatusCode);
         await AssertUnchanged(database, owner, first);
@@ -153,7 +153,7 @@ public sealed class DraftMovePostgresTests
         }
         finally { release.TrySetResult(); }
         await disable.WaitAsync(TimeSpan.FromSeconds(10));
-        var error = await Assert.ThrowsAsync<WorkspaceException>(() => move!.WaitAsync(TimeSpan.FromSeconds(10)));
+        var error = await Assert.ThrowsAsync<ProblemException>(() => move!.WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.Equal(409, error.StatusCode);
         Assert.Equal("advisory", waitEvent);
         await AssertUnchanged(database, owner, first);
@@ -181,7 +181,7 @@ public sealed class DraftMovePostgresTests
         }
         finally { gate.Release.TrySetResult(); }
         var saved = await winning.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => losing!.WaitAsync(TimeSpan.FromSeconds(10)))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => losing!.WaitAsync(TimeSpan.FromSeconds(10)))).StatusCode);
         await AssertUnchanged(database, owner, saved);
     }
 
@@ -208,7 +208,7 @@ public sealed class DraftMovePostgresTests
         finally { gate.Release.TrySetResult(); }
         var saved = await winning.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.NotEqual("advisory", waitEvent);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => losing!.WaitAsync(TimeSpan.FromSeconds(10)))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => losing!.WaitAsync(TimeSpan.FromSeconds(10)))).StatusCode);
         await AssertUnchanged(database, owner, saved);
     }
 
@@ -222,7 +222,7 @@ public sealed class DraftMovePostgresTests
         await using (var editing = database.Context(owner))
             saved = await Service(editing).UpdateAsync(first.Summary.Id, Update(first, first.Summary.AccountId, "Winner"), default);
         await using var moving = database.Context(owner);
-        Assert.Equal(409, (await Assert.ThrowsAsync<WorkspaceException>(() => Service(moving).UpdateAsync(first.Summary.Id,
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => Service(moving).UpdateAsync(first.Summary.Id,
             Update(first, second.Summary.AccountId, "Loser", "Rejected review"), default))).StatusCode);
         await AssertUnchanged(database, owner, saved);
     }
