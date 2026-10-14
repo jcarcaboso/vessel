@@ -13,6 +13,7 @@ var builder = WebApplication.CreateBuilder(args);
 if (!builder.Environment.IsDevelopment()) ProductionConfiguration.Validate(builder.Configuration);
 builder.Services.AddVesselInfrastructure(builder.Configuration);
 builder.Services.AddVesselPersistence(builder.Configuration);
+builder.Services.AddVesselApplication();
 builder.Services.AddOpenApi();
 builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
 builder.Services.AddResponseCompression(options =>
