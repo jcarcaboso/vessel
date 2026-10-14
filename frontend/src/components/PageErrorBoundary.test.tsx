@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { PageErrorBoundary } from './PageErrorBoundary'
+import { PageErrorBoundary, PageLoadFallback } from './PageErrorBoundary'
 
 function Child({ fail }: { fail: boolean }) {
   if (fail) throw new Error('Bearer private-token database-password')
@@ -27,8 +27,8 @@ describe('page error boundary', () => {
     expect(screen.getByText('Recovered content')).toBeInTheDocument()
   })
 
-  it('keeps browser reload as an explicit fallback with an unsaved-work warning', () => {
-    render(<PageErrorBoundary><Child fail /></PageErrorBoundary>, { onCaughtError: () => {} })
+  it.each(['render', 'module'])('keeps browser reload explicit with an unsaved-work warning for %s failures', kind => {
+    render(kind === 'render' ? <PageErrorBoundary><Child fail /></PageErrorBoundary> : <PageLoadFallback />, { onCaughtError: () => {} })
     expect(screen.getByRole('alert')).toHaveTextContent('Reloading the browser discards unsaved work.')
     const reload = vi.fn()
     vi.stubGlobal('window', { location: { reload } })

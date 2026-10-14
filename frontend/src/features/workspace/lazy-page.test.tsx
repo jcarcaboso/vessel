@@ -1,31 +1,27 @@
 import { Suspense } from 'react'
-import { act, render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { render, screen } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { PageErrorBoundary } from '@/components/PageErrorBoundary'
 import { lazyPage } from './lazy-page'
 
-it('leaves repeated import failures behind the boundary until another deliberate retry', async () => {
+it('does not promise import recovery when the browser can retain a rejected module URL', async () => {
   const load = vi.fn<() => Promise<{ default: () => React.JSX.Element }>>()
     .mockRejectedValueOnce(new Error('private import detail'))
-    .mockRejectedValueOnce(new Error('private import detail'))
-    .mockResolvedValue({ default: () => <p>Loaded page</p> })
-  const { Page, reset } = lazyPage(load)
-  const user = userEvent.setup()
-  render(<PageErrorBoundary onError={reset}>
+    .mockResolvedValue({ default: () => <p>Available module</p> })
+  const Page = lazyPage(load)
+  const content = (route: string) => <PageErrorBoundary key={route}>
     <Suspense fallback={<p>Loading page</p>}><Page /></Suspense>
-  </PageErrorBoundary>, { onCaughtError: () => {} })
+  </PageErrorBoundary>
+  const view = render(content('review'), { onCaughtError: () => {} })
 
-  await screen.findByRole('alert')
-  await act(async () => {})
-  expect(load).toHaveBeenCalledTimes(1)
+  expect(await screen.findByRole('alert')).toHaveTextContent('This page could not be loaded.')
   expect(screen.queryByText('private import detail')).not.toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'Try again' }))
-  expect(await screen.findByRole('alert')).toHaveTextContent('Some browser module errors require a reload.')
-  await act(async () => {})
-  expect(load).toHaveBeenCalledTimes(2)
+  expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+  expect(screen.getByRole('alert')).toHaveTextContent('Return to Plays to save any unsaved work before reloading.')
+  expect(screen.getByRole('alert')).toHaveTextContent('Reloading the browser discards unsaved work.')
   expect(screen.getByRole('button', { name: 'Reload browser' })).toBeEnabled()
-  await user.click(screen.getByRole('button', { name: 'Try again' }))
-  expect(await screen.findByText('Loaded page')).toBeVisible()
-  expect(load).toHaveBeenCalledTimes(3)
+  view.rerender(content('overview'))
+  expect(await screen.findByRole('alert')).toHaveTextContent('This page could not be loaded.')
+  expect(load).toHaveBeenCalledTimes(1)
+  expect(screen.queryByText('Available module')).not.toBeInTheDocument()
 })

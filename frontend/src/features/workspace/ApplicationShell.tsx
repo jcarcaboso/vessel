@@ -32,9 +32,9 @@ import type { ManagementEvent } from './management-events'
 import './application-shell.css'
 import './skip-content.css'
 
-const { Page: PlaysPage, reset: resetPlaysPage } = lazyPage(async () => ({ default: (await import('@/features/plays/PlaysPage')).PlaysPage }))
-const { Page: ReviewPage, reset: resetReviewPage } = lazyPage(async () => ({ default: (await import('@/features/review/ReviewPage')).ReviewPage }))
-const { Page: SettingsPage, reset: resetSettingsPage } = lazyPage(async () => ({ default: (await import('./SettingsPage')).SettingsPage }))
+const PlaysPage = lazyPage(async () => ({ default: (await import('@/features/plays/PlaysPage')).PlaysPage }))
+const ReviewPage = lazyPage(async () => ({ default: (await import('@/features/review/ReviewPage')).ReviewPage }))
+const SettingsPage = lazyPage(async () => ({ default: (await import('./SettingsPage')).SettingsPage }))
 
 function PageLoading() {
   return <div className="workspace-loading" role="status">Loading your workspace…</div>
@@ -217,7 +217,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
         {!pending && !data && !error && <div className="workspace-alert">No workspace data is available.</div>}
 
         {playsLifetime.visited && <div hidden={page !== 'plays'}>
-          <PageErrorBoundary resetKey={page} key={playsLifetime.generation} onError={resetPlaysPage}>
+          <PageErrorBoundary resetKey={page} key={playsLifetime.generation}>
             <Suspense fallback={<PageLoading />}>
               <PlaysPage workRef={playsLifetime.work} active={page === 'plays'} accounts={accounts} portfolios={portfolios}
                 api={api} session={playsSession} onSession={setPlaysSession} onReload={reload} loading={loading}
@@ -225,10 +225,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
             </Suspense>
           </PageErrorBoundary>
         </div>}
-        <PageErrorBoundary key={page} onError={() => {
-          if (page === 'review') resetReviewPage()
-          if (page === 'settings') resetSettingsPage()
-        }}>
+        <PageErrorBoundary key={page}>
         {page === 'review' && <Suspense fallback={<PageLoading />}><ReviewPage api={api} reloadGeneration={reloadKey} onOpenPlay={viewPlay} /></Suspense>}
 
         {page === 'overview' && data && <OverviewPage data={data} api={api} overviewQuery={overviewQuery} setOverviewQuery={setOverviewQuery}
