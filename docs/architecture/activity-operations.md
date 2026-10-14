@@ -42,6 +42,22 @@ All API monetary values, prices and quantities are decimal strings. The aggregat
 
 Reported closed P&L sums allocated venue facts. The P&L basis is gross, net-of-fee or mixed. Net result follows the existing sizing rule: subtract USDC fees on gross fills only. Net-of-fee fills already include their fees, so no fee is subtracted again. A nonzero gross fee in another token makes net result null, with a coverage reason, rather than converting it or claiming a complete result.
 
+October 14, 2026: the operation summary displays before-fee closed P&L from
+`grossClosedPnlUsd`, followed by fees and the existing net result. The aggregator
+adds back allocated USDC fees only for net-of-fee facts, including negative-fee
+rebates; gross facts stay unchanged. Before-fee P&L is null with coverage when a
+net-of-fee fact has a nonzero fee in another token. `reportedClosedPnlUsd` and the
+original executions retain the venue's reported values. RISEx net results must
+not have their fees deducted a second time.
+
+The adjacent percentage is the direction-adjusted change from weighted average
+entry to weighted average exit, not a leveraged, margin or account return.
+It excludes fees and is labelled as price return in its tooltip and drill-down.
+Integer arithmetic rounds only the displayed percentage to two decimals.
+Incomplete operations, unknown prices/direction and zero entry prices have no
+percentage. Reentries can make this price comparison differ from realized
+return on capital; it is not used in sizing or Review.
+
 The display sums USDC, USDT, USDT0, USDE, USDe and USDH fees as nominal stablecoin units. These are explicit symbol labels from normalized execution facts, not a wallet token-identity validation or FX conversion. All other fee tokens stay in separate exact token totals. A USDT gross fee appears in the nominal stablecoin display but still makes net result unknown, since sizing's USD result supports USDC fees only. Negative reported fees, such as rebates, retain their sign. Unsupported fees on net-of-fee fills do not make net result unknown because that P&L already accounts for them. Separate funding cashflows are not added, and RISEx funding inclusion remains unverified.
 
 The frontend does not total money. Sign colouring examines decimal strings directly; display formatting reuses the existing decimal-string formatter. Exact API values remain available in numeric-cell titles.
@@ -75,3 +91,17 @@ Aggregation happens before response limits. Snapshot identities and latest-opera
 Activity filters loaded operations by enabled account, current portfolio membership including Unassigned accounts, canonical contract, Long/Short, open/closed/incomplete, rolling 7/30/90 days or a custom date range. All retained activity is the default. Date filters use the latest constituent fill timestamp, not only opening time, so an operation opened earlier but active within the period remains visible. Each accepted activity response advances the rolling window's reference time, including Reload and retry. Custom dates include both selected UTC calendar days. Filters are client-side and do not expand the endpoint's retained-history or response limits. The shell keeps account and Activity filters in memory across detail views and page navigation; disconnect/reload discards them. Missing portfolio, enabled-account and instrument options resolve to All for both controls and filtering. Reset restores all loaded operations.
 
 Long uses the positive green token and an up arrow; Short uses the negative red token and a down arrow. October 13, 2026 owner refinement: an expanded operation lists its executions by their own trade side from the normalized side, never venue wording: a buy is Long and a sell is Short, so a long's closing sells show as Short and a short's closing buys as Long. Open/close wording, the instrument and the account are not repeated on each execution because the operation row already states them. Order and fill counts are not displayed (the response still carries them); per-operation display omissions are stated without a count. Reported P&L and net result colour by sign. All CSS reads appearance tokens; direction badge text sits on the theme's card background, covered by built-in contrast tests. Controls have native labels, table headings and expanders with `aria-expanded`. Loading and failures never fall back to raw overview fills or synthetic operations.
+
+October 14, 2026: the whole operation summary row toggles its executions; the
+expander remains a native keyboard-operable button and expanded actions do not
+toggle the row. Instrument, direction and status have distinct treatments.
+Open is green, Partially closed is amber, Closed is muted, and Incomplete is
+amber with a dashed border. Partially closed is display/filter progress for an
+open operation with positive exited and remaining quantities, not a new API
+status. Open filtering still includes partial operations. Pending is not
+invented from executed activity. The summary retains peak size and shows
+Remaining only above zero; cumulative entered/exited values and reporting-basis
+notes move into the drill-down. Entry and exit have separate columns; the exit
+colour follows the direction-adjusted price return. Times are shortened in UTC,
+with full timestamps in a tooltip. Activity uses the shared `NativeSelect` for
+consistent arrow placement, padding and native keyboard behaviour.

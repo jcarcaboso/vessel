@@ -22,6 +22,30 @@ public sealed class ActivityOperationsTests
     };
 
     [Fact]
+    public void Before_fee_display_restores_net_fees_without_deducting_them_twice()
+    {
+        var entry = Fill(0, fee: 0.19m, pnl: -0.19m, basis: "net-of-fee");
+        var exit = Fill(1, "sell", "close", fee: 0.50m, pnl: -109.81m, basis: "net-of-fee");
+        var op = Assert.Single(OperationAggregator.Aggregate([entry, exit]));
+        Assert.Equal("-110", op.ReportedClosedPnlUsd);
+        Assert.Equal("-109.31", op.GrossClosedPnlUsd);
+        Assert.Equal("0.69", op.StablecoinFeesNominalUsd);
+        Assert.Equal("-110", op.NetResultUsd);
+        Assert.Equal(-109.81m, exit.ClosedPnlUsd);
+    }
+
+    [Fact]
+    public void Before_fee_display_restores_negative_fee_rebates_exactly()
+    {
+        var op = Assert.Single(OperationAggregator.Aggregate([
+            Fill(0, basis: "net-of-fee"),
+            Fill(1, "sell", "close", pnl: 0.0000000000000000000000000003m,
+                fee: -0.0000000000000000000000000001m, basis: "net-of-fee")]));
+        Assert.Equal("0.0000000000000000000000000002", op.GrossClosedPnlUsd);
+        Assert.Equal("0.0000000000000000000000000003", op.NetResultUsd);
+    }
+
+    [Fact]
     public void Multi_order_entry_and_exit_form_one_round_trip()
     {
         List<ImportedFill> fills = [Fill(0), Fill(1, quantity: 2, price: 110), Fill(2, quantity: 2, price: 120)];
@@ -32,6 +56,7 @@ public sealed class ActivityOperationsTests
         Assert.Equal("112", op.AverageEntryPrice); Assert.Equal("130", op.AverageExitPrice);
         Assert.Equal(3, op.EntryOrderCount); Assert.Equal(5, op.ExitOrderCount); Assert.Equal(8, op.FillCount);
         Assert.Equal("20", op.ReportedClosedPnlUsd); Assert.Equal("19.5", op.NetResultUsd);
+        Assert.Equal("20", op.GrossClosedPnlUsd);
         Assert.Equal(Start, op.OpenedAtUtc); Assert.Equal(Start.AddMinutes(7), op.ClosedAtUtc);
     }
 
@@ -65,9 +90,11 @@ public sealed class ActivityOperationsTests
     {
         var op = Assert.Single(OperationAggregator.Aggregate([Fill(0, fee: 1), Fill(1, "sell", "close", pnl: 10, fee: 2, basis: "net-of-fee")]));
         Assert.Equal("9", op.NetResultUsd); Assert.Equal("3", op.StablecoinFeesNominalUsd); Assert.Equal("mixed", op.PnlBasis);
+        Assert.Equal("12", op.GrossClosedPnlUsd);
         var net = Assert.Single(OperationAggregator.Aggregate([Fill(0, basis: "net-of-fee", token: "ETH", fee: 1),
             Fill(1, "sell", "close", basis: "net-of-fee", token: "ETH", fee: 2, pnl: 10)]));
         Assert.Equal("10", net.NetResultUsd); Assert.Equal("3", Assert.Single(net.OtherFees).Amount);
+        Assert.Null(net.GrossClosedPnlUsd);
     }
 
     [Fact]

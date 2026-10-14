@@ -4,8 +4,8 @@ import type { BrokerAccount } from '@/api/workspace'
 import { ChevronDown, ChevronRight, Inbox } from 'lucide-react'
 import { ActivityTable } from './ActivityTable'
 import { OperationDirection } from './OperationDirection'
-import { duration, resultSign } from './activity-format'
-import { amount, money, time } from '@/lib/format'
+import { duration, operationDates, operationPriceReturn, operationStatus, resultSign } from './activity-format'
+import { amount, money } from '@/lib/format'
 import './activity-operations.css'
 
 function Result({ value }: { value: string | null }) {
@@ -17,24 +17,32 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
   onPreview?: (operation: ActivityOperation) => void
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const toggle = (id: string) => setExpanded(previous => {
+    const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next
+  })
   // Defense in depth: a management reload may disable an account while an earlier activity read is still visible.
   const visible = operations.filter(op => accounts.some(a => a.id === op.accountId && a.isEnabled !== false))
   if (!visible.length) return <div className="workspace-empty small-empty"><Inbox size={27} /><strong>No operations in this view</strong><p>Refresh an enabled exchange account to retrieve fills, or reset the filters. Imported history never supplies trading intent.</p></div>
   return <div className="workspace-table-wrap"><table className="workspace-table operations-table"><thead><tr>
-    <th>Operation</th><th>Account / time</th><th>Size</th>{!compact && <><th>Average entry → exit</th><th>Closed P&amp;L</th></>}<th>Net result</th>{!compact && <><th>Fees</th><th>Play</th></>}
+    <th>Operation</th><th>Account / time <span className="operation-timezone">UTC</span></th><th title="Peak position quantity">Size</th>{!compact && <><th>Average entry</th><th>Average exit</th><th title="Before reported fees; venue-reported P&L is preserved in the executions">Closed P&amp;L</th><th title="Stablecoin fees in nominal USD; other tokens listed separately">Fees</th></>}<th title="After reported fees, deducted once. Realized executions only; excludes unrealized P&L.">Net result</th>{!compact && <th>Play</th>}
   </tr></thead><tbody>{visible.map(op => {
     const open = expanded.has(op.id)
-    return <Fragment key={op.id}><tr>
-      <td><div className="operation-heading"><button type="button" className="icon-button" aria-label={`${open ? 'Collapse' : 'Expand'} ${op.contractId} operation`} aria-expanded={open} aria-controls={`operation-${op.id}`} onClick={() => setExpanded(previous => {
-        const next = new Set(previous); if (next.has(op.id)) next.delete(op.id); else next.add(op.id); return next
-      })}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button><div><strong>{op.contractId}</strong><OperationDirection direction={op.direction} /><small className={op.status === 'incomplete' ? 'operation-incomplete' : ''}>{op.status}</small></div></div></td>
-      <td><strong>{accounts.find(a => a.id === op.accountId)?.name ?? 'Account'}</strong><small>Opened {op.openedAtUtc === null ? 'unknown' : time(op.openedAtUtc)}</small><small>{op.closedAtUtc === null ? op.status === 'incomplete' ? `Last fill ${time(op.lastOccurredAtUtc)}` : 'Not closed' : `Closed ${time(op.closedAtUtc)}`}</small><small>{duration(op.openedAtUtc, op.closedAtUtc)}</small></td>
-      <td className="numeric"><strong title={op.quantity ?? 'Unknown'}>{op.quantity === null ? '—' : amount(op.quantity)}</strong><small>Peak quantity</small>{!compact && <><small>Entered {op.totalEnteredQuantity === null ? '—' : amount(op.totalEnteredQuantity)}</small><small>Exited {op.totalExitedQuantity === null ? '—' : amount(op.totalExitedQuantity)}</small><small>Remaining {op.openQuantity === null ? '—' : amount(op.openQuantity)}</small></>}</td>
-      {!compact && <><td className="numeric"><span title={op.averageEntryPrice ?? 'Unknown'}>{money(op.averageEntryPrice)}</span> → <span title={op.averageExitPrice ?? 'Unknown'}>{money(op.averageExitPrice)}</span></td><td className="numeric"><Result value={op.reportedClosedPnlUsd} /><small>{op.pnlBasis}</small></td></>}
-      <td className="numeric"><Result value={op.netResultUsd} /><small>{op.status === 'open' ? 'Realized to date' : 'Reported executions'}</small></td>
-      {!compact && <><td className="numeric"><span title={op.stablecoinFeesNominalUsd}>{money(op.stablecoinFeesNominalUsd)}</span><small>Stablecoin units · nominal</small>{op.otherFees.map(f => <small key={f.token}>{amount(f.amount)} {f.token}</small>)}</td><td>{op.playId ? <span className="workspace-badge" title={op.playId}>Play {op.playId.slice(0, 8)}</span> : <span className="workspace-badge">{op.playAssociation === 'mixed' ? 'Mixed' : 'Unassigned'}</span>}</td></>}
-    </tr>{open && <tr id={`operation-${op.id}`}><td colSpan={compact ? 4 : 8} className="operation-expanded">
+    const status = operationStatus(op)
+    const priceReturn = operationPriceReturn(op)
+    const priceTone = resultSign(priceReturn)
+    return <Fragment key={op.id}><tr className="operation-row" data-expanded={open} onClick={event => {
+      if (!(event.target as Element).closest('button, a, input, select, textarea') && !window.getSelection()?.toString()) toggle(op.id)
+    }}>
+      <td><div className="operation-heading"><button type="button" className="operation-toggle" aria-label={`${open ? 'Collapse' : 'Expand'} ${op.contractId} operation`} aria-expanded={open} aria-controls={open ? `operation-${op.id}` : undefined} onClick={() => toggle(op.id)}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button><div><strong className="operation-asset">{op.contractId}</strong><div className="operation-tags"><OperationDirection direction={op.direction} /><span className={`operation-status ${status.tone}`}>{status.label}</span></div></div></div></td>
+      <td><strong>{accounts.find(a => a.id === op.accountId)?.name ?? 'Account'}</strong><small className="operation-dates" title={`Opened: ${op.openedAtUtc ?? 'unknown'}; ${op.closedAtUtc ? `Closed: ${op.closedAtUtc}` : `Last execution: ${op.lastOccurredAtUtc}`}`}>{operationDates(op)}</small>{op.openedAtUtc !== null && op.closedAtUtc !== null && <small>{duration(op.openedAtUtc, op.closedAtUtc)}</small>}</td>
+      <td className="numeric"><strong title={op.quantity === null ? 'Peak quantity unknown' : `Peak quantity: ${op.quantity}`}>{op.quantity === null ? '—' : amount(op.quantity)}</strong>{resultSign(op.openQuantity) === 'positive' && <small>Remaining {amount(op.openQuantity!)}</small>}</td>
+      {!compact && <><td className="numeric operation-entry"><span title={op.averageEntryPrice ?? 'Unknown'}>{money(op.averageEntryPrice)}</span></td><td className={`numeric operation-result ${priceTone}`}><span title={op.averageExitPrice ?? 'Unknown'}>{money(op.averageExitPrice)}</span></td><td className="numeric"><div className="operation-pnl"><Result value={op.grossClosedPnlUsd} />{priceReturn !== null && <span className={`operation-return operation-result ${priceTone}`} title="Average entry-to-exit price return, direction-adjusted, before fees and leverage. Not an account or margin return.">{priceReturn}</span>}</div></td>
+      <td className="numeric operation-fees"><span title={op.stablecoinFeesNominalUsd}>{money(op.stablecoinFeesNominalUsd)}</span>{op.otherFees.map(f => <small key={f.token}>{amount(f.amount)} {f.token}</small>)}</td></>}
+      <td className="numeric operation-net"><Result value={op.netResultUsd} /></td>
+      {!compact && <td>{op.playId ? <span className="workspace-badge" title={op.playId}>Play {op.playId.slice(0, 8)}</span> : <span className="workspace-badge">{op.playAssociation === 'mixed' ? 'Mixed' : 'Unassigned'}</span>}</td>}
+    </tr>{open && <tr id={`operation-${op.id}`}><td colSpan={compact ? 4 : 9} className="operation-expanded">
       {onPreview && <button className="text-action" aria-label={`Inspect ${op.contractId} retrospective eligibility`} onClick={() => onPreview(op)}>Inspect retrospective eligibility</button>}
+      <p className="workspace-scope-note operation-details">Entered {op.totalEnteredQuantity === null ? 'unknown' : amount(op.totalEnteredQuantity)} · Exited {op.totalExitedQuantity === null ? 'unknown' : amount(op.totalExitedQuantity)} · Remaining {op.openQuantity === null ? 'unknown' : amount(op.openQuantity)}. Venue-reported P&amp;L {money(op.reportedClosedPnlUsd)} ({op.pnlBasis}). Net result deducts reported fees once; stablecoin fees use nominal USD without conversion. Price return excludes fees and leverage.</p>
       {op.coverage.length > 0 && <ul className="operation-coverage">{op.coverage.map(reason => <li key={reason}>{reason}</li>)}</ul>}
       {op.fills.some(part => part.fill.positionEffect === 'flip') && <p className="workspace-scope-note">Flip rows show this operation's allocated quantity, fee and P&amp;L; the original fact stays unchanged.</p>}
       {op.fills.length > 0 ? <ActivityTable fills={op.fills.map(part => ({ ...part.fill, quantity: part.quantity, fee: part.fee, closedPnlUsd: part.closedPnlUsd }))} accounts={accounts} /> : <p className="workspace-scope-note">Execution rows were omitted by the response limit.</p>}
