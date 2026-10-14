@@ -1,0 +1,32 @@
+
+ RUN  v5.0.3 /tmp/vessel-fe-review/wt/wave1/frontend
+
+ ✓ src/features/settings/appearance.test.tsx > Built-in themes > offers dark and light themes with Graphite as the default 9ms
+ ✓ src/features/settings/appearance.test.tsx > Built-in themes > Graphite passes every readability check 3ms
+ ✓ src/features/settings/appearance.test.tsx > Built-in themes > Carbon passes every readability check 1ms
+ ✓ src/features/settings/appearance.test.tsx > Built-in themes > Midnight passes every readability check 1ms
+ ✓ src/features/settings/appearance.test.tsx > Built-in themes > Forest passes every readability check 1ms
+ ✓ src/features/settings/appearance.test.tsx > Built-in themes > Petrol passes every readability check 1ms
+ ✓ src/features/settings/appearance.test.tsx > Built-in themes > Espresso passes every readability check 1ms
+ ✓ src/features/settings/appearance.test.tsx > Built-in themes > Aubergine passes every readability check 1ms
+ ✓ src/features/settings/appearance.test.tsx > Built-in themes > Paper passes every readability check 1ms
+ ✓ src/features/settings/appearance.test.tsx > Built-in themes > Daylight passes every readability check 1ms
+ ✓ src/features/settings/appearance.test.tsx > Built-in themes > Sand passes every readability check 2ms
+ ✓ src/features/settings/appearance.test.tsx > Built-in themes > applies Graphite tokens when nothing is stored 1ms
+ ✓ src/features/settings/appearance.test.tsx > Stored appearance > drops unknown themes, malformed colours and out-of-range radii 1ms
+ ✓ src/features/settings/appearance.test.tsx > Stored appearance > keeps overrides per theme and persists them 13ms
+ ✓ src/features/settings/appearance.test.tsx > Appearance settings > switches theme, customizes a colour, warns about contrast and resets 913ms
+ ✓ src/features/settings/appearance.test.tsx > Appearance settings > jumps to the theme builder and the customizer from the panel header 105ms
+ ✓ src/features/settings/appearance.test.tsx > Appearance settings > ignores an incomplete hex value 75ms
+ ✓ src/features/settings/appearance.test.tsx > Chart level tags > pick dark ink on pastel levels and white ink on deep ones 1ms
+ ✓ src/features/settings/appearance.test.tsx > Random theme builder > always rolls readable dark palettes 36ms
+ ✓ src/features/settings/appearance.test.tsx > Random theme builder > always rolls readable light palettes 37ms
+ ✓ src/features/settings/appearance.test.tsx > Random theme builder > shows a roll as the draft, saves it by name and deletes it 4ms
+ ✓ src/features/settings/appearance.test.tsx > Random theme builder > drops malformed or duplicate saved themes from storage 1ms
+ ✓ src/features/settings/appearance.test.tsx > Random theme builder > rolls, names and saves a theme from Settings 403ms
+
+ Test Files  1 passed (1)
+      Tests  23 passed (23)
+   Start at  16:31:32
+   Duration  3.15s (tests 53%, environment 17%, import 13%, transform 9%, setup 7%)
+
