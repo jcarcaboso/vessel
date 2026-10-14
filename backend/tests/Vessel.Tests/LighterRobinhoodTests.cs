@@ -153,10 +153,10 @@ public sealed class LighterRobinhoodTests
         Assert.Equal("lighter-rh-perps-account", Rh.SnapshotScope);
         // The trades weight is three times mainnet's, so the history budget is smaller and the notice says so.
         Assert.Equal(2, Rh.TradePages);
-        Assert.StartsWith("Incomplete Lighter · Robinhood history: at most the latest 200 perpetual executions", Rh.HistoryNotice);
+        Assert.StartsWith("Incomplete Lighter RH history: at most the latest 200 perpetual executions", Rh.HistoryNotice);
         Assert.Contains("USDG perpetual equity only", Rh.HistoryNotice);
         Assert.Equal("The two-page history limit was reached; older executions remain unimported.", Rh.PageLimitNotice);
-        Assert.StartsWith("Lighter · Robinhood perpetual orders:", Rh.OrdersNotice);
+        Assert.StartsWith("Lighter RH perpetual orders:", Rh.OrdersNotice);
         Assert.True(Rh.HistoryNotice.Length <= LighterReader.HistoryNotice.Length + 40);
         Assert.Equal(["lighter", "lighter-rh"], LighterExchange.All.Select(e => e.VenueId));
     }

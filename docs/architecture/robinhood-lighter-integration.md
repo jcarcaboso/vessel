@@ -78,7 +78,7 @@ Verification: one Sol review per wave, two independent Sol reviews of the full d
 
 ## Implementation state
 
-October 14, 2026, backend venue wave (delivery contract items 1, 2 and the backend half of 4). Nominal stablecoins (item 3) and the frontend (logo assets, `VenueBadge`, `logo` parsing) are separate waves.
+October 14, 2026. All five delivery contract items are implemented: the backend venue wave (items 1, 2 and the backend half of 4), nominal stablecoins (item 3, see [stablecoin-wallet.md](stablecoin-wallet.md) and [execution-facts.md](execution-facts.md)) and the frontend (logo assets, `VenueBadge`, `logo` parsing and the account UI, items 4 and 5, see [account-management-contract.md](account-management-contract.md)). Values of a venue account are labelled in the venue's quote stablecoin (for example USDG); pooled totals say nominal USD with listed stablecoins at 1:1.
 
 **Hosts (item 1).** `VenueHostOptions` binds `Vessel:Venues:{Hyperliquid,Risex,Lighter,LighterRh}` with `BaseUrl` and, for Hyperliquid, `StreamUrl`. Defaults equal the previous hard-coded hosts and are also written in `appsettings.json`. `VenueHostValidation` runs on start. REST hosts must be absolute `https://` origins: adapters send absolute paths, so a base path is refused instead of silently dropped. Streams must be `wss://`. Neither may hold user info, a query or a fragment. A missing trailing slash is normalized. Messages name only the key, for example `Vessel:Venues:LighterRh:BaseUrl must be an absolute https origin…`. `DependencyInjection` contains no venue host; `HyperliquidMarketStream` takes its endpoint from the options. Operator settings are in [deploy/README.md](../../deploy/README.md#optional-venue-hosts).
 
@@ -92,6 +92,7 @@ October 14, 2026, backend venue wave (delivery contract items 1, 2 and the backe
 | Credential purpose | `lighter-read-token` | `lighter-rh-read-token` |
 | Setup URL | `https://app.lighter.xyz/read-only-tokens` | `https://robinhoodchain.lighter.xyz/read-only-tokens` |
 | Trade URL | none (unchanged) | `https://robinhoodchain.lighter.xyz/trade/{instrument}` |
+| Stored-notice name | Lighter | Lighter RH (keeps combined public and order coverage within the 1,000-character `HistoryNotice` column) |
 | History budget | 5 pages, 500 executions | 2 pages, 200 executions (`trades` weight 600 vs 200) |
 | Snapshot scope | `lighter-perps-account` | `lighter-rh-perps-account` |
 | Logo | `lighter` | `lighter-rh` |
@@ -114,4 +115,6 @@ The mainnet ID, host, strings, scope, notices and descriptor are unchanged, and 
 
 Verification: the Release build had no warnings. 1,465 backend tests passed against a disposable PostgreSQL 18 container; 3 opt-in live tests were skipped in that run. Both Lighter live tests passed separately against the public mainnet and RH hosts. No owner database, `.env` or credential was used.
 
-Open: RH read-only tokens were not tested with a real token. Until the nominal-stablecoin wave lands, RH results and balances are USDG figures that the USDC-shaped application rules treat as described in [the decision](#the-decision-that-matters-usdg-next-to-usdc).
+The combined history-notice budget test covers every Lighter exchange; the longest Lighter RH combination is 869 characters, mainnet's is unchanged.
+
+Open: RH read-only tokens were not tested with a real token.
