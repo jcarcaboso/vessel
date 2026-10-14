@@ -68,6 +68,18 @@ describe('Account filters', () => {
     expect(within(row).getByTitle('281474976710655')).toHaveTextContent('#2814…0655')
     expect(row).toHaveTextContent('Unassigned')
   })
+  it('labels venue values in the venue quote stablecoin and manual values in USD', () => {
+    const mixed = [{ ...accountFixture, name: 'Manual savings' },
+      { ...accountFixture, id: 'rh', name: 'Robinhood main', venueId: 'lighter-rh', sourceId: '7', address: null, syncStatus: 'synced' as const }]
+    render(<AccountsPanel api={createWorkspaceApi('test-only-token')} onChanged={vi.fn()} onReload={vi.fn()} accounts={mixed} portfolios={[portfolioFixture]}
+      portfolioFilter="" onPortfolioFilter={vi.fn()} filters={emptyAccountFilters} onFiltersChange={vi.fn()}
+      refreshing={null} refreshAction={null} onDetail={vi.fn()} onSync={vi.fn()} onManage={vi.fn()} onAdd={vi.fn()} />)
+    const row = (name: string) => screen.getByRole('button', { name: `View ${name}` }).closest('tr')!
+    expect(within(row('Robinhood main')).getByText('USDG · venue-reported account value · nominal')).toBeInTheDocument()
+    expect(within(row('Robinhood main')).getByText('$1,250.12')).toBeInTheDocument()
+    expect(row('Robinhood main')).not.toHaveTextContent('USD ·')
+    expect(within(row('Manual savings')).getByText('USD · manual value')).toBeInTheDocument()
+  })
   it('finds a source address as well as an account name', async () => {
     render(<Harness />)
     const input = screen.getByRole('textbox', { name: 'Search accounts' })

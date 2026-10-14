@@ -177,15 +177,16 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         {portfolios.map(portfolio => <option key={portfolio.id} value={portfolio.id}>{portfolio.name}</option>)}
         {enabledAccounts.some(account => account.portfolioId === null) && <option value="unassigned">Unassigned accounts</option>}
       </select></label>
-      <div className="plays-account-field"><label htmlFor={`${fieldId}-account`} className="field-label">Account</label>
+      <div className="plays-account-field">
+        {/* The venue sits beside the label so the select keeps its full width for long account names. */}
+        <div className="plays-field-heading plays-account-heading"><label htmlFor={`${fieldId}-account`}>Account</label>
+          {account && <VenueBadge venueId={account.venueId} size="xs" className="plays-account-venue" />}</div>
         <div className="plays-select-row">
           <select id={`${fieldId}-account`} value={lockInstrument ? draft.accountId : accountId} disabled={lockInstrument || (loading && !accounts.length)} onChange={event => chooseAccount(event.target.value)}>
             <option value="">Choose an account</option>
             {lockInstrument && !account && <option value={draft.accountId}>Unavailable or disabled account</option>}
             {filteredAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {venues.name(account.venueId)}</option>)}
-          </select>
-          {account && <VenueBadge venueId={account.venueId} compact className="plays-account-venue" />}
-          {onReload && <button type="button" className="plays-reload-accounts" aria-label="Reload accounts" title="Reload accounts"
+          </select>          {onReload && <button type="button" className="plays-reload-accounts" aria-label="Reload accounts" title="Reload accounts"
             onClick={onReload} disabled={loading} aria-busy={loading}>
             <RefreshCw size={13} className={loading ? 'is-spinning' : ''} aria-hidden="true" /></button>}
         </div>
