@@ -75,3 +75,43 @@ Owner decisions, October 14, 2026:
 5. **Account and venue UI.** A shared `VenueBadge` (logo + name; compact logo-only with accessible name) is used wherever accounts or venues appear: account rows, account detail, portfolio account lists, Accounts filters, the create-account venue picker (logo cards), Lighter import, Overview summary, Plays account selection and Review (names, not raw IDs). The Accounts page layout may be refined; the Plays page section positions may not move. Theme tokens only, both built-in themes keep contrast, logos sit on a neutral token tile.
 
 Verification: one Sol review per wave, two independent Sol reviews of the full diff, `pnpm check`, synthetic-data screenshots attached to the PR. No migration of the owner's database.
+
+## Implementation state
+
+October 14, 2026, backend venue wave (delivery contract items 1, 2 and the backend half of 4). Nominal stablecoins (item 3) and the frontend (logo assets, `VenueBadge`, `logo` parsing) are separate waves.
+
+**Hosts (item 1).** `VenueHostOptions` binds `Vessel:Venues:{Hyperliquid,Risex,Lighter,LighterRh}` with `BaseUrl` and, for Hyperliquid, `StreamUrl`. Defaults equal the previous hard-coded hosts and are also written in `appsettings.json`. `VenueHostValidation` runs on start. REST hosts must be absolute `https://` origins: adapters send absolute paths, so a base path is refused instead of silently dropped. Streams must be `wss://`. Neither may hold user info, a query or a fragment. A missing trailing slash is normalized. Messages name only the key, for example `Vessel:Venues:LighterRh:BaseUrl must be an absolute https origin…`. `DependencyInjection` contains no venue host; `HyperliquidMarketStream` takes its endpoint from the options. Operator settings are in [deploy/README.md](../../deploy/README.md#optional-venue-hosts).
+
+**One Lighter module, two exchanges (item 2).** `LighterExchange` holds the venue ID, display name, host section, collateral (asset 3), credential setup URL, trade URL template, logo key, trades page budget and snapshot scope. It words every user-facing message from the display name. `LighterReader` takes an exchange (mainnet by default). Catalogues carry their exchange, so the static parsers use its collateral and invalid-response message. `DependencyInjection` loops over `LighterExchange.All`. Per exchange it registers the descriptor, a named `HttpClient` (`LighterAuthenticationHandler`, `AllowAutoRedirect = false`, 20 s), a keyed catalogue cache, a keyed scoped reader and one forward for each of the five ports. Each exchange has its own process-local read gate. A reader refuses a catalogue cache that belongs to the other exchange, and accounts with the other venue ID.
+
+| | `lighter` | `lighter-rh` |
+| --- | --- | --- |
+| Name | Lighter | Lighter · Robinhood |
+| Host key | `Vessel:Venues:Lighter:BaseUrl` | `Vessel:Venues:LighterRh:BaseUrl` |
+| Collateral / quote / fill fee token | USDC | USDG |
+| Credential purpose | `lighter-read-token` | `lighter-rh-read-token` |
+| Setup URL | `https://app.lighter.xyz/read-only-tokens` | `https://robinhoodchain.lighter.xyz/read-only-tokens` |
+| Trade URL | none (unchanged) | `https://robinhoodchain.lighter.xyz/trade/{instrument}` |
+| History budget | 5 pages, 500 executions | 2 pages, 200 executions (`trades` weight 600 vs 200) |
+| Snapshot scope | `lighter-perps-account` | `lighter-rh-perps-account` |
+| Logo | `lighter` | `lighter-rh` |
+
+The mainnet ID, host, strings, scope, notices and descriptor are unchanged, and a test pins them. Margin in any asset other than the exchange's collateral is still refused. On RH this includes margin-enabled tokenized stocks such as AMZN. The collateral must be asset ID 3. The stale planned `lighter` entry in `SystemMetadata` is removed.
+
+**Paths verified.** The RH web app returns its single-page shell for any path, so an HTTP status proves nothing. Its router (`/assets/index-*.js`, fetched 2026-10-14) declares `/read-only-tokens` and `/trade/:symbol`. The setup URL therefore uses the token page, like mainnet's. The trade link uses the symbol, which equals Vessel's canonical key on Lighter. Mainnet still advertises no trade link.
+
+**Logos (item 4, backend).** `VenueDescriptor.Logo` is an optional key from `VenueLogos` (`hyperliquid`, `lighter`, `lighter-rh`, `risex`, `manual`). Hyperliquid, RISEx, both Lighter exchanges and the manual venue set theirs. `VenueRegistry` throws when a descriptor uses any other key. `/api/system` emits `logo`, which is null for planned venues.
+
+**Tests.** `LighterRobinhoodTests` uses fixtures captured from the public RH `orderBookDetails`, `orderBooks` and `assetDetails` (`backend/tests/Vessel.Tests/Fixtures/LighterRh`, trimmed to BTC, AAPL, XAU, OPENAI and two spot markets). It covers:
+
+- catalogue parsing with USDG quotes, ticks and leverage, with spot IDs ignored;
+- USDG asset-3 identity taken from `assetDetails`, and refusal of AMZN, USDC and misplaced-USDG margin;
+- USDG fill fee tokens, the RH page budget and its notice;
+- per-exchange caches, messages and account refusal;
+- host validation, configured hosts per named client, one registration per exchange and port, and startup failure that names only the key.
+
+`ApiTests` checks `logo` and the `lighter-rh` descriptor; `VenueRegistryTests` checks the logo set. The opt-in `LighterLiveTests` (`Vessel_TEST_LIGHTER_PUBLIC=1`) now also reads the public RH catalogue, system account 1 (USDG asset 3) and bounded BTC candles.
+
+Verification: the Release build had no warnings. 1,465 backend tests passed against a disposable PostgreSQL 18 container; 3 opt-in live tests were skipped in that run. Both Lighter live tests passed separately against the public mainnet and RH hosts. No owner database, `.env` or credential was used.
+
+Open: RH read-only tokens were not tested with a real token. Until the nominal-stablecoin wave lands, RH results and balances are USDG figures that the USDC-shaped application rules treat as described in [the decision](#the-decision-that-matters-usdg-next-to-usdc).

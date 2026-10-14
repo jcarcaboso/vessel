@@ -15,6 +15,23 @@ public static class PriceRules
     public const string TickSize = "tick-size";
 }
 
+/// <summary>
+/// Venue logo keys. The browser maps each to a bundled same-origin asset (frontend <c>venue-logos.ts</c>, kept in step
+/// like portfolio icons) and falls back to a generic icon. Registration rejects any other key.
+/// </summary>
+public static class VenueLogos
+{
+    public const string Hyperliquid = "hyperliquid";
+    public const string Lighter = "lighter";
+    public const string LighterRh = "lighter-rh";
+    public const string Risex = "risex";
+    public const string Manual = "manual";
+
+    public static readonly IReadOnlyList<string> All = [Hyperliquid, Lighter, LighterRh, Risex, Manual];
+
+    public static bool IsValid(string? logo) => logo is null || All.Contains(logo, StringComparer.Ordinal);
+}
+
 /// <summary>What Vessel can do at a venue. Use cases and the browser check these instead of venue names.</summary>
 public sealed record VenueCapabilities(bool Sync, bool Instruments, bool Orders, bool Candles, bool MarketContext, bool Stream, bool StablecoinWallet,
     bool AccountDiscovery = false, bool ReadOnlyCredential = false, bool ManualExecutions = false)
@@ -27,13 +44,14 @@ public sealed record VenueCapabilities(bool Sync, bool Instruments, bool Orders,
 /// or <c>{venueContractId}</c> for the venue's own identifier.
 /// <paramref name="Intervals"/> are the candle intervals the venue serves natively; others are refused, not approximated.
 /// The notices replace the generic candle and market-context notices for this venue.
+/// <paramref name="Logo"/> is an optional <see cref="VenueLogos"/> key.
 /// Adapters are looked up by <paramref name="Id"/> through <see cref="IVenueRegistry"/>.
 /// </summary>
 public sealed record VenueDescriptor(
     string Id, string Name, string Status, string Source, VenueCapabilities Capabilities,
     string? QuoteAsset = null, string? TradeUrlTemplate = null, IReadOnlyList<string>? Intervals = null,
     string PriceRule = PriceRules.SignificantFigures, string? CandleNotice = null, string? MarketContextNotice = null,
-    string? CredentialSetupUrl = null)
+    string? CredentialSetupUrl = null, string? Logo = null)
 {
     public IReadOnlyList<string> CandleIntervals => Intervals ?? [];
 
@@ -41,5 +59,5 @@ public sealed record VenueDescriptor(
 
     /// <summary>Manual accounts hold owner-entered values: no venue adapter, no source identity.</summary>
     public static readonly VenueDescriptor Manual = new(ManualId, "Manual", "manual", VenueSources.None,
-        VenueCapabilities.None with { ManualExecutions = true });
+        VenueCapabilities.None with { ManualExecutions = true }, Logo: VenueLogos.Manual);
 }

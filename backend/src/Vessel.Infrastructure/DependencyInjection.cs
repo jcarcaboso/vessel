@@ -3,9 +3,12 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Vessel.Infrastructure.Credentials;
+using Vessel.Infrastructure.Venues;
 using Vessel.Infrastructure.Venues.Lighter;
+using Vessel.Application.Credentials;
 using Vessel.Application.Evidence;
 using Vessel.Application.MarketData;
 using Vessel.Application.Ownership;
@@ -23,39 +26,30 @@ public static class DependencyInjection
     {
         services.Configure<VesselAuthOptions>(config.GetSection("Vessel:Auth"));
         services.AddSingleton(TimeProvider.System);
+        AddVenueHosts(services, config);
         services.AddSingleton<HyperliquidCatalogueCache>();
-        services.AddSingleton<LighterCatalogueCache>();
-        services.AddHttpClient<IPerpetualVenueReader, HyperliquidPerpetualReader>(client =>
+        static void Hyperliquid(IServiceProvider sp, HttpClient client)
         {
-            client.BaseAddress = new Uri("https://api.hyperliquid.xyz/");
+            client.BaseAddress = Hosts(sp).BaseUri(nameof(VenueHostOptions.Hyperliquid));
             client.Timeout = TimeSpan.FromSeconds(20);
-        }).RemoveAllLoggers();
-        services.AddHttpClient<ICandleReader, HyperliquidPerpetualReader>(client =>
-        {
-            client.BaseAddress = new Uri("https://api.hyperliquid.xyz/");
-            client.Timeout = TimeSpan.FromSeconds(20);
-        }).RemoveAllLoggers();
-        services.AddHttpClient<IMarketContextReader, HyperliquidPerpetualReader>(client =>
-        {
-            client.BaseAddress = new Uri("https://api.hyperliquid.xyz/");
-            client.Timeout = TimeSpan.FromSeconds(20);
-        }).RemoveAllLoggers();
-        services.AddHttpClient<IVenueOrderReader, HyperliquidPerpetualReader>(client =>
-        {
-            client.BaseAddress = new Uri("https://api.hyperliquid.xyz/");
-            client.Timeout = TimeSpan.FromSeconds(20);
-        }).RemoveAllLoggers();
+        }
+        services.AddHttpClient<IPerpetualVenueReader, HyperliquidPerpetualReader>(Hyperliquid).RemoveAllLoggers();
+        services.AddHttpClient<ICandleReader, HyperliquidPerpetualReader>(Hyperliquid).RemoveAllLoggers();
+        services.AddHttpClient<IMarketContextReader, HyperliquidPerpetualReader>(Hyperliquid).RemoveAllLoggers();
+        services.AddHttpClient<IVenueOrderReader, HyperliquidPerpetualReader>(Hyperliquid).RemoveAllLoggers();
         // Venue modules register their descriptor and adapters; use cases find them by venue ID.
         services.AddSingleton(VenueDescriptor.Manual);
         services.AddSingleton(HyperliquidPerpetualReader.Descriptor);
         AddRisex(services);
-        AddLighter(services);
+        foreach (var exchange in LighterExchange.All) AddLighter(services, exchange);
         services.AddScoped<IVenueRegistry, VenueRegistry>();
         services.AddSingleton<CandleCache>();
         services.AddSingleton<MarketContextCache>();
         services.AddSingleton<MarketStreamLimiter>();
         services.AddSingleton<IWebSocketTransportFactory, ClientWebSocketTransportFactory>();
-        services.AddSingleton<IMarketStream, HyperliquidMarketStream>();
+        services.AddSingleton<IMarketStream>(sp => new HyperliquidMarketStream(sp.GetRequiredService<IWebSocketTransportFactory>(),
+            sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<HyperliquidMarketStream>>(),
+            Hosts(sp).StreamUri(nameof(VenueHostOptions.Hyperliquid))));
         AddEvidenceStorage(services, config);
         services.AddVesselCredentials(config);
         services.AddHttpContextAccessor();
@@ -81,9 +75,9 @@ public static class DependencyInjection
     {
         services.AddSingleton(RisexReader.Descriptor);
         services.AddSingleton<RisexCatalogueCache>();
-        static void Configure(HttpClient client)
+        static void Configure(IServiceProvider sp, HttpClient client)
         {
-            client.BaseAddress = new Uri("https://api.rise.trade/");
+            client.BaseAddress = Hosts(sp).BaseUri(nameof(VenueHostOptions.Risex));
             client.Timeout = TimeSpan.FromSeconds(20);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Vessel/1.0 (self-hosted trading journal; read-only)");
         }
@@ -93,21 +87,43 @@ public static class DependencyInjection
         services.AddHttpClient<IMarketContextReader, RisexReader>("risex-IMarketContextReader", Configure).RemoveAllLoggers();
     }
 
-    private static void AddLighter(IServiceCollection services)
+    /// <summary>
+    /// Venue hosts are configuration (<c>Vessel:Venues</c>), validated at startup so a bad value fails fast and the
+    /// message names only the key. Defaults are the production hosts.
+    /// </summary>
+    private static void AddVenueHosts(IServiceCollection services, IConfiguration config)
     {
-        services.AddSingleton(LighterReader.Descriptor);
-        services.AddHttpClient<LighterReader>("lighter", client =>
+        services.AddOptions<VenueHostOptions>().Bind(config.GetSection(VenueHostOptions.Section)).ValidateOnStart();
+        services.AddSingleton<IValidateOptions<VenueHostOptions>, VenueHostValidation>();
+    }
+
+    private static VenueHostOptions Hosts(IServiceProvider sp) => sp.GetRequiredService<IOptions<VenueHostOptions>>().Value;
+
+    /// <summary>
+    /// One Lighter exchange: its own descriptor, named client (authentication handler, no redirects so Authorization
+    /// cannot leave the host, 20 s), catalogue cache and reader. Each port is registered once per exchange, so the
+    /// registry and the per-venue lookups find exactly one adapter for each venue ID.
+    /// </summary>
+    private static void AddLighter(IServiceCollection services, LighterExchange exchange)
+    {
+        var id = exchange.VenueId;
+        services.AddSingleton(exchange.Descriptor);
+        services.AddKeyedSingleton(id, (sp, _) => new LighterCatalogueCache(sp.GetRequiredService<TimeProvider>(), id));
+        services.AddHttpClient(exchange.ClientName, (sp, client) =>
         {
-            client.BaseAddress = new Uri("https://mainnet.zklighter.elliot.ai/");
+            client.BaseAddress = Hosts(sp).BaseUri(exchange.HostSection);
             client.Timeout = TimeSpan.FromSeconds(20);
-        }).AddHttpMessageHandler(() => new LighterAuthenticationHandler())
+        }).AddHttpMessageHandler(() => new LighterAuthenticationHandler(exchange.Name))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
             .RemoveAllLoggers();
-        services.AddScoped<IPerpetualVenueReader>(sp => sp.GetRequiredService<LighterReader>());
-        services.AddScoped<IVenueOrderReader>(sp => sp.GetRequiredService<LighterReader>());
-        services.AddScoped<ICandleReader>(sp => sp.GetRequiredService<LighterReader>());
-        services.AddScoped<IVenueAccountDiscovery>(sp => sp.GetRequiredService<LighterReader>());
-        services.AddScoped<IVenueCredentialVerifier>(sp => sp.GetRequiredService<LighterReader>());
+        services.AddKeyedScoped(id, (sp, _) => new LighterReader(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient(exchange.ClientName), sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<IAccountCredentialReader>(), sp.GetRequiredKeyedService<LighterCatalogueCache>(id), exchange));
+        services.AddScoped<IPerpetualVenueReader>(sp => sp.GetRequiredKeyedService<LighterReader>(id));
+        services.AddScoped<IVenueOrderReader>(sp => sp.GetRequiredKeyedService<LighterReader>(id));
+        services.AddScoped<ICandleReader>(sp => sp.GetRequiredKeyedService<LighterReader>(id));
+        services.AddScoped<IVenueAccountDiscovery>(sp => sp.GetRequiredKeyedService<LighterReader>(id));
+        services.AddScoped<IVenueCredentialVerifier>(sp => sp.GetRequiredKeyedService<LighterReader>(id));
     }
 
     private static void AddEvidenceStorage(IServiceCollection services, IConfiguration config)

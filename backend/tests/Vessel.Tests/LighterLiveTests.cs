@@ -13,7 +13,7 @@ public sealed class LighterLiveFactAttribute : FactAttribute
     }
 }
 
-/// <summary>No token is read from the environment. Public mainnet only, with no account writes or history backfill.</summary>
+/// <summary>No token is read from the environment. Public reads only (mainnet and Robinhood), with no account writes or history backfill.</summary>
 public sealed class LighterLiveTests
 {
     private sealed class NoCredential : IAccountCredentialReader
@@ -46,5 +46,30 @@ public sealed class LighterLiveTests
         var candles = await reader.ReadCandlesAsync("BTC", "1h", now - 2 * 3600000L, now, default);
         Assert.InRange(candles.Count, 1, 3);
         Assert.All(candles, c => Assert.Null(c.Trades));
+    }
+
+    /// <summary>Lighter on Robinhood Chain: same gate, public reads only, the RH host and its USDG collateral.</summary>
+    [LighterLiveFact]
+    public async Task Robinhood_public_catalogue_system_account_and_candles_parse()
+    {
+        var exchange = LighterExchange.Robinhood;
+        using var client = new HttpClient(new LighterAuthenticationHandler(exchange.Name) { InnerHandler = new HttpClientHandler { AllowAutoRedirect = false } })
+        {
+            BaseAddress = new Uri("https://api.rh.lighter.xyz/"), Timeout = TimeSpan.FromSeconds(20)
+        };
+        var reader = new LighterReader(client, TimeProvider.System, new NoCredential(), exchange: exchange);
+        var catalogue = await reader.ReadInstrumentsAsync(default);
+        Assert.Contains(catalogue, i => i.ContractId == "BTC" && i.PriceStep > 0);
+        Assert.Contains(catalogue, i => i.ContractId == "AAPL");
+        Assert.All(catalogue, i => Assert.Equal("USDG", i.QuoteAsset));
+        Assert.DoesNotContain(catalogue, i => i.ContractId.Contains('/'));
+        // System account 1 holds USDG as asset 3 (checked 2026-10-14) and has no recent executions.
+        var result = await reader.ReadAsync("1", default);
+        Assert.Equal("lighter-rh-perps-account", result.Snapshot.ValueScope);
+        Assert.All(result.Fills, f => Assert.True(VenueFactChecks.Valid(f)));
+        Assert.StartsWith(exchange.HistoryNotice, result.HistoryNotice);
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var candles = await reader.ReadCandlesAsync("BTC", "1h", now - 2 * 3600000L, now, default);
+        Assert.InRange(candles.Count, 1, 3);
     }
 }
