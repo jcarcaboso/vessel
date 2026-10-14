@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
@@ -184,6 +185,45 @@ public sealed class ExecutionMatcherTests
         Assert.Equal(near, ExecutionMatcher.Near((decimal)actual, (decimal)planned));
 
     [Theory]
+    [InlineData("1.0001e-24", "1e-24", null, true)]
+    [InlineData("1.0002e-24", "1e-24", null, false)]
+    [InlineData("1e-25", "1e-25", null, true)]
+    [InlineData("1.001e-25", "1e-25", null, false)]
+    [InlineData("1e-26", "1e-26", null, true)]
+    [InlineData("1e-27", "1e-27", null, true)]
+    [InlineData("1e-28", "1e-28", null, true)]
+    [InlineData("2e-28", "1e-28", null, false)]
+    [InlineData("1.001e-25", "1e-25", "1e-28", true)]
+    [InlineData("1.002e-25", "1e-25", "1e-28", false)]
+    [InlineData("0.01", "1e-25", "0.01", true)]
+    [InlineData("0.02", "1e-25", "0.01", false)]
+    [InlineData("79228162514264337593543950335", "79228162514264337593543950335", null, true)]
+    public void Matching_handles_decimal_precision_boundaries_and_coarser_ticks(string actual, string planned, string? tick, bool near)
+    {
+        static decimal Parse(string text) => decimal.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture);
+        Assert.Equal(near, ExecutionMatcher.Near(Parse(actual), Parse(planned), tick is null ? null : Parse(tick)));
+    }
+
+    [Theory]
+    [InlineData("long")]
+    [InlineData("short")]
+    public void Overflowing_percentage_stops_and_targets_keep_their_keys_but_have_no_resolved_price(string direction)
+    {
+        var plan = PlayDocuments.Normalize(TestPlays.Plan("100000") with
+        {
+            Direction = direction, Leverage = "1",
+            Entries = [TestPlays.Plan("100000").Entries[0] with
+            {
+                Stops = [new PlanExit("stop-1", "percent", "1e28", "100")],
+                Targets = [new PlanExit("target-1", "percent", "1e28", "100")]
+            }]
+        });
+        var levels = ExecutionMatcher.Levels(plan).ToList();
+        Assert.Equal(["entry|entry-1", "stop|entry-1|stop-1", "target|entry-1|target-1"], levels.Select(l => l.Key));
+        Assert.Equal(new decimal?[] { 100000m, null, null }, levels.Select(l => l.Price));
+    }
+
+    [Theory]
     [InlineData("open", VenueOrderStatus.Open)]
     [InlineData("filled", VenueOrderStatus.Filled)]
     [InlineData("canceled", VenueOrderStatus.Canceled)]
@@ -236,6 +276,61 @@ public sealed class ExecutionPostgresTests
             dir.StartsWith("Close") ? 5m : 0m, at ?? DateTimeOffset.UtcNow, orderId, "hash-" + id, "{}", HyperliquidPerpetualReader.EffectOf(dir));
 
     private static void AddFills(Harness h, params VenueFill[] fills) => h.Reader.Result = h.Reader.Result with { Fills = [.. h.Reader.Result.Fills, .. fills] };
+
+    [PostgresFact]
+    public async Task Accepted_percentage_overflow_does_not_break_execution_reads_or_link_an_unresolved_target()
+    {
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var plan = TestPlays.Plan("100000") with
+        {
+            Leverage = "1",
+            Entries = [TestPlays.Plan("100000").Entries[0] with
+            {
+                Targets = [new PlanExit("target-1", "percent", "1e28", "100")]
+            }]
+        };
+        var play = await h.Plays.CreateAsync(new(account, "BTC", "venue", "Extreme target", plan), default);
+        play = await h.Plays.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "planned"), default);
+
+        var execution = await h.Execution.GetAsync(play.Summary.Id, default);
+        Assert.Equal("planned", execution.Status);
+        Assert.Empty(execution.Links);
+        Assert.Equal("0", execution.Totals.EnteredQuantity);
+        Assert.Equal("1e28", play.Plan.Entries[0].Targets[0].Value);
+        Assert.Null(ExecutionMatcher.Levels(play.Plan).Single(l => l.Role == OrderLinkRole.Target).Price);
+
+        h.Orders.Orders.AddRange([Order("entry", "buy", 100000m), Order("exit", "sell", 1000000m, reduceOnly: true)]);
+        execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        Assert.Equal(("entry", "entry"), (Assert.Single(execution.Links).Role, execution.Links[0].Order!.OrderId));
+        Assert.Equal("exit", Assert.Single(execution.UnlinkedOrders).OrderId);
+        Assert.Empty(execution.Suggestions);
+    }
+
+    [PostgresFact]
+    public async Task Accepted_tiny_entry_does_not_block_another_plays_account_reconciliation()
+    {
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var ordinary = await PlannedPlay(h, account);
+        var plan = TestPlays.Plan("1e-25") with
+        {
+            Entries = [TestPlays.Plan("1e-25").Entries[0] with { Stops = [], Targets = [] }]
+        };
+        var tiny = await h.Plays.CreateAsync(new(account, "BTC", "venue", "Tiny entry", plan), default);
+        tiny = await h.Plays.ChangeStatusAsync(tiny.Summary.Id, new(tiny.Summary.Version, "planned"), default);
+        h.Orders.Orders.AddRange([Order("ordinary", "buy", 100m), Order("tiny", "buy", 0.0000000000000000000000001m)]);
+
+        var execution = await h.Execution.CheckAsync(ordinary.Summary.Id, default);
+        Assert.Equal("ordinary", Assert.Single(execution.Links).Order!.OrderId);
+        Assert.Empty(execution.Suggestions);
+        var tinyExecution = await h.Execution.GetAsync(tiny.Summary.Id, default);
+        Assert.Equal("tiny", Assert.Single(tinyExecution.Links).Order!.OrderId);
+        Assert.Empty(tinyExecution.Suggestions);
+        Assert.Equal("planned", tinyExecution.Status);
+        Assert.Equal("0", tinyExecution.Totals.EnteredQuantity);
+        Assert.Equal("1e-25", tiny.Plan.Entries[0].Price);
+    }
 
     [PostgresFact]
     public async Task Links_orders_automatically_and_opens_then_closes_from_linked_fills()
