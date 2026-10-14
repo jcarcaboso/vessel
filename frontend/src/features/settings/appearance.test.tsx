@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readableInk } from '@/components/chart/ink'
 import { AppearanceSettings, CurrentThemeName } from './AppearanceSettings'
-import { appearanceStore, initAppearance, parseAppearance, storageKey } from './appearance'
+import { applyAppearance, appearanceStore, initAppearance, parseAppearance, storageKey } from './appearance'
 import { generatePalette, isReadable } from './generator'
 import { contrastChecks, defaultThemeId, themes } from './themes'
 
@@ -12,6 +12,11 @@ const token = (name: string) => root.style.getPropertyValue(name)
 
 beforeEach(() => {
   window.localStorage.clear()
+  if (!document.querySelector('meta[name="theme-color"]')) {
+    const meta = document.createElement('meta')
+    meta.name = 'theme-color'
+    document.head.append(meta)
+  }
   initAppearance()
 })
 
@@ -32,6 +37,57 @@ describe('Built-in themes', () => {
     expect(token('--background')).toBe('#0f1114')
     expect(token('--sidebar')).toBe('#13161a')
     expect(token('--radius')).toBe('0.4375rem')
+    expect(root).toHaveClass('dark')
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', '#0f1114')
+    expect(token('--shadow-color')).toBe('#000000')
+  })
+})
+
+describe('Resolved browser appearance', () => {
+  it.each(themes)('$name synchronizes the scheme, dark controls and browser theme colour', theme => {
+    root.classList.add('unrelated')
+    appearanceStore.selectTheme(theme.id)
+    expect(root.classList.contains('dark')).toBe(theme.scheme === 'dark')
+    expect(root).toHaveClass('unrelated')
+    root.classList.remove('unrelated')
+    expect(root.style.colorScheme).toBe(theme.scheme)
+    expect(root.dataset.scheme).toBe(theme.scheme)
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', theme.colors.background)
+    expect(token('--shadow-color')).toBe(theme.scheme === 'dark' ? '#000000' : theme.colors.foreground)
+  })
+
+  it('updates the browser colour on customization, reset and reload', () => {
+    appearanceStore.selectTheme('paper')
+    appearanceStore.setColor('background', '#abcdef')
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', '#abcdef')
+    initAppearance()
+    expect(root).not.toHaveClass('dark')
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', '#abcdef')
+    appearanceStore.resetTheme('paper')
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', themes.find(theme => theme.id === 'paper')!.colors.background)
+    appearanceStore.selectTheme('graphite')
+    expect(root).toHaveClass('dark')
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', '#0f1114')
+  })
+
+  it.each(['light', 'dark'] as const)('applies the %s draft and saved theme scheme', scheme => {
+    appearanceStore.randomize(scheme, seeded(12))
+    const background = token('--background')
+    expect(root.classList.contains('dark')).toBe(scheme === 'dark')
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', background)
+    appearanceStore.saveCurrent('Saved scheme')
+    const id = appearanceStore.get().themeId
+    appearanceStore.selectTheme(scheme === 'dark' ? 'paper' : 'graphite')
+    appearanceStore.selectTheme(id)
+    initAppearance()
+    expect(root.classList.contains('dark')).toBe(scheme === 'dark')
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', background)
+  })
+
+  it('also applies safely to a document without a browser theme meta tag', () => {
+    const other = document.implementation.createHTMLDocument()
+    expect(() => applyAppearance(parseAppearance(null), other.documentElement)).not.toThrow()
+    expect(other.documentElement.classList.contains('dark')).toBe(true)
   })
 })
 
