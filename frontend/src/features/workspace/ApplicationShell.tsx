@@ -1,4 +1,4 @@
-import { createRef, Suspense, useCallback, useEffect, useState } from 'react'
+import { createRef, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Tooltip } from 'radix-ui'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
@@ -6,7 +6,7 @@ import type { SystemInfo } from '@/api/system'
 import { Button } from '@/components/ui/button'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { useNotifications } from '@/components/notifications/notifications'
-import { createPlaysSession, startNewPlay } from '@/features/plays/saved'
+import { createPlaysSession, hasUnsavedPlayWork, startNewPlay, type PlaysSession } from '@/features/plays/saved'
 import { AccountDetail } from './AccountDetail'
 import { ActivityOperations } from './ActivityOperations'
 import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
@@ -77,6 +77,33 @@ function Shell({ system, disconnect, api }: ShellProps) {
   }
   const [requestedPlay, setRequestedPlay] = useState<{ api: WorkspaceApi; id: string } | null>(null)
   const [disconnectedApi, setDisconnectedApi] = useState<WorkspaceApi | null>(null)
+  const exitState = useRef<{ api: WorkspaceApi; session: PlaysSession; work: typeof playsLifetime.work } | null>(null)
+  useLayoutEffect(() => {
+    if (disconnectedApi === api) return
+    const current = { api, session: playsSession, work: playsLifetime.work }
+    exitState.current = current
+    return () => { if (exitState.current === current) exitState.current = null }
+  }, [api, disconnectedApi, playsSession, playsLifetime.work])
+  useEffect(() => {
+    if (disconnectedApi === api) return
+    const work = playsLifetime.work
+    // Keep the listener for this connection: acquiring the work ref alone does not render the shell.
+    // Only serialize a draft at exit time, never on chart frames or ordinary navigation.
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      const current = exitState.current
+      if (current?.api !== api || current.work !== work || (!work.current && !hasUnsavedPlayWork(current.session))) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', beforeUnload)
+    return () => window.removeEventListener('beforeunload', beforeUnload)
+  }, [api, disconnectedApi, playsLifetime.work])
+  const acceptPlaysSession = useCallback((next: PlaysSession) => {
+    const current = exitState.current
+    if (current?.api !== api || current.work !== playsLifetime.work) return
+    current.session = next
+    setPlaysSession(next)
+  }, [api, playsLifetime.work])
   const [navigationCollapsed, setNavigationCollapsed] = useState(false)
   const [data, setData] = useState<Overview | null>(null)
   const [loaded, setLoaded] = useState<{ api: WorkspaceApi; key: number } | null>(null)
@@ -180,7 +207,19 @@ function Shell({ system, disconnect, api }: ShellProps) {
     navigate('plays')
   }
   const { refreshing, refreshProgress, sync, refreshAll, cancel: cancelRefresh } = useAccountRefresh({ api, refreshable, reload, notify })
-  const disconnectSession = () => { cancelRefresh(); setDisconnectedApi(api); setRequestedPlay(null); setPlaysSession(createPlaysSession()); disconnect() }
+  const disconnectSession = () => {
+    const current = exitState.current
+    if (current?.api !== api || current.work !== playsLifetime.work) return
+    if (current.work.current || hasUnsavedPlayWork(current.session)) {
+      const message = current.work.current
+        ? 'A Play request is still in progress. Disconnect and discard unsaved work? Already-sent changes may still complete.'
+        : 'Disconnect and discard unsaved Play work?'
+      if (!window.confirm(message)) return
+    }
+    if (exitState.current?.api !== api || exitState.current.work !== current.work) return
+    exitState.current = null
+    cancelRefresh(); setDisconnectedApi(api); setRequestedPlay(null); setPlaysSession(createPlaysSession()); disconnect()
+  }
   const refreshAllAction = <Button variant="outline" size="sm" onClick={() => { void refreshAll() }}
     disabled={refreshing !== null || loading || !refreshable.length} aria-busy={refreshProgress !== null}>
     <RefreshCw size={14} className={refreshProgress ? 'is-spinning' : ''} />
@@ -220,7 +259,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
           <PageErrorBoundary resetKey={page} key={playsLifetime.generation}>
             <Suspense fallback={<PageLoading />}>
               <PlaysPage workRef={playsLifetime.work} active={page === 'plays'} accounts={accounts} portfolios={portfolios}
-                api={api} session={playsSession} onSession={setPlaysSession} onReload={reload} loading={loading}
+                api={api} session={playsSession} onSession={acceptPlaysSession} onReload={reload} loading={loading}
                 requestedPlayId={requestedPlay?.api === api ? requestedPlay.id : null} onRequestedPlayHandled={() => setRequestedPlay(null)} />
             </Suspense>
           </PageErrorBoundary>

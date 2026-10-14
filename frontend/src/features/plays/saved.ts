@@ -34,8 +34,11 @@ export function observedPlayVersion(session: PlaysSession, api: WorkspaceApi) {
 
 /** A new editor must never replace unsaved work, including changes to a saved Play. */
 export function startNewPlay(session: PlaysSession): PlaysSession {
-  const unsaved = (session.saved ? isDirty(session.draft, session.saved) : hasDraftContent(session.draft)) || hasManualDraft(session.manual)
-  return { ...(unsaved ? session : createPlaysSession()), view: 'editor' }
+  return { ...(hasUnsavedPlayWork(session) ? session : createPlaysSession()), view: 'editor' }
+}
+
+export function hasUnsavedPlayWork(session: PlaysSession) {
+  return (session.saved ? isDirty(session.draft, session.saved) : hasDraftContent(session.draft)) || hasManualDraft(session.manual)
 }
 
 export function hasDraftContent(draft: PlayDraft) {
