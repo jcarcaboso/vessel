@@ -40,7 +40,7 @@ frontend/
       chart/                 renderer-neutral chart, Lightweight Charts adapter, drawings, indicators, chart chrome
       notifications/         popup notification stack
       ui/                    Button, Input, Dialog, Tabs (shadcn-derived, MIT notice kept)
-    lib/utils.ts             cn() for class names
+    lib/                     exact decimal helpers, cross-feature formatters, cn() for class names
     design/portfolio-review/ standalone mock of the Review proposal (not part of the app)
     test/                    Vitest setup, render helper and shared fixtures
 ```
@@ -59,10 +59,11 @@ modules, rather than feature components.
 4. `ApplicationShell` wraps the app in `NotificationProvider` and `VenuesProvider` (the venues from `/api/system`), loads `GET /api/overview` and renders the current page.
 
 A new `WorkspaceApi` object means a new session. Shell memory, the Plays session
-and the old client's candle cache are reset. Request cancellation is not yet
-complete: execution checks, link mutations and some Play and account-import
-requests can continue after their caller leaves. Review items R3 and N5 track
-these gaps.
+and the old client's candle cache are reset. Saved-Play reads, history and
+execution reads/checks abort when their session ends, and ignore stale results.
+Order-link mutations deliberately remain non-abortable; ignoring a stale
+completion does not roll back a server write. Account-discovery cancellation
+is part of the pending shell wave recorded in the verification note.
 
 ## Routing and the shell
 
@@ -201,14 +202,14 @@ Pages talk to each other only through the shell: opening a Play from Overview or
 | Candles | `candleCache` (`features/market`), one per `WorkspaceApi` | The session, at most 20 series of 5,000 candles; never stored in the browser. |
 | Chart undo/redo, drawing tool and selection | `useChartHistory`, `useDrawingEditor` | Per account and instrument; reset when it changes. |
 | Theme choice, overrides, saved themes | `appearanceStore` → `localStorage['vessel.appearance']` | Persistent; a browser preference, not workspace data. |
-| Chart preferences (interval, favourites, magnet, live, indicators) | `useChartPreferences` → `localStorage['vessel.chart.preferences.v1']` | Persistent; view preferences only. |
+| Chart preferences (interval, favourites, magnet, live, indicators) | Shared `useSyncExternalStore` store in `chartPreferences.ts`, exposed by `useChartPreferences` | Persistent in `localStorage['vessel.chart.preferences.v1']`; view preferences only. All mounted charts observe the same value. |
 
 Tokens and financial data are not persisted in browser storage. They remain in
 memory for the active session.
 
 **Patterns you will see.**
 
-- *Keyed request state.* A component stores its result with the key it was requested for (API identity, IDs, `reloadGeneration`, a retry counter) and treats any other key as loading. Many request effects create an `AbortController` and abort it in cleanup. This is the intended pattern, not a guarantee for every request; R3 and N5 list exceptions.
+- *Keyed request state.* A component stores its result with the key it was requested for (API identity, IDs, `reloadGeneration`, a retry counter) and treats any other key as loading. Read effects use `AbortController` cleanup and stale-result guards. Mutation cancellation is not evidence of rollback.
 - *Latest refs.* Async work that finishes later reads `latest.current` (updated in an effect) instead of the render's props, so it applies to the current draft, not the one from the click.
 - *Adjusting state during render.* A few components compare a source prop with stored state and call `setState` during render (React's documented pattern for derived resets), for example when a selection must drop rows that are no longer shown.
 
@@ -219,9 +220,11 @@ memory for the active session.
 - Every edit produces a new `PlayDraft` through `onChange`; `PlaysPage` writes it into the shell session.
 - **Saving** sends `fieldsFromDraft(draft)` with the expected version (and a revision reason after planning), then syncs evidence (deletes, uploads, note and markup updates). Edits made while saving stay in the draft.
 - **Status** changes (`Plan it`, `Pause`, `Resume`, `Cancel play`) go through `POST /status`; planning a dirty draft saves it first.
-- A **saved Play** is tracked by `usePlayExecution`: it reads `/execution`, runs `/execution/check` when opened and every 60 seconds while visible, and offers order links. A status that moved on the server (Open, Closed) reloads the Play.
+- A **saved Play** is tracked by `usePlayExecution`: it reads `/execution`, runs `/execution/check` when opened and every 60 seconds while visible, and offers order links. Busy state counts all current-session requests, and polling skips ticks while work is in flight. Responses cannot overwrite a newer applied result. A status that moved on the server (Open, Closed) reloads the Play.
 - **Manual accounts** show `ManualExecutionPanel` instead, with idempotent request IDs.
 - **Unsaved work** is protected: opening another Play or starting a new one never replaces a dirty draft.
+- `useLeverageChange` owns one confirmation for the position controls and Suggestions. Controls keep showing the committed leverage while the dialog previews the pending value.
+- `useObjectUrl` acquires evidence image URLs in effects and releases them on Blob replacement or unmount. A thumbnail and viewer own separate URLs, so closing either cannot invalidate the other.
 
 ## The chart stack
 
@@ -237,7 +240,7 @@ features/plays/PlayChart.tsx      ChartPanel: plan overlays, plan tools, drawing
 
 - `CandleChart` receives display candles, `PriceOverlay`s, drawings, the active tool and callbacks. It never sees a Play. Its `ChartAdapter` interface (`types.ts`) is the only way into the renderer, and tests replace it with a fake (`src/test/setup.ts` mocks `lightweight`).
 - **Data**: `useCandles` reads from `candleCache`, which shows cached candles immediately, revalidates the latest window, pages older windows, merges live candles and drops entries on 404/409. `useLiveMarket` reads the SSE stream, reconnects with backoff, falls back to 15-second polling and pauses when the tab is hidden. Prices are observations, never fills.
-- **Levels**: `planOverlays` (in `features/plays/levels.ts`) turns entries into overlays. Dragging previews on the canvas only and commits once on release; a percentage level dragged on the chart becomes a price.
+- **Levels**: `planOverlays` (in `features/plays/levels.ts`) turns entries into overlays. Dragging previews on the canvas only and commits once on release; a percentage level dragged on the chart becomes a price. The level popover retains explicitly typed price strings exactly. Generated prices use `priceStep`, with the existing precision fallback when no tick is available.
 - **Drawings** are anchored to UTC time and price, stored in the draft per `venueId:contractId`, and drawn on the canvas so captures include them.
 - **Captures** use `takeScreenshot` plus a caption footer and go into the draft's evidence.
 - **Theme**: the adapter reads tokens (`--background`, `--chart-candle-*`, `--positive`, …) from computed styles and re-reads them when `<html>` changes.
@@ -246,7 +249,7 @@ features/plays/PlayChart.tsx      ChartPanel: plan overlays, plan tools, drawing
 ## Theming
 
 - `features/settings/themes.ts` defines ten built-in themes (seven dark, three light). A theme sets sixteen colours and a radius; nothing else.
-- `appearance.ts` resolves the selected theme plus overrides into CSS custom properties on `<html>` (`themeTokens`), and stores the choice in `localStorage`.
+- `appearance.ts` resolves the selected theme plus overrides into CSS custom properties on `<html>` (`themeTokens`), and stores the choice in `localStorage`. It also synchronizes the `dark` class, `data-scheme`, `color-scheme` and browser `theme-color` with the selected theme.
 - `styles.css` keeps the Graphite values as the fallback and maps tokens into Tailwind (`@theme inline`).
 - **Component CSS reads tokens only**: `var(--card)`, `var(--positive)`, or `color-mix` of tokens. Do not write a literal colour in component CSS.
 - Every built-in theme must pass `contrastChecks` (WCAG AA for text and signals on every surface, 3:1 for the focus ring); `appearance.test.tsx` enforces it.
@@ -274,7 +277,7 @@ pnpm --filter vessel-frontend build
 
 - Vitest with jsdom and Testing Library; tests sit next to the code (`*.test.ts(x)`). The default timeout is 15 seconds for slow CI runners.
 - `src/test/setup.ts` adds jest-dom matchers, stubs `scrollTo` and object URLs, and replaces the Lightweight Charts adapter with a fake, because jsdom has no canvas.
-- `src/test/render.tsx` renders inside `VenuesProvider` with the shared `systemFixture`. Fixtures for accounts, Plays, Activity, Review and the Overview summary are in `src/test/`.
+- `src/test/render.tsx` renders inside the shared `Tooltip.Provider` and `VenuesProvider` with `systemFixture`. Fixtures for accounts, Plays, Activity, Review and the Overview summary are in `src/test/`, along with retrospective fixtures and chart frame helpers.
 - API tests stub `fetch` and check both requests (headers, bodies, paths) and guards. Feature tests usually pass a partial fake `WorkspaceApi`.
 - Canvas rendering, real layout and gestures are checked in a browser, not jsdom. Use synthetic data only; see [`docs/product-review/verification/`](../product-review/verification/) and `scripts/release-browser-smoke.cjs`, which intercepts venue market-data routes so no venue is called.
 
