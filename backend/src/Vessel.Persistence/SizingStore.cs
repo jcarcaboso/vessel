@@ -32,7 +32,7 @@ public sealed class SizingStore(VesselDbContext db) : ISizingStore
             new ClosedPlayFacts(p, revisions[p.Id].ToList(),
             linked[p.Id].SelectMany(l => fills[(l.AccountId, l.OrderId)].Select(f => new LinkedFill(l.Role, f))).ToList(),
             linked[p.Id].Where(l => known.TryGetValue((l.AccountId, l.OrderId), out var order) &&
-                ExecutionIntegrity.MissingExecutions(order, fills[(l.AccountId, l.OrderId)].Sum(f => f.Quantity))).Select(l => l.OrderId).ToList())).ToList();
+                ExecutionIntegrity.MissingExecutions(order, fills[(l.AccountId, l.OrderId)])).Select(l => l.OrderId).ToList())).ToList();
     }
 
     private static ClosedPlayFacts ManualFacts(Play play, IReadOnlyList<PlayPlanRevision> revisions, IEnumerable<ManualExecution> rows)

@@ -212,6 +212,120 @@ describe('whole-position planned money summary', () => {
     expect(summary(draft).stops.allocation.status).toBe('partial')
   })
 
+  it.each(['99.99999999999999', '99.9999999999999999999999999999'])(
+    'keeps entry shortfall %s partial without tolerance or rounding', share => {
+      const draft = plan({ entries: [entry('100', share, [exit('90')], [exit('120')])] })
+      const result = summary(draft)
+      expect(result.entryAllocation.status).toBe('partial')
+      expect(result.pricedCoverage.status).toBe('partial')
+      expect(result.quantity).toBe(10)
+      expect(result.pricedQuantity).toBeCloseTo(10)
+      for (const kind of ['stops', 'targets'] as const) {
+        expect(result[kind].allocation.status).toBe('partial')
+        expect(result[kind].coverage.status).toBe('partial')
+        expect(result[kind].knownAmount).not.toBeNull()
+        expect(result[kind].totalAmount).toBeNull()
+      }
+      expect(result.rewardToRisk).toBeNull()
+      expect(result.riskSharePercent).toBeNull()
+      expect(summary({ ...draft, sizingMode: 'margin' }).quantity).toBeNull()
+    })
+
+  it.each(['99.99999999999999', '99.9999999999999999999999999999'])(
+    'keeps exit shortfall %s partial independently for stops and targets', share => {
+      for (const kind of ['stops', 'targets'] as const) {
+        const draft = plan({ entries: [entry('100', '100', [exit('90')], [exit('120')])] })
+        draft.entries[0]![kind][0]!.share = share
+        const result = summary(draft)
+        expect(result.entryAllocation.status).toBe('complete')
+        expect(result.pricedCoverage.status).toBe('complete')
+        expect(result[kind].allocation.status).toBe('partial')
+        expect(result[kind].coverage.status).toBe('partial')
+        expect(result[kind].knownAmount).not.toBeNull()
+        expect(result[kind].totalAmount).toBeNull()
+        expect(result[kind === 'stops' ? 'targets' : 'stops'].coverage.status).toBe('complete')
+        expect(result.rewardToRisk).toBeNull()
+      }
+    })
+
+  it.each([
+    ['100.00000000000001'],
+    ['100.0000000000000000000000000001'],
+    ['99.9999999999999999999999999999', '0.0000000000000000000000000002'],
+  ])('rejects tiny overallocation in exact shares %j', (...shares) => {
+    const draft = plan({ entries: shares.map(share => entry('100', share, [exit('90')], [exit('120')])) })
+    const result = summary(draft)
+    expect(result.entryAllocation.status).toBe('invalid')
+    expect(result.pricedQuantity).toBeNull()
+    expect(result.stops.totalAmount).toBeNull()
+    expect(result.targets.totalAmount).toBeNull()
+    for (const kind of ['stops', 'targets'] as const) {
+      const exits = shares.map(share => exit(kind === 'stops' ? '90' : '120', share))
+      const exitDraft = plan({ entries: [entry('100', '100', [exit('90')], [exit('120')])] })
+      exitDraft.entries[0]![kind] = exits
+      const exitResult = summary(exitDraft)
+      expect(exitResult[kind].allocation.status).toBe('invalid')
+      expect(exitResult[kind].coverage.status).toBe('invalid')
+      expect(exitResult[kind].knownAmount).toBeNull()
+      expect(exitResult[kind].totalAmount).toBeNull()
+      expect(exitResult[kind === 'stops' ? 'targets' : 'stops'].coverage.status).toBe('complete')
+    }
+  })
+
+  it.each([
+    ['33.3', '33.3', '33.4'],
+    ['99.9999999999999999999999999999', '0.0000000000000000000000000001'],
+    ['0.1', '0.2', '99.7'],
+  ])('accepts exactly complete decimal splits %j', (...shares) => {
+    const draft = plan({ entries: shares.map(share => entry('100', share,
+      shares.map(share => exit('90', share)), shares.map(share => exit('120', share)))) })
+    const result = summary(draft)
+    expect(result.entryAllocation.status).toBe('complete')
+    expect(result.pricedCoverage.status).toBe('complete')
+    expect(result.pricedQuantity).toBeCloseTo(10)
+    expect(result.stops.allocation.status).toBe('complete')
+    expect(result.stops.coverage.status).toBe('complete')
+    expect(result.stops.totalAmount).toBeCloseTo(100)
+    expect(result.targets.allocation.status).toBe('complete')
+    expect(result.targets.coverage.status).toBe('complete')
+    expect(result.targets.totalAmount).toBeCloseTo(200)
+  })
+
+  it('does not offset a tiny per-entry exit overage against another entry shortfall', () => {
+    const result = summary(plan({ entries: [
+      entry('100', '50', [exit('90', '100.0000000000000000000000000001')], [exit('120')]),
+      entry('100', '50', [exit('90', '99.9999999999999999999999999999')], [exit('120')]),
+    ] }))
+    expect(result.stops.allocation).toEqual({ percent: 100, status: 'invalid' })
+    expect(result.stops.coverage.status).toBe('invalid')
+    expect(result.stops.knownAmount).toBeNull()
+    expect(result.stops.totalAmount).toBeNull()
+    expect(result.targets.totalAmount).toBe(200)
+  })
+
+  it('keeps an exactly allocated tiny unpriced exit uncovered at the plan share length limit', () => {
+    const nearFull = `99.${'9'.repeat(61)}`
+    const tiny = `0.${'0'.repeat(60)}1`
+    const draft = plan({ entries: [entry('100', '100', [exit('90', nearFull), exit('', tiny)], [exit('120')])] })
+    const result = summary(draft)
+    expect(result.stops.allocation.status).toBe('complete')
+    expect(result.stops.coverage.status).toBe('partial')
+    expect(result.stops.knownAmount).toBeCloseTo(100)
+    expect(result.stops.totalAmount).toBeNull()
+    expect(result.targets.totalAmount).toBe(200)
+    draft.entries[0]!.stops[1]!.value = '90'
+    expect(summary(draft).stops.totalAmount).toBeCloseTo(100)
+  })
+
+  it('rejects overlong share text instead of truncating it into a complete allocation', () => {
+    const draft = plan({ entries: [entry('100', `99.${'9'.repeat(62)}`, [exit('90')], [exit('120')])] })
+    const result = summary(draft)
+    expect(result.entryAllocation.status).toBe('invalid')
+    expect(result.pricedQuantity).toBeNull()
+    expect(result.stops.totalAmount).toBeNull()
+    expect(result.targets.totalAmount).toBeNull()
+  })
+
   it('keeps a missing entry price partial even when its share is below floating-point addition precision', () => {
     const draft = plan({ entries: [
       entry('100', '99.99999999999999', [exit('90')], [exit('120')]),
@@ -237,7 +351,7 @@ describe('whole-position planned money summary', () => {
     expect(result.targets.totalAmount).toBeNull()
   })
 
-  it.each(['NaN', 'Infinity', '-1', '101', '9'.repeat(400)])('rejects invalid shares %s without finite-looking totals', share => {
+  it.each(['NaN', 'Infinity', '-1', '101', '1e2', '1e-2', '9'.repeat(400)])('rejects invalid shares %s without finite-looking totals', share => {
     const draft = plan()
     draft.entries[0]!.stops[0]!.share = share
     expect(summary(draft).stops.totalAmount).toBeNull()

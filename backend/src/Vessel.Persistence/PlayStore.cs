@@ -42,11 +42,19 @@ public sealed class PlayStore(VesselDbContext db) : IPlayStore
         }
     }
 
-    public async Task<T> WithPlayLockAsync<T>(Guid id, Func<Task<T>> action, CancellationToken ct)
+    public async Task<T> WithPlayLockAsync<T>(Guid id, Func<Task<T>> action, CancellationToken ct, Guid? destinationAccountId = null)
     {
         await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         var accountId = await db.Plays.Where(p => p.Id == id).Select(p => (Guid?)p.AccountId).SingleOrDefaultAsync(ct)
             ?? throw new WorkspaceException(404, "Play not found.");
+        if (destinationAccountId is { } destination && destination != accountId)
+        {
+            // ponytail: moves serialize per owner; use ordered account locks if move throughput requires it.
+            // Reuse the management key before either account row to avoid destination FK key-share deadlocks.
+            var key = "vessel-management:" + db.CurrentOwnerId;
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);
+            await new WorkspaceStore(db).WithAccountLockAsync(destination, _ => Task.FromResult(true), ct);
+        }
         // Lock order is account row -> execution advisory -> Play row everywhere.
         await new ExecutionStore(db).WithAccountLockAsync(accountId, () => Task.FromResult(true), ct);
         // The same row lock ExecutionStore.ActivePlaysAsync takes; evidence and history inserts only need a key share.

@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Numerics;
+using Vessel.Application.Activity;
 using Vessel.Application.Sizing;
 using Vessel.Application.Venues;
 using Vessel.Application.Credentials;
@@ -19,6 +21,50 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     private const int MaxUnlinkedOrders = 20;
     private const string Notice = "Orders and fills come from the venue and link to this play by order ID. " +
         "Price touches are never treated as fills. Quantities are base units from linked fills; closed PnL and fees are as the venue reports them.";
+
+    /// <summary>Retains bounded venue order history on explicit account refresh, without linking orders or changing Plays.</summary>
+    public Task<string?> RetainAccountOrdersAsync(Guid accountId, CancellationToken ct) =>
+        workspace.WithAccountLockAsync<string?>(accountId, async account =>
+        {
+            var notice = await RetainAccountOrdersLockedAsync(account, ct);
+            await workspace.RecordOrderHistoryNoticeAsync(account, notice, ct);
+            return notice;
+        }, ct);
+
+    private async Task<string?> RetainAccountOrdersLockedAsync(Account account, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (!account.IsEnabled) throw new WorkspaceException(400, "Enable the account before refreshing it.");
+        if (venues.Descriptor(account.VenueId) is not { Capabilities.Orders: true })
+            return "This venue does not provide order history; execution completeness cannot be checked.";
+        if (account.SourceId is null) throw new WorkspaceException(400, "A source identity is required before refresh.");
+        if (venues.Orders(account.VenueId) is not { } reader)
+            return "Order history was not refreshed because the venue order reader is unavailable.";
+        VenueOrderReadResult read;
+        try
+        {
+            var reason = await CredentialReasonAsync(account, usableOnly: false, ct);
+            ct.ThrowIfCancellationRequested();
+            if (reason is not null)
+                return $"Order history was not refreshed. {reason}";
+            read = await reader.ReadOrdersAsync(account, ct);
+            if (!read.Orders.All(VenueFactChecks.Valid))
+                throw new VenueReadException("The venue adapter returned orders outside Vessel's execution vocabulary.");
+        }
+        catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            ct.ThrowIfCancellationRequested();
+            return "Order history could not be refreshed; execution completeness remains limited to retained order records. Try again later.";
+        }
+        ct.ThrowIfCancellationRequested();
+        await store.WithAccountLockAsync(account.Id, async () =>
+        {
+            await store.UpsertOrdersAsync(account, read.Orders, read.ObservedAtUtc, ct);
+            return true;
+        }, ct);
+        return read.Notice;
+    }
+
 
     /// <summary>Refreshes the account's fills and orders, links what matches and applies status changes.</summary>
     public async Task<PlayExecutionDto> CheckAsync(Guid playId, CancellationToken ct)
@@ -46,6 +92,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             }
             var ticks = await TicksAsync(lockedAccount, ct);
             await store.WithAccountLockAsync(lockedAccount.Id, async () => { await ReconcileAsync(lockedAccount, read, ticks, ct); return true; }, ct);
+            await workspace.RecordOrderHistoryNoticeAsync(lockedAccount, read.Notice, ct);
             return true;
         }, ct);
         return await GetAsync(playId, ct);
@@ -71,21 +118,26 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
 
         var plan = PlayDocuments.Read(play.Plan);
         var settlement = Settle(plan, linked, orders, fills, play.Origin == PlayOrigin.Retrospective);
-        decimal entered = settlement.Entered, exited = settlement.Exited;
+        var entered = settlement.Entered;
+        var exited = settlement.Exited;
+        var open = entered - exited;
         var all = settlement.Counted.Select(f => f.Fill).ToList();
-        var totals = new ExecutionTotalsDto(Money(entered), Money(exited), Money(Math.Max(0, entered - exited)),
-            Money(all.Sum(f => f.ClosedPnlUsd)), PnlBasis(all),
-            all.GroupBy(f => f.FeeToken).OrderBy(g => g.Key).Select(g => new FeeTotalDto(g.Key, Money(g.Sum(f => f.Fee)))).ToList());
+        var totals = new ExecutionTotalsDto(entered.ToString(), exited.ToString(), open.Units.Sign > 0 ? open.ToString() : "0",
+            all.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.ClosedPnlUsd)).ToString(), PnlBasis(all),
+            all.GroupBy(f => f.FeeToken).OrderBy(g => g.Key).Select(g => new FeeTotalDto(g.Key,
+                g.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Fee)).ToString())).ToList());
         var entries = plan.Entries.Select(entry =>
         {
             var own = linked.Where(l => l.Role == OrderLinkRole.Entry && l.EntryId == entry.Id).ToList();
             var filled = own.SelectMany(l => fills[l.OrderId]).Where(f => !ExecutionIntegrity.Contradicts(OrderLinkRole.Entry, settlement.EntrySide, f)).ToList();
-            var quantity = filled.Sum(f => f.Quantity);
-            return new EntryProgressDto(entry.Id, Money(quantity), quantity > 0 ? Money(filled.Sum(f => f.Price * f.Quantity) / quantity) : null,
+            var quantity = ExecutionIntegrity.Quantity(filled);
+            var notional = filled.Aggregate(BigInteger.Zero,
+                (sum, f) => sum + ExactAmount.From(f.Price).Units * ExactAmount.From(f.Quantity).Units);
+            return new EntryProgressDto(entry.Id, quantity.ToString(), quantity.Units.Sign > 0 ? ExactAmount.Average(notional, quantity) : null,
                 own.Count(l => orders.TryGetValue(l.OrderId, out var o) && o.Status == "open"));
         }).ToList();
         OrderLinkDto Link(PlayOrderLink link) => new(link.Id, Name(link.Role), link.EntryId, link.LevelId, Name(link.State), Name(link.Source),
-            orders.TryGetValue(link.OrderId, out var order) ? OrderDto(order) : null, Money(fills[link.OrderId].Sum(f => f.Quantity)),
+            orders.TryGetValue(link.OrderId, out var order) ? OrderDto(order) : null, ExecutionIntegrity.Quantity(fills[link.OrderId]).ToString(),
             fills[link.OrderId].OrderBy(f => f.OccurredAtUtc).Select(FillDto).ToList());
         var reason = UntrackedReason(play, account, account is null ? null : venues.Descriptor(account.VenueId));
         if (reason is null && account is { IsEnabled: true } && play.Status is not (PlayStatus.Closed or PlayStatus.Cancelled))
@@ -221,6 +273,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var now = time.GetUtcNow();
         foreach (var order in orders.OrderBy(o => o.PlacedAtUtc))
         {
+            if (order.Status == "rejected") continue;
             if (links.Any(l => l.OrderId == order.OrderId && l.State == OrderLinkState.Linked)) continue;
             // A cancelled order that never filled cannot affect a play.
             if (order.Status == "canceled" && !fills[order.OrderId].Any()) continue;
@@ -270,22 +323,22 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             var settlement = Settle(PlayDocuments.Read(play.Plan), own, orders, fills);
             var entryFills = settlement.Counted.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill).OrderBy(f => f.OccurredAtUtc).ToList();
             var entered = settlement.Entered;
-            if (play.Status is PlayStatus.Planned or PlayStatus.Paused && entered > 0)
+            if (play.Status is PlayStatus.Planned or PlayStatus.Paused && entered.Units.Sign > 0)
             {
                 var first = entryFills[0];
                 store.Add(play.MarkOpen($"Entry fill of {Money(first.Quantity)} at {Money(first.Price)} on order {first.OrderId}.", now));
             }
             var resting = own.Any(l => l.Role == OrderLinkRole.Entry && orders.TryGetValue(l.OrderId, out var o) && o.Status == "open");
-            if (play.Status == PlayStatus.Open && entered > 0 && settlement.Exited == entered && settlement.Problems.Count == 0 && !resting)
-                store.Add(play.MarkClosed($"Linked exits covered the {Money(entered)} entered.", now));
+            if (play.Status == PlayStatus.Open && entered.Units.Sign > 0 && settlement.Exited == entered && settlement.Problems.Count == 0 && !resting)
+                store.Add(play.MarkClosed($"Linked exits covered the {entered} entered.", now));
         }
     }
 
     /// <summary>The linked fills that count for a Play, with the reasons they cannot settle it yet.</summary>
     private sealed record Settlement(string EntrySide, List<LinkedFill> Counted, List<string> Problems)
     {
-        public decimal Entered => Counted.Where(f => f.Role == OrderLinkRole.Entry).Sum(f => f.Fill.Quantity);
-        public decimal Exited => Counted.Where(f => f.Role != OrderLinkRole.Entry).Sum(f => f.Fill.Quantity);
+        public ExactAmount Entered => ExecutionIntegrity.Quantity(Counted.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill));
+        public ExactAmount Exited => ExecutionIntegrity.Quantity(Counted.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill));
     }
 
     /// <summary>Fills that contradict their role stay visible on their links but count toward neither side.</summary>
@@ -295,7 +348,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var side = ExecutionIntegrity.EntrySide(plan);
         var all = linked.SelectMany(l => fills[l.OrderId].Select(f => new LinkedFill(l.Role, f))).ToList();
         var incomplete = linked.Where(l => orders.TryGetValue(l.OrderId, out var order) &&
-            ExecutionIntegrity.MissingExecutions(order, fills[l.OrderId].Sum(f => f.Quantity))).Select(l => l.OrderId);
+            ExecutionIntegrity.MissingExecutions(order, fills[l.OrderId])).Select(l => l.OrderId);
         var problems = ExecutionIntegrity.Problems(side, all, incomplete);
         if (!retrospective)
         {

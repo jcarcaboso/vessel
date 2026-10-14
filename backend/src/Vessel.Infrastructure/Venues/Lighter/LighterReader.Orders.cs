@@ -9,9 +9,10 @@ namespace Vessel.Infrastructure.Venues.Lighter;
 public sealed partial class LighterReader
 {
     private const string TokenRequired = "Add a valid read-only token to this Lighter account to track orders.";
-    private const string OrdersNotice =
-        "Lighter perpetual orders: at most 1,000 active and 500 recent inactive records, with five history pages and no backfill. " +
-        "Zero-size, flagged, and TWAP orders are omitted because their position-tied or grouped execution semantics are not supported.";
+    internal const string OrdersNotice =
+        "Lighter perpetual orders: max 1,000 active, 500 recent inactive, five pages; no backfill. " +
+        "Zero-size, flagged and TWAP omitted; position-tied/grouped execution unsupported.";
+    internal const string OrdersPageLimitNotice = " The five-page history limit was reached.";
 
     public Task<VenueOrderReadResult> ReadOrdersAsync(string sourceId, CancellationToken cancellationToken)
     {
@@ -48,7 +49,7 @@ public sealed partial class LighterReader
                 if (!cursors.Add(cursor)) throw Json.Invalid();
             }
             return new VenueOrderReadResult(orders.Values.ToArray(), observed, OrdersNotice +
-                (cursor is null ? "" : " The five-page history limit was reached."));
+                (cursor is null ? "" : OrdersPageLimitNotice));
         }, cancellationToken);
     }
 

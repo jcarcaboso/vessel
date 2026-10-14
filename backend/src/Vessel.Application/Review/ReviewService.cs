@@ -1,4 +1,5 @@
 using System.Globalization;
+using Vessel.Application.Activity;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
@@ -66,7 +67,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
             current.GroupBy(key).Select(group =>
             {
                 var items = group.ToList();
-                return (Total: items.Sum(x => x.Result!.NetResult),
+                return (Total: Sum(items.Select(x => x.Result!.NetResult)),
                     Dto: new ReviewGroupDto(group.Key, name(group.Key), detail(group.Key, items), Metrics(items)));
             }).OrderByDescending(x => x.Total).ThenBy(x => x.Dto.Name, StringComparer.Ordinal).Select(x => x.Dto).ToList();
 
@@ -90,7 +91,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         return new ReviewDto(now, from ?? current.FirstOrDefault()?.ClosedAt, query.Period, "USD",
             options, Periods.Select(period => {
                 var selected = accepted.Where(e => InPeriod(e.ClosedAt, From(period, now), now)).ToList();
-                return new ReviewPeriodDto(period, selected.Count, selected.Count == 0 ? null : Number(selected.Sum(e => e.Result!.NetResult)));
+                return new ReviewPeriodDto(period, selected.Count, selected.Count == 0 ? null : Number(Sum(selected.Select(e => e.Result!.NetResult))));
             }).ToList(),
             Metrics(current), series.Points, series.BucketDays, groups,
             new ReviewCoverageDto(candidates.Count, candidates.Count(e => e.Exclusion == "fees"),
@@ -129,6 +130,8 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
     {
         var reasons = ExecutionIntegrity.Problems(ExecutionIntegrity.EntrySide(PlayDocuments.Read(facts.Play.Plan)),
             facts.Fills.ToList(), facts.IncompleteOrders ?? []);
+        PlayOutcomeCalculator.Outcome(facts, out var arithmeticProblem);
+        if (arithmeticProblem is not null) reasons.Add(arithmeticProblem);
         if (exclusion == "fees" || facts.Fills.Any(f => !ExecutionFacts.IsFeeBasis(f.Fill.FeeBasis) ||
             string.IsNullOrWhiteSpace(f.Fill.FeeToken) || f.Fill.PnlBasis == ExecutionFacts.PnlGross &&
                 f.Fill.Fee != 0 && f.Fill.FeeToken != "USDC"))
@@ -145,8 +148,8 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
                 f.Fill.PositionEffect is not (ExecutionFacts.Open or ExecutionFacts.Close) || f.Fill.Price <= 0 || f.Fill.Quantity <= 0 ||
                 f.Fill.OccurredAtUtc > now).Select(f => $"Fill {f.Fill.SourceFillId} of order {f.Fill.OrderId} has invalid identity, effect, quantity, price or time."));
             if (facts.Fills.Select(f => f.Fill.Id).Distinct().Count() != facts.Fills.Count) reasons.Add("Repeated fill IDs prevent a unique execution result.");
-            if (facts.Fills.Where(f => f.Role == OrderLinkRole.Entry).Sum(f => f.Fill.Quantity) !=
-                facts.Fills.Where(f => f.Role != OrderLinkRole.Entry).Sum(f => f.Fill.Quantity))
+            if (ExecutionIntegrity.Quantity(facts.Fills.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill)) !=
+                ExecutionIntegrity.Quantity(facts.Fills.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill)))
                 reasons.Add("Retained entry and exit quantities do not form a closed round trip.");
             if (reasons.Count == 0) reasons.Add("Complete opening and closing executions or executed entry notional are unavailable.");
         }
@@ -169,14 +172,9 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
                 f.Fill.OccurredAtUtc > now || f.Fill.Quantity <= 0 || f.Fill.Price <= 0) ||
             entries.Any(f => f.Fill.PositionEffect != ExecutionFacts.Open) ||
             exits.Any(f => f.Fill.PositionEffect != ExecutionFacts.Close) ||
-            entries.Sum(f => f.Fill.Quantity) != exits.Sum(f => f.Fill.Quantity))
+            !ExecutionIntegrity.Settled(facts))
             return incomplete;
-        // A flip, mismatched side or missing opening quantity cannot establish a complete Play outcome.
-        var side = entries[0].Fill.Side;
-        if (side is not (ExecutionFacts.Buy or ExecutionFacts.Sell) || entries.Any(f => f.Fill.Side != side) ||
-            exits.Any(f => f.Fill.Side != (side == ExecutionFacts.Buy ? ExecutionFacts.Sell : ExecutionFacts.Buy)))
-            return incomplete;
-        if (!ExecutionIntegrity.Chronological(fills)) return incomplete;
+        var side = ExecutionIntegrity.EntrySide(PlayDocuments.Read(facts.Play.Plan));
         var result = PlayOutcomeCalculator.Outcome(facts);
         if (result is not null && !HasCompleteInitialRisk(facts, entries.Min(f => f.Fill.OccurredAtUtc), side))
             result = result with { PlannedRisk = null };
@@ -213,24 +211,24 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         var gain = Average(wins.Select(o => o.ReturnPercent));
         var loss = Average(losses.Select(o => -o.ReturnPercent));
         var risks = outcomes.Where(o => o.RMultiple is not null).ToList();
-        decimal running = 0, peak = 0, drawdown = 0;
+        ExactAmount running = default, peak = default, drawdown = default;
         int streak = 0, maxWins = 0, maxLosses = 0;
         foreach (var play in plays.OrderBy(e => e.ClosedAt).ThenBy(e => e.Facts.Play.Id))
         {
             var net = play.Result!.NetResult;
-            running += net;
-            peak = Math.Max(peak, running);
-            drawdown = Math.Max(drawdown, peak - running);
+            running += ExactAmount.From(net);
+            peak = Max(peak, running);
+            drawdown = Max(drawdown, peak - running);
             if (net == 0) continue;
             streak = net > 0 ? Math.Max(0, streak) + 1 : Math.Min(0, streak) - 1;
             maxWins = Math.Max(maxWins, streak);
             maxLosses = Math.Max(maxLosses, -streak);
         }
         return new(plays.Count, wins.Count, losses.Count, plays.Count - wins.Count - losses.Count,
-            plays.Count == 0 ? null : Number(running), Number(Ratio(wins.Count, wins.Count + losses.Count)),
-            Number(gain), Number(loss), Number(Ratio(gain, loss)), Number(Ratio(wins.Sum(o => o.NetResult), -losses.Sum(o => o.NetResult))),
+            plays.Count == 0 ? null : Number(running), Number(Ratio(ExactAmount.From(wins.Count), ExactAmount.From(wins.Count + losses.Count))),
+            Number(gain), Number(loss), Number(Ratio(gain, loss)), Number(Ratio(Sum(wins.Select(o => o.NetResult)), -Sum(losses.Select(o => o.NetResult)))),
             Number(Average(wins.Select(o => o.NetResult))), Number(Average(losses.Select(o => -o.NetResult))),
-            Number(Ratio(running, plays.Count)), Number(Average(risks.Select(o => o.RMultiple!.Value))), risks.Count,
+            Number(Ratio(running, ExactAmount.From(plays.Count))), Number(Average(risks.Select(o => o.RMultiple!.Value))), risks.Count,
             plays.Count(p => p.Facts.Play.HasReview), plays.Count == 0 ? null : Number(drawdown),
             maxWins, maxLosses);
     }
@@ -244,25 +242,33 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         var bucketDays = Math.Max(1, (int)Math.Ceiling(days / 366m));
         var buckets = plays.ToLookup(p => (p.ClosedAt.UtcDateTime.Date - first).Days / bucketDays);
         List<ReviewPointDto> points = [];
-        decimal cumulative = 0, peak = 0;
+        ExactAmount cumulative = default, peak = default;
         for (var index = 0; index * bucketDays < days; index++)
         {
             var items = buckets[index].ToList();
-            var net = items.Sum(p => p.Result!.NetResult);
+            var net = Sum(items.Select(p => p.Result!.NetResult));
             cumulative += net;
-            peak = Math.Max(peak, cumulative);
+            peak = Max(peak, cumulative);
             var end = first.AddDays(Math.Min((index + 1) * bucketDays, days) - 1);
             points.Add(new(new DateTimeOffset(end, TimeSpan.Zero), Number(net), Number(cumulative), Number(cumulative - peak), items.Count));
         }
         return (points, bucketDays);
     }
 
-    private static decimal? Average(IEnumerable<decimal> values)
+    private static ExactAmount Sum(IEnumerable<decimal> values) =>
+        values.Aggregate(default(ExactAmount), (sum, value) => sum + ExactAmount.From(value));
+    private static ExactAmount Max(ExactAmount a, ExactAmount b) => a.CompareTo(b) >= 0 ? a : b;
+    private static ExactAmount? Average(IEnumerable<decimal> values)
     {
         var items = values.ToList();
-        return items.Count == 0 ? null : items.Average();
+        return Ratio(Sum(items), ExactAmount.From(items.Count));
     }
-    private static decimal? Ratio(decimal? a, decimal? b) => a is not null && b > 0 ? a / b : null;
+    // Aggregate sums can exceed decimal's coefficient range; round only a derived division, to 28 places.
+    private static ExactAmount? Ratio(ExactAmount? a, ExactAmount? b) =>
+        a is { } numerator && b is { } denominator && denominator.Units.Sign > 0
+            ? ExactAmount.Parse(ExactAmount.Average(numerator.Units * ExactAmount.From(1).Units, denominator)!) : null;
+    private static string Number(ExactAmount value) => value.ToString();
+    private static string? Number(ExactAmount? value) => value?.ToString();
     private static string Number(decimal value) => value.ToString("0.############################", CultureInfo.InvariantCulture);
     private static string? Number(decimal? value) => value is { } number ? Number(number) : null;
 }

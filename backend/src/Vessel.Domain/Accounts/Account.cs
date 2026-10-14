@@ -2,6 +2,7 @@ namespace Vessel.Domain.Accounts;
 
 public sealed class Account
 {
+    private const string OrderHistorySection = "\nOrder history: ";
     public Guid Id { get; private set; }
     public Guid OwnerId { get; private set; }
     public string VenueId { get; private set; } = null!;
@@ -41,8 +42,17 @@ public sealed class Account
     {
         if (LastSyncedAtUtc is null || observedAtUtc > LastSyncedAtUtc)
             LastSyncedAtUtc = observedAtUtc;
-        HistoryNotice = historyNotice;
+        var orderSection = HistoryNotice?.IndexOf(OrderHistorySection, StringComparison.Ordinal) ?? -1;
+        HistoryNotice = historyNotice + (orderSection < 0 ? "" : HistoryNotice![orderSection..]);
         SyncStatus = "synced"; LastSyncError = null;
+    }
+
+    /// <summary>Replaces only order coverage, keeping the latest public coverage and sync/settings state.</summary>
+    public void RecordOrderHistoryNotice(string? notice)
+    {
+        var orderSection = HistoryNotice?.IndexOf(OrderHistorySection, StringComparison.Ordinal) ?? -1;
+        var publicNotice = orderSection < 0 ? HistoryNotice : HistoryNotice![..orderSection];
+        HistoryNotice = string.IsNullOrWhiteSpace(notice) ? publicNotice : publicNotice + OrderHistorySection + notice;
     }
 
     public void RecordSyncFailure()

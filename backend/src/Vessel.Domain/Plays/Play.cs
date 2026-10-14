@@ -108,7 +108,8 @@ public sealed class Play
         if (answers.Lesson is null || answers.NextAction is null ||
             answers.Adherence is not (null or "followed" or "deviated" or "not-applicable") ||
             answers.MistakeTag?.Length > 100 || answers.Lesson.Length > 4000 || answers.NextAction.Length > 4000 ||
-            new[] { answers.MistakeTag, answers.Lesson, answers.NextAction }.Any(s => s?.Any(char.IsControl) == true))
+            answers.MistakeTag?.Any(char.IsControl) == true ||
+            new[] { answers.Lesson, answers.NextAction }.Any(s => s.Any(c => char.IsControl(c) && c is not ('\r' or '\n'))))
             throw new ArgumentException("Review answers must be bounded plain text with a valid adherence.");
         if (answers.IsAnswered && Status is not (PlayStatus.Closed or PlayStatus.Cancelled))
             throw new PlayRuleException("Structured review answers are only available for closed or cancelled Plays.");

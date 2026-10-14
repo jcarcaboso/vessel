@@ -1,4 +1,5 @@
 using System.Globalization;
+using Vessel.Application.Activity;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
 using Vessel.Domain.Plays;
@@ -15,16 +16,44 @@ public static class PlayOutcomeCalculator
     /// Net result and planned risk of one closed Play. Risk uses the plan in force at the first entry fill;
     /// a Play without entry fills or a close time has no outcome.
     /// </summary>
-    public static PlayOutcome? Outcome(ClosedPlayFacts facts)
+    public static PlayOutcome? Outcome(ClosedPlayFacts facts) => Outcome(facts, out _);
+
+    /// <summary>A projected close validates manual writes before any ledger or lifecycle mutation.</summary>
+    public static PlayOutcome? Outcome(ClosedPlayFacts facts, out string? problem, DateTimeOffset? projectedClose = null)
+    {
+        problem = null;
+        if (projectedClose is null && facts.Play.Status != PlayStatus.Closed ||
+            (projectedClose ?? facts.Play.EndedAtUtc) is not { } closedAt) return null;
+        try
+        {
+            var result = Calculate(facts, closedAt);
+            if (result is not null)
+            {
+                // These properties are also consumed by Review and sizing, so an unusable outcome is excluded at source.
+                _ = result.ReturnPercent;
+                _ = result.RMultiple;
+            }
+            return result;
+        }
+        catch (OverflowException)
+        {
+            problem = "Executed result, return percent or initial-risk R exceeds the supported decimal range or exact precision.";
+            return null;
+        }
+    }
+
+    private static PlayOutcome? Calculate(ClosedPlayFacts facts, DateTimeOffset closedAt)
     {
         var entries = facts.Fills.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill).ToList();
-        if (facts.Play.Status != PlayStatus.Closed || facts.Play.EndedAtUtc is not { } closedAt || entries.Count == 0) return null;
-        var notional = entries.Sum(f => f.Quantity * f.Price);
+        if (entries.Count == 0) return null;
+        var notional = ExactDecimal(entries.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Quantity * f.Price)));
         if (notional <= 0) return null;
         var fills = facts.Fills.Select(f => f.Fill).ToList();
         // A net-of-fee closed PnL already has its fee taken off; only gross PnL needs the fee subtracted.
         var gross = fills.Where(f => f.PnlBasis == ExecutionFacts.PnlGross).ToList();
-        var net = fills.Sum(f => f.ClosedPnlUsd) - gross.Where(f => f.FeeToken == FeeToken).Sum(f => f.Fee);
+        // Decimal sums can lose a small result between large cancelling exits.
+        var net = ExactDecimal(fills.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.ClosedPnlUsd)) -
+            gross.Where(f => f.FeeToken == FeeToken).Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Fee)));
         var feesComplete = facts.ManualFeesComplete && fills.All(f => ExecutionFacts.IsFeeBasis(f.FeeBasis)) &&
             gross.All(f => !string.IsNullOrWhiteSpace(f.FeeToken) && (f.FeeToken == FeeToken || f.Fee == 0));
         var firstEntry = entries.Min(f => f.OccurredAtUtc);
@@ -32,6 +61,13 @@ public static class PlayOutcomeCalculator
         var plan = (revisions.LastOrDefault(r => r.CreatedAtUtc <= firstEntry) ?? revisions.FirstOrDefault())?.Plan ?? facts.Play.Plan;
         decimal? risk = facts.Play.Origin != PlayOrigin.Retrospective && StopDistance(PlayDocuments.Read(plan)) is { } distance ? notional * distance : null;
         return new PlayOutcome(facts.Play.Id, closedAt, net, notional, risk, feesComplete);
+    }
+
+    private static decimal ExactDecimal(ExactAmount value)
+    {
+        var result = decimal.Parse(value.ToString(), CultureInfo.InvariantCulture);
+        if (ExactAmount.From(result) != value) throw new OverflowException();
+        return result;
     }
 
     /// <summary>

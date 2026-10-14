@@ -156,7 +156,8 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
             onChange={event => change({ role: event.target.value as 'entry' | 'exit', entryId: '' })}><option value="entry">Entry</option><option value="exit">Exit</option></select></label>
           {form.role === 'entry' && <label htmlFor={`${id}-entry`}>Saved plan entry<select id={`${id}-entry`} value={form.entryId} disabled={!!form.executionId}
             onChange={event => change({ entryId: event.target.value })}><option value="">Choose entry</option>{entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>}
-          <label htmlFor={`${id}-time`}>Execution time (UTC)<input id={`${id}-time`} type="datetime-local" step="0.001" value={form.occurredAtUtc}
+          <label htmlFor={`${id}-time`}>Execution time (UTC)<input id={`${id}-time`} type="text" maxLength={64}
+            placeholder="YYYY-MM-DDTHH:mm:ss.ffffffZ" aria-describedby={`${id}-time-help`} value={form.occurredAtUtc}
             onChange={event => change({ occurredAtUtc: event.target.value })} /></label>
           <label htmlFor={`${id}-side`}>Side<select id={`${id}-side`} value={form.side} disabled={!!form.executionId}
             onChange={event => change({ side: event.target.value as ManualExecutionDraft['side'] })}><option value="">Choose side</option><option value="buy">Buy</option><option value="sell">Sell</option></select></label>
@@ -164,6 +165,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
           {field('fee', 'Fee amount (blank = unknown)', 96, true)}{field('feeCurrency', 'Fee currency', 32)}
           {field('source', 'Source label', 100)}{form.executionId && field('reason', 'Correction reason', 2000)}
         </div>
+        <p id={`${id}-time-help`} className="muted">Enter a UTC date and time, such as 2026-10-13T10:00:00.123456Z. Z or +00:00 is optional. Whole microseconds or coarser; finer precision is rejected by the server, never rounded.</p>
         <p className="muted">Decimal or scientific text is kept exactly. Leave both fee fields blank for unknown. Known zero needs 0 and a currency. The server validates precision, chronology and over-exits; a Closed correction must remain a closed round trip.</p>
         <Button type="submit" size="sm">{busy ? 'Recording…' : form.executionId ? 'Save correction' : form.attempt ? 'Retry same execution' : 'Record execution'}</Button>
       </fieldset>

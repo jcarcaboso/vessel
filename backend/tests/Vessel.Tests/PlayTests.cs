@@ -48,7 +48,7 @@ internal sealed class MemoryPlayStore(Guid owner) : IPlayStore
     public HashSet<string> FilledEntries { get; } = [];
     public Task<IReadOnlySet<string>> FilledEntryIdsAsync(Guid playId, CancellationToken ct) => Task.FromResult<IReadOnlySet<string>>(FilledEntries);
     public Task SaveAsync(CancellationToken ct) { Saves++; return Task.CompletedTask; }
-    public Task<T> WithPlayLockAsync<T>(Guid id, Func<Task<T>> action, CancellationToken ct) => action();
+    public Task<T> WithPlayLockAsync<T>(Guid id, Func<Task<T>> action, CancellationToken ct, Guid? destinationAccountId = null) => action();
     public Task<IReadOnlyList<string>> DeleteAsync(Play play, CancellationToken ct)
     {
         Plays.Remove(play);

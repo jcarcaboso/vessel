@@ -69,8 +69,9 @@ public interface IPlayStore
     /// <summary>
     /// Runs the action in one transaction holding account, execution advisory, then Play, so import/link/plan writes take turns.
     /// Inside it the Play is read with its committed values.
+    /// Cross-account moves first hold the owner management lock and reload the locked destination account.
     /// </summary>
-    Task<T> WithPlayLockAsync<T>(Guid id, Func<Task<T>> action, CancellationToken ct);
+    Task<T> WithPlayLockAsync<T>(Guid id, Func<Task<T>> action, CancellationToken ct, Guid? destinationAccountId = null);
     /// <summary>Deletes the Play with its evidence records and returns the evidence object keys to remove.</summary>
     Task<IReadOnlyList<string>> DeleteAsync(Play play, CancellationToken ct);
 }

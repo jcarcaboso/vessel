@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Vessel.Application.Activity;
 using Vessel.Application.Plays.Execution;
+using Vessel.Application.Sizing;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Plays;
@@ -19,7 +20,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         "Linear USD-quoted contracts only, one base unit per recorded quantity; inverse contracts, other quotes and implicit multipliers are unsupported. " +
         "Not venue imports, Activity operations or reported account balances. Unknown costs are not zero. " +
         "Execution times must use whole microseconds; finer precision is rejected, never rounded. " +
-        "Partial average-cost allocations use decimal precision; the final close takes all remaining cost. " +
+        "Derived partial average-cost allocations use rounded decimal precision; residual cost carries to the final close. " +
         "Net results subtract known USDC execution fees; funding and slippage are not added. " +
         "At most 200 records and 1000 history revisions per Play; further writes are rejected, never silently omitted.";
     public const string RetrospectiveNotice = "Owner-confirmed completed imported operation, not a contemporaneous thesis or plan. " +
@@ -68,6 +69,13 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
                 var ledger = ManualLedger.Calculate(play, resulting);
                 if (play.Status == PlayStatus.Closed && ledger.ClosedAt is null)
                     throw new WorkspaceException(409, "A correction cannot reopen a Closed Play.");
+                if (ledger.ClosedAt is { } projectedClose)
+                {
+                    var facts = new ClosedPlayFacts(play, await plays.RevisionsAsync(play.Id, ct),
+                        ledger.Projection, ManualSource: true, ManualFeesComplete: ledger.FeesComplete);
+                    PlayOutcomeCalculator.Outcome(facts, out var problem, projectedClose);
+                    if (problem is not null) throw new WorkspaceException(400, problem);
+                }
                 if (previous is null) diary.Add(row);
                 else
                 {
@@ -150,31 +158,46 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         var facts = await diary.ActivityAsync(accountId, ct);
         var operation = OperationAggregator.Aggregate(facts.Fills, facts.FillPlayIds, facts.Snapshots).SingleOrDefault(o => o.Id == operationId)
             ?? throw new WorkspaceException(404, "Retained operation not found. Reload Activity.");
-        var orders = await diary.OrdersAsync(accountId, ct);
-        var links = await diary.LinksAsync(accountId, ct);
+        var bounded = operation with { Fills = operation.Fills.Take(ActivityService.MaxFillsPerOperation).ToList(),
+            OmittedFillCount = operation.OmittedFillCount + Math.Max(0, operation.Fills.Count - ActivityService.MaxFillsPerOperation) };
+        if (operation.FillCount > ActivityService.MaxFillsPerOperation || operation.Fills.Count > ActivityService.MaxFillsPerOperation ||
+            operation.OmittedFillCount > 0)
+            return new(false, [$"Constituent rows are omitted or exceed the {ActivityService.MaxFillsPerOperation}-fill preview limit; whole-order attribution is unsafe."],
+                Hash(new { account.Id, account.OwnerId, account.IsEnabled, account.SettingsRevision, operation = bounded }),
+                bounded, RetrospectiveNotice);
+
         var ids = operation.Fills.Select(f => f.Fill.Id).ToHashSet();
-        var own = facts.Fills.Where(f => ids.Contains(f.Id)).ToList();
-        var orderIds = own.Select(f => f.OrderId).ToHashSet(StringComparer.Ordinal);
+        var operationOrders = operation.Fills.ToLookup(f => f.Fill.OrderId, StringComparer.Ordinal);
+        var orderIds = operationOrders.Select(g => g.Key).ToHashSet(StringComparer.Ordinal);
+        // Include every retained fill of the involved orders, also those outside the selected operation.
+        var relevant = facts.Fills.Where(f => orderIds.Contains(f.OrderId)).ToList();
+        var fillsByOrder = relevant.ToLookup(f => f.OrderId, StringComparer.Ordinal);
+        var own = relevant.Where(f => ids.Contains(f.Id)).ToDictionary(f => f.Id);
+        var orders = (await diary.OrdersAsync(accountId, ct)).Where(o => orderIds.Contains(o.OrderId))
+            .ToDictionary(o => o.OrderId, StringComparer.Ordinal);
+        var links = (await diary.LinksAsync(accountId, ct)).Where(l => orderIds.Contains(l.OrderId)).ToList();
+        var retrospectivePlan = new PlayPlanDocument(operation.Direction ?? "long", "margin", "", "0", null, [],
+            new PlanNotes("", "", "", ""));
         List<string> reasons = [];
         if (operation.Status != "closed" || operation.Direction is not ("long" or "short"))
             reasons.Add("Only a completed single-direction operation can become a retrospective Play.");
-        if (operation.PlayAssociation != "unassigned" || links.Any(l => orderIds.Contains(l.OrderId) && l.State == OrderLinkState.Linked))
+        if (operation.PlayAssociation != "unassigned" || links.Any(l => l.State == OrderLinkState.Linked))
             reasons.Add("This operation contains existing or mixed Play associations.");
         reasons.AddRange(operation.Coverage.Where(r => !r.StartsWith("Net result is unknown:", StringComparison.Ordinal)));
-        if (operation.Fills.Count > ActivityService.MaxFillsPerOperation || operation.OmittedFillCount > 0 ||
-            operation.FillCount != own.Count || operation.Fills.Any(f => f.Quantity != ManualLedger.Text(own.Single(x => x.Id == f.Fill.Id).Quantity)))
+        if (operation.FillCount != own.Count || operation.Fills.Any(f =>
+            !own.TryGetValue(f.Fill.Id, out var retained) || f.Quantity != ManualLedger.Text(retained.Quantity)))
             reasons.Add("Constituent rows are omitted or split/flip allocations; whole-order attribution is unsafe.");
-        if (own.Any(f => f.PositionEffect is not (ExecutionFacts.Open or ExecutionFacts.Close)))
+        if (own.Values.Any(f => f.PositionEffect is not (ExecutionFacts.Open or ExecutionFacts.Close)))
             reasons.Add("Some fills have unknown or flip position effects.");
-        if (own.Any(f => f.Quantity <= 0 || f.Price <= 0 || f.OccurredAtUtc > time.GetUtcNow()))
+        if (own.Values.Any(f => f.Quantity <= 0 || f.Price <= 0 || f.OccurredAtUtc > time.GetUtcNow()))
             reasons.Add("Some retained fills have nonpositive amounts/prices or future timestamps.");
         foreach (var orderId in orderIds.Order(StringComparer.Ordinal))
         {
-            var fills = facts.Fills.Where(f => f.OrderId == orderId).ToList();
-            var order = orders.SingleOrDefault(o => o.OrderId == orderId);
+            var fills = fillsByOrder[orderId].ToList();
+            var order = orders.GetValueOrDefault(orderId);
             if (string.IsNullOrWhiteSpace(orderId) || order is null)
                 reasons.Add($"Order {orderId} has no retained order record; execution completeness cannot be checked.");
-            else if (ExecutionIntegrity.MissingExecutions(order, fills.Sum(f => f.Quantity)))
+            else if (ExecutionIntegrity.MissingExecutions(order, fills))
                 reasons.Add($"Order {orderId} is known to have missing executions.");
             else if (order.Status is "open" or "triggered")
                 reasons.Add($"Order {orderId} can still execute.");
@@ -182,15 +205,15 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
                 reasons.Add($"Order {orderId} crosses operation boundaries or requires different roles.");
             if (order is not null && (order.ContractId != operation.ContractId ||
                 fills.Any(f => f.AccountId != account.Id || f.OwnerId != account.OwnerId || f.ContractId != operation.ContractId ||
-                    order.VenueContractId is not null && f.VenueContractId is not null && order.VenueContractId != f.VenueContractId) ||
-                order.Side != fills.FirstOrDefault()?.Side || order.ReduceOnly && fills.Any(f => f.PositionEffect == ExecutionFacts.Open)))
+                    order.VenueContractId is not null && f.VenueContractId is not null && order.VenueContractId != f.VenueContractId)))
                 reasons.Add($"Order {orderId} identity or role contradicts its executions.");
+            var role = operationOrders[orderId].First().Role == "entry" ? OrderLinkRole.Entry : OrderLinkRole.Exit;
+            if (order is not null && ExecutionIntegrity.RoleConflict(role, retrospectivePlan, order, fills) is { } conflict)
+                reasons.Add($"Order {orderId}: {conflict}");
         }
         var fingerprint = Hash(new { account.Id, account.OwnerId, account.IsEnabled, account.SettingsRevision, operation,
-            fills = facts.Fills.OrderBy(f => f.Id), orders = orders.Where(o => orderIds.Contains(o.OrderId)).OrderBy(o => o.OrderId),
-            links = links.Where(l => orderIds.Contains(l.OrderId)).OrderBy(l => l.Id) });
-        var bounded = operation with { Fills = operation.Fills.Take(ActivityService.MaxFillsPerOperation).ToList(),
-            OmittedFillCount = Math.Max(0, operation.Fills.Count - ActivityService.MaxFillsPerOperation) };
+            fills = relevant.OrderBy(f => f.Id), orders = orders.Values.OrderBy(o => o.OrderId),
+            links = links.OrderBy(l => l.Id) });
         return new(reasons.Count == 0, BoundedReasons(reasons), fingerprint, bounded, RetrospectiveNotice);
     }
 

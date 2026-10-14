@@ -423,12 +423,13 @@ function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onD
   const [filter, setFilter] = useState<Filter>('active')
   const [result, setResult] = useState<{ plays: PlaySummary[] } | { error: string } | null>(null)
   const [generation, setGeneration] = useState(0)
+  // Shared work settles even when a lost response or older replay leaves the version unchanged.
   useEffect(() => {
     const controller = new AbortController()
-    api.plays(controller.signal).then(plays => setResult({ plays }))
+    api.plays(controller.signal).then(plays => { if (!controller.signal.aborted) setResult({ plays }) })
       .catch(cause => { if (!controller.signal.aborted) setResult({ error: failure(cause) }) })
     return () => controller.abort()
-  }, [api, generation])
+  }, [api, generation, busy])
   const plays = result && 'plays' in result ? result.plays : []
   const shown = plays.filter(play => {
     if (filter === 'all') return true

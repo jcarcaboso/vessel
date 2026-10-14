@@ -118,6 +118,25 @@ describe('manual executions', () => {
     expect(screen.getByLabelText('Correction reason')).toHaveValue('Statement amended')
     expect(screen.getByLabelText('Execution quantity')).toHaveValue(record.quantity)
   })
+  it.each(['Z', '+00:00'])('shows and preserves all six fractional timestamp digits on a fee-only correction, suffix=%s', async suffix => {
+    const precise = { ...record, occurredAtUtc: `2026-10-13T10:00:00.123456${suffix}` }
+    const initial = ledger('closed', [precise])
+    const { api, methods } = client(initial)
+    render(<Harness api={api} initial={initial.play} />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: `Correct ${id}` }))
+    expect(screen.getByLabelText('Execution time (UTC)')).toHaveValue(precise.occurredAtUtc)
+    expect(screen.getByLabelText('Execution time (UTC)')).toHaveAttribute('type', 'text')
+    await user.type(screen.getByLabelText('Fee amount (blank = unknown)'), '0.01')
+    await user.type(screen.getByLabelText('Fee currency'), 'USD')
+    await user.type(screen.getByLabelText('Correction reason'), 'Statement fee added')
+    await user.click(screen.getByRole('button', { name: 'Save correction' }))
+    expect(methods.correctManualExecution).toHaveBeenCalledWith(play.summary.id, id, expect.objectContaining({
+      occurredAtUtc: precise.occurredAtUtc, role: precise.role, entryId: precise.entryId, side: precise.side,
+      quantity: precise.quantity, price: precise.price, source: precise.source, fee: '0.01', feeCurrency: 'USD',
+      reason: 'Statement fee added',
+    }))
+  })
   it('does not invent fills for a partial exit, or clear pending input before the server accepts it', async () => {
     const { api, methods } = client(ledger('open', [record]))
     let finish!: (result: ManualExecutions) => void

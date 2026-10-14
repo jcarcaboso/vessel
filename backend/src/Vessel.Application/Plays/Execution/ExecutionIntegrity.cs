@@ -1,3 +1,4 @@
+using Vessel.Application.Activity;
 using Vessel.Application.Sizing;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
@@ -40,16 +41,26 @@ public static class ExecutionIntegrity
     /// size changes are not executions, and a position TP/SL has no fixed size, so they never prove a missing fill.
     /// </summary>
     public static bool MissingExecutions(ImportedOrder order, decimal retained) =>
-        order.Status == "filled" && !order.IsPositionTpsl && order.OriginalSize > retained;
+        MissingExecutions(order, ExactAmount.From(retained));
+
+    public static bool MissingExecutions(ImportedOrder order, IEnumerable<ImportedFill> fills) =>
+        MissingExecutions(order, Quantity(fills));
+
+    private static bool MissingExecutions(ImportedOrder order, ExactAmount retained) =>
+        order.Status == "filled" && !order.IsPositionTpsl && ExactAmount.From(order.OriginalSize).CompareTo(retained) > 0;
+
+    internal static ExactAmount Quantity(IEnumerable<ImportedFill> fills) =>
+        fills.Aggregate(default(ExactAmount), (sum, fill) => sum + ExactAmount.From(fill.Quantity));
 
     /// <summary>Exits never exceed the entries filled before them; fills at the same time net together.</summary>
     public static bool Chronological(IEnumerable<LinkedFill> fills)
     {
-        decimal balance = 0;
+        var balance = default(ExactAmount);
         foreach (var group in fills.GroupBy(f => f.Fill.OccurredAtUtc).OrderBy(g => g.Key))
         {
-            balance += group.Sum(f => f.Role == OrderLinkRole.Entry ? f.Fill.Quantity : -f.Fill.Quantity);
-            if (balance < 0) return false;
+            balance += Quantity(group.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill)) -
+                Quantity(group.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill));
+            if (balance.Units.Sign < 0) return false;
         }
         return true;
     }
@@ -68,7 +79,8 @@ public static class ExecutionIntegrity
                 $"Order {g.Key.OrderId} has {string.Join(", ", g.Select(f => $"{f.Fill.Side} {f.Fill.PositionEffect}").Distinct())} fills, " +
                 $"so it cannot be an {(g.Key.Entry ? "entry" : "exit")} of this {direction} play."));
         var counted = fills.Where(f => !Contradicts(f.Role, entrySide, f.Fill)).ToList();
-        if (counted.Where(f => f.Role != OrderLinkRole.Entry).Sum(f => f.Fill.Quantity) > counted.Where(f => f.Role == OrderLinkRole.Entry).Sum(f => f.Fill.Quantity))
+        if (Quantity(counted.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill))
+            .CompareTo(Quantity(counted.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill))) > 0)
             problems.Add("Linked exits exceed the entered quantity; a fill cannot be split between plays.");
         else if (!Chronological(counted))
             problems.Add("A linked exit filled before the entry it would close.");
@@ -82,8 +94,8 @@ public static class ExecutionIntegrity
     public static bool Settled(ClosedPlayFacts facts)
     {
         var fills = facts.Fills;
-        var entered = fills.Where(f => f.Role == OrderLinkRole.Entry).Sum(f => f.Fill.Quantity);
-        return entered > 0 && entered == fills.Where(f => f.Role != OrderLinkRole.Entry).Sum(f => f.Fill.Quantity) &&
+        var entered = Quantity(fills.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill));
+        return entered.Units.Sign > 0 && entered == Quantity(fills.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill)) &&
             Problems(EntrySide(PlayDocuments.Read(facts.Play.Plan)), fills, facts.IncompleteOrders ?? []).Count == 0;
     }
 }

@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
 import type { ManualExecutions } from '@/api/diary'
-import { emptyStructuredReview, type PlayExecution, type PlayFields, type SavedPlay } from '@/api/plays'
+import { emptyStructuredReview, type PlayExecution, type PlayFields, type PlaySummary, type SavedPlay } from '@/api/plays'
 import { VenuesProvider } from '@/api/venues'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { accountFixture, idleMarketStream, instrumentCatalogFixture, overviewFixture, playApiStubs, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
@@ -50,7 +50,7 @@ const readyManualSession = (): PlaysSession => ({ ...sessionFor(planned), manual
 function client(play = terminal, more: SavedPlay[] = []) {
   let current = play
   const methods = {
-    plays: vi.fn(() => Promise.resolve([current.summary, ...more.map(item => item.summary)])),
+    plays: vi.fn<WorkspaceApi['plays']>(() => Promise.resolve([current.summary, ...more.map(item => item.summary)])),
     play: vi.fn<WorkspaceApi['play']>(() => Promise.resolve(current)),
     playExecution: vi.fn(() => Promise.resolve(execution(current))),
     sizing: vi.fn(() => Promise.reject(new ApiError('unavailable', 'No sizing.'))),
@@ -614,6 +614,174 @@ describe('diary workspace integration', () => {
     expect(screen.queryByRole('button', { name: 'Open Imported review' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Reviewed' }))
     expect(screen.getByRole('button', { name: 'Open Imported review' })).toHaveTextContent('Retrospective')
+  })
+  it.each([false, true])('refreshes the mounted review queue after saving, with later dirty edits=%s', async edited => {
+    const pending = { ...terminal, review: '' }
+    const { api, methods } = client(pending)
+    const saving = deferred<SavedPlay>()
+    methods.updatePlay.mockImplementationOnce(() => saving.promise)
+    const seen = vi.fn()
+    render(<Harness api={api} initial={sessionFor(pending)} onSession={seen} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    await user.type(screen.getByLabelText('Lesson'), 'First lesson')
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    if (edited) await user.type(screen.getByLabelText('Lesson'), ' extended')
+    const sent = methods.updatePlay.mock.calls[0]![1]
+    await user.click(screen.getByRole('button', { name: 'All plays' }))
+    await user.click(screen.getByRole('button', { name: 'Pending review' }))
+    expect(await screen.findByRole('button', { name: `Open ${pending.summary.title}` })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Discard changes' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'New play' })).toBeDisabled()
+    expect(methods.plays).toHaveBeenCalledOnce()
+    const reviewed = { ...pending, structuredReview: sent.structuredReview ?? emptyStructuredReview(),
+      summary: { ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at } }
+    methods.plays.mockResolvedValue([reviewed.summary])
+    await act(async () => saving.resolve(reviewed))
+    await waitFor(() => expect(methods.plays).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('button', { name: `Open ${pending.summary.title}` })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Reviewed' }))
+    expect(screen.getByRole('button', { name: `Open ${pending.summary.title}` })).toHaveTextContent('Reviewed')
+    expect(seen.mock.lastCall![0].saved.summary.version).toBe(3)
+    expect(methods.updatePlay).toHaveBeenCalledOnce()
+    if (edited) {
+      expect(screen.getByRole('button', { name: 'Discard changes' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: `Open ${pending.summary.title}` })).toBeDisabled()
+      await user.click(screen.getByRole('button', { name: 'Continue editing' }))
+      await user.click(screen.getByRole('tab', { name: 'Review' }))
+      expect(screen.getByLabelText('Lesson')).toHaveValue('First lesson extended')
+      expect(screen.getByRole('button', { name: /^Save$/ })).toBeEnabled()
+    } else {
+      expect(screen.getByRole('button', { name: `Open ${pending.summary.title}` })).toBeEnabled()
+      expect(screen.queryByRole('button', { name: 'Discard changes' })).not.toBeInTheDocument()
+    }
+  })
+  it.each(['resolve', 'reject'] as const)('ignores an aborted list read that later %ss after a review save', async outcome => {
+    const pending = { ...terminal, review: '' }
+    const { api, methods } = client(pending)
+    const saving = deferred<SavedPlay>()
+    const previous = deferred<PlaySummary[]>()
+    methods.updatePlay.mockImplementationOnce(() => saving.promise)
+    methods.plays.mockImplementationOnce(() => previous.promise)
+    render(<Harness api={api} initial={sessionFor(pending)} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    await user.type(screen.getByLabelText('Lesson'), 'First lesson')
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    const sent = methods.updatePlay.mock.calls[0]![1]
+    await user.click(screen.getByRole('button', { name: 'All plays' }))
+    await waitFor(() => expect(methods.plays).toHaveBeenCalledOnce())
+    const signal = methods.plays.mock.calls[0]![0]!
+    const reviewed = { ...pending, structuredReview: sent.structuredReview ?? emptyStructuredReview(),
+      summary: { ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at } }
+    methods.plays.mockResolvedValue([reviewed.summary])
+    await act(async () => saving.resolve(reviewed))
+    await user.click(screen.getByRole('button', { name: 'Reviewed' }))
+    expect(await screen.findByRole('button', { name: `Open ${pending.summary.title}` })).toHaveTextContent('Reviewed')
+    expect(signal.aborted).toBe(true)
+    await act(async () => {
+      if (outcome === 'resolve') previous.resolve([pending.summary])
+      else previous.reject(new ApiError('unavailable', 'Superseded read failed.'))
+    })
+    expect(screen.getByRole('button', { name: `Open ${pending.summary.title}` })).toHaveTextContent('Reviewed')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Pending review' }))
+    expect(screen.queryByRole('button', { name: `Open ${pending.summary.title}` })).not.toBeInTheDocument()
+  })
+  it('refreshes the mounted queue after an older correction replay without advancing the observed version', async () => {
+    const closed: SavedPlay = { ...terminal, review: '', summary: { ...terminal.summary, status: 'closed', version: 3 } }
+    const record: ManualExecutions['records'][number] = { id: otherId, role: 'entry', entryId: 'entry-1',
+      occurredAtUtc: at, side: 'buy', quantity: '1', price: '100', fee: '0', feeCurrency: 'USD',
+      source: 'Statement', createdAtUtc: at, updatedAtUtc: at }
+    const exit = { ...record, id: '00000000-0000-4000-8000-000000000003', role: 'exit' as const, entryId: null,
+      occurredAtUtc: '2026-10-13T10:01:00Z', side: 'sell' as const, price: '101' }
+    const ledger = (version: number): ManualExecutions => ({ ...manualLedger({ ...closed, summary: { ...closed.summary, version } }),
+      records: [record, exit], totals: { enteredQuantity: '1', exitedQuantity: '1', openQuantity: '0',
+        grossResultUsd: '1', netResultUsd: '1', feesComplete: true } })
+    const { api, methods } = client(closed)
+    const read = vi.fn(async () => ledger(3))
+    const replay = deferred<ManualExecutions>()
+    const correct = vi.fn<NonNullable<WorkspaceApi['correctManualExecution']>>()
+      .mockRejectedValueOnce(new ApiError('unavailable', 'Response lost.'))
+      .mockImplementationOnce(() => replay.promise)
+    api.manualExecutions = read
+    api.correctManualExecution = correct
+    let current = sessionFor(closed)
+    render(<Harness api={api} initial={current} onSession={next => { current = next }} manual />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('tab', { name: 'Execution' }))
+    await user.click(await screen.findByRole('button', { name: `Correct ${otherId}` }))
+    await user.type(screen.getByLabelText('Correction reason'), 'Statement amended')
+    await user.click(screen.getByRole('button', { name: 'Save correction' }))
+    await screen.findByText(/Response lost\./)
+    read.mockResolvedValue(ledger(5))
+    await user.click(screen.getByRole('button', { name: 'Reload manual ledger' }))
+    await waitFor(() => expect(current.observedPlay?.version).toBe(5))
+    methods.plays.mockResolvedValue([ledger(5).play.summary])
+    await user.click(screen.getByRole('button', { name: 'Save correction' }))
+    expect(correct.mock.calls[1]).toEqual(correct.mock.calls[0])
+    await user.click(screen.getByRole('button', { name: 'All plays' }))
+    await user.click(screen.getByRole('button', { name: 'Pending review' }))
+    expect(await screen.findByRole('button', { name: `Open ${closed.summary.title}` })).toBeDisabled()
+    // A concurrent review completes after the queue read; the retry still returns its cached v4 document.
+    const reviewed = { ...closed.summary, version: 6, hasReview: true, reviewedAtUtc: at }
+    methods.plays.mockResolvedValue([reviewed])
+    await act(async () => replay.resolve(ledger(4)))
+    expect(current.saved?.summary.version).toBe(5)
+    expect(current.observedPlay?.version).toBe(5)
+    expect(current.manual?.executionId).toBeNull()
+    await waitFor(() => expect(methods.plays).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('button', { name: `Open ${closed.summary.title}` })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Reviewed' }))
+    expect(screen.getByRole('button', { name: `Open ${closed.summary.title}` })).toBeEnabled()
+  })
+  it('refetches after a lost review response without inferring success or clearing dirty work', async () => {
+    const pending = { ...terminal, review: '' }
+    const { api, methods } = client(pending)
+    const saving = deferred<SavedPlay>()
+    methods.updatePlay.mockImplementationOnce(() => saving.promise)
+    let current = sessionFor(pending)
+    render(<Harness api={api} initial={current} onSession={next => { current = next }} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    await user.type(screen.getByLabelText('Lesson'), 'Unconfirmed lesson')
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    await user.click(screen.getByRole('button', { name: 'All plays' }))
+    await user.click(screen.getByRole('button', { name: 'Pending review' }))
+    await screen.findByRole('button', { name: `Open ${pending.summary.title}` })
+    // The server committed, but no saved document reaches the editor.
+    methods.plays.mockResolvedValue([{ ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at }])
+    await act(async () => saving.reject(new ApiError('unavailable', 'Review response lost.')))
+    await waitFor(() => expect(methods.plays).toHaveBeenCalledTimes(2))
+    expect(current.saved?.summary.version).toBe(2)
+    expect(current.draft.structuredReview?.lesson).toBe('Unconfirmed lesson')
+    expect(screen.queryByRole('button', { name: `Open ${pending.summary.title}` })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Reviewed' }))
+    expect(screen.getByRole('button', { name: `Open ${pending.summary.title}` })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Discard changes' })).toBeEnabled()
+  })
+  it('keeps a failed review save in the mounted pending queue with its dirty edits', async () => {
+    const pending = { ...terminal, review: '' }
+    const { api, methods } = client(pending)
+    const saving = deferred<SavedPlay>()
+    methods.updatePlay.mockImplementationOnce(() => saving.promise)
+    render(<Harness api={api} initial={sessionFor(pending)} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    await user.type(screen.getByLabelText('Lesson'), 'Unsaved lesson')
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    await user.click(screen.getByRole('button', { name: 'All plays' }))
+    await user.click(screen.getByRole('button', { name: 'Pending review' }))
+    await screen.findByRole('button', { name: `Open ${pending.summary.title}` })
+    await act(async () => saving.reject(new ApiError('http', 'Review save failed.', 409)))
+    expect(screen.getByRole('button', { name: `Open ${pending.summary.title}` })).toHaveTextContent('Pending review')
+    await waitFor(() => expect(methods.plays).toHaveBeenCalledTimes(2))
+    await user.click(screen.getByRole('button', { name: 'Reviewed' }))
+    expect(screen.queryByRole('button', { name: `Open ${pending.summary.title}` })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Continue editing' }))
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    expect(screen.getByLabelText('Lesson')).toHaveValue('Unsaved lesson')
+    expect(screen.getByRole('button', { name: /^Save$/ })).toBeEnabled()
   })
   it.each(['saved', 'unsaved'] as const)('retains dirty %s work when another screen requests a Play', async kind => {
     const { api, methods } = client()

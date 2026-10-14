@@ -23,7 +23,7 @@ export const hasManualDraft = (draft?: ManualExecutionDraft) => !!draft &&
   !!(draft.executionId || draft.entryId || draft.occurredAtUtc || draft.side || draft.quantity || draft.price || draft.fee || draft.feeCurrency || draft.source || draft.reason || draft.attempt)
 export function manualCorrectionDraft(record: ManualExecutionRecord): ManualExecutionDraft {
   return { ...emptyManualDraft(), ...record, executionId: record.id, entryId: record.entryId ?? '', fee: record.fee ?? '',
-    feeCurrency: record.feeCurrency ?? '', occurredAtUtc: record.occurredAtUtc.replace(/(?:Z|\+00:00)$/, '') }
+    feeCurrency: record.feeCurrency ?? '' }
 }
 
 export function manualRequest(draft: ManualExecutionDraft, version: number, direction: 'long' | 'short', entryIds: string[]) {
@@ -32,9 +32,9 @@ export function manualRequest(draft: ManualExecutionDraft, version: number, dire
   if (draft.side !== (draft.role === 'entry' ? openingSide : openingSide === 'buy' ? 'sell' : 'buy')) {
     return { error: `This ${direction} play needs ${draft.role === 'entry' ? openingSide : openingSide === 'buy' ? 'sell' : 'buy'} for an ${draft.role}.` } as const
   }
-  // datetime-local is interpreted explicitly as UTC, not as the browser's local timezone.
+  // Unqualified input is UTC; keep explicit UTC suffixes and fractional precision intact.
   const time = draft.occurredAtUtc
-  const occurredAtUtc = time ? `${time.length === 16 ? `${time}:00` : time}Z` : ''
+  const occurredAtUtc = !time || /(?:Z|\+00:00)$/.test(time) ? time : `${time.length === 16 ? `${time}:00` : time}Z`
   if (Number.isFinite(Date.parse(occurredAtUtc)) && Date.parse(occurredAtUtc) > Date.now()) return { error: 'Execution time must be a nonfuture UTC timestamp.' } as const
   const input: ManualExecutionInput | ManualExecutionCorrection = draft.attempt ?? {
     requestId: newDiaryRequestId(), expectedVersion: version, role: draft.role, entryId: draft.role === 'entry' ? draft.entryId : null,

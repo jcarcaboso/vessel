@@ -61,6 +61,20 @@ Partial entries/exits are supported. Example: buy 1 at 100, sell 0.4 at 105,
 then sell 0.6 at 95 gives gross -1 before costs. It is Open after the first
 exit, Closed after the second.
 
+Submitted amounts stay exact. Derived partial average-cost allocations and P&L
+may round to decimal precision; inexact allocations leave coefficient
+headroom based on the bounded ledger notionals, and residual cost carries to
+the final close. Once that rounding starts, later partial allocations retain
+the bounded scale. An otherwise exact finite-cost path does not start that
+rounding policy.
+The final exit must consume that cost exactly, and completed gross/net totals
+must be exactly representable. A closure or correction that cannot satisfy
+those conditions or has an unsupported derived return is rejected before any
+facts, history or status change. Outcome calculation sums exact retained P&L
+and fee values before converting the supported per-Play result. Review aggregate
+money sums remain exact strings even when their combined value exceeds a single
+decimal.
+
 Recording requires a saved Planned/Open Play on an enabled manual account.
 Expose an explicit `manualExecutions` venue capability, true only for the
 manual descriptor. Do not infer manual access from a missing adapter or failed
@@ -79,6 +93,9 @@ is rejected without partial changes.
 
 Existing authenticated API conventions, decimal strings, owner scope, body
 limits, no-store responses and error format apply. New endpoints are additive.
+Manual writes have a 16,384-byte limit; retrospective writes have a
+131,072-byte limit. These limits apply to every routed casing and trailing-slash
+variant, including chunked requests.
 Frontend work can use optional new methods on `WorkspaceApi` so older test
 doubles still compile; the real API factory implements every method.
 
@@ -111,7 +128,8 @@ shape. History and rows are bounded with explicit limits, not silent omission.
 Extend `PlayFields`/create/update and `SavedPlay` with optional
 `structuredReview: { adherence, mistakeTag, lesson, nextAction }`.
 Adherence is null, `followed`, `deviated` or `not-applicable`; mistakeTag is
-null or a bounded plain string. Lesson and nextAction are bounded plain strings.
+null or a bounded single-line plain string. Lesson and nextAction are bounded
+plain strings that preserve LF and CR line breaks; other controls are rejected.
 Empty defaults mean unanswered, not failure. Existing free-text `review` stays.
 
 Summary gains `origin: planned|retrospective` and nullable `reviewedAtUtc`.
@@ -140,6 +158,25 @@ rechecks it under the same lock as linking/import changes; stale previews
 return 409. Request retries are idempotent and different payloads with the same
 key conflict. Creating the retrospective Play and all links is atomic. Do not
 link a whole net position that overlaps another Play.
+
+The fingerprint includes all retained fills of the involved orders, even those
+outside the selected operation, but excludes unrelated orders and instruments.
+Operations above the 1,000-fill preview limit are rejected before order/link
+reads or per-order completeness scans.
+
+Explicit account refresh retains bounded venue-reported orders even when no
+active Play exists. This does not link orders or modify imported fills.
+Missing order credentials and optional order-read failures leave successful
+public balance/fill refreshes intact and add a safe history notice. Public and
+order coverage persist through account/workspace reloads. Later order reads
+replace the order section without clearing public coverage or changing sync
+status, timestamps or settings revision. Only retained orders establish
+completeness; missing or partial records still block creation.
+
+Linked execution quantities accumulate exactly for chronology, missing-order
+coverage, over-exit checks and lifecycle equality. Displayed entered/exited/open
+strings use the same sums. A small remaining quantity cannot round into a
+Closed status or a scored result, even beside a much larger execution.
 
 ### Exclusion API
 

@@ -60,7 +60,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         if (review is not null) store.Add(review);
         await store.SaveAsync(ct);
         return ToDto(play);
-    }, ct);
+    }, ct, destinationAccountId: request.AccountId);
 
     public Task<PlayDto> ChangeStatusAsync(Guid id, ChangePlayStatusRequest request, CancellationToken ct) =>
         store.WithPlayLockAsync(id, async () =>

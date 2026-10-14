@@ -35,14 +35,21 @@ export interface PositionRisk {
   riskSharePercent: number | null
 }
 
-// Only tolerate floating-point addition noise, not missing allocations.
-const tolerance = Number.EPSILON * 100 * 4
 const finite = (value: number) => Number.isFinite(value) ? value : null
 const decimal = (value: string) => /^\d+(\.\d+)?$/.test(value.trim()) ? finite(Number(value)) : null
-const full = (percent: number | null) => percent !== null && Math.abs(percent - 100) <= tolerance
+// ponytail: match the plan's 64-character share limit; reject longer drafts, never truncate.
+const shareDigits = 64
+const shareScale = 10n ** BigInt(shareDigits)
+const fullShare = 100n * shareScale
+const exactShare = (value: string) => {
+  const text = value.trim()
+  if (text.length > shareDigits || decimal(text) === null) return null
+  const [whole = '', fraction = ''] = text.split('.')
+  return BigInt(whole + fraction.padEnd(shareDigits, '0'))
+}
 const shareOf = (value: string) => {
-  const share = decimal(value)
-  return share !== null && share <= 100 ? share : null
+  const share = exactShare(value)
+  return share !== null && share <= fullShare ? Number(value) : null
 }
 
 function coverage(percent: number | null, complete: boolean, invalid = false): RiskCoverage {
@@ -50,12 +57,13 @@ function coverage(percent: number | null, complete: boolean, invalid = false): R
 }
 
 function allocation(values: string[]): RiskCoverage {
-  const shares = values.map(decimal)
-  const known = shares.filter((share): share is number => share !== null)
-  const percent = values.length === 0 ? 0 : known.length ? finite(known.reduce((sum, share) => sum + share, 0)) : null
-  const invalid = values.some((value, index) => value.trim() !== '' && (shares[index] === null || (shares[index] ?? 0) > 100))
-    || (percent !== null && percent > 100 + tolerance) || (known.length > 0 && percent === null)
-  return coverage(percent, !invalid && known.length === values.length && full(percent), invalid)
+  const shares = values.map(exactShare)
+  const known = shares.filter((share): share is bigint => share !== null)
+  const total = known.reduce((sum, share) => sum + share, 0n)
+  const percent = values.length === 0 ? 0 : known.length ? finite(Number(`${total}e-${shareDigits}`)) : null
+  const invalid = values.some((value, index) => value.trim() !== '' && (shares[index] === null || (shares[index] ?? 0n) > fullShare))
+    || total > fullShare || (known.length > 0 && percent === null)
+  return coverage(percent, !invalid && known.length === values.length && total === fullShare, invalid)
 }
 
 /**
@@ -73,7 +81,7 @@ export function positionRiskSummary(draft: PlayDraft, units: SizeUnits = default
   })
   const pricedPercent = priced.length ? finite(priced.reduce((sum, share) => sum + share, 0)) : null
   const pricedCoverage = coverage(pricedPercent,
-    entryAllocation.status === 'complete' && priced.length === draft.entries.length && full(pricedPercent),
+    entryAllocation.status === 'complete' && priced.length === draft.entries.length && pricedPercent !== null,
     entryAllocation.status === 'invalid')
 
   const size = decimal(draft.size)
@@ -97,7 +105,7 @@ export function positionRiskSummary(draft: PlayDraft, units: SizeUnits = default
     let hasAmount = false
     let overflow = false
     let completeAllocation = entryAllocation.status === 'complete'
-    let completeCoverage = pricedCoverage.status === 'complete'
+    let completeCoverage = pricedCoverage.status === 'complete' && leverage !== null
     let invalid = entryAllocation.status === 'invalid'
     let hasShare = false
     for (const entry of draft.entries) {
@@ -124,9 +132,9 @@ export function positionRiskSummary(draft: PlayDraft, units: SizeUnits = default
     }
     const allocatedPercent = hasShare ? finite(allocated) : null
     const coveredPercent = hasShare ? finite(covered) : null
-    const allocationCoverage = coverage(allocatedPercent, completeAllocation && full(allocatedPercent), invalid)
+    const allocationCoverage = coverage(allocatedPercent, completeAllocation && allocatedPercent !== null, invalid)
     const exitCoverage = coverage(coveredPercent,
-      allocationCoverage.status === 'complete' && completeCoverage && full(coveredPercent), invalid)
+      allocationCoverage.status === 'complete' && completeCoverage && coveredPercent !== null, invalid)
     const subtotal = hasAmount && !invalid && !overflow ? finite(knownAmount) : null
     return {
       allocation: allocationCoverage, coverage: exitCoverage, knownAmount: subtotal,
