@@ -1,6 +1,7 @@
 import type { SystemInfo } from '@/api/system'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
+import { VenueBadge } from '@/components/venues/VenueBadge'
 import { AppearanceSettings, CurrentThemeName } from '@/features/settings/AppearanceSettings'
 import { showAppearanceSection } from '@/features/settings/appearance'
 import { Database, LogOut, ShieldCheck } from 'lucide-react'
@@ -26,7 +27,7 @@ export function SettingsPage({ system, disconnectSession, onAccounts }: {
       <Database size={23} /><h2>Venue capabilities</h2>
       <p>Accounts can be added at {venues.creatable().map(venue => venue.name).join(', ')}. A refresh is explicitly requested, not a background job.</p>
       <div className="venue-capability-list">{system.venues.map(venue => <div key={venue.id}>
-        <span>{venue.name}</span><span className="workspace-badge">import {venue.capabilities.sync ? 'available' : 'unavailable'} · orders {venue.capabilities.orders ? 'read-only' : 'unavailable'}</span>
+        <VenueBadge venueId={venue.id} /><span className="workspace-badge">import {venue.capabilities.sync ? 'available' : 'unavailable'} · orders {venue.capabilities.orders ? 'read-only' : 'unavailable'}</span>
       </div>)}</div>
       <p className="field-help">Some venues require a verified read-only token for order reads. Manage it on the account. No trading keys or orders are sent; retained imports are not complete lifetime history.</p>
       <Button variant="outline" onClick={onAccounts}>Manage account access and refresh</Button>

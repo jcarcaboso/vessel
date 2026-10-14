@@ -38,7 +38,8 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
         QuoteAsset: QuoteAsset, TradeUrlTemplate: "https://www.rise.trade/trade/{instrument}",
         Intervals: [.. IntervalMs.Keys], PriceRule: PriceRules.TickSize,
         CandleNotice: "RISEx trade candles from the venue's chart data. Refresh to update; prices are trade candles, not fills.",
-        MarketContextNotice: "RISEx market context: mark and index price, 24-hour quote volume, open interest in base units and the current hourly funding rate. Not a fill or valuation.");
+        MarketContextNotice: "RISEx market context: mark and index price, 24-hour quote volume, open interest in base units and the current hourly funding rate. Not a fill or valuation.",
+        Logo: VenueLogos.Risex);
 
     private const string HistoryNotice =
         "Incomplete history: the latest RISEx fills only, at most 2,000 per refresh; older fills are not imported. " +

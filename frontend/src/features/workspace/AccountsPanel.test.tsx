@@ -32,7 +32,8 @@ describe('Account filters', () => {
     expect(names()).toEqual(['View'])
     expect(screen.getByRole('button', { name: 'View Alpha trading' })).toBeInTheDocument()
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Filter by portfolio' }), 'unassigned')
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Filter by venue' }), 'hyperliquid')
+    await userEvent.click(within(screen.getByRole('group', { name: 'Filter by venue' })).getByRole('button', { name: 'Hyperliquid' }))
+    expect(within(screen.getByRole('group', { name: 'Filter by venue' })).getByRole('button', { name: 'Hyperliquid' })).toHaveAttribute('aria-pressed', 'true')
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Filter by status' }), 'error')
     expect(screen.getByText('1 of 4 accounts')).toBeInTheDocument()
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Filter by portfolio' }), portfolioFixture.id)
@@ -50,6 +51,34 @@ describe('Account filters', () => {
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Filter by status' }), status as string)
     expect(screen.getByText(`${count} of 4 accounts`)).toBeInTheDocument()
     expect(names()).toHaveLength(count as number)
+  })
+  it('shows venue logo chips with counts and an accessible venue name, falling back to the generic icon', async () => {
+    const mixed = [...accounts, { ...accountFixture, id: 'rh', name: 'Robinhood main', venueId: 'lighter-rh', sourceId: '281474976710655', address: null, portfolioId: null },
+      { ...accountFixture, id: 'other', name: 'Other', venueId: 'quantfury' }]
+    render(<AccountsPanel api={createWorkspaceApi('test-only-token')} onChanged={vi.fn()} onReload={vi.fn()} accounts={mixed} portfolios={[portfolioFixture]}
+      portfolioFilter="" onPortfolioFilter={vi.fn()} filters={emptyAccountFilters} onFiltersChange={vi.fn()}
+      refreshing={null} refreshAction={null} onDetail={vi.fn()} onSync={vi.fn()} onManage={vi.fn()} onAdd={vi.fn()} />)
+    const chips = within(screen.getByRole('group', { name: 'Filter by venue' }))
+    expect(chips.getByRole('button', { name: 'All venues' })).toHaveAttribute('aria-pressed', 'true')
+    expect(chips.getByRole('button', { name: 'Lighter · Robinhood' })).toHaveTextContent('1')
+    expect(chips.getByRole('button', { name: 'Lighter · Robinhood' }).querySelector('[data-logo="lighter-rh"] img')).not.toBeNull()
+    expect(chips.getByRole('button', { name: 'Quantfury' }).querySelector('[data-logo="generic"] svg')).not.toBeNull()
+    const row = screen.getByRole('button', { name: 'View Robinhood main' }).closest('tr')!
+    expect(row).toHaveTextContent('Lighter · Robinhood')
+    expect(within(row).getByTitle('281474976710655')).toHaveTextContent('#2814…0655')
+    expect(row).toHaveTextContent('Unassigned')
+  })
+  it('labels venue values in the venue quote stablecoin and manual values in USD', () => {
+    const mixed = [{ ...accountFixture, name: 'Manual savings' },
+      { ...accountFixture, id: 'rh', name: 'Robinhood main', venueId: 'lighter-rh', sourceId: '7', address: null, syncStatus: 'synced' as const }]
+    render(<AccountsPanel api={createWorkspaceApi('test-only-token')} onChanged={vi.fn()} onReload={vi.fn()} accounts={mixed} portfolios={[portfolioFixture]}
+      portfolioFilter="" onPortfolioFilter={vi.fn()} filters={emptyAccountFilters} onFiltersChange={vi.fn()}
+      refreshing={null} refreshAction={null} onDetail={vi.fn()} onSync={vi.fn()} onManage={vi.fn()} onAdd={vi.fn()} />)
+    const row = (name: string) => screen.getByRole('button', { name: `View ${name}` }).closest('tr')!
+    expect(within(row('Robinhood main')).getByText('USDG · venue-reported account value · nominal')).toBeInTheDocument()
+    expect(within(row('Robinhood main')).getByText('$1,250.12')).toBeInTheDocument()
+    expect(row('Robinhood main')).not.toHaveTextContent('USD ·')
+    expect(within(row('Manual savings')).getByText('USD · manual value')).toBeInTheDocument()
   })
   it('finds a source address as well as an account name', async () => {
     render(<Harness />)

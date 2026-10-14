@@ -1,3 +1,4 @@
+using Vessel.Application.Workspace;
 using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Plays;
@@ -14,7 +15,8 @@ namespace Vessel.Application.Sizing;
 /// </summary>
 public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner, TimeProvider time)
 {
-    private const string Notice = "Results come from each closed play's linked fills: venue closed PnL less fees paid in USDC. " +
+    private const string Notice = "Results come from each closed play's linked fills: venue closed PnL less fees paid in listed USD stablecoins. " +
+        NominalStablecoins.Caveat + " Plays on venues with different quote stablecoins are pooled nominally. " +
         "Suggestions are mechanical estimates from your risk setting and record, not advice.";
 
     public async Task<SizingDto> GetAsync(CancellationToken ct)

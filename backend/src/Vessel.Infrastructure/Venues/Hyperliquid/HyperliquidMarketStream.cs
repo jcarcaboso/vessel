@@ -18,7 +18,8 @@ public sealed class HyperliquidMarketStream : IMarketStream, IAsyncDisposable
 {
     // https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket
     // https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/timeouts-and-heartbeats
-    public static readonly Uri Endpoint = new("wss://api.hyperliquid.xyz/ws");
+    // Default only; the host is configuration (Vessel:Venues:Hyperliquid:StreamUrl).
+    public static readonly Uri DefaultEndpoint = new("wss://api.hyperliquid.xyz/ws");
     public const int MaxSubscriptions = 100;
     public const int MaxMessageBytes = 1024 * 1024;
     public static readonly TimeSpan IdleClose = TimeSpan.FromSeconds(60);
@@ -34,6 +35,7 @@ public sealed class HyperliquidMarketStream : IMarketStream, IAsyncDisposable
     private const string Ping = """{"method":"ping"}""";
 
     private readonly IWebSocketTransportFactory transports;
+    private readonly Uri endpoint;
     private readonly TimeProvider time;
     private readonly ILogger<HyperliquidMarketStream> logger;
     private readonly object gate = new();
@@ -46,9 +48,11 @@ public sealed class HyperliquidMarketStream : IMarketStream, IAsyncDisposable
     private long dropped;
     private Task loop = Task.CompletedTask;
 
-    public HyperliquidMarketStream(IWebSocketTransportFactory transports, TimeProvider time, ILogger<HyperliquidMarketStream> logger)
+    public HyperliquidMarketStream(IWebSocketTransportFactory transports, TimeProvider time, ILogger<HyperliquidMarketStream> logger,
+        Uri? endpoint = null)
     {
         this.transports = transports; this.time = time; this.logger = logger;
+        this.endpoint = endpoint ?? DefaultEndpoint;
     }
 
     public string VenueId => HyperliquidPerpetualReader.Id;
@@ -139,7 +143,7 @@ public sealed class HyperliquidMarketStream : IMarketStream, IAsyncDisposable
             {
                 using (var connectDeadline = new CancellationTokenSource(ConnectTimeout, time))
                 using (var linked = CancellationTokenSource.CreateLinkedTokenSource(connectDeadline.Token, shutdown.Token))
-                    await transport.ConnectAsync(Endpoint, linked.Token);
+                    await transport.ConnectAsync(endpoint, linked.Token);
 
                 lock (gate)
                 {

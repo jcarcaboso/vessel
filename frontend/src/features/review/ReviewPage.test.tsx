@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from '@/api/workspace'
 import { defaultReviewQuery, type ReviewDocument } from '@/api/review'
 import { emptyReview, reviewFixture } from '@/test/review-fixture'
+import { render as renderWithVenues } from '@/test/render'
 import { ReviewPage } from './ReviewPage'
 
 function setup(review = vi.fn().mockResolvedValue(reviewFixture)) {
@@ -109,5 +110,24 @@ describe('Production portfolio review', () => {
     await waitFor(() => expect(review).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 50 }), expect.any(AbortSignal)))
     await user.click(await within(dialog).findByRole('button', { name: 'Open Play BTC breakout' }))
     expect(open).toHaveBeenCalledWith(reviewFixture.plays[0]!.id, expect.any(AbortSignal))
+  })
+})
+
+describe('Review venue names', () => {
+  it('shows venue descriptor names instead of raw venue IDs in breakdowns and the Play list', async () => {
+    const api = { ...createWorkspaceApi('test'), review: vi.fn().mockResolvedValue(reviewFixture) }
+    const user = userEvent.setup()
+    renderWithVenues(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={vi.fn().mockResolvedValue(undefined)} />)
+    const breakdown = await screen.findByRole('table', { name: /ranked by net closed-play P&L/ })
+    await user.click(screen.getByRole('button', { name: 'Accounts' }))
+    expect(within(breakdown).getByText(/^Hyperliquid( · Small sample)?$/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Assets' }))
+    expect(within(breakdown).getByText(/^Hyperliquid( · Small sample)?$/)).toBeInTheDocument()
+    expect(within(breakdown).queryByText(/hyperliquid/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: `${reviewFixture.metrics.count} Plays` }))
+    const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByRole('table', { name: 'Contributing closed Plays' })
+    expect(within(dialog).getAllByText('Hyperliquid').length).toBeGreaterThan(0)
+    expect(within(dialog).queryByText('hyperliquid')).not.toBeInTheDocument()
   })
 })

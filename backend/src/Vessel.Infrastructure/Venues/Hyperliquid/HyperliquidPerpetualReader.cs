@@ -49,7 +49,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         Intervals: ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M"],
         PriceRule: PriceRules.SignificantFigures,
         CandleNotice: "Hyperliquid exposes only the latest 5,000 candles per interval. Prices are trade candles, not fills.",
-        MarketContextNotice: "Venue market context for the primary perpetual DEX. Funding is the current hourly rate; open interest is in base units. Not a fill or valuation.");
+        MarketContextNotice: "Venue market context for the primary perpetual DEX. Funding is the current hourly rate; open interest is in base units. Not a fill or valuation.",
+        Logo: VenueLogos.Hyperliquid);
 
     public string VenueId => Id;
 

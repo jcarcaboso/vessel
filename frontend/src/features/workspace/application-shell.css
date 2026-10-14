@@ -63,7 +63,6 @@
 .workspace-table .numeric{font-variant-numeric:tabular-nums;white-space:nowrap}
 
 .account-row-name{display:flex;align-items:center;gap:10px;text-align:left;background:none;border:0;padding:0;cursor:pointer;color:var(--foreground);min-width:150px}.account-row-name strong{display:block;font-size:11px;font-weight:550}.account-row-name small{display:block;font-size:8px;color:var(--muted-foreground);margin-top:5px}
-.venue-mark{display:grid;place-items:center;width:33px;height:33px;background:var(--accent);border:1px solid color-mix(in srgb,var(--ring) 12%,var(--border));border-radius:7px;color:color-mix(in srgb,var(--ring) 70%,var(--foreground))}.venue-mark.synced{color:var(--positive);background:color-mix(in srgb,var(--positive) 12%,var(--card));border-color:color-mix(in srgb,var(--positive) 35%,var(--border))}
 .row-actions{display:flex;align-items:center;gap:5px}.row-actions>button{font-size:9px;padding:6px 8px;height:28px}.icon-button{display:grid;place-items:center;width:29px;height:29px;border:1px solid var(--border);border-radius:5px;background:none;color:var(--muted-foreground);cursor:pointer}.icon-button:disabled{cursor:not-allowed}
 .workspace-badge{display:inline-block;white-space:nowrap;background:var(--accent);border:1px solid color-mix(in srgb,var(--ring) 12%,var(--border));border-radius:4px;padding:3px 7px;font-size:8px;letter-spacing:.15px;color:color-mix(in srgb,var(--ring) 70%,var(--foreground));line-height:1.6;font-weight:450}.workspace-badge.warning-badge{color:var(--warning);border-color:color-mix(in srgb,var(--warning) 35%,var(--border));background:color-mix(in srgb,var(--warning) 10%,var(--card))}
 .workspace-alert{display:flex;align-items:center;gap:10px;padding:14px 17px;margin-bottom:20px;border:1px solid color-mix(in srgb,var(--warning) 35%,var(--border));border-left:3px solid var(--warning);border-radius:6px;background:color-mix(in srgb,var(--warning) 8%,var(--card));color:var(--warning);font-size:11px;line-height:1.75}.workspace-alert>span{flex:1}.workspace-alert button{font-size:10px;color:var(--warning)}
@@ -174,7 +173,7 @@
 .portfolio-membership>.field-help{margin:8px 0}
 .portfolio-account-list{display:flex;flex-direction:column;gap:9px;max-height:240px;overflow-y:auto;margin-top:10px}
 .portfolio-account-choice{display:flex;align-items:center;gap:10px;padding:9px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card)}
-.portfolio-account-choice span{display:flex;flex-direction:column;gap:4px;min-width:0}
+.portfolio-account-choice>span:not(.venue-logo){display:flex;flex-direction:column;gap:4px;min-width:0}
 .portfolio-account-choice strong{font-size:12px;overflow-wrap:anywhere}
 .portfolio-account-choice small{font-size:10px;color:var(--muted-foreground)}
 .portfolio-tile>button:last-child:not(.portfolio-manage){margin:0 22px 20px}

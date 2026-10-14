@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { amount, money, reviewDate, reviewMoney, reviewMultiple, reviewPercent, shortAddress, time } from './format'
+import { amount, money, reviewDate, reviewMoney, reviewMultiple, reviewPercent, shortAddress, shortSource, time } from './format'
 
 it('keeps unavailable values distinct from a reported zero', () => {
   expect(money(null)).toBe('—')
@@ -46,4 +46,11 @@ it('keeps Review percent, ratio and UTC dates separate from local refresh dates'
   expect(reviewDate('2024-02-15T12:00:00Z', true)).toBe('15 Feb 2024')
   expect(shortAddress(null)).toBe('Manual record')
   expect(shortAddress('0x1234567890abcdef')).toBe('0x1234…cdef')
+})
+it('shortens source identities without losing their kind', () => {
+  expect(shortSource(`0x${'ab'.repeat(20)}`)).toBe('0xabab…abab')
+  expect(shortSource('42')).toBe('#42')
+  expect(shortSource('9007199254740993')).toBe('#9007…0993')
+  expect(shortSource(null)).toBeNull()
+  expect(shortSource('')).toBeNull()
 })

@@ -122,6 +122,29 @@ Restore existing key IDs and bytes if encrypted credentials already exist.
 Never generate a replacement for a lost existing ring. See
 [credential setup and rotation](../docs/architecture/venue-credentials.md).
 
+## Optional venue hosts
+
+The API reads each venue's host from `Vessel:Venues`. The defaults are the
+production hosts, so most installations set nothing. To point a venue at a
+different host, for example an egress proxy, add the matching variable to the
+`api` service's `environment` in your own Compose override file and include it
+on every Compose command. The example `compose.yaml` does not forward these
+from `.env`, and an empty value is invalid rather than a default.
+
+| Variable | Default |
+| --- | --- |
+| `Vessel__Venues__Hyperliquid__BaseUrl` | `https://api.hyperliquid.xyz/` |
+| `Vessel__Venues__Hyperliquid__StreamUrl` | `wss://api.hyperliquid.xyz/ws` |
+| `Vessel__Venues__Risex__BaseUrl` | `https://api.rise.trade/` |
+| `Vessel__Venues__Lighter__BaseUrl` | `https://mainnet.zklighter.elliot.ai/` |
+| `Vessel__Venues__LighterRh__BaseUrl` | `https://api.rh.lighter.xyz/` |
+
+Base URLs must be `https://` origins with no path. Stream URLs must be `wss://`.
+Neither may contain user info, a query or a fragment. The API refuses to start
+with an invalid value and names only the key, never the value. A host receives
+the venue's read-only tokens, so configure only hosts you trust as much as the
+venue itself.
+
 ## Start and connect
 
 Without optional credential storage:
