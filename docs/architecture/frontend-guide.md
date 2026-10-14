@@ -45,7 +45,11 @@ frontend/
     test/                    Vitest setup, render helper and shared fixtures
 ```
 
-Dependencies point downward: `features` use `components`, `api` and `lib`; `components` should not use `features`; `api` should not use `features` or `components`. Today a few imports break that rule (review item S1).
+Dependencies point downward: `features` use `components`, `api` and `lib`;
+`components` does not import `features`; `api` imports neither `features` nor
+`components`. `src/test/architecture.test.ts` checks those boundaries and
+synchronous import cycles. Shared contract types and values live in leaf API
+modules, rather than feature components.
 
 ## How the application starts
 
@@ -78,6 +82,12 @@ The page bodies for Overview, Portfolios and Settings are currently inline in th
 
 `api/workspace.ts` defines the `WorkspaceApi` interface and `createWorkspaceApi(token)`, which returns an object of methods closing over the token. Feature code only ever calls these methods.
 
+`api/request.ts` implements the shared transport through `createApiCall`.
+Endpoints supply their timeout, response decoder or guard, and error-message
+options. `getSystem` uses the same transport. API events notify the candle cache
+of unauthorized responses and removed or disabled accounts without importing the
+cache into the API layer.
+
 Ordinary JSON requests:
 
 - send `Authorization: Bearer …`, `credentials: 'omit'`, `redirect: 'error'` and `cache: 'no-store'`;
@@ -92,11 +102,18 @@ guarded JSON document. `marketStream` validates individual SSE events. Its
 stream has no overall timeout. Caller cancellation ends the stream without
 reporting an error. Endpoints without a response body also skip JSON parsing.
 
-`ApiError` (`api/system.ts`) carries a `kind` (`missing-token`, `unauthorized`, `unavailable`, `invalid-response`, `http`), the message to show and the status.
+`ApiError` in `api/errors.ts` carries a `kind` (`missing-token`, `unauthorized`,
+`unavailable`, `invalid-response`, `http`), the message to show and the status.
+`errorMessage(cause, fallback)` returns that safe message or the caller's fixed
+fallback, never an arbitrary exception message.
 
 | File | Covers |
 | --- | --- |
-| `system.ts` | `/api/system`, `ApiError`, venue descriptors and capability validation |
+| `system.ts` | `/api/system`, venue descriptors and capability validation |
+| `request.ts`, `errors.ts`, `events.ts` | shared transport, safe errors and per-client cache-invalidation events |
+| `guards.ts` | named primitives for text, decimal, date and collection validation |
+| `fills.ts`, `markup.ts` | shared imported-fill and image-markup contracts and guards |
+| `candles.ts`, `portfolio-icons.ts` | shared interval and portfolio-icon keys without UI dependencies |
 | `venues.ts` | `Venues` lookups and `VenuesProvider`/`useVenues()` |
 | `workspace.ts` | the client, portfolios, accounts, snapshots, fills, instruments, candles, market context, the live stream, account sync |
 | `account-access.ts` | Lighter discovery and read-only token metadata, token transport rules and messages |
@@ -109,7 +126,7 @@ reporting an error. Endpoints without a response body also skip JSON parsing.
 | `sizing.ts` | sizing record, exposure and limits |
 | `sse.ts` | an incremental, bounded server-sent-events parser |
 
-**Guards** are hand-written to mirror the C# DTOs: exact decimal strings by regular expression, GUIDs, ISO dates, counts, enumerations, length limits and cross-field invariants (for example an Overview summary's totals must match its rows). Optional fields marked "older servers" were added during rollouts. When a backend DTO changes, update the TypeScript type, its guard and the fixtures in `src/test/` together.
+**Guards** are hand-written to mirror the C# DTOs: exact decimal strings by regular expression, GUIDs, ISO dates, counts, enumerations, length limits and cross-field invariants (for example an Overview summary's totals must match its rows). `guards.ts` names the differing acceptance profiles, including plain and diary decimals and ISO and strict UTC timestamps. Endpoint guards choose the profile required by their contract. Optional fields marked "older servers" were added during rollouts. When a backend DTO changes, update the TypeScript type, its guard and the fixtures in `src/test/` together.
 
 **The live stream** (`marketStream`) uses `fetch` with the bearer header, never `EventSource` and never a token in the URL. `SseParser` handles split chunks and bounds memory; each event is validated with the same candle and context guards as the REST endpoints.
 
