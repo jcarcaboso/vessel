@@ -2,7 +2,7 @@ import { OperationDirection } from './OperationDirection'
 import { sideDirection, resultSign } from './activity-format'
 import type { ImportedFill } from '@/api/fills'
 import type { BrokerAccount } from '@/api/workspace'
-import { amount, money, time } from './format'
+import { amount, money, time } from '@/lib/format'
 import { Inbox } from 'lucide-react'
 
 /** Executions inside one operation: the operation row already names its account and instrument. */

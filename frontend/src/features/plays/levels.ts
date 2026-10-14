@@ -1,5 +1,6 @@
 import type { PriceOverlay } from '@/components/chart/types'
 import { createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
+import { finitePlanNumber as unsigned, positiveFinitePlanNumber as positive } from './numbers'
 
 export type ChartView = 'aggregate' | 'selected'
 export type ExitKind = 'stop' | 'target'
@@ -15,12 +16,6 @@ export function parseOverlayId(id: string): LevelRef | null {
   if (kind === 'entry') return { entryId, kind }
   if ((kind === 'stop' || kind === 'target') && levelId) return { entryId, kind, levelId }
   return null
-}
-
-const unsigned = (value: string) => /^\d+(\.\d+)?$/.test(value.trim()) && Number.isFinite(Number(value)) ? Number(value) : null
-const positive = (value: string) => {
-  const number = unsigned(value)
-  return number !== null && number > 0 ? number : null
 }
 
 /** The play's whole-number leverage, or 1 while it is blank or invalid. */

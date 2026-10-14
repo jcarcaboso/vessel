@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computeIndicators, defaultIndicators } from './indicators'
 import type { ChartAdapter, ChartCallbacks, ChartCandle, PriceOverlay } from './types'
-import { testFrames } from './testFrames'
+import { testFrames } from '@/test/testFrames'
 
 vi.unmock('@/components/chart/lightweight')
 const library = vi.hoisted(() => ({ createChart: vi.fn() }))

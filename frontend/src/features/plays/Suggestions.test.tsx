@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { render, renderHook, screen, waitFor, within } from '@testing-library/react'
+import { renderHook, screen, waitFor, within } from '@testing-library/react'
+import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { SizingDocument } from '@/api/sizing'

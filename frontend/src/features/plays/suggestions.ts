@@ -2,6 +2,7 @@ import type { ExposureLevel, SizingDocument } from '@/api/sizing'
 import type { DraftEntry, DraftExit, PlayDraft } from './draft'
 import { averageEntryPrice, levelPrice, stepDecimals } from './levels'
 import { wrongSide } from './planChecks'
+import { positivePlanNumber as positive } from './numbers'
 import { averageDistance, estimatedLiquidation, positionSize, rewardToRisk, weightedLevels, type SizeUnits } from './sizing'
 
 /*
@@ -16,7 +17,6 @@ type Direction = PlayDraft['direction']
 export const exposureLabels: Record<ExposureLevel, string> = { full: 'full exposure', half: '50% exposure', quarter: '25% exposure' }
 type SizedDraft = Pick<PlayDraft, 'entries' | 'direction' | 'size' | 'sizingMode'>
 
-const positive = (value: string) => /^\d+(\.\d+)?$/.test(value.trim()) && Number(value) > 0 ? Number(value) : null
 /** A decimal string from the API, or null when it is not a positive finite number. */
 const amount = (value: string | null | undefined) => {
   const number = value == null ? NaN : Number(value)

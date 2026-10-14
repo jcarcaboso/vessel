@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
 import { isCreateRetrospectivePlayRequest, isRetrospectivePreview, retrospectivePlayPath, retrospectivePreviewPath } from './retrospective'
-import { retrospectiveFixture, retrospectiveSavedFixture } from '@/features/workspace/retrospective.fixtures'
+import { retrospectiveFixture, retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
 
 const op = retrospectiveFixture.operation
 const request = { requestId: 'bbbbbbbb-1234-1234-1234-123456789abc', accountId: op.accountId, operationId: op.id,

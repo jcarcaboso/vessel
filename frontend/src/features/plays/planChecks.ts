@@ -1,10 +1,9 @@
 import type { DraftEntry, DraftExit, PlayDraft } from './draft'
 import { levelName } from './execution'
 import { exitsOf, formatDraggedPrice, levelPrice, type ExitKind } from './levels'
+import { positivePlanNumber as positive } from './numbers'
 
 type Direction = PlayDraft['direction']
-
-const positive = (value: string) => /^\d+(\.\d+)?$/.test(value.trim()) && Number(value) > 0 ? Number(value) : null
 
 /** Long targets and short stops sit above the entry. */
 const belongsAbove = (kind: ExitKind, direction: Direction) => (kind === 'target') === (direction === 'long')

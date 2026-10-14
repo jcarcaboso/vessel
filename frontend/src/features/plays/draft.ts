@@ -1,27 +1,13 @@
 import type { ChartDrawing } from '@/components/chart/drawings'
-import type { StructuredReview } from '@/api/plays'
+import type { PlanEntry, PlanExit, StructuredReview } from '@/api/plays'
 import type { ImageMarkup } from '@/api/markup'
 
 /**
  * A stop or target. A percent value is the return on margin at the play's leverage, so the price
  * moves value ÷ leverage percent from the entry. Share is the part of the entry it closes.
  */
-export interface DraftExit {
-  id: string
-  unit: 'price' | 'percent'
-  value: string
-  share: string
-}
-
-export interface DraftEntry {
-  id: string
-  name: string
-  color: string
-  share: string
-  price: string
-  stops: DraftExit[]
-  targets: DraftExit[]
-}
+export type DraftExit = PlanExit
+export type DraftEntry = PlanEntry
 
 export interface PlayDraft {
   title: string

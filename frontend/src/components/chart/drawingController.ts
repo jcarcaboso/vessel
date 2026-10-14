@@ -51,7 +51,7 @@ const maxDrawings = 200
 const textFont = 12
 
 let nextId = 0
-// ponytail: session-local IDs also work on HTTP LAN previews; persistence will assign server IDs.
+// Session-local drawing IDs also work on HTTP LAN previews and remain stable when saved.
 const drawingId = () => `drawing-${Date.now().toString(36)}-${++nextId}`
 
 export function buildPoints(kind: DrawingKind, start: DrawingPoint, end: DrawingPoint): DrawingPoint[] {

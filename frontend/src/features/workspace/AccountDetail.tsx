@@ -3,7 +3,7 @@ import type { AccountSnapshot, BrokerAccount, WorkspaceApi } from '@/api/workspa
 import { errorMessage } from '@/api/errors'
 import { Button } from '@/components/ui/button'
 import { ActivityOperations } from './ActivityOperations'
-import { amount, money, time } from './format'
+import { amount, money, time } from '@/lib/format'
 import { useVenues } from '@/api/venues'
 import { ArrowLeft, RefreshCw, Wallet } from 'lucide-react'
 

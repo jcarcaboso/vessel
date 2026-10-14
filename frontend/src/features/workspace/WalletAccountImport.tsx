@@ -9,7 +9,7 @@ import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ReadOnlyTokenInput } from './AccountCredential'
-import { money } from './format'
+import { money } from '@/lib/format'
 
 type ImportResult = { account?: BrokerAccount; message: string }
 

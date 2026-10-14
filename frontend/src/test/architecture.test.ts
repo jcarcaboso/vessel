@@ -166,6 +166,14 @@ describe('frontend architecture', () => {
   it('keeps components free of features', () => {
     expect(crossing('components', ['features'])).toEqual([])
   })
+  it('keeps test fixtures and helpers out of production imports', () => {
+    const imports = sourceFiles(src).flatMap(file => moduleImports(file, readFileSync(file, 'utf8')).flatMap(({ specifier }) => {
+      const target = specifier.startsWith('@/') ? resolve(src, specifier.slice(2))
+        : specifier.startsWith('.') ? resolve(dirname(file), specifier) : null
+      return target?.startsWith(`${join(src, 'test')}/`) ? [`${relative(src, file)} → ${specifier}`] : []
+    }))
+    expect(imports).toEqual([])
+  })
   it('has no runtime import cycles', () => {
     expect(runtimeCycles(modules, edges)).toEqual([])
   })

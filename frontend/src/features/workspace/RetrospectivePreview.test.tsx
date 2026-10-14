@@ -5,7 +5,7 @@ import type { WorkspaceApi } from '@/api/workspace'
 import type { RetrospectivePreview } from '@/api/retrospective'
 import { ApiError } from '@/api/errors'
 import { accountFixture } from '@/test/workspace-fixture'
-import { retrospectiveFixture, retrospectiveSavedFixture as savedPlayFixture } from './retrospective.fixtures'
+import { retrospectiveFixture, retrospectiveSavedFixture as savedPlayFixture } from '@/test/retrospective.fixtures'
 import { ActivityOperations } from './ActivityOperations'
 
 function setup(preview: RetrospectivePreview = retrospectiveFixture, overrides: Partial<WorkspaceApi> = {}) {

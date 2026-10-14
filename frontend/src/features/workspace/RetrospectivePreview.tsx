@@ -4,7 +4,7 @@ import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError, errorMessage } from '@/api/errors'
 import { newDiaryRequestId } from '@/api/diary'
 import { Button } from '@/components/ui/button'
-import { money, time } from './format'
+import { money, time } from '@/lib/format'
 import { OperationDirection } from './OperationDirection'
 
 export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, onCreated }: {

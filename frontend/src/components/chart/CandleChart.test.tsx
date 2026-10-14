@@ -7,7 +7,7 @@ import { ChartPanel } from '@/features/plays/PlayChart'
 import { createEntry } from '@/features/plays/draft'
 import { CandleChart } from './CandleChart'
 import { FrameEdit } from './frameEdit'
-import { testFrames } from './testFrames'
+import { testFrames } from '@/test/testFrames'
 import type { ChartAdapterFactory, ChartCallbacks } from './types'
 
 vi.mock('./IndicatorControls', async importOriginal => ({

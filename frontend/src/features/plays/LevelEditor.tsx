@@ -3,11 +3,10 @@ import { Plus, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { DraftEntry, PlayDraft } from './draft'
 import { levelName } from './execution'
+import { planShare, positivePlanNumber } from './numbers'
 import {
   addChartExit, applyLevelDrag, exitsOf, formatDraggedPrice, levelTag, overlayPrice, parseOverlayId, removeExit, setExitShare,
 } from './levels'
-
-const decimal = /^\d+(\.\d+)?$/
 
 /**
  * In-chart editor for one planned level. Changing a price switches percentage levels to price
@@ -68,9 +67,10 @@ export function LevelEditor({ entries, entry, overlayId, anchor, direction, leve
 
   function save(event: FormEvent) {
     event.preventDefault()
-    if (!decimal.test(price.trim()) || Number(price) <= 0) { setError('Enter a price above zero.'); return }
-    if (exit && share.trim() !== '' && (!decimal.test(share.trim()) || Number(share) > 100)) { setError('Share must be 0 to 100%.'); return }
-    let next = Number(price) === Number(initialPrice) ? entry : applyLevelDrag([entry], overlayId, Number(price))[0]!
+    const parsedPrice = positivePlanNumber(price)
+    if (parsedPrice === null) { setError('Enter a price above zero.'); return }
+    if (exit && share.trim() !== '' && planShare(share) === null) { setError('Share must be 0 to 100%.'); return }
+    let next = parsedPrice === Number(initialPrice) ? entry : applyLevelDrag([entry], overlayId, parsedPrice)[0]!
     if (exit && ref?.kind !== 'entry') next = setExitShare(next, ref!.kind, exit.id, share.trim())
     onApply(next, `Edit ${readable.toLowerCase()}`)
     onClose()
