@@ -1,4 +1,5 @@
-import type { ImageMarkup } from './markup'
+import { isCount, isGuid, isNullOr, isPlainDecimal, isRecord, isText, isTimestamp } from './guards'
+import { isImageMarkup, type ImageMarkup } from './markup'
 
 export const playStatuses = ['draft', 'planned', 'paused', 'open', 'closed', 'cancelled'] as const
 export type PlayStatus = typeof playStatuses[number]
@@ -87,49 +88,47 @@ export interface SavedEvidence {
   markup: ImageMarkup | null
 }
 
-const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
-const text = (v: unknown, max = 20_000): v is string => typeof v === 'string' && v.length <= max
-const guid = (v: unknown) => text(v) && /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(v)
-const date = (v: unknown) => text(v, 64) && Number.isFinite(Date.parse(v))
-const nullable = <T>(check: (v: unknown) => boolean) => (v: unknown): v is T | null => v === null || check(v)
-const count = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
-const exit = (v: unknown): v is PlanExit => object(v) && text(v.id, 64) && (v.unit === 'price' || v.unit === 'percent') &&
-  text(v.value, 64) && text(v.share, 64)
-const entry = (v: unknown): v is PlanEntry => object(v) && text(v.id, 64) && text(v.name, 100) && text(v.color, 16) &&
-  text(v.share, 64) && text(v.price, 64) && Array.isArray(v.stops) && v.stops.every(exit) && Array.isArray(v.targets) && v.targets.every(exit)
-export const isPlayPlan = (v: unknown): v is PlayPlan => object(v) && (v.direction === 'long' || v.direction === 'short') &&
-  (v.sizingMode === 'margin' || v.sizingMode === 'quantity') && text(v.size, 64) && text(v.leverage, 8) &&
-  nullable(x => text(x, 64))(v.budgetOverride) && Array.isArray(v.entries) && v.entries.length > 0 && v.entries.every(entry) &&
-  object(v.notes) && ['thesis', 'invalidation', 'strategy', 'evidence'].every(k => text((v.notes as Record<string, unknown>)[k]))
-export const isPlaySummary = (v: unknown): v is PlaySummary => object(v) && guid(v.id) && text(v.title, 200) &&
-  playStatuses.includes(v.status as PlayStatus) && guid(v.accountId) && text(v.venueId, 64) && nullable(x => text(x, 128))(v.instrument) &&
+/** Notes and reviews are at most 20,000 characters; timestamps at most 64. */
+const noteLength = 20_000
+const timeLength = 64
+const exit = (v: unknown): v is PlanExit => isRecord(v) && isText(v.id, 64) && (v.unit === 'price' || v.unit === 'percent') &&
+  isText(v.value, 64) && isText(v.share, 64)
+const entry = (v: unknown): v is PlanEntry => isRecord(v) && isText(v.id, 64) && isText(v.name, 100) && isText(v.color, 16) &&
+  isText(v.share, 64) && isText(v.price, 64) && Array.isArray(v.stops) && v.stops.every(exit) && Array.isArray(v.targets) && v.targets.every(exit)
+export const isPlayPlan = (v: unknown): v is PlayPlan => isRecord(v) && (v.direction === 'long' || v.direction === 'short') &&
+  (v.sizingMode === 'margin' || v.sizingMode === 'quantity') && isText(v.size, 64) && isText(v.leverage, 8) &&
+  isNullOr(v.budgetOverride, x => isText(x, 64)) && Array.isArray(v.entries) && v.entries.length > 0 && v.entries.every(entry) &&
+  isRecord(v.notes) && ['thesis', 'invalidation', 'strategy', 'evidence'].every(k => isText((v.notes as Record<string, unknown>)[k], noteLength))
+export const isPlaySummary = (v: unknown): v is PlaySummary => isRecord(v) && isGuid(v.id) && isText(v.title, 200) &&
+  playStatuses.includes(v.status as PlayStatus) && isGuid(v.accountId) && isText(v.venueId, 64) && isNullOr(v.instrument, x => isText(x, 128)) &&
   (v.instrumentSource === 'venue' || v.instrumentSource === 'manual') && (v.direction === 'long' || v.direction === 'short') &&
-  count(v.planRevision) && count(v.version) && nullable(x => cancelReasons.includes(x as CancelReason))(v.cancelReason) &&
-  date(v.createdAtUtc) && date(v.updatedAtUtc) && nullable(date)(v.plannedAtUtc) && nullable(date)(v.endedAtUtc) &&
+  isCount(v.planRevision) && isCount(v.version) && isNullOr(v.cancelReason, x => cancelReasons.includes(x as CancelReason)) &&
+  isTimestamp(v.createdAtUtc, timeLength) && isTimestamp(v.updatedAtUtc, timeLength) &&
+  isNullOr(v.plannedAtUtc, x => isTimestamp(x, timeLength)) && isNullOr(v.endedAtUtc, x => isTimestamp(x, timeLength)) &&
   typeof v.hasReview === 'boolean' && (v.origin === undefined || v.origin === 'planned' || v.origin === 'retrospective') &&
-  (v.reviewedAtUtc === undefined || nullable(date)(v.reviewedAtUtc))
-export const isStructuredReview = (v: unknown): v is StructuredReview => object(v) &&
+  (v.reviewedAtUtc === undefined || isNullOr(v.reviewedAtUtc, x => isTimestamp(x, timeLength)))
+export const isStructuredReview = (v: unknown): v is StructuredReview => isRecord(v) &&
   (v.adherence === null || ['followed', 'deviated', 'not-applicable'].includes(v.adherence as string)) &&
-  nullable(x => text(x, 100))(v.mistakeTag) && text(v.lesson, 4000) && text(v.nextAction, 4000)
+  isNullOr(v.mistakeTag, x => isText(x, 100)) && isText(v.lesson, 4000) && isText(v.nextAction, 4000)
 // Retrospective documents have a deliberately empty compatibility plan, not an original plan.
-const isRetrospectivePlan = (v: unknown) => object(v) && Array.isArray(v.entries) && v.entries.length === 0 &&
-  v.leverage === '0' && object(v.notes) && ['thesis', 'invalidation', 'strategy', 'evidence'].every(k => v.notes && (v.notes as Record<string, unknown>)[k] === '') &&
+const isRetrospectivePlan = (v: unknown) => isRecord(v) && Array.isArray(v.entries) && v.entries.length === 0 &&
+  v.leverage === '0' && isRecord(v.notes) && ['thesis', 'invalidation', 'strategy', 'evidence'].every(k => v.notes && (v.notes as Record<string, unknown>)[k] === '') &&
   isPlayPlan({ ...v, entries: [{ id: 'compatibility', name: '', color: '', share: '', price: '', stops: [], targets: [] }] })
-export const isSavedPlay = (v: unknown): v is SavedPlay => object(v) && isPlaySummary(v.summary) &&
+export const isSavedPlay = (v: unknown): v is SavedPlay => isRecord(v) && isPlaySummary(v.summary) &&
   (v.summary.origin === 'retrospective' ? isRetrospectivePlan(v.plan) : isPlayPlan(v.plan)) &&
-  object(v.drawings) && Object.values(v.drawings).every(Array.isArray) && text(v.review) &&
+  isRecord(v.drawings) && Object.values(v.drawings).every(Array.isArray) && isText(v.review, noteLength) &&
   (v.structuredReview == null || isStructuredReview(v.structuredReview))
-export const isPlayHistory = (v: unknown): v is PlayHistory => object(v) && Array.isArray(v.revisions) && Array.isArray(v.statusChanges) &&
-  v.revisions.every(r => object(r) && count(r.number) && playStatuses.includes(r.status as PlayStatus) && text(r.reason, 2000) &&
-    date(r.createdAtUtc) && isPlayPlan(r.plan)) &&
-  v.statusChanges.every(c => object(c) && playStatuses.includes(c.from as PlayStatus) && playStatuses.includes(c.to as PlayStatus) &&
-    nullable(x => cancelReasons.includes(x as CancelReason))(c.reason) && nullable(x => text(x, 2000))(c.note) && date(c.occurredAtUtc) &&
+export const isPlayHistory = (v: unknown): v is PlayHistory => isRecord(v) && Array.isArray(v.revisions) && Array.isArray(v.statusChanges) &&
+  v.revisions.every(r => isRecord(r) && isCount(r.number) && playStatuses.includes(r.status as PlayStatus) && isText(r.reason, 2000) &&
+    isTimestamp(r.createdAtUtc, timeLength) && isPlayPlan(r.plan)) &&
+  v.statusChanges.every(c => isRecord(c) && playStatuses.includes(c.from as PlayStatus) && playStatuses.includes(c.to as PlayStatus) &&
+    isNullOr(c.reason, x => cancelReasons.includes(x as CancelReason)) && isNullOr(c.note, x => isText(x, 2000)) && isTimestamp(c.occurredAtUtc, timeLength) &&
     (c.source === undefined || c.source === 'owner' || c.source === 'venue' || c.source === 'manual')) &&
-  (v.reviews == null || Array.isArray(v.reviews) && v.reviews.every(r => object(r) && count(r.number) &&
-    date(r.occurredAtUtc) && text(r.review) && isStructuredReview(r.structuredReview)))
-export const isSavedEvidence = (v: unknown): v is SavedEvidence => object(v) && guid(v.id) && guid(v.playId) &&
-  (v.source === 'capture' || v.source === 'upload') && text(v.contentType, 64) && count(v.sizeBytes) && text(v.sha256, 64) &&
-  text(v.note, 4000) && date(v.createdAtUtc) && date(v.updatedAtUtc) && (v.markup === null || object(v.markup))
+  (v.reviews == null || Array.isArray(v.reviews) && v.reviews.every(r => isRecord(r) && isCount(r.number) &&
+    isTimestamp(r.occurredAtUtc, timeLength) && isText(r.review, noteLength) && isStructuredReview(r.structuredReview)))
+export const isSavedEvidence = (v: unknown): v is SavedEvidence => isRecord(v) && isGuid(v.id) && isGuid(v.playId) &&
+  (v.source === 'capture' || v.source === 'upload') && isText(v.contentType, 64) && isCount(v.sizeBytes) && isText(v.sha256, 64) &&
+  isText(v.note, 4000) && isTimestamp(v.createdAtUtc, timeLength) && isTimestamp(v.updatedAtUtc, timeLength) && isNullOr(v.markup, isImageMarkup)
 
 export const statusLabels: Record<PlayStatus, string> = {
   draft: 'Draft', planned: 'Planned', paused: 'Paused', open: 'Open', closed: 'Closed', cancelled: 'Cancelled',
@@ -202,27 +201,26 @@ export interface PlayExecution {
 }
 export interface LinkOrder { orderId: string; role: LinkRole; entryId?: string; levelId?: string }
 
-const decimalText = (v: unknown) => text(v, 100) && /^-?\d+(\.\d+)?$/.test(v)
-const executionOrder = (v: unknown): v is ExecutionOrder => object(v) && text(v.orderId, 128) && (v.side === 'buy' || v.side === 'sell') &&
-  text(v.orderType, 32) && decimalText(v.limitPrice) && (v.triggerPrice === null || decimalText(v.triggerPrice)) &&
-  typeof v.reduceOnly === 'boolean' && typeof v.isPositionTpsl === 'boolean' && decimalText(v.originalSize) && decimalText(v.remainingSize) &&
-  date(v.placedAtUtc) && ['open', 'filled', 'triggered', 'canceled', 'rejected', 'other'].includes(v.status as string) &&
-  text(v.venueStatus, 64) && date(v.statusAtUtc)
-const executionFill = (v: unknown): v is ExecutionFill => object(v) && text(v.sourceFillId, 128) && text(v.direction, 128) &&
-  decimalText(v.price) && decimalText(v.quantity) && decimalText(v.fee) && text(v.feeToken, 64) && decimalText(v.closedPnlUsd) && date(v.occurredAtUtc) &&
+const executionOrder = (v: unknown): v is ExecutionOrder => isRecord(v) && isText(v.orderId, 128) && (v.side === 'buy' || v.side === 'sell') &&
+  isText(v.orderType, 32) && isPlainDecimal(v.limitPrice) && (v.triggerPrice === null || isPlainDecimal(v.triggerPrice)) &&
+  typeof v.reduceOnly === 'boolean' && typeof v.isPositionTpsl === 'boolean' && isPlainDecimal(v.originalSize) && isPlainDecimal(v.remainingSize) &&
+  isTimestamp(v.placedAtUtc, timeLength) && ['open', 'filled', 'triggered', 'canceled', 'rejected', 'other'].includes(v.status as string) &&
+  isText(v.venueStatus, 64) && isTimestamp(v.statusAtUtc, timeLength)
+const executionFill = (v: unknown): v is ExecutionFill => isRecord(v) && isText(v.sourceFillId, 128) && isText(v.direction, 128) &&
+  isPlainDecimal(v.price) && isPlainDecimal(v.quantity) && isPlainDecimal(v.fee) && isText(v.feeToken, 64) && isPlainDecimal(v.closedPnlUsd) && isTimestamp(v.occurredAtUtc, timeLength) &&
   (v.side === 'buy' || v.side === 'sell') && ['open', 'close', 'flip', 'unknown'].includes(v.positionEffect as string) &&
   (v.pnlBasis === 'gross' || v.pnlBasis === 'net-of-fee')
-const orderLink = (v: unknown): v is OrderLink => object(v) && guid(v.id) && ['entry', 'stop', 'target', 'exit'].includes(v.role as string) &&
-  nullable(x => text(x, 64))(v.entryId) && nullable(x => text(x, 64))(v.levelId) && (v.state === 'linked' || v.state === 'suggested') &&
-  (v.source === 'automatic' || v.source === 'owner') && (v.order === null || executionOrder(v.order)) && decimalText(v.filledQuantity) &&
+const orderLink = (v: unknown): v is OrderLink => isRecord(v) && isGuid(v.id) && ['entry', 'stop', 'target', 'exit'].includes(v.role as string) &&
+  isNullOr(v.entryId, x => isText(x, 64)) && isNullOr(v.levelId, x => isText(x, 64)) && (v.state === 'linked' || v.state === 'suggested') &&
+  (v.source === 'automatic' || v.source === 'owner') && (v.order === null || executionOrder(v.order)) && isPlainDecimal(v.filledQuantity) &&
   Array.isArray(v.fills) && v.fills.every(executionFill)
-export const isPlayExecution = (v: unknown): v is PlayExecution => object(v) && guid(v.playId) && playStatuses.includes(v.status as PlayStatus) &&
-  typeof v.tracked === 'boolean' && nullable(x => text(x, 500))(v.reason) && nullable(date)(v.checkedAtUtc) &&
-  object(v.totals) && ['enteredQuantity', 'exitedQuantity', 'openQuantity', 'closedPnlUsd'].every(k => decimalText((v.totals as Record<string, unknown>)[k])) &&
+export const isPlayExecution = (v: unknown): v is PlayExecution => isRecord(v) && isGuid(v.playId) && playStatuses.includes(v.status as PlayStatus) &&
+  typeof v.tracked === 'boolean' && isNullOr(v.reason, x => isText(x, 500)) && isNullOr(v.checkedAtUtc, x => isTimestamp(x, timeLength)) &&
+  isRecord(v.totals) && ['enteredQuantity', 'exitedQuantity', 'openQuantity', 'closedPnlUsd'].every(k => isPlainDecimal((v.totals as Record<string, unknown>)[k])) &&
   ['gross', 'net-of-fee', 'mixed'].includes(v.totals.closedPnlBasis as string) &&
-  Array.isArray(v.totals.fees) && v.totals.fees.every(f => object(f) && text(f.token, 64) && decimalText(f.amount)) &&
-  Array.isArray(v.entries) && v.entries.every(e => object(e) && text(e.entryId, 64) && decimalText(e.filledQuantity) &&
-    nullable(decimalText)(e.averageFillPrice) && count(e.restingOrders)) &&
+  Array.isArray(v.totals.fees) && v.totals.fees.every(f => isRecord(f) && isText(f.token, 64) && isPlainDecimal(f.amount)) &&
+  Array.isArray(v.entries) && v.entries.every(e => isRecord(e) && isText(e.entryId, 64) && isPlainDecimal(e.filledQuantity) &&
+    isNullOr(e.averageFillPrice, isPlainDecimal) && isCount(e.restingOrders)) &&
   Array.isArray(v.links) && v.links.every(orderLink) && Array.isArray(v.suggestions) && v.suggestions.every(orderLink) &&
-  Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) && text(v.notice, 1000) &&
-  Array.isArray(v.issues) && v.issues.every(issue => text(issue, 1000))
+  Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) && isText(v.notice, 1000) &&
+  Array.isArray(v.issues) && v.issues.every(issue => isText(issue, 1000))

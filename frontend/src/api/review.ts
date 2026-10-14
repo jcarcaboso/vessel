@@ -1,3 +1,5 @@
+import { isCount, isGuid, isListOf, isNonBlankText, isNullOr, isRecord, isReviewDecimal, isText, isTimestamp } from './guards'
+
 export const reviewPeriods = [
   { id: 'day', label: 'Last 24 hours' }, { id: 'week', label: 'Last 7 days' },
   { id: 'month', label: 'Last 30 days' }, { id: 'year', label: 'Last 365 days' },
@@ -45,47 +47,40 @@ export interface ReviewDocument {
   }
   plays: ReviewPlay[]; offset: number; nextOffset: number | null
 }
-const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
-const text = (v: unknown, max = 200): v is string => typeof v === 'string' && v.length <= max
-const guid = (v: unknown) => text(v, 36) && /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(v)
-const decimal = (v: unknown): v is string => text(v, 100) && /^-?\d+(\.\d+)?$/.test(v) && Number.isFinite(Number(v))
-const nullableDecimal = (v: unknown) => v === null || decimal(v)
-const count = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
-const date = (v: unknown) => text(v, 64) && Number.isFinite(Date.parse(v))
-const nullableDate = (v: unknown) => v === null || date(v)
+/** Lists hold at most 10,000 items unless stated. */
+const listLimit = 10_000
 const period = (v: unknown) => reviewPeriods.some(p => p.id === v)
-const list = (v: unknown, guard: (item: unknown) => boolean, max = 10_000): boolean => Array.isArray(v) && v.length <= max && v.every(guard)
-export const isReviewMetrics = (v: unknown): v is ReviewMetrics => object(v) &&
-  ['count', 'wins', 'losses', 'scratches', 'riskCount', 'reviewed', 'maxWins', 'maxLosses'].every(key => count(v[key])) &&
+export const isReviewMetrics = (v: unknown): v is ReviewMetrics => isRecord(v) &&
+  ['count', 'wins', 'losses', 'scratches', 'riskCount', 'reviewed', 'maxWins', 'maxLosses'].every(key => isCount(v[key])) &&
   ['net', 'batting', 'averageGain', 'averageLoss', 'payoff', 'profitFactor', 'averageWin', 'averageLossUsd', 'expectancy', 'averageR', 'drawdown']
-    .every(key => nullableDecimal(v[key])) &&
+    .every(key => isNullOr(v[key], isReviewDecimal)) &&
   (v.wins as number) + (v.losses as number) + (v.scratches as number) === v.count &&
   (v.riskCount as number) <= (v.count as number) && (v.reviewed as number) <= (v.count as number) &&
   (v.batting === null || Number(v.batting) >= 0 && Number(v.batting) <= 1) &&
-  (v.count === 0 ? v.net === null : decimal(v.net))
-const group = (v: unknown) => object(v) && text(v.id, 128) && text(v.name) && text(v.detail, 2000) && isReviewMetrics(v.metrics)
-const play = (v: unknown) => object(v) && guid(v.id) && text(v.title) && guid(v.accountId) && text(v.accountName) &&
-  text(v.venueId, 64) && text(v.instrument, 128) && date(v.closedAtUtc) && decimal(v.net) &&
-  decimal(v.returnPercent) && nullableDecimal(v.rMultiple) && typeof v.reviewed === 'boolean' &&
+  (v.count === 0 ? v.net === null : isReviewDecimal(v.net))
+const group = (v: unknown) => isRecord(v) && isText(v.id, 128) && isText(v.name, 200) && isText(v.detail, 2000) && isReviewMetrics(v.metrics)
+const play = (v: unknown) => isRecord(v) && isGuid(v.id) && isText(v.title, 200) && isGuid(v.accountId) && isText(v.accountName, 200) &&
+  isText(v.venueId, 64) && isText(v.instrument, 128) && isTimestamp(v.closedAtUtc, 64) && isReviewDecimal(v.net) &&
+  isReviewDecimal(v.returnPercent) && isNullOr(v.rMultiple, isReviewDecimal) && typeof v.reviewed === 'boolean' &&
   (v.origin === undefined || v.origin === 'planned' || v.origin === 'retrospective') &&
   (v.executionSource === undefined || v.executionSource === 'imported' || v.executionSource === 'manual') &&
   (v.origin !== 'retrospective' || v.rMultiple === null)
-const account = (v: unknown) => object(v) && guid(v.id) && text(v.name) && (v.portfolioId === null || guid(v.portfolioId)) &&
-  text(v.venueId, 64) && nullableDate(v.lastSyncedAtUtc) && text(v.syncStatus, 32) &&
-  (v.historyNotice === null || text(v.historyNotice, 1000))
-export const isReviewDocument = (v: unknown): v is ReviewDocument => object(v) &&
-  date(v.asOfUtc) && nullableDate(v.fromUtc) && period(v.period) && v.currency === 'USD' &&
-  object(v.options) && list(v.options.portfolios, p => object(p) && guid(p.id) && text(p.name)) &&
-  list(v.options.accounts, account) && list(v.options.instruments, i => text(i, 128)) &&
-  list(v.periods, p => object(p) && period(p.id) && count(p.count) && nullableDecimal(p.net), 5) &&
+const account = (v: unknown) => isRecord(v) && isGuid(v.id) && isText(v.name, 200) && isNullOr(v.portfolioId, isGuid) &&
+  isText(v.venueId, 64) && isNullOr(v.lastSyncedAtUtc, x => isTimestamp(x, 64)) && isText(v.syncStatus, 32) &&
+  isNullOr(v.historyNotice, x => isText(x, 1000))
+export const isReviewDocument = (v: unknown): v is ReviewDocument => isRecord(v) &&
+  isTimestamp(v.asOfUtc, 64) && isNullOr(v.fromUtc, x => isTimestamp(x, 64)) && period(v.period) && v.currency === 'USD' &&
+  isRecord(v.options) && isListOf(v.options.portfolios, p => isRecord(p) && isGuid(p.id) && isText(p.name, 200), listLimit) &&
+  isListOf(v.options.accounts, account, listLimit) && isListOf(v.options.instruments, i => isText(i, 128), listLimit) &&
+  isListOf(v.periods, p => isRecord(p) && period(p.id) && isCount(p.count) && isNullOr(p.net, isReviewDecimal), 5) &&
   (v.periods as Array<{ id: string }>).length === 5 && new Set((v.periods as Array<{ id: string }>).map(p => p.id)).size === 5 &&
   isReviewMetrics(v.metrics) &&
-  list(v.series, p => object(p) && date(p.atUtc) && decimal(p.net) && decimal(p.cumulative) && decimal(p.drawdown) && count(p.count), 366) &&
-  count(v.bucketDays) && v.bucketDays > 0 &&
-  object(v.groups) && list(v.groups.portfolios, group) && list(v.groups.accounts, group) && list(v.groups.assets, group) &&
-  object(v.coverage) && ['closedCandidates', 'incompleteFees', 'incompleteExecutions', 'openPlays', 'unassignedFills'].every(key => count((v.coverage as Record<string, unknown>)[key])) &&
-  nullableDate(v.coverage.firstFillAtUtc) && text(v.coverage.notice, 4000) && list(v.plays, play, 50) &&
-  count(v.offset) && (v.nextOffset === null || count(v.nextOffset) && v.nextOffset > v.offset)
+  isListOf(v.series, p => isRecord(p) && isTimestamp(p.atUtc, 64) && isReviewDecimal(p.net) && isReviewDecimal(p.cumulative) && isReviewDecimal(p.drawdown) && isCount(p.count), 366) &&
+  isCount(v.bucketDays) && v.bucketDays > 0 &&
+  isRecord(v.groups) && isListOf(v.groups.portfolios, group, listLimit) && isListOf(v.groups.accounts, group, listLimit) && isListOf(v.groups.assets, group, listLimit) &&
+  isRecord(v.coverage) && ['closedCandidates', 'incompleteFees', 'incompleteExecutions', 'openPlays', 'unassignedFills'].every(key => isCount((v.coverage as Record<string, unknown>)[key])) &&
+  isNullOr(v.coverage.firstFillAtUtc, x => isTimestamp(x, 64)) && isText(v.coverage.notice, 4000) && isListOf(v.plays, play, 50) &&
+  isCount(v.offset) && (v.nextOffset === null || isCount(v.nextOffset) && v.nextOffset > v.offset)
 
 export function reviewPath(query: ReviewQuery): string {
   const params = new URLSearchParams({ period: query.period, portfolio: query.portfolio })
@@ -95,16 +90,16 @@ export function reviewPath(query: ReviewQuery): string {
   return `/api/review?${params}`
 }
 
-export const isReviewExclusions = (v: unknown): v is ReviewExclusions => object(v) &&
-  list(v.items, item => object(item) && guid(item.playId) && text(item.title) && guid(item.accountId) &&
-    text(item.accountName) && text(item.instrument, 128) && list(item.reasons, reason => text(reason, 2000) && reason.trim().length > 0) &&
+export const isReviewExclusions = (v: unknown): v is ReviewExclusions => isRecord(v) &&
+  isListOf(v.items, item => isRecord(item) && isGuid(item.playId) && isText(item.title, 200) && isGuid(item.accountId) &&
+    isText(item.accountName, 200) && isText(item.instrument, 128) && isListOf(item.reasons, reason => isNonBlankText(reason, 2000), listLimit) &&
     (item.reasons as string[]).length > 0, 50) &&
-  count(v.total) && count(v.offset) && (v.items as unknown[]).length <= v.total &&
+  isCount(v.total) && isCount(v.offset) && (v.items as unknown[]).length <= v.total &&
   (v.items as unknown[]).length === Math.min(50, Math.max(0, v.total - v.offset)) &&
   new Set((v.items as ReviewExclusion[]).map(item => item.playId)).size === (v.items as unknown[]).length &&
   (v.nextOffset === null ? v.offset + (v.items as unknown[]).length >= v.total :
-    count(v.nextOffset) && v.nextOffset === v.offset + (v.items as unknown[]).length && v.nextOffset < v.total && v.nextOffset > v.offset) &&
-  text(v.notice, 4000)
+    isCount(v.nextOffset) && v.nextOffset === v.offset + (v.items as unknown[]).length && v.nextOffset < v.total && v.nextOffset > v.offset) &&
+  isText(v.notice, 4000)
 
 export function reviewExclusionsPath(query: ReviewQuery): string {
   return reviewPath(query).replace('/api/review?', '/api/review/exclusions?')

@@ -4,6 +4,10 @@ import { SseOverflowError, SseParser } from './sse'
 import { candleIntervals, type CandleInterval } from './candles'
 import { ApiError } from './errors'
 import { emitApiEvent } from './events'
+import { isImportedFill, type ImportedFill } from './fills'
+import {
+  isCount, isFilledText, isGuid, isNonNegativeDecimal, isNullOr, isPlainDecimal, isPositiveCount, isRecord, isText, isTimestamp,
+} from './guards'
 import {
   accountIndex, credentialSaveMessage, credentialTransportAllowed, credentialTransportMessage,
   type AccountCredential, type AccountDiscovery,
@@ -155,29 +159,6 @@ export interface AccountSettingsExpectation {
   accountId: string
   settingsRevision: number
 }
-export interface ImportedFill {
-  id: string
-  accountId: string
-  contractId: string
-  side: string
-  direction: string
-  price: string
-  quantity: string
-  fee: string
-  feeToken: string
-  closedPnlUsd: string
-  occurredAtUtc: string
-  orderId: string
-  sourceFillId: string
-  transactionHash: string
-  /** open, close, flip or unknown. */
-  positionEffect: string
-  /** reported, or standard-account-free when the account tier trades without fees. */
-  feeBasis: string
-  /** gross (fee separate) or net-of-fee (already taken off the closed PnL). */
-  pnlBasis: string
-  playId: string | null
-}
 export interface AccountSnapshot {
   observedAtUtc: string
   valueScope: string
@@ -297,134 +278,117 @@ export interface WorkspaceApi {
   updateSizingSettings(settings: { riskPercent: string }): Promise<SizingDocument>
 }
 
-const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
-const text = (v: unknown): v is string => typeof v === 'string'
-const nullableText = (v: unknown) => v === null || text(v)
-const guid = (v: unknown) => text(v) && /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(v)
-const decimal = (v: unknown): v is string => text(v) && v.length <= 100 && /^-?\d+(\.\d+)?$/.test(v)
-const nullableDecimal = (v: unknown) => v === null || decimal(v)
-const date = (v: unknown) => text(v) && Number.isFinite(Date.parse(v))
-const count = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
+const coverages = ['complete', 'partial', 'unavailable']
 const validExpected = (ids: string[] | undefined, expected: AccountSettingsExpectation[] | undefined) =>
   expected === undefined || Array.isArray(expected) && !!ids?.length && expected.length === ids.length &&
-  expected.every(e => object(e) && guid(e.accountId) && ids.includes(e.accountId) && count(e.settingsRevision) && e.settingsRevision > 0) &&
+  expected.every(e => isRecord(e) && isGuid(e.accountId) && ids.includes(e.accountId) && isPositiveCount(e.settingsRevision)) &&
   new Set(expected.map(e => e.accountId)).size === expected.length
-const instrumentCatalog = (v: unknown): v is InstrumentCatalog => object(v) &&
-  text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 &&
+const instrumentCatalog = (v: unknown): v is InstrumentCatalog => isRecord(v) && isFilledText(v.venueId, 64) &&
   v.marketScope === 'perpetuals' && ['venue-perpetuals', 'manual'].includes(String(v.scope)) &&
   Array.isArray(v.instruments) && v.instruments.length <= 10_000 &&
-  v.instruments.every((i: unknown) => object(i) && text(i.contractId) && i.contractId.trim() === i.contractId &&
-    i.contractId.length > 0 && i.contractId.length <= 128 && count(i.quantityDecimals) &&
-    (i.quantityDecimals as number) <= 28 && count(i.maxLeverage) && (i.maxLeverage as number) > 0 &&
-    text(i.quoteAsset) && /^[A-Za-z0-9]{1,16}$/.test(i.quoteAsset) &&
+  v.instruments.every((i: unknown) => isRecord(i) && isFilledText(i.contractId, 128) && i.contractId.trim() === i.contractId &&
+    isCount(i.quantityDecimals) && i.quantityDecimals <= 28 && isPositiveCount(i.maxLeverage) &&
+    isText(i.quoteAsset) && /^[A-Za-z0-9]{1,16}$/.test(i.quoteAsset) &&
     (i.priceStep == null || typeof i.priceStep === 'number' && Number.isFinite(i.priceStep) && i.priceStep > 0) &&
-    (i.category == null || text(i.category) && i.category.length <= 32) &&
-    (i.venueContractId == null || text(i.venueContractId) && i.venueContractId.length <= 128) &&
+    (i.category == null || isText(i.category, 32)) &&
+    (i.venueContractId == null || isText(i.venueContractId, 128)) &&
     (i.maintenanceMarginFraction == null || typeof i.maintenanceMarginFraction === 'number' && i.maintenanceMarginFraction > 0 &&
       i.maintenanceMarginFraction < 1)) &&
   new Set(v.instruments.map((i: VenueInstrument) => i.contractId)).size === v.instruments.length &&
-  (v.scope !== 'manual' || v.instruments.length === 0) && text(v.notice) && v.notice.length <= 1000
-const epoch = (v: unknown): v is number => count(v) && (v as number) > 0
-const unsignedDecimal = (v: unknown): v is string => decimal(v) && !v.startsWith('-')
-const candle = (v: unknown): v is VenueCandle => object(v) && epoch(v.openTime) && epoch(v.closeTime) &&
-  v.closeTime >= v.openTime && ['open', 'high', 'low', 'close', 'volume'].every(k => unsignedDecimal(v[k])) &&
-  (v.trades === null || count(v.trades))
-const candleSeries = (query: CandleQuery) => (v: unknown): v is CandleSeries => object(v) &&
-  text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 &&
+  (v.scope !== 'manual' || v.instruments.length === 0) && isText(v.notice, 1000)
+const candle = (v: unknown): v is VenueCandle => isRecord(v) && isPositiveCount(v.openTime) && isPositiveCount(v.closeTime) &&
+  v.closeTime >= v.openTime && ['open', 'high', 'low', 'close', 'volume'].every(k => isNonNegativeDecimal(v[k])) &&
+  isNullOr(v.trades, isCount)
+const candleSeries = (query: CandleQuery) => (v: unknown): v is CandleSeries => isRecord(v) && isFilledText(v.venueId, 64) &&
   v.instrument === query.instrument && v.interval === query.interval && v.priceSource === 'trades' &&
   Array.isArray(v.candles) && v.candles.length <= 5_000 && v.candles.every(candle) &&
   v.candles.every((c: VenueCandle, i: number, all: VenueCandle[]) => i === 0 || c.openTime > all[i - 1]!.openTime) &&
-  count(v.requestedFrom) && epoch(v.requestedTo) && v.requestedTo >= (v.requestedFrom as number) && date(v.retrievedAt) &&
-  typeof v.historyExhausted === 'boolean' && text(v.notice) && v.notice.length <= 1000
-const marketContext = (instrument: string) => (v: unknown): v is MarketContext => object(v) &&
-  text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 && v.instrument === instrument &&
-  ['markPrice', 'oraclePrice', 'dayNotionalVolume', 'openInterest'].every(k => unsignedDecimal(v[k])) &&
-  (v.previousDayPrice === null || unsignedDecimal(v.previousDayPrice)) &&
-  (v.midPrice === null || unsignedDecimal(v.midPrice)) && decimal(v.fundingRate) && nullableDecimal(v.premium) &&
-  date(v.observedAt) && text(v.notice) && v.notice.length <= 1000
-const streamStatus = (v: unknown): v is MarketStreamStatus => object(v) &&
-  ['live', 'reconnecting', 'stale'].includes(String(v.state)) && text(v.observedAt) && v.observedAt.length <= 40 && date(v.observedAt)
+  isCount(v.requestedFrom) && isPositiveCount(v.requestedTo) && v.requestedTo >= v.requestedFrom && isTimestamp(v.retrievedAt) &&
+  typeof v.historyExhausted === 'boolean' && isText(v.notice, 1000)
+const marketContext = (instrument: string) => (v: unknown): v is MarketContext => isRecord(v) &&
+  isFilledText(v.venueId, 64) && v.instrument === instrument &&
+  ['markPrice', 'oraclePrice', 'dayNotionalVolume', 'openInterest'].every(k => isNonNegativeDecimal(v[k])) &&
+  isNullOr(v.previousDayPrice, isNonNegativeDecimal) && isNullOr(v.midPrice, isNonNegativeDecimal) &&
+  isPlainDecimal(v.fundingRate) && isNullOr(v.premium, isPlainDecimal) && isTimestamp(v.observedAt) && isText(v.notice, 1000)
+const streamStatus = (v: unknown): v is MarketStreamStatus => isRecord(v) &&
+  ['live', 'reconnecting', 'stale'].includes(String(v.state)) && isTimestamp(v.observedAt, 40)
 const streamLimit = 1024 * 1024
 const instrumentPattern = /^[A-Za-z0-9_-]{1,32}$/
-const portfolio = (v: unknown): v is Portfolio => object(v) && guid(v.id) && text(v.name) &&
-  count(v.accountCount) && nullableDecimal(v.totalValueUsd) &&
-  ['complete', 'partial', 'unavailable'].includes(String(v.valueCoverage)) &&
-  (v.balanceUsd === undefined || nullableDecimal(v.balanceUsd)) &&
-  (v.balanceCoverage === undefined || ['complete', 'partial', 'unavailable'].includes(String(v.balanceCoverage))) &&
-  (v.availableBalanceUsd === undefined || nullableDecimal(v.availableBalanceUsd)) &&
-  (v.availableBalanceAccountCount === undefined || count(v.availableBalanceAccountCount)) &&
-  (v.enabledAccountCount === undefined || count(v.enabledAccountCount)) &&
-  (v.availableBalanceCoverage === undefined || text(v.availableBalanceCoverage) && ['complete', 'partial', 'unavailable'].includes(v.availableBalanceCoverage)) &&
-  (v.icon === undefined || (text(v.icon) && v.icon.length <= 40))
-const account = (v: unknown): v is BrokerAccount => object(v) && guid(v.id) &&
-  (v.portfolioId === null || guid(v.portfolioId)) && text(v.name) && text(v.venueId) &&
-  nullableText(v.address) && nullableDecimal(v.accountValueUsd) &&
-  (v.sourceId === undefined || nullableText(v.sourceId)) &&
-  (v.lastSyncedAtUtc === null || date(v.lastSyncedAtUtc)) &&
+const portfolio = (v: unknown): v is Portfolio => isRecord(v) && isGuid(v.id) && isText(v.name) &&
+  isCount(v.accountCount) && isNullOr(v.totalValueUsd, isPlainDecimal) &&
+  coverages.includes(String(v.valueCoverage)) &&
+  (v.balanceUsd === undefined || isNullOr(v.balanceUsd, isPlainDecimal)) &&
+  (v.balanceCoverage === undefined || coverages.includes(String(v.balanceCoverage))) &&
+  (v.availableBalanceUsd === undefined || isNullOr(v.availableBalanceUsd, isPlainDecimal)) &&
+  (v.availableBalanceAccountCount === undefined || isCount(v.availableBalanceAccountCount)) &&
+  (v.enabledAccountCount === undefined || isCount(v.enabledAccountCount)) &&
+  (v.availableBalanceCoverage === undefined || isText(v.availableBalanceCoverage) && coverages.includes(v.availableBalanceCoverage)) &&
+  (v.icon === undefined || isText(v.icon, 40))
+const account = (v: unknown): v is BrokerAccount => isRecord(v) && isGuid(v.id) &&
+  isNullOr(v.portfolioId, isGuid) && isText(v.name) && isText(v.venueId) &&
+  isNullOr(v.address, isText) && isNullOr(v.accountValueUsd, isPlainDecimal) &&
+  (v.sourceId === undefined || isNullOr(v.sourceId, isText)) &&
+  isNullOr(v.lastSyncedAtUtc, isTimestamp) &&
   ['manual', 'not-synced', 'synced', 'error'].includes(String(v.syncStatus)) &&
-  nullableText(v.lastSyncError) && count(v.positionCount) && nullableText(v.historyNotice) &&
+  isNullOr(v.lastSyncError, isText) && isCount(v.positionCount) && isNullOr(v.historyNotice, isText) &&
   (v.isEnabled === undefined || typeof v.isEnabled === 'boolean') &&
-  (v.availableStablecoinNominalUsd === undefined || nullableDecimal(v.availableStablecoinNominalUsd)) &&
-  (v.stablecoinScope === undefined || nullableText(v.stablecoinScope)) &&
-  (v.accountMode === undefined || nullableText(v.accountMode)) &&
-  (v.totalStablecoinNominalUsd === undefined || nullableDecimal(v.totalStablecoinNominalUsd)) &&
-  (v.balanceUsd === undefined || nullableDecimal(v.balanceUsd)) &&
-  (v.availableBalanceUsd === undefined || nullableDecimal(v.availableBalanceUsd)) &&
+  (v.availableStablecoinNominalUsd === undefined || isNullOr(v.availableStablecoinNominalUsd, isPlainDecimal)) &&
+  (v.stablecoinScope === undefined || isNullOr(v.stablecoinScope, isText)) &&
+  (v.accountMode === undefined || isNullOr(v.accountMode, isText)) &&
+  (v.totalStablecoinNominalUsd === undefined || isNullOr(v.totalStablecoinNominalUsd, isPlainDecimal)) &&
+  (v.balanceUsd === undefined || isNullOr(v.balanceUsd, isPlainDecimal)) &&
+  (v.availableBalanceUsd === undefined || isNullOr(v.availableBalanceUsd, isPlainDecimal)) &&
   (v.availableBalanceSource === undefined || v.availableBalanceSource === null ||
-    text(v.availableBalanceSource) && ['wallet', 'margin', 'withdrawable'].includes(v.availableBalanceSource)) &&
-  (v.settingsRevision === undefined || typeof v.settingsRevision === 'number' && count(v.settingsRevision) && v.settingsRevision > 0)
-const fill = (v: unknown): v is ImportedFill => object(v) && guid(v.id) && guid(v.accountId) &&
-  ['contractId', 'direction', 'feeToken', 'orderId', 'sourceFillId', 'transactionHash'].every(k => text(v[k])) &&
-  (v.side === 'buy' || v.side === 'sell') && ['open', 'close', 'flip', 'unknown'].includes(v.positionEffect as string) &&
-  ['reported', 'standard-account-free'].includes(v.feeBasis as string) && ['gross', 'net-of-fee'].includes(v.pnlBasis as string) &&
-  ['price', 'quantity', 'fee', 'closedPnlUsd'].every(k => decimal(v[k])) && date(v.occurredAtUtc) && (v.playId === null || guid(v.playId))
-const discovery = (venueId: string, address: string) => (v: unknown): v is AccountDiscovery => object(v) &&
-  v.venueId === venueId && text(v.address) && v.address.toLowerCase() === address.toLowerCase() &&
-  text(v.notice) && v.notice.length <= 2000 && Array.isArray(v.accounts) && v.accounts.length <= 1000 &&
-  v.accounts.every((a: unknown) => object(a) && accountIndex(a.sourceId) && text(a.name) && a.name.length <= 200 &&
-    ['main', 'subaccount'].includes(String(a.accountType)) && nullableDecimal(a.accountValueUsd) &&
-    (a.collateralUsd === undefined || nullableDecimal(a.collateralUsd)) &&
-    (a.availableBalanceUsd === undefined || nullableDecimal(a.availableBalanceUsd)) &&
-    (a.existingAccountId === null || guid(a.existingAccountId)) && (a.isEnabled === null || typeof a.isEnabled === 'boolean')) &&
+    isText(v.availableBalanceSource) && ['wallet', 'margin', 'withdrawable'].includes(v.availableBalanceSource)) &&
+  (v.settingsRevision === undefined || isPositiveCount(v.settingsRevision))
+const discovery = (venueId: string, address: string) => (v: unknown): v is AccountDiscovery => isRecord(v) &&
+  v.venueId === venueId && isText(v.address) && v.address.toLowerCase() === address.toLowerCase() &&
+  isText(v.notice, 2000) && Array.isArray(v.accounts) && v.accounts.length <= 1000 &&
+  v.accounts.every((a: unknown) => isRecord(a) && accountIndex(a.sourceId) && isText(a.name, 200) &&
+    ['main', 'subaccount'].includes(String(a.accountType)) && isNullOr(a.accountValueUsd, isPlainDecimal) &&
+    (a.collateralUsd === undefined || isNullOr(a.collateralUsd, isPlainDecimal)) &&
+    (a.availableBalanceUsd === undefined || isNullOr(a.availableBalanceUsd, isPlainDecimal)) &&
+    isNullOr(a.existingAccountId, isGuid) && (a.isEnabled === null || typeof a.isEnabled === 'boolean')) &&
   new Set(v.accounts.map(a => a.sourceId)).size === v.accounts.length
-const credential = (v: unknown): v is AccountCredential => object(v) && typeof v.storageConfigured === 'boolean' &&
+const credential = (v: unknown): v is AccountCredential => isRecord(v) && typeof v.storageConfigured === 'boolean' &&
   Object.keys(v).every(k => ['storageConfigured', 'credential'].includes(k)) &&
-  (v.credential === null || object(v.credential) &&
+  (v.credential === null || isRecord(v.credential) &&
     Object.keys(v.credential).every(k => ['scope', 'expiresAt', 'lastVerifiedAt', 'status'].includes(k)) &&
-    ['single', 'all'].includes(String(v.credential.scope)) && date(v.credential.expiresAt) &&
-    (v.credential.lastVerifiedAt === null || date(v.credential.lastVerifiedAt)) &&
+    ['single', 'all'].includes(String(v.credential.scope)) && isTimestamp(v.credential.expiresAt) &&
+    isNullOr(v.credential.lastVerifiedAt, isTimestamp) &&
     ['valid', 'expiring', 'expired', 'unavailable'].includes(String(v.credential.status)))
-const wallet = (v: unknown): v is StablecoinWallet | null => v === null || object(v) &&
-  date(v.observedAtUtc) && text(v.accountMode) && text(v.scope) && decimal(v.totalNominalUsd) &&
-  decimal(v.availableNominalUsd) && text(v.notice) && Array.isArray(v.balances) &&
-  v.balances.every(b => object(b) && text(b.symbol) && count(b.tokenIndex) && text(b.tokenId) &&
-    decimal(b.total) && decimal(b.held) && decimal(b.available))
-const snapshot = (v: unknown): v is AccountSnapshot | null => v === null || object(v) &&
-  date(v.observedAtUtc) && text(v.valueScope) && ['accountValueUsd', 'withdrawableUsd', 'marginUsedUsd'].every(k => nullableDecimal(v[k])) &&
-  (v.availableMarginUsd === undefined || nullableDecimal(v.availableMarginUsd)) &&
-  Array.isArray(v.positions) && v.positions.every(p => object(p) && text(p.contractId) &&
-    ['signedQuantity', 'entryPrice', 'unrealizedPnlUsd', 'marginUsedUsd'].every(k => decimal(p[k])) &&
+const wallet = (v: unknown): v is StablecoinWallet | null => v === null || isRecord(v) &&
+  isTimestamp(v.observedAtUtc) && isText(v.accountMode) && isText(v.scope) && isPlainDecimal(v.totalNominalUsd) &&
+  isPlainDecimal(v.availableNominalUsd) && isText(v.notice) && Array.isArray(v.balances) &&
+  v.balances.every(b => isRecord(b) && isText(b.symbol) && isCount(b.tokenIndex) && isText(b.tokenId) &&
+    isPlainDecimal(b.total) && isPlainDecimal(b.held) && isPlainDecimal(b.available))
+const snapshot = (v: unknown): v is AccountSnapshot | null => v === null || isRecord(v) &&
+  isTimestamp(v.observedAtUtc) && isText(v.valueScope) &&
+  ['accountValueUsd', 'withdrawableUsd', 'marginUsedUsd'].every(k => isNullOr(v[k], isPlainDecimal)) &&
+  (v.availableMarginUsd === undefined || isNullOr(v.availableMarginUsd, isPlainDecimal)) &&
+  Array.isArray(v.positions) && v.positions.every(p => isRecord(p) && isText(p.contractId) &&
+    ['signedQuantity', 'entryPrice', 'unrealizedPnlUsd', 'marginUsedUsd'].every(k => isPlainDecimal(p[k])) &&
     (p.leverage === null || typeof p.leverage === 'number' && Number.isInteger(p.leverage) && p.leverage > 0)) &&
   (v.stablecoinWallet === undefined || wallet(v.stablecoinWallet))
-const overview = (v: unknown): v is Overview => object(v) && Array.isArray(v.portfolios) && v.portfolios.every(portfolio) &&
-  Array.isArray(v.accounts) && v.accounts.every(account) && object(v.totals) &&
-  ['portfolioCount', 'accountCount', 'valuedAccountCount', 'openPositionCount', 'importedFillCount'].every(k => object(v.totals) && count(v.totals[k])) &&
-  nullableDecimal(v.totals.totalAccountValueUsd) &&
-  (v.totals.availableStablecoinNominalUsd === undefined || nullableDecimal(v.totals.availableStablecoinNominalUsd)) &&
-  (v.totals.stablecoinAccountCount === undefined || count(v.totals.stablecoinAccountCount)) &&
-  (v.totals.totalBalanceUsd === undefined || nullableDecimal(v.totals.totalBalanceUsd)) &&
-  (v.totals.availableBalanceUsd === undefined || nullableDecimal(v.totals.availableBalanceUsd)) &&
-  ['balanceAccountCount', 'availableBalanceAccountCount', 'enabledAccountCount'].every(k => object(v.totals) &&
-    (v.totals[k] === undefined || count(v.totals[k]))) &&
-  ['balanceCoverage', 'availableBalanceCoverage'].every(k => object(v.totals) &&
-    (v.totals[k] === undefined || ['complete', 'partial', 'unavailable'].includes(String(v.totals[k])))) &&
-  Array.isArray(v.recentActivity) && v.recentActivity.every(fill) && text(v.scopeNote)
+const overview = (v: unknown): v is Overview => isRecord(v) && Array.isArray(v.portfolios) && v.portfolios.every(portfolio) &&
+  Array.isArray(v.accounts) && v.accounts.every(account) && isRecord(v.totals) &&
+  ['portfolioCount', 'accountCount', 'valuedAccountCount', 'openPositionCount', 'importedFillCount'].every(k => isRecord(v.totals) && isCount(v.totals[k])) &&
+  isNullOr(v.totals.totalAccountValueUsd, isPlainDecimal) &&
+  (v.totals.availableStablecoinNominalUsd === undefined || isNullOr(v.totals.availableStablecoinNominalUsd, isPlainDecimal)) &&
+  (v.totals.stablecoinAccountCount === undefined || isCount(v.totals.stablecoinAccountCount)) &&
+  (v.totals.totalBalanceUsd === undefined || isNullOr(v.totals.totalBalanceUsd, isPlainDecimal)) &&
+  (v.totals.availableBalanceUsd === undefined || isNullOr(v.totals.availableBalanceUsd, isPlainDecimal)) &&
+  ['balanceAccountCount', 'availableBalanceAccountCount', 'enabledAccountCount'].every(k => isRecord(v.totals) &&
+    (v.totals[k] === undefined || isCount(v.totals[k]))) &&
+  ['balanceCoverage', 'availableBalanceCoverage'].every(k => isRecord(v.totals) &&
+    (v.totals[k] === undefined || coverages.includes(String(v.totals[k])))) &&
+  Array.isArray(v.recentActivity) && v.recentActivity.every(isImportedFill) && isText(v.scopeNote)
 
 export function createWorkspaceApi(token: string): WorkspaceApi {
   const bearer = token.trim()
   if (!bearer) throw new ApiError('missing-token', 'Enter your Vessel API token.')
   const resourceId = (id: string) => {
-    if (!guid(id)) throw new ApiError('invalid-response', 'The account identifier is invalid.')
+    if (!isGuid(id)) throw new ApiError('invalid-response', 'The account identifier is invalid.')
     return id
   }
   const accountPath = (id: string) => `/api/accounts/${resourceId(id)}`
@@ -437,7 +401,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     if ([400, 409, 413, 415].includes(response.status)) {
       try {
         const problem: unknown = await response.json()
-        if (object(problem) && text(problem.detail) && problem.detail.length <= 500) detail = problem.detail
+        if (isRecord(problem) && isText(problem.detail, 500)) detail = problem.detail
       } catch { /* The safe default remains when a proxy returns non-JSON. */ }
     }
     if (response.status === 404) detail = notFound
@@ -569,11 +533,11 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     return body
   }
   const playPath = (id: string) => {
-    if (!guid(id)) throw new ApiError('invalid-response', 'The play identifier is invalid.')
+    if (!isGuid(id)) throw new ApiError('invalid-response', 'The play identifier is invalid.')
     return `/api/plays/${id}`
   }
   const evidencePath = (id: string) => {
-    if (!guid(id)) throw new ApiError('invalid-response', 'The image identifier is invalid.')
+    if (!isGuid(id)) throw new ApiError('invalid-response', 'The image identifier is invalid.')
     return `/api/evidence/${id}`
   }
   const none = (v: unknown): v is undefined => v === undefined
@@ -604,7 +568,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     checkPlayExecution: (id, signal) => json(`${playPath(id)}/execution/check`, isPlayExecution, { method: 'POST', ...withSignal(signal) }, 45_000),
     linkOrder: (id, link) => json(`${playPath(id)}/execution/links`, isPlayExecution, { method: 'POST', body: JSON.stringify(link) }),
     unlinkOrder: (id, linkId) => {
-      if (!guid(linkId)) return Promise.reject(new ApiError('invalid-response', 'The link identifier is invalid.'))
+      if (!isGuid(linkId)) return Promise.reject(new ApiError('invalid-response', 'The link identifier is invalid.'))
       return json(`${playPath(id)}/execution/links/${linkId}`, isPlayExecution, { method: 'DELETE' })
     },
     evidence: (playId, signal) => json(`${playPath(playId)}/evidence`, (v): v is SavedEvidence[] => Array.isArray(v) && v.every(isSavedEvidence), withSignal(signal)),
@@ -628,7 +592,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     review: (query, signal) => json(reviewPath(query), isReviewDocument, withSignal(signal)),
     reviewExclusions: (query, signal) => json(reviewExclusionsPath(query), isReviewExclusions, withSignal(signal)),
     retrospectivePreview: (accountId, operationId, signal) => json(retrospectivePreviewPath(resourceId(accountId), operationId),
-      (v): v is RetrospectivePreview => isRetrospectivePreview(v, fill) && v.operation.accountId === accountId && v.operation.id === operationId, withSignal(signal)),
+      (v): v is RetrospectivePreview => isRetrospectivePreview(v) && v.operation.accountId === accountId && v.operation.id === operationId, withSignal(signal)),
     createRetrospectivePlay: (input, signal) => {
       if (!isCreateRetrospectivePlayRequest(input)) return Promise.reject(new ApiError('invalid-response', 'Provide a valid retrospective request and preview fingerprint.'))
       return json(retrospectivePlayPath(), (v): v is SavedPlay => isSavedPlay(v) &&
@@ -638,7 +602,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     updateSizingSettings: settings => json('/api/sizing/settings', isSizingDocument,
       { method: 'PUT', body: JSON.stringify({ riskPercent: settings.riskPercent }) }),
     activity: (id, signal) => request(`/api/activity${id !== undefined ? `?${new URLSearchParams({ accountId: resourceId(id) })}` : ''}`,
-      (v): v is ActivityDocument => isActivityDocument(v, fill) && (id === undefined ||
+      (v): v is ActivityDocument => isActivityDocument(v) && (id === undefined ||
         v.operations.every(op => op.accountId.toLowerCase() === id.toLowerCase()) && v.coverage.every(c => c.accountId.toLowerCase() === id.toLowerCase())), signal ? { signal } : {}),
     overviewSummary: (query, signal) => request(overviewSummaryPath(query), (v): v is OverviewSummaryDocument => isOverviewSummary(v, query), signal ? { signal } : {}),
     overview: signal => request('/api/overview', overview, signal ? { signal } : {}),
@@ -649,7 +613,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       25_000, 'The venue instrument catalogue is unavailable. Try again or enter a manual label.'),
     candles: (id, query, signal) => {
       if (!instrumentPattern.test(query.instrument) || !candleIntervals.includes(query.interval) ||
-        (query.endTime !== undefined && !epoch(query.endTime))) {
+        (query.endTime !== undefined && !isPositiveCount(query.endTime))) {
         return Promise.reject(new ApiError('invalid-response', 'The chart request is invalid.'))
       }
       const params = new URLSearchParams({ instrument: query.instrument, interval: query.interval })
@@ -669,11 +633,11 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       return request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name, icon, accountIds, expected }) })
     },
     moveAccounts: (accountIds, portfolioId, expected) => {
-      if (!accountIds.length || accountIds.length > 200 || !accountIds.every(guid) || new Set(accountIds).size !== accountIds.length ||
-          portfolioId !== null && !guid(portfolioId)) return Promise.reject(new ApiError('invalid-response', 'Choose between 1 and 200 distinct accounts and a valid portfolio.'))
+      if (!accountIds.length || accountIds.length > 200 || !accountIds.every(isGuid) || new Set(accountIds).size !== accountIds.length ||
+          portfolioId !== null && !isGuid(portfolioId)) return Promise.reject(new ApiError('invalid-response', 'Choose between 1 and 200 distinct accounts and a valid portfolio.'))
       if (!validExpected(accountIds, expected)) return Promise.reject(new ApiError('invalid-response', 'Reload accounts and provide one positive settings revision per selected account.'))
       return request('/api/accounts/portfolio', (v): v is BrokerAccount[] => Array.isArray(v) && v.length === accountIds.length &&
-        v.every(a => account(a) && accountIds.includes(a.id) && a.portfolioId === portfolioId && count(a.settingsRevision) && a.settingsRevision! > 0) &&
+        v.every(a => account(a) && accountIds.includes(a.id) && a.portfolioId === portfolioId && isPositiveCount(a.settingsRevision)) &&
         new Set(v.map(a => a.id)).size === v.length, { method: 'POST', body: JSON.stringify({ accountIds, portfolioId, expected }) })
     },
     createAccount: body => request('/api/accounts', account, { method: 'POST', body: JSON.stringify(body) }),
@@ -715,7 +679,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       emitApiEvent(api, { type: 'account-removed', accountId: id })
     },
     snapshot: (id, signal) => request(`${accountPath(id)}/snapshot`, snapshot, signal ? { signal } : {}),
-    fills: (id, signal) => request(`${accountPath(id)}/fills`, (v): v is ImportedFill[] => Array.isArray(v) && v.every(fill), signal ? { signal } : {}),
+    fills: (id, signal) => request(`${accountPath(id)}/fills`, (v): v is ImportedFill[] => Array.isArray(v) && v.every(isImportedFill), signal ? { signal } : {}),
     sync: (id, signal) => request(`${accountPath(id)}/sync`, account, { method: 'POST', ...withSignal(signal) }, 30_000, 'The venue refresh failed. Previous account data is still available.'),
   }
   return api

@@ -1,17 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createWorkspaceApi, type ImportedFill } from './workspace'
+import { createWorkspaceApi } from './workspace'
 import { isCreateRetrospectivePlayRequest, isRetrospectivePreview, retrospectivePlayPath, retrospectivePreviewPath } from './retrospective'
 import { retrospectiveFixture, retrospectiveSavedFixture } from '@/features/workspace/retrospective.fixtures'
 
 const op = retrospectiveFixture.operation
-const fill = (value: unknown): value is ImportedFill => typeof value === 'object' && value !== null && 'id' in value
 const request = { requestId: 'bbbbbbbb-1234-1234-1234-123456789abc', accountId: op.accountId, operationId: op.id,
   expectedFingerprint: retrospectiveFixture.fingerprint, title: 'Owner confirmed round trip' }
 describe('retrospective API contract', () => {
   it('accepts exact original facts and blocked mixed records without fabricating a plan', () => {
-    expect(isRetrospectivePreview(retrospectiveFixture, fill)).toBe(true)
+    expect(isRetrospectivePreview(retrospectiveFixture)).toBe(true)
     expect(isRetrospectivePreview({ ...retrospectiveFixture, eligible: false, reasons: ['Order 2 spans another operation.'],
-      operation: { ...op, playAssociation: 'mixed' } }, fill)).toBe(true)
+      operation: { ...op, playAssociation: 'mixed' } })).toBe(true)
     expect(isCreateRetrospectivePlayRequest(request)).toBe(true)
     expect(retrospectivePlayPath()).toBe('/api/plays/retrospective')
   })
@@ -22,7 +21,7 @@ describe('retrospective API contract', () => {
     { operation: { ...op, fills: Array.from({ length: 201 }, () => op.fills[0]), fillCount: 201 } },
     { operation: { ...op, fills: [{ ...op.fills[0], fill: { ...op.fills[0]!.fill, accountId: 'other' } }] } },
   ])('rejects malformed or contradictory previews %#', change => {
-    expect(isRetrospectivePreview({ ...retrospectiveFixture, ...change }, fill)).toBe(false)
+    expect(isRetrospectivePreview({ ...retrospectiveFixture, ...change })).toBe(false)
   })
   it.each([{ requestId: '' }, { accountId: '../../' }, { operationId: 'fake' }, { title: ' ' },
     { expectedFingerprint: '' }, { title: 'x'.repeat(201) }, { review: 'x'.repeat(10_001) }])('rejects malformed confirmation %#', change => {

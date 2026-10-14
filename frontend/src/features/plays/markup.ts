@@ -31,6 +31,9 @@ export const clampPoint = (markup: Pick<ImageMarkup, 'width' | 'height'>, point:
   x: round(Math.min(markup.width, Math.max(0, point.x))), y: round(Math.min(markup.height, Math.max(0, point.y))),
 })
 
+// Decide by kind, never by which fields exist: the server returns fields that do not apply as null.
+const isStroke = (shape: MarkupShape): shape is Extract<MarkupShape, { kind: 'pen' | 'marker' }> => shape.kind === 'pen' || shape.kind === 'marker'
+
 export const hasMarks = (markup: ImageMarkup | null | undefined): markup is ImageMarkup => !!markup && markup.shapes.length > 0
 
 /** Approximate box of a shape, used for selection and text hit testing. */
@@ -40,7 +43,7 @@ export function shapeBounds(shape: MarkupShape) {
     const width = Math.max(...lines.map(line => line.length)) * shape.size * 0.58
     return { x: shape.at.x, y: shape.at.y, width, height: lines.length * shape.size * 1.25 }
   }
-  const points = 'points' in shape ? shape.points : [shape.from, shape.to]
+  const points = isStroke(shape) ? shape.points : [shape.from, shape.to]
   const xs = points.map(point => point.x)
   const ys = points.map(point => point.y)
   const pad = shape.width / 2
@@ -79,7 +82,7 @@ export function hitShape(markup: ImageMarkup, point: MarkupPoint, tolerance: num
         || segmentDistance(point, { x: left, y: bottom }, { x: left, y: top }) <= reach) return shape
       continue
     }
-    const points = 'points' in shape ? shape.points : [shape.from, shape.to]
+    const points = isStroke(shape) ? shape.points : [shape.from, shape.to]
     if (points.length === 1 && Math.hypot(point.x - points[0]!.x, point.y - points[0]!.y) <= reach) return shape
     for (let index = 1; index < points.length; index++) {
       if (segmentDistance(point, points[index - 1]!, points[index]!) <= reach) return shape
@@ -91,7 +94,7 @@ export function hitShape(markup: ImageMarkup, point: MarkupPoint, tolerance: num
 export function moveShape(markup: Pick<ImageMarkup, 'width' | 'height'>, shape: MarkupShape, dx: number, dy: number): MarkupShape {
   const move = (point: MarkupPoint) => clampPoint(markup, { x: point.x + dx, y: point.y + dy })
   if (shape.kind === 'text') return { ...shape, at: move(shape.at) }
-  if ('points' in shape) return { ...shape, points: shape.points.map(move) }
+  if (isStroke(shape)) return { ...shape, points: shape.points.map(move) }
   return { ...shape, from: move(shape.from), to: move(shape.to) }
 }
 

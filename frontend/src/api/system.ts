@@ -1,5 +1,6 @@
 import { candleIntervals, type CandleInterval } from './candles'
 import { ApiError } from './errors'
+import { isGuid, isRecord } from './guards'
 
 export interface VenueCapabilities {
   sync: boolean; instruments: boolean; orders: boolean; candles: boolean
@@ -33,10 +34,6 @@ export interface SystemInfo {
   marketScope: 'perpetuals'
   allowsConcurrentPlays: true
   venues: VenueInfo[]
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }
 
 const capabilityNames = ['sync', 'instruments', 'orders', 'candles', 'marketContext', 'stream', 'stablecoinWallet']
@@ -78,7 +75,7 @@ function isSystemInfo(value: unknown): value is SystemInfo {
   const ids = venues.map(venue => isRecord(venue) ? venue.id : null)
   return value.application === 'Vessel' && ['foundation', 'core'].includes(String(value.stage)) &&
     value.marketScope === 'perpetuals' && value.allowsConcurrentPlays === true &&
-    typeof value.owner.id === 'string' && /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(value.owner.id) &&
+    isGuid(value.owner.id) &&
     typeof value.owner.displayName === 'string' && value.owner.displayName.trim().length > 0 &&
     venues.every(isVenue) && new Set(ids).size === ids.length && ids.includes('manual')
 }
