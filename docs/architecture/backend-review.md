@@ -19,7 +19,7 @@ The corrected combined code at `d17f56a` passed 1,689 backend tests against a de
 
 The [current-state guide](../app-status.md) and [four diagrams](../diagrams/app-status.md) cover the whole app. All 38 relative links and anchors resolve. The four Mermaid diagrams were rendered and inspected; the HTML overview was checked at desktop and mobile widths without horizontal overflow.
 
-Remaining implementation includes R1/S2 refresh and lock work, S9 execution performance, N7/N13 reporting consistency, S6 workspace separation, the rest of S8, N5/N6/N10, and N8/N11/N12/R3 documentation and maintenance work. S4 refresh orchestration is still in the endpoint. N9 adapter allocation/wrapper cleanup and N14 retrospective HTTP status consistency are **not implemented**. P1–P8 remain proposals needing owner agreement.
+Remaining implementation includes R1/S2 refresh and lock work, R4 execution arithmetic guards, S9 execution performance, N7/N13 reporting consistency, S6 workspace separation, the rest of S8, N5/N6/N10, and N8/N11/N12/R3 documentation and maintenance work. S4 refresh orchestration is still in the endpoint. N9 adapter allocation/wrapper cleanup and N14 retrospective HTTP status consistency are **not implemented**. P1–P8 remain proposals needing owner agreement.
 
 The owner-isolation review also reproduced two preexisting boundaries, neither reached by current production code:
 
@@ -27,6 +27,16 @@ The owner-isolation review also reproduced two preexisting boundaries, neither r
 - An EF customizer that adds entities after `OnModelCreating` can miss owner-filter installation. No such customizer is registered. Mapped inheritance currently fails closed; current entities are sealed. Revisit model-finalization checks if either extension is introduced.
 
 Verification used disposable schemas only. It did not read the owner's `.env`, call live venues, deploy the app or migrate the owner's database.
+
+### Final code-smell and architecture pass
+
+A fresh GPT-6.1-Sol review inspected `356a6ba` against PR base `6acd5fe`. It covered composition and venue registration, authorization and transport, ownership and EF configuration, numeric consumers, and adjacent Play, diary, reconciliation, evidence, refresh and reporting code.
+
+The review found **one new P2 issue, R4 below**, in preexisting execution arithmetic. The parent reviewer independently reran the service-level reproductions against both revisions and confirmed both failures. No introduced regression was found in the inspected paths. The earlier deferred items remain open; this pass does not certify the entire backend as defect-free.
+
+A fresh Release test run passed **1,689 backend tests**, with only the two opt-in live-venue tests skipped. All **24 Python tests** passed, and all **38 current-state guide and diagram links/anchors** resolved. CI on `356a6ba` also passed. The new arithmetic probes use actual application services and in-memory stores; they are separate from the passing regression suite and were not HTTP or live-venue tests.
+
+This pass changed documentation only. R4 remains unfixed, and PR #38 remains a draft while the implementation backlog is unfinished.
 
 ## What is already in good shape
 
@@ -101,6 +111,21 @@ Combine this with S12.
 - The route list leaves out plays, review, sizing, activity, overview summary, market data, credentials and discovery.
 
 **Suggestion.** Cut the README down to running, testing, migrating and configuring, and link the [backend guide](backend-guide.md) for structure. Move the per-phase historical detail (review safeguards, stablecoin update, package provenance) into the existing state documents. This review only added a pointer at the top.
+
+### R4. Accepted plan numbers can overflow execution matching
+
+**Status.** P2, found during the final review of `356a6ba`; also reproduced at PR base `6acd5fe`. This is a preexisting defect, not a regression from the numeric-helper cleanup. Unfixed.
+
+**Where.** `ExecutionMatcher.Near`, line 102, and `ExecutionMatcher.Resolve`, line 119, in [ExecutionMatcher.cs](../../backend/src/Vessel.Application/Plays/Execution/ExecutionMatcher.cs).
+
+**Reproduction.** With a synthetic venue account and a one-entry long plan, both of these pass `PlayService.CreateAsync` and the transition to Planned:
+
+- Entry price `"100000"`, leverage `"1"` and a percentage target of `"1e28"`. `PlayExecutionService.GetAsync` throws `OverflowException` while resolving the target, even with no orders, fills or links.
+- Entry price `"1e-25"`. Matching a subsequent ordinary buy limit order throws because the fifth-significant-figure tolerance calculates `10^29` before taking its reciprocal. The calculation runs before a coarser instrument tick can replace it.
+
+**Impact.** The first case repeatedly breaks the saved Play's execution read. The API's existing unexpected-error handler maps the exception to HTTP 500. The second can abort account-wide reconciliation from another Play because `MatchAsync` considers all active Plays on the account. No venue failure or fabricated detached entity is needed.
+
+**Smallest fix.** Guard derived-price overflow locally and return an unresolved level, or reject the unsupported calculation explicitly. Compute fractional tolerances without an overflowing intermediate denominator. Preserve current matching and exact-value behavior for supported numbers, and cover accepted-plan execution reads and account-wide candidate matching with regressions. Do not hide the defect by mapping all `OverflowException` instances to client errors.
 
 ---
 
