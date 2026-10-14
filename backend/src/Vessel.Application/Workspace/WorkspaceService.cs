@@ -427,12 +427,3 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         Money(f.Quantity)!, Money(f.Fee)!, f.FeeToken, Money(f.ClosedPnlUsd)!, f.OccurredAtUtc, f.OrderId, f.SourceFillId, f.TransactionHash,
         f.PositionEffect, f.FeeBasis, f.PnlBasis);
 }
-
-file static class HexValidation
-{
-    public static bool ContainsOnlyHex(this ReadOnlySpan<char> text)
-    {
-        foreach (var c in text) if (!char.IsAsciiHexDigit(c)) return false;
-        return true;
-    }
-}

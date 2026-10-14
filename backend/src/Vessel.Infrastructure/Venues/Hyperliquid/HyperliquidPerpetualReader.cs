@@ -128,8 +128,6 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         }, cancellationToken);
     }
 
-
-
     /// <summary>Primary perpetual DEX contracts are quoted and margined in USDC.</summary>
     private const string PrimaryQuoteAsset = "USDC";
 
@@ -319,14 +317,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         return new(observedAtUtc, accountMode, "hypercore-spot-stablecoins", balances);
     }
 
-
-
-
     // Matches the persisted fee-token column, so an oversized value fails as a venue read.
     private const int FeeTokenLength = 64;
-
-
-
 
     private static string Identity(JsonElement element)
     {
@@ -342,11 +334,6 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         var normalized = value.TrimStart('0');
         return normalized.Length == 0 ? "0" : normalized;
     }
-
-
-
-
-
 }
 
 /// <summary>Full validated primary metadata, including retired identities; shared across adapter instances.</summary>

@@ -40,7 +40,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
     {
         // A closed record whose linked fills are known incomplete, contradictory or out of order is not a decided outcome.
         var outcomes = closed.Where(f => f.Play.Origin != PlayOrigin.Retrospective && f.ManualFeesComplete)
-            .Where(ExecutionIntegrity.Settled).Select(facts => (facts.Play, Outcome: Outcome(facts))).Where(x => x.Outcome is not null)
+            .Where(ExecutionIntegrity.Settled).Select(facts => (facts.Play, Outcome: PlayOutcomeCalculator.Outcome(facts))).Where(x => x.Outcome is not null)
             .Select(x => (x.Play, Outcome: x.Outcome!)).ToList();
         var record = TrackRecord.From(outcomes.Select(x => x.Outcome).ToList());
         var exposure = Exposure.From(outcomes.Select(x => x.Outcome));
@@ -59,10 +59,6 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
                 Source(limits.MaxStopSource), Source(limits.MinRewardRiskSource)),
             Notice);
     }
-
-    // Kept for sizing callers; reporting and sizing share the same result arithmetic.
-    public static PlayOutcome? Outcome(ClosedPlayFacts facts) => PlayOutcomeCalculator.Outcome(facts);
-    public static decimal? StopDistance(PlayPlanDocument plan) => PlayOutcomeCalculator.StopDistance(plan);
 
     private static string Number(decimal value) => decimal.Round(value, 8).ToString("0.########", CultureInfo.InvariantCulture);
     private static string? Number(decimal? value) => value is { } number ? Number(number) : null;

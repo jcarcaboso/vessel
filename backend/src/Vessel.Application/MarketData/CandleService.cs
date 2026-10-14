@@ -20,7 +20,6 @@ public sealed class CandleCache(TimeProvider time)
     private readonly BoundedMarketDataCache<CandleResponseDto> entries = new(time, MaxEntries, MaxStoredCandles, v => v.Candles.Count);
 
     public CandleResponseDto? Get(string key) => entries.Get(key);
-    public void Set(string key, CandleResponseDto value) => entries.Set(key, value, value.Candles.Count == 0 ? EmptyLifetime : Lifetime);
     public Task<CandleResponseDto> GetAsync(string key, bool historical, bool refresh,
         Func<CancellationToken, Task<CandleResponseDto>> load, CancellationToken ct) =>
         entries.GetAsync(key, load, value => value.Candles.Count == 0 ? EmptyLifetime :

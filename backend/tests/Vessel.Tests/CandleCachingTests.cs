@@ -141,15 +141,19 @@ public sealed class CandleCachingTests
         Enumerable.Range(0, size).Select(i => new CandleDto(i, i, "1", "1", "1", "1", "1", null)).ToArray(),
         0, 500, DateTimeOffset.UnixEpoch, size == 0, "");
 
+    // A refresh load stores the value exactly as a cache miss does, replacing any entry under the key.
+    private static Task Put(CandleCache cache, string key, CandleResponseDto value) =>
+        cache.GetAsync(key, historical: false, refresh: true, _ => Task.FromResult(value), default);
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
-    public void Entry_bound_evicts_one_LRU_entry_even_under_empty_pressure(int size)
+    public async Task Entry_bound_evicts_one_LRU_entry_even_under_empty_pressure(int size)
     {
         var cache = new CandleCache(new Clock()); var result = Response(size);
-        for (var i = 0; i < CandleCache.MaxEntries; i++) cache.Set(i.ToString(), result);
+        for (var i = 0; i < CandleCache.MaxEntries; i++) await Put(cache, i.ToString(), result);
         Assert.NotNull(cache.Get("0"));
-        cache.Set("new", result);
+        await Put(cache, "new", result);
         Assert.Null(cache.Get("1"));
         Assert.NotNull(cache.Get("0"));
         Assert.NotNull(cache.Get("2"));
@@ -157,14 +161,14 @@ public sealed class CandleCachingTests
     }
 
     [Fact]
-    public void Candle_bound_is_200000_and_replacement_updates_weight()
+    public async Task Candle_bound_is_200000_and_replacement_updates_weight()
     {
         var cache = new CandleCache(new Clock()); var result = Response(500);
-        for (var i = 0; i < 400; i++) cache.Set(i.ToString(), result);
-        cache.Set("399", Response(0)); // Free 500 candles without adding an entry.
-        cache.Set("400", result);
+        for (var i = 0; i < 400; i++) await Put(cache, i.ToString(), result);
+        await Put(cache, "399", Response(0)); // Free 500 candles without adding an entry.
+        await Put(cache, "400", result);
         Assert.NotNull(cache.Get("0"));
-        cache.Set("401", result);
+        await Put(cache, "401", result);
         Assert.Null(cache.Get("1"));
         Assert.NotNull(cache.Get("0"));
         Assert.NotNull(cache.Get("2"));
