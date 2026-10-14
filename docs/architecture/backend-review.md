@@ -2,7 +2,31 @@
 
 A review of the backend architecture and code after PR #37, looking for defects, simplifications and cleanups. The companion [backend guide](backend-guide.md) explains how the backend works.
 
-**Method.** I read all of `backend/src` (about 10,700 lines, excluding migrations), skimmed the tests (about 18,500 lines) and cross-checked the docs, CI and the frontend's polling. The solution builds with 0 warnings (`TreatWarningsAsErrors`). Locally 1,316 tests pass and 124 are skipped: the PostgreSQL and live-venue tests need environment variables. CI runs the PostgreSQL tests. **No code was changed for this review.**
+**Original review method.** I read all of `backend/src` (about 10,700 lines, excluding migrations), skimmed the tests (about 18,500 lines) and cross-checked the docs, CI and the frontend's polling. The solution built with 0 warnings (`TreatWarningsAsErrors`). At that checkpoint, 1,316 tests passed and 124 were skipped because the PostgreSQL and live-venue environment variables were unset. No code changed during the initial review. The findings below retain that baseline; subsequent implementation is tracked here.
+
+## Implementation and verification
+
+October 14, 2026, on `t3/backend-architecture-review`, PR #38. This records branch work, not a merged release or deployment.
+
+| Work | Implemented | Independent verification |
+| --- | --- | --- |
+| Wave 1 | S3 composition root, S7 error types, S11 namespace, N1/N3/N4 cleanup and the manual venue ID part of S8. | Sol found no runtime regression. The stale guide references it found are corrected. |
+| Wave 2a | R2 `IOwned` filters/save guard and S12 entity configurations/decimal convention. | Sol passed 75 targeted tests, checked all 18 mapped entities and compared the baseline, current model and migration snapshot. No introduced finding; both schema diffs were empty. |
+| Wave 2b | S1 named exact-number profiles and shared arithmetic/formatting, plus N2 drawing-document disposal. | Sol passed 1,013 targeted tests and 868,510 independent differential/exactness checks. No introduced finding. |
+| Wave 2c | S5 endpoint transport metadata, S10 venue composition, plus the authorized groups/claims portion of S4. | Sol found two transport regressions. Fix `d17f56a` moves server body limits after authorization and preserves unmatched-route errors. Sol re-verification closed both: 50/50 immediate authenticated retries succeeded and 870 differential HTTP cases matched the baseline. |
+
+The corrected combined code at `d17f56a` passed 1,689 backend tests against a dedicated synthetic PostgreSQL container; only the two opt-in live-venue tests skipped. All 24 Python checks passed. The transport regression tests failed before the correction and the corrected focused suite passed 132 tests. Independent re-verification found no remaining introduced issue in its scope.
+
+The [current-state guide](../app-status.md) and [four diagrams](../diagrams/app-status.md) cover the whole app. All 38 relative links and anchors resolve. The four Mermaid diagrams were rendered and inspected; the HTML overview was checked at desktop and mobile widths without horizontal overflow.
+
+Remaining implementation includes R1/S2 refresh and lock work, S9 execution performance, N7/N13 reporting consistency, S6 workspace separation, the rest of S8, N5/N6/N10, and N8/N11/N12/R3 documentation and maintenance work. S4 refresh orchestration is still in the endpoint. N9 adapter allocation/wrapper cleanup and N14 retrospective HTTP status consistency are **not implemented**. P1–P8 remain proposals needing owner agreement.
+
+The owner-isolation review also reproduced two preexisting boundaries, neither reached by current production code:
+
+- Attaching a fabricated entity with a foreign row ID but local current/original `OwnerId` can bypass the save guard on an ID-only key. Current stores load owner-filtered rows rather than attaching caller-supplied entities. Before introducing detached writes, add an owner concurrency predicate or equivalent storage check and a regression test.
+- An EF customizer that adds entities after `OnModelCreating` can miss owner-filter installation. No such customizer is registered. Mapped inheritance currently fails closed; current entities are sealed. Revisit model-finalization checks if either extension is introduced.
+
+Verification used disposable schemas only. It did not read the owner's `.env`, call live venues, deploy the app or migrate the owner's database.
 
 ## What is already in good shape
 

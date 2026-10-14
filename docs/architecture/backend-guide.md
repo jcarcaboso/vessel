@@ -2,7 +2,7 @@
 
 Start here if you are new to the Vessel backend. This guide explains how the code is organised, what each module does, how the modules work together and which rules hold everywhere. It describes this branch as of October 14, 2026, including the first two waves of PR #38. The contracts and state documents in this folder hold the detailed rules for each feature. Where this guide and the code disagree, the code wins; please fix the guide.
 
-Read [`CONTEXT.md`](../../CONTEXT.md) first for the product vocabulary (Play, Plan, Order link, Fill, Portfolio, Account and so on). Improvement work is tracked in [`backend-review.md`](backend-review.md).
+For a shorter tour of the whole app, start with [App today](../app-status.md). Read [`CONTEXT.md`](../../CONTEXT.md) for the product vocabulary. Improvement work is tracked in [`backend-review.md`](backend-review.md).
 
 ## What the backend is
 
@@ -62,7 +62,7 @@ flowchart LR
 4. **Error mapping.** Exceptions become RFC 7807 Problem Details. `ProblemException(status, detail)` maps to its status and safe message. `DomainValidationException` maps to 400 and `DomainRuleException` to 409. Bad bodies map to 400/413; transient database or network failures anywhere in the exception chain map to 503. Anything else is a 500 logged once by `SafeExceptionDiagnostics`, with trace ID, route, exception type and method names only, never messages or data.
 5. **Compression.** Only endpoints marked with `CompressMarketData` metadata (instruments, candles, market context) are compressed.
 6. **Authentication and authorization.** `BearerTokenHandler` compares a hash of the bearer token with the configured token in constant time and issues the configured owner identity. The fallback policy makes every endpoint private unless it opts out (`/health/live`, `/health/ready`). Repeated wrong tokens from one address get 429 (`AuthFailureLimiter`).
-7. **Endpoint transport.** `CarriesCredential()` marks token routes with the HTTPS guard and a 4 KiB body limit. `WithBodyLimit()` marks manual writes with 16 KiB and retrospective creation with 128 KiB. The guard runs after authorization, before binding, using matched endpoint metadata rather than URL text. Non-loopback credential entry requires HTTPS outside Development.
+7. **Endpoint transport.** `CarriesCredential()` marks token routes with the HTTPS guard and a 4 KiB body limit. `WithBodyLimit()` marks manual writes with 16 KiB and retrospective creation with 128 KiB. The guard and server body limit run after authorization, before binding. Matched routes use their metadata; an unmatched-route fallback preserves the old error responses for malformed URLs and unsupported methods. Non-loopback credential entry requires HTTPS outside Development.
 8. **Endpoint.** A thin lambda binds the request, calls one application service and returns `Results.Ok/Created/NoContent`.
 
 Application services throw `ProblemException` from `Application/Common` for expected request failures. Entities use the two Domain exception types for invalid input and rule conflicts. The API maps them centrally; unrelated `ArgumentException` or `InvalidOperationException` failures remain server errors.
