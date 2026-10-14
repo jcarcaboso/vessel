@@ -899,6 +899,11 @@ const openedLedger = (): ManualExecutions => {
 }
 
 describe('diary mutation ownership in the actual shell', () => {
+  function warnsOnUnload() {
+    const event = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    return event.defaultPrevented
+  }
   it('guards a retained Overview action synchronously before the pending Save render', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('Unexpected network request'))))
     window.history.replaceState(null, '', '/#plays')
@@ -922,6 +927,7 @@ describe('diary mutation ownership in the actual shell', () => {
     await user.type(screen.getByRole('textbox', { name: 'Review' }), ' sent while saving')
     api.updatePlay.mockImplementation(() => {
       expect(screen.getByRole('button', { name: /^Save$/ })).toBeEnabled()
+      expect(warnsOnUnload()).toBe(true)
       newPlayFromOverview()
       return saving.promise
     })
@@ -934,6 +940,7 @@ describe('diary mutation ownership in the actual shell', () => {
     await act(async () => saving.resolve({ ...shellPlay, review: sent.review, summary: { ...shellPlay.summary, version: 3 } }))
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue(shellPlay.summary.title)
     expect(screen.getByRole('button', { name: 'Saved' })).toBeDisabled()
+    expect(warnsOnUnload()).toBe(false)
     await user.click(screen.getByRole('link', { name: 'Overview' }))
     await user.click(screen.getByRole('button', { name: 'New play' }))
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('')
@@ -949,6 +956,7 @@ describe('diary mutation ownership in the actual shell', () => {
     render(<ApplicationShell system={shellSystem} disconnect={vi.fn()} api={api} />)
     await enterShellManual(user)
     await user.click(screen.getByRole('button', { name: 'Discard execution edit' }))
+    expect(warnsOnUnload()).toBe(false)
     await user.click(screen.getByRole('tab', { name: 'Review' }))
     await user.type(screen.getByRole('textbox', { name: 'Review' }), ' sent while saving')
     await user.click(screen.getByRole('button', { name: /^Save$/ }))
@@ -956,6 +964,8 @@ describe('diary mutation ownership in the actual shell', () => {
     expect(sent.expectedVersion).toBe(2)
     await user.clear(screen.getByRole('textbox', { name: 'Review' }))
     await user.type(screen.getByRole('textbox', { name: 'Review' }), shellPlay.review)
+    // The draft now matches its saved baseline, but the real save still owns the work ref.
+    expect(warnsOnUnload()).toBe(true)
     await user.click(screen.getByRole('link', { name: 'Overview' }))
     await user.click(await screen.findByRole('button', { name: 'New play' }))
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue(shellPlay.summary.title)
@@ -964,6 +974,7 @@ describe('diary mutation ownership in the actual shell', () => {
     await user.click(screen.getByRole('tab', { name: 'Review' }))
     expect(screen.getByRole('textbox', { name: 'Review' })).toHaveValue(shellPlay.review)
     expect(screen.getByRole('button', { name: /^Save$/ })).toBeEnabled()
+    expect(warnsOnUnload()).toBe(true)
     await user.click(screen.getByRole('tab', { name: 'Execution' }))
     await waitFor(() => expect(api.manualExecutions).toHaveBeenCalledTimes(2))
     expect(api.manualExecutions).toHaveBeenLastCalledWith(shellPlay.summary.id, expect.any(AbortSignal))
@@ -1024,6 +1035,7 @@ describe('diary mutation ownership in the actual shell', () => {
     const attempted = api.addManualExecution.mock.calls[0]
     await user.click(screen.getByRole('link', { name: 'Settings' }))
     await act(async () => recording.reject(new ApiError('unavailable', 'Response lost.')))
+    expect(warnsOnUnload()).toBe(true)
     await user.click(screen.getByRole('link', { name: 'Plays' }))
     await user.click(screen.getByRole('tab', { name: 'Execution' }))
     const retrying = deferred<ManualExecutions>()
@@ -1033,6 +1045,7 @@ describe('diary mutation ownership in the actual shell', () => {
     await user.click(screen.getByRole('link', { name: 'Settings' }))
     api.manualExecutions.mockResolvedValue(openedLedger())
     await act(async () => retrying.resolve(openedLedger()))
+    expect(warnsOnUnload()).toBe(false)
     await user.click(screen.getByRole('link', { name: 'Plays' }))
     await user.click(screen.getByRole('tab', { name: 'Execution' }))
     await screen.findByText('Entry · buy 1 at 100')
@@ -1075,8 +1088,15 @@ describe('diary mutation ownership in the actual shell', () => {
     await enterShellManual(user)
     await user.click(screen.getByRole('button', { name: 'Record execution' }))
     await user.click(screen.getByRole('link', { name: 'Settings' }))
-    if (action === 'disconnect') await user.click(screen.getByRole('button', { name: 'Disconnect session' }))
-    else if (action === 'unmount') view.unmount()
+    if (action === 'disconnect') {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+      await user.click(screen.getByRole('button', { name: 'Disconnect session' }))
+      expect(disconnect).not.toHaveBeenCalled()
+      expect(warnsOnUnload()).toBe(true)
+      await user.click(screen.getByRole('button', { name: 'Disconnect session' }))
+      expect(confirm).toHaveBeenCalledTimes(2)
+      expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('Already-sent changes may still complete.'))
+    } else if (action === 'unmount') view.unmount()
     else {
       const nextApi = shellClient()
       const nextRequest = deferred<ManualExecutions>()
@@ -1095,6 +1115,7 @@ describe('diary mutation ownership in the actual shell', () => {
       return
     }
     await act(async () => previous.resolve(openedLedger()))
+    expect(warnsOnUnload()).toBe(false)
     expect(screen.queryByText('Entry · buy 1 at 100')).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Plays' })).not.toBeInTheDocument()
     if (action === 'disconnect') expect(disconnect).toHaveBeenCalledOnce()
