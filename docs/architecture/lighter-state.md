@@ -19,6 +19,8 @@ Production browser builds block token entry on plain HTTP outside loopback hosts
 
 ## Venue coverage
 
+October 14, 2026: the module serves two exchanges, `lighter` (below, unchanged) and `lighter-rh` (Lighter on Robinhood Chain). Each is a configured `LighterExchange` with its own descriptor, host (`Vessel:Venues:Lighter` / `LighterRh`), named client, catalogue cache, read gate and credential purpose (`lighter-read-token` / `lighter-rh-read-token`). For `lighter-rh`, read USDG wherever the table says USDC, and two history pages (200 executions) instead of five, because its `trades` weight is 600 rather than 200. Details: [robinhood-lighter-integration.md](robinhood-lighter-integration.md#implementation-state).
+
 | Read | Current boundary |
 | --- | --- |
 | Discovery | Main account and personal subaccounts from the public L1-address lookup; no pool import or wallet signing. |
@@ -29,7 +31,7 @@ Production browser builds block token entry on plain HTTP outside loopback hosts
 | Candles | One bounded manual request, at most 500 candles. Native intervals are 1m, 5m, 15m, 30m, 1h, 4h, 12h and 1d. No trade-count value is fabricated. |
 | Market context and streaming | Not advertised or implemented for Lighter. No invented funding rate and no generic stream-relay refactor in this delivery. |
 
-Requests share a process-local two-operation concurrency limit. Queue time is inside each operation's 20-second deadline. There is no rate-limit retry loop. An authentication refusal for history can fall back to public history once; if public history is also refused, the public snapshot still refreshes with an explicit notice. Malformed financial data remains a failure.
+Requests share a process-local two-operation concurrency limit per exchange. Queue time is inside each operation's 20-second deadline. There is no rate-limit retry loop. An authentication refusal for history can fall back to public history once; if public history is also refused, the public snapshot still refreshes with an explicit notice. Malformed financial data remains a failure.
 
 The October 5 investigation described Standard accounts as fee-free. The October 7 verification found fee-bearing cases, including Standard TWAP. Import checks the relevant fee fields and authenticated tier information where available. It does not label every discovered account Standard or every omitted fee field zero.
 

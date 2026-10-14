@@ -8,7 +8,7 @@ namespace Vessel.Infrastructure.Venues.Lighter;
 /// Register on the Lighter named HttpClient before BoundedJsonHttp discards error status/body.
 /// This exposes only the refusal category, never a venue error body or Authorization value.
 /// </summary>
-public sealed class LighterAuthenticationHandler : DelegatingHandler
+public sealed class LighterAuthenticationHandler(string venueName = "Lighter") : DelegatingHandler
 {
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -23,7 +23,7 @@ public sealed class LighterAuthenticationHandler : DelegatingHandler
         catch { response.Dispose(); throw; }
     }
 
-    private static async Task<bool> AuthErrorAsync(HttpResponseMessage response, CancellationToken ct)
+    private async Task<bool> AuthErrorAsync(HttpResponseMessage response, CancellationToken ct)
     {
         // The live API also returns HTTP400 for missing/invalid auth. Only classify known auth codes;
         // never turn unrelated invalid-parameter or financial schema errors into successful empty history.
@@ -42,7 +42,7 @@ public sealed class LighterAuthenticationHandler : DelegatingHandler
         try
         {
             using var document = JsonDocument.Parse(bytes.AsMemory(0, length), new JsonDocumentOptions { MaxDepth = 8 });
-            new StrictJson("Lighter returned an invalid error response.").RejectDuplicateProperties(document.RootElement);
+            new StrictJson($"{venueName} returned an invalid error response.").RejectDuplicateProperties(document.RootElement);
             return IsAuthenticationError(document.RootElement);
         }
         catch (JsonException) { return false; }
