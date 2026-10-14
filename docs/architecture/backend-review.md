@@ -6,7 +6,7 @@ A review of the backend architecture and code after PR #37, looking for defects,
 
 ## Implementation and verification
 
-October 14, 2026, on `t3/backend-architecture-review`, PR #38. This records branch work, not a merged release or deployment.
+October 14, 2026, on `t3/backend-architecture-review`. This records the work in PR #38, not a release or deployment.
 
 | Work | Implemented | Independent verification |
 | --- | --- | --- |
@@ -14,12 +14,15 @@ October 14, 2026, on `t3/backend-architecture-review`, PR #38. This records bran
 | Wave 2a | R2 `IOwned` filters/save guard and S12 entity configurations/decimal convention. | Sol passed 75 targeted tests, checked all 18 mapped entities and compared the baseline, current model and migration snapshot. No introduced finding; both schema diffs were empty. |
 | Wave 2b | S1 named exact-number profiles and shared arithmetic/formatting, plus N2 drawing-document disposal. | Sol passed 1,013 targeted tests and 868,510 independent differential/exactness checks. No introduced finding. |
 | Wave 2c | S5 endpoint transport metadata, S10 venue composition, plus the authorized groups/claims portion of S4. | Sol found two transport regressions. Fix `d17f56a` moves server body limits after authorization and preserves unmatched-route errors. Sol re-verification closed both: 50/50 immediate authenticated retries succeeded and 870 differential HTTP cases matched the baseline. |
+| Arithmetic follow-up | R4 derived-price overflow guard and safe tiny-price tolerances in `728a13c`. | Sol closed both reproductions with no actionable finding: 61,140 tolerance checks, 576 level-resolution checks and six Review/Sizing service cases passed. |
 
 The corrected combined code at `d17f56a` passed 1,689 backend tests against a dedicated synthetic PostgreSQL container; only the two opt-in live-venue tests skipped. All 24 Python checks passed. The transport regression tests failed before the correction and the corrected focused suite passed 132 tests. Independent re-verification found no remaining introduced issue in its scope.
 
+**Final integrated checks.** After the arithmetic fix and integration of the latest `main`, `scripts/check.sh` passed at `3ea2e26`: 1,708 backend tests with two opt-in live-venue skips, 24 Python tests, 76 prototype tests and 1,256 frontend tests across 68 files. Locked restores, the Release build, frontend type checking, lint and production build also passed. The Release build reported zero warnings and errors. Sol confirmed that the reviewed arithmetic code and regressions were unchanged by the `main` integration.
+
 The [current-state guide](../app-status.md) and [four diagrams](../diagrams/app-status.md) cover the whole app. All 38 relative links and anchors resolve. The four Mermaid diagrams were rendered and inspected; the HTML overview was checked at desktop and mobile widths without horizontal overflow.
 
-Remaining implementation includes R1/S2 refresh and lock work, R4 execution arithmetic guards, S9 execution performance, N7/N13 reporting consistency, S6 workspace separation, the rest of S8, N5/N6/N10, and N8/N11/N12/R3 documentation and maintenance work. S4 refresh orchestration is still in the endpoint. N9 adapter allocation/wrapper cleanup and N14 retrospective HTTP status consistency are **not implemented**. P1–P8 remain proposals needing owner agreement.
+Remaining implementation includes R1/S2 refresh and lock work, S9 execution performance, N7/N13 reporting consistency, S6 workspace separation, the rest of S8, N5/N6/N10, and N8/N11/N12/R3 documentation and maintenance work. S4 refresh orchestration is still in the endpoint. N9 adapter allocation/wrapper cleanup and N14 retrospective HTTP status consistency are **not implemented**. P1–P8 remain proposals needing owner agreement. The owner subsequently authorized fixing R4 and merging the implemented cleanup; the remaining waves are separate follow-up work, not part of this merge scope.
 
 The owner-isolation review also reproduced two preexisting boundaries, neither reached by current production code:
 
@@ -36,7 +39,7 @@ The review found **one new P2 issue, R4 below**, in preexisting execution arithm
 
 A fresh Release test run passed **1,689 backend tests**, with only the two opt-in live-venue tests skipped. All **24 Python tests** passed, and all **38 current-state guide and diagram links/anchors** resolved. CI on `356a6ba` also passed. The new arithmetic probes use actual application services and in-memory stores; they are separate from the passing regression suite and were not HTTP or live-venue tests.
 
-This pass changed documentation only. R4 remains unfixed, and PR #38 remains a draft while the implementation backlog is unfinished.
+The review-only pass changed documentation. The subsequent owner-authorized arithmetic fix is recorded under R4; it does not implement the remaining architecture backlog.
 
 ## What is already in good shape
 
@@ -114,9 +117,9 @@ Combine this with S12.
 
 ### R4. Accepted plan numbers can overflow execution matching
 
-**Status.** P2, found during the final review of `356a6ba`; also reproduced at PR base `6acd5fe`. This is a preexisting defect, not a regression from the numeric-helper cleanup. Unfixed.
+**Status.** P2, found during the final review of `356a6ba`; also reproduced at PR base `6acd5fe`. This was a preexisting defect, not a regression from the numeric-helper cleanup. Fixed in `728a13c`.
 
-**Where.** `ExecutionMatcher.Near`, line 102, and `ExecutionMatcher.Resolve`, line 119, in [ExecutionMatcher.cs](../../backend/src/Vessel.Application/Plays/Execution/ExecutionMatcher.cs).
+**Where.** `ExecutionMatcher.Near` and `ExecutionMatcher.Resolve` in [ExecutionMatcher.cs](../../backend/src/Vessel.Application/Plays/Execution/ExecutionMatcher.cs).
 
 **Reproduction.** With a synthetic venue account and a one-entry long plan, both of these pass `PlayService.CreateAsync` and the transition to Planned:
 
@@ -125,7 +128,9 @@ Combine this with S12.
 
 **Impact.** The first case repeatedly breaks the saved Play's execution read. The API's existing unexpected-error handler maps the exception to HTTP 500. The second can abort account-wide reconciliation from another Play because `MatchAsync` considers all active Plays on the account. No venue failure or fabricated detached entity is needed.
 
-**Smallest fix.** Guard derived-price overflow locally and return an unresolved level, or reject the unsupported calculation explicitly. Compute fractional tolerances without an overflowing intermediate denominator. Preserve current matching and exact-value behavior for supported numbers, and cover accepted-plan execution reads and account-wide candidate matching with regressions. Do not hide the defect by mapping all `OverflowException` instances to client errors.
+**Fix.** `Resolve` catches derived-price overflow locally and leaves the level's price null. Its key and the stored plan text remain unchanged, and it cannot automatically match an order. `Near` computes fractional powers directly rather than constructing an overflowing denominator. Below decimal precision, the step is zero, requiring exact equality unless a venue tick provides a coarser tolerance. Supported calculations and the global exception handler are unchanged.
+
+**Regression evidence.** Two real PostgreSQL service tests failed with the original overflow errors and passed after their respective fixes. They cover accepted-plan execution reads, continued linking of valid entry orders, refusal to match an unresolved target, and reconciliation of both an ordinary Play and a tiny-price Play when checking the ordinary one. Thirteen exact-decimal/tick cases cover the tolerance boundary and decimal maximum; two further cases cover overflowing stops and targets in both directions. All 254 focused execution, market-data, sizing and review tests passed before integrating the latest `main`.
 
 ---
 
