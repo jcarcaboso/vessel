@@ -53,31 +53,51 @@ modules, rather than feature components.
 
 ## How the application starts
 
-1. `main.tsx` calls `initAppearance()` so the stored theme is on `<html>` before the first paint, then renders `WorkspacePage` in `StrictMode`.
+1. `main.tsx` calls `initAppearance()` so the stored theme is on `<html>` before the first paint, then renders `WorkspacePage` in `StrictMode` inside a last-resort error boundary.
 2. `ConnectionGate` (`features/connection`) shows the token form. On submit it calls `getSystem(token)` (`GET /api/system`), then creates the client with `createWorkspaceApi(token)`. The field is cleared whether or not it worked.
 3. With a `SystemInfo` and a client, the gate renders `ApplicationShell`. Disconnect drops both, clears the candle cache and returns to the form.
-4. `ApplicationShell` wraps the app in `NotificationProvider` and `VenuesProvider` (the venues from `/api/system`), loads `GET /api/overview` and renders the current page.
+4. `ApplicationShell` provides tooltips, notifications and venue descriptors from `/api/system`, loads `GET /api/overview` and renders the current page. Polite and assertive notification regions stay mounted so newly inserted messages can be announced.
 
 A new `WorkspaceApi` object means a new session. Shell memory, the Plays session
 and the old client's candle cache are reset. Saved-Play reads, history and
 execution reads/checks abort when their session ends, and ignore stale results.
 Order-link mutations deliberately remain non-abortable; ignoring a stale
-completion does not roll back a server write. Account-discovery cancellation
-is part of the pending shell wave recorded in the verification note.
+completion does not roll back a server write. Wallet-account and token-name
+discovery abort on close, replacement or unmount; stale results cannot repopulate
+a later discovery session.
 
 ## Routing and the shell
 
-`ApplicationShell` keeps the current page in state and mirrors it in the hash (`#overview`, `#plays`, `#review`, `#portfolios`, `#accounts`, `#activity`, `#settings`). There is no router; account detail is shell state on the Accounts page, not a URL.
+`useHashPage` owns the current hash page and navigation listener for
+`#overview`, `#plays`, `#review`, `#portfolios`, `#accounts`, `#activity` and
+`#settings`. Unknown hashes fall back to Overview. There is no router library;
+account detail remains shell state on the Accounts page, not a URL.
 
 The shell owns:
 
 - **Navigation**: the sidebar (collapsible to a 78-pixel rail on desktop, a focus-trapped drawer at 800 pixels and below), the page heading and its actions.
 - **Workspace data**: the `Overview` document (portfolios, accounts, totals), reloaded after every change through `reload()`, which bumps `reloadKey`. Pages receive `reloadGeneration` and refetch their own data when it changes.
-- **Account refresh**: `sync(id)` and `refreshAll()` share one abortable session, show progress and report failures as one notification.
+- **Account refresh**: `useAccountRefresh` exposes `sync(id)` and `refreshAll()`. They share one abortable session, show progress and report failures as one notification.
 - **Dialogs**: create and manage portfolio or account.
 - **Shell memory** (see [State ownership](#state-ownership)).
 
-The page bodies for Overview, Portfolios and Settings are currently inline in the shell (review item S5); Plays, Review, Accounts and Activity are separate components.
+`OverviewPage`, `PortfoliosPage` and `SettingsPage` keep page bodies outside the
+shell. Management dialogs report typed `ManagementEvent` values; the shell
+clears selections using the event kind and IDs, never by parsing notification
+text.
+
+Plays, Review and Settings load through `lazyPage` and `Suspense`. After the
+first Plays visit, its healthy component stays mounted while hidden. This
+preserves local work owners as well as the shell-owned draft. Replacing the API
+starts a new Plays lifetime.
+
+Page error boundaries isolate render failures from the shell and offer Try
+again. A rejected page import uses a different fallback with an explicit reload
+action, not a misleading retry. Browser module failures may stay cached for
+the document's lifetime. The fallback preserves other pages and tells the
+owner to save accessible work first. Nothing reloads automatically or stores
+the draft to recover it. The root boundary is only a last resort; it cannot
+preserve a shell that has itself failed.
 
 ## The API client
 
@@ -285,9 +305,9 @@ pnpm --filter vessel-frontend build
 
 ### Add a page
 
-1. Add `{ id, label, icon, description }` to `pages` in `ApplicationShell.tsx`; the hash route and navigation follow.
+1. Add the route ID to `pageIds` in `useHashPage.ts` and `{ id, label, icon, description }` to `pages` in `ApplicationShell.tsx`.
 2. Create the page component in its feature folder. Take `api`, `reloadGeneration` and the shell data it needs as props; keep its own request state with an `AbortController`.
-3. Render it in the shell's main area for `page === '<id>'`. Anything that must survive navigation goes into shell memory, not the page.
+3. Render it inside the shell's page error boundary for `page === '<id>'`. Use `lazyPage` with a `Suspense` loading state for a deferred page. Anything that must survive navigation goes into shell memory; do not use a route key to remount an active work owner.
 4. Add a feature CSS file that reads theme tokens, and tests next to the component.
 
 ### Add an API call
