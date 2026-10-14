@@ -1,0 +1,42 @@
+{
+  "source": "f02bd15697466694448dd9c47730749260987865",
+  "status": "passed",
+  "checks": [
+    "graphite-desktop: load fallback retains shell, authentication and unsaved Plays title",
+    "graphite-desktop: no misleading retry, automatic import loop or automatic reload",
+    "graphite-desktop: explicit reload and reconnect loads real Review with Chart view group",
+    "graphite-mobile: load fallback retains shell, authentication and unsaved Plays title",
+    "graphite-mobile: no misleading retry, automatic import loop or automatic reload",
+    "graphite-mobile: explicit reload and reconnect loads real Review with Chart view group",
+    "paper-desktop: load fallback retains shell, authentication and unsaved Plays title",
+    "paper-desktop: no misleading retry, automatic import loop or automatic reload",
+    "paper-desktop: explicit reload and reconnect loads real Review with Chart view group",
+    "paper-mobile: load fallback retains shell, authentication and unsaved Plays title",
+    "paper-mobile: no misleading retry, automatic import loop or automatic reload",
+    "paper-mobile: explicit reload and reconnect loads real Review with Chart view group"
+  ],
+  "shots": [
+    "graphite-desktop-failed-import.png",
+    "graphite-desktop-reloaded.png",
+    "graphite-mobile-failed-import.png",
+    "graphite-mobile-reloaded.png",
+    "paper-desktop-failed-import.png",
+    "paper-desktop-reloaded.png",
+    "paper-mobile-failed-import.png",
+    "paper-mobile-reloaded.png"
+  ],
+  "expectedInjectedErrors": [
+    "graphite-desktop: Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "graphite-mobile: Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "paper-desktop: Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+    "paper-mobile: Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+  ],
+  "unexpectedErrors": [],
+  "blocked": [],
+  "attempts": {
+    "graphite-desktop": 2,
+    "graphite-mobile": 2,
+    "paper-desktop": 2,
+    "paper-mobile": 2
+  }
+}
