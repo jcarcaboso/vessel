@@ -1,0 +1,2076 @@
+{
+  "browser": "151.0.7922.137",
+  "inputs": [
+    {
+      "label": "upstream-main-before",
+      "provenance": {
+        "sourceCommit": "4f3d3d110753def455cac0caabeee1ffe0828d20",
+        "sourceClaim": "Caller-specified build commit; served asset hashes recorded, not an independent build attestation",
+        "toolingCommit": "c8acf6fb61d95d9d12ca0eb06df8583b76d44a8b",
+        "toolingDirty": false,
+        "captureScriptSha256": "f9e054c5c6503a7156b84ae17130163bd0dddc36f91eba2076ecf7ffc556025a",
+        "fixtureSha256": "b6e3345bc36ef541c0cbdb32b0e95e9262bf24d6cf52f160b986fde167387053",
+        "browserVersion": "151.0.7922.137",
+        "executablePath": "/nix/store/ll2lvrd9795hpa0yr20p207h8vif1ax0-chromium-151.0.7922.137/bin/chromium",
+        "playwrightVersion": "1.63.0",
+        "locale": "en-US",
+        "timezoneId": "UTC",
+        "deviceScaleFactor": 1,
+        "reducedMotion": "reduce",
+        "screenshotAnimations": "disabled",
+        "screenshotCaret": "hide",
+        "platform": "linux",
+        "node": "v24.21.0",
+        "servedAssets": {
+          "/": "5383b1dc1048162cc0cf8e5060cb40ea173d11ee6efe737951b2275894ea13e4",
+          "/assets/index-D0DQKtbA.css": "857465103919b23914d6e3ca1a8631f493eed74812f4a8b9a6a5be85e6bb5e0f",
+          "/assets/index-O2lkbez_.js": "5b80ef69708a1173416ac69af855105264d814753a3f07758f3dd14585649c08",
+          "/assets/inter-latin-wght-normal-Dx4kXJAl.woff2": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
+          "/assets/lightweight-C3y1kZxs.js": "9a3f19b5132471686129b7279b82c7a9ab24e3d679ecf874e50e57d4bce5c3aa"
+        },
+        "isolation": {
+          "databaseContainer": "vessel-fe-review-20261014",
+          "databaseName": "vesselfe",
+          "apiBind": "127.0.0.1:47305",
+          "processes": [
+            {
+              "pid": 2048997,
+              "proxyEnvironment": {
+                "HTTP_PROXY": "http://127.0.0.1:9",
+                "HTTPS_PROXY": "http://127.0.0.1:9",
+                "ALL_PROXY": "http://127.0.0.1:9",
+                "NO_PROXY": "127.0.0.1,localhost"
+              }
+            },
+            {
+              "pid": 2049110,
+              "proxyEnvironment": {
+                "HTTP_PROXY": "http://127.0.0.1:9",
+                "HTTPS_PROXY": "http://127.0.0.1:9",
+                "ALL_PROXY": "http://127.0.0.1:9",
+                "NO_PROXY": "127.0.0.1,localhost"
+              }
+            }
+          ],
+          "guard": "HTTP(S) requests use unreachable loopback proxy; browser separately rejects external origins and intercepts venue-touching routes. This is not a network namespace firewall."
+        },
+        "browserEnvironment": {
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+          "locale": "en-US",
+          "timezone": "UTC"
+        }
+      },
+      "clock": {
+        "browserDateOnly": "2026-10-14T16:30:00.000Z",
+        "timersFrozen": false,
+        "serverClockFrozen": false,
+        "evidenceCreatedAtServerUtc": "2026-10-14T17:07:37.919091+00:00",
+        "exceptions": [
+          "Review asOfUtc and request-window dates use live server time.",
+          "Evidence creation time uses server time persisted by the synthetic supplement."
+        ],
+        "masking": "None. Server timestamps and all render/text differences stay visible and must be investigated.",
+        "reviewResponses": [
+          {
+            "tag": "graphite/desktop",
+            "asOfUtc": "2026-10-14T21:50:45.828491+00:00",
+            "fromUtc": "2026-09-14T21:50:45.828491+00:00",
+            "observedAtRealUtc": "2026-10-14T21:50:46.050Z"
+          },
+          {
+            "tag": "graphite/mobile",
+            "asOfUtc": "2026-10-14T21:51:02.6019641+00:00",
+            "fromUtc": "2026-09-14T21:51:02.6019641+00:00",
+            "observedAtRealUtc": "2026-10-14T21:51:02.646Z"
+          },
+          {
+            "tag": "paper/desktop",
+            "asOfUtc": "2026-10-14T21:51:24.3739805+00:00",
+            "fromUtc": "2026-09-14T21:51:24.3739805+00:00",
+            "observedAtRealUtc": "2026-10-14T21:51:24.503Z"
+          },
+          {
+            "tag": "paper/mobile",
+            "asOfUtc": "2026-10-14T21:51:43.4332415+00:00",
+            "fromUtc": "2026-09-14T21:51:43.4332415+00:00",
+            "observedAtRealUtc": "2026-10-14T21:51:43.580Z"
+          }
+        ]
+      }
+    },
+    {
+      "label": "final-main-before",
+      "provenance": {
+        "sourceCommit": "4f3d3d110753def455cac0caabeee1ffe0828d20",
+        "sourceClaim": "Caller-specified build commit; served asset hashes recorded, not an independent build attestation",
+        "toolingCommit": "f48503ad32ac59f0ff9a5a82a4d4684017b40e4c",
+        "toolingDirty": true,
+        "captureScriptSha256": "f9e054c5c6503a7156b84ae17130163bd0dddc36f91eba2076ecf7ffc556025a",
+        "fixtureSha256": "b6e3345bc36ef541c0cbdb32b0e95e9262bf24d6cf52f160b986fde167387053",
+        "browserVersion": "151.0.7922.137",
+        "executablePath": "/nix/store/ll2lvrd9795hpa0yr20p207h8vif1ax0-chromium-151.0.7922.137/bin/chromium",
+        "playwrightVersion": "1.63.0",
+        "locale": "en-US",
+        "timezoneId": "UTC",
+        "deviceScaleFactor": 1,
+        "reducedMotion": "reduce",
+        "screenshotAnimations": "disabled",
+        "screenshotCaret": "hide",
+        "platform": "linux",
+        "node": "v24.21.0",
+        "servedAssets": {
+          "/": "5383b1dc1048162cc0cf8e5060cb40ea173d11ee6efe737951b2275894ea13e4",
+          "/assets/index-D0DQKtbA.css": "857465103919b23914d6e3ca1a8631f493eed74812f4a8b9a6a5be85e6bb5e0f",
+          "/assets/index-O2lkbez_.js": "5b80ef69708a1173416ac69af855105264d814753a3f07758f3dd14585649c08",
+          "/assets/inter-latin-wght-normal-Dx4kXJAl.woff2": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
+          "/assets/lightweight-C3y1kZxs.js": "9a3f19b5132471686129b7279b82c7a9ab24e3d679ecf874e50e57d4bce5c3aa"
+        },
+        "isolation": {
+          "verifiedAt": "2026-10-14T22:11:12.399296+00:00",
+          "apiSourceCommit": "f7bcc38",
+          "databaseContainer": "vessel-fe-review-20261014",
+          "databaseName": "vesselfe",
+          "apiBind": "127.0.0.1:47305",
+          "processes": [
+            {
+              "pid": 2528953,
+              "proxyEnvironment": {
+                "HTTP_PROXY": "http://127.0.0.1:9",
+                "HTTPS_PROXY": "http://127.0.0.1:9",
+                "ALL_PROXY": "http://127.0.0.1:9",
+                "NO_PROXY": "127.0.0.1,localhost"
+              }
+            },
+            {
+              "pid": 2528984,
+              "proxyEnvironment": {
+                "HTTP_PROXY": "http://127.0.0.1:9",
+                "HTTPS_PROXY": "http://127.0.0.1:9",
+                "ALL_PROXY": "http://127.0.0.1:9",
+                "NO_PROXY": "127.0.0.1,localhost"
+              }
+            }
+          ],
+          "guard": "HTTP(S) requests use unreachable loopback proxy; browser separately rejects external origins and intercepts venue-touching routes. This is not a network namespace firewall."
+        },
+        "browserEnvironment": {
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+          "locale": "en-US",
+          "timezone": "UTC"
+        }
+      },
+      "clock": {
+        "browserDateOnly": "2026-10-14T16:30:00.000Z",
+        "timersFrozen": false,
+        "serverClockFrozen": false,
+        "evidenceCreatedAtServerUtc": "2026-10-14T17:07:37.919091+00:00",
+        "exceptions": [
+          "Review asOfUtc and request-window dates use live server time.",
+          "Evidence creation time uses server time persisted by the synthetic supplement."
+        ],
+        "masking": "None. Server timestamps and all render/text differences stay visible and must be investigated.",
+        "reviewResponses": [
+          {
+            "tag": "graphite/desktop",
+            "asOfUtc": "2026-10-14T22:11:36.0158336+00:00",
+            "fromUtc": "2026-09-14T22:11:36.0158336+00:00",
+            "observedAtRealUtc": "2026-10-14T22:11:36.148Z"
+          },
+          {
+            "tag": "graphite/mobile",
+            "asOfUtc": "2026-10-14T22:11:48.5075844+00:00",
+            "fromUtc": "2026-09-14T22:11:48.5075844+00:00",
+            "observedAtRealUtc": "2026-10-14T22:11:48.541Z"
+          },
+          {
+            "tag": "paper/desktop",
+            "asOfUtc": "2026-10-14T22:12:01.9502707+00:00",
+            "fromUtc": "2026-09-14T22:12:01.9502707+00:00",
+            "observedAtRealUtc": "2026-10-14T22:12:01.977Z"
+          },
+          {
+            "tag": "paper/mobile",
+            "asOfUtc": "2026-10-14T22:12:14.4185132+00:00",
+            "fromUtc": "2026-09-14T22:12:14.4185132+00:00",
+            "observedAtRealUtc": "2026-10-14T22:12:14.449Z"
+          }
+        ]
+      }
+    }
+  ],
+  "note": "Exact means decoded pixel equality, not PNG byte equality. Tolerance is not identity. All differences require investigation; no time regions are masked.",
+  "results": [
+    {
+      "file": "graphite-desktop-account-detail.png",
+      "before": [
+        1440,
+        1670
+      ],
+      "after": [
+        1440,
+        1670
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-accounts.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-activity.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 15,
+        "ratio": 0.000011574074074074073,
+        "rows": [
+          379,
+          385
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.000004436728395061728,
+      "maxSummedRgbaDelta": 3
+    },
+    {
+      "file": "graphite-desktop-chart-expanded.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-entry-expanded.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-evidence-marked.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-evidence-markup.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-evidence-original.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-execution.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-keyboard-tooltip.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-level-popover.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-leverage-confirmation.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 11,
+        "ratio": 0.000008487654320987654,
+        "rows": [
+          38,
+          210
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.0000021219135802469136,
+      "maxSummedRgbaDelta": 1
+    },
+    {
+      "file": "graphite-desktop-overview.png",
+      "before": [
+        1440,
+        1914
+      ],
+      "after": [
+        1440,
+        1914
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-plays-editor.png",
+      "before": [
+        1440,
+        1838
+      ],
+      "after": [
+        1440,
+        1838
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-plays-list.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-plays-manual.png",
+      "before": [
+        1440,
+        1801
+      ],
+      "after": [
+        1440,
+        1801
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-portfolios.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-desktop-review.png",
+      "before": [
+        1440,
+        1354
+      ],
+      "after": [
+        1440,
+        1354
+      ],
+      "exact": {
+        "changed": 273,
+        "ratio": 0.00014001723289020187,
+        "rows": [
+          365,
+          372
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 260,
+        "ratio": 0.00013334974560971606,
+        "rows": [
+          365,
+          372
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.007919820901033974,
+      "maxSummedRgbaDelta": 490
+    },
+    {
+      "file": "graphite-desktop-settings.png",
+      "before": [
+        1440,
+        2147
+      ],
+      "after": [
+        1440,
+        2147
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-account-detail.png",
+      "before": [
+        390,
+        2173
+      ],
+      "after": [
+        390,
+        2173
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-accounts.png",
+      "before": [
+        390,
+        1128
+      ],
+      "after": [
+        390,
+        1128
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-activity.png",
+      "before": [
+        390,
+        1409
+      ],
+      "after": [
+        390,
+        1409
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-chart-expanded.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-entry-expanded.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-evidence-marked.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 5,
+        "ratio": 0.000015190181066958317,
+        "rows": [
+          648,
+          650
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.0000068355814801312435,
+      "maxSummedRgbaDelta": 2
+    },
+    {
+      "file": "graphite-mobile-evidence-markup.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-evidence-original.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-execution.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 61,
+        "ratio": 0.0001853202090168915,
+        "rows": [
+          471,
+          628
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 5,
+        "ratio": 0.000015190181066958317,
+        "rows": [
+          471,
+          478
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.00031367723903268926,
+      "maxSummedRgbaDelta": 54
+    },
+    {
+      "file": "graphite-mobile-keyboard-tooltip.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 32,
+        "ratio": 0.00009721715882853324,
+        "rows": [
+          421,
+          522
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.00010557175841536031,
+      "maxSummedRgbaDelta": 12
+    },
+    {
+      "file": "graphite-mobile-level-popover.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-leverage-confirmation.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-overview.png",
+      "before": [
+        390,
+        3298
+      ],
+      "after": [
+        390,
+        3298
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-plays-editor.png",
+      "before": [
+        390,
+        3974
+      ],
+      "after": [
+        390,
+        3974
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-plays-list.png",
+      "before": [
+        390,
+        907
+      ],
+      "after": [
+        390,
+        907
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-plays-manual.png",
+      "before": [
+        390,
+        3270
+      ],
+      "after": [
+        390,
+        3270
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-portfolios.png",
+      "before": [
+        390,
+        927
+      ],
+      "after": [
+        390,
+        927
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "graphite-mobile-review.png",
+      "before": [
+        390,
+        1922
+      ],
+      "after": [
+        390,
+        1922
+      ],
+      "exact": {
+        "changed": 154,
+        "ratio": 0.00020544838442861335,
+        "rows": [
+          586,
+          593
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 144,
+        "ratio": 0.00019210758024493718,
+        "rows": [
+          586,
+          593
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.007736332346113824,
+      "maxSummedRgbaDelta": 490
+    },
+    {
+      "file": "graphite-mobile-settings.png",
+      "before": [
+        390,
+        3903
+      ],
+      "after": [
+        390,
+        3903
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-account-detail.png",
+      "before": [
+        1440,
+        1670
+      ],
+      "after": [
+        1440,
+        1670
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-accounts.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-activity.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 28,
+        "ratio": 0.000021604938271604937,
+        "rows": [
+          523,
+          715
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.000009645061728395062,
+      "maxSummedRgbaDelta": 3
+    },
+    {
+      "file": "paper-desktop-chart-expanded.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-entry-expanded.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-evidence-marked.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-evidence-markup.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-evidence-original.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-execution.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-keyboard-tooltip.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-level-popover.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-leverage-confirmation.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-overview.png",
+      "before": [
+        1440,
+        1914
+      ],
+      "after": [
+        1440,
+        1914
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-plays-editor.png",
+      "before": [
+        1440,
+        1838
+      ],
+      "after": [
+        1440,
+        1838
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-plays-list.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-plays-manual.png",
+      "before": [
+        1440,
+        1801
+      ],
+      "after": [
+        1440,
+        1801
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-desktop-portfolios.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 27,
+        "ratio": 0.000020833333333333333,
+        "rows": [
+          309,
+          348
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0.00000945216049382716,
+      "maxSummedRgbaDelta": 4
+    },
+    {
+      "file": "paper-desktop-review.png",
+      "before": [
+        1440,
+        1354
+      ],
+      "after": [
+        1440,
+        1354
+      ],
+      "exact": {
+        "changed": 269,
+        "ratio": 0.00013796569834236008,
+        "rows": [
+          365,
+          372
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 260,
+        "ratio": 0.00013334974560971606,
+        "rows": [
+          365,
+          372
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.007163317536517315,
+      "maxSummedRgbaDelta": 460
+    },
+    {
+      "file": "paper-desktop-settings.png",
+      "before": [
+        1440,
+        2147
+      ],
+      "after": [
+        1440,
+        2147
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-account-detail.png",
+      "before": [
+        390,
+        2173
+      ],
+      "after": [
+        390,
+        2173
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-accounts.png",
+      "before": [
+        390,
+        1128
+      ],
+      "after": [
+        390,
+        1128
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-activity.png",
+      "before": [
+        390,
+        1409
+      ],
+      "after": [
+        390,
+        1409
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-chart-expanded.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-entry-expanded.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-evidence-marked.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-evidence-markup.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-evidence-original.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-execution.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-keyboard-tooltip.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-level-popover.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-leverage-confirmation.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-overview.png",
+      "before": [
+        390,
+        3298
+      ],
+      "after": [
+        390,
+        3298
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-plays-editor.png",
+      "before": [
+        390,
+        3974
+      ],
+      "after": [
+        390,
+        3974
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-plays-list.png",
+      "before": [
+        390,
+        907
+      ],
+      "after": [
+        390,
+        907
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-plays-manual.png",
+      "before": [
+        390,
+        3270
+      ],
+      "after": [
+        390,
+        3270
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-portfolios.png",
+      "before": [
+        390,
+        927
+      ],
+      "after": [
+        390,
+        927
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    },
+    {
+      "file": "paper-mobile-review.png",
+      "before": [
+        390,
+        1922
+      ],
+      "after": [
+        390,
+        1922
+      ],
+      "exact": {
+        "changed": 269,
+        "ratio": 0.0003588676325408896,
+        "rows": [
+          586,
+          593
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 260,
+        "ratio": 0.000346860908775581,
+        "rows": [
+          586,
+          593
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.018632767683235945,
+      "maxSummedRgbaDelta": 460
+    },
+    {
+      "file": "paper-mobile-settings.png",
+      "before": [
+        390,
+        3903
+      ],
+      "after": [
+        390,
+        3903
+      ],
+      "exact": {
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 0,
+      "maxSummedRgbaDelta": 0
+    }
+  ]
+}
