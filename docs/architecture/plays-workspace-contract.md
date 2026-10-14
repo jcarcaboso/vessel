@@ -1,5 +1,18 @@
 # Plays workspace first pass
 
+October 13 diary completion extends the saved workspace under
+[its delivery contract](diary-completion-contract.md). Manual execution entry
+and correction history use the existing Execution tab. Optional adherence,
+mistake tag, lesson and next action use the existing Review tab. Pending and
+reviewed filters follow saved state. Cross-screen open requests preserve
+unsaved notes, plans, evidence and manual forms until the owner discards them.
+
+The existing bottom Summary now includes all-stops loss, all-targets gain,
+aggregate R:R and a named risk-reference share. Entry allocation, priced
+quantity and stop/target coverage are separate. Partial plans show known
+subtotals, not full-plan totals. Fees, funding and slippage are excluded, and
+actual loss can exceed a planned stop estimate. No section is moved.
+
 The chart placeholder is superseded for venue instruments by [the chart plan](chart-plan.md).
 
 October 1, 2026. The owner merged PR #1 and authorized the Plays page, delegated to Sol agents. This step builds the page and components from the approved prototype, with the chart deferred until its renderer and data requirements are researched.
@@ -159,3 +172,13 @@ The owner asked for a minimal, clean page with more room for entries.
 - **Liquidation in the entry details**: under the entry price, each entry shows its own estimate (`Liq. ≈ 111.32 · 7.69% below entry`), with "this entry alone" when there are several entries; the readout and chart keep the whole-plan figure. A stop at or past the plan estimate gets a warning border and tooltip. Every figure follows the direction: switching Long/Short moves the estimate to the other side of the entry, and the warnings are recomputed once the stops and targets fit the new direction.
 - **SL/TP interpretation**: the helper explicitly separates the underlying `price move (1×)` from the loss/gain percentage at the selected leverage. The entered % remains the leveraged return, consistent with saved plans and order matching: a 10% stop at 3× on a 3.75 long resolves to 3.625, a 3.3333% underlying move. Once size, price and quantity shares are known, each exit also shows its estimated loss/gain in quote units, using full-position quantity × entry share × exit share × price distance; leverage is already included in quantity and is not applied again. At 130 USDC margin, that stop estimates 13 USDC loss, and a 50% target at 4.375 estimates 65 USDC gain. These are planned estimates before fees, funding and slippage, not realized results or guaranteed execution.
 - **Chart-picked SL/TP prices**: dragging a percentage stop/target or explicitly changing its price in the chart popover switches it to price units and stores the chosen price; the side editor selects `$` immediately. Share-only edits keep the previous unit and value. Undo/redo restore the unit and value together. Unmoved percentage levels keep the existing return-at-leverage meaning; chart-picked prices stay fixed when leverage or the entry price changes.
+
+## October 13 execution and pending-save corrections
+
+- Direction is fixed once entry fills exist. Open Plays disable the Long/Short toggle and the direction-reversal fix in plan notices; the API independently enforces the filled-entry rule. Untaken plans can still change direction, and stop/target revisions remain available.
+- The Execution tab filters owner-link choices by order side and reduce-only/position-TP/SL flags. The API also checks retained fill effects. Owner attribution never changes immutable fill facts.
+- Execution responses include `issues`, rendered as "Not reconciled". They explain known missing executions, incompatible fill roles, over-exits and invalid chronology. Incompatible fills remain visible on their links but are excluded from progress/P&L totals.
+- Saving captures the submitted draft. When a response arrives, newer evidence notes/markup remain in the editor; only persisted IDs and saved-state metadata merge into them. The Save button remains enabled until those later edits are saved.
+- Removing an image while a save/upload is pending does not resurrect it in the editor. If that upload succeeds, its server ID remains in deletion bookkeeping and the next Save deletes it. Discarding the later edits leaves the already-saved image on the server.
+
+These corrections preserve the approved layout. They do not introduce autosave, split-fill attribution, terminal Play reopening, manual executions or a retrospective-record workflow.

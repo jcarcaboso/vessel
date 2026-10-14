@@ -10,6 +10,15 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
 {
     internal Task<T> WithAccountLockAsync<T>(Guid id, Func<Account, Task<T>> action, CancellationToken ct) =>
         store.WithAccountLockAsync(id, action, ct);
+
+    /// <summary>The caller holds the owner-scoped account lock throughout the order read and this save.</summary>
+    internal async Task RecordOrderHistoryNoticeAsync(Account lockedAccount, string? notice, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lockedAccount.RecordOrderHistoryNotice(notice);
+        await store.SaveAsync(ct);
+    }
+
     private static string? Money(decimal? value) => value?.ToString("0.############################", CultureInfo.InvariantCulture);
     private static void ValidateName(string? name)
     {

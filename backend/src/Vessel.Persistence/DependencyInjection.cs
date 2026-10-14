@@ -42,6 +42,8 @@ public static class DependencyInjection
         services.AddScoped<Vessel.Application.Evidence.EvidenceService>();
         services.AddScoped<Vessel.Application.Plays.IPlayStore, PlayStore>();
         services.AddScoped<Vessel.Application.Plays.PlayService>();
+        services.AddScoped<Vessel.Application.Plays.IDiaryStore, DiaryStore>();
+        services.AddScoped<Vessel.Application.Plays.DiaryService>();
         services.AddScoped<Vessel.Application.Plays.Execution.IPlayExecutionStore, ExecutionStore>();
         services.AddScoped<Vessel.Application.Plays.Execution.PlayExecutionService>();
         services.AddScoped<Vessel.Application.Sizing.ISizingStore, SizingStore>();

@@ -17,7 +17,7 @@ public static class PriceRules
 
 /// <summary>What Vessel can do at a venue. Use cases and the browser check these instead of venue names.</summary>
 public sealed record VenueCapabilities(bool Sync, bool Instruments, bool Orders, bool Candles, bool MarketContext, bool Stream, bool StablecoinWallet,
-    bool AccountDiscovery = false, bool ReadOnlyCredential = false)
+    bool AccountDiscovery = false, bool ReadOnlyCredential = false, bool ManualExecutions = false)
 {
     public static readonly VenueCapabilities None = new(false, false, false, false, false, false, false);
 }
@@ -40,5 +40,6 @@ public sealed record VenueDescriptor(
     public const string ManualId = "manual";
 
     /// <summary>Manual accounts hold owner-entered values: no venue adapter, no source identity.</summary>
-    public static readonly VenueDescriptor Manual = new(ManualId, "Manual", "manual", VenueSources.None, VenueCapabilities.None);
+    public static readonly VenueDescriptor Manual = new(ManualId, "Manual", "manual", VenueSources.None,
+        VenueCapabilities.None with { ManualExecutions = true });
 }

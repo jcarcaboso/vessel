@@ -1,0 +1,154 @@
+{
+  "date": "2026-10-14",
+  "syntheticDataOnly": true,
+  "productionDeployment": false,
+  "ownerDatabaseChanged": false,
+  "checks": {
+    "api": [
+      {
+        "check": "repeating-average partial/final close",
+        "playId": "700d7e68-3c43-4576-b5bd-cbd1341213f6",
+        "totals": {
+          "enteredQuantity": "3",
+          "exitedQuantity": "3",
+          "openQuantity": "0",
+          "grossResultUsd": "4",
+          "netResultUsd": "4",
+          "feesComplete": true
+        }
+      },
+      {
+        "check": "multiline review exact readback and atomic control rejection",
+        "playId": "700d7e68-3c43-4576-b5bd-cbd1341213f6",
+        "version": 9
+      },
+      {
+        "check": "tiny-notional closure rejected before mutation",
+        "playId": "d243d4ca-3557-403d-8a4e-e36f86b6cd41",
+        "records": 1,
+        "status": "open"
+      },
+      {
+        "check": "exact aggregates beyond scalar decimal range",
+        "accountId": "6e81cef4-39fe-47ac-bf79-4811500acd98",
+        "net": "80000000000000000000000000000",
+        "count": 2
+      },
+      {
+        "check": "case-insensitive body limits",
+        "rejectedRequests": 6,
+        "status": 413
+      }
+    ],
+    "browserMultiline": {
+      "playId": "700d7e68-3c43-4576-b5bd-cbd1341213f6",
+      "version": 10,
+      "structuredReview": {
+        "adherence": "deviated",
+        "mistakeTag": "timing",
+        "lesson": "Wait for the entry signal.\nWrite down the invalidation first.",
+        "nextAction": "Check position size.\nRecord known fees before review."
+      }
+    },
+    "precision": [
+      {
+        "check": "unsupported final cost rejected atomically",
+        "direction": "long",
+        "price": "0.9",
+        "playId": "32db0045-21bb-4310-a290-4d4bfb90eac0",
+        "status": 400
+      },
+      {
+        "check": "unsupported final cost rejected atomically",
+        "direction": "long",
+        "price": "0.1",
+        "playId": "73c7c402-c051-4d16-b821-6b407df4e824",
+        "status": 400
+      },
+      {
+        "check": "supported cancellation and fee correction agree with Review",
+        "direction": "long",
+        "playId": "c6de0a43-5fe3-4379-b368-332dac5a04ed",
+        "gross": "0.1",
+        "net": "0.09"
+      },
+      {
+        "check": "unsupported final cost rejected atomically",
+        "direction": "short",
+        "price": "0.9",
+        "playId": "acf1a7ba-c6b5-4263-b9f1-f2921774031d",
+        "status": 400
+      },
+      {
+        "check": "unsupported final cost rejected atomically",
+        "direction": "short",
+        "price": "0.1",
+        "playId": "1eaed386-7aff-452a-8165-63ebf2f12572",
+        "status": 400
+      },
+      {
+        "check": "supported cancellation and fee correction agree with Review",
+        "direction": "short",
+        "playId": "dfc3c81e-b0d8-4a32-a8ea-798beb2a648d",
+        "gross": "-0.1",
+        "net": "-0.11"
+      }
+    ],
+    "ordinaryPartial": [
+      {
+        "check": "ordinary repeating partial closes and agrees with Review",
+        "direction": "long",
+        "finalPrice": "105",
+        "gross": "10",
+        "playId": "46b86a56-ef53-47ab-9141-5dc9c52781e6"
+      },
+      {
+        "check": "ordinary repeating partial closes and agrees with Review",
+        "direction": "long",
+        "finalPrice": "150",
+        "gross": "100",
+        "playId": "dff39301-d135-44a2-9e4a-23fc78181cc9"
+      },
+      {
+        "check": "ordinary repeating partial closes and agrees with Review",
+        "direction": "short",
+        "finalPrice": "105",
+        "gross": "-10",
+        "playId": "a5ef9de6-ab3b-42b8-a450-19cbafc02e49"
+      },
+      {
+        "check": "ordinary repeating partial closes and agrees with Review",
+        "direction": "short",
+        "finalPrice": "150",
+        "gross": "-100",
+        "playId": "c3d2ebae-5b55-4d49-91da-c7ba0ed7ce62"
+      }
+    ],
+    "linkedQuantity": [
+      {
+        "check": "large imported residual remains open/unscored",
+        "direction": "long",
+        "playId": "ce977fc0-0daf-46df-bf2e-0bd4a5bf48e5",
+        "openQuantity": "0.1"
+      },
+      {
+        "check": "last small exit closes and agrees with Review",
+        "direction": "long",
+        "playId": "ce977fc0-0daf-46df-bf2e-0bd4a5bf48e5",
+        "net": "0.1"
+      },
+      {
+        "check": "large imported residual remains open/unscored",
+        "direction": "short",
+        "playId": "e964d217-9b8e-4f9c-af1d-42649a197585",
+        "openQuantity": "0.1"
+      },
+      {
+        "check": "last small exit closes and agrees with Review",
+        "direction": "short",
+        "playId": "e964d217-9b8e-4f9c-af1d-42649a197585",
+        "net": "0.1"
+      }
+    ]
+  }
+}

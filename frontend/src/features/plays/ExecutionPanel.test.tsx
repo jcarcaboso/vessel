@@ -25,15 +25,16 @@ const execution: PlayExecution = {
     order: order('12', { side: 'sell', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true }), filledQuantity: '0', fills: [] }],
   unlinkedOrders: [order('13', { side: 'sell', limitPrice: '110', reduceOnly: true })],
   notice: 'Orders and fills come from the venue.',
+  issues: [],
 }
 
 describe('execution panel', () => {
   it('says when the venue already took fees off the closed PnL', () => {
     const net = { ...execution, totals: { ...execution.totals, closedPnlBasis: 'net-of-fee' as const } }
-    const { unmount } = render(<ExecutionPanel execution={execution} error={null} busy={false} entries={entries} onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+    const { unmount } = render(<ExecutionPanel execution={execution} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     expect(screen.getByText('Venue closed PnL')).toBeInTheDocument()
     unmount()
-    render(<ExecutionPanel execution={net} error={null} busy={false} entries={entries} onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+    render(<ExecutionPanel execution={net} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     expect(screen.getByText('Venue closed PnL · after fees').parentElement).toHaveAttribute('title', expect.stringMatching(/fees already taken off/))
   })
   it('shows linked fills, asks about ambiguous orders and links others by hand', async () => {
@@ -41,7 +42,7 @@ describe('execution panel', () => {
     const onUnlink = vi.fn()
     const onCheck = vi.fn()
     const user = userEvent.setup()
-    render(<ExecutionPanel execution={execution} error={null} busy={false} entries={entries} onCheck={onCheck} onLink={onLink} onUnlink={onUnlink} />)
+    render(<ExecutionPanel execution={execution} error={null} busy={false} entries={entries} direction="long" onCheck={onCheck} onLink={onLink} onUnlink={onUnlink} />)
     expect(screen.getByText('Still open').nextSibling).toHaveTextContent('0.5')
     expect(screen.getByText('0.02 USDC')).toBeInTheDocument()
     const linked = screen.getByRole('region', { name: 'Linked orders' })
@@ -63,6 +64,8 @@ describe('execution panel', () => {
     expect(link).toBeDisabled()
     const select = within(other).getByRole('combobox', { name: 'Level for order 13' })
     expect(within(select).getByRole('option', { name: 'Unplanned exit' })).toBeInTheDocument()
+    // A sell cannot enter a long play, so only its exits are offered.
+    expect(within(select).queryByRole('option', { name: 'Entry 1' })).not.toBeInTheDocument()
     await user.selectOptions(select, 'target|e1|t1')
     await user.click(link)
     expect(onLink).toHaveBeenLastCalledWith({ orderId: '13', role: 'target', entryId: 'e1', levelId: 't1' })
@@ -73,12 +76,23 @@ describe('execution panel', () => {
     expect(onCheck).toHaveBeenCalledOnce()
   })
 
+  it('offers only the roles an order can take and says why linked fills do not settle the play', () => {
+    const issue = 'Order 51 is filled at the venue, but not all of its executions are retained yet.'
+    render(<ExecutionPanel execution={{ ...execution, issues: [issue], unlinkedOrders: [order('21'), order('22', { reduceOnly: true }), order('23', { side: 'sell' })] }}
+      error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+    expect(within(screen.getByRole('region', { name: 'Not reconciled' })).getByText(issue)).toBeInTheDocument()
+    const options = (id: string) => within(screen.getByRole('combobox', { name: `Level for order ${id}` })).getAllByRole('option').map(option => option.textContent)
+    expect(options('21')).toEqual(['Link as…', 'Entry 1'])
+    expect(options('22')).toEqual(['Link as…'])
+    expect(options('23')).toEqual(['Link as…', 'Entry 1 stop', 'Entry 1 target 1', 'Unplanned exit'])
+  })
+
   it('explains untracked and closed plays without edit controls', () => {
     const view = render(<ExecutionPanel execution={{ ...execution, tracked: false, status: 'planned', reason: 'Manual instruments are not tracked at a venue.',
-      links: [], suggestions: [], unlinkedOrders: [] }} error={null} busy={false} entries={entries} onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+      links: [], suggestions: [], unlinkedOrders: [] }} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     expect(screen.getByText('Manual instruments are not tracked at a venue.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Check venue' })).not.toBeInTheDocument()
-    view.rerender(<ExecutionPanel execution={{ ...execution, status: 'closed' }} error={null} busy={false} entries={entries} onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+    view.rerender(<ExecutionPanel execution={{ ...execution, status: 'closed' }} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     expect(screen.queryByRole('button', { name: /Unlink/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Other orders on this instrument' })).not.toBeInTheDocument()
   })

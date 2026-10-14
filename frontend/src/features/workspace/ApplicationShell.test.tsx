@@ -8,6 +8,7 @@ import { reviewFixture } from '@/test/review-fixture'
 import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, playApiStubs, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { ApplicationShell } from './ApplicationShell'
 import { activityFixture, operationFixture } from '@/test/activity-fixture'
+import { retrospectiveFixture, retrospectiveSavedFixture } from './retrospective.fixtures'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
@@ -219,14 +220,14 @@ describe('Main application shell', () => {
     const trigger = screen.getByRole('button', { name: 'Add' })
     trigger.focus(); await userEvent.keyboard('{Enter}')
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
-    const first = screen.getByRole('menuitem', { name: 'New portfolio' })
+    const first = screen.getByRole('menuitem', { name: 'Add account' })
     await waitFor(() => expect(first).toHaveFocus())
     await userEvent.keyboard('{Enter}')
-    expect(screen.getByRole('dialog')).toHaveTextContent('New portfolio')
+    expect(screen.getByRole('dialog')).toHaveTextContent('Add an account')
     await userEvent.keyboard('{Escape}')
     await userEvent.click(trigger)
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Add account' }))
-    expect(screen.getByRole('dialog')).toHaveTextContent('Add account')
+    await userEvent.click(screen.getByRole('menuitem', { name: 'New portfolio' }))
+    expect(screen.getByRole('dialog')).toHaveTextContent('New portfolio')
   })
   it('refreshes portfolio grouping, counts and Plays capital context after move, disable and enable', async () => {
     const second = { ...portfolioFixture, id: '22222222-3333-4444-5555-666666666666', name: 'Second', accountCount: 0, balanceUsd: null }
@@ -315,10 +316,84 @@ describe('Main application shell', () => {
     await userEvent.click(screen.getByRole('link', { name: 'Review' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Inspect Swing trading' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Open Play BTC breakout' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Continue editing' }))
+    expect(await screen.findByText(/A Play was requested from another screen/)).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('button', { name: 'Keep current work' }))
+    expect(screen.queryByText(/A Play was requested from another screen/)).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('')
     expect(screen.getByRole('article', { name: 'Entry 2 editor' })).toBeInTheDocument()
     expect(client.play).not.toHaveBeenCalled()
+  })
+  it('opens the precise excluded Play through the requested-play loader', async () => {
+    const play = reviewFixture.plays[0]!
+    const client = api({ review: vi.fn().mockResolvedValue(reviewFixture), play: vi.fn().mockResolvedValue(savedPlayFixture),
+      reviewExclusions: vi.fn().mockResolvedValue({ items: [{ playId: play.id, title: play.title, accountId: play.accountId,
+        accountName: play.accountName, instrument: play.instrument, reasons: ['Order 932 is missing execution rows.'] }],
+        total: 1, offset: 0, nextOffset: null, notice: 'Retained facts in this period.' }) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(screen.getByRole('link', { name: 'Review' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Inspect exclusions (2)' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open excluded Play BTC breakout' }))
+    expect(await screen.findByRole('textbox', { name: 'Play title' })).toHaveValue(savedPlayFixture.summary.title)
+    expect(client.play).toHaveBeenCalledWith(play.id, expect.any(AbortSignal))
+    expect(screen.queryByText(/Opening the requested Play/)).not.toBeInTheDocument()
+  })
+  it.each(['keep', 'discard'])('preserves an unsaved editor after retrospective success until the owner chooses to %s', async choice => {
+    const client = api({ overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [{ ...accountFixture, venueId: 'hyperliquid' }] }),
+      activity: vi.fn().mockResolvedValue({ ...activityFixture, operations: [retrospectiveFixture.operation], retainedFillCount: 2 }),
+      retrospectivePreview: vi.fn().mockResolvedValue(retrospectiveFixture),
+      createRetrospectivePlay: vi.fn().mockResolvedValue(retrospectiveSavedFixture), play: vi.fn().mockResolvedValue(retrospectiveSavedFixture) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await screen.findByRole('button', { name: 'View Main account' })
+    await userEvent.click(screen.getByRole('link', { name: 'Plays' }))
+    await userEvent.click(screen.getByRole('button', { name: 'New play' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Play title' }), 'Unsaved plan stays')
+    await userEvent.click(screen.getByRole('button', { name: 'Add entry' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Activity' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Expand BTC operation' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Inspect BTC retrospective eligibility' }))
+    await userEvent.type(await screen.findByLabelText('Retrospective title'), 'Confirmed history')
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm retrospective Play' }))
+    expect(await screen.findByText(/A Play was requested from another screen/)).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Unsaved plan stays')
+    expect(screen.getByRole('article', { name: 'Entry 2 editor' })).toBeInTheDocument()
+    expect(client.play).not.toHaveBeenCalled()
+    expect(client.createRetrospectivePlay).toHaveBeenCalledOnce()
+    if (choice === 'keep') {
+      await userEvent.click(screen.getByRole('button', { name: 'Keep current work' }))
+      expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Unsaved plan stays')
+      expect(screen.queryByText(/A Play was requested from another screen/)).not.toBeInTheDocument()
+      expect(client.play).not.toHaveBeenCalled()
+    } else {
+      await userEvent.click(screen.getByRole('button', { name: 'All plays' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+      await waitFor(() => expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue(retrospectiveSavedFixture.summary.title))
+      expect(client.play).toHaveBeenCalledWith(retrospectiveSavedFixture.summary.id, expect.any(AbortSignal))
+      expect(screen.getByRole('region', { name: 'No original plan' })).toBeInTheDocument()
+      expect(screen.queryByText(/A Play was requested from another screen/)).not.toBeInTheDocument()
+    }
+  })
+  it('cancels retrospective creation on disconnect and never requests its late result', async () => {
+    let finish!: (saved: typeof retrospectiveSavedFixture) => void
+    const create = vi.fn().mockImplementation(() => new Promise<typeof retrospectiveSavedFixture>(resolve => { finish = resolve }))
+    const client = api({ overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [{ ...accountFixture, venueId: 'hyperliquid' }] }),
+      activity: vi.fn().mockResolvedValue({ ...activityFixture, operations: [retrospectiveFixture.operation], retainedFillCount: 2 }),
+      retrospectivePreview: vi.fn().mockResolvedValue(retrospectiveFixture), createRetrospectivePlay: create })
+    const disconnect = vi.fn()
+    render(<ApplicationShell system={systemFixture} disconnect={disconnect} api={client} />)
+    await userEvent.click(screen.getByRole('link', { name: 'Activity' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Expand BTC operation' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Inspect BTC retrospective eligibility' }))
+    await userEvent.type(await screen.findByLabelText('Retrospective title'), 'Pending confirmation')
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm retrospective Play' }))
+    // Close the disclosure while its request is pending, then disconnect the actual shell.
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(screen.getByRole('button', { name: /^Disconnect .*session$/ }))
+    expect(disconnect).toHaveBeenCalledOnce()
+    expect((create.mock.calls[0]![1] as AbortSignal).aborted).toBe(true)
+    await act(async () => finish(retrospectiveSavedFixture))
+    expect(client.play).not.toHaveBeenCalled()
+    expect(client.overview).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('heading', { name: 'Plays' })).not.toBeInTheDocument()
   })
   it('opens a saved play from Overview and preserves edits when reopening that same play', async () => {
     const client = api({
@@ -351,9 +426,10 @@ describe('Main application shell', () => {
     await userEvent.type(screen.getByRole('textbox', { name: 'Play title' }), 'Keep this draft')
     await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Open Saved idea' }))
-    expect(await screen.findByText('Keep this draft')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Open Saved idea' })).toBeDisabled()
-    await userEvent.click(screen.getByRole('button', { name: 'Continue editing' }))
+    expect(await screen.findByText(/A Play was requested from another screen/)).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Keep this draft')
+    expect(client.play).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Keep current work' }))
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Keep this draft')
     expect(client.play).not.toHaveBeenCalled()
   })
@@ -494,7 +570,7 @@ describe('Main application shell', () => {
   it('creates an owner-scoped portfolio and reloads the workspace', async () => {
     const client = api()
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
-    await userEvent.click(await screen.findByRole('button', { name: 'Create your first portfolio' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Create an optional portfolio' }))
     const dialog = screen.getByRole('dialog')
     await userEvent.type(within(dialog).getByLabelText('Portfolio name'), 'Long-term perps')
     expect(within(dialog).getByRole('radio', { name: 'Folder' })).toBeChecked()
@@ -508,12 +584,14 @@ describe('Main application shell', () => {
     const client = api()
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
     await screen.findByText('Start with your accounts.')
-    await userEvent.click(screen.getByRole('button', { name: 'Add' }))
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Add account' }))
+    expect(screen.getByText(/Portfolios are optional groups/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Add your first account' }))
     await userEvent.type(screen.getByLabelText('Account name'), 'Unassigned manual')
     await userEvent.selectOptions(screen.getByLabelText(/Venue/), 'manual')
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add account' }))
     await waitFor(() => expect(client.createAccount).toHaveBeenCalledWith({ portfolioId: null, name: 'Unassigned manual', venueId: 'manual' }))
+    expect(client.createPortfolio).not.toHaveBeenCalled()
+    expect(client.sync).not.toHaveBeenCalled()
   })
   it('creates a manual account without fabricating an unavailable balance', async () => {
     const client = api({ overview: vi.fn().mockResolvedValue({ ...emptyOverview, portfolios: [portfolioFixture] }) })

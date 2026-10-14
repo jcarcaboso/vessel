@@ -26,6 +26,10 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<PlayStatusChange> StatusChanges => Set<PlayStatusChange>();
     public DbSet<ImportedOrder> Orders => Set<ImportedOrder>();
     public DbSet<PlayOrderLink> OrderLinks => Set<PlayOrderLink>();
+    public DbSet<ManualExecution> ManualExecutions => Set<ManualExecution>();
+    public DbSet<ManualExecutionHistory> ManualExecutionHistory => Set<ManualExecutionHistory>();
+    public DbSet<PlayReviewRevision> ReviewRevisions => Set<PlayReviewRevision>();
+    public DbSet<DiaryRequest> DiaryRequests => Set<DiaryRequest>();
     public DbSet<SizingSettings> SizingSettings => Set<SizingSettings>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -149,6 +153,13 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         play.Property(x => x.Plan).HasColumnType("jsonb");
         play.Property(x => x.Drawings).HasColumnType("jsonb");
         play.Property(x => x.Review).HasMaxLength(Play.MaxReviewLength);
+        play.Property(x => x.Origin).HasConversion<string>().HasMaxLength(16);
+        play.Property(x => x.ReviewAdherence).HasMaxLength(32);
+        play.Property(x => x.ReviewMistakeTag).HasMaxLength(100);
+        play.Property(x => x.ReviewLesson).HasMaxLength(4000);
+        play.Property(x => x.ReviewNextAction).HasMaxLength(4000);
+        play.Ignore(x => x.Answers);
+        play.Ignore(x => x.HasReview);
         play.Property(x => x.Version).IsConcurrencyToken();
         play.HasIndex(x => new { x.OwnerId, x.UpdatedAtUtc });
         play.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
@@ -184,6 +195,45 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         statusChange.Property(x => x.To).HasConversion<string>().HasMaxLength(16);
         statusChange.Property(x => x.Reason).HasConversion<string>().HasMaxLength(16);
         statusChange.Property(x => x.Note).HasMaxLength(Play.MaxCancelNoteLength);
+        var reviewRevision = modelBuilder.Entity<PlayReviewRevision>();
+        reviewRevision.ToTable("play_review_revisions");
+        reviewRevision.HasKey(x => x.Id);
+        reviewRevision.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
+            .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+        reviewRevision.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
+        reviewRevision.HasIndex(x => new { x.OwnerId, x.PlayId, x.Number }).IsUnique();
+        reviewRevision.Property(x => x.StructuredReview).HasColumnType("jsonb");
+        reviewRevision.Property(x => x.Review).HasMaxLength(Play.MaxReviewLength);
+
+        var manual = modelBuilder.Entity<ManualExecution>();
+        manual.ToTable("manual_executions");
+        manual.HasKey(x => x.Id);
+        manual.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
+            .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+        manual.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
+        manual.HasIndex(x => new { x.OwnerId, x.PlayId, x.OccurredAtUtc });
+        manual.Property(x => x.Role).HasMaxLength(16); manual.Property(x => x.EntryId).HasMaxLength(100);
+        manual.Property(x => x.Side).HasMaxLength(8); manual.Property(x => x.Source).HasMaxLength(100);
+        manual.Property(x => x.Quantity).HasMaxLength(96); manual.Property(x => x.Price).HasMaxLength(96);
+        manual.Property(x => x.Fee).HasMaxLength(96); manual.Property(x => x.FeeCurrency).HasMaxLength(32);
+
+        var manualHistory = modelBuilder.Entity<ManualExecutionHistory>();
+        manualHistory.ToTable("manual_execution_history");
+        manualHistory.HasKey(x => x.Id);
+        manualHistory.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
+            .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+        manualHistory.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
+        manualHistory.HasIndex(x => new { x.OwnerId, x.PlayId, x.OccurredAtUtc });
+        manualHistory.Property(x => x.Before).HasColumnType("jsonb");
+        manualHistory.Property(x => x.After).HasColumnType("jsonb");
+        manualHistory.Property(x => x.Reason).HasMaxLength(2000);
+
+        var request = modelBuilder.Entity<DiaryRequest>();
+        request.ToTable("diary_requests");
+        request.HasKey(x => new { x.OwnerId, x.Id });
+        request.HasQueryFilter(x => x.OwnerId == CurrentOwnerId);
+        request.Property(x => x.PayloadHash).HasMaxLength(64);
+        request.Property(x => x.Response).HasColumnType("jsonb");
         statusChange.Property(x => x.Source).HasConversion<string>().HasMaxLength(16).HasDefaultValue(StatusChangeSource.Owner)
             .HasSentinel(StatusChangeSource.Owner);
 
@@ -255,6 +305,9 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         // Reject foreign tracked heads even if loaded with an explicit filter bypass.
         foreach (var entry in ChangeTracker.Entries())
         {
+            if (entry.State == EntityState.Modified &&
+                entry.Entity is Vessel.Domain.Plays.ManualExecutionHistory or PlayReviewRevision or DiaryRequest)
+                throw new InvalidOperationException("Diary audit and request records are append-only.");
             var ownerId = entry.Entity switch
             {
                 Account account => account.OwnerId,
@@ -270,6 +323,10 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
                 PlayStatusChange change => change.OwnerId,
                 ImportedOrder importedOrder => importedOrder.OwnerId,
                 PlayOrderLink orderLink => orderLink.OwnerId,
+                ManualExecution manual => manual.OwnerId,
+                ManualExecutionHistory manualHistory => manualHistory.OwnerId,
+                PlayReviewRevision reviewRevision => reviewRevision.OwnerId,
+                DiaryRequest request => request.OwnerId,
                 SizingSettings sizing => sizing.OwnerId,
                 _ => (Guid?)null
             };

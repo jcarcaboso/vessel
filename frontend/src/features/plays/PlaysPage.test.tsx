@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { screen, waitFor, within } from '@testing-library/react'
+import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -11,6 +11,8 @@ import { accountFixture, idleMarketStream, instrumentCatalogFixture, portfolioFi
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { PlaysPage } from './PlaysPage'
 import { createDraft } from './draft'
+import { createEvidence } from './evidence'
+import type { ImageMarkup } from './markup'
 import { createPlaysSession, describePlanChanges, planFromDraft, syncEvidence, type PlaysSession } from './saved'
 
 const ids = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
@@ -33,7 +35,7 @@ function fakeServer() {
     playId: play.summary.id, status: play.summary.status, tracked: play.summary.instrumentSource === 'venue', checkedAtUtc: null,
     reason: play.summary.instrumentSource === 'venue' ? null : 'Manual instruments are not tracked at a venue.',
     totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
-    entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Venue facts.',
+    entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Venue facts.', issues: [],
   })
   const api = {
     plays: vi.fn(() => Promise.resolve([...plays.values()].map(play => play.summary))),
@@ -102,8 +104,10 @@ function fakeServer() {
   return { api, plays, history, evidence, execution }
 }
 
-function Page({ api, accounts = [accountFixture], initial = createPlaysSession() }: { api: WorkspaceApi; accounts?: BrokerAccount[]; initial?: PlaysSession }) {
+function Page({ api, accounts = [accountFixture], initial = createPlaysSession(), onControl }: { api: WorkspaceApi; accounts?: BrokerAccount[];
+  initial?: PlaysSession; onControl?: (set: Dispatch<SetStateAction<PlaysSession>>) => void }) {
   const [session, setSession] = useState(initial)
+  useEffect(() => { onControl?.(setSession) }, [onControl])
   return <NotificationProvider><PlaysPage accounts={accounts} portfolios={[portfolioFixture]} api={api} session={session} onSession={setSession} /></NotificationProvider>
 }
 
@@ -184,7 +188,7 @@ describe('saved plays', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Cancel play' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(server.api.changePlayStatus.mock.lastCall![2]).toEqual({ status: 'cancelled', reason: 'missed', note: 'Price ran away' })
-    expect(screen.getByRole('status')).toHaveTextContent('Cancelled. Only the review and images can change.')
+    expect(screen.getByRole('status')).toHaveTextContent('Cancelled. Review and images can change.')
     expect(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toBeDisabled()
     await user.click(screen.getByRole('tab', { name: 'Thesis' }))
@@ -284,6 +288,61 @@ describe('saved plays', () => {
     await waitFor(() => expect(server.api.createPlay).toHaveBeenCalledOnce())
   })
 
+  it('keeps notes, marks and removals made while a save is pending, and saves them next', async () => {
+    const server = fakeServer()
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    // The first upload's response arrives late, as on a slow connection.
+    const uploadEvidence = vi.fn(async (...args: Parameters<typeof server.api.uploadEvidence>) => {
+      const item = await server.api.uploadEvidence(...args)
+      await held
+      return item
+    })
+    const updateEvidenceMarkup = vi.fn((id: string, markup: ImageMarkup | null) => {
+      const item = server.evidence.find(other => other.id === id)!
+      item.markup = markup
+      return Promise.resolve({ ...item })
+    })
+    const image = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' })
+    const draft = { ...createDraft(), title: 'Evidence', accountId: accountFixture.id,
+      evidence: [{ ...createEvidence('capture', image, 'a.png'), note: 'Before' }, createEvidence('upload', image, 'b.png')] }
+    let setSession!: Dispatch<SetStateAction<PlaysSession>>
+    const user = userEvent.setup()
+    render(<Page api={client(server, { uploadEvidence, updateEvidenceMarkup })} initial={{ view: 'editor', draft, saved: null }}
+      onControl={set => { setSession = set }} />)
+    await user.click(screen.getByRole('tab', { name: 'Evidence' }))
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    await waitFor(() => expect(uploadEvidence).toHaveBeenCalledOnce())
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled()
+
+    const note = screen.getByRole('textbox', { name: 'Note for image 1' })
+    await user.clear(note)
+    await user.type(note, 'During save')
+    const markup: ImageMarkup = { width: 100, height: 50, shapes: [{ id: 'b', kind: 'box', color: '#ff5c5c', width: 2, from: { x: 1, y: 1 }, to: { x: 50, y: 25 } }] }
+    act(() => setSession(session => ({ ...session, draft: { ...session.draft,
+      evidence: session.draft.evidence.map((item, index) => index === 0 ? { ...item, markup } : item) } })))
+    await user.click(screen.getByRole('button', { name: 'Remove image 2' }))
+    await user.click(within(screen.getByRole('group', { name: 'Remove image 2?' })).getByRole('button', { name: 'Remove' }))
+
+    release()
+    const save = await screen.findByRole('button', { name: /^Save$/ })
+    expect(save).toBeEnabled()
+    expect(screen.getByRole('textbox', { name: 'Note for image 1' })).toHaveValue('During save')
+    expect(within(screen.getByRole('list', { name: 'Evidence images' })).getAllByRole('listitem')).toHaveLength(1)
+    // The removed image finished uploading with the save; it is now a saved image to delete.
+    expect(uploadEvidence).toHaveBeenCalledTimes(2)
+    const [first, second] = [...server.evidence]
+    expect(first!.note).toBe('Before')
+
+    await user.click(save)
+    await waitFor(() => expect(screen.getByRole('button', { name: /Saved/ })).toBeDisabled())
+    expect(server.api.updateEvidenceNote).toHaveBeenCalledWith(first!.id, 'During save')
+    expect(updateEvidenceMarkup).toHaveBeenCalledWith(first!.id, markup)
+    expect(server.api.deleteEvidence).toHaveBeenCalledWith(second!.id)
+    expect(uploadEvidence).toHaveBeenCalledTimes(2)
+    expect(server.evidence).toEqual([expect.objectContaining({ id: first!.id, note: 'During save', markup })])
+  })
+
   it('links a venue instrument to its trading page on the venue', async () => {
     const venue = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}` }
     const server = fakeServer()
@@ -312,6 +371,8 @@ describe('venue tracking', () => {
     await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
     await pickInstrument(user, 'BTC')
     await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
+    const direction = () => within(screen.getByRole('group', { name: 'Direction' }))
+    expect(direction().getByRole('button', { name: /Short/ })).toBeEnabled()
     // The venue reports the entry filled: the server moves the play to Open on the next check.
     server.api.checkPlayExecution.mockImplementation((id: string) => {
       const play = server.plays.get(id)!
@@ -322,6 +383,9 @@ describe('venue tracking', () => {
     await user.click(screen.getByRole('button', { name: 'Plan it' }))
     await waitFor(() => expect(server.api.checkPlayExecution).toHaveBeenCalled())
     await waitFor(() => expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByText('Open', { selector: '.badge' })).toBeInTheDocument())
+    // A filled entry fixes the direction: it decides which side closes the position.
+    expect(direction().getByRole('button', { name: /Short/ })).toBeDisabled()
+    expect(direction().getByRole('button', { name: /Long/ })).toBeDisabled()
     await user.click(screen.getByRole('tab', { name: 'Execution' }))
     expect(screen.getByRole('button', { name: 'Check venue' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument()

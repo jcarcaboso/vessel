@@ -3,7 +3,7 @@ import { candleIntervals, type CandleInterval } from './workspace'
 export interface VenueCapabilities {
   sync: boolean; instruments: boolean; orders: boolean; candles: boolean
   marketContext: boolean; stream: boolean; stablecoinWallet: boolean
-  accountDiscovery?: boolean; readOnlyCredential?: boolean
+  accountDiscovery?: boolean; readOnlyCredential?: boolean; manualExecutions?: boolean
 }
 
 /** One venue and what Vessel can do there. The browser checks capabilities, never venue names. */
@@ -69,7 +69,7 @@ function isVenue(value: unknown): value is VenueInfo {
     ['planned', 'candidate', 'manual', 'read-only'].includes(String(value.status)) &&
     ['none', 'evm-address', 'account-index'].includes(String(value.source)) &&
     isRecord(value.capabilities) && capabilityNames.every(name => typeof (value.capabilities as Record<string, unknown>)[name] === 'boolean') &&
-    ['accountDiscovery', 'readOnlyCredential'].every(name => {
+    ['accountDiscovery', 'readOnlyCredential', 'manualExecutions'].every(name => {
       const flag = (value.capabilities as Record<string, unknown>)[name]
       return flag === undefined || typeof flag === 'boolean'
     }) &&

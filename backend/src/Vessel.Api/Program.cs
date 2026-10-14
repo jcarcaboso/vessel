@@ -96,6 +96,16 @@ app.Use(async (context, next) =>
         if (context.Request.ContentLength > 4096)
             throw new WorkspaceException(413, "Credential request is too large.");
     }
+    else if (!HttpMethods.IsGet(context.Request.Method) &&
+        (context.Request.Path.StartsWithSegments("/api/plays") &&
+            (context.Request.Path.Value?.Contains("/manual-executions", StringComparison.OrdinalIgnoreCase) == true ||
+             string.Equals(context.Request.Path.Value?.TrimEnd('/'), "/api/plays/retrospective", StringComparison.OrdinalIgnoreCase))))
+    {
+        var max = context.Request.Path.Value?.Contains("/manual-executions", StringComparison.OrdinalIgnoreCase) == true ? 16_384 : 131_072;
+        var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+        if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = max;
+        if (context.Request.ContentLength > max) throw new WorkspaceException(413, "Diary request is too large.");
+    }
     await next(context);
 });
 

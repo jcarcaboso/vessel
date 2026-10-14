@@ -42,6 +42,15 @@ October 13, 2026: first manual release packaging targets v0.1.0 on Linux amd64. 
 
 ## Project tracking
 
+October 13, 2026: the owner authorized all P1 diary must-haves from the product
+review, delegated Sol implementation, two independent adversarial Sol reviews,
+a pull request and synthetic browser captures. Follow
+`docs/architecture/diary-completion-contract.md` for manual execution provenance,
+correction history, retrospective eligibility and atomic linking, structured
+review, exclusion drill-down and whole-position estimates. Preserve the six
+execution/evidence integrity fixes. This work does not authorize P2/P3,
+deployment or migration of the owner's database.
+
 - Repository: https://github.com/jcarcaboso/vessel
 - Plane origin: https://kanban.testing.alpetxino.com
 - Plane workspace: working-projects

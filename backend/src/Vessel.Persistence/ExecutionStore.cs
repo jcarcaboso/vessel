@@ -11,9 +11,18 @@ namespace Vessel.Persistence;
 public sealed class ExecutionStore(VesselDbContext db) : IPlayExecutionStore
 {
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => db.Accounts.SingleOrDefaultAsync(x => x.Id == id, ct);
-    public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct) => db.Plays
-        .Where(p => p.AccountId == accountId && (p.Status == PlayStatus.Planned || p.Status == PlayStatus.Paused || p.Status == PlayStatus.Open))
-        .OrderBy(p => p.CreatedAtUtc).ThenBy(p => p.Id).ToListAsync(ct);
+    public async Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct)
+    {
+        // The row locks make owner status and plan changes wait for this transaction (PlayStore.WithPlayLockAsync).
+        // Owner is explicit in raw SQL as well as the global query filter.
+        var plays = await db.Plays.FromSqlInterpolated($"""
+            SELECT * FROM plays WHERE "AccountId" = {accountId} AND "OwnerId" = {db.CurrentOwnerId}
+            AND "Status" IN ('Planned', 'Paused', 'Open') FOR NO KEY UPDATE
+            """).OrderBy(p => p.CreatedAtUtc).ThenBy(p => p.Id).ToListAsync(ct);
+        // A scoped context could already track a Play read before waiting on the lock.
+        foreach (var play in plays) await db.Entry(play).ReloadAsync(ct);
+        return plays;
+    }
     public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct) =>
         db.Orders.Where(o => o.AccountId == accountId).OrderBy(o => o.PlacedAtUtc).ThenBy(o => o.OrderId).ToListAsync(ct);
     public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, CancellationToken ct) =>
@@ -69,6 +78,10 @@ public sealed class ExecutionStore(VesselDbContext db) : IPlayExecutionStore
     public async Task<T> WithAccountLockAsync<T>(Guid accountId, Func<Task<T>> action, CancellationToken ct)
     {
         await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
+        var accounts = await db.Accounts.FromSqlInterpolated(
+            $"SELECT * FROM accounts WHERE \"Id\" = {accountId} AND \"OwnerId\" = {db.CurrentOwnerId} FOR UPDATE").ToListAsync(ct);
+        var account = accounts.SingleOrDefault() ?? throw new WorkspaceException(404, "Account not found.");
+        await db.Entry(account).ReloadAsync(ct);
         var key = "vessel-execution:" + accountId;
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);
         var result = await action();

@@ -46,12 +46,17 @@ public static class ExecutionMatcher
     /// <summary>
     /// Candidates for one order. Planned levels win over an unplanned exit, which is only proposed for an
     /// open Play when the order reduces a position and was placed after the Play's first entry fill.
+    /// The order's retained <paramref name="fills"/> must not contradict the level, and an exit that has filled
+    /// must have filled at or after the Play's first entry fill; a resting stop or target may be placed earlier.
     /// </summary>
     public static List<MatchCandidate> Candidates(ImportedOrder order, IEnumerable<(Play Play, PlayPlanDocument Plan)> plays,
-        Func<Play, string, bool> dismissed, bool closesPosition, Func<Play, DateTimeOffset?>? firstEntryFill = null, decimal? tick = null)
+        Func<Play, string, bool> dismissed, bool closesPosition, Func<Play, DateTimeOffset?>? firstEntryFill = null, decimal? tick = null,
+        IReadOnlyCollection<ImportedFill>? fills = null)
     {
         var planned = new List<MatchCandidate>();
         var exits = new List<MatchCandidate>();
+        fills ??= [];
+        DateTimeOffset? filledAt = fills.Count > 0 ? fills.Min(f => f.OccurredAtUtc) : null;
         foreach (var (play, plan) in plays)
         {
             if (!IsActive(play) || play.InstrumentSource != InstrumentSource.Venue || play.ContractId != order.ContractId ||
@@ -59,6 +64,10 @@ public static class ExecutionMatcher
                 continue;
             var acting = order.TriggerPrice ?? order.LimitPrice;
             var kind = order.OrderType.ToLowerInvariant();
+            var entrySide = ExecutionIntegrity.EntrySide(plan);
+            var opened = firstEntryFill?.Invoke(play);
+            bool Executed(OrderLinkRole role) => fills.All(f => !ExecutionIntegrity.Contradicts(role, entrySide, f)) &&
+                (role == OrderLinkRole.Entry || filledAt is null || opened is { } at && filledAt >= at);
             foreach (var level in Levels(plan))
             {
                 if (level.Side != order.Side || level.Price is not { } price || !Near(acting, price, tick) || dismissed(play, level.Key)) continue;
@@ -70,11 +79,11 @@ public static class ExecutionMatcher
                     OrderLinkRole.Target => !kind.Contains("stop"),
                     _ => false
                 };
-                if (fits) planned.Add(new(play, level));
+                if (fits && Executed(level.Role)) planned.Add(new(play, level));
             }
             var exit = new PlanLevelTarget(OrderLinkRole.Exit, null, null, null, ExitSide(plan));
             if (play.Status == PlayStatus.Open && order.Side == exit.Side && (order.ReduceOnly || order.IsPositionTpsl || closesPosition) &&
-                firstEntryFill?.Invoke(play) is { } opened && order.PlacedAtUtc >= opened && !dismissed(play, exit.Key))
+                opened is { } first && order.PlacedAtUtc >= first && Executed(OrderLinkRole.Exit) && !dismissed(play, exit.Key))
                 exits.Add(new(play, exit));
         }
         if (planned.Count > 0) return planned;

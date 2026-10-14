@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plays (improved) · Vessel mockup</title>
+<style>
+@font-face{font-family:Manrope;src:url('../../../frontend/public/fonts/manrope.ttf') format('truetype');font-weight:200 800;font-display:swap}
+:root{color-scheme:dark;
+--bg:#0f1114;--fg:#e9edf2;--card:#171a1f;--card2:#1b1f25;--sec:#1e2229;--accent:#242932;--muted:#abb3c0;--dim:#929cab;
+--primary:#c5cfdd;--primary-fg:#11161d;--border:#394350;--border2:#2c333d;--field:#111419;--ring:#b9c9e4;
+--pos:#a9d6b6;--neg:#f2b3ac;--warn:#edd49e;--info:#8fb8ff;
+--e1:#8fb8ff;--e2:#c9a8ff;--e3:#7fd6e0;--avg:#e9edf2;--radius:7px}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:Manrope,system-ui,sans-serif;font-size:13px;line-height:1.45}
+h1,h2,h3,p{margin:0}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.muted{color:var(--muted)}.dim{color:var(--dim)}.pos{color:var(--pos)}.neg{color:var(--neg)}.warn{color:var(--warn)}
+.sm{font-size:11.5px}.xs{font-size:11px}
+/* shell */
+.shell{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100vh;background:linear-gradient(90deg,#13161a 219px,#394350 219px 220px,transparent 220px)}
+.side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:22px 14px 16px;border-right:1px solid var(--border);background:#13161a}
+.brand{display:flex;align-items:center;gap:10px;padding:0 8px 22px;font-size:24px;font-weight:650;letter-spacing:-1.2px}
+.mono{display:grid;place-items:center;width:32px;height:34px;border:1px solid #414b58;border-radius:8px;color:var(--primary);font-size:21px;font-weight:500}
+.brand small{display:block;font-size:8px;letter-spacing:1.8px;font-weight:500;color:var(--muted)}
+.navlabel{font-size:10px;letter-spacing:1.6px;color:var(--muted);margin:14px 10px 8px;font-weight:600}
+.nav{display:flex;align-items:center;gap:10px;min-height:38px;padding:8px 11px;border:1px solid transparent;border-radius:6px;color:var(--muted);font-size:13px;text-decoration:none}
+.nav.on{background:#222832;border-color:#394554;color:#eaf0fa}
+.nav svg{width:16px;height:16px;flex-shrink:0}
+.nav .count{margin-left:auto;font-size:11px;min-width:22px;text-align:center;border:1px solid #6b5a3a;border-radius:4px;color:var(--warn);padding:0 4px}
+.nav .count.plain{border-color:#4c596b;color:#d0dcf1}
+.side-bottom{margin-top:auto;border-top:1px solid var(--border);padding-top:12px}
+.ro{display:flex;gap:8px;font-size:11px;color:var(--muted);padding:6px 10px 12px}
+.owner{display:flex;align-items:center;gap:9px;padding:6px 10px}
+.avatar{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#29313c;border:1px solid #455165;color:#d3def0;font-size:12px}
+.main{min-width:0}
+.topbar{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;border-bottom:1px solid var(--border)}
+.crumb{font-size:12px;color:var(--muted)}.crumb b{color:var(--fg);font-weight:600}.crumb span{margin:0 9px;color:#7f8ca1}
+.topright{display:flex;align-items:center;gap:14px;font-size:12px;color:var(--muted)}
+.live{display:inline-flex;align-items:center;gap:6px}.live i{width:6px;height:6px;border-radius:50%;background:var(--pos)}
+.content{padding:18px 28px 28px}
+.mock-note{font-size:11px;color:var(--dim);border:1px dashed #3a4350;border-radius:6px;padding:6px 10px;margin-top:18px}
+/* primitives */
+.panel{background:var(--card);border:1px solid var(--border);border-radius:9px;min-width:0}
+.ph{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border)}
+.ph h2{font-size:14px;font-weight:650;letter-spacing:-.2px}
+.ph p{font-size:11.5px;color:var(--muted);margin-top:2px}
+.pb{padding:14px 16px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border:1px solid var(--border);border-radius:6px;background:var(--sec);color:var(--fg);font:inherit;font-size:12px;white-space:nowrap}
+.btn.primary{background:var(--primary);color:var(--primary-fg);border-color:var(--primary);font-weight:650}
+.btn.ghost{background:transparent}
+.btn.sm{height:26px;padding:0 8px;font-size:11.5px}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:999px;border:1px solid var(--border);background:var(--sec);font-size:11.5px;color:var(--muted);white-space:nowrap}
+.chip i{width:7px;height:7px;border-radius:50%;background:var(--warn)}
+.chip.warn{border-color:#6b5a3a;background:#241f17;color:var(--warn)}
+.chip.ok{border-color:#3e5a49;background:#17221c;color:var(--pos)}
+.chip.bad{border-color:#6a4440;background:#261a19;color:var(--neg)}
+.chip.info{border-color:#3f5272;background:#171f2b;color:#bcd2f7}
+.badge{display:inline-block;font-size:10.5px;line-height:1.6;padding:1px 6px;border:1px solid #424d5e;border-radius:4px;background:#232933;color:#c5d1e3;white-space:nowrap}
+.badge.warn{border-color:#6b5a3a;color:var(--warn);background:#241f17}
+.badge.pos{border-color:#3e5a49;color:var(--pos);background:#17221c}
+.badge.neg{border-color:#6a4440;color:var(--neg);background:#261a19}
+.badge.info{border-color:#3f5272;color:#bcd2f7;background:#171f2b}
+.ii{display:inline-grid;place-items:center;width:14px;height:14px;border:1px solid #6d7889;border-radius:50%;font-size:9px;font-weight:700;color:var(--muted);font-style:normal;vertical-align:1px;margin-left:4px}
+.field{display:inline-flex;align-items:center;height:30px;border:1px solid var(--border);border-radius:6px;background:var(--field);padding:0 9px;gap:6px;font-size:12.5px}
+.field .u{color:var(--dim);font-size:11px}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--field)}
+.seg span{padding:5px 10px;font-size:12px;color:var(--muted);border-right:1px solid var(--border)}
+.seg span:last-child{border-right:0}
+.seg span.on{background:var(--accent);color:var(--fg)}
+.seg span.long{background:#1b2a21;color:var(--pos)}
+.lbl{font-size:10.5px;letter-spacing:.9px;text-transform:uppercase;color:var(--muted);font-weight:600}
+table.t{width:100%;border-collapse:collapse;font-size:12.5px}
+table.t th{font-size:11px;font-weight:600;color:var(--muted);text-align:left;padding:9px 12px;background:#14181e;white-space:nowrap;border-bottom:1px solid var(--border)}
+table.t td{padding:10px 12px;border-top:1px solid #2a313b;vertical-align:middle}
+table.t .r{text-align:right}
+.kpi{padding:14px 16px}
+.kpi .k{font-size:11.5px;color:var(--muted)}
+.kpi .v{font-size:23px;font-weight:550;letter-spacing:-.6px;font-variant-numeric:tabular-nums;margin-top:2px}
+.kpi .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.grid{display:grid;gap:14px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:0}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);padding:0 12px}
+.tabs span{padding:10px 10px 9px;font-size:12.5px;color:var(--muted);border-bottom:2px solid transparent}
+.tabs span.on{color:var(--fg);border-color:var(--primary)}
+.greyed{opacity:.55}
+.hatch{background-image:repeating-linear-gradient(135deg,transparent 0 5px,#ffffff10 5px 7px)}
+
+.hdr{padding:12px 16px;display:grid;gap:10px}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:nowrap}
+.title{font-size:20px;font-weight:650;letter-spacing:-.6px;display:flex;align-items:center;gap:8px}
+.title svg{color:var(--muted)}
+.sel{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:6px;background:var(--field);font-size:12.5px;white-space:nowrap}
+.sel .k{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.7px}
+.sel b{font-weight:600}
+.caret{color:var(--dim);font-size:10px}
+.spacer{flex:1}
+.capline>span{white-space:nowrap}
+.capline{display:flex;align-items:center;gap:18px;font-size:12.5px;color:var(--muted)}
+.capline b{color:var(--fg);font-weight:600}
+.vsep{width:1px;height:20px;background:var(--border)}
+.risk{display:inline-flex;align-items:center;gap:8px;padding:3px 4px 3px 10px;border:1px solid #3f5272;border-radius:7px;background:#151b24}
+.risk .field{height:26px;width:72px;justify-content:space-between;border-color:#4b5f80}
+.ws{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,1fr);gap:14px;margin-top:14px;height:780px}
+.left{display:grid;grid-template-rows:auto minmax(0,1fr);gap:14px;min-height:0}
+.stats{display:flex;gap:22px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:11px;color:var(--muted)}
+.stats b{display:block;color:var(--fg);font-size:12.5px;font-weight:600}
+.tb{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px}
+.tf span{padding:3px 7px;border-radius:4px;color:var(--muted)}.tf span.on{background:var(--accent);color:var(--fg)}
+.drawbar{display:inline-flex;align-items:center;gap:8px;padding:2px 8px;border:1px solid var(--border);border-radius:5px;background:var(--sec);color:var(--muted);font-size:11.5px}
+.body{display:grid;grid-template-columns:38px minmax(0,1fr)}
+.railc{display:flex;flex-direction:column;align-items:center;gap:6px;padding-top:8px;border-right:1px solid var(--border);background:#14171c}
+.tool{display:grid;place-items:center;width:28px;height:28px;border-radius:5px;color:var(--muted)}
+.tool:nth-child(2){background:var(--accent);color:var(--fg)}
+.legend{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--border);font-size:11.5px;color:var(--muted)}
+.lg{white-space:nowrap;display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border:1px solid var(--border);border-radius:5px;background:var(--field)}
+.lg i{width:12px;height:3px;border-radius:1px}
+.journal .tabs span .d{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--warn);margin-left:5px;vertical-align:1px}
+.jgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:12px 14px}
+.jf{display:grid;gap:4px;font-size:11.5px;color:var(--muted)}
+.jf .field{width:100%}
+.jarea{flex:1;margin:0 14px 12px;border:1px solid var(--border);border-radius:6px;background:var(--field);padding:9px 11px;font-size:12.5px;color:#d6dce5;min-height:64px}
+.pos-panel{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.pscroll{overflow:auto;flex:1;min-height:0}
+.sect{padding:12px 14px;border-bottom:1px solid var(--border2)}
+.sect h3{font-size:12.5px;font-weight:650;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pair .field{width:100%;justify-content:space-between}
+.fl{font-size:11px;color:var(--muted);margin-bottom:3px}
+.slider{position:relative;height:22px;margin:4px 0 2px}
+.slider .track{position:absolute;left:0;right:0;top:9px;height:4px;border-radius:2px;background:#2a313b}
+.slider .safe{position:absolute;left:0;width:53.8%;top:9px;height:4px;border-radius:2px;background:#4d6a58}
+.slider .fill{position:absolute;left:0;width:23%;top:9px;height:4px;border-radius:2px;background:var(--ring)}
+.slider .thumb{position:absolute;left:23%;top:4px;width:14px;height:14px;margin-left:-7px;border-radius:50%;background:var(--ring);border:2px solid var(--card)}
+.slider .mk{position:absolute;left:53.8%;top:0;height:22px;border-left:1px dashed var(--warn)}
+.presets{display:flex;gap:5px;margin-top:6px}
+.presets span{padding:2px 8px;border:1px solid var(--border);border-radius:4px;font-size:11.5px;color:var(--muted)}
+.presets span.on{background:var(--accent);color:var(--fg);border-color:#5a6678}
+.et{width:100%;border-collapse:collapse;font-size:12px}
+.et th{font-size:10.5px;color:var(--muted);font-weight:600;text-align:left;padding:5px 5px;border-bottom:1px solid var(--border)}
+.et td{padding:6px 5px;border-top:1px solid #2a313b;font-variant-numeric:tabular-nums;white-space:nowrap}
+.et tr.sub td{border-top:0;padding-top:0;font-size:11.5px;color:var(--muted)}
+.et tr.selrow td{background:#1a2230}
+.et .r{text-align:right}
+.ebar{display:inline-block;width:3px;height:14px;border-radius:1px;vertical-align:-2px;margin-right:6px}
+.tp{display:inline-flex;gap:4px;align-items:center;padding:1px 6px;border-radius:4px;background:#17221c;color:var(--pos);font-size:11px;border:1px solid #2f4a3a}
+.lvl{display:grid;grid-template-columns:58px 1fr 54px;gap:6px;align-items:center;margin-bottom:6px;font-size:12px}
+.unit{display:inline-flex;border-left:1px solid var(--border);margin-left:auto;height:100%}
+.unit span{padding:0 6px;font-size:10.5px;color:var(--dim);display:grid;place-items:center}
+.unit span.on{color:var(--fg);background:var(--accent)}
+.lvl .field{padding-right:0;width:100%}
+.summary{margin-top:14px}
+.sgrid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid var(--border)}
+.sc{padding:12px 16px;border-right:1px solid var(--border2);border-bottom:1px solid var(--border2)}
+.sc:nth-child(5n){border-right:0}
+.sc .k{font-size:11.5px;color:var(--muted);display:flex;align-items:center}
+.sc .v{font-size:18px;font-weight:600;letter-spacing:-.3px;font-variant-numeric:tabular-nums;margin-top:3px}
+.sc .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.assume{display:flex;flex-wrap:wrap;gap:6px 18px;padding:10px 16px;background:#1a1f27;border-top:1px solid #3f5272;font-size:11.5px;color:#d6dce5;border-radius:0 0 9px 9px}.assume b{width:100%;color:#bcd2f7;font-weight:650}.assume span::before{content:'· ';color:var(--dim)}
+.pop{position:absolute;z-index:5;background:#1e2229;border:1px solid #4a5563;border-radius:8px;box-shadow:0 10px 30px #0008;padding:12px 14px;font-size:12px}
+.pop h4{margin:0 0 6px;font-size:12.5px}
+.pop ul{margin:6px 0 0;padding-left:16px;color:#d6dce5}
+.pop li{margin:2px 0}
+.check{color:var(--pos)}
+</style></head>
+<body><div class="shell">
+<aside class="side">
+  <div class="brand"><span class="mono">V</span><div>vessel<small>THE TRADING JOURNAL</small></div></div>
+  <div class="navlabel">WORKSPACE</div>
+  <a class="nav" href="overview-improved.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>Overview</a>
+  <a class="nav on" href="plays-improved.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 3h5v10H2zM9 3h5v10H9z"/></svg>Plays<span class="count plain">4</span></a>
+  <a class="nav" href="trades-inbox.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M1 9h3l2-5 3 9 2-4h4"/></svg>Activity<span class="count" title="Unreviewed">3</span></a>
+  <a class="nav" href="analytics.html"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 14V8M6 14V4M10 14V9M14 14V2"/></svg>Analytics</a>
+  <a class="nav" href="#"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 4h4l1 1h7v8H2z"/></svg>Portfolios</a>
+  <a class="nav" href="#"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2" y="4" width="12" height="9" rx="1.5"/><path d="M10 8.5h4"/></svg>Accounts<span class="count plain">3</span></a>
+  <div class="navlabel">LATER</div>
+  <a class="nav" style="opacity:.75"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M3 2h8l2 2v10H3z"/><path d="M5.5 6h5M5.5 9h5"/></svg>Playbook<span style="margin-left:auto;font-size:10px">Later</span></a>
+  <div class="side-bottom">
+    <div class="ro"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 1.5l5 2v4c0 3.2-2.2 5.6-5 7-2.8-1.4-5-3.8-5-7v-4z"/></svg><div><b style="color:#c6d2e2;font-weight:550">Read-only by design</b><br>Records and flags. Never places orders.</div></div>
+    <a class="nav" href="#"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><circle cx="8" cy="8" r="2.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg>Settings</a>
+    <div class="owner"><span class="avatar">O</span><div class="sm">Owner<div class="dim xs">Private workspace</div></div></div>
+  </div>
+</aside>
+<main class="main">
+  <div class="topbar"><div class="crumb">Workspace<span>/</span>Plays<span>/</span><b>BTC range reclaim 59k</b></div><div class="topright"><span class="live"><i></i>Hyperliquid stream live</span><span class="badge">Perpetuals</span></div></div>
+  <div class="content">
+<section class="panel hdr" style="position:relative">
+  <div class="row">
+    <div class="title">BTC range reclaim 59k <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M11 2l3 3-8 8H3v-3z"/></svg></div>
+    <span class="sel"><span class="k">Account</span><b>Hyperliquid main</b><span class="caret">▾</span></span>
+    <span class="sel"><span class="k">Perp</span><b>BTC</b><span class="num">60,880</span><span class="pos xs">+1.12%</span><span class="dim xs">max 40×</span><span class="caret">▾</span></span>
+    <span class="seg"><span class="long">↑ Long</span><span>↓ Short</span></span>
+    <span class="spacer"></span>
+    <span class="sel"><span class="k">Status</span><b>Idea</b><span class="caret">▾</span></span>
+    <span class="btn primary">Save Play</span>
+    <span class="btn ghost" style="padding:0 8px">⋯</span>
+  </div>
+  <div class="row capline">
+    <span class="chip warn"><i></i>Unsaved · saved 14:05<span class="ii" style="border-color:#8d7a52;color:var(--warn)">i</span></span>
+    <span class="chip warn" style="border-radius:6px;border-color:var(--warn)">⚠ 1 issue ▾</span>
+    <span class="vsep"></span>
+    <span>Account <b class="num">$10,000.00</b><span class="ii">i</span></span>
+    <span>Budget <b class="num">$10,000.00</b> ✎</span>
+    <span class="risk"><span style="color:#bcd2f7;font-weight:600">Risk</span><span class="field num"><b>1.00</b><span class="u">%</span></span><span class="num">= <b>$100.00</b> → <b>0.0667 BTC</b></span><span class="badge info">Applied</span></span>
+    <span class="spacer"></span>
+    <span class="xs muted">Heat <b class="warn">3.2% + 1 unknown</b> / 3% ⚠</span>
+  </div>
+  <div class="pop" style="left:120px;top:84px;width:470px">
+    <h4>1 issue · saving is allowed, <i>Planned</i> is blocked</h4>
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #6b5a3a;background:#241f17;border-radius:6px;color:var(--warn)">⚠<div style="flex:1">Invalidation is empty. Add at least one condition before marking this Play Planned.</div><span class="btn sm">Fix →</span></div>
+    <div class="xs muted" style="margin-top:8px"><span class="check">✓</span> Stops below Long entries · <span class="check">✓</span> Shares 100% · <span class="check">✓</span> 10× ≤ BTC 40× · <span class="check">✓</span> Liq beyond stop on every fill path</div>
+  </div>
+</section>
+
+<div class="ws">
+  <div class="left">
+    <section class="panel" style="overflow:hidden">
+      <div class="stats">
+        <div>Mark<b class="num">60,880</b></div><div>Oracle<b class="num">60,874</b></div>
+        <div>24h<b class="num pos">+674 · +1.12%</b></div><div>24h volume<b class="num">$1.84B</b></div>
+        <div>Open interest<b class="num">$2.31B · 37,940 BTC</b></div><div>Funding<b class="num">0.00125%/h · 11.0% APR</b></div>
+      </div>
+      <div class="tb">
+        <span class="tf"><span>5m</span><span>15m</span><span class="on">1h</span><span>4h</span><span>D</span></span>
+        <span class="vsep"></span>
+        <span class="sel" style="height:26px">Aggregate · all entries <span class="caret">▾</span></span>
+        <span class="drawbar">Trend line · <span class="dot" style="background:#8fb8ff"></span> · 1px · Delete</span>
+        <span class="spacer"></span>
+        <span class="xs dim">Updated 14:05:12 UTC</span><span class="live xs"><i style="width:6px;height:6px;border-radius:50%;background:var(--pos);display:inline-block"></i> Live</span>
+        <span class="btn sm ghost">Capture</span><span class="btn sm ghost">Expand</span>
+      </div>
+      <div class="body"><div class="railc"><span class="tool"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 13L13 3"/></svg></span><span class="tool"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 8h12"/></svg></span><span class="tool"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 4h10v8H3z"/></svg></span><span class="tool"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v12M2 8h12"/></svg></span><span class="tool"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 13V3h4a3 3 0 010 6H4"/></svg></span><span class="tool"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 12l4-4 2 2 4-5"/></svg></span></div><div><svg viewBox="0 0 692 384" width="100%" height="384" role="img" aria-label="BTC 1h candles with plan levels">
+    <rect width="692" height="384" fill="#14171c"/><line x1="0" x2="618" y1="345.61538461538464" y2="345.61538461538464" stroke="#39435033"/><text x="626" y="349.61538461538464" fill="#929cab" font-size="11">57,000</text><line x1="0" x2="618" y1="323.69230769230774" y2="323.69230769230774" stroke="#39435033"/><text x="626" y="327.69230769230774" fill="#929cab" font-size="11">57,500</text><line x1="0" x2="618" y1="301.7692307692308" y2="301.7692307692308" stroke="#39435033"/><line x1="0" x2="618" y1="279.8461538461538" y2="279.8461538461538" stroke="#39435033"/><text x="626" y="283.8461538461538" fill="#929cab" font-size="11">58,500</text><line x1="0" x2="618" y1="257.9230769230769" y2="257.9230769230769" stroke="#39435033"/><line x1="0" x2="618" y1="236" y2="236" stroke="#39435033"/><line x1="0" x2="618" y1="214.07692307692307" y2="214.07692307692307" stroke="#39435033"/><line x1="0" x2="618" y1="192.15384615384613" y2="192.15384615384613" stroke="#39435033"/><text x="626" y="196.15384615384613" fill="#929cab" font-size="11">60,500</text><line x1="0" x2="618" y1="170.23076923076923" y2="170.23076923076923" stroke="#39435033"/><line x1="0" x2="618" y1="148.3076923076923" y2="148.3076923076923" stroke="#39435033"/><text x="626" y="152.3076923076923" fill="#929cab" font-size="11">61,500</text><line x1="0" x2="618" y1="126.38461538461539" y2="126.38461538461539" stroke="#39435033"/><line x1="0" x2="618" y1="104.46153846153847" y2="104.46153846153847" stroke="#39435033"/><text x="626" y="108.46153846153847" fill="#929cab" font-size="11">62,500</text><line x1="0" x2="618" y1="82.53846153846153" y2="82.53846153846153" stroke="#39435033"/><text x="626" y="86.53846153846153" fill="#929cab" font-size="11">63,000</text><line x1="0" x2="618" y1="60.61538461538462" y2="60.61538461538462" stroke="#39435033"/><text x="626" y="64.61538461538461" fill="#929cab" font-size="11">63,500</text><line x1="0" x2="618" y1="38.69230769230769" y2="38.69230769230769" stroke="#39435033"/><line x1="0" x2="618" y1="16.769230769230766" y2="16.769230769230766" stroke="#39435033"/><text x="626" y="20.769230769230766" fill="#929cab" font-size="11">64,500</text><line x1="6" x2="6" y1="0" y2="356" stroke="#39435026"/><text x="9" y="373" fill="#929cab" font-size="11">Sep 29</text><line x1="152.39999999999998" x2="152.39999999999998" y1="0" y2="356" stroke="#39435026"/><text x="155.39999999999998" y="373" fill="#929cab" font-size="11">Sep 30</text><line x1="298.79999999999995" x2="298.79999999999995" y1="0" y2="356" stroke="#39435026"/><text x="301.79999999999995" y="373" fill="#929cab" font-size="11">Oct 1</text><line x1="445.2" x2="445.2" y1="0" y2="356" stroke="#39435026"/><text x="448.2" y="373" fill="#929cab" font-size="11">Oct 2</text>
+    <rect x="347.59999999999997" y="38.69230769230769" width="270.40000000000003" height="197.30769230769232" fill="#a9d6b6" opacity=".09"/>
+    <rect x="347.59999999999997" y="126.38461538461539" width="270.40000000000003" height="109.61538461538461" fill="#a9d6b6" opacity=".06"/>
+    <rect x="347.59999999999997" y="236" width="270.40000000000003" height="65.76923076923077" fill="#f2b3ac" opacity=".16"/>
+    <text x="353.59999999999997" y="142.3846153846154" fill="#a9d6b6" font-size="11" font-weight="600">Reward · 2.33R</text>
+    <text x="353.59999999999997" y="296.7692307692308" fill="#f2b3ac" font-size="11" font-weight="600">Risk · $100</text>
+    <line x1="9.1" x2="9.1" y1="147.0" y2="160.8" stroke="#cf8e86" stroke-width="1"/><rect x="7.2" y="150.5" width="3.8" height="5.9" fill="#cf8e86"/><line x1="15.1" x2="15.1" y1="147.5" y2="168.3" stroke="#cf8e86" stroke-width="1"/><rect x="13.3" y="156.4" width="3.8" height="1.3" fill="#cf8e86"/><line x1="21.3" x2="21.3" y1="145.9" y2="159.0" stroke="#7fb596" stroke-width="1"/><rect x="19.4" y="154.9" width="3.8" height="2.7" fill="#7fb596"/><line x1="27.3" x2="27.3" y1="139.6" y2="158.3" stroke="#7fb596" stroke-width="1"/><rect x="25.5" y="149.5" width="3.8" height="5.4" fill="#7fb596"/><line x1="33.4" x2="33.4" y1="139.2" y2="156.0" stroke="#7fb596" stroke-width="1"/><rect x="31.6" y="143.7" width="3.8" height="5.8" fill="#7fb596"/><line x1="39.5" x2="39.5" y1="129.8" y2="149.7" stroke="#7fb596" stroke-width="1"/><rect x="37.7" y="134.7" width="3.8" height="8.9" fill="#7fb596"/><line x1="45.6" x2="45.6" y1="126.6" y2="136.3" stroke="#7fb596" stroke-width="1"/><rect x="43.8" y="131.6" width="3.8" height="3.1" fill="#7fb596"/><line x1="51.7" x2="51.7" y1="118.0" y2="132.1" stroke="#7fb596" stroke-width="1"/><rect x="49.9" y="127.7" width="3.8" height="4.0" fill="#7fb596"/><line x1="57.8" x2="57.8" y1="126.1" y2="142.2" stroke="#cf8e86" stroke-width="1"/><rect x="56.0" y="127.7" width="3.8" height="7.3" fill="#cf8e86"/><line x1="63.9" x2="63.9" y1="130.4" y2="149.8" stroke="#cf8e86" stroke-width="1"/><rect x="62.1" y="134.9" width="3.8" height="3.3" fill="#cf8e86"/><line x1="70.0" x2="70.0" y1="109.3" y2="150.3" stroke="#7fb596" stroke-width="1"/><rect x="68.2" y="118.5" width="3.8" height="19.8" fill="#7fb596"/><line x1="76.1" x2="76.1" y1="113.9" y2="143.0" stroke="#cf8e86" stroke-width="1"/><rect x="74.3" y="118.5" width="3.8" height="14.8" fill="#cf8e86"/><line x1="82.2" x2="82.2" y1="128.4" y2="144.0" stroke="#7fb596" stroke-width="1"/><rect x="80.4" y="131.1" width="3.8" height="2.2" fill="#7fb596"/><line x1="88.3" x2="88.3" y1="121.8" y2="142.0" stroke="#7fb596" stroke-width="1"/><rect x="86.5" y="125.3" width="3.8" height="5.8" fill="#7fb596"/><line x1="94.4" x2="94.4" y1="97.9" y2="134.4" stroke="#7fb596" stroke-width="1"/><rect x="92.6" y="109.7" width="3.8" height="15.6" fill="#7fb596"/><line x1="100.5" x2="100.5" y1="103.9" y2="134.4" stroke="#cf8e86" stroke-width="1"/><rect x="98.7" y="109.7" width="3.8" height="17.3" fill="#cf8e86"/><line x1="106.6" x2="106.6" y1="116.0" y2="130.2" stroke="#7fb596" stroke-width="1"/><rect x="104.8" y="121.2" width="3.8" height="5.8" fill="#7fb596"/><line x1="112.7" x2="112.7" y1="115.5" y2="124.4" stroke="#cf8e86" stroke-width="1"/><rect x="110.9" y="121.2" width="3.8" height="2.6" fill="#cf8e86"/><line x1="118.8" x2="118.8" y1="122.1" y2="124.8" stroke="#cf8e86" stroke-width="1"/><rect x="117.0" y="123.8" width="3.8" height="1.0" fill="#cf8e86"/><line x1="124.9" x2="124.9" y1="119.3" y2="136.8" stroke="#cf8e86" stroke-width="1"/><rect x="123.1" y="124.3" width="3.8" height="5.2" fill="#cf8e86"/><line x1="131.1" x2="131.1" y1="117.1" y2="144.4" stroke="#cf8e86" stroke-width="1"/><rect x="129.2" y="129.5" width="3.8" height="13.1" fill="#cf8e86"/><line x1="137.2" x2="137.2" y1="142.1" y2="155.4" stroke="#cf8e86" stroke-width="1"/><rect x="135.3" y="142.6" width="3.8" height="6.3" fill="#cf8e86"/><line x1="143.3" x2="143.3" y1="144.9" y2="159.3" stroke="#cf8e86" stroke-width="1"/><rect x="141.4" y="149.0" width="3.8" height="1.1" fill="#cf8e86"/><line x1="149.3" x2="149.3" y1="145.9" y2="156.9" stroke="#7fb596" stroke-width="1"/><rect x="147.5" y="148.4" width="3.8" height="1.6" fill="#7fb596"/><line x1="155.4" x2="155.4" y1="140.7" y2="164.2" stroke="#cf8e86" stroke-width="1"/><rect x="153.6" y="148.4" width="3.8" height="10.9" fill="#cf8e86"/><line x1="161.6" x2="161.6" y1="158.5" y2="172.9" stroke="#cf8e86" stroke-width="1"/><rect x="159.7" y="159.4" width="3.8" height="4.7" fill="#cf8e86"/><line x1="167.7" x2="167.7" y1="148.5" y2="167.3" stroke="#7fb596" stroke-width="1"/><rect x="165.8" y="148.8" width="3.8" height="15.3" fill="#7fb596"/><line x1="173.8" x2="173.8" y1="138.8" y2="170.8" stroke="#cf8e86" stroke-width="1"/><rect x="171.9" y="148.8" width="3.8" height="17.7" fill="#cf8e86"/><line x1="179.8" x2="179.8" y1="154.3" y2="178.3" stroke="#cf8e86" stroke-width="1"/><rect x="178.0" y="166.5" width="3.8" height="4.8" fill="#cf8e86"/><line x1="185.9" x2="185.9" y1="155.7" y2="171.8" stroke="#7fb596" stroke-width="1"/><rect x="184.1" y="166.3" width="3.8" height="5.1" fill="#7fb596"/><line x1="192.1" x2="192.1" y1="161.5" y2="173.3" stroke="#cf8e86" stroke-width="1"/><rect x="190.2" y="166.3" width="3.8" height="5.0" fill="#cf8e86"/><line x1="198.2" x2="198.2" y1="160.0" y2="188.4" stroke="#cf8e86" stroke-width="1"/><rect x="196.3" y="171.3" width="3.8" height="11.0" fill="#cf8e86"/><line x1="204.3" x2="204.3" y1="166.7" y2="193.8" stroke="#7fb596" stroke-width="1"/><rect x="202.4" y="174.4" width="3.8" height="7.9" fill="#7fb596"/><line x1="210.3" x2="210.3" y1="166.8" y2="201.9" stroke="#cf8e86" stroke-width="1"/><rect x="208.5" y="174.4" width="3.8" height="21.8" fill="#cf8e86"/><line x1="216.4" x2="216.4" y1="187.6" y2="208.1" stroke="#cf8e86" stroke-width="1"/><rect x="214.6" y="196.2" width="3.8" height="7.8" fill="#cf8e86"/><line x1="222.6" x2="222.6" y1="197.4" y2="214.6" stroke="#cf8e86" stroke-width="1"/><rect x="220.7" y="204.0" width="3.8" height="2.2" fill="#cf8e86"/><line x1="228.7" x2="228.7" y1="198.1" y2="217.5" stroke="#7fb596" stroke-width="1"/><rect x="226.8" y="205.8" width="3.8" height="1.0" fill="#7fb596"/><line x1="234.8" x2="234.8" y1="198.9" y2="208.7" stroke="#cf8e86" stroke-width="1"/><rect x="232.9" y="205.8" width="3.8" height="1.7" fill="#cf8e86"/><line x1="240.8" x2="240.8" y1="198.6" y2="218.5" stroke="#cf8e86" stroke-width="1"/><rect x="239.0" y="207.5" width="3.8" height="1.8" fill="#cf8e86"/><line x1="246.9" x2="246.9" y1="203.8" y2="232.5" stroke="#cf8e86" stroke-width="1"/><rect x="245.1" y="209.3" width="3.8" height="18.7" fill="#cf8e86"/><line x1="253.1" x2="253.1" y1="228.0" y2="236.4" stroke="#cf8e86" stroke-width="1"/><rect x="251.2" y="228.0" width="3.8" height="7.6" fill="#cf8e86"/><line x1="259.2" x2="259.2" y1="228.3" y2="251.7" stroke="#cf8e86" stroke-width="1"/><rect x="257.3" y="235.6" width="3.8" height="4.6" fill="#cf8e86"/><line x1="265.3" x2="265.3" y1="232.7" y2="251.8" stroke="#7fb596" stroke-width="1"/><rect x="263.4" y="237.6" width="3.8" height="2.6" fill="#7fb596"/><line x1="271.4" x2="271.4" y1="226.2" y2="251.4" stroke="#cf8e86" stroke-width="1"/><rect x="269.5" y="237.6" width="3.8" height="4.2" fill="#cf8e86"/><line x1="277.4" x2="277.4" y1="239.9" y2="254.3" stroke="#cf8e86" stroke-width="1"/><rect x="275.6" y="241.8" width="3.8" height="4.4" fill="#cf8e86"/><line x1="283.6" x2="283.6" y1="241.5" y2="250.0" stroke="#cf8e86" stroke-width="1"/><rect x="281.7" y="246.2" width="3.8" height="2.0" fill="#cf8e86"/><line x1="289.6" x2="289.6" y1="241.7" y2="262.1" stroke="#cf8e86" stroke-width="1"/><rect x="287.8" y="248.2" width="3.8" height="7.6" fill="#cf8e86"/><line x1="295.8" x2="295.8" y1="247.8" y2="265.2" stroke="#cf8e86" stroke-width="1"/><rect x="293.9" y="255.8" width="3.8" height="2.0" fill="#cf8e86"/><line x1="301.8" x2="301.8" y1="251.5" y2="271.3" stroke="#cf8e86" stroke-width="1"/><rect x="300.0" y="257.7" width="3.8" height="7.4" fill="#cf8e86"/><line x1="307.9" x2="307.9" y1="252.0" y2="274.0" stroke="#7fb596" stroke-width="1"/><rect x="306.1" y="260.5" width="3.8" height="4.6" fill="#7fb596"/><line x1="314.1" x2="314.1" y1="251.1" y2="264.6" stroke="#cf8e86" stroke-width="1"/><rect x="312.2" y="260.5" width="3.8" height="1.0" fill="#cf8e86"/><line x1="320.1" x2="320.1" y1="252.5" y2="288.8" stroke="#cf8e86" stroke-width="1"/><rect x="318.3" y="261.5" width="3.8" height="19.5" fill="#cf8e86"/><line x1="326.3" x2="326.3" y1="270.4" y2="289.7" stroke="#7fb596" stroke-width="1"/><rect x="324.4" y="274.3" width="3.8" height="6.7" fill="#7fb596"/><line x1="332.3" x2="332.3" y1="263.6" y2="282.8" stroke="#cf8e86" stroke-width="1"/><rect x="330.5" y="274.3" width="3.8" height="6.8" fill="#cf8e86"/><line x1="338.4" x2="338.4" y1="250.0" y2="291.2" stroke="#7fb596" stroke-width="1"/><rect x="336.6" y="262.1" width="3.8" height="19.0" fill="#7fb596"/><line x1="344.6" x2="344.6" y1="249.8" y2="283.0" stroke="#cf8e86" stroke-width="1"/><rect x="342.7" y="262.1" width="3.8" height="10.3" fill="#cf8e86"/><line x1="350.6" x2="350.6" y1="260.2" y2="275.9" stroke="#7fb596" stroke-width="1"/><rect x="348.8" y="265.3" width="3.8" height="7.1" fill="#7fb596"/><line x1="356.8" x2="356.8" y1="242.0" y2="271.6" stroke="#7fb596" stroke-width="1"/><rect x="354.9" y="243.7" width="3.8" height="21.6" fill="#7fb596"/><line x1="362.8" x2="362.8" y1="235.5" y2="269.9" stroke="#cf8e86" stroke-width="1"/><rect x="361.0" y="243.7" width="3.8" height="15.1" fill="#cf8e86"/><line x1="368.9" x2="368.9" y1="243.4" y2="268.6" stroke="#7fb596" stroke-width="1"/><rect x="367.1" y="244.5" width="3.8" height="14.3" fill="#7fb596"/><line x1="375.1" x2="375.1" y1="244.3" y2="265.1" stroke="#cf8e86" stroke-width="1"/><rect x="373.2" y="244.5" width="3.8" height="8.2" fill="#cf8e86"/><line x1="381.1" x2="381.1" y1="234.0" y2="257.9" stroke="#7fb596" stroke-width="1"/><rect x="379.3" y="235.7" width="3.8" height="16.9" fill="#7fb596"/><line x1="387.3" x2="387.3" y1="233.8" y2="248.4" stroke="#cf8e86" stroke-width="1"/><rect x="385.4" y="235.7" width="3.8" height="5.7" fill="#cf8e86"/><line x1="393.3" x2="393.3" y1="229.9" y2="244.9" stroke="#7fb596" stroke-width="1"/><rect x="391.5" y="232.4" width="3.8" height="9.0" fill="#7fb596"/><line x1="399.4" x2="399.4" y1="220.6" y2="240.9" stroke="#7fb596" stroke-width="1"/><rect x="397.6" y="222.3" width="3.8" height="10.1" fill="#7fb596"/><line x1="405.6" x2="405.6" y1="203.2" y2="224.5" stroke="#7fb596" stroke-width="1"/><rect x="403.7" y="209.2" width="3.8" height="13.0" fill="#7fb596"/><line x1="411.6" x2="411.6" y1="200.6" y2="222.7" stroke="#cf8e86" stroke-width="1"/><rect x="409.8" y="209.2" width="3.8" height="1.1" fill="#cf8e86"/><line x1="417.8" x2="417.8" y1="192.7" y2="218.5" stroke="#7fb596" stroke-width="1"/><rect x="415.9" y="195.3" width="3.8" height="15.0" fill="#7fb596"/><line x1="423.8" x2="423.8" y1="184.4" y2="195.6" stroke="#7fb596" stroke-width="1"/><rect x="422.0" y="186.9" width="3.8" height="8.5" fill="#7fb596"/><line x1="429.9" x2="429.9" y1="178.7" y2="216.4" stroke="#cf8e86" stroke-width="1"/><rect x="428.1" y="186.9" width="3.8" height="22.3" fill="#cf8e86"/><line x1="436.1" x2="436.1" y1="194.5" y2="218.7" stroke="#7fb596" stroke-width="1"/><rect x="434.2" y="202.1" width="3.8" height="7.1" fill="#7fb596"/><line x1="442.1" x2="442.1" y1="189.1" y2="206.9" stroke="#7fb596" stroke-width="1"/><rect x="440.3" y="197.0" width="3.8" height="5.1" fill="#7fb596"/><line x1="448.3" x2="448.3" y1="187.3" y2="215.0" stroke="#cf8e86" stroke-width="1"/><rect x="446.4" y="197.0" width="3.8" height="9.3" fill="#cf8e86"/><line x1="454.3" x2="454.3" y1="199.9" y2="235.0" stroke="#cf8e86" stroke-width="1"/><rect x="452.5" y="206.3" width="3.8" height="16.8" fill="#cf8e86"/><line x1="460.4" x2="460.4" y1="220.3" y2="237.1" stroke="#cf8e86" stroke-width="1"/><rect x="458.6" y="223.1" width="3.8" height="5.3" fill="#cf8e86"/><line x1="466.6" x2="466.6" y1="195.6" y2="232.9" stroke="#7fb596" stroke-width="1"/><rect x="464.7" y="206.6" width="3.8" height="21.9" fill="#7fb596"/><line x1="472.6" x2="472.6" y1="198.1" y2="236.0" stroke="#cf8e86" stroke-width="1"/><rect x="470.8" y="206.6" width="3.8" height="16.9" fill="#cf8e86"/><line x1="478.8" x2="478.8" y1="187.9" y2="229.0" stroke="#7fb596" stroke-width="1"/><rect x="476.9" y="199.7" width="3.8" height="23.8" fill="#7fb596"/><line x1="484.8" x2="484.8" y1="195.6" y2="218.6" stroke="#cf8e86" stroke-width="1"/><rect x="483.0" y="199.7" width="3.8" height="12.8" fill="#cf8e86"/><line x1="490.9" x2="490.9" y1="195.4" y2="218.4" stroke="#7fb596" stroke-width="1"/><rect x="489.1" y="200.2" width="3.8" height="12.3" fill="#7fb596"/><line x1="497.1" x2="497.1" y1="190.8" y2="208.9" stroke="#cf8e86" stroke-width="1"/><rect x="495.2" y="200.2" width="3.8" height="1.6" fill="#cf8e86"/><line x1="503.1" x2="503.1" y1="193.1" y2="209.9" stroke="#7fb596" stroke-width="1"/><rect x="501.3" y="200.9" width="3.8" height="1.0" fill="#7fb596"/><line x1="509.3" x2="509.3" y1="183.5" y2="201.2" stroke="#7fb596" stroke-width="1"/><rect x="507.4" y="195.9" width="3.8" height="4.9" fill="#7fb596"/><line x1="515.3" x2="515.3" y1="174.1" y2="198.9" stroke="#7fb596" stroke-width="1"/><rect x="513.5" y="184.3" width="3.8" height="11.6" fill="#7fb596"/><line x1="521.4" x2="521.4" y1="172.7" y2="196.2" stroke="#7fb596" stroke-width="1"/><rect x="519.6" y="173.7" width="3.8" height="10.6" fill="#7fb596"/><line x1="527.5" x2="527.5" y1="159.3" y2="174.4" stroke="#cf8e86" stroke-width="1"/><rect x="525.7" y="173.7" width="3.8" height="1.8" fill="#cf8e86"/><line x1="0" x2="618" y1="175.4923076923077" y2="175.4923076923077" stroke="#c5cfdd" stroke-dasharray="1 3" opacity=".6"/>
+    <rect x="619" y="166.9923076923077" width="71" height="17" rx="2" fill="#39424f"/><text x="626" y="179.4923076923077" fill="#e9edf2" font-size="11" font-weight="700">60,880</text><line x1="347.59999999999997" x2="618" y1="38.69230769230769" y2="38.69230769230769" stroke="#a9d6b6" stroke-width="1.3" stroke-dasharray="6 4" opacity=".9"/>
+      <g><rect x="512.6" y="30.192307692307693" width="99.39999999999999" height="17" rx="3" fill="#1d3527" stroke="#a9d6b6" stroke-width=".8"/>
+      <text x="519.6" y="42.69230769230769" fill="#a9d6b6" font-size="11" font-weight="600">TP2 ×2 · 3.00R</text></g>
+      <rect x="619" y="30.192307692307693" width="71" height="17" rx="2" fill="#a9d6b6"/>
+      <text x="626" y="42.69230769230769" fill="#11161d" font-size="11" font-weight="700">64,000</text><line x1="347.59999999999997" x2="618" y1="126.38461538461539" y2="126.38461538461539" stroke="#a9d6b6" stroke-width="1.3" stroke-dasharray="6 4" opacity=".9"/>
+      <g><rect x="512.6" y="117.88461538461539" width="99.39999999999999" height="17" rx="3" fill="#1d3527" stroke="#a9d6b6" stroke-width=".8"/>
+      <text x="519.6" y="130.3846153846154" fill="#a9d6b6" font-size="11" font-weight="600">TP1 ×2 · 1.67R</text></g>
+      <rect x="619" y="117.88461538461539" width="71" height="17" rx="2" fill="#a9d6b6"/>
+      <text x="626" y="130.3846153846154" fill="#11161d" font-size="11" font-weight="700">62,000</text><line x1="347.59999999999997" x2="618" y1="214.07692307692307" y2="214.07692307692307" stroke="#8fb8ff" stroke-width="1.3"  opacity=".9"/>
+      <g><rect x="549.2" y="205.57692307692307" width="62.8" height="17" rx="3" fill="#1b2a44" stroke="#8fb8ff" stroke-width=".8"/>
+      <text x="556.2" y="218.07692307692307" fill="#8fb8ff" font-size="11" font-weight="600">E1 · 50%</text></g>
+      <rect x="619" y="205.57692307692307" width="71" height="17" rx="2" fill="#8fb8ff"/>
+      <text x="626" y="218.07692307692307" fill="#11161d" font-size="11" font-weight="700">60,000</text><line x1="347.59999999999997" x2="618" y1="236" y2="236" stroke="#e9edf2" stroke-width="1" stroke-dasharray="2 3" opacity=".9"/>
+      <g><rect x="579.7" y="227.5" width="32.3" height="17" rx="3" fill="#2a3039" stroke="#e9edf2" stroke-width=".8"/>
+      <text x="586.7" y="240" fill="#e9edf2" font-size="11" font-weight="600">AVG</text></g>
+      <rect x="619" y="227.5" width="71" height="17" rx="2" fill="#e9edf2"/>
+      <text x="626" y="240" fill="#11161d" font-size="11" font-weight="700">59,500</text><line x1="347.59999999999997" x2="618" y1="257.9230769230769" y2="257.9230769230769" stroke="#c9a8ff" stroke-width="1.3"  opacity=".9"/>
+      <g><rect x="549.2" y="249.4230769230769" width="62.8" height="17" rx="3" fill="#2c2342" stroke="#c9a8ff" stroke-width=".8"/>
+      <text x="556.2" y="261.9230769230769" fill="#c9a8ff" font-size="11" font-weight="600">E2 · 50%</text></g>
+      <rect x="619" y="249.4230769230769" width="71" height="17" rx="2" fill="#c9a8ff"/>
+      <text x="626" y="261.9230769230769" fill="#11161d" font-size="11" font-weight="700">59,000</text><line x1="347.59999999999997" x2="618" y1="301.7692307692308" y2="301.7692307692308" stroke="#f2b3ac" stroke-width="1.3" stroke-dasharray="6 4" opacity=".9"/>
+      <g><rect x="512.6" y="293.2692307692308" width="99.39999999999999" height="17" rx="3" fill="#3a2220" stroke="#f2b3ac" stroke-width=".8"/>
+      <text x="519.6" y="305.7692307692308" fill="#f2b3ac" font-size="11" font-weight="600">SL ×2 · −1.00R</text></g>
+      <rect x="619" y="293.2692307692308" width="71" height="17" rx="2" fill="#f2b3ac"/>
+      <text x="626" y="305.7692307692308" fill="#11161d" font-size="11" font-weight="700">58,000</text><rect x="356" y="333" width="256" height="18" rx="3" fill="#2f2818" stroke="#edd49e" stroke-width=".8"/>
+    <text x="364" y="346" fill="#edd49e" font-size="11" font-weight="600">↓ Liq ≈ 54,228 · 10× isolated est. · off-scale</text><g><rect x="318" y="50.69230769230769" width="204" height="62" rx="5" fill="#1e2229" stroke="#4a5563"/>
+    <text x="328" y="67.6923076923077" fill="#e9edf2" font-size="11" font-weight="700">62,000 · TP1 ×2 (hover)</text>
+    <circle cx="332" cy="82.6923076923077" r="3.5" fill="#8fb8ff"/><text x="342" y="86.6923076923077" fill="#d6dce5" font-size="11">E1 TP1 · 50% of E1 · 1.00R entry</text>
+    <circle cx="332" cy="99.6923076923077" r="3.5" fill="#c9a8ff"/><text x="342" y="103.6923076923077" fill="#d6dce5" font-size="11">E2 TP1 · 50% of E2 · 3.00R entry</text>
+    <line x1="522" x2="520" y1="90.6923076923077" y2="126.38461538461539" stroke="#4a5563"/></g>
+    <line x1="618" x2="618" y1="0" y2="356" stroke="#394350"/>
+    <line x1="0" x2="692" y1="356" y2="356" stroke="#394350"/>
+  </svg></div></div>
+      <div class="legend">
+        <span class="lg"><i style="background:var(--e1)"></i>E1 <b class="num" style="color:var(--fg)">60,000</b> · 50%</span>
+        <span class="lg"><i style="background:var(--e2)"></i>E2 <b class="num" style="color:var(--fg)">59,000</b> · 50%</span>
+        <span class="lg"><i style="background:var(--avg)"></i>Avg <b class="num" style="color:var(--fg)">59,500</b></span>
+        <span class="spacer"></span>
+        <span>Shading: <b style="color:var(--fg)">Aggregate</b> · tags group within 0.5% · entry colours are non-semantic</span>
+      </div>
+    </section>
+    <section class="panel journal" style="display:flex;flex-direction:column;min-height:0">
+      <div class="ph" style="padding:8px 14px"><h2>Play journal</h2><span class="xs dim">Structured prompts + free text</span></div>
+      <div class="tabs"><span class="on">Thesis</span><span>Invalidation<i class="d"></i></span><span>Management</span><span>Strategy</span><span>Evidence 1</span><span class="dim">Review · after close</span></div>
+      <div class="jgrid">
+        <label class="jf">Trigger<span class="field">4h reclaim of 59,000 range low</span></label>
+        <label class="jf">Timeframe<span class="field">4h <span class="caret" style="margin-left:auto">▾</span></span></label>
+        <label class="jf">Setup<span class="field">HTF range reclaim <span class="caret" style="margin-left:auto">▾</span></span></label>
+      </div>
+      <div class="jarea">Swept 58,600 and reclaimed the range low on the 4h close. Funding reset to baseline, OI flushed ~4% in the sweep. Scaling in at the range low and the reclaim retest; targets at range mid and range high.</div>
+    </section>
+  </div>
+
+  <section class="panel pos-panel">
+    <div class="ph" style="padding:10px 14px"><div><h2>Position <span class="ii">i</span></h2><p>Whole position, split across entries</p></div><span class="seg"><span class="on">Isolated</span><span>Cross</span></span></div>
+    <div class="pscroll">
+      <div class="sect">
+        <div class="pair">
+          <div><div class="fl">Quantity (BTC) · from Risk 1%</div><span class="field num"><b>0.0667</b><span class="u">BTC</span></span></div>
+          <div><div class="fl">Margin (USDC) @10×</div><span class="field num">396.69<span class="u">USDC</span></span></div>
+        </div>
+        <div class="xs dim" style="margin-top:6px">Fees-inside-budget size 0.0651 BTC <span class="ii">i</span></div>
+      </div>
+      <div class="sect">
+        <h3>Leverage <span class="num" style="font-size:15px">10×</span></h3>
+        <div class="slider"><div class="track"></div><div class="safe"></div><div class="fill"></div><div class="mk"></div><div class="thumb"></div></div>
+        <div style="display:flex;justify-content:space-between" class="xs dim"><span>1×</span><span class="warn" style="margin-left:40%">22× max safe (worst path)</span><span>40× BTC max</span></div>
+        <div class="presets"><span>1×</span><span>3×</span><span>5×</span><span class="on">10×</span><span>20×</span><span>40×</span></div>
+      </div>
+      <div class="sect">
+        <h3>Entries <span class="xs pos" style="font-weight:600">Shares 100% ✓</span></h3>
+        <table class="et">
+          <tr><th>Entry</th><th class="r">Price</th><th class="r">Share</th><th class="r">Stop</th><th class="r">Risk</th></tr>
+          <tr class="selrow"><td><span class="ebar" style="background:var(--e1)"></span><b>E1</b></td><td class="r">60,000</td><td class="r">50%</td><td class="r">58,000</td><td class="r neg">0.67R</td></tr>
+          <tr class="sub selrow"><td></td><td colspan="4"><span class="tp">TP1 62,000 · 50% · 1.00R</span> <span class="tp">TP2 64,000 · 50% · 2.00R</span></td></tr>
+          <tr><td><span class="ebar" style="background:var(--e2)"></span><b>E2</b></td><td class="r">59,000</td><td class="r">50%</td><td class="r">58,000</td><td class="r neg">0.33R</td></tr>
+          <tr class="sub"><td></td><td colspan="4"><span class="tp">TP1 62,000 · 50% · 3.00R</span> <span class="tp">TP2 64,000 · 50% · 5.00R</span></td></tr>
+          <tr><td class="muted">Avg</td><td class="r"><b>59,500</b></td><td class="r">100%</td><td class="r muted">1,500/u</td><td class="r neg">1.00R</td></tr>
+        </table>
+        <div class="xs dim" style="margin-top:6px">Target R is per entry (its own stop distance). Play R:R <b style="color:var(--fg)">2.33</b> blended.</div>
+        <div style="margin-top:8px"><span class="btn sm">＋ Entry</span> <span class="btn sm ghost">Split equally</span> <span class="btn sm ghost">⤢ Expand table</span></div>
+      </div>
+      <div class="sect">
+        <h3><span><span class="ebar" style="background:var(--e1)"></span>E1 levels</span><span class="xs dim" style="font-weight:500">Planned, not fills</span></h3>
+        <div class="lvl"><span class="muted">Entry</span><span class="field num">60,000<span class="unit"><span class="on">$</span><span>%</span><span>R</span></span></span><span class="field num">50%</span></div>
+        <div class="lvl"><span class="neg">Stop</span><span class="field num">58,000<span class="unit"><span class="on">$</span><span>%</span><span>R</span></span></span><span class="xs neg">−3.33%</span></div>
+        <div class="lvl"><span class="pos">TP1</span><span class="field num">62,000<span class="unit"><span class="on">$</span><span>%</span><span>R</span></span></span><span class="field num">50%</span></div>
+        <div class="lvl"><span class="pos">TP2</span><span class="field num">64,000<span class="unit"><span class="on">$</span><span>%</span><span>R</span></span></span><span class="field num">50%</span></div>
+        <div class="xs dim">Stop 58,000 · −3.33% · −0.67R play / −1.00R entry · ROE −33% @10×</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<section class="panel summary" style="position:relative">
+  <div class="ph"><div><h2>Position summary</h2><p>Estimates from the entered plan. Every figure lists its assumptions under ⓘ. The venue's schedule governs.</p></div><span class="chip info">Estimates · isolated · tier-0 fees</span></div>
+  <div class="sgrid">
+    <div class="sc"><div class="k">Risk at all stops<span class="ii">i</span></div><div class="v neg">−$100.00</div><div class="s">1.00% of $10,000 · + fees $2.34 = <b class="neg">−1.02R</b></div></div>
+    <div class="sc"><div class="k">Reward at all targets<span class="ii">i</span></div><div class="v pos">+$233.33</div><div class="s">2.33R · if every entry and target fills</div></div>
+    <div class="sc"><div class="k">Blended R:R<span class="ii">i</span></div><div class="v">2.33</div><div class="s">TP1 1.67R · TP2 3.00R from avg</div></div>
+    <div class="sc"><div class="k">Size · notional<span class="ii">i</span></div><div class="v">0.0667 BTC</div><div class="s">$3,967 notional · avg 59,500</div></div>
+    <div class="sc"><div class="k">Margin<span class="ii">i</span></div><div class="v">$397</div><div class="s">@10× isolated · 3.97% of account</div></div>
+    <div class="sc" style="background:#1a1f27"><div class="k">Liquidation (isolated)<span class="ii" style="border-color:var(--ring);color:var(--fg)">i</span></div><div class="v">≈ 54,228</div><div class="s"><span class="pos">✓</span> 3,772 below the stop</div></div>
+    <div class="sc"><div class="k">Max safe leverage<span class="ii">i</span></div><div class="v">22×</div><div class="s">worst path (E1 only) · 26× if all fill</div></div>
+    <div class="sc"><div class="k">Funding<span class="ii">i</span></div><div class="v neg">−$1.19/day</div><div class="s">0.012R/day at 0.00125%/h (longs pay)</div></div>
+    <div class="sc"><div class="k">Fees if stopped<span class="ii">i</span></div><div class="v neg">−$2.34</div><div class="s">maker entries $0.60 · taker stop $1.74 · 0.023R</div></div>
+    <div class="sc"><div class="k">Break-even after fees<span class="ii">i</span></div><div class="v">≈ 59,536</div><div class="s">maker entry · taker exit</div></div>
+  </div>
+  <div class="assume"><b>ⓘ Liquidation ≈ 54,228 · assumptions</b>
+    <span>Isolated margin, freshly opened, full position (avg 59,500)</span><span>mmr 1.25% = ½ × 1/40× (BTC margin tier 1)</span><span>liq = avg × (1 − 1/L) / (1 − mmr), L = 10</span><span>E1-only path 54,684; both beyond the 58,000 stop</span><span>Cross margin: depends on the account; venue-reported once open</span></div>
+</section>
+<div class="mock-note">Static mockup · proposal only (roadmap 0.1, 0.6, 0.7, 1.1). Numbers from trader-review M2. Section order unchanged: capital context above, chart left, journal below chart, position right, summary below.</div>
+</div>
+</main></div></body></html>

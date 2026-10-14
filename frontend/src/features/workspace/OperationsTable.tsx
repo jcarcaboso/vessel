@@ -12,8 +12,9 @@ function Result({ value }: { value: string | null }) {
   return <span className={`operation-result ${resultSign(value)}`} title={value ?? 'Unknown'}>{money(value)}</span>
 }
 
-export function OperationsTable({ operations, accounts, compact = false }: {
+export function OperationsTable({ operations, accounts, compact = false, onPreview }: {
   operations: ActivityOperation[]; accounts: BrokerAccount[]; compact?: boolean
+  onPreview?: (operation: ActivityOperation) => void
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   // Defense in depth: a management reload may disable an account while an earlier activity read is still visible.
@@ -33,6 +34,7 @@ export function OperationsTable({ operations, accounts, compact = false }: {
       <td className="numeric"><Result value={op.netResultUsd} /><small>{op.status === 'open' ? 'Realized to date' : 'Reported executions'}</small></td>
       {!compact && <><td className="numeric"><span title={op.stablecoinFeesNominalUsd}>{money(op.stablecoinFeesNominalUsd)}</span><small>Stablecoin units · nominal</small>{op.otherFees.map(f => <small key={f.token}>{amount(f.amount)} {f.token}</small>)}</td><td>{op.playId ? <span className="workspace-badge" title={op.playId}>Play {op.playId.slice(0, 8)}</span> : <span className="workspace-badge">{op.playAssociation === 'mixed' ? 'Mixed' : 'Unassigned'}</span>}</td></>}
     </tr>{open && <tr id={`operation-${op.id}`}><td colSpan={compact ? 4 : 8} className="operation-expanded">
+      {onPreview && <button className="text-action" aria-label={`Inspect ${op.contractId} retrospective eligibility`} onClick={() => onPreview(op)}>Inspect retrospective eligibility</button>}
       {op.coverage.length > 0 && <ul className="operation-coverage">{op.coverage.map(reason => <li key={reason}>{reason}</li>)}</ul>}
       {op.fills.some(part => part.fill.positionEffect === 'flip') && <p className="workspace-scope-note">Flip rows show this operation's allocated quantity, fee and P&amp;L; the original fact stays unchanged.</p>}
       {op.fills.length > 0 ? <ActivityTable fills={op.fills.map(part => ({ ...part.fill, quantity: part.quantity, fee: part.fee, closedPnlUsd: part.closedPnlUsd }))} accounts={accounts} /> : <p className="workspace-scope-note">Execution rows were omitted by the response limit.</p>}

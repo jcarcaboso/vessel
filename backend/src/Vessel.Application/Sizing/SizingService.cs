@@ -1,8 +1,10 @@
 using System.Globalization;
 using Vessel.Application.Ownership;
 using Vessel.Application.Plays;
+using Vessel.Application.Plays.Execution;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Sizing;
+using Vessel.Domain.Plays;
 
 namespace Vessel.Application.Sizing;
 
@@ -40,7 +42,9 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
 
     private static SizingDto ToDto(decimal risk, List<ClosedPlayFacts> closed)
     {
-        var outcomes = closed.Select(facts => (facts.Play, Outcome: Outcome(facts))).Where(x => x.Outcome is not null)
+        // A closed record whose linked fills are known incomplete, contradictory or out of order is not a decided outcome.
+        var outcomes = closed.Where(f => f.Play.Origin != PlayOrigin.Retrospective && f.ManualFeesComplete)
+            .Where(ExecutionIntegrity.Settled).Select(facts => (facts.Play, Outcome: Outcome(facts))).Where(x => x.Outcome is not null)
             .Select(x => (x.Play, Outcome: x.Outcome!)).ToList();
         var record = TrackRecord.From(outcomes.Select(x => x.Outcome).ToList());
         var exposure = Exposure.From(outcomes.Select(x => x.Outcome));

@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Text.Json;
 using Vessel.Application.Evidence;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
@@ -25,17 +26,23 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var plan = PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan));
         var now = time.GetUtcNow();
         var play = new Play(Guid.NewGuid(), account, instrument, source, plan, now);
-        Apply(() => play.Annotate(request.Title ?? "", PlayDocuments.NormalizeDrawings(request.Drawings), request.Review ?? "", now));
+        var review = Apply(() => play.Annotate(request.Title ?? "", PlayDocuments.NormalizeDrawings(request.Drawings),
+            request.Review ?? "", now, request.StructuredReview));
         store.Add(play);
+        if (review is not null) store.Add(review);
         await store.SaveAsync(ct);
         return ToDto(play);
     }
 
-    public async Task<PlayDto> UpdateAsync(Guid id, UpdatePlayRequest request, CancellationToken ct)
+    /// <summary>Holds the Play while it checks entry fills and saves, so no order links to an entry this revision changes in between.</summary>
+    public Task<PlayDto> UpdateAsync(Guid id, UpdatePlayRequest request, CancellationToken ct) => store.WithPlayLockAsync(id, async () =>
     {
         var play = await Find(id, ct);
         RequireVersion(play, request.ExpectedVersion);
-        var plan = PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan));
+        if (request.Plan is null) throw new WorkspaceException(400, "A plan compatibility document is required.");
+        // Retrospectives keep an empty compatibility document, not a manufactured plan.
+        var plan = play.Origin == PlayOrigin.Retrospective
+            ? PlayDocuments.Serialize(request.Plan) : PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan));
         var drawings = PlayDocuments.NormalizeDrawings(request.Drawings);
         var now = time.GetUtcNow();
         if (request.AccountId != play.AccountId || request.Instrument != play.ContractId ||
@@ -48,13 +55,15 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         }
         if (play.Status != PlayStatus.Draft && plan != play.Plan) await RequireFilledEntriesKept(play, request.Plan, ct);
         var revision = Apply(() => play.ChangePlan(plan, request.RevisionReason, now));
-        Apply(() => play.Annotate(request.Title ?? "", drawings, request.Review ?? "", now));
+        var review = Apply(() => play.Annotate(request.Title ?? "", drawings, request.Review ?? "", now, request.StructuredReview));
         if (revision is not null) store.Add(revision);
+        if (review is not null) store.Add(review);
         await store.SaveAsync(ct);
         return ToDto(play);
-    }
+    }, ct, destinationAccountId: request.AccountId);
 
-    public async Task<PlayDto> ChangeStatusAsync(Guid id, ChangePlayStatusRequest request, CancellationToken ct)
+    public Task<PlayDto> ChangeStatusAsync(Guid id, ChangePlayStatusRequest request, CancellationToken ct) =>
+        store.WithPlayLockAsync(id, async () =>
     {
         var play = await Find(id, ct);
         RequireVersion(play, request.ExpectedVersion);
@@ -92,16 +101,19 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         }
         await store.SaveAsync(ct);
         return ToDto(play);
-    }
+    }, ct);
 
     public async Task<PlayHistoryDto> HistoryAsync(Guid id, CancellationToken ct)
     {
         var play = await Find(id, ct);
         var revisions = await store.RevisionsAsync(play.Id, ct);
         var changes = await store.StatusChangesAsync(play.Id, ct);
+        var reviews = await store.ReviewsAsync(play.Id, ct);
         return new(revisions.Select(r => new PlanRevisionDto(r.Number, StatusName(r.Status), r.Reason, r.CreatedAtUtc, PlayDocuments.Read(r.Plan))).ToList(),
             changes.Select(c => new StatusChangeDto(StatusName(c.From), StatusName(c.To), c.Reason is { } reason ? ReasonName(reason) : null,
-                c.Note, c.OccurredAtUtc, c.Source == StatusChangeSource.Venue ? "venue" : "owner")).ToList());
+                c.Note, c.OccurredAtUtc, c.Source == StatusChangeSource.Venue ? "venue" : "owner")).ToList(),
+            reviews.Select(r => new ReviewRevisionDto(r.Number, r.OccurredAtUtc, r.Review,
+                JsonSerializer.Deserialize<ReviewAnswers>(r.StructuredReview)!)).ToList());
     }
 
     public async Task DeleteAsync(Guid id, CancellationToken ct)
@@ -116,18 +128,35 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         }
     }
 
-    /// <summary>A filled entry already happened: its price and share cannot be revised, nor the entry removed.</summary>
+    /// <summary>
+    /// A filled entry already happened: its price and share cannot be revised, nor the entry removed. The direction
+    /// decides which side closes that exposure, so it stays too; the opposite idea is a new Play.
+    /// </summary>
     private async Task RequireFilledEntriesKept(Play play, PlayPlanDocument next, CancellationToken ct)
     {
         var filled = await store.FilledEntryIdsAsync(play.Id, ct);
-        if (filled.Count == 0) return;
-        var before = PlayDocuments.Read(play.Plan).Entries.ToDictionary(e => e.Id);
+        var current = PlayDocuments.Read(play.Plan);
+        var linked = await store.LinkedPlanReferencesAsync(play.Id, ct);
+        if ((filled.Count > 0 || linked.Count > 0) && next.Direction != current.Direction)
+            throw new WorkspaceException(409, $"This play has entry fills or linked orders, so it stays {current.Direction}. Start a new play for the opposite idea.");
+        foreach (var link in linked.Where(l => l.Role is OrderLinkRole.Stop or OrderLinkRole.Target))
+        {
+            var oldEntry = current.Entries.FirstOrDefault(e => e.Id == link.EntryId);
+            var nextEntry = next.Entries.FirstOrDefault(e => e.Id == link.EntryId);
+            var oldLevel = (link.Role == OrderLinkRole.Stop ? oldEntry?.Stops : oldEntry?.Targets)?.FirstOrDefault(l => l.Id == link.LevelId);
+            var nextLevel = (link.Role == OrderLinkRole.Stop ? nextEntry?.Stops : nextEntry?.Targets)?.FirstOrDefault(l => l.Id == link.LevelId);
+            if (nextEntry is null || nextLevel is null || nextLevel != oldLevel || nextEntry.Price != oldEntry?.Price ||
+                nextEntry.Share != oldEntry?.Share ||
+                next.Leverage != current.Leverage && oldLevel?.Unit == "percent")
+                throw new WorkspaceException(409, $"Order {link.OrderId} still references this plan level. Unlink it before changing or removing the level.");
+        }
+        var before = current.Entries.ToDictionary(e => e.Id);
         foreach (var id in filled)
         {
             if (!before.TryGetValue(id, out var old)) continue;
             var now = next.Entries.FirstOrDefault(e => e.Id == id);
             if (now is null || now.Price != old.Price || now.Share != old.Share)
-                throw new WorkspaceException(409, $"{old.Name} has fills, so its price and share stay as planned. Stops and targets can still change.");
+                throw new WorkspaceException(409, $"{old.Name} has fills or linked orders, so its price and share stay as planned. Unlinked stops and targets can still change.");
         }
     }
 
@@ -176,13 +205,13 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     private static string SourceName(InstrumentSource source) => source == InstrumentSource.Venue ? "venue" : "manual";
     private static string ReasonName(CancelReason reason) => reason == CancelReason.ChangedMind ? "changed-mind" : reason.ToString().ToLowerInvariant();
 
-    private static PlaySummaryDto Summary(Play play) => new(play.Id, play.Title, StatusName(play.Status), play.AccountId, play.VenueId,
+    public static PlaySummaryDto Summary(Play play) => new(play.Id, play.Title, StatusName(play.Status), play.AccountId, play.VenueId,
         play.ContractId, SourceName(play.InstrumentSource), PlayDocuments.Read(play.Plan).Direction, play.PlanRevision, play.Version,
         play.CancelReason is { } reason ? ReasonName(reason) : null, play.CreatedAtUtc, play.UpdatedAtUtc, play.PlannedAtUtc, play.EndedAtUtc,
-        !string.IsNullOrWhiteSpace(play.Review));
+        play.HasReview, play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned", play.ReviewedAtUtc);
 
-    private static PlayDto ToDto(Play play) =>
-        new(Summary(play), PlayDocuments.Read(play.Plan), PlayDocuments.ReadDrawings(play.Drawings), play.Review);
+    public static PlayDto ToDto(Play play) =>
+        new(Summary(play), PlayDocuments.Read(play.Plan), PlayDocuments.ReadDrawings(play.Drawings), play.Review, play.Answers);
 
     [GeneratedRegex("^[A-Za-z0-9_-]{1,32}$")]
     private static partial Regex ContractPattern();

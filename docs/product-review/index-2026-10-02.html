@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vessel product review — summary</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2317191d'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23e6e8eb' font-family='sans-serif'%3EV%3C/text%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#0f1114;--panel:#16191d;--panel2:#1b1f24;--line:#2a2f36;--text:#e6e8eb;--muted:#a3abb6;--faint:#7f8894;
+  --accent:#9db4d8;--pos:#6fcf97;--neg:#ef7d7d;--warn:#e8c170;--violet:#b9a4e8;--r:10px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:64px}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent)}
+a:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.skip{position:absolute;left:-999px;top:8px;background:var(--panel2);padding:8px 12px;border-radius:6px;z-index:20}
+.skip:focus{left:8px}
+nav.top{position:sticky;top:0;z-index:10;background:rgba(15,17,20,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
+nav.top .in{max-width:1240px;margin:0 auto;padding:10px 20px;display:flex;gap:6px;align-items:center;overflow-x:auto;white-space:nowrap}
+nav.top b{margin-right:10px;font-weight:650;letter-spacing:.02em}
+nav.top a{color:var(--muted);text-decoration:none;font-size:13px;padding:5px 9px;border-radius:6px}
+nav.top a:hover{color:var(--text);background:var(--panel2)}
+main{max-width:1240px;margin:0 auto;padding:28px 20px 80px}
+h1{font-size:30px;line-height:1.2;margin:6px 0 10px;letter-spacing:-.01em}
+h2{font-size:21px;margin:46px 0 6px;letter-spacing:-.005em}
+h2 small{font-size:13px;color:var(--faint);font-weight:400;margin-left:8px}
+h3{font-size:15px;margin:0 0 4px}
+p.lead{color:var(--muted);max-width:900px;margin:0 0 14px}
+.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.verdict{background:linear-gradient(180deg,#1a1e24,#15181c);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0}
+.verdict p{margin:8px 0;max-width:980px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:16px 0 0}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+.tile .v{font-size:24px;font-weight:650;font-variant-numeric:tabular-nums}
+.tile .l{font-size:12.5px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px;margin-top:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+.card p{margin:0;color:var(--muted);font-size:14px}
+.card pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.card .id{font-family:var(--mono);font-size:12px;color:var(--faint)}
+.card.req{border-left:3px solid var(--accent)}
+.card.miss{border-left:3px solid var(--violet)}
+.card.new{border-left:3px solid var(--warn)}
+.card.idea{border-left:3px solid var(--pos)}
+pre,code{font-family:var(--mono);font-size:12.5px}
+pre{background:#0b0d10;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:4px 0 0;overflow-x:auto;color:#d5dae0;line-height:1.45}
+.pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-right:4px;vertical-align:middle}
+.pill.high{color:#ffb4b4;border-color:#6b3535;background:#2a1717}
+.pill.med{color:#f3d89a;border-color:#6a5628;background:#2a2314}
+.pill.low{color:#b8c3d1;border-color:#3a4250;background:#1a1f26}
+.pill.owner{color:#d6c7ff;border-color:#4b3f72;background:#1f1a2e}
+table{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.06em;background:var(--panel2)}
+tr:last-child td{border-bottom:0}
+td.num{font-variant-numeric:tabular-nums;font-family:var(--mono);font-size:13px}
+.ok{color:var(--pos)}.bad{color:var(--neg)}.warn{color:var(--warn)}
+.tablewrap{overflow-x:auto}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:860px){.cols{grid-template-columns:1fr}}
+.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:14px}
+figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+figure a{display:block}
+figure img{display:block;width:100%;height:170px;object-fit:cover;object-position:top left;border-bottom:1px solid var(--line)}
+figcaption{padding:8px 12px;font-size:13px;color:var(--muted)}
+.hero-shot img{height:auto;max-height:none;object-fit:contain}
+details{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);margin-top:10px}
+summary{cursor:pointer;padding:11px 14px;font-weight:600}
+details>div{padding:0 14px 14px}
+ul.tight{margin:6px 0 0;padding-left:18px}ul.tight li{margin:3px 0;color:var(--muted)}
+ul.tight li b{color:var(--text)}
+.phase{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:14px}
+.phase .card h3 span{color:var(--faint);font-weight:400;font-size:12px}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12.5px;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+footer{color:var(--faint);font-size:13px;margin-top:60px;border-top:1px solid var(--line);padding-top:16px}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<nav class="top" aria-label="Sections"><div class="in">
+  <b>Vessel review</b>
+  <a href="#verdict">Verdict</a>
+  <a href="#required">Must-haves</a>
+  <a href="#issues">Issues &amp; bugs</a>
+  <a href="#numbers">Key numbers</a>
+  <a href="#missing">Missing</a>
+  <a href="#ideas">Best ideas</a>
+  <a href="#improve">Improvements</a>
+  <a href="#ui">UI/UX</a>
+  <a href="#roadmap">Roadmap</a>
+  <a href="#decisions">Your decisions</a>
+  <a href="#notes">Notes</a>
+</div></nav>
+
+<main id="main">
+<div class="eyebrow">Product review · Vessel at a51c7f2 · October 2–3, 2026</div>
+<h1>A trader's review of Vessel: summary</h1>
+<p class="lead">This page summarises the review documents in this folder: the trader review, the UI/UX audit, the roadmap and the competitor benchmark. Examples use a made-up 10,000 USDC Hyperliquid account. Fees use Hyperliquid tier 0 (0.045% taker, 0.015% maker) and funding uses the baseline rate (0.00125%/h). All numbers were recomputed by script. This is a proposal, not investment advice and not an authorisation to build.</p>
+
+<section id="verdict" class="verdict" aria-labelledby="v-h">
+  <h2 id="v-h" style="margin-top:0">Verdict</h2>
+  <p><b>Right philosophy, strong foundations, but the loop is not closed.</b> Vessel separates plan, fill, price observation and retrospective review better than any journal benchmarked. It already has live Hyperliquid candles, drawing tools, and evidence capture with markup. But a trader cannot complete one cycle of <i>plan → execute → review → learn</i>:</p>
+  <ul class="tight">
+    <li><b>Plays cannot be saved.</b> A reload deletes the thesis, levels, drawings and captures.</li>
+    <li><b>No money figures.</b> Risk in $, reward-to-risk, margin, fees, funding and liquidation show "Not calculated" or are absent.</li>
+    <li><b>Imported fills</b> cannot be grouped into trades or linked to a plan, and every row says "Unassigned".</li>
+    <li><b>Nothing measures results in R</b> (multiples of planned risk), so nothing can be learned from history.</li>
+  </ul>
+  <div class="tiles" role="list">
+    <div class="tile" role="listitem"><div class="v bad">0</div><div class="l">complete plan→review loops possible today</div></div>
+    <div class="tile" role="listitem"><div class="v warn">5 / 8</div><div class="l">summary cells show "Not calculated"</div></div>
+    <div class="tile" role="listitem"><div class="v">35</div><div class="l">clicks + 17 typed fields to plan 2 entries</div></div>
+    <div class="tile" role="listitem"><div class="v warn">y≈659</div><div class="l">where the chart starts on a 900 px screen</div></div>
+    <div class="tile" role="listitem"><div class="v bad">11</div><div class="l">bugs found (2 high)</div></div>
+    <div class="tile" role="listitem"><div class="v ok">1st</div><div class="l">in multi-entry planning among the tools benchmarked</div></div>
+  </div>
+</section>
+
+<section id="required" aria-labelledby="req-h">
+  <h2 id="req-h">Must-haves <small>trader-review.md §3, in build order</small></h2>
+  <p class="lead">M1–M5 close the loop. M6–M10 make it teach something. The order follows dependencies and how directly each item reduces losses.</p>
+  <div class="grid">
+    <article class="card req"><span class="id">M1</span><h3>Save Plays, with revisions and a frozen context snapshot</h3><p>Everything depends on this. Freeze plan, capture, candles, funding and OI at <i>Planned</i> and at the first fill. Hyperliquid keeps only the latest 5,000 candles (about 3.5 days of 1m data).</p><pre>Rev 3 "widened stop"  58,000 → 57,500  ⚠ risk increased after entry</pre></article>
+    <article class="card req"><span class="id">M2</span><h3>Risk-first sizing and a full money summary</h3><p>Size from the stop. Show risk, reward, R:R, fees per leg, funding, margin mode, isolated liquidation and the maximum safe leverage.</p><pre>Risk 1% = $100 → 0.0667 BTC · R:R 2.33 · fees −$2.34
+Liq ≈ 54,228 @10× ✓ · max safe 26× / 22× worst path</pre></article>
+    <article class="card req"><span class="id">M3</span><h3>Portfolio heat across concurrent Plays</h3><p>Three 1% Plays on BTC, ETH and SOL are one large bet. Positions with an unknown stop stay unknown, not zero.</p><pre>Open risk 2.2% known + 1 SOL unknown → +1.0% = 3.2%  ⚠ limit 3%</pre></article>
+    <article class="card req"><span class="id">M4</span><h3>Management rules and invalidation in the plan</h3><p>Stop scope (position or per entry), break-even/trailing rules, time stop, and non-price invalidation. If a rule isn't written down, the review can't check it.</p><pre>After TP1: stop → BE + fees (59,536) · time stop 12h
+Invalid: 4h close &lt; 58,500 or funding &gt; 0.01%/h</pre></article>
+    <article class="card req"><span class="id">M5</span><h3>Fills → trades, linked per order, plus an Unreviewed inbox</h3><p>Round trips are a derived view. Links go per order or fill, because one netted position can hold several concurrent Plays. Group TWAP slices, split flips, flag liquidations.</p><pre>Trade #41 BTC = Play A (oid 123) + Play B (oid 456)
+[Link orders] [No plan] [Hedge] [Impulsive] [Retro review]</pre></article>
+    <article class="card req"><span class="id">M6</span><h3>Protection check</h3><p>Read venue open orders (read-only) and compare them with the plan. A position without a stop at the venue is the largest tail risk.</p><pre>BTC long 0.0667  ⚠ No reduce-only stop at the venue
+ETH long 1.2     ⚠ Venue stop 2,410 ≠ plan 2,450</pre></article>
+    <article class="card req"><span class="id">M7</span><h3>Outcome in R, with defined denominators</h3><p>Planned R, initial R, realised R (after fees and funding), slippage, exit versus plan, sizing error.</p><pre>Net $190.02 / initial R $104.00 = +1.83R
+Slippage 0.04R · 0.37R not captured on TP2 half</pre></article>
+    <article class="card req"><span class="id">M8</span><h3>One-minute structured review</h3><p>Adherence (N/A if there was no plan), rules followed, mistake tags, emotion, one-line lesson, and the process/outcome 2×2.</p><pre>Good process + bad outcome = "good loss, repeat it"
+Bad process + good outcome = "lucky, dangerous"</pre></article>
+    <article class="card req"><span class="id">M9</span><h3>Soft guardrails and behaviour signals</h3><p>Record and flag; never block. Daily −2R, weekly −5R, max trades per day, max open risk, and what you do after a loss.</p><pre>After 2 losses: 3 trades in 40 min at 1.8× median size
+Trades within 1h of a loss: −0.6R/trade (n=14)</pre></article>
+    <article class="card req"><span class="id">M10</span><h3>Analytics that show sample size</h3><p>Expectancy, profit factor, R equity curve, drawdown, cost per mistake tag, followed vs broken plans. Show n and ±SE; grey out below 20 trades.</p><pre>E = 0.40×2.5R − 0.60×1.0R = +0.40R · PF 1.67
+Followed +0.62R ±0.31 · Broke −0.48R ±0.49 (n&lt;20)</pre></article>
+  </div>
+</section>
+
+<section id="issues" aria-labelledby="iss-h">
+  <h2 id="iss-h">Issues &amp; bugs <small>ui-ux-audit.md §7 and the code inventory</small></h2>
+  <div class="cols">
+  <div>
+  <h3 style="margin-top:12px">Product gaps today</h3>
+  <ul class="tight">
+    <li><b>Draft only lives in memory.</b> The backend <code>Play</code> has only account, contract and status, and there are no Play CRUD routes.</li>
+    <li><b>Evidence storage exists on the server</b>, but nothing can create the parent Play, so images never upload.</li>
+    <li><b>The sizing assistant is a "Deferred" placeholder</b>, although the approved prototype had working maths.</li>
+    <li><b>Five free-text journal tabs</b> and nothing structured, so nothing can be analysed.</li>
+    <li><b>Import:</b> latest 2,000 fills, manual refresh only, Activity capped at 100 rows. Funding payments are not imported.</li>
+    <li><b>No strategies, lifecycle, alerts, tags or analytics.</b> Status is a fixed "Draft" badge.</li>
+    <li><b>Manual accounts</b> can't update their value after creation and get no chart.</li>
+  </ul>
+  </div>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>#</th><th>Bug</th><th>Severity</th></tr></thead>
+    <tbody>
+      <tr><td>B1</td><td>No plan validation: a long with its stop above entry, targets totalling 160%, or a Short with Long-side levels are all accepted silently</td><td><span class="pill high">High</span></td></tr>
+      <tr><td>B2</td><td>Leverage above the venue maximum is accepted (HYPE max 10×; 25× preset and up to 100×)</td><td><span class="pill high">High</span></td></tr>
+      <tr><td>B3</td><td>"100% allocated" shows green while a new entry's share is blank</td><td><span class="pill med">Med</span></td></tr>
+      <tr><td>B4</td><td>Chart tags overlap within ~1%; equal prices hide a tag</td><td><span class="pill med">Med</span></td></tr>
+      <tr><td>B5</td><td>Overview still says "Play workspace · Not enabled yet"</td><td><span class="pill med">Med</span></td></tr>
+      <tr><td>B6</td><td>Footer "1 enabled read-only account" when 3 accounts are enabled</td><td><span class="pill low">Low</span></td></tr>
+      <tr><td>B7</td><td>Size select label is clipped: "Quantity · instrum…"</td><td><span class="pill low">Low</span></td></tr>
+      <tr><td>B8</td><td>After a refresh, the empty state still says "Refresh a Hyperliquid account…"</td><td><span class="pill low">Low</span></td></tr>
+      <tr><td>B9</td><td>Account detail subtitle is copied from the Accounts list</td><td><span class="pill low">Low</span></td></tr>
+      <tr><td>B10</td><td>"Side-by-side · Layout locked" caption shows on mobile</td><td><span class="pill low">Low</span></td></tr>
+      <tr><td>B11</td><td>TradingView attribution link has no accessible name</td><td><span class="pill low">Low</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  </div>
+</section>
+
+<section id="numbers" aria-labelledby="num-h">
+  <h2 id="num-h">Key numbers that came up <small>BTC worked example, trader-review.md M2/M7</small></h2>
+  <p class="lead">Long BTC. E1 60,000 (50%) and E2 59,000 (50%), stop 58,000, TP 62,000 / 64,000 (50/50). Risk 1% of 10,000 = $100. Average entry 59,500. Size 0.0667 BTC, notional ≈ $3,967, margin ≈ $397 at 10×. Planned R:R 2.33 if everything fills.</p>
+  <div class="cols">
+    <div class="tablewrap">
+    <table>
+      <caption class="eyebrow" style="caption-side:top;text-align:left;padding:4px 0 6px">Partial fills hide liquidation risk (isolated, mmr 1.25%)</caption>
+      <thead><tr><th>Leverage</th><th>Full fill (avg 59,500)</th><th>Only E1 fills (60,000)</th></tr></thead>
+      <tbody>
+        <tr><td class="num">10×</td><td class="num ok">54,228 ✓</td><td class="num ok">54,684 ✓</td></tr>
+        <tr><td class="num">25×</td><td class="num ok">57,843 ✓</td><td class="num bad">58,329 ⚠ liquidated before the stop</td></tr>
+        <tr><td class="num">40×</td><td class="num bad">58,747 ⚠</td><td class="num bad">59,241 ⚠</td></tr>
+        <tr><td colspan="3" style="color:var(--muted)">Max safe leverage: <b>26×</b> if everything fills, <b>22×</b> on the worst path. <code>liq = avg×(1−1/L)/(1−mmr)</code> · <code>Lmax = 1/(1−(S/E)(1−mmr))</code></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="tablewrap">
+    <table>
+      <caption class="eyebrow" style="caption-side:top;text-align:left;padding:4px 0 6px">Quiet costs and odds</caption>
+      <thead><tr><th>Item</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Fees if stopped (maker in, taker out)</td><td class="num">$0.60 + $1.74 = $2.34 (0.023R)</td></tr>
+        <tr><td>Fees as share of R with a 0.45% / 0.25% stop, both taker</td><td class="num warn">20% / 36% of R</td></tr>
+        <tr><td>Funding at baseline · 5× baseline over 5 days</td><td class="num">$1.19/day · ≈ $30 (0.30R)</td></tr>
+        <tr><td>True break-even (maker in, taker out)</td><td class="num">59,536, not 59,500</td></tr>
+        <tr><td>Size with fees inside the budget</td><td class="num">0.0651 BTC, not 0.0667</td></tr>
+        <tr><td>P(10+ losses in a row in 200 trades at 40% win rate)</td><td class="num warn">≈ 38%</td></tr>
+        <tr><td>Example outcome: plan 2.33R, closed early</td><td class="num">+1.83R realised · 0.37R left on TP2</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+
+<section id="missing" aria-labelledby="mis-h">
+  <h2 id="mis-h">What's missing <small>trader-review.md §4 (G) and competitors.md §5 (X)</small></h2>
+  <div class="legend"><span><i style="background:var(--violet)"></i>Important next (trader review)</span><span><i style="background:var(--warn)"></i>New, from the competitor benchmark</span></div>
+  <div class="grid">
+    <article class="card new"><span class="id">X3 · data integrity</span><h3>Import funding payments</h3><p>Vessel shows the live funding rate but never imports funding payments (<code>userFunding</code>), so net results in R are incomplete.</p></article>
+    <article class="card new"><span class="id">X5 · data integrity</span><h3>History backfill and a visible coverage line</h3><p>Hyperliquid serves only the latest 10,000 fills. Store history as it arrives, and show what the data covers.</p><pre>Complete back to 2026-07-14 (provider limit)</pre></article>
+    <article class="card new"><span class="id">X1</span><h3>"What if" review of your own exit rules</h3><p>Replay your written management rules on stored candles. Label the result hypothetical.</p></article>
+    <article class="card new"><span class="id">X2 · X4 · X6</span><h3>Auto-tag rules · cash flows · liquidation alert</h3><p>Readable tagging rules (no AI). Keep deposits and withdrawals out of performance. Alert on distance to the venue's liquidation price.</p></article>
+    <article class="card new"><span class="id">X7 · X8 · X9</span><h3>Metric definitions · local API · redacted export</h3><p>A versioned page of formulas, a read-only API for your own tools, and a review export that hides $ and addresses.</p></article>
+    <article class="card miss"><span class="id">G1</span><h3>Automatic context tags</h3><p>Session, weekday, funding and OI at entry, volatility percentile, events in the holding window.</p></article>
+    <article class="card miss"><span class="id">G2 · G3</span><h3>Setups, playbook and typed checklist</h3><p>Rules plus A+ example captures. Skipped checklist items are recorded, not blocked.</p><pre>All criteria met +0.7R · one skipped −0.2R</pre></article>
+    <article class="card miss"><span class="id">G4 · G5</span><h3>Lifecycle, including Missed and Cancelled</h3><p>Active and Closed come from confirmed fills or a manual action, never from a price touch. Missed setups are observations.</p></article>
+    <article class="card miss"><span class="id">G6 · G7 · G8</span><h3>Level alerts · position on chart · MAE/MFE</h3><p>In-page alerts near planned levels, venue fills and liquidation drawn on the chart, excursions from stored candles.</p></article>
+    <article class="card miss"><span class="id">G9</span><h3>Liquidity and slippage estimate</h3><p>Estimate market-order impact from <code>impactPxs</code> or the order book. Warn above 10% of R.</p></article>
+    <article class="card miss"><span class="id">G10–G15</span><h3>Templates, search, daily journal, review cadence, export, CSV import</h3><p>Speed for repeated setups, findability, a day-level plan, a review schedule, and portable data.</p></article>
+  </div>
+</section>
+
+<section id="ideas" aria-labelledby="ide-h">
+  <h2 id="ide-h">Best ideas <small>borrowed and differentiating, competitors.md §3–4</small></h2>
+  <div class="cols">
+    <div>
+      <h3 style="margin-top:12px">Worth borrowing</h3>
+      <div class="grid" style="grid-template-columns:1fr">
+        <article class="card idea"><h3>R only where risk is known (Tradervue)</h3><pre>31 of 47 trades have an initial R · 16 shown in $ only</pre></article>
+        <article class="card idea"><h3>MAE/MFE as labelled estimates (LuxAlgo)</h3><pre>MAE −0.62R · MFE +2.10R (1m candles, 3 of 960 missing)</pre></article>
+        <article class="card idea"><h3>Cost of tilt in R (Edgewonk)</h3><pre>"Tilted" 9 trades −0.71R/trade vs Calm +0.38R (n&lt;20)</pre></article>
+        <article class="card idea"><h3>Log passed trades with a reason (Edgewonk)</h3><pre>Passed ETH short "funding too negative" · observation only</pre></article>
+        <article class="card idea"><h3>Morning plan vs the day's trades (TradeZella)</h3><pre>Plan: max 3 trades · Actual: 5 (2 over) · −1.4R mid-range</pre></article>
+        <article class="card idea"><h3>Typed checklists you can analyse (TradesViz)</h3><pre>"volume &gt; avg" checked +0.55R · unchecked −0.12R</pre></article>
+        <article class="card idea"><h3>Chart drawing → entry with fees and liquidation</h3><pre>E1 60,000 · SL 58,000 · risk $100 → 0.05 BTC · liq 54,684 ✓</pre></article>
+      </div>
+    </div>
+    <div>
+      <h3 style="margin-top:12px">Where Vessel can win</h3>
+      <ul class="tight">
+        <li><b>Plan first, with revisions.</b> None of the journals reviewed keeps a versioned multi-entry plan with a frozen snapshot.</li>
+        <li><b>Perps-native maths.</b> None of them shows liquidation versus stop on every fill path before the trade.</li>
+        <li><b>Concurrent Plays inside one position</b>, linked per order. None of them handles this.</li>
+        <li><b>Honest uncertainty:</b> n, ±SE, null not zero, observation not fill.</li>
+        <li><b>Private where it matters.</b> Hyperliquid fills are public; your thesis and review stay on your own server.</li>
+        <li><b>Process over outcome</b>, without a coach persona or gamified scores.</li>
+        <li><b>Free and self-hosted</b>, against $197–$1,188 a year for paid journals.</li>
+      </ul>
+      <h3 style="margin-top:18px">Deliberately not copied</h3>
+      <ul class="tight">
+        <li>Backtesting, single "health" scores, social leaderboards, whale tracking.</li>
+        <li><b>AI that writes the thesis or the review:</b> it breaks the "never fabricate" principle.</li>
+      </ul>
+      <h3 style="margin-top:18px">Nice to have</h3>
+      <ul class="tight">
+        <li>Risk-of-ruin and streak simulation · trade replay · Telegram/Discord · weekly review page</li>
+        <li>Opt-in AI over your own journal · daily-R calendar · Lighter · themes · mobile quick capture</li>
+        <li>Command palette (<code>N</code> new Play, <code>L</code>/<code>S</code>, <code>E</code>, <code>C</code>) · HIP-3, sub-accounts and vaults</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="improve" aria-labelledby="imp-h">
+  <h2 id="imp-h">Improvements to what exists <small>trader-review.md §5</small></h2>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>#</th><th>Today</th><th>Improve to</th></tr></thead>
+    <tbody>
+      <tr><td>I1</td><td>Leverage 1–100× on every instrument</td><td>Warn above the venue max ("Above BTC max 40×") and show the safe maximum <span class="pill owner">owner decision</span></td></tr>
+      <tr><td>I2</td><td>Stop/target as % from entry only</td><td><code>58,000 · −3.33% · −0.67R play / −1.00R entry · ROE −33% @10×</code></td></tr>
+      <tr><td>I3</td><td>Switching price ↔ % clears the value</td><td>Convert using the entry price <span class="pill owner">owner decision</span></td></tr>
+      <tr><td>I4</td><td>Shares don't have to total 100%</td><td>Red total; block <i>Planned</i> until entries and targets each total 100%</td></tr>
+      <tr><td>I5</td><td>Fixed "Draft" badge that looks like a control</td><td>Hide it, or make it the lifecycle control</td></tr>
+      <tr><td>I6</td><td>Chart position drawing computes its own R</td><td>"Create entry from this drawing"</td></tr>
+      <tr><td>I7</td><td>Five free-text tabs</td><td>Keep the text and add structured fields (trigger, timeframe, setup, rules)</td></tr>
+      <tr><td>I8</td><td>Flat list of fills, 100 rows</td><td>Trades by default, fills on drill-down, filters, paging</td></tr>
+      <tr><td>I9</td><td>Overview shows balances and counts</td><td><code>This week: 7 trades · +3.1R · adherence 86% · open risk 2.0% + 1 unknown</code></td></tr>
+      <tr><td>I10</td><td>Manual refresh only</td><td>Background sync plus a "new fills" toast that opens the inbox</td></tr>
+      <tr><td>I11</td><td>Image download leaves out the note</td><td>Option to put the note under the image</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="ui" aria-labelledby="ui-h">
+  <h2 id="ui-h">UI/UX <small>ui-ux-audit.md · 18 screenshots · isolated test stack</small></h2>
+  <p class="lead">Calm, consistent Graphite design with visible focus and a professional chart. It fails the trader on arithmetic, validation and vertical space. Planning two entries took 35 clicks; the entry sidebar shows about half an entry at a time; it takes about 33 Tab presses to reach the position editor.</p>
+  <div class="cols">
+    <ol class="tight" style="padding-left:20px">
+      <li><b>Calculate the plan</b> with labelled estimates: <code>Risk −$250 (1.0%) · Reward +$689 (2.76R) · Liq ≈ 72.6</code></li>
+      <li><b>Risk-based sizing input:</b> <code>Risk [1]% of $25,000 = $250 → 102.04 HYPE</code></li>
+      <li><b>Plan validation</b> inline, plus an "N issues" badge</li>
+      <li><b>Readable chart levels:</b> group collisions ("TP1 ×3 · 91–92"), one tag per price, entry colours away from red/green, R/R shading, R on tags</li>
+      <li><b>Chart above the fold:</b> compress six header bands into two rows (chart at y≈260)</li>
+    </ol>
+    <ol class="tight" start="6" style="padding-left:20px">
+      <li><b>Persist drafts:</b> autosave now, full Plays later ("Saved 14:05" chip)</li>
+      <li><b>Compact entry table</b> with R per row and a "+TP" button</li>
+      <li><b>Known account value as the default budget</b> <span class="pill owner">owner decision</span></li>
+      <li><b>Searchable instrument picker</b> with favourites and live price</li>
+      <li><b>Fix the Overview:</b> lead with equity, remove the stale card, fix the footer</li>
+    </ol>
+  </div>
+
+  <h3 style="margin-top:22px">Proposed Plays page <small style="color:var(--faint);font-weight:400">· mockup, unfinished (the round 4 subagent stopped early)</small></h3>
+  <figure class="hero-shot" style="margin-top:10px">
+    <a href="mockups/plays-improved.png" target="_blank" rel="noopener"><img src="mockups/plays-improved.png" alt="Mockup of the improved Plays page: two-row header with risk field and issues badge, grouped chart tags with R, risk/reward shading, entry table with R per row, isolated/cross toggle and max safe leverage marker" loading="lazy"></a>
+    <figcaption>Two-row header with Risk % and an issues badge · grouped tags with R · red/green risk–reward shading · liquidation line · entry table with R · isolated/cross · "22× max safe (worst path)". <a href="mockups/plays-improved.html">Open the HTML mockup</a></figcaption>
+  </figure>
+
+  <h3 style="margin-top:22px">Evidence from the current app</h3>
+  <div class="shots">
+    <figure><a href="screenshots/plays-desktop-empty.png" target="_blank" rel="noopener"><img src="screenshots/plays-desktop-empty.png" alt="Empty Plays page" loading="lazy"></a><figcaption>Chart starts at y≈659: six bands above it</figcaption></figure>
+    <figure><a href="screenshots/plays-desktop-filled-workspace.png" target="_blank" rel="noopener"><img src="screenshots/plays-desktop-filled-workspace.png" alt="Three-entry plan" loading="lazy"></a><figcaption>Overlapping TP tags; cramped sidebar</figcaption></figure>
+    <figure><a href="screenshots/plays-short-with-long-levels.png" target="_blank" rel="noopener"><img src="screenshots/plays-short-with-long-levels.png" alt="Short with long-side levels" loading="lazy"></a><figcaption>Short with Long-side levels and no warning (B1)</figcaption></figure>
+    <figure><a href="screenshots/plays-desktop-filled-full.png" target="_blank" rel="noopener"><img src="screenshots/plays-desktop-filled-full.png" alt="Full plays page" loading="lazy"></a><figcaption>Summary: mostly "Not calculated"</figcaption></figure>
+    <figure><a href="screenshots/plays-chart-drawing.png" target="_blank" rel="noopener"><img src="screenshots/plays-chart-drawing.png" alt="Chart drawing" loading="lazy"></a><figcaption>Drawings work; edit bar covers the price area</figcaption></figure>
+    <figure><a href="screenshots/plays-evidence-viewer.png" target="_blank" rel="noopener"><img src="screenshots/plays-evidence-viewer.png" alt="Evidence viewer" loading="lazy"></a><figcaption>Capture is strong, but the image lacks a plan header</figcaption></figure>
+    <figure><a href="screenshots/overview-desktop.png" target="_blank" rel="noopener"><img src="screenshots/overview-desktop.png" alt="Overview" loading="lazy"></a><figcaption>Overview: stale card, wallet-first KPI</figcaption></figure>
+    <figure><a href="screenshots/account-detail-hl-refreshed.png" target="_blank" rel="noopener"><img src="screenshots/account-detail-hl-refreshed.png" alt="Account detail" loading="lazy"></a><figcaption>Account detail: equity not featured</figcaption></figure>
+    <figure><a href="screenshots/plays-mobile-390-filled-full.png" target="_blank" rel="noopener"><img src="screenshots/plays-mobile-390-filled-full.png" alt="Mobile plays" loading="lazy"></a><figcaption>390 px: works, but 3,881 px tall</figcaption></figure>
+  </div>
+  <details><summary>All 18 screenshots</summary><div><ul class="tight">
+    <li><a href="screenshots/overview-desktop.png">overview-desktop</a> · <a href="screenshots/portfolios-desktop.png">portfolios-desktop</a> · <a href="screenshots/accounts-desktop.png">accounts-desktop</a> · <a href="screenshots/accounts-add-dialog.png">accounts-add-dialog</a> · <a href="screenshots/account-detail-hl-refreshed.png">account-detail-hl-refreshed</a> · <a href="screenshots/activity-desktop.png">activity-desktop</a> · <a href="screenshots/settings-desktop.png">settings-desktop</a></li>
+    <li><a href="screenshots/plays-desktop-empty.png">plays-desktop-empty</a> · <a href="screenshots/plays-desktop-filled-full.png">plays-desktop-filled-full</a> · <a href="screenshots/plays-desktop-filled-workspace.png">plays-desktop-filled-workspace</a> · <a href="screenshots/plays-chart-drawing.png">plays-chart-drawing</a> · <a href="screenshots/plays-chart-level-editor.png">plays-chart-level-editor</a> · <a href="screenshots/plays-chart-expanded.png">plays-chart-expanded</a></li>
+    <li><a href="screenshots/plays-entry-expanded.png">plays-entry-expanded</a> · <a href="screenshots/plays-evidence-viewer.png">plays-evidence-viewer</a> · <a href="screenshots/plays-short-with-long-levels.png">plays-short-with-long-levels</a> · <a href="screenshots/plays-manual-account-placeholder.png">plays-manual-account-placeholder</a> · <a href="screenshots/plays-mobile-390-filled-full.png">plays-mobile-390-filled-full</a></li>
+  </ul></div></details>
+</section>
+
+<section id="roadmap" aria-labelledby="rm-h">
+  <h2 id="rm-h">Roadmap <small>roadmap.md</small></h2>
+  <div class="phase">
+    <article class="card req"><h3>Phase 0 <span>· days, frontend</span></h3><p>Validation, leverage warning, allocation fix, chart tag grouping, compressed header, Overview fixes, unit labels, autosave safety net.</p></article>
+    <article class="card req"><h3>Phase 1 <span>· close the planning loop</span></h3><p>1.1 money summary and risk sizing → 1.2 saved Plays, revisions, snapshot → 1.3 lifecycle → 1.4 management rules and invalidation.</p></article>
+    <article class="card req"><h3>Phase 2 <span>· close the execution loop</span></h3><p>Full fill import and sync, trades view with per-order links and an inbox, protection check, outcome in R. Add X3 funding and X5 coverage here.</p></article>
+    <article class="card req"><h3>Phase 3 <span>· learn</span></h3><p>Structured review, context tags, portfolio heat, guardrails, setups and playbook, analytics with ±SE, Overview performance strip.</p></article>
+    <article class="card req"><h3>Phase 4 <span>· deepen</span></h3><p>Alerts, position on chart, MAE/MFE, liquidity, templates, search, daily journal, export, CSV import, nice-to-haves.</p></article>
+  </div>
+  <p class="lead" style="margin-top:12px"><b>Suggested first slice:</b> Phase 0 plus 1.1. It is mostly frontend work on code that already exists, and it removes the main complaint: <i>"the app knows my numbers but won't do arithmetic."</i></p>
+</section>
+
+<section id="decisions" aria-labelledby="dec-h">
+  <h2 id="dec-h">Decisions waiting for you <small>these change current contracts</small></h2>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>#</th><th>Decision</th><th>Unblocks</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Show labelled <b>estimates</b> for money figures instead of "financial calculations deferred"</td><td>M2 / 1.1</td></tr>
+      <tr><td>2</td><td>Session-storage <b>autosave</b> before full persistence</td><td>0.10</td></tr>
+      <tr><td>3</td><td>Default <b>margin mode</b> for planning: cross (venue default) or isolated (the only mode a pre-trade liquidation estimate can describe)</td><td>M2</td></tr>
+      <tr><td>4</td><td><b>R for unplanned imports:</b> dollars only, or a retrospective stop entered by you and labelled as such</td><td>M7</td></tr>
+      <tr><td>5</td><td>Start with <b>setups and a playbook</b> before versioned strategies</td><td>G2 / M10</td></tr>
+      <tr><td>6</td><td>Default <b>soft limits</b> (daily −2R, weekly −5R, 3 trades/day, 3% open risk)</td><td>M9</td></tr>
+      <tr><td>7</td><td><b>Compress the Plays header</b> and fold the sizing assistant into a risk field, keeping section order</td><td>0.7</td></tr>
+      <tr><td>8</td><td>Convert price ↔ % instead of clearing the value</td><td>0.4 / I3</td></tr>
+      <tr><td>9</td><td><b>Clamp</b> leverage to the venue max, or only warn</td><td>0.2 / I1</td></tr>
+      <tr><td>10</td><td>Use the account's known value as the <b>default budget</b></td><td>UI #8</td></tr>
+      <tr><td>11</td><td>Segmented <b>mobile view</b> (Chart · Position · Journal · Summary) instead of the shared stack</td><td>UI §4.7</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="notes" aria-labelledby="not-h">
+  <h2 id="not-h">Principles, risks and caveats</h2>
+  <div class="cols">
+    <div>
+      <h3 style="margin-top:12px">Principles every proposal keeps</h3>
+      <ul class="tight">
+        <li>A price touch or candle is an <b>observation</b>, never a fill.</li>
+        <li>No fabricated thesis, stop or plan for imported history. Retrospective inputs are labelled.</li>
+        <li>Concurrent Plays per account and instrument; links by order or fill, never guessed.</li>
+        <li>Read-only venue access. Vessel records and flags; it never blocks trading or places orders.</li>
+        <li>Unknown stays null. Exact decimal strings are kept.</li>
+        <li>Locked section order: capital above, chart left, journal below the chart, position right, summary below.</li>
+      </ul>
+      <h3 style="margin-top:18px">Risks to the concept</h3>
+      <ul class="tight">
+        <li><b>Friction kills journals:</b> logging should take about a minute at most.</li>
+        <li><b>Over-cautious wording</b> ("Not calculated" everywhere) reads as "can't help me".</li>
+        <li><b>Learning from noise:</b> always show n and uncertainty.</li>
+      </ul>
+    </div>
+    <div>
+      <h3 style="margin-top:12px">How this was produced</h3>
+      <ul class="tight">
+        <li><b>Round 1:</b> docs, a code inventory, a hands-on UI walkthrough on an isolated stack with live public Hyperliquid data, first draft.</li>
+        <li><b>Round 2:</b> a critic playing a professional perps trader corrected fees, the liquidation formula and examples, and re-prioritised. HIP-3 claims were checked against the docs and only partly held.</li>
+        <li><b>Round 3:</b> roadmap; a reviewer checked every number, link and 20 code references (fix: +1.83R, not +1.90R).</li>
+        <li><b>Round 4:</b> competitor benchmark done. The accessibility audit, technical specs and the other mockups stopped at the session limit and are <b>not done</b>.</li>
+      </ul>
+      <h3 style="margin-top:18px">Not verified</h3>
+      <ul class="tight">
+        <li>Human timing, touch, screen readers, populated fill tables, venue errors, widths other than 1440 / 390.</li>
+        <li>TraderSync and HyperTracker details (third-party only). Fees and funding follow Hyperliquid docs at the time of writing.</li>
+      </ul>
+    </div>
+  </div>
+  <details><summary>Full documents</summary><div><ul class="tight">
+    <li><a href="README.md">README.md</a>: index and the rounds</li>
+    <li><a href="trader-review.md">trader-review.md</a>: M/G/I/N items with worked examples</li>
+    <li><a href="ui-ux-audit.md">ui-ux-audit.md</a>: friction log, pages, bugs</li>
+    <li><a href="roadmap.md">roadmap.md</a>: phases, acceptance, decisions</li>
+    <li><a href="competitors.md">competitors.md</a>: feature matrix, borrowed ideas, X items</li>
+  </ul></div></details>
+</section>
+
+<footer>Vessel product review summary · generated October 3, 2026 from <code>docs/product-review/</code> · static page, no scripts, no external requests.</footer>
+</main>
+</body>
+</html>

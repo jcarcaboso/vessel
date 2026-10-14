@@ -1,5 +1,12 @@
 # Normalized execution facts
 
+October 13 diary completion adds explicit manual facts in separate play-owned
+records, never in imported order/fill tables. The ledger preserves submitted
+decimal strings and correction history. Its normalized in-memory projection
+reuses lifecycle/result validation while retaining manual provenance and
+unknown-cost coverage. Whole-order retrospective linking never changes the
+imported facts. See [the diary contract](diary-completion-contract.md).
+
 October 5, 2026, slice S2 of the RISEx-first plan ([risex-integration.md](risex-integration.md)). Builds on the [venue registry](venue-registry.md) (S1). Behaviour for Hyperliquid is unchanged; stored Hyperliquid rows are converted once by a migration.
 
 ## Why
@@ -21,8 +28,8 @@ Matching, lifecycle and sizing used to read Hyperliquid's encoding directly: `"B
 
 - **Adapters** translate. Hyperliquid: `B`→`buy`, `A`→`sell`; `dir` "Open Long/Short" → `open`, "Close Long/Short" → `close`, "Long > Short"/"Short > Long" → `flip`, anything else (liquidation or settlement wording) → `unknown`; closed PnL is `gross`, fees `reported`.
 - **Validation:** `VenueFactChecks` rejects adapter output outside the vocabulary before anything is stored. Sync treats it as a venue failure (the account keeps its previous facts and reports a refresh error); an order read answers the usual 502.
-- **Matcher:** plan levels carry `buy`/`sell`; a long entry buys and its exits sell.
-- **Lifecycle:** an order "closes a position" when any of its fills has a `close` or `flip` effect.
+- **Matcher:** plan levels carry `buy`/`sell`; a long entry buys and its exits sell. Retained fills must not contradict the assigned role. Entry links reject close/flip effects, and exit links reject open/flip effects. Owner linking uses the same compatibility rule.
+- **Lifecycle:** unknown effect does not assert a contradiction, but a known flip cannot settle a Play without split attribution. Compatible exits must equal entries in valid chronology, with no known missing fixed-size filled-order executions or resting entry order, before closure. Review retains its stricter requirement for explicit open/close effects.
 - **Sizing:** a Play's net result is the sum of closed PnL minus the USDC fees of `gross` fills only. `net-of-fee` fills already include their fee, and a fee paid in another token on such a fill does not make the result incomplete.
 - **Execution totals** report `closedPnlBasis`: `gross`, `net-of-fee` or `mixed`. The panel labels net-of-fee totals "after fees".
 
@@ -34,6 +41,7 @@ Migration `NormalizedExecutionFacts` adds `PositionEffect`, `FeeBasis` and `PnlB
 
 - `FillDto` (account activity) adds `positionEffect`, `feeBasis` and `pnlBasis`; `side` is `buy`/`sell`.
 - Execution fills add `side`, `positionEffect` and `pnlBasis`; execution orders use `buy`/`sell`; totals add `closedPnlBasis`.
+- October 13 integrity corrections add execution `issues`. Contradictory linked fills remain visible on their original links, but do not contribute to progress/P&L totals; the issues explain the exclusion.
 - The browser validates these values and stops treating `A`/`B` as sides.
 
 ## Tests

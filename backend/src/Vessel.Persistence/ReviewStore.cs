@@ -18,19 +18,8 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
             (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
                 a.PortfolioId?.ToString() == query.Portfolio)).Select(a => a.Id).ToList();
         var closed = await sizing.ClosedPlaysAsync(ct);
-        var closedIds = closed.Select(p => p.Play.Id).ToList();
-        // Balanced fills alone cannot prove completeness: a known filled order may have only part
-        // (or none) of its executions retained. Only fixed-size filled orders establish this bound:
-        // cancellation/rejection/trigger size changes are not executions, and position TP/SL size is dynamic.
-        var linkedOrders = await (from link in db.OrderLinks
-            join order in db.Orders on new { link.AccountId, link.OrderId } equals new { order.AccountId, order.OrderId }
-            where closedIds.Contains(link.PlayId) && link.State == OrderLinkState.Linked
-            select new { link.PlayId, Order = order }).AsNoTracking().ToListAsync(ct);
-        var retained = closed.ToDictionary(p => p.Play.Id, p => p.Fills.GroupBy(f => f.Fill.OrderId)
-            .ToDictionary(g => g.Key, g => g.Sum(f => f.Fill.Quantity)));
-        var incomplete = linkedOrders.Where(item => item.Order.Status == "filled" && !item.Order.IsPositionTpsl &&
-            item.Order.OriginalSize > retained[item.PlayId].GetValueOrDefault(item.Order.OrderId))
-            .Select(item => item.PlayId).ToHashSet();
+        // Known filled orders with missing executions come with the closed Plays, as sizing reads them.
+        var incomplete = closed.Where(p => p.IncompleteOrders is { Count: > 0 }).Select(p => p.Play.Id).ToHashSet();
         var open = await db.Plays.CountAsync(p => ids.Contains(p.AccountId) && p.Status == PlayStatus.Open &&
             (query.Instrument == null || p.ContractId == query.Instrument), ct);
         var fills = db.Fills.Where(f => ids.Contains(f.AccountId) && f.OccurredAtUtc <= asOf &&

@@ -1,0 +1,18 @@
+known missing entry before late fill: status=closed; entered=1; exited=1; open=0; reviewCount=0; incomplete=1; sizingOutcome=10; sizingRisk=5.00; sizingW/L/S=1/0/0; links=in:Entry,out:Target
+known missing entry after late fill: status=closed; entered=2; exited=1; open=1; reviewCount=0; incomplete=1; sizingOutcome=10; sizingRisk=10.00; sizingW/L/S=1/0/0; links=in:Entry,out:Target
+pre-entry planned target: status=closed; entered=1; exited=1; open=0; reviewCount=0; incomplete=1; sizingOutcome=10; sizingRisk=5.00; sizingW/L/S=1/0/0; links=old-close:Target,in:Entry
+same-side opening fill linked as exit: status=closed; entered=1; exited=1; open=0; reviewCount=0; incomplete=1; sizingOutcome=0; sizingRisk=5.00; sizingW/L/S=0/0/1; links=in:Entry,increase:Exit
+automatic entry from close-short: status=open; entered=1; exited=0; open=1; reviewCount=0; incomplete=0; sizingOutcome=null; sizingRisk=null; sizingW/L/S=0/0/0; links=close-short:Entry
+closed Play after unlink exit: status=closed; entered=1; exited=0; open=1; reviewCount=0; incomplete=1; sizingOutcome=0; sizingRisk=5.00; sizingW/L/S=0/0/1; links=in:Entry
+repair rejected: 409 Only planned, paused or open plays link orders.
+filled long changed to short: status=open; entered=1; exited=0; open=1; reviewCount=0; incomplete=0; sizingOutcome=null; sizingRisk=null; sizingW/L/S=0/0/0; links=in:Entry
+PASS: complete partial exit stays Open
+PASS: two concurrent matching Plays require confirmation
+PASS: Activity retains partial exit within one open operation
+PASS: post-entry revision does not replace initial stop for R
+PASS: gross USDC fees subtracted once
+PASS: net-of-fee result not charged twice
+PASS: Activity unsupported gross fee is unknown, not zero
+PASS: Activity flip preserves quantity allocation and fee/PnL totals
+PASS: Review complete scratch is a real zero
+PASS: Review empty history is unknown

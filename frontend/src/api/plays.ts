@@ -4,6 +4,15 @@ export const playStatuses = ['draft', 'planned', 'paused', 'open', 'closed', 'ca
 export type PlayStatus = typeof playStatuses[number]
 export const cancelReasons = ['invalidated', 'missed', 'changed-mind', 'expired', 'mistake', 'other'] as const
 export type CancelReason = typeof cancelReasons[number]
+export interface StructuredReview {
+  adherence: 'followed' | 'deviated' | 'not-applicable' | null
+  mistakeTag: string | null
+  lesson: string
+  nextAction: string
+}
+export const emptyStructuredReview = (): StructuredReview => ({ adherence: null, mistakeTag: null, lesson: '', nextAction: '' })
+export const hasStructuredReview = (review?: StructuredReview) =>
+  !!review && !!(review.adherence || review.mistakeTag?.trim() || review.lesson.trim() || review.nextAction.trim())
 
 /** A stop or target. A percent value is the return on margin at the plan's leverage; share is the part of the entry it closes. */
 export interface PlanExit { id: string; unit: 'price' | 'percent'; value: string; share: string }
@@ -36,6 +45,9 @@ export interface PlaySummary {
   endedAtUtc: string | null
   /** Whether a nonblank review note has been saved, independently of lifecycle status. */
   hasReview: boolean
+  /** Absent on older servers: those records were planned, never retrospective. */
+  origin?: 'planned' | 'retrospective'
+  reviewedAtUtc?: string | null
 }
 export interface SavedPlay {
   summary: PlaySummary
@@ -43,6 +55,7 @@ export interface SavedPlay {
   /** Chart drawings per venue instrument key; validated by the chart when loaded. */
   drawings: Record<string, unknown[]>
   review: string
+  structuredReview?: StructuredReview | null
 }
 export interface PlayFields {
   accountId: string
@@ -52,10 +65,12 @@ export interface PlayFields {
   plan: PlayPlan
   drawings: Record<string, unknown[]>
   review: string
+  structuredReview?: StructuredReview
 }
 export interface PlanRevision { number: number; status: PlayStatus; reason: string; createdAtUtc: string; plan: PlayPlan }
-export interface StatusChange { from: PlayStatus; to: PlayStatus; reason: CancelReason | null; note: string | null; occurredAtUtc: string; source?: 'owner' | 'venue' }
-export interface PlayHistory { revisions: PlanRevision[]; statusChanges: StatusChange[] }
+export interface StatusChange { from: PlayStatus; to: PlayStatus; reason: CancelReason | null; note: string | null; occurredAtUtc: string; source?: 'owner' | 'venue' | 'manual' }
+export interface ReviewRevision { number: number; occurredAtUtc: string; review: string; structuredReview: StructuredReview }
+export interface PlayHistory { revisions: PlanRevision[]; statusChanges: StatusChange[]; reviews?: ReviewRevision[] | null }
 export type StatusRequest =
   | { status: 'planned' | 'paused' }
   | { status: 'cancelled'; reason: CancelReason; note?: string }
@@ -91,15 +106,27 @@ export const isPlaySummary = (v: unknown): v is PlaySummary => object(v) && guid
   (v.instrumentSource === 'venue' || v.instrumentSource === 'manual') && (v.direction === 'long' || v.direction === 'short') &&
   count(v.planRevision) && count(v.version) && nullable(x => cancelReasons.includes(x as CancelReason))(v.cancelReason) &&
   date(v.createdAtUtc) && date(v.updatedAtUtc) && nullable(date)(v.plannedAtUtc) && nullable(date)(v.endedAtUtc) &&
-  typeof v.hasReview === 'boolean'
-export const isSavedPlay = (v: unknown): v is SavedPlay => object(v) && isPlaySummary(v.summary) && isPlayPlan(v.plan) &&
-  object(v.drawings) && Object.values(v.drawings).every(Array.isArray) && text(v.review)
+  typeof v.hasReview === 'boolean' && (v.origin === undefined || v.origin === 'planned' || v.origin === 'retrospective') &&
+  (v.reviewedAtUtc === undefined || nullable(date)(v.reviewedAtUtc))
+export const isStructuredReview = (v: unknown): v is StructuredReview => object(v) &&
+  (v.adherence === null || ['followed', 'deviated', 'not-applicable'].includes(v.adherence as string)) &&
+  nullable(x => text(x, 100))(v.mistakeTag) && text(v.lesson, 4000) && text(v.nextAction, 4000)
+// Retrospective documents have a deliberately empty compatibility plan, not an original plan.
+const isRetrospectivePlan = (v: unknown) => object(v) && Array.isArray(v.entries) && v.entries.length === 0 &&
+  v.leverage === '0' && object(v.notes) && ['thesis', 'invalidation', 'strategy', 'evidence'].every(k => v.notes && (v.notes as Record<string, unknown>)[k] === '') &&
+  isPlayPlan({ ...v, entries: [{ id: 'compatibility', name: '', color: '', share: '', price: '', stops: [], targets: [] }] })
+export const isSavedPlay = (v: unknown): v is SavedPlay => object(v) && isPlaySummary(v.summary) &&
+  (v.summary.origin === 'retrospective' ? isRetrospectivePlan(v.plan) : isPlayPlan(v.plan)) &&
+  object(v.drawings) && Object.values(v.drawings).every(Array.isArray) && text(v.review) &&
+  (v.structuredReview == null || isStructuredReview(v.structuredReview))
 export const isPlayHistory = (v: unknown): v is PlayHistory => object(v) && Array.isArray(v.revisions) && Array.isArray(v.statusChanges) &&
   v.revisions.every(r => object(r) && count(r.number) && playStatuses.includes(r.status as PlayStatus) && text(r.reason, 2000) &&
     date(r.createdAtUtc) && isPlayPlan(r.plan)) &&
   v.statusChanges.every(c => object(c) && playStatuses.includes(c.from as PlayStatus) && playStatuses.includes(c.to as PlayStatus) &&
     nullable(x => cancelReasons.includes(x as CancelReason))(c.reason) && nullable(x => text(x, 2000))(c.note) && date(c.occurredAtUtc) &&
-    (c.source === undefined || c.source === 'owner' || c.source === 'venue'))
+    (c.source === undefined || c.source === 'owner' || c.source === 'venue' || c.source === 'manual')) &&
+  (v.reviews == null || Array.isArray(v.reviews) && v.reviews.every(r => object(r) && count(r.number) &&
+    date(r.occurredAtUtc) && text(r.review) && isStructuredReview(r.structuredReview)))
 export const isSavedEvidence = (v: unknown): v is SavedEvidence => object(v) && guid(v.id) && guid(v.playId) &&
   (v.source === 'capture' || v.source === 'upload') && text(v.contentType, 64) && count(v.sizeBytes) && text(v.sha256, 64) &&
   text(v.note, 4000) && date(v.createdAtUtc) && date(v.updatedAtUtc) && (v.markup === null || object(v.markup))
@@ -170,6 +197,8 @@ export interface PlayExecution {
   suggestions: OrderLink[]
   unlinkedOrders: ExecutionOrder[]
   notice: string
+  /** Why linked fills cannot settle the play: missing executions, contradicting fills, or exits before or beyond the entries. */
+  issues: string[]
 }
 export interface LinkOrder { orderId: string; role: LinkRole; entryId?: string; levelId?: string }
 
@@ -195,4 +224,5 @@ export const isPlayExecution = (v: unknown): v is PlayExecution => object(v) && 
   Array.isArray(v.entries) && v.entries.every(e => object(e) && text(e.entryId, 64) && decimalText(e.filledQuantity) &&
     nullable(decimalText)(e.averageFillPrice) && count(e.restingOrders)) &&
   Array.isArray(v.links) && v.links.every(orderLink) && Array.isArray(v.suggestions) && v.suggestions.every(orderLink) &&
-  Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) && text(v.notice, 1000)
+  Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) && text(v.notice, 1000) &&
+  Array.isArray(v.issues) && v.issues.every(issue => text(issue, 1000))

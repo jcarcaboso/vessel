@@ -1,0 +1,46 @@
+using System.Text.Json.Serialization;
+using Vessel.Application.Activity;
+using Vessel.Domain.Plays;
+using Vessel.Domain.Workspace;
+
+namespace Vessel.Application.Plays;
+
+public sealed record ManualExecutionRequest(
+    [property: JsonRequired] Guid RequestId, [property: JsonRequired] long ExpectedVersion,
+    [property: JsonRequired] string Role, string? EntryId,
+    [property: JsonRequired] DateTimeOffset OccurredAtUtc, [property: JsonRequired] string Side,
+    [property: JsonRequired] string Quantity, [property: JsonRequired] string Price,
+    string? Fee, string? FeeCurrency, [property: JsonRequired] string Source, string? Reason = null);
+
+public sealed record ManualExecutionDto(Guid Id, string Role, string? EntryId, DateTimeOffset OccurredAtUtc,
+    string Side, string Quantity, string Price, string? Fee, string? FeeCurrency, string Source,
+    DateTimeOffset CreatedAtUtc, DateTimeOffset UpdatedAtUtc);
+public sealed record ManualHistoryDto(Guid Id, Guid ExecutionId, string? Reason, DateTimeOffset OccurredAtUtc,
+    ManualExecutionDto? Before, ManualExecutionDto After);
+public sealed record ManualTotalsDto(string EnteredQuantity, string ExitedQuantity, string OpenQuantity,
+    string GrossResultUsd, string? NetResultUsd, bool FeesComplete);
+public sealed record ManualExecutionsDto(PlayDto Play, IReadOnlyList<ManualExecutionDto> Records,
+    IReadOnlyList<ManualHistoryDto> History, ManualTotalsDto Totals, string Notice);
+
+public sealed record RetrospectivePreviewDto(bool Eligible, IReadOnlyList<string> Reasons, string Fingerprint,
+    ActivityOperationDto Operation, string Notice);
+public sealed record CreateRetrospectiveRequest(
+    [property: JsonRequired] Guid RequestId, [property: JsonRequired] Guid AccountId,
+    [property: JsonRequired] string OperationId, [property: JsonRequired] string ExpectedFingerprint,
+    [property: JsonRequired] string Title, string? Review = null);
+
+// Small diary-owned records; imported facts are only read here.
+public interface IDiaryStore
+{
+    Task<T> WithRequestLockAsync<T>(Guid requestId, Func<Task<T>> action, CancellationToken ct);
+    Task<DiaryRequest?> RequestAsync(Guid requestId, CancellationToken ct);
+    Task<List<ManualExecution>> ManualAsync(Guid playId, CancellationToken ct);
+    Task<List<ManualExecutionHistory>> ManualHistoryAsync(Guid playId, CancellationToken ct);
+    Task<ActivityFacts> ActivityAsync(Guid accountId, CancellationToken ct);
+    Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct);
+    Task<List<PlayOrderLink>> LinksAsync(Guid accountId, CancellationToken ct);
+    void Add(ManualExecution execution);
+    void Add(ManualExecutionHistory history);
+    void Add(DiaryRequest request);
+    void Add(PlayOrderLink link);
+}

@@ -1,6 +1,7 @@
 using Vessel.Application.MarketData;
 using Vessel.Application.Workspace;
 using Vessel.Application.Credentials;
+using Vessel.Application.Plays.Execution;
 
 namespace Vessel.Api;
 
@@ -83,8 +84,13 @@ public static class WorkspaceEndpoints
             MarketContextService service, CancellationToken ct) =>
             Results.Ok(await service.ContextAsync(id, instrument, ct))).WithMetadata(new CompressMarketData());
         api.MapGet("/accounts/{id:guid}/market-stream", MarketStreamEndpoint.StreamAsync);
-        api.MapPost("/accounts/{id:guid}/sync", async (Guid id, WorkspaceService service, CancellationToken ct) =>
-            Results.Ok(await service.SyncAsync(id, ct)));
+        api.MapPost("/accounts/{id:guid}/sync", async (Guid id, WorkspaceService service, HttpContext context, CancellationToken ct) =>
+        {
+            await service.SyncAsync(id, ct);
+            var execution = context.RequestServices.GetRequiredService<PlayExecutionService>();
+            await execution.RetainAccountOrdersAsync(id, ct);
+            return Results.Ok(await service.AccountAsync(id, ct));
+        });
         api.MapGet("/activity", async (Guid? accountId, Vessel.Application.Activity.ActivityService service, HttpContext context, CancellationToken ct) =>
         {
             context.Response.Headers.CacheControl = "no-store";

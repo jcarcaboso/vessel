@@ -91,14 +91,21 @@ export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; pla
       detail: index === 0 ? ['The plan as first committed.'] : describePlanChanges(all[index - 1]!.plan, revision.plan),
     })),
     ...result.history.statusChanges.map((change, index): HistoryItem => ({
-      at: change.occurredAtUtc, key: `s${index}`, title: `${statusLabels[change.from]} → ${statusLabels[change.to]}${change.source === 'venue' ? ' · from linked venue fills' : ''}`,
+      at: change.occurredAtUtc, key: `s${index}`, title: `${statusLabels[change.from]} → ${statusLabels[change.to]}${change.source === 'venue' ? ' · from linked venue fills' : change.source === 'manual' ? ' · from manual facts' : ''}`,
       detail: [change.reason ? cancelReasonLabels[change.reason] : '', change.note ?? ''].filter(Boolean),
+    })),
+    ...(result.history.reviews ?? []).map(review => ({
+      at: review.occurredAtUtc, key: `review${review.number}`, title: `Review revision ${review.number}`,
+      detail: [review.review, review.structuredReview.adherence ? `Adherence: ${review.structuredReview.adherence}` : '',
+        review.structuredReview.mistakeTag ? `Mistake: ${review.structuredReview.mistakeTag}` : '',
+        review.structuredReview.lesson ? `Lesson: ${review.structuredReview.lesson}` : '',
+        review.structuredReview.nextAction ? `Next action: ${review.structuredReview.nextAction}` : ''].filter(Boolean),
     })),
   ].sort((a, b) => b.at.localeCompare(a.at) || b.key.localeCompare(a.key)) : []
   return <Dialog open onOpenChange={next => { if (!next) onClose() }}>
     <DialogContent className="workspace-dialog play-history-dialog">
       <DialogHeader><DialogTitle>Play history</DialogTitle><DialogDescription>
-        Every plan revision since planning, with the reason you gave, and every status change.
+        Saved plan revisions, status changes and review revisions. Retrospective records have no original plan.
       </DialogDescription></DialogHeader>
       {result === null && <p role="status">Loading history…</p>}
       {result && 'error' in result && <p className="error" role="alert">{result.error}</p>}

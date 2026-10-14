@@ -16,6 +16,13 @@ The owner initially clarified that a generated picture was enough. On September 
 
 ## Purpose
 
+Core diary completion, October 13, 2026: the owner authorized the P1 must-haves
+in the current product review. The bounded
+[delivery contract](architecture/diary-completion-contract.md) covers explicit
+manual executions, safe retrospective review, actionable data-quality
+explanations, whole-position estimates and structured review. P2/P3 remain
+proposals.
+
 Make it easy to document trades, preserve the reasoning behind them, and discover repeated mistakes. The diary should help distinguish a poor decision from an unfavorable outcome, and a sound process from a lucky result.
 
 Vessel is a diary and planning tool. Order execution, investment recommendations, and a promise that any strategy works are not part of the current request.

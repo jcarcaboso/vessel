@@ -1,5 +1,15 @@
 # Activity operations
 
+October 13 diary completion adds **Review this activity** to the drill-down.
+The server previews original facts, current associations and eligibility.
+Confirmation creates a retrospective Play only for a complete unassigned
+round trip whose entire orders fit the selection. Split/flip, mixed,
+already-linked and incomplete operations stay inspectable but are rejected
+for this bounded workflow. Stale fingerprints return conflict, and identical
+request retries do not duplicate Plays. Operations still describe position
+facts, not inferred intent. Manual execution ledgers do not enter this feed.
+See [the diary contract](diary-completion-contract.md).
+
 October 12, 2026. Activity groups retained imported fills into position operations. This is a read-only report, not a Play creation, a thesis, an order link or a retrospective review. Overview shows the latest five operations, Activity adds filters, and account detail shows that account's operations. Every row can expand into constituent executions.
 
 ## Round trips

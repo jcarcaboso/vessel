@@ -22,7 +22,7 @@ import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
 import './plays-workspace.css'
 
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, notice,
-  lockInstrument = false, readOnly = false, execution, sizing = null, onRiskChange }: {
+  lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, onRiskChange, retrospective = false }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -36,16 +36,19 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   notice?: ReactNode
   /** Account and instrument are fixed once a Play is planned. */
   lockInstrument?: boolean
+  /** Direction is fixed once an entry has filled: it decides which side closes that position. */
+  lockDirection?: boolean
   /** Closed and cancelled Plays keep their plan; only the review and evidence change. */
   readOnly?: boolean
   /** Execution tab content for a saved play. */
   execution?: ReactNode
+  retrospective?: boolean
   /** Risk settings and record for sizing suggestions, which only apply to editable plays. */
   sizing?: SizingDocument | null
   onRiskChange?: (riskPercent: string) => Promise<void>
 }) {
   const fieldId = useId()
-  const [selectedId, setSelectedId] = useState(draft.entries[0]!.id)
+  const [selectedId, setSelectedId] = useState(draft.entries[0]?.id ?? '')
   const [selectionRequest, setSelectionRequest] = useState(0)
   const [portfolioFilter, setPortfolioFilter] = useState('')
   const [evidenceRequest, setEvidenceRequest] = useState(0)
@@ -77,9 +80,15 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const maxLeverage = instrumentInfo?.maxLeverage ?? null
   const maintenanceMargin = instrumentInfo?.maintenanceMarginFraction ?? null
   const priceStep = instrumentInfo?.priceStep ?? null
+  const manualUsd = !!account && venues.can(account.venueId, 'manualExecutions')
   const units: SizeUnits = instrumentInfo
     ? { quote: instrumentInfo.quoteAsset, base: instrumentInfo.contractId, quantityDecimals: instrumentInfo.quantityDecimals }
-    : defaultSizeUnits
+    : manualUsd ? { quote: 'USD', base: draft.instrument, quantityDecimals: null } : defaultSizeUnits
+  const riskAmount = account?.accountValueUsd && Number(account.accountValueUsd) > 0 ? account.accountValueUsd
+    : draft.budgetOverride && Number(draft.budgetOverride) > 0 ? draft.budgetOverride : null
+  const riskName = account?.accountValueUsd && Number(account.accountValueUsd) > 0 ? `${account.name} account value` : 'Explicit manual budget'
+  const riskReference = riskAmount && (units.quote === 'USD' || units.quote === 'USDC')
+    ? { name: units.quote === 'USDC' ? `${riskName} · nominal USD/USDC at 1:1` : riskName, amount: riskAmount, quote: units.quote } : null
 
   const tradeUrl = account ? venues.tradeUrl(account.venueId, draft.instrument, draft.instrumentSource, instrumentInfo?.venueContractId) : null
   // In a read-only Play, the chart can still be viewed but not edited.
@@ -188,13 +197,16 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           onChange({ ...draft, instrument, instrumentSource, leverage })
         }} />}
       <div className="direction-field"><span className="field-label">Direction</span>
-        <DirectionToggle value={draft.direction} onChange={direction => onChange({ ...draft, direction })} />
+        <DirectionToggle value={draft.direction} onChange={direction => onChange({ ...draft, direction })} disabled={lockDirection}
+          title={lockDirection ? 'An entry has filled, so the direction stays. Start a new play for the opposite idea.' : undefined} />
       </div>
       <div className="plays-context-status"><span className="field-label">Status</span><span className={`badge play-status-${status}`}>{statusLabels[status]}</span></div>
     </fieldset>
-    <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} />
+    {retrospective ? <p className="workspace-alert" role="status">Retrospective · recorded after execution. No original plan, thesis, initial stop or initial-risk R. The compatibility document is not a pre-trade plan.</p>
+      : <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} lockDirection={lockDirection} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} />}
     {!loading && !enabledAccounts.length && <p className="plays-context-note">No enabled accounts yet. You can outline the play and add an account later.</p>}
-    <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} />
+    {manualUsd && !retrospective && <p className="plays-context-note">Manual plans assume a linear USD quote and one base unit per quantity. Other quote currencies, inverse contracts and implicit multipliers are unsupported.</p>}
+    <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} retrospective={retrospective} />
     {suggestions && sizing && onRiskChange && <SuggestionsPanel plan={suggestions} sizing={sizing} draft={draft} leverage={leverage} units={units}
       onSize={size => onChange({ ...draft, size })} onLevel={acceptLevel} onRiskChange={onRiskChange}
       onLeverage={acceptLeverage} />}
@@ -202,29 +214,35 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       onKeepPrices={() => finishLeverage('prices')} onKeepPercentages={() => finishLeverage('percentages')} onCancel={() => finishLeverage()} />}
     <div className="workspace" data-testid="workspace">
       <div ref={leftColumn} className="left-column" data-testid="left-column">
-        <ChartPanel entries={draft.entries} selectedId={selectedId} onSelect={id => {
+        <ChartPanel entries={retrospective ? [] : draft.entries} selectedId={selectedId} onSelect={id => {
           setSelectedId(id)
           setSelectionRequest(current => current + 1)
         }} instrument={draft.instrument} instrumentName={instrumentName} venue={account ? venues.name(account.venueId) : null} direction={draft.direction}
         intervals={account ? venues.find(account.venueId)?.intervals : undefined} priceStep={priceStep}
         streamable={account ? venues.can(account.venueId, 'stream') : false}
         marketContext={account ? venues.can(account.venueId, 'marketContext') : false}
-        leverage={leverageOf(draft.leverage)} liquidation={estimatedLiquidation(draft.entries, draft.direction, leverageOf(draft.leverage), maxLeverage, maintenanceMargin)}
+        leverage={retrospective ? 1 : leverageOf(draft.leverage)} liquidation={retrospective ? null : estimatedLiquidation(draft.entries, draft.direction, leverageOf(draft.leverage), maxLeverage, maintenanceMargin)}
         source={account && venues.can(account.venueId, 'candles') && draft.instrumentSource === 'venue' ? { api, accountId: account.id } : null}
         onEntriesChange={entries => planChange({ ...draft, entries })}
         drawings={drawingKey ? draft.drawings[drawingKey] : undefined}
         onDrawingsChange={drawings => { if (drawingKey) planChange({ ...draft, drawings: { ...draft.drawings, [drawingKey]: drawings } }) }}
         editable={!readOnly} onCapture={addCapture} onShowEvidence={showEvidence} />
         <PlayJournal notes={draft.notes} onChange={notes => onChange({ ...draft, notes: readOnly ? { ...draft.notes, review: notes.review } : notes })}
-          execution={execution} readOnly={readOnly}
+          execution={execution} readOnly={readOnly} retrospective={retrospective} terminal={status === 'closed' || status === 'cancelled'}
+          structuredReview={draft.structuredReview}
+          onStructuredReviewChange={structuredReview => onChange({ ...draft, structuredReview })}
           evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} />
       </div>
-      {readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
+      {retrospective ? <section className="panel retrospective-position" aria-label="No original plan"><h2>No original plan</h2>
+        <p>This completed operation was recorded retrospectively. Execution facts and review are kept without invented sizing, leverage, entries or risk.</p></section>
+        : readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
         <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} units={units} availableBudget={available} checkBudget={false} />
       </fieldset> : <PositionEditor draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId}
         maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} instrumentName={instrumentName} units={units} availableBudget={available} checkBudget={status === 'draft'}
         marks={marks} />}
     </div>
-    <PositionSummary draft={draft} units={units} instrumentName={instrumentName} />
+    {retrospective ? <section className="panel summary" data-testid="summary-panel" aria-label="Retrospective summary">
+      <h2>Retrospective summary</h2><p>Original executions, not a contemporaneous plan. Initial-risk R and planned sizing are unavailable.</p>
+    </section> : <PositionSummary draft={draft} units={units} instrumentName={instrumentName} riskReference={riskReference} />}
   </section>
 }

@@ -1,0 +1,40 @@
+Independent browser verification of R6, October 13, 2026
+
+Environment
+  Disposable PostgreSQL 18 container vessel-opus-verify-20261013, loopback 55613.
+  Separate vesselbrowser database, explicitly migrated.
+  QA API 5098 and Vite 5198. Synthetic owner/manual account and generated PNG only.
+  No owner database, .env, account token or venue request was used.
+
+Procedure
+  Created a new manual Play in the actual browser and uploaded a generated PNG.
+  Delayed the actual Play-create response by 10 seconds.
+  Edited the image note; it remained visible and Save stayed enabled.
+  Repeated with a 10-second delay on an actual successful Play-update response,
+  recording input events and the Saving state to verify the overlap precisely.
+
+Recorded update sequence, milliseconds since Unix epoch
+  1791915530888: actual HTTP 200 response held
+  1791915539528: note input event while Saving was true
+    "Edited DURING deferred UPDATE, keep this note"
+  1791915540888: response released
+
+After release
+  Editor note: "Edited DURING deferred UPDATE, keep this note"
+  Button: Save, enabled
+  GET evidence returned the previously submitted note:
+    "Edited DURING deferred create, must remain unsaved"
+  Exactly one evidence record existed.
+
+After a second Save, with the delay removed
+  GET evidence note: "Edited DURING deferred UPDATE, keep this note"
+  Button: Saved, disabled
+  Editor note matched the persisted note.
+  The evidence ID was unchanged; no duplicate upload occurred.
+
+Only response delivery timing was altered. No API success body was fabricated.
+The fetch override was restored afterward.
+Markup edits and removal/deletion bookkeeping are covered by the frontend
+regression test; this real-API browser pass verifies concurrent note editing.
+
+Cleanup: QA API 5098 and Vite 5198 were stopped after this browser pass.

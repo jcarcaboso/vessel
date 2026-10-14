@@ -1,4 +1,7 @@
 using System.Globalization;
+using System.Numerics;
+using Vessel.Application.Activity;
+using Vessel.Application.Sizing;
 using Vessel.Application.Venues;
 using Vessel.Application.Credentials;
 using Vessel.Application.Workspace;
@@ -18,6 +21,50 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     private const int MaxUnlinkedOrders = 20;
     private const string Notice = "Orders and fills come from the venue and link to this play by order ID. " +
         "Price touches are never treated as fills. Quantities are base units from linked fills; closed PnL and fees are as the venue reports them.";
+
+    /// <summary>Retains bounded venue order history on explicit account refresh, without linking orders or changing Plays.</summary>
+    public Task<string?> RetainAccountOrdersAsync(Guid accountId, CancellationToken ct) =>
+        workspace.WithAccountLockAsync<string?>(accountId, async account =>
+        {
+            var notice = await RetainAccountOrdersLockedAsync(account, ct);
+            await workspace.RecordOrderHistoryNoticeAsync(account, notice, ct);
+            return notice;
+        }, ct);
+
+    private async Task<string?> RetainAccountOrdersLockedAsync(Account account, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (!account.IsEnabled) throw new WorkspaceException(400, "Enable the account before refreshing it.");
+        if (venues.Descriptor(account.VenueId) is not { Capabilities.Orders: true })
+            return "This venue does not provide order history; execution completeness cannot be checked.";
+        if (account.SourceId is null) throw new WorkspaceException(400, "A source identity is required before refresh.");
+        if (venues.Orders(account.VenueId) is not { } reader)
+            return "Order history was not refreshed because the venue order reader is unavailable.";
+        VenueOrderReadResult read;
+        try
+        {
+            var reason = await CredentialReasonAsync(account, usableOnly: false, ct);
+            ct.ThrowIfCancellationRequested();
+            if (reason is not null)
+                return $"Order history was not refreshed. {reason}";
+            read = await reader.ReadOrdersAsync(account, ct);
+            if (!read.Orders.All(VenueFactChecks.Valid))
+                throw new VenueReadException("The venue adapter returned orders outside Vessel's execution vocabulary.");
+        }
+        catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            ct.ThrowIfCancellationRequested();
+            return "Order history could not be refreshed; execution completeness remains limited to retained order records. Try again later.";
+        }
+        ct.ThrowIfCancellationRequested();
+        await store.WithAccountLockAsync(account.Id, async () =>
+        {
+            await store.UpsertOrdersAsync(account, read.Orders, read.ObservedAtUtc, ct);
+            return true;
+        }, ct);
+        return read.Notice;
+    }
+
 
     /// <summary>Refreshes the account's fills and orders, links what matches and applies status changes.</summary>
     public async Task<PlayExecutionDto> CheckAsync(Guid playId, CancellationToken ct)
@@ -45,6 +92,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             }
             var ticks = await TicksAsync(lockedAccount, ct);
             await store.WithAccountLockAsync(lockedAccount.Id, async () => { await ReconcileAsync(lockedAccount, read, ticks, ct); return true; }, ct);
+            await workspace.RecordOrderHistoryNoticeAsync(lockedAccount, read.Notice, ct);
             return true;
         }, ct);
         return await GetAsync(playId, ct);
@@ -69,57 +117,65 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             .OrderByDescending(o => o.PlacedAtUtc).Take(MaxUnlinkedOrders).Select(OrderDto).ToList();
 
         var plan = PlayDocuments.Read(play.Plan);
-        var entryFills = linked.Where(l => l.Role == OrderLinkRole.Entry).SelectMany(l => fills[l.OrderId]).ToList();
-        var exitFills = linked.Where(l => l.Role != OrderLinkRole.Entry).SelectMany(l => fills[l.OrderId]).ToList();
-        decimal entered = entryFills.Sum(f => f.Quantity), exited = exitFills.Sum(f => f.Quantity);
-        var all = entryFills.Concat(exitFills).ToList();
-        var totals = new ExecutionTotalsDto(Money(entered), Money(exited), Money(Math.Max(0, entered - exited)),
-            Money(all.Sum(f => f.ClosedPnlUsd)), PnlBasis(all),
-            all.GroupBy(f => f.FeeToken).OrderBy(g => g.Key).Select(g => new FeeTotalDto(g.Key, Money(g.Sum(f => f.Fee)))).ToList());
+        var settlement = Settle(plan, linked, orders, fills, play.Origin == PlayOrigin.Retrospective);
+        var entered = settlement.Entered;
+        var exited = settlement.Exited;
+        var open = entered - exited;
+        var all = settlement.Counted.Select(f => f.Fill).ToList();
+        var totals = new ExecutionTotalsDto(entered.ToString(), exited.ToString(), open.Units.Sign > 0 ? open.ToString() : "0",
+            all.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.ClosedPnlUsd)).ToString(), PnlBasis(all),
+            all.GroupBy(f => f.FeeToken).OrderBy(g => g.Key).Select(g => new FeeTotalDto(g.Key,
+                g.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Fee)).ToString())).ToList());
         var entries = plan.Entries.Select(entry =>
         {
             var own = linked.Where(l => l.Role == OrderLinkRole.Entry && l.EntryId == entry.Id).ToList();
-            var filled = own.SelectMany(l => fills[l.OrderId]).ToList();
-            var quantity = filled.Sum(f => f.Quantity);
-            return new EntryProgressDto(entry.Id, Money(quantity), quantity > 0 ? Money(filled.Sum(f => f.Price * f.Quantity) / quantity) : null,
+            var filled = own.SelectMany(l => fills[l.OrderId]).Where(f => !ExecutionIntegrity.Contradicts(OrderLinkRole.Entry, settlement.EntrySide, f)).ToList();
+            var quantity = ExecutionIntegrity.Quantity(filled);
+            var notional = filled.Aggregate(BigInteger.Zero,
+                (sum, f) => sum + ExactAmount.From(f.Price).Units * ExactAmount.From(f.Quantity).Units);
+            return new EntryProgressDto(entry.Id, quantity.ToString(), quantity.Units.Sign > 0 ? ExactAmount.Average(notional, quantity) : null,
                 own.Count(l => orders.TryGetValue(l.OrderId, out var o) && o.Status == "open"));
         }).ToList();
         OrderLinkDto Link(PlayOrderLink link) => new(link.Id, Name(link.Role), link.EntryId, link.LevelId, Name(link.State), Name(link.Source),
-            orders.TryGetValue(link.OrderId, out var order) ? OrderDto(order) : null, Money(fills[link.OrderId].Sum(f => f.Quantity)),
+            orders.TryGetValue(link.OrderId, out var order) ? OrderDto(order) : null, ExecutionIntegrity.Quantity(fills[link.OrderId]).ToString(),
             fills[link.OrderId].OrderBy(f => f.OccurredAtUtc).Select(FillDto).ToList());
         var reason = UntrackedReason(play, account, account is null ? null : venues.Descriptor(account.VenueId));
         if (reason is null && account is { IsEnabled: true } && play.Status is not (PlayStatus.Closed or PlayStatus.Cancelled))
             reason = await CredentialReasonAsync(account, usableOnly: true, ct);
         return new PlayExecutionDto(play.Id, PlayService.StatusName(play.Status), reason is null, reason, account?.LastSyncedAtUtc,
-            totals, entries, linked.Select(Link).ToList(), suggestions.Select(Link).ToList(), unlinked, Notice);
+            totals, entries, linked.Select(Link).ToList(), suggestions.Select(Link).ToList(), unlinked, Notice, settlement.Problems);
     }
 
     /// <summary>The owner links an order (or confirms a suggestion). It must not belong to another level already.</summary>
     public async Task<PlayExecutionDto> LinkAsync(Guid playId, LinkOrderRequest request, CancellationToken ct)
     {
         var play = await plays.FindAsync(playId, ct) ?? throw new WorkspaceException(404, "Play not found.");
-        if (!ExecutionMatcher.IsActive(play)) throw new WorkspaceException(409, "Only planned, paused or open plays link orders.");
+        if (!ExecutionMatcher.IsActive(play)) throw new WorkspaceException(409, NotLinkable);
         var role = request.Role switch
         {
             "entry" => OrderLinkRole.Entry, "stop" => OrderLinkRole.Stop, "target" => OrderLinkRole.Target, "exit" => OrderLinkRole.Exit,
             _ => throw new WorkspaceException(400, "Role must be entry, stop, target or exit.")
         };
-        var plan = PlayDocuments.Read(play.Plan);
-        var entry = role == OrderLinkRole.Exit ? null : plan.Entries.FirstOrDefault(e => e.Id == request.EntryId)
-            ?? throw new WorkspaceException(400, "Choose an entry of this play.");
-        var levelId = role switch
-        {
-            OrderLinkRole.Stop => entry!.Stops.FirstOrDefault(s => s.Id == request.LevelId)?.Id ?? throw new WorkspaceException(400, "Choose a stop of this entry."),
-            OrderLinkRole.Target => entry!.Targets.FirstOrDefault(t => t.Id == request.LevelId)?.Id ?? throw new WorkspaceException(400, "Choose a target of this entry."),
-            _ => null
-        };
         await store.WithAccountLockAsync(play.AccountId, async () =>
         {
+            await RequireActiveAsync(play, NotLinkable, ct);
+            // The committed plan decides, not the one this request read first.
+            var plan = PlayDocuments.Read(play.Plan);
+            var entry = role == OrderLinkRole.Exit ? null : plan.Entries.FirstOrDefault(e => e.Id == request.EntryId)
+                ?? throw new WorkspaceException(400, "Choose an entry of this play.");
+            var levelId = role switch
+            {
+                OrderLinkRole.Stop => entry!.Stops.FirstOrDefault(s => s.Id == request.LevelId)?.Id ?? throw new WorkspaceException(400, "Choose a stop of this entry."),
+                OrderLinkRole.Target => entry!.Targets.FirstOrDefault(t => t.Id == request.LevelId)?.Id ?? throw new WorkspaceException(400, "Choose a target of this entry."),
+                _ => null
+            };
             var order = (await store.OrdersAsync(play.AccountId, ct)).FirstOrDefault(o => o.OrderId == request.OrderId && o.ContractId == play.ContractId)
                 ?? throw new WorkspaceException(404, "This order is not known for the play's instrument. Check the venue first.");
             var links = await store.LinksAsync(play.AccountId, ct);
             if (links.Any(l => l.OrderId == order.OrderId && l.State == OrderLinkState.Linked))
                 throw new WorkspaceException(409, "This order is already linked. Unlink it first.");
+            if (ExecutionIntegrity.RoleConflict(role, plan, order, await store.FillsAsync(play.AccountId, [order.OrderId], ct)) is { } conflict)
+                throw new WorkspaceException(409, conflict);
             var now = time.GetUtcNow();
             var key = PlayOrderLink.Key(role, entry?.Id, levelId);
             var existing = links.FirstOrDefault(l => l.PlayId == play.Id && l.OrderId == order.OrderId && l.LevelKey == key);
@@ -134,7 +190,10 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         return await GetAsync(playId, ct);
     }
 
-    /// <summary>Removes a link or declines a suggestion. It is never proposed for that level again.</summary>
+    /// <summary>
+    /// Removes a link or declines a suggestion. It is never proposed for that level again. Closed and Cancelled are
+    /// final, so their links stay: removing one would leave a final status its fills no longer support.
+    /// </summary>
     public async Task<PlayExecutionDto> UnlinkAsync(Guid playId, Guid linkId, CancellationToken ct)
     {
         var play = await plays.FindAsync(playId, ct) ?? throw new WorkspaceException(404, "Play not found.");
@@ -142,11 +201,24 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         {
             var link = (await store.LinksAsync(play.AccountId, ct)).FirstOrDefault(l => l.Id == linkId && l.PlayId == play.Id &&
                 l.State != OrderLinkState.Dismissed) ?? throw new WorkspaceException(404, "Link not found.");
+            if (link.State == OrderLinkState.Linked) await RequireActiveAsync(play, "Closed and cancelled plays keep their linked orders.", ct);
             link.Dismiss(time.GetUtcNow());
             await store.SaveAsync(ct);
             return true;
         }, ct);
         return await GetAsync(playId, ct);
+    }
+
+    private const string NotLinkable = "Only planned, paused or open plays link orders.";
+
+    /// <summary>
+    /// The Play may have closed, been cancelled or revised since this request read it. Membership in the committed
+    /// active set decides, under the account lock that fill-driven changes hold; it also reloads the Play and holds it
+    /// until the transaction ends, so the owner's status and plan changes wait rather than commit in between.
+    /// </summary>
+    private async Task RequireActiveAsync(Play play, string message, CancellationToken ct)
+    {
+        if (!(await store.ActivePlaysAsync(play.AccountId, ct)).Any(p => p.Id == play.Id)) throw new WorkspaceException(409, message);
     }
 
     /// <summary>
@@ -194,12 +266,14 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var links = await store.LinksAsync(account.Id, ct);
         var fills = (await store.FillsAsync(account.Id, orders.Select(o => o.OrderId).ToList(), ct)).ToLookup(f => f.OrderId);
         var candidatesPlays = active.Select(p => (Play: p, Plan: PlayDocuments.Read(p.Plan))).ToList();
-        var firstEntryFill = active.ToDictionary(p => p.Id, p => links
-            .Where(l => l.PlayId == p.Id && l.State == OrderLinkState.Linked && l.Role == OrderLinkRole.Entry)
-            .SelectMany(l => fills[l.OrderId]).Select(f => (DateTimeOffset?)f.OccurredAtUtc).Min());
+        var firstEntryFill = candidatesPlays.ToDictionary(p => p.Play.Id, p => links
+            .Where(l => l.PlayId == p.Play.Id && l.State == OrderLinkState.Linked && l.Role == OrderLinkRole.Entry)
+            .SelectMany(l => fills[l.OrderId]).Where(f => !ExecutionIntegrity.Contradicts(OrderLinkRole.Entry, ExecutionIntegrity.EntrySide(p.Plan), f))
+            .Select(f => (DateTimeOffset?)f.OccurredAtUtc).Min());
         var now = time.GetUtcNow();
         foreach (var order in orders.OrderBy(o => o.PlacedAtUtc))
         {
+            if (order.Status == "rejected") continue;
             if (links.Any(l => l.OrderId == order.OrderId && l.State == OrderLinkState.Linked)) continue;
             // A cancelled order that never filled cannot affect a play.
             if (order.Status == "canceled" && !fills[order.OrderId].Any()) continue;
@@ -207,7 +281,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             var candidates = ExecutionMatcher.Candidates(order, candidatesPlays,
                 (play, key) => links.Any(l => l.PlayId == play.Id && l.OrderId == order.OrderId && l.LevelKey == key && l.State == OrderLinkState.Dismissed),
                 closes, play => firstEntryFill.GetValueOrDefault(play.Id),
-                ticks.TryGetValue(order.ContractId, out var tick) ? tick : null);
+                ticks.TryGetValue(order.ContractId, out var tick) ? tick : null, fills[order.OrderId].ToList());
             if (candidates.Count == 1)
             {
                 var (play, level) = (candidates[0].Play, candidates[0].Level);
@@ -233,7 +307,10 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         await store.SaveAsync(ct);
     }
 
-    /// <summary>Planned or paused → Open on the first linked entry fill; Open → Closed once linked exits cover all entries.</summary>
+    /// <summary>
+    /// Planned or paused → Open on the first linked entry fill; Open → Closed once linked exits equal the entries and
+    /// nothing is known missing, contradictory or out of order. Closed is final, so it waits until the fills settle the play.
+    /// </summary>
     private async Task ApplyTransitionsAsync(Guid accountId, IReadOnlyList<Play> targets, CancellationToken ct)
     {
         var links = (await store.LinksAsync(accountId, ct)).Where(l => l.State == OrderLinkState.Linked).ToList();
@@ -243,18 +320,43 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         foreach (var play in targets)
         {
             var own = links.Where(l => l.PlayId == play.Id).ToList();
-            var entryFills = own.Where(l => l.Role == OrderLinkRole.Entry).SelectMany(l => fills[l.OrderId]).OrderBy(f => f.OccurredAtUtc).ToList();
-            var entered = entryFills.Sum(f => f.Quantity);
-            var exited = own.Where(l => l.Role != OrderLinkRole.Entry).SelectMany(l => fills[l.OrderId]).Sum(f => f.Quantity);
-            if (play.Status is PlayStatus.Planned or PlayStatus.Paused && entered > 0)
+            var settlement = Settle(PlayDocuments.Read(play.Plan), own, orders, fills);
+            var entryFills = settlement.Counted.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill).OrderBy(f => f.OccurredAtUtc).ToList();
+            var entered = settlement.Entered;
+            if (play.Status is PlayStatus.Planned or PlayStatus.Paused && entered.Units.Sign > 0)
             {
                 var first = entryFills[0];
                 store.Add(play.MarkOpen($"Entry fill of {Money(first.Quantity)} at {Money(first.Price)} on order {first.OrderId}.", now));
             }
             var resting = own.Any(l => l.Role == OrderLinkRole.Entry && orders.TryGetValue(l.OrderId, out var o) && o.Status == "open");
-            if (play.Status == PlayStatus.Open && entered > 0 && exited >= entered && !resting)
-                store.Add(play.MarkClosed($"Linked exits covered the {Money(entered)} entered.", now));
+            if (play.Status == PlayStatus.Open && entered.Units.Sign > 0 && settlement.Exited == entered && settlement.Problems.Count == 0 && !resting)
+                store.Add(play.MarkClosed($"Linked exits covered the {entered} entered.", now));
         }
+    }
+
+    /// <summary>The linked fills that count for a Play, with the reasons they cannot settle it yet.</summary>
+    private sealed record Settlement(string EntrySide, List<LinkedFill> Counted, List<string> Problems)
+    {
+        public ExactAmount Entered => ExecutionIntegrity.Quantity(Counted.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill));
+        public ExactAmount Exited => ExecutionIntegrity.Quantity(Counted.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill));
+    }
+
+    /// <summary>Fills that contradict their role stay visible on their links but count toward neither side.</summary>
+    private static Settlement Settle(PlayPlanDocument plan, IReadOnlyCollection<PlayOrderLink> linked,
+        IReadOnlyDictionary<string, ImportedOrder> orders, ILookup<string, ImportedFill> fills, bool retrospective = false)
+    {
+        var side = ExecutionIntegrity.EntrySide(plan);
+        var all = linked.SelectMany(l => fills[l.OrderId].Select(f => new LinkedFill(l.Role, f))).ToList();
+        var incomplete = linked.Where(l => orders.TryGetValue(l.OrderId, out var order) &&
+            ExecutionIntegrity.MissingExecutions(order, fills[l.OrderId])).Select(l => l.OrderId);
+        var problems = ExecutionIntegrity.Problems(side, all, incomplete);
+        if (!retrospective)
+        {
+            var levels = ExecutionMatcher.Levels(plan).Select(l => l.Key).ToHashSet(StringComparer.Ordinal);
+            problems.AddRange(linked.Where(l => l.Role != OrderLinkRole.Exit && !levels.Contains(l.LevelKey))
+                .Select(l => $"Order {l.OrderId} references a plan entry or level that no longer exists; review its association."));
+        }
+        return new(side, all.Where(f => !ExecutionIntegrity.Contradicts(f.Role, side, f.Fill)).ToList(), problems);
     }
 
     /// <summary>Why the play cannot be tracked at the venue, or null when it can.</summary>

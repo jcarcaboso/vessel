@@ -1,4 +1,4 @@
-import type { ExecutionFill, ExecutionOrder, LinkOrder, OrderLink } from '@/api/plays'
+import type { ExecutionFill, ExecutionOrder, LinkOrder, LinkRole, OrderLink, PlaySummary } from '@/api/plays'
 import type { DraftEntry } from './draft'
 
 export function describeOrder(order: ExecutionOrder) {
@@ -13,12 +13,22 @@ const exitName = (entry: DraftEntry, kind: 'stop' | 'target', index: number) =>
   kind === 'target' || entry.stops.length > 1 ? `${entry.name} ${kind} ${index + 1}` : `${entry.name} ${kind}`
 
 /** Readable name of a plan level, e.g. "Entry 1 target 2". */
-export function levelName(entries: readonly DraftEntry[], link: Pick<OrderLink, 'role' | 'entryId' | 'levelId'>) {
+export function levelName(entries: readonly DraftEntry[], link: Pick<OrderLink, 'role' | 'entryId' | 'levelId'>, origin: PlaySummary['origin'] = 'planned') {
+  if (origin === 'retrospective') return link.role === 'entry' ? 'Actual entry' : 'Actual exit'
   if (link.role === 'exit') return 'Unplanned exit'
   const entry = entries.find(item => item.id === link.entryId)
   if (link.role === 'entry') return entry?.name ?? 'Removed entry'
   const index = (link.role === 'stop' ? entry?.stops : entry?.targets)?.findIndex(exit => exit.id === link.levelId) ?? -1
   return entry && index >= 0 ? exitName(entry, link.role, index) : `${entry?.name ?? 'Removed entry'} removed ${link.role}`
+}
+
+/**
+ * Whether the order can take the role on a play of this direction: an entry buys for a long and can open a
+ * position; stops, targets and exits trade the other side. The server also checks what the fills did.
+ */
+export function orderFitsRole(order: ExecutionOrder, role: LinkRole, direction: 'long' | 'short') {
+  const entrySide = direction === 'long' ? 'buy' : 'sell'
+  return role === 'entry' ? order.side === entrySide && !order.reduceOnly && !order.isPositionTpsl : order.side !== entrySide
 }
 
 export function levelOptions(entries: readonly DraftEntry[], open: boolean) {

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
-import { statusLabels, type PlayStatus, type PlaySummary, type StatusRequest } from '@/api/plays'
+import { statusLabels, type PlayStatus, type PlaySummary, type SavedPlay, type StatusRequest } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { useNotifications } from '@/components/notifications/notifications'
 import { preloadLightweightRenderer } from '@/components/chart/lazy'
@@ -10,6 +10,8 @@ import type { PlayDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
 import { instrumentLabel } from './instruments'
 import { ExecutionPanel } from './ExecutionPanel'
+import { ManualExecutionPanel } from './ManualExecutionPanel'
+import { emptyManualDraft, hasManualDraft } from './manual'
 import { usePlayExecution } from './usePlayExecution'
 import { useSizing } from './useSizing'
 import { planIssues, planIssueSummary } from './planChecks'
@@ -17,16 +19,18 @@ import { formatMoney, marginOverBudget } from './sizing'
 import { leverageOf } from './levels'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
 import {
-  createPlaysSession, draftFromSaved, failure, fieldsFromDraft, hasDraftContent, isDirty, loadSavedPlay, planChanged, savedState, startNewPlay, syncEvidence,
+  createPlaysSession, draftFromSaved, failure, fieldsFromDraft, hasDraftContent, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
+  observedPlayVersion, startNewPlay, syncEvidence,
   type PlaysSession, type SavedState,
 } from './saved'
 
 
 const ended: PlayStatus[] = ['closed', 'cancelled']
-const filters = [['active', 'In progress'], ['ended', 'Closed and cancelled'], ['all', 'All']] as const
+const filters = [['active', 'In progress'], ['ended', 'Closed and cancelled'], ['pending', 'Pending review'], ['reviewed', 'Reviewed'], ['all', 'All']] as const
 type Filter = typeof filters[number][0]
+type WorkKind = 'save' | 'status' | 'open' | 'delete' | 'manual'
 
-export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false }: {
+export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -34,6 +38,12 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   onSession: (session: PlaysSession) => void
   onReload?: (() => void) | undefined
   loading?: boolean
+  requestedPlayId?: string | null
+  onRequestedPlayHandled?: () => void
+  /** The shell retains this mutation owner while another page is visible, not its UI or polling. */
+  active?: boolean
+  /** Shared with shell actions that could replace the session, before disabled controls render. */
+  workRef?: RefObject<symbol | null>
 }) {
   useEffect(() => { void preloadLightweightRenderer().catch(() => { /* The adapter shows a load error when mounted. */ }) }, [])
   const latest = useRef(session)
@@ -42,34 +52,94 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     latest.current = { ...latest.current, ...next }
     onSession(latest.current)
   }, [onSession])
-  const [busy, setBusy] = useState<null | 'save' | 'status' | 'open' | 'delete'>(null)
+  const [busy, setBusy] = useState<WorkKind | null>(null)
+  const activeWork = useRef(workRef ?? { current: null as symbol | null })
+  const [navigationError, setNavigationError] = useState<string | null>(null)
+  const requestAttempt = useRef<string | null>(null)
+  const requestedId = useRef(requestedPlayId)
+  useEffect(() => { requestedId.current = requestedPlayId })
+  const openController = useRef<AbortController | null>(null)
+  const epoch = useRef(0)
+  const mounted = useRef(false)
+  const currentApi = useRef(api)
+  useEffect(() => { currentApi.current = api })
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  useEffect(() => {
+    const currentEpoch = epoch
+    const controllerRef = openController
+    const workRef = activeWork.current
+    currentEpoch.current++
+    workRef.current = null
+    requestAttempt.current = null
+    let active = true
+    queueMicrotask(() => { if (active && !workRef.current) setBusy(null) })
+    return () => { active = false; currentEpoch.current++; workRef.current = null; controllerRef.current?.abort() }
+  }, [api, activeWork])
+  // Acquire synchronously, before React renders disabled controls. Only the owner may release.
+  const beginWork = useCallback((kind: WorkKind) => {
+    if (!mounted.current || currentApi.current !== api || activeWork.current.current) return null
+    const owner = Symbol(kind)
+    activeWork.current.current = owner
+    setBusy(kind)
+    return () => {
+      if (activeWork.current.current !== owner) return
+      activeWork.current.current = null
+      if (mounted.current && currentApi.current === api) setBusy(null)
+    }
+  }, [api, activeWork])
   // Errors appear as popup notifications; a newer one replaces the last, and starting another action clears it.
   const { notify, dismiss } = useNotifications()
   const setError = useCallback((message: string | null) => {
     if (message) notify({ tone: 'error', key: 'plays-error', message })
     else dismiss('plays-error')
   }, [notify, dismiss])
+  // A version identifies the whole saved document, not just its lifecycle.
+  const acceptStoredPlay = useCallback((play: SavedPlay) => {
+    if (!mounted.current || currentApi.current !== api) return false
+    const { draft: currentDraft, saved: current } = latest.current
+    if (!current || current.summary.id !== play.summary.id || current.summary.accountId !== play.summary.accountId ||
+      play.summary.version < observedPlayVersion(latest.current, api)) return false
+    const observedPlay = { api, id: play.summary.id, accountId: play.summary.accountId, version: play.summary.version, conflict: false }
+    const stored = draftFromSaved(play, currentDraft.evidence)
+    const next = { ...savedState(play, stored), evidenceIds: current.evidenceIds }
+    if (next.fieldsKey !== current.fieldsKey) {
+      if (isDirty(currentDraft, current)) {
+        update({ observedPlay: { ...observedPlay, conflict: true } })
+        return true
+      }
+      update({ saved: next, draft: stored, observedPlay })
+    } else {
+      update({ saved: next, observedPlay })
+    }
+    return true
+  }, [api, update])
   const [dialog, setDialog] = useState<null | 'revision' | 'cancel' | 'delete' | 'history'>(null)
   const [dialogError, setDialogError] = useState<string | null>(null)
 
   const { draft, saved } = session
+  const venues = useVenues()
+  const account = accounts.find(item => item.id === (saved?.summary.accountId ?? draft.accountId))
+  const manual = !!account && venues.can(account.venueId, 'manualExecutions')
+  const retrospective = saved?.summary.origin === 'retrospective'
   // Loaded once per page visit; without it the sizing suggestions stay hidden.
   const sizing = useSizing(api)
-  const tracking = usePlayExecution(api, session.view === 'editor' && saved ? saved.summary.id : null, saved?.summary.status)
+  const tracking = usePlayExecution(api, visible && session.view === 'editor' && saved && !manual ? saved.summary.id : null, saved?.summary.status)
 
   // Linked fills move a play to Open or Closed on the server; take the new status and version.
   const venueStatus = tracking.execution?.playId === saved?.summary.id ? tracking.execution?.status : undefined
   useEffect(() => {
     const state = latest.current.saved
-    if (!venueStatus || !state || venueStatus === state.summary.status) return
+    if (!visible || !venueStatus || !state || venueStatus === state.summary.status) return
     let active = true
     api.play(state.summary.id).then(play => {
-      const current = latest.current.saved
-      if (active && current?.summary.id === play.summary.id) update({ saved: { ...current, summary: play.summary } })
+      if (active) acceptStoredPlay(play)
     }).catch(cause => { if (active) setError(failure(cause)) })
     return () => { active = false }
-  }, [api, venueStatus, update, setError])
+  }, [visible, api, venueStatus, acceptStoredPlay, setError])
+  // The server keeps the direction once an entry has filled: it decides which side closes the position.
+  const filled = venueStatus !== undefined && !!tracking.execution?.links.some(link => link.role === 'entry' && link.fills.length > 0)
   const dirty = saved ? isDirty(draft, saved) : hasDraftContent(draft)
+  const unsaved = dirty || hasManualDraft(session.manual)
   // A blocked save says why until the plan is fixed.
   const status = saved?.summary.status ?? 'draft'
   const fixed = !planProblem(draft, status)
@@ -81,6 +151,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
    * used, so the budget is only held while the play is a draft.
    */
   function planProblem(current: PlayDraft, currentStatus: PlayStatus) {
+    if (retrospective) return null
     const issues = planIssues(current.entries, current.direction)
     if (issues.length) return planIssueSummary(issues)
     const account = accounts.find(item => item.id === current.accountId)
@@ -97,92 +168,180 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
 
   /** Saves the draft and its evidence. Returns the saved state, or null when the save failed. */
   async function save(reason?: string): Promise<SavedState | null> {
+    const finish = beginWork('save')
+    if (!finish) return null
+    try { return await saveDraft(reason) } finally { finish() }
+  }
+
+  /** The caller owns the shared work guard, including a save followed by planning. */
+  async function saveDraft(reason?: string): Promise<SavedState | null> {
+    const started = epoch.current
     const { draft: sent, saved: before } = latest.current
     if (!sent.accountId) { setError('Choose an account before saving.'); return null }
     if (planBlocked()) return null
-    setBusy('save'); setError(null); setDialogError(null)
+    setError(null); setDialogError(null)
     try {
       const fields = fieldsFromDraft(sent)
       const play = before
         ? await api.updatePlay(before.summary.id, { ...fields, expectedVersion: before.summary.version, ...(reason ? { revisionReason: reason } : {}) })
         : await api.createPlay(fields)
+      if (started !== epoch.current) return null
+      if (before && play.summary.version < observedPlayVersion(latest.current, api)) {
+        setError('The Play was saved, but this response is older than the latest known Play. Reload the current saved Play before saving again.')
+        return null
+      }
+      update({ observedPlay: { api, id: play.summary.id, accountId: play.summary.accountId, version: play.summary.version,
+        conflict: latest.current.observedPlay?.conflict ?? false } })
       const synced = await syncEvidence(api, play.summary.id, sent.evidence, before?.evidenceIds ?? [])
+      if (started !== epoch.current) return null
+      if (play.summary.version < observedPlayVersion(latest.current, api)) {
+        setError('The Play changed again while saving. Reload the current saved Play before saving again.')
+        return null
+      }
       const stored = draftFromSaved(play, synced.evidence)
       const state = savedState(play, stored)
       const next = { ...state, evidenceIds: [...state.evidenceIds, ...synced.pendingDeletes] }
       // Edits made while saving stay; only their evidence learns its server identity.
       const current = latest.current.draft
-      const ids = new Map(synced.evidence.map(item => [item.id, item]))
       update({
         saved: next,
-        draft: current === sent ? stored : { ...current, evidence: current.evidence.map(item => ids.get(item.id) ?? item) },
+        observedPlay: { api, id: play.summary.id, accountId: play.summary.accountId, version: play.summary.version, conflict: false },
+        draft: current === sent ? stored : { ...current, evidence: mergeSavedEvidence(current.evidence, synced.evidence) },
       })
       if (synced.error) setError(`The play was saved, but an image did not sync: ${failure(synced.error)} Save again to retry.`)
       setDialog(null)
       return next
     } catch (cause) {
+      if (started !== epoch.current) return null
       if (dialog === 'revision') setDialogError(failure(cause))
       else setError(failure(cause))
       return null
-    } finally {
-      setBusy(null)
     }
   }
 
   async function changeStatus(request: StatusRequest) {
-    let state = latest.current.saved
-    if (request.status === 'planned' && planBlocked()) return
-    if (request.status === 'planned' && status === 'draft' && (!state || isDirty(latest.current.draft, state))) {
-      state = await save()
-      if (!state) return
-    }
-    if (!state) return
-    setBusy('status'); setError(null); setDialogError(null)
+    const finish = beginWork('status')
+    if (!finish) return
+    const started = epoch.current
     try {
+      let state = latest.current.saved
+      if (request.status === 'planned' && planBlocked()) return
+      if (request.status === 'planned' && status === 'draft' && (!state || isDirty(latest.current.draft, state))) {
+        state = await saveDraft()
+        if (!state) return
+        if (isDirty(latest.current.draft, state)) { setError('Changes made during saving are still unsaved. Save them before planning.'); return }
+      }
+      if (!state) return
+      setError(null); setDialogError(null)
       const play = await api.changePlayStatus(state.summary.id, state.summary.version, request)
-      update({ saved: { ...state, summary: play.summary } })
+      if (started !== epoch.current) return
+      acceptStoredPlay(play)
       setDialog(null)
     } catch (cause) {
+      if (started !== epoch.current) return
       if (dialog === 'cancel') setDialogError(failure(cause))
       else setError(failure(cause))
     } finally {
-      setBusy(null)
+      finish()
     }
   }
 
   async function remove() {
+    const started = epoch.current
     if (!saved) return
-    setBusy('delete'); setDialogError(null)
+    const finish = beginWork('delete')
+    if (!finish) return
+    setDialogError(null)
     try {
       await api.deletePlay(saved.summary.id)
+      if (started !== epoch.current) return
       setDialog(null)
-      update(createPlaysSession())
+      update({ ...createPlaysSession(), manual: emptyManualDraft() })
     } catch (cause) {
+      if (started !== epoch.current) return
       setDialogError(failure(cause))
     } finally {
-      setBusy(null)
+      finish()
     }
   }
 
-  async function open(id: string) {
-    setBusy('open'); setError(null)
+  async function open(id: string): Promise<boolean> {
+    const before = latest.current
+    if ((before.saved ? isDirty(before.draft, before.saved) : hasDraftContent(before.draft)) || hasManualDraft(before.manual)) {
+      setNavigationError('Keep your current work. Save or explicitly discard it before opening the requested Play.')
+      return false
+    }
+    const finish = beginWork('open')
+    if (!finish) return false
+    const started = epoch.current
+    openController.current?.abort()
+    const controller = new AbortController()
+    openController.current = controller
+    setError(null)
     try {
-      const loaded = await loadSavedPlay(api, id)
-      update({ view: 'editor', ...loaded })
+      const loaded = await loadSavedPlay(api, id, controller.signal)
+      if (started !== epoch.current || controller.signal.aborted) return false
+      if (latest.current.draft !== before.draft || hasManualDraft(latest.current.manual)) {
+        setNavigationError('Your edits made while loading were kept. Save them before trying the requested Play again.')
+        return false
+      }
+      if (before.saved?.summary.id === id && loaded.saved.summary.version < observedPlayVersion(latest.current, api)) {
+        setNavigationError('This response is older than the latest known Play. Retry opening the current saved Play.')
+        return false
+      }
+      update({ view: 'editor', ...loaded, manual: emptyManualDraft(), observedPlay: {
+        api, id, accountId: loaded.saved.summary.accountId, version: loaded.saved.summary.version, conflict: false,
+      } })
+      setNavigationError(null)
+      return true
     } catch (cause) {
-      setError(failure(cause))
+      if (started === epoch.current && !controller.signal.aborted) { setError(failure(cause)); setNavigationError(failure(cause)) }
+      return false
     } finally {
-      setBusy(null)
+      finish()
     }
   }
 
+  useEffect(() => {
+    if (!visible) return
+    if (!requestedPlayId) { requestAttempt.current = null; return }
+    if (requestAttempt.current === requestedPlayId || busy) return
+    if (saved?.summary.id === requestedPlayId) {
+      update({ view: 'editor' })
+      requestAttempt.current = requestedPlayId
+      onRequestedPlayHandled?.()
+      return
+    }
+    if (unsaved) return
+    requestAttempt.current = requestedPlayId
+    let active = true
+    queueMicrotask(() => { if (active) void open(requestedPlayId).then(success => {
+      if (success && requestedId.current === requestedPlayId) onRequestedPlayHandled?.()
+    }) })
+    return () => { active = false }
+    // open reads the live session and guards edits made during loading.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, requestedPlayId, busy, unsaved, saved?.summary.id, onRequestedPlayHandled, api, update])
+
+  const requested = requestedPlayId && requestedPlayId !== saved?.summary.id ? <div className="workspace-alert plays-request" role="status">
+    <span>{unsaved ? 'A Play was requested from another screen. Your current work is kept; save it or explicitly discard it before opening.'
+      : navigationError ?? 'Opening the requested Play…'}</span>
+    <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => { update({ view: 'editor' }); onRequestedPlayHandled?.() }}>Keep current work</Button>
+    {!unsaved && navigationError && <Button variant="outline" size="sm" disabled={busy !== null}
+      onClick={() => { void open(requestedPlayId).then(success => { if (success && requestedId.current === requestedPlayId) onRequestedPlayHandled?.() }) }}>Retry requested Play</Button>}
+  </div> : null
+
+  if (!visible) return null
+  const conflict = session.observedPlay?.api === api && session.observedPlay.id === saved?.summary.id &&
+    session.observedPlay.accountId === saved.summary.accountId && session.observedPlay.conflict
+    ? <div className="workspace-alert" role="alert">The saved Play changed elsewhere. Your edits and their original version were kept. Copy any edits you want to keep, then discard the local copy from All plays and reopen the latest saved Play before saving.</div> : null
   if (session.view === 'list') {
-    return <PlayList api={api} accounts={accounts} busy={busy === 'open'}
-      unsaved={dirty ? draft.title.trim() || 'Untitled play' : null}
+    return <>{requested}{conflict}<PlayList api={api} accounts={accounts} busy={busy !== null}
+      unsaved={unsaved ? draft.title.trim() || 'Untitled play' : null}
       onOpen={id => { void open(id) }}
-      onNew={() => { setError(null); update(startNewPlay(session)) }}
+      onNew={() => { if (activeWork.current.current) return; setError(null); update(startNewPlay(session)) }}
       onContinue={() => update({ view: 'editor' })}
-      onDiscard={() => update(createPlaysSession())} />
+      onDiscard={() => { if (activeWork.current.current) return; latest.current = createPlaysSession(); onSession(latest.current) }} /></>
   }
 
   const saving = busy === 'save'
@@ -220,17 +379,25 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
 
   // One short line, only when it changes what the owner can do; the buttons and status badge say the rest.
   const notice = !saved ? null
-    : readOnly ? `${statusLabels[status]}. Only the review and images can change.`
+    : retrospective ? 'Retrospective. No original plan or initial-risk R. Only review and images can change.'
+    : readOnly ? `${statusLabels[status]}. Review and images can change${manual && status === 'closed' ? '; manual facts can be corrected without reopening' : ''}.`
     : dirty ? 'Unsaved changes.'
     : locked ? `Revision ${saved.summary.planRevision}. Saved plan changes ask for a reason.` : null
 
-  return <>
+  return <>{requested}{conflict}
     <Button variant="ghost" size="sm" className="plays-back" onClick={() => update({ view: 'list' })}><ArrowLeft size={14} />All plays</Button>
     <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={draft} onChange={next => update({ draft: next })}
-      {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} {...(notice ? { notice } : {})} lockInstrument={locked} readOnly={readOnly}
+      {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} {...(notice ? { notice } : {})} lockInstrument={locked}
+      lockDirection={status === 'open' || filled} readOnly={readOnly} retrospective={retrospective}
       sizing={sizing.sizing} onRiskChange={sizing.updateRisk}
-      execution={saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}
-        entries={draft.entries} onCheck={() => { void tracking.check() }} onLink={request => { void tracking.link(request) }}
+      execution={manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
+        enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
+        working={busy !== null}
+        observedVersion={observedPlayVersion(session, api)}
+        onChange={form => { if (mounted.current && currentApi.current === api && latest.current.saved?.summary.id === saved?.summary.id) update({ manual: form }) }}
+        onStored={acceptStoredPlay} onBegin={() => latest.current.saved?.summary.id === saved?.summary.id ? beginWork('manual') : null} />
+        : saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}
+        entries={draft.entries} direction={draft.direction} origin={saved.summary.origin} onCheck={() => { void tracking.check() }} onLink={request => { void tracking.link(request) }}
         onUnlink={linkId => { void tracking.unlink(linkId) }} /> : undefined} />
     {dialog === 'revision' && saved && <RevisionDialog revision={saved.summary.planRevision} pending={saving} error={dialogError}
       onSave={reason => { void save(reason) }} onClose={() => setDialog(null)} />}
@@ -256,14 +423,20 @@ function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onD
   const [filter, setFilter] = useState<Filter>('active')
   const [result, setResult] = useState<{ plays: PlaySummary[] } | { error: string } | null>(null)
   const [generation, setGeneration] = useState(0)
+  // Shared work settles even when a lost response or older replay leaves the version unchanged.
   useEffect(() => {
     const controller = new AbortController()
-    api.plays(controller.signal).then(plays => setResult({ plays }))
+    api.plays(controller.signal).then(plays => { if (!controller.signal.aborted) setResult({ plays }) })
       .catch(cause => { if (!controller.signal.aborted) setResult({ error: failure(cause) }) })
     return () => controller.abort()
-  }, [api, generation])
+  }, [api, generation, busy])
   const plays = result && 'plays' in result ? result.plays : []
-  const shown = plays.filter(play => filter === 'all' || (filter === 'ended') === ended.includes(play.status))
+  const shown = plays.filter(play => {
+    if (filter === 'all') return true
+    if (filter === 'pending' || filter === 'reviewed') return ended.includes(play.status) &&
+      (filter === 'reviewed') === (play.hasReview || !!play.reviewedAtUtc)
+    return (filter === 'ended') === ended.includes(play.status)
+  })
   const accountName = (id: string) => accounts.find(account => account.id === id)?.name ?? 'Unknown account'
 
   return <section className="plays-page plays-list-page" aria-label="Saved plays">
@@ -274,7 +447,7 @@ function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onD
     </div>
     {unsaved && <div className="workspace-alert plays-unsaved" role="status"><span>Unsaved changes in <strong>{unsaved}</strong>. Save or discard them before opening another play.</span>
       <Button variant="outline" size="sm" onClick={onContinue}>Continue editing</Button>
-      <Button variant="ghost" size="sm" className="danger-action" onClick={onDiscard}>Discard changes</Button></div>}
+      <Button variant="ghost" size="sm" className="danger-action" disabled={busy} onClick={onDiscard}>Discard changes</Button></div>}
     <div className="plays-list-filters" role="group" aria-label="Show plays">
       {filters.map(([value, label]) => <button key={value} type="button" className={filter === value ? 'active' : ''} aria-pressed={filter === value}
         onClick={() => setFilter(value)}>{label}</button>)}
@@ -285,11 +458,11 @@ function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onD
     {result && 'plays' in result && (shown.length ? <ul className="plays-list">
       {shown.map(play => <li key={play.id}>
         <button type="button" className="plays-list-item" disabled={!!unsaved || busy} onClick={() => onOpen(play.id)} aria-label={`Open ${play.title || 'Untitled play'}`}>
-          <span className="plays-list-title"><strong>{play.title || 'Untitled play'}</strong>
+          <span className="plays-list-title"><strong>{play.title || 'Untitled play'}</strong>{play.origin === 'retrospective' && <small>Retrospective · no original plan / R</small>}
             <small>{play.instrument ? instrumentLabel(venues.quote(play.venueId), play.instrument, play.instrumentSource) : 'No instrument'} · {venues.name(play.venueId)} · {accountName(play.accountId)}</small></span>
           <span className={`direction-chip ${play.direction}`}>{play.direction === 'long' ? 'Long' : 'Short'}</span>
           <span className={`badge play-status-${play.status}`}>{statusLabels[play.status]}</span>
-          <small className="plays-list-meta">{play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated {new Date(play.updatedAtUtc).toLocaleDateString()}</small>
+          <small className="plays-list-meta">{ended.includes(play.status) && (play.hasReview || play.reviewedAtUtc ? 'Reviewed · ' : 'Pending review · ')}{play.origin !== 'retrospective' && play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated {new Date(play.updatedAtUtc).toLocaleDateString()}</small>
         </button>
       </li>)}
     </ul> : <div className="plays-list-empty"><p>{plays.length ? 'No plays in this view.' : 'No saved plays yet. Start one to write down the idea before the trade.'}</p></div>)}

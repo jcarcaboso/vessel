@@ -1,5 +1,13 @@
 # Sizing suggestions
 
+October 13 diary completion adds eligible closed manual-ledger outcomes to the
+same validated result calculation. Unknown execution costs do not become zero.
+Retrospective Plays remain outside the sizing ladder; they have no initial plan
+or risk estimate. The ladder thresholds, rolling window and existing
+return-on-executed-notional arithmetic are unchanged. Review can still show
+retrospective results separately. See
+[the diary contract](diary-completion-contract.md).
+
 October 5, 2026: the owner asked for position-size suggestions after Mark Minervini's risk management: a success rate from past plays, smaller size after repeated losses and back up only once success returns, a risk-based size, a suggested maximum stop, a minimum target and a leverage. Each is a suggestion the owner accepts with a button; nothing is applied automatically. This replaces the prototype's sizing assistant (removed from the app on October 4) and follows the [project brief](../project-brief.md#suggested-position): suggested and entered sizing stay separate.
 
 These are mechanical estimates from the owner's own settings and record, not investment advice.
@@ -48,6 +56,12 @@ Statistics use the most recent 20 decided (win or loss) closed plays, ordered by
 - Average R of wins and losses where planned risk is known.
 
 The ladder walks every decided play from the oldest, so its level reflects the whole history.
+
+### Execution eligibility correction on October 13
+
+Before calculating the record and ladder, `SizingService` requires linked executions to settle the Play. Entry and exit quantities must match, roles must not contradict the normalized side/effect, chronology must not take exposure negative, and no fixed-size filled order may have known missing executions. `SizingStore` supplies those incomplete-order IDs to both sizing and Review. Cancellation or changing remaining size does not prove execution; position-sized TP/SL orders have no fixed completeness bound.
+
+This changes which historical Closed records are eligible, not the arithmetic, window or exposure ladder. Previously inconsistent records stay Closed and may disappear from the scored record; no migration or automatic history repair occurs. Review still has stricter explicit-effect, fee and initial-risk requirements. Unknown effect alone is not a role contradiction for sizing.
 
 ## Limits (backend)
 

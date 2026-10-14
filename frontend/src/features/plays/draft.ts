@@ -1,4 +1,5 @@
 import type { ChartDrawing } from '@/components/chart/drawings'
+import type { StructuredReview } from '@/api/plays'
 import type { ImageMarkup } from './markup'
 
 /**
@@ -38,6 +39,8 @@ export interface PlayDraft {
   drawings: Record<string, ChartDrawing[]>
   /** Chart captures and uploaded images. They stay in the browser until the Play is saved. */
   evidence: DraftEvidence[]
+  /** Missing on old session/test drafts means unanswered. */
+  structuredReview?: StructuredReview
 }
 
 export interface DraftEvidence {

@@ -15,12 +15,19 @@ describe('GET /api/system', () => {
     mockResponse(body)
     await expect(getSystem('token')).resolves.toEqual(body)
   })
-  it.each(['accountDiscovery', 'readOnlyCredential'])('rejects a non-boolean %s capability', async name => {
+  it.each(['accountDiscovery', 'readOnlyCredential', 'manualExecutions'])('rejects a non-boolean %s capability', async name => {
     mockResponse({ ...systemFixture, venues: [
       { ...indexVenue, capabilities: { ...indexVenue.capabilities, [name]: 'yes' } },
       ...systemFixture.venues.filter(v => v.id !== indexVenue.id),
     ] })
     await expect(getSystem('token')).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+  it.each([true, false])('accepts explicit manual execution capability %s without inferring it from venue names', async manualExecutions => {
+    const body = { ...systemFixture, venues: systemFixture.venues.map(venue => ({
+      ...venue, capabilities: { ...venue.capabilities, manualExecutions },
+    })) }
+    mockResponse(body)
+    await expect(getSystem('token')).resolves.toEqual(body)
   })
   it('accepts the native trade placeholder and HTTPS read-only credential setup link', async () => {
     const body = { ...systemFixture, venues: [
