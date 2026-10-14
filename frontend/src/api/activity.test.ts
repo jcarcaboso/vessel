@@ -22,7 +22,8 @@ describe('activity API', () => {
   })
   it.each([
     { quantity: 2 }, { direction: 'buy' }, { status: 'planned' }, { averageEntryPrice: '1e3' }, { entryOrderCount: 1.5 },
-    { netResultUsd: 0.1 }, { pnlBasis: 'guess' }, { playAssociation: 'linked', playId: null }, { otherFees: [{ token: 'ETH', amount: 1 }] },
+    { netResultUsd: 0.1 }, { grossClosedPnlUsd: 0.1 }, { grossClosedPnlUsd: '1e3' },
+    { pnlBasis: 'guess' }, { playAssociation: 'linked', playId: null }, { otherFees: [{ token: 'ETH', amount: 1 }] },
     { coverage: [null] }, { openedAtUtc: 'yesterday' }, { closedAtUtc: '2026-10-12T11:00:00Z' }, { omittedFillCount: 1 },
     { direction: null }, { fills: [{ ...operationFixture.fills[0]!, role: 'flip' }] },
     { fills: [{ ...operationFixture.fills[0]!, fill: { ...operationFixture.fills[0]!.fill, accountId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' } }] },
@@ -30,6 +31,11 @@ describe('activity API', () => {
     response({ ...activityFixture, operations: [{ ...operationFixture, ...fields }] })
     await expect(createWorkspaceApi('token').activity()).rejects.toMatchObject({ kind: 'invalid-response' })
   })
+  it.each([null, '-0.0000000000000000000000000001', '100000000000000000000000000000.123456789'])(
+    'preserves unknown or exact before-fee P&L %s', async grossClosedPnlUsd => {
+      response({ ...activityFixture, operations: [{ ...operationFixture, grossClosedPnlUsd }] })
+      expect((await createWorkspaceApi('token').activity()).operations[0]!.grossClosedPnlUsd).toBe(grossClosedPnlUsd)
+    })
   it('accepts incomplete coverage and unknown values without inventing an entry', async () => {
     const incomplete = { ...operationFixture, status: 'incomplete', direction: null, openedAtUtc: null, quantity: null, totalEnteredQuantity: null,
       totalExitedQuantity: null, openQuantity: null, averageEntryPrice: null, averageExitPrice: null, coverage: ['Opening history missing.'] }

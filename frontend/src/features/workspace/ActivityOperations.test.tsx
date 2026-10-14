@@ -8,7 +8,7 @@ import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { ActivityOperations } from './ActivityOperations'
 import { OperationsTable } from './OperationsTable'
 import { ActivityTable } from './ActivityTable'
-import { sideDirection, resultSign } from './activity-format'
+import { sideDirection, resultSign, operationPriceReturn, operationDates, operationStatus } from './activity-format'
 import { emptyFilters, filterOperations } from './activity-filters'
 
 const client = (activity = vi.fn().mockResolvedValue(activityFixture)) => ({ activity }) as unknown as WorkspaceApi
@@ -17,6 +17,42 @@ const closed: ActivityOperation = { ...operationFixture, id: '22345678-1234-1234
   averageExitPrice: '99', netResultUsd: '2', exitOrderCount: 1 }
 
 describe('operation table', () => {
+  it('toggles from any summary cell, retains keyboard control and leaves expanded actions independent', async () => {
+    const preview = vi.fn()
+    render(<OperationsTable operations={[closed]} accounts={[accountFixture]} onPreview={preview} />)
+    await userEvent.click(screen.getByText(accountFixture.name))
+    const button = screen.getByRole('button', { name: 'Collapse BTC operation' })
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(screen.getByRole('button', { name: /Inspect BTC retrospective/ }))
+    expect(preview).toHaveBeenCalledExactlyOnceWith(closed)
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(screen.getByText('$2.00'))
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    button.focus()
+    await userEvent.keyboard('{Enter}')
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.keyboard(' ')
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+  })
+  it('keeps only the size and nonzero remaining quantity in the summary', () => {
+    const view = render(<OperationsTable operations={[closed]} accounts={[accountFixture]} />)
+    expect(screen.queryByText(/Remaining|Entered|Exited|Peak quantity|Reported executions|Stablecoin units/)).not.toBeInTheDocument()
+    view.rerender(<OperationsTable operations={[{ ...operationFixture, openQuantity: '0.0000000000000000000000000001',
+      totalExitedQuantity: '1.9999999999999999999999999999' }]} accounts={[accountFixture]} />)
+    expect(screen.getByText(/Remaining/)).toBeInTheDocument()
+    expect(screen.getByText('Partially closed')).toHaveClass('partial')
+  })
+  it('uses before-fee P&L and the authoritative net result without another fee deduction', () => {
+    render(<OperationsTable operations={[{ ...closed, pnlBasis: 'net-of-fee', grossClosedPnlUsd: '-109.31',
+      reportedClosedPnlUsd: '-110', netResultUsd: '-110', stablecoinFeesNominalUsd: '0.69',
+      direction: 'long', averageEntryPrice: '1796.44', averageExitPrice: '1740.45' }]} accounts={[accountFixture]} />)
+    expect(screen.getByText('-$109.31')).toBeInTheDocument()
+    expect(screen.getByText('-$110.00')).toBeInTheDocument()
+    expect(screen.getByText('$0.69')).toBeInTheDocument()
+    expect(screen.getByText('-3.12%')).toHaveClass('negative')
+    expect(screen.getByText('$1,740.45').closest('td')).toHaveClass('negative')
+    expect(screen.queryByText('net-of-fee')).not.toBeInTheDocument()
+  })
   it('renders a round trip as one row, colours Long and expands its constituent fills accessibly', async () => {
     render(<OperationsTable operations={[operationFixture]} accounts={[accountFixture]} />)
     expect(screen.getByText('Long')).toHaveClass('long')
@@ -47,11 +83,12 @@ describe('operation table', () => {
       totalEnteredQuantity: null, averageEntryPrice: null, coverage: ['Opening entries are missing.'] }
     render(<OperationsTable operations={[missing]} accounts={[accountFixture]} />)
     expect(screen.getByText('Short')).toHaveClass('short')
-    expect(screen.getByText('Opened unknown')).toBeInTheDocument()
-    expect(screen.getByText('Exited 2')).toBeInTheDocument()
+    expect(screen.getByText(/Opened unknown/)).toBeInTheDocument()
+    expect(screen.queryByText(/Exited 2/)).not.toBeInTheDocument()
     expect(screen.getByTitle('99')).toHaveTextContent('$99.00')
-    expect(screen.getByText('incomplete')).toBeInTheDocument()
+    expect(screen.getByText('Incomplete')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Expand BTC operation' }))
+    expect(screen.getByText(/Exited 2/)).toBeInTheDocument()
     expect(screen.getByText('Opening entries are missing.')).toBeInTheDocument()
   })
   it('hides disabled account operations even if an earlier response includes them', () => {
@@ -95,6 +132,38 @@ describe('operation table', () => {
     expect(resultSign('999999999999999999999999999999.1')).toBe('positive')
     expect(resultSign('-0.0000')).toBe('neutral')
     expect(resultSign(null)).toBe('neutral')
+  })
+})
+
+describe('operation display values', () => {
+  it.each([
+    ['long', '100', '110', '+10.00%'], ['short', '100', '110', '-10.00%'],
+    ['short', '100', '90', '+10.00%'], ['long', '100', '90', '-10.00%'],
+    ['long', '100', '100', '0.00%'], ['long', '100', '99.999999', '0.00%'],
+    ['long', '0.000000000000000000000000001', '0.0000000000000000000000000011', '+10.00%'],
+    ['long', '100000000000000000000000000000', '110000000000000000000000000000', '+10.00%'],
+    ['long', '100', '100.005', '+0.01%'],
+  ] as const)('formats %s %s → %s without floating point loss', (direction, averageEntryPrice, averageExitPrice, expected) => {
+    expect(operationPriceReturn({ ...closed, direction, averageEntryPrice, averageExitPrice })).toBe(expected)
+  })
+  it('does not invent a return for missing, incomplete or zero-price entries', () => {
+    for (const override of [{ averageEntryPrice: null }, { averageExitPrice: null }, { averageEntryPrice: '0' },
+      { direction: null }, { status: 'incomplete' as const }]) {
+      expect(operationPriceReturn({ ...closed, ...override })).toBeNull()
+    }
+  })
+  it('distinguishes incomplete from partial and keeps partial operations within Open filtering', () => {
+    const partial = { ...operationFixture, totalExitedQuantity: '1', openQuantity: '1' }
+    expect(operationStatus(partial)).toEqual({ label: 'Partially closed', tone: 'partial' })
+    expect(operationStatus({ ...partial, status: 'incomplete' }).label).toBe('Incomplete')
+    for (const status of ['open', 'partial']) {
+      expect(filterOperations([partial, closed], [accountFixture], { ...emptyFilters, status }, 0)).toEqual([partial])
+    }
+  })
+  it('shortens same-day UTC times while retaining dates and years across boundaries', () => {
+    expect(operationDates(closed)).toBe('12 Oct, 10:00 → 12:00')
+    expect(operationDates({ ...closed, closedAtUtc: '2026-10-13T12:00:00Z' })).toBe('12 Oct, 10:00 → 13 Oct, 12:00')
+    expect(operationDates({ ...closed, closedAtUtc: '2027-01-01T12:00:00Z' })).toBe('12 Oct 2026, 10:00 → 1 Jan 2027, 12:00')
   })
 })
 

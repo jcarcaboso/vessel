@@ -12,7 +12,7 @@ export const operationFixture: ActivityOperation = {
   id: `${activityFillFixture.id}:long`, accountId: accountFixture.id, contractId: 'BTC', direction: 'long', status: 'open',
   openedAtUtc: activityFillFixture.occurredAtUtc, closedAtUtc: null, lastOccurredAtUtc: activityFillFixture.occurredAtUtc,
   quantity: '2', totalEnteredQuantity: '2', totalExitedQuantity: '0', openQuantity: '2', averageEntryPrice: activityFillFixture.price,
-  averageExitPrice: null, entryOrderCount: 1, exitOrderCount: 0, fillCount: 1, reportedClosedPnlUsd: '0',
+  averageExitPrice: null, entryOrderCount: 1, exitOrderCount: 0, fillCount: 1, reportedClosedPnlUsd: '0', grossClosedPnlUsd: '0',
   stablecoinFeesNominalUsd: '0.01', otherFees: [], netResultUsd: '-0.01', pnlBasis: 'gross', playId: null, playAssociation: 'unassigned',
   coverage: [], fills: [{ fill: activityFillFixture, role: 'entry', quantity: '2', fee: '0.01', closedPnlUsd: '0' }], omittedFillCount: 0,
 }

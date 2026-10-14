@@ -28,6 +28,7 @@ export interface ActivityOperation {
   exitOrderCount: number
   fillCount: number
   reportedClosedPnlUsd: string
+  grossClosedPnlUsd: string | null
   stablecoinFeesNominalUsd: string
   otherFees: { token: string; amount: string }[]
   netResultUsd: string | null
@@ -67,7 +68,8 @@ export function isActivityDocument(value: unknown): value is ActivityDocument {
       !isNullOr(op.openedAtUtc, isIsoTimestamp) || !isNullOr(op.closedAtUtc, isIsoTimestamp) ||
       !['quantity', 'totalEnteredQuantity', 'totalExitedQuantity', 'openQuantity', 'averageEntryPrice', 'averageExitPrice'].every(k => isNullOr(op[k], x => isNonNegativeDecimal(x, decimalLength))) ||
       !['entryOrderCount', 'exitOrderCount', 'fillCount', 'omittedFillCount'].every(k => isCount(op[k])) ||
-      !isPlainDecimal(op.reportedClosedPnlUsd, decimalLength) || !isPlainDecimal(op.stablecoinFeesNominalUsd, decimalLength) || !isNullOr(op.netResultUsd, x => isPlainDecimal(x, decimalLength)) ||
+      !isPlainDecimal(op.reportedClosedPnlUsd, decimalLength) || !isNullOr(op.grossClosedPnlUsd, x => isPlainDecimal(x, decimalLength)) ||
+      !isPlainDecimal(op.stablecoinFeesNominalUsd, decimalLength) || !isNullOr(op.netResultUsd, x => isPlainDecimal(x, decimalLength)) ||
       !['gross', 'net-of-fee', 'mixed'].includes(String(op.pnlBasis)) || !isNullOr(op.playId, isGuid) ||
       !['linked', 'unassigned', 'mixed'].includes(String(op.playAssociation)) || !isListOf(op.coverage, n => isFilledText(n, 2000), 100) ||
       !Array.isArray(op.otherFees) || !op.otherFees.every(f => isRecord(f) && isFilledText(f.token, 64) && isPlainDecimal(f.amount, decimalLength)) ||

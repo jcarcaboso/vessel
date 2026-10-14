@@ -4,6 +4,7 @@ import type { ActivityDocument } from '@/api/activity'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
 import { Button } from '@/components/ui/button'
+import { NativeSelect } from '@/components/ui/native-select'
 import { OperationsTable } from './OperationsTable'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { RetrospectivePreview } from './RetrospectivePreview'
@@ -50,12 +51,12 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
   const update = (field: keyof Filters, value: string) => setFilters({ ...filters, [field]: value })
   return <div className="activity-operations">
     {showFilters && <fieldset className="operation-filters"><legend>Filter operations</legend>
-      <label>Account<select value={filters.account} onChange={e => update('account', e.target.value)}><option value="">All enabled accounts</option>{enabled.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
-      <label>Portfolio<select value={filters.portfolio} onChange={e => update('portfolio', e.target.value)}><option value="">All portfolios</option><option value="unassigned">Unassigned accounts</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-      <label>Instrument<select value={filters.contract} onChange={e => update('contract', e.target.value)}><option value="">All instruments</option>{contracts.map(c => <option key={c}>{c}</option>)}</select></label>
-      <label>Direction<select value={filters.direction} onChange={e => update('direction', e.target.value)}><option value="">All directions</option><option value="long">Long</option><option value="short">Short</option></select></label>
-      <label>Status<select value={filters.status} onChange={e => update('status', e.target.value)}><option value="">All statuses</option><option value="open">Open</option><option value="closed">Closed</option><option value="incomplete">Incomplete</option></select></label>
-      <label>Period<select value={filters.period} onChange={e => update('period', e.target.value)}><option value="all">All retained activity</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="custom">Date range · UTC</option></select></label>
+      <label>Account<NativeSelect value={filters.account} onChange={e => update('account', e.target.value)}><option value="">All enabled accounts</option>{enabled.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</NativeSelect></label>
+      <label>Portfolio<NativeSelect value={filters.portfolio} onChange={e => update('portfolio', e.target.value)}><option value="">All portfolios</option><option value="unassigned">Unassigned accounts</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</NativeSelect></label>
+      <label>Instrument<NativeSelect value={filters.contract} onChange={e => update('contract', e.target.value)}><option value="">All instruments</option>{contracts.map(c => <option key={c}>{c}</option>)}</NativeSelect></label>
+      <label>Direction<NativeSelect value={filters.direction} onChange={e => update('direction', e.target.value)}><option value="">All directions</option><option value="long">Long</option><option value="short">Short</option></NativeSelect></label>
+      <label>Status<NativeSelect value={filters.status} onChange={e => update('status', e.target.value)}><option value="">All statuses</option><option value="open">Open</option><option value="partial">Partially closed</option><option value="closed">Closed</option><option value="incomplete">Incomplete</option></NativeSelect></label>
+      <label>Period<NativeSelect value={filters.period} onChange={e => update('period', e.target.value)}><option value="all">All retained activity</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="custom">Date range · UTC</option></NativeSelect></label>
       {filters.period === 'custom' && <><label>From date<input type="date" value={filters.from} onChange={e => update('from', e.target.value)} /></label><label>Through date<input type="date" value={filters.to} min={filters.from || undefined} onChange={e => update('to', e.target.value)} /></label></>}
       <Button variant="outline" size="sm" onClick={() => setFilters(emptyFilters)}>Reset filters</Button>
     </fieldset>}

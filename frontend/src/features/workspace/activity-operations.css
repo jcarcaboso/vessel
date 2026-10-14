@@ -5,9 +5,29 @@
 .operation-direction.short { background: var(--card); border-color: color-mix(in srgb, var(--negative) 35%, var(--border)); }
 .operation-direction.unknown, .operation-result.neutral { color: var(--muted-foreground); }
 .operation-incomplete, .operation-coverage { color: var(--warning); }
-.operation-heading { display: flex; align-items: flex-start; gap: 8px; }
+.operation-heading { display: flex; align-items: center; gap: 8px; }
 .operation-heading > div { display: flex; flex-direction: column; align-items: flex-start; min-width: 85px; }
-.workspace-table.operations-table td { vertical-align: top; }
+.workspace-table.operations-table td { vertical-align: middle; }
+.operation-row { cursor: pointer; }
+.operation-row:hover, .operation-row[data-expanded="true"] { background: var(--secondary); }
+.operation-row:focus-within { outline: 1px solid var(--ring); outline-offset: -1px; }
+.operation-toggle { display: grid; place-items: center; flex-shrink: 0; width: 28px; height: 36px; padding: 0; border: 0; border-radius: var(--radius); background: transparent; color: var(--muted-foreground); }
+.workspace-table .operation-asset { font-size: 14px; font-weight: 650; letter-spacing: .02em; }
+.operation-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; }
+.operation-tags .operation-direction { margin-top: 0; }
+.operation-status { display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 10px; line-height: 1.2; background: var(--card); }
+.operation-status::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.operation-status.open { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 35%, var(--border)); }
+.operation-status.partial, .operation-status.incomplete { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 35%, var(--border)); }
+.operation-status.incomplete { border-style: dashed; }
+.operation-status.closed { color: var(--muted-foreground); }
+.operation-timezone { font-size: 9px; opacity: .8; }
+.operation-dates { white-space: nowrap; }
+.operation-entry, .operation-fees { color: var(--muted-foreground); }
+.operation-pnl { display: flex; align-items: center; gap: 8px; }
+.operation-return { font-size: 10px; white-space: nowrap; padding: 3px 5px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+.operation-net { font-weight: 650; }
+.workspace-table .operation-details { margin: 10px 0 14px; white-space: normal; }
 .operation-expanded { background: var(--background); padding: 16px !important; }
 .operation-coverage { margin: 0 0 12px; padding-left: 20px; font-size: 12px; }
 .operation-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 0 20px 14px; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
@@ -15,6 +35,7 @@
 .operation-filters label { display: grid; gap: 5px; color: var(--muted-foreground); font-size: 12px; flex: 1 1 150px; }
 .operation-filters select, .operation-filters input { width: 100%; min-height: 36px; padding: 7px 10px; color: var(--foreground); background: var(--field); border: 1px solid var(--border); border-radius: var(--radius); font: inherit; }
 .operation-filters select:focus-visible, .operation-filters input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.operation-filters > button { min-height: 36px; }
 .operation-scope, .operation-originals { padding: 16px; color: var(--muted-foreground); font-size: 12px; }
 .operation-scope summary, .operation-originals summary { cursor: pointer; color: var(--foreground); }
 .retrospective-dialog { max-width: min(900px, calc(100% - 2rem)) !important; max-height: calc(100dvh - 40px); overflow-y: auto; }
