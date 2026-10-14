@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Application.Venues;
+using Vessel.Domain.Numerics;
 
 namespace Vessel.Tests;
 
@@ -12,12 +13,12 @@ public sealed class StablecoinPersistenceTests
     [InlineData("79228162514264337593543950335", "1", "79228162514264337593543950336")]
     [InlineData("1.5000", "2.50", "4")]
     public void Nominal_totals_do_not_round_or_overflow_exact_token_strings(string first, string second, string expected) =>
-        Assert.Equal(expected, StablecoinTotals.Sum([
+        Assert.Equal(expected, ExactDecimal.Sum([
             decimal.Parse(first, System.Globalization.CultureInfo.InvariantCulture),
             decimal.Parse(second, System.Globalization.CultureInfo.InvariantCulture)]));
 
     [Fact]
-    public void Observed_empty_wallet_is_exact_zero() => Assert.Equal("0", StablecoinTotals.Sum([]));
+    public void Observed_empty_wallet_is_exact_zero() => Assert.Equal("0", ExactDecimal.Sum([]));
 
     [PostgresFact]
     public async Task Balances_use_the_wallet_alone_in_unified_mode_and_add_perps_otherwise_and_sum_per_portfolio()

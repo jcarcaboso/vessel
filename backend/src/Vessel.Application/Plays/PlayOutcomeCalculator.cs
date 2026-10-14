@@ -1,7 +1,7 @@
 using System.Globalization;
-using Vessel.Application.Activity;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Workspace;
@@ -46,13 +46,13 @@ public static class PlayOutcomeCalculator
     {
         var entries = facts.Fills.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill).ToList();
         if (entries.Count == 0) return null;
-        var notional = ExactDecimal(entries.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Quantity * f.Price)));
+        var notional = ToDecimal(entries.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Quantity * f.Price)));
         if (notional <= 0) return null;
         var fills = facts.Fills.Select(f => f.Fill).ToList();
         // A net-of-fee closed PnL already has its fee taken off; only gross PnL needs the fee subtracted.
         var gross = fills.Where(f => f.PnlBasis == ExecutionFacts.PnlGross).ToList();
         // Decimal sums can lose a small result between large cancelling exits.
-        var net = ExactDecimal(fills.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.ClosedPnlUsd)) -
+        var net = ToDecimal(fills.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.ClosedPnlUsd)) -
             gross.Where(f => f.FeeToken == FeeToken).Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Fee)));
         var feesComplete = facts.ManualFeesComplete && fills.All(f => ExecutionFacts.IsFeeBasis(f.FeeBasis)) &&
             gross.All(f => !string.IsNullOrWhiteSpace(f.FeeToken) && (f.FeeToken == FeeToken || f.Fee == 0));
@@ -63,7 +63,7 @@ public static class PlayOutcomeCalculator
         return new PlayOutcome(facts.Play.Id, closedAt, net, notional, risk, feesComplete);
     }
 
-    private static decimal ExactDecimal(ExactAmount value)
+    private static decimal ToDecimal(ExactAmount value)
     {
         var result = decimal.Parse(value.ToString(), CultureInfo.InvariantCulture);
         if (ExactAmount.From(result) != value) throw new OverflowException();

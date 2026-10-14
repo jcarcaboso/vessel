@@ -2,6 +2,7 @@ using System.Globalization;
 using Vessel.Application.Activity;
 using Vessel.Application.Common;
 using Vessel.Application.Workspace;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Overview;
@@ -68,7 +69,7 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
                 Sum(a => a.AvailableBalanceUsd, "Reported availability unavailable; manual values are not available funds."),
                 selected.Sum(a => snapshots.GetValueOrDefault(a.Id)?.Positions.Count(p => p.SignedQuantity != 0) ?? 0),
                 Sum(a => snapshots.TryGetValue(a.Id, out var snapshot)
-                    ? StablecoinTotals.Sum(snapshot.Positions.Where(p => p.SignedQuantity != 0).Select(p => p.UnrealizedPnlUsd)) : null,
+                    ? ExactDecimal.Sum(snapshot.Positions.Where(p => p.SignedQuantity != 0).Select(p => p.UnrealizedPnlUsd)) : null,
                     "Latest perpetual snapshot unavailable; unrealized P&L unknown."), realized,
                 selected.Sum(a => fills.GetValueOrDefault(a.Id)));
         }
