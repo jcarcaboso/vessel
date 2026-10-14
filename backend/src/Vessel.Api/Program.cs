@@ -1,10 +1,8 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Api;
 using Vessel.Application.Common;
-using Vessel.Application.Metadata;
 using Vessel.Domain.Common;
 using Vessel.Infrastructure;
 using Vessel.Persistence;
@@ -73,8 +71,7 @@ app.Use(async (context, next) =>
             SafeExceptionDiagnostics.Log(app.Logger, context, ex, traceId, status);
         if (context.Response.HasStarted) throw;
         context.Response.Clear();
-        if (context.Request.Path.Value?.TrimEnd('/').EndsWith("/credential", StringComparison.OrdinalIgnoreCase) == true)
-            context.Response.Headers.CacheControl = "no-store";
+        if (context.IsCredentialEndpoint()) context.Response.Headers.CacheControl = "no-store";
         context.Response.Headers["X-Correlation-ID"] = traceId;
         await Results.Problem(statusCode: status, detail: detail,
             extensions: new Dictionary<string, object?> { ["traceId"] = traceId }).ExecuteAsync(context);
@@ -83,35 +80,8 @@ app.Use(async (context, next) =>
 app.UseResponseCompression();
 app.UseAuthentication();
 app.UseAuthorization();
-// Bound credential JSON before model binding, including chunked requests. Never log its body.
-app.Use(async (context, next) =>
-{
-    if (context.Request.Path.Value?.TrimEnd('/').EndsWith("/credential", StringComparison.OrdinalIgnoreCase) == true)
-    {
-        context.Response.Headers.CacheControl = "no-store";
-        // Local/LAN development may use HTTP. Every other environment retains the transport guard,
-        // independently of the frontend build; headers and request bodies cannot enable this exception.
-        if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsDelete(context.Request.Method) &&
-            !app.Environment.IsDevelopment() &&
-            !CredentialTransport.IsAllowed(context))
-            throw new ProblemException(403, "Credential entry requires HTTPS outside localhost.");
-        var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
-        if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = 4096;
-        if (context.Request.ContentLength > 4096)
-            throw new ProblemException(413, "Credential request is too large.");
-    }
-    else if (!HttpMethods.IsGet(context.Request.Method) &&
-        (context.Request.Path.StartsWithSegments("/api/plays") &&
-            (context.Request.Path.Value?.Contains("/manual-executions", StringComparison.OrdinalIgnoreCase) == true ||
-             string.Equals(context.Request.Path.Value?.TrimEnd('/'), "/api/plays/retrospective", StringComparison.OrdinalIgnoreCase))))
-    {
-        var max = context.Request.Path.Value?.Contains("/manual-executions", StringComparison.OrdinalIgnoreCase) == true ? 16_384 : 131_072;
-        var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
-        if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = max;
-        if (context.Request.ContentLength > max) throw new ProblemException(413, "Diary request is too large.");
-    }
-    await next(context);
-});
+// Credential HTTPS, no-store and body limits come from endpoint metadata (CredentialEndpoint, RequestBodyLimit).
+app.UseEndpointTransport();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
 // Readiness for a proxy or orchestrator: the database answers and every migration is applied. No details.
@@ -128,9 +98,7 @@ app.MapGet("/health/ready", async (IServiceProvider services, CancellationToken 
         return Results.Json(new { status = "unavailable" }, statusCode: 503);
     }
 }).AllowAnonymous();
-app.MapGet("/api/system", (ClaimsPrincipal user, Vessel.Application.Venues.IVenueRegistry venues) => SystemMetadata.ForOwner(new JournalOwner(
-    Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!), user.FindFirstValue(ClaimTypes.Name)!), venues))
-    .RequireAuthorization();
+app.MapSystem();
 app.MapWorkspace();
 app.MapEvidence();
 app.MapPlays();

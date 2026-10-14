@@ -42,9 +42,7 @@ public sealed class BearerTokenHandler(
             return Task.FromResult(AuthenticateResult.Fail("Invalid bearer credentials."));
         }
 
-        var identity = new ClaimsIdentity([
-            new Claim(ClaimTypes.NameIdentifier, settings.OwnerId.ToString()),
-            new Claim(ClaimTypes.Name, settings.OwnerName)], SchemeName);
+        var identity = JournalOwnerClaims.Identity(settings.OwnerId, settings.OwnerName, SchemeName);
         return Task.FromResult(AuthenticateResult.Success(
             new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
     }

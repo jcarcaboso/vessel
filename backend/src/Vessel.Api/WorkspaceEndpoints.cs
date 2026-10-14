@@ -12,18 +12,13 @@ public static class WorkspaceEndpoints
         var api = app.MapGroup("/api").RequireAuthorization();
         api.MapGet("/venues/{venueId}/accounts", async (string venueId, string? address, AccountDiscoveryService service, CancellationToken ct) =>
             Results.Ok(await service.DiscoverAsync(venueId, address, ct)));
-        // This read-only preview never stores the token. The credential suffix applies the same
-        // no-store and bounded-body middleware as credential saves; tokens never enter a URL.
+        // This read-only preview never stores the token. It carries the same HTTPS guard, no-store and
+        // bounded body as credential saves; tokens never enter a URL.
         api.MapPost("/venues/{venueId}/accounts/credential",
             async (string venueId, CredentialDiscoveryRequest request, AccountDiscoveryService service, CancellationToken ct) =>
-                Results.Ok(await service.DiscoverAsync(venueId, request, ct)));
-        var credential = api.MapGroup("/accounts/{id:guid}/credential");
-        credential.AddEndpointFilter(async (context, next) =>
-        {
-            context.HttpContext.Response.Headers.CacheControl = "no-store";
-            return await next(context);
-        });
-        credential.MapGet("", async (Guid id, AccountCredentialService service, CancellationToken ct) =>
+                Results.Ok(await service.DiscoverAsync(venueId, request, ct))).CarriesCredential();
+        var credential = api.MapGroup("/accounts/{id:guid}/credential").CarriesCredential();
+        credential.MapGet("",async (Guid id, AccountCredentialService service, CancellationToken ct) =>
             Results.Ok(await service.GetAsync(id, ct)));
         credential.MapPut("", async (Guid id, SaveAccountCredentialRequest request, AccountCredentialService service, CancellationToken ct) =>
             Results.Ok(await service.PutAsync(id, request, ct)));
@@ -91,17 +86,11 @@ public static class WorkspaceEndpoints
             await execution.RetainAccountOrdersAsync(id, ct);
             return Results.Ok(await service.AccountAsync(id, ct));
         });
-        api.MapGet("/activity", async (Guid? accountId, Vessel.Application.Activity.ActivityService service, HttpContext context, CancellationToken ct) =>
-        {
-            context.Response.Headers.CacheControl = "no-store";
-            return Results.Ok(await service.GetAsync(accountId, ct));
-        });
+        api.MapGet("/activity", async (Guid? accountId, Vessel.Application.Activity.ActivityService service, CancellationToken ct) =>
+            Results.Ok(await service.GetAsync(accountId, ct)));
         api.MapGet("/overview/summary", async (string? groupBy, string? period, string? scope,
-            Vessel.Application.Overview.OverviewSummaryService service, HttpContext context, CancellationToken ct) =>
-        {
-            context.Response.Headers.CacheControl = "no-store";
-            return Results.Ok(await service.GetAsync(groupBy, period, scope, ct));
-        });
+            Vessel.Application.Overview.OverviewSummaryService service, CancellationToken ct) =>
+            Results.Ok(await service.GetAsync(groupBy, period, scope, ct)));
         api.MapGet("/overview", async (WorkspaceService service, CancellationToken ct) => Results.Ok(await service.OverviewAsync(ct)));
     }
 }
