@@ -44,7 +44,11 @@ async function main() {
       }
       context.putImageData(shown, 0, 0)
       const blob = changed ? await canvas.convertToBlob({ type: 'image/png' }) : null
-      const diff = blob ? btoa(String.fromCharCode(...new Uint8Array(await blob.arrayBuffer()))) : null
+      const diff = blob ? await new Promise(resolve => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result).split(',')[1])
+        reader.readAsDataURL(blob)
+      }) : null
       return { before: [first.width, first.height], after: [second.width, second.height], changed, ratio: changed / (width * height),
         rows: changed ? [top, bottom] : null, diff }
     }, { a: encode(before), b: encode(after) })
