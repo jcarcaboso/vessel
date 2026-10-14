@@ -1,0 +1,531 @@
+{
+  "label": "appearance-wave3-after",
+  "base": "http://127.0.0.1:48651",
+  "frozen": "2026-10-14T16:30:00.000Z",
+  "shots": [
+    {
+      "file": "graphite-desktop-overview.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "overview",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "24a8b402bf4c80b3b9b8cf4022b1a42c70b59b1fa7755850070d304642ebe313",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-plays-list.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "plays-list",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "5636f12405f5002cce410e73539e87181ee836cc62176e982476cf00409a3491",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-plays-editor.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "plays-editor",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "d272725be0b09497bdda8be5433b9e751e650e69a0987fb0389e0b37d804ad93",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-entry-expanded.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "entry-expanded",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 295,
+          "right": 1145,
+          "width": 850
+        }
+      ],
+      "renderedTextSha256": "19c14cac94f376b10f756fe81095827e05df77ee4edf2aa0e6ee8536c8789937",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-chart-expanded.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "chart-expanded",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 28.8046875,
+          "right": 1411.1953125,
+          "width": 1382.390625
+        }
+      ],
+      "renderedTextSha256": "34f7dd51d587c4dc350a77d6ad0afa0911c8372f8405a4a2902e2ccd5bf73711",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-level-popover.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "level-popover",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 28.8046875,
+          "right": 1411.1953125,
+          "width": 1382.390625
+        },
+        {
+          "name": "Edit Entry 1",
+          "left": 124.8046875,
+          "right": 360.8046875,
+          "width": 236
+        }
+      ],
+      "renderedTextSha256": "0b386cb0eefdec59125d2fb1305cd4dc84c24479fcc99a68873a3b2c9f342674",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-leverage-confirmation.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "leverage-confirmation",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 400,
+          "right": 1040,
+          "width": 640
+        }
+      ],
+      "renderedTextSha256": "ff79af11e21b9595d9b601a2b361fb617797e40fb75a27d788ab0cc26103aeb5",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-evidence-marked.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "evidence-marked",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 170,
+          "right": 1270,
+          "width": 1100
+        }
+      ],
+      "renderedTextSha256": "55a5d7ea8ee1b20977f24c66e7d0314d5ba88f9e1b91ac70824e8fef58f48f26",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-evidence-original.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "evidence-original",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 170,
+          "right": 1270,
+          "width": 1100
+        }
+      ],
+      "renderedTextSha256": "41892675a6a4a4daf94eaf3cc07a0e7f57bda4f8f99390043249710204ac88bb",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-evidence-markup.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "evidence-markup",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 170,
+          "right": 1270,
+          "width": 1100
+        }
+      ],
+      "renderedTextSha256": "860a292d4b90aa3fed2d2d29c0dcaf37e3c7471442c3293f8fb34c0350b35408",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-execution.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "execution",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "70433863396555be4902b9144fb029b176d6f08c283a64de50279638ee5ef750",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-keyboard-tooltip.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "keyboard-tooltip",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "tooltip",
+          "left": 1012,
+          "right": 1102.484375,
+          "width": 90.484375
+        }
+      ],
+      "renderedTextSha256": "3309ffc18d04c515acce3dca7ad6fee06d5324986b750853eb37cf8d135fc05a",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    }
+  ],
+  "geometry": {
+    "graphite/desktop": {
+      "capital-context": {
+        "x": 274,
+        "y": 365,
+        "width": 1128,
+        "height": 61
+      },
+      "workspace": {
+        "x": 272,
+        "y": 498,
+        "width": 1132,
+        "height": 940
+      },
+      "chart-panel": {
+        "x": 272,
+        "y": 498,
+        "width": 808,
+        "height": 603
+      },
+      "journal-panel": {
+        "x": 272,
+        "y": 1118,
+        "width": 808,
+        "height": 320
+      },
+      "position-panel": {
+        "x": 1097,
+        "y": 498,
+        "width": 307,
+        "height": 940
+      },
+      "summary-panel": {
+        "x": 272,
+        "y": 1458,
+        "width": 1132,
+        "height": 360
+      }
+    }
+  },
+  "errors": [
+    "graphite/desktop: request failed /api/plays: net::ERR_ABORTED",
+    "Browser/network/render errors before capture\n+ actual - expected\n\n+ [\n+   'graphite/desktop: request failed /api/plays: net::ERR_ABORTED'\n+ ]\n- []\n"
+  ],
+  "blocked": [],
+  "intercepted": {
+    "candles": 1,
+    "market-context": 1,
+    "instruments": 1,
+    "check": 1
+  },
+  "status": "failed",
+  "matrix": {
+    "expected": [
+      "graphite-desktop-account-detail.png",
+      "graphite-desktop-accounts.png",
+      "graphite-desktop-activity.png",
+      "graphite-desktop-chart-expanded.png",
+      "graphite-desktop-entry-expanded.png",
+      "graphite-desktop-evidence-marked.png",
+      "graphite-desktop-evidence-markup.png",
+      "graphite-desktop-evidence-original.png",
+      "graphite-desktop-execution.png",
+      "graphite-desktop-keyboard-tooltip.png",
+      "graphite-desktop-level-popover.png",
+      "graphite-desktop-leverage-confirmation.png",
+      "graphite-desktop-overview.png",
+      "graphite-desktop-plays-editor.png",
+      "graphite-desktop-plays-list.png",
+      "graphite-desktop-plays-manual.png",
+      "graphite-desktop-portfolios.png",
+      "graphite-desktop-review.png",
+      "graphite-desktop-settings.png",
+      "graphite-mobile-account-detail.png",
+      "graphite-mobile-accounts.png",
+      "graphite-mobile-activity.png",
+      "graphite-mobile-chart-expanded.png",
+      "graphite-mobile-entry-expanded.png",
+      "graphite-mobile-evidence-marked.png",
+      "graphite-mobile-evidence-markup.png",
+      "graphite-mobile-evidence-original.png",
+      "graphite-mobile-execution.png",
+      "graphite-mobile-keyboard-tooltip.png",
+      "graphite-mobile-level-popover.png",
+      "graphite-mobile-leverage-confirmation.png",
+      "graphite-mobile-overview.png",
+      "graphite-mobile-plays-editor.png",
+      "graphite-mobile-plays-list.png",
+      "graphite-mobile-plays-manual.png",
+      "graphite-mobile-portfolios.png",
+      "graphite-mobile-review.png",
+      "graphite-mobile-settings.png",
+      "paper-desktop-account-detail.png",
+      "paper-desktop-accounts.png",
+      "paper-desktop-activity.png",
+      "paper-desktop-chart-expanded.png",
+      "paper-desktop-entry-expanded.png",
+      "paper-desktop-evidence-marked.png",
+      "paper-desktop-evidence-markup.png",
+      "paper-desktop-evidence-original.png",
+      "paper-desktop-execution.png",
+      "paper-desktop-keyboard-tooltip.png",
+      "paper-desktop-level-popover.png",
+      "paper-desktop-leverage-confirmation.png",
+      "paper-desktop-overview.png",
+      "paper-desktop-plays-editor.png",
+      "paper-desktop-plays-list.png",
+      "paper-desktop-plays-manual.png",
+      "paper-desktop-portfolios.png",
+      "paper-desktop-review.png",
+      "paper-desktop-settings.png",
+      "paper-mobile-account-detail.png",
+      "paper-mobile-accounts.png",
+      "paper-mobile-activity.png",
+      "paper-mobile-chart-expanded.png",
+      "paper-mobile-entry-expanded.png",
+      "paper-mobile-evidence-marked.png",
+      "paper-mobile-evidence-markup.png",
+      "paper-mobile-evidence-original.png",
+      "paper-mobile-execution.png",
+      "paper-mobile-keyboard-tooltip.png",
+      "paper-mobile-level-popover.png",
+      "paper-mobile-leverage-confirmation.png",
+      "paper-mobile-overview.png",
+      "paper-mobile-plays-editor.png",
+      "paper-mobile-plays-list.png",
+      "paper-mobile-plays-manual.png",
+      "paper-mobile-portfolios.png",
+      "paper-mobile-review.png",
+      "paper-mobile-settings.png"
+    ],
+    "initialPageShots": 40,
+    "targetedShots": 36
+  },
+  "provenance": {
+    "sourceCommit": "a29ad36edc70c4f62ec4621f8536e0cda92b0b18",
+    "sourceClaim": "Caller-specified build commit; served asset hashes recorded, not an independent build attestation",
+    "toolingCommit": "581c08387b1a0df1415a7a88334204df81de43bc",
+    "toolingDirty": false,
+    "captureScriptSha256": "f9e054c5c6503a7156b84ae17130163bd0dddc36f91eba2076ecf7ffc556025a",
+    "fixtureSha256": "b6e3345bc36ef541c0cbdb32b0e95e9262bf24d6cf52f160b986fde167387053",
+    "browserVersion": "151.0.7922.137",
+    "executablePath": "/nix/store/ll2lvrd9795hpa0yr20p207h8vif1ax0-chromium-151.0.7922.137/bin/chromium",
+    "playwrightVersion": "1.63.0",
+    "locale": "en-US",
+    "timezoneId": "UTC",
+    "deviceScaleFactor": 1,
+    "reducedMotion": "reduce",
+    "screenshotAnimations": "disabled",
+    "screenshotCaret": "hide",
+    "platform": "linux",
+    "node": "v24.21.0",
+    "servedAssets": {
+      "/": "296ae5b8859b797e2d62ea7081324ab61e8a97709714b45b8ce1b14844c972a2",
+      "/assets/index-BsFXqnqF.css": "adaa0bec8dc771feb110895dc6f79978a8ebb386a2e13a6afe72b38f94c1ebfd",
+      "/assets/index-CLc-Ejz7.js": "33a1824df3b99d0dafb05e514586b4964666c6f284055277987ff4d1f4a01d60",
+      "/assets/inter-latin-wght-normal-Dx4kXJAl.woff2": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
+      "/assets/lightweight-C39cpy6H.js": "44802b71034b0aac217b0d969dc82aac74c977f560dc155c327ef812255cfd0b"
+    },
+    "isolation": {
+      "databaseContainer": "vessel-fe-review-20261014",
+      "databaseName": "vesselfe",
+      "apiBind": "127.0.0.1:47305",
+      "processes": [
+        {
+          "pid": 2048997,
+          "proxyEnvironment": {
+            "HTTP_PROXY": "http://127.0.0.1:9",
+            "HTTPS_PROXY": "http://127.0.0.1:9",
+            "ALL_PROXY": "http://127.0.0.1:9",
+            "NO_PROXY": "127.0.0.1,localhost"
+          }
+        },
+        {
+          "pid": 2049110,
+          "proxyEnvironment": {
+            "HTTP_PROXY": "http://127.0.0.1:9",
+            "HTTPS_PROXY": "http://127.0.0.1:9",
+            "ALL_PROXY": "http://127.0.0.1:9",
+            "NO_PROXY": "127.0.0.1,localhost"
+          }
+        }
+      ],
+      "guard": "HTTP(S) requests use unreachable loopback proxy; browser separately rejects external origins and intercepts venue-touching routes. This is not a network namespace firewall."
+    },
+    "browserEnvironment": {
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+      "locale": "en-US",
+      "timezone": "UTC"
+    }
+  },
+  "clock": {
+    "browserDateOnly": "2026-10-14T16:30:00.000Z",
+    "timersFrozen": false,
+    "serverClockFrozen": false,
+    "evidenceCreatedAtServerUtc": "2026-10-14T17:07:37.919091+00:00",
+    "exceptions": [
+      "Review asOfUtc and request-window dates use live server time.",
+      "Evidence creation time uses server time persisted by the synthetic supplement."
+    ],
+    "masking": "None. Server timestamps and all render/text differences stay visible and must be investigated.",
+    "reviewResponses": []
+  },
+  "levelInteractions": {
+    "graphite/desktop": {
+      "tagPoint": {
+        "x": 14,
+        "y": 154.5
+      },
+      "chartBox": {
+        "x": 85.8046875,
+        "y": 152.75,
+        "width": 1308.390625,
+        "height": 665.25
+      },
+      "editor": "Edit Entry 1"
+    }
+  },
+  "failureDiagnostic": {
+    "dialogs": [],
+    "forms": []
+  }
+}

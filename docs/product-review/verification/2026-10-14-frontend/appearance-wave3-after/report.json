@@ -1,0 +1,2192 @@
+{
+  "label": "appearance-wave3-after-retry",
+  "base": "http://127.0.0.1:48651",
+  "frozen": "2026-10-14T16:30:00.000Z",
+  "shots": [
+    {
+      "file": "graphite-desktop-overview.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "overview",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "24a8b402bf4c80b3b9b8cf4022b1a42c70b59b1fa7755850070d304642ebe313",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-plays-list.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "plays-list",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "5636f12405f5002cce410e73539e87181ee836cc62176e982476cf00409a3491",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-plays-editor.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "plays-editor",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "d272725be0b09497bdda8be5433b9e751e650e69a0987fb0389e0b37d804ad93",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-entry-expanded.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "entry-expanded",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 295,
+          "right": 1145,
+          "width": 850
+        }
+      ],
+      "renderedTextSha256": "19c14cac94f376b10f756fe81095827e05df77ee4edf2aa0e6ee8536c8789937",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-chart-expanded.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "chart-expanded",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 28.8046875,
+          "right": 1411.1953125,
+          "width": 1382.390625
+        }
+      ],
+      "renderedTextSha256": "34f7dd51d587c4dc350a77d6ad0afa0911c8372f8405a4a2902e2ccd5bf73711",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-level-popover.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "level-popover",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 28.8046875,
+          "right": 1411.1953125,
+          "width": 1382.390625
+        },
+        {
+          "name": "Edit Entry 1",
+          "left": 124.8046875,
+          "right": 360.8046875,
+          "width": 236
+        }
+      ],
+      "renderedTextSha256": "0b386cb0eefdec59125d2fb1305cd4dc84c24479fcc99a68873a3b2c9f342674",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-leverage-confirmation.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "leverage-confirmation",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 400,
+          "right": 1040,
+          "width": 640
+        }
+      ],
+      "renderedTextSha256": "ff79af11e21b9595d9b601a2b361fb617797e40fb75a27d788ab0cc26103aeb5",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-evidence-marked.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "evidence-marked",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 170,
+          "right": 1270,
+          "width": 1100
+        }
+      ],
+      "renderedTextSha256": "55a5d7ea8ee1b20977f24c66e7d0314d5ba88f9e1b91ac70824e8fef58f48f26",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-evidence-original.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "evidence-original",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 170,
+          "right": 1270,
+          "width": 1100
+        }
+      ],
+      "renderedTextSha256": "41892675a6a4a4daf94eaf3cc07a0e7f57bda4f8f99390043249710204ac88bb",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-evidence-markup.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "evidence-markup",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 170,
+          "right": 1270,
+          "width": 1100
+        }
+      ],
+      "renderedTextSha256": "860a292d4b90aa3fed2d2d29c0dcaf37e3c7471442c3293f8fb34c0350b35408",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-execution.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "execution",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "70433863396555be4902b9144fb029b176d6f08c283a64de50279638ee5ef750",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-keyboard-tooltip.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "keyboard-tooltip",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "tooltip",
+          "left": 1012,
+          "right": 1102.484375,
+          "width": 90.484375
+        }
+      ],
+      "renderedTextSha256": "3309ffc18d04c515acce3dca7ad6fee06d5324986b750853eb37cf8d135fc05a",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-plays-manual.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "plays-manual",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "aa32bd56e611a5a5eacea55229cadbc7de5ed1ea83166cedc8969e6a18e3808a",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-review.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "review",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "137af1593d97ef27d8b2df5a6672fe93f2da13cdab782910e27f0e3c3e6c0175",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      },
+      "reviewServerTime": {
+        "tag": "graphite/desktop",
+        "asOfUtc": "2026-10-14T21:32:56.9586066+00:00",
+        "fromUtc": "2026-09-14T21:32:56.9586066+00:00",
+        "observedAtRealUtc": "2026-10-14T21:32:57.007Z"
+      }
+    },
+    {
+      "file": "graphite-desktop-portfolios.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "portfolios",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "54d87594fdc7ee6d279e438d0f6e8bac505ab6ee93429d743506db4054e477c9",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-accounts.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "accounts",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "68610e2c6615ff802122697205c239045c24f23cd6d580c840f06ca105c6f8aa",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-account-detail.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "account-detail",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "e14af6177370fe8ef294c123b34b3264fe49609d9b9fcc6977b65d82a030860a",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-activity.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "activity",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "a45cdf770acc5e7f1228e3d5546c6531911adbe2d563669b13024ea23da07d69",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-desktop-settings.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "settings",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "55bd20cbe1e5e5784cafa92a72c768c59158b2895a6d345ac1545380e8adbe30",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-overview.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "overview",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "9bceb538f229105781201581da0d464fc16fe10949d7453f4aa4c1624de5f0f2",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-plays-list.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "plays-list",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "dc5028bc4a65edfbb683a3002a574bc3b90a409d0108e26e324e2b016f9f0545",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-plays-editor.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "plays-editor",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "8ed7afc1bdd3bc33f15096698031a36636a851f36a7736010858885ea465f1ab",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-entry-expanded.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "entry-expanded",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 6,
+          "right": 384,
+          "width": 378
+        }
+      ],
+      "renderedTextSha256": "a935ef1a2c5ab42c7bdf79b458b36860df56d970d57a6396e1cb355f0962bb42",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-chart-expanded.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "chart-expanded",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 7.8046875,
+          "right": 382.1953125,
+          "width": 374.390625
+        }
+      ],
+      "renderedTextSha256": "dda44085ccb46e2b4e226233d8bfd1b7ecbcbeb5bf72495ba11359940e0cb14b",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-level-popover.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "level-popover",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 7.8046875,
+          "right": 382.1953125,
+          "width": 374.390625
+        },
+        {
+          "name": "Edit Entry 1",
+          "left": 97.8046875,
+          "right": 333.8046875,
+          "width": 236
+        }
+      ],
+      "renderedTextSha256": "13fe6b2ca53813e294f39ec6771ad244c94556fc7d9f9c85a3744d8f9ad59905",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-leverage-confirmation.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "leverage-confirmation",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 16,
+          "right": 374,
+          "width": 358
+        }
+      ],
+      "renderedTextSha256": "3b1f73e0759fa392e1374654bd5a557e83edf8e0282622e65f5aac506c539957",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-evidence-marked.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "evidence-marked",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 11.703125,
+          "right": 378.296875,
+          "width": 366.59375
+        }
+      ],
+      "renderedTextSha256": "77fdb4c9c4bc84203727e07cbb1b5f398a61c7dcc270af03746af6c63860ec83",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-evidence-original.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "evidence-original",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 11.703125,
+          "right": 378.296875,
+          "width": 366.59375
+        }
+      ],
+      "renderedTextSha256": "5eac2c773fbbb293c014b11aa9013d3a4f3f25125583f101d5f8c1f24f6ed403",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-evidence-markup.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "evidence-markup",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 11.703125,
+          "right": 378.296875,
+          "width": 366.59375
+        }
+      ],
+      "renderedTextSha256": "4617ef42e9ce2429a92f1b4154c469e8b25a781fe9c5464a6be1f46be2c9efd3",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-execution.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "execution",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "dd3524a82fca9dd8f41d22df6882245858f7ababad68b4134057e0fad882a2b5",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-keyboard-tooltip.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "keyboard-tooltip",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "tooltip",
+          "left": 292,
+          "right": 382.484375,
+          "width": 90.484375
+        }
+      ],
+      "renderedTextSha256": "8736fbbcc252b45eba69f7e315d1d00ddb58ac825bde8f85c86975d389fe4f06",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-plays-manual.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "plays-manual",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "8634b4cae372c07320c18bf9e54ba70b6b0c660c77d839c7e8337e91b4caab3f",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-review.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "review",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "94a8f0bc5219555e02758c21a0da8f9527de1c5894572185ad0306d143022d58",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      },
+      "reviewServerTime": {
+        "tag": "graphite/mobile",
+        "asOfUtc": "2026-10-14T21:33:09.5442007+00:00",
+        "fromUtc": "2026-09-14T21:33:09.5442007+00:00",
+        "observedAtRealUtc": "2026-10-14T21:33:09.592Z"
+      }
+    },
+    {
+      "file": "graphite-mobile-portfolios.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "portfolios",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "91696a34bd3239cb1dd234665dd29e96a2be3dc27965ffda05add740ccd85d51",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-accounts.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "accounts",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "fd5e2d971d4682a6d718d9fab61d3070d0282dad7d47efda44a69dad34a6a897",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-account-detail.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "account-detail",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "8108c7463f159a7b12256a295cb26993e04d3fb8560a5c31dd82828b6c8628da",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-activity.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "activity",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "34ec65b092ab48bf08cb627b086c94ffdd86b44b47e07f3738aada2efbfab043",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "graphite-mobile-settings.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "settings",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "e913fbdc2a3be0088f63ddcdfb8a5e7f99583130f551ff9c5536ecd63eec701a",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-overview.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "overview",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "24a8b402bf4c80b3b9b8cf4022b1a42c70b59b1fa7755850070d304642ebe313",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-plays-list.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "plays-list",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "5636f12405f5002cce410e73539e87181ee836cc62176e982476cf00409a3491",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-plays-editor.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "plays-editor",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "d272725be0b09497bdda8be5433b9e751e650e69a0987fb0389e0b37d804ad93",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-entry-expanded.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "entry-expanded",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 295,
+          "right": 1145,
+          "width": 850
+        }
+      ],
+      "renderedTextSha256": "19c14cac94f376b10f756fe81095827e05df77ee4edf2aa0e6ee8536c8789937",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-chart-expanded.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "chart-expanded",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 28.8046875,
+          "right": 1411.1953125,
+          "width": 1382.390625
+        }
+      ],
+      "renderedTextSha256": "34f7dd51d587c4dc350a77d6ad0afa0911c8372f8405a4a2902e2ccd5bf73711",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-level-popover.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "level-popover",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 28.8046875,
+          "right": 1411.1953125,
+          "width": 1382.390625
+        },
+        {
+          "name": "Edit Entry 1",
+          "left": 124.8046875,
+          "right": 360.8046875,
+          "width": 236
+        }
+      ],
+      "renderedTextSha256": "0b386cb0eefdec59125d2fb1305cd4dc84c24479fcc99a68873a3b2c9f342674",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-leverage-confirmation.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "leverage-confirmation",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 400,
+          "right": 1040,
+          "width": 640
+        }
+      ],
+      "renderedTextSha256": "ff79af11e21b9595d9b601a2b361fb617797e40fb75a27d788ab0cc26103aeb5",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-evidence-marked.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "evidence-marked",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 170,
+          "right": 1270,
+          "width": 1100
+        }
+      ],
+      "renderedTextSha256": "55a5d7ea8ee1b20977f24c66e7d0314d5ba88f9e1b91ac70824e8fef58f48f26",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-evidence-original.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "evidence-original",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 170,
+          "right": 1270,
+          "width": 1100
+        }
+      ],
+      "renderedTextSha256": "41892675a6a4a4daf94eaf3cc07a0e7f57bda4f8f99390043249710204ac88bb",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-evidence-markup.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "evidence-markup",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 170,
+          "right": 1270,
+          "width": 1100
+        }
+      ],
+      "renderedTextSha256": "860a292d4b90aa3fed2d2d29c0dcaf37e3c7471442c3293f8fb34c0350b35408",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-execution.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "execution",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "70433863396555be4902b9144fb029b176d6f08c283a64de50279638ee5ef750",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-keyboard-tooltip.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "keyboard-tooltip",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "tooltip",
+          "left": 1012,
+          "right": 1102.484375,
+          "width": 90.484375
+        }
+      ],
+      "renderedTextSha256": "3309ffc18d04c515acce3dca7ad6fee06d5324986b750853eb37cf8d135fc05a",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-plays-manual.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "plays-manual",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "aa32bd56e611a5a5eacea55229cadbc7de5ed1ea83166cedc8969e6a18e3808a",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-review.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "review",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "e02d46a149c2bc9ba5d98d19e02f0a9db19e810628afa888c77cb4cf273ee5ea",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      },
+      "reviewServerTime": {
+        "tag": "paper/desktop",
+        "asOfUtc": "2026-10-14T21:33:22.6284116+00:00",
+        "fromUtc": "2026-09-14T21:33:22.6284116+00:00",
+        "observedAtRealUtc": "2026-10-14T21:33:22.640Z"
+      }
+    },
+    {
+      "file": "paper-desktop-portfolios.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "portfolios",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "54d87594fdc7ee6d279e438d0f6e8bac505ab6ee93429d743506db4054e477c9",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-accounts.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "accounts",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "68610e2c6615ff802122697205c239045c24f23cd6d580c840f06ca105c6f8aa",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-account-detail.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "account-detail",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "e14af6177370fe8ef294c123b34b3264fe49609d9b9fcc6977b65d82a030860a",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-activity.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "activity",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "a45cdf770acc5e7f1228e3d5546c6531911adbe2d563669b13024ea23da07d69",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-desktop-settings.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "settings",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "27268500c8bbc53447106f2055537609077858a467fdfe6b05468fa9918ea6b1",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-overview.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "overview",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "9bceb538f229105781201581da0d464fc16fe10949d7453f4aa4c1624de5f0f2",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-plays-list.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "plays-list",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "dc5028bc4a65edfbb683a3002a574bc3b90a409d0108e26e324e2b016f9f0545",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-plays-editor.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "plays-editor",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "8ed7afc1bdd3bc33f15096698031a36636a851f36a7736010858885ea465f1ab",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-entry-expanded.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "entry-expanded",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 6,
+          "right": 384,
+          "width": 378
+        }
+      ],
+      "renderedTextSha256": "a935ef1a2c5ab42c7bdf79b458b36860df56d970d57a6396e1cb355f0962bb42",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-chart-expanded.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "chart-expanded",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 7.8046875,
+          "right": 382.1953125,
+          "width": 374.390625
+        }
+      ],
+      "renderedTextSha256": "dda44085ccb46e2b4e226233d8bfd1b7ecbcbeb5bf72495ba11359940e0cb14b",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-level-popover.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "level-popover",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 7.8046875,
+          "right": 382.1953125,
+          "width": 374.390625
+        },
+        {
+          "name": "Edit Entry 1",
+          "left": 97.8046875,
+          "right": 333.8046875,
+          "width": 236
+        }
+      ],
+      "renderedTextSha256": "13fe6b2ca53813e294f39ec6771ad244c94556fc7d9f9c85a3744d8f9ad59905",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-leverage-confirmation.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "leverage-confirmation",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 16,
+          "right": 374,
+          "width": 358
+        }
+      ],
+      "renderedTextSha256": "3b1f73e0759fa392e1374654bd5a557e83edf8e0282622e65f5aac506c539957",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-evidence-marked.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "evidence-marked",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 11.703125,
+          "right": 378.296875,
+          "width": 366.59375
+        }
+      ],
+      "renderedTextSha256": "77fdb4c9c4bc84203727e07cbb1b5f398a61c7dcc270af03746af6c63860ec83",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-evidence-original.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "evidence-original",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 11.703125,
+          "right": 378.296875,
+          "width": 366.59375
+        }
+      ],
+      "renderedTextSha256": "5eac2c773fbbb293c014b11aa9013d3a4f3f25125583f101d5f8c1f24f6ed403",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-evidence-markup.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "evidence-markup",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "dialog",
+          "left": 11.703125,
+          "right": 378.296875,
+          "width": 366.59375
+        }
+      ],
+      "renderedTextSha256": "4617ef42e9ce2429a92f1b4154c469e8b25a781fe9c5464a6be1f46be2c9efd3",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-execution.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "execution",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "dd3524a82fca9dd8f41d22df6882245858f7ababad68b4134057e0fad882a2b5",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-keyboard-tooltip.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "keyboard-tooltip",
+      "fullPage": false,
+      "overflow": 0,
+      "controls": [
+        {
+          "name": "tooltip",
+          "left": 292,
+          "right": 382.484375,
+          "width": 90.484375
+        }
+      ],
+      "renderedTextSha256": "8736fbbcc252b45eba69f7e315d1d00ddb58ac825bde8f85c86975d389fe4f06",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-plays-manual.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "plays-manual",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "8634b4cae372c07320c18bf9e54ba70b6b0c660c77d839c7e8337e91b4caab3f",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-review.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "review",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "94a8f0bc5219555e02758c21a0da8f9527de1c5894572185ad0306d143022d58",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      },
+      "reviewServerTime": {
+        "tag": "paper/mobile",
+        "asOfUtc": "2026-10-14T21:33:35.5465681+00:00",
+        "fromUtc": "2026-09-14T21:33:35.5465681+00:00",
+        "observedAtRealUtc": "2026-10-14T21:33:35.589Z"
+      }
+    },
+    {
+      "file": "paper-mobile-portfolios.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "portfolios",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "91696a34bd3239cb1dd234665dd29e96a2be3dc27965ffda05add740ccd85d51",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-accounts.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "accounts",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "fd5e2d971d4682a6d718d9fab61d3070d0282dad7d47efda44a69dad34a6a897",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-account-detail.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "account-detail",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "8108c7463f159a7b12256a295cb26993e04d3fb8560a5c31dd82828b6c8628da",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-activity.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "activity",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "34ec65b092ab48bf08cb627b086c94ffdd86b44b47e07f3738aada2efbfab043",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    },
+    {
+      "file": "paper-mobile-settings.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "settings",
+      "fullPage": true,
+      "overflow": 0,
+      "controls": [],
+      "renderedTextSha256": "c1428bc039462f7f30a5e8ad83596e0304aa861fdfa2080436cb305020e75635",
+      "fontState": {
+        "status": "loaded",
+        "loaded": [
+          {
+            "family": "Inter Variable",
+            "weight": "100 900",
+            "style": "normal"
+          }
+        ]
+      }
+    }
+  ],
+  "geometry": {
+    "graphite/desktop": {
+      "capital-context": {
+        "x": 274,
+        "y": 365,
+        "width": 1128,
+        "height": 61
+      },
+      "workspace": {
+        "x": 272,
+        "y": 498,
+        "width": 1132,
+        "height": 940
+      },
+      "chart-panel": {
+        "x": 272,
+        "y": 498,
+        "width": 808,
+        "height": 603
+      },
+      "journal-panel": {
+        "x": 272,
+        "y": 1118,
+        "width": 808,
+        "height": 320
+      },
+      "position-panel": {
+        "x": 1097,
+        "y": 498,
+        "width": 307,
+        "height": 940
+      },
+      "summary-panel": {
+        "x": 272,
+        "y": 1458,
+        "width": 1132,
+        "height": 360
+      }
+    },
+    "graphite/mobile": {
+      "capital-context": {
+        "x": 18,
+        "y": 686,
+        "width": 354,
+        "height": 216
+      },
+      "workspace": {
+        "x": 16,
+        "y": 990,
+        "width": 358,
+        "height": 2316
+      },
+      "chart-panel": {
+        "x": 16,
+        "y": 990,
+        "width": 358,
+        "height": 964
+      },
+      "journal-panel": {
+        "x": 16,
+        "y": 1968,
+        "width": 358,
+        "height": 440
+      },
+      "position-panel": {
+        "x": 16,
+        "y": 2422,
+        "width": 358,
+        "height": 885
+      },
+      "summary-panel": {
+        "x": 16,
+        "y": 3327,
+        "width": 358,
+        "height": 631
+      }
+    },
+    "paper/desktop": {
+      "capital-context": {
+        "x": 274,
+        "y": 365,
+        "width": 1128,
+        "height": 61
+      },
+      "workspace": {
+        "x": 272,
+        "y": 498,
+        "width": 1132,
+        "height": 940
+      },
+      "chart-panel": {
+        "x": 272,
+        "y": 498,
+        "width": 808,
+        "height": 603
+      },
+      "journal-panel": {
+        "x": 272,
+        "y": 1118,
+        "width": 808,
+        "height": 320
+      },
+      "position-panel": {
+        "x": 1097,
+        "y": 498,
+        "width": 307,
+        "height": 940
+      },
+      "summary-panel": {
+        "x": 272,
+        "y": 1458,
+        "width": 1132,
+        "height": 360
+      }
+    },
+    "paper/mobile": {
+      "capital-context": {
+        "x": 18,
+        "y": 686,
+        "width": 354,
+        "height": 216
+      },
+      "workspace": {
+        "x": 16,
+        "y": 990,
+        "width": 358,
+        "height": 2316
+      },
+      "chart-panel": {
+        "x": 16,
+        "y": 990,
+        "width": 358,
+        "height": 964
+      },
+      "journal-panel": {
+        "x": 16,
+        "y": 1968,
+        "width": 358,
+        "height": 440
+      },
+      "position-panel": {
+        "x": 16,
+        "y": 2422,
+        "width": 358,
+        "height": 885
+      },
+      "summary-panel": {
+        "x": 16,
+        "y": 3327,
+        "width": 358,
+        "height": 631
+      }
+    }
+  },
+  "errors": [],
+  "blocked": [],
+  "intercepted": {
+    "candles": 4,
+    "market-context": 4,
+    "instruments": 4,
+    "check": 4
+  },
+  "status": "passed",
+  "matrix": {
+    "expected": [
+      "graphite-desktop-account-detail.png",
+      "graphite-desktop-accounts.png",
+      "graphite-desktop-activity.png",
+      "graphite-desktop-chart-expanded.png",
+      "graphite-desktop-entry-expanded.png",
+      "graphite-desktop-evidence-marked.png",
+      "graphite-desktop-evidence-markup.png",
+      "graphite-desktop-evidence-original.png",
+      "graphite-desktop-execution.png",
+      "graphite-desktop-keyboard-tooltip.png",
+      "graphite-desktop-level-popover.png",
+      "graphite-desktop-leverage-confirmation.png",
+      "graphite-desktop-overview.png",
+      "graphite-desktop-plays-editor.png",
+      "graphite-desktop-plays-list.png",
+      "graphite-desktop-plays-manual.png",
+      "graphite-desktop-portfolios.png",
+      "graphite-desktop-review.png",
+      "graphite-desktop-settings.png",
+      "graphite-mobile-account-detail.png",
+      "graphite-mobile-accounts.png",
+      "graphite-mobile-activity.png",
+      "graphite-mobile-chart-expanded.png",
+      "graphite-mobile-entry-expanded.png",
+      "graphite-mobile-evidence-marked.png",
+      "graphite-mobile-evidence-markup.png",
+      "graphite-mobile-evidence-original.png",
+      "graphite-mobile-execution.png",
+      "graphite-mobile-keyboard-tooltip.png",
+      "graphite-mobile-level-popover.png",
+      "graphite-mobile-leverage-confirmation.png",
+      "graphite-mobile-overview.png",
+      "graphite-mobile-plays-editor.png",
+      "graphite-mobile-plays-list.png",
+      "graphite-mobile-plays-manual.png",
+      "graphite-mobile-portfolios.png",
+      "graphite-mobile-review.png",
+      "graphite-mobile-settings.png",
+      "paper-desktop-account-detail.png",
+      "paper-desktop-accounts.png",
+      "paper-desktop-activity.png",
+      "paper-desktop-chart-expanded.png",
+      "paper-desktop-entry-expanded.png",
+      "paper-desktop-evidence-marked.png",
+      "paper-desktop-evidence-markup.png",
+      "paper-desktop-evidence-original.png",
+      "paper-desktop-execution.png",
+      "paper-desktop-keyboard-tooltip.png",
+      "paper-desktop-level-popover.png",
+      "paper-desktop-leverage-confirmation.png",
+      "paper-desktop-overview.png",
+      "paper-desktop-plays-editor.png",
+      "paper-desktop-plays-list.png",
+      "paper-desktop-plays-manual.png",
+      "paper-desktop-portfolios.png",
+      "paper-desktop-review.png",
+      "paper-desktop-settings.png",
+      "paper-mobile-account-detail.png",
+      "paper-mobile-accounts.png",
+      "paper-mobile-activity.png",
+      "paper-mobile-chart-expanded.png",
+      "paper-mobile-entry-expanded.png",
+      "paper-mobile-evidence-marked.png",
+      "paper-mobile-evidence-markup.png",
+      "paper-mobile-evidence-original.png",
+      "paper-mobile-execution.png",
+      "paper-mobile-keyboard-tooltip.png",
+      "paper-mobile-level-popover.png",
+      "paper-mobile-leverage-confirmation.png",
+      "paper-mobile-overview.png",
+      "paper-mobile-plays-editor.png",
+      "paper-mobile-plays-list.png",
+      "paper-mobile-plays-manual.png",
+      "paper-mobile-portfolios.png",
+      "paper-mobile-review.png",
+      "paper-mobile-settings.png"
+    ],
+    "initialPageShots": 40,
+    "targetedShots": 36
+  },
+  "provenance": {
+    "sourceCommit": "a29ad36edc70c4f62ec4621f8536e0cda92b0b18",
+    "sourceClaim": "Caller-specified build commit; served asset hashes recorded, not an independent build attestation",
+    "toolingCommit": "581c08387b1a0df1415a7a88334204df81de43bc",
+    "toolingDirty": false,
+    "captureScriptSha256": "f9e054c5c6503a7156b84ae17130163bd0dddc36f91eba2076ecf7ffc556025a",
+    "fixtureSha256": "b6e3345bc36ef541c0cbdb32b0e95e9262bf24d6cf52f160b986fde167387053",
+    "browserVersion": "151.0.7922.137",
+    "executablePath": "/nix/store/ll2lvrd9795hpa0yr20p207h8vif1ax0-chromium-151.0.7922.137/bin/chromium",
+    "playwrightVersion": "1.63.0",
+    "locale": "en-US",
+    "timezoneId": "UTC",
+    "deviceScaleFactor": 1,
+    "reducedMotion": "reduce",
+    "screenshotAnimations": "disabled",
+    "screenshotCaret": "hide",
+    "platform": "linux",
+    "node": "v24.21.0",
+    "servedAssets": {
+      "/": "296ae5b8859b797e2d62ea7081324ab61e8a97709714b45b8ce1b14844c972a2",
+      "/assets/index-BsFXqnqF.css": "adaa0bec8dc771feb110895dc6f79978a8ebb386a2e13a6afe72b38f94c1ebfd",
+      "/assets/index-CLc-Ejz7.js": "33a1824df3b99d0dafb05e514586b4964666c6f284055277987ff4d1f4a01d60",
+      "/assets/inter-latin-wght-normal-Dx4kXJAl.woff2": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
+      "/assets/lightweight-C39cpy6H.js": "44802b71034b0aac217b0d969dc82aac74c977f560dc155c327ef812255cfd0b"
+    },
+    "isolation": {
+      "databaseContainer": "vessel-fe-review-20261014",
+      "databaseName": "vesselfe",
+      "apiBind": "127.0.0.1:47305",
+      "processes": [
+        {
+          "pid": 2048997,
+          "proxyEnvironment": {
+            "HTTP_PROXY": "http://127.0.0.1:9",
+            "HTTPS_PROXY": "http://127.0.0.1:9",
+            "ALL_PROXY": "http://127.0.0.1:9",
+            "NO_PROXY": "127.0.0.1,localhost"
+          }
+        },
+        {
+          "pid": 2049110,
+          "proxyEnvironment": {
+            "HTTP_PROXY": "http://127.0.0.1:9",
+            "HTTPS_PROXY": "http://127.0.0.1:9",
+            "ALL_PROXY": "http://127.0.0.1:9",
+            "NO_PROXY": "127.0.0.1,localhost"
+          }
+        }
+      ],
+      "guard": "HTTP(S) requests use unreachable loopback proxy; browser separately rejects external origins and intercepts venue-touching routes. This is not a network namespace firewall."
+    },
+    "browserEnvironment": {
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36",
+      "locale": "en-US",
+      "timezone": "UTC"
+    }
+  },
+  "clock": {
+    "browserDateOnly": "2026-10-14T16:30:00.000Z",
+    "timersFrozen": false,
+    "serverClockFrozen": false,
+    "evidenceCreatedAtServerUtc": "2026-10-14T17:07:37.919091+00:00",
+    "exceptions": [
+      "Review asOfUtc and request-window dates use live server time.",
+      "Evidence creation time uses server time persisted by the synthetic supplement."
+    ],
+    "masking": "None. Server timestamps and all render/text differences stay visible and must be investigated.",
+    "reviewResponses": [
+      {
+        "tag": "graphite/desktop",
+        "asOfUtc": "2026-10-14T21:32:56.9586066+00:00",
+        "fromUtc": "2026-09-14T21:32:56.9586066+00:00",
+        "observedAtRealUtc": "2026-10-14T21:32:57.007Z"
+      },
+      {
+        "tag": "graphite/mobile",
+        "asOfUtc": "2026-10-14T21:33:09.5442007+00:00",
+        "fromUtc": "2026-09-14T21:33:09.5442007+00:00",
+        "observedAtRealUtc": "2026-10-14T21:33:09.592Z"
+      },
+      {
+        "tag": "paper/desktop",
+        "asOfUtc": "2026-10-14T21:33:22.6284116+00:00",
+        "fromUtc": "2026-09-14T21:33:22.6284116+00:00",
+        "observedAtRealUtc": "2026-10-14T21:33:22.640Z"
+      },
+      {
+        "tag": "paper/mobile",
+        "asOfUtc": "2026-10-14T21:33:35.5465681+00:00",
+        "fromUtc": "2026-09-14T21:33:35.5465681+00:00",
+        "observedAtRealUtc": "2026-10-14T21:33:35.589Z"
+      }
+    ]
+  },
+  "levelInteractions": {
+    "graphite/desktop": {
+      "tagPoint": {
+        "x": 14,
+        "y": 154.5
+      },
+      "chartBox": {
+        "x": 85.8046875,
+        "y": 152.75,
+        "width": 1308.390625,
+        "height": 665.25
+      },
+      "editor": "Edit Entry 1"
+    },
+    "graphite/mobile": {
+      "tagPoint": {
+        "x": 14,
+        "y": 120.5
+      },
+      "chartBox": {
+        "x": 58.8046875,
+        "y": 228.265625,
+        "width": 306.390625,
+        "height": 535.96875
+      },
+      "editor": "Edit Entry 1"
+    },
+    "paper/desktop": {
+      "tagPoint": {
+        "x": 14,
+        "y": 154.5
+      },
+      "chartBox": {
+        "x": 85.8046875,
+        "y": 152.75,
+        "width": 1308.390625,
+        "height": 665.25
+      },
+      "editor": "Edit Entry 1"
+    },
+    "paper/mobile": {
+      "tagPoint": {
+        "x": 14,
+        "y": 120.5
+      },
+      "chartBox": {
+        "x": 58.8046875,
+        "y": 228.265625,
+        "width": 306.390625,
+        "height": 535.96875
+      },
+      "editor": "Edit Entry 1"
+    }
+  }
+}

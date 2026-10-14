@@ -1,0 +1,13 @@
+$ vitest run -- src/features/settings/appearance.test.tsx src/features/market/chartPreferences.test.ts src/features/market/useMarketContext.test.tsx src/features/plays/markup.test.tsx
+
+ RUN  v5.0.3 /tmp/vessel-fe-review/wt/sol-wave3-appearance/frontend
+
+
+ Test Files  79 passed (79)
+      Tests  1607 passed (1607)
+   Start at  21:31:19
+   Duration  34.31s (tests 60%, environment 25%, import 6%, setup 5%, transform 3%)
+
+    Isolate  79 workers spawned · ~815ms startup each (spawn + environment, per file)
+             at least ~8.38s faster with isolate: false — reuses workers across files instead of one per file
+
