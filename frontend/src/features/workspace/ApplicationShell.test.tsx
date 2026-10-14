@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { systemFixture } from '@/test/system-fixture'
 import { reviewFixture } from '@/test/review-fixture'
 import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, playApiStubs, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'

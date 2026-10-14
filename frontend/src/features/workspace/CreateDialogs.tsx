@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { accountIndex } from '@/api/account-access'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,7 +11,7 @@ import { PortfolioAccounts } from './PortfolioAccounts'
 import { PortfolioDestination } from './PortfolioDestination'
 import { usePortfolioDestination } from './usePortfolioDestination'
 import { PortfolioIconPicker } from './PortfolioIcon'
-import { defaultPortfolioIcon, type PortfolioIconKey } from './portfolio-icons'
+import { defaultPortfolioIcon, type PortfolioIconKey } from '@/api/portfolio-icons'
 
 export function CreatePortfolioDialog({ open, onOpenChange, api, accounts = [], portfolios = [], onCreated }: {
   open: boolean; onOpenChange: (open: boolean) => void; api: WorkspaceApi; accounts?: BrokerAccount[]; portfolios?: Portfolio[]; onCreated: () => void

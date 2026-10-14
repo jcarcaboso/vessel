@@ -1,4 +1,5 @@
-import { candleIntervals, type CandleInterval } from './workspace'
+import { candleIntervals, type CandleInterval } from './candles'
+import { ApiError } from './errors'
 
 export interface VenueCapabilities {
   sync: boolean; instruments: boolean; orders: boolean; candles: boolean
@@ -32,15 +33,6 @@ export interface SystemInfo {
   marketScope: 'perpetuals'
   allowsConcurrentPlays: true
   venues: VenueInfo[]
-}
-
-export type ApiErrorKind = 'missing-token' | 'unauthorized' | 'unavailable' | 'invalid-response' | 'http'
-
-export class ApiError extends Error {
-  constructor(public readonly kind: ApiErrorKind, message: string, public readonly status?: number) {
-    super(message)
-    this.name = 'ApiError'
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,8 +1,9 @@
 import { overviewSummaryPath, isOverviewSummary, type OverviewQuery, type OverviewSummaryDocument } from './overview-summary'
 import { isActivityDocument, type ActivityDocument } from './activity'
 import { SseOverflowError, SseParser } from './sse'
-import { ApiError } from './system'
-import { clearCandleCache, evictAccountCandles } from '@/features/market/candleCache'
+import { candleIntervals, type CandleInterval } from './candles'
+import { ApiError } from './errors'
+import { emitApiEvent } from './events'
 import {
   accountIndex, credentialSaveMessage, credentialTransportAllowed, credentialTransportMessage,
   type AccountCredential, type AccountDiscovery,
@@ -21,7 +22,7 @@ import {
   isManualExecutions, isManualExecutionInput, isManualExecutionCorrection,
   type ManualExecutions, type ManualExecutionInput, type ManualExecutionCorrection,
 } from './diary'
-import type { ImageMarkup } from '@/features/plays/markup'
+import type { ImageMarkup } from './markup'
 
 export interface Portfolio {
   id: string
@@ -61,8 +62,6 @@ export interface InstrumentCatalog {
   instruments: VenueInstrument[]
   notice: string
 }
-export const candleIntervals = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '1d', '3d', '1w', '1M'] as const
-export type CandleInterval = typeof candleIntervals[number]
 /** Venue trade candle. OHLCV stay exact decimal strings; times are UTC Unix milliseconds. */
 export interface VenueCandle {
   openTime: number
@@ -469,7 +468,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     } finally {
       clearTimeout(timer)
     }
-    if (response.status === 401 || response.status === 403) clearCandleCache(api)
+    if (response.status === 401 || response.status === 403) emitApiEvent(api, { type: 'unauthorized' })
     if (!response.ok) {
       throw await httpError(response, 'Venue market data is unavailable. Try refreshing the chart.',
         'Too many live chart streams. Close another chart and try again.')
@@ -528,7 +527,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       throw new ApiError('unavailable', safeError ?? 'The request did not complete. Check the API and try again.')
     }
     // Credential failures must never echo provider or proxy response bodies.
-    if (response.status === 401 || response.status === 403) clearCandleCache(api)
+    if (response.status === 401 || response.status === 403) emitApiEvent(api, { type: 'unauthorized' })
     if (!response.ok) throw safeError ? new ApiError('http', safeError, response.status) : await httpError(response, badGateway)
     if (response.status === 204) {
       const noContent: unknown = undefined
@@ -553,7 +552,7 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     } catch {
       throw new ApiError('unavailable', 'The request did not complete. Check the API and try again.')
     }
-    if (response.status === 401 || response.status === 403) clearCandleCache(api)
+    if (response.status === 401 || response.status === 403) emitApiEvent(api, { type: 'unauthorized' })
     if (!response.ok) throw await httpError(response, undefined, undefined, 'This play or image is no longer available.')
     return response
   }
@@ -708,12 +707,12 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     deletePortfolio: id => request(`/api/portfolios/${resourceId(id)}`, (v): v is undefined => v === undefined, { method: 'DELETE' }),
     updateAccount: async (id, settings) => {
       const updated = await request(accountPath(id), account, { method: 'PUT', body: JSON.stringify(settings) })
-      if (updated.isEnabled === false) evictAccountCandles(api, id)
+      if (updated.isEnabled === false) emitApiEvent(api, { type: 'account-removed', accountId: id })
       return updated
     },
     deleteAccount: async id => {
       await request(accountPath(id), (v): v is undefined => v === undefined, { method: 'DELETE' })
-      evictAccountCandles(api, id)
+      emitApiEvent(api, { type: 'account-removed', accountId: id })
     },
     snapshot: (id, signal) => request(`${accountPath(id)}/snapshot`, snapshot, signal ? { signal } : {}),
     fills: (id, signal) => request(`${accountPath(id)}/fills`, (v): v is ImportedFill[] => Array.isArray(v) && v.every(fill), signal ? { signal } : {}),

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { accountIndex, credentialFailureMessage, credentialSaveMessage, credentialTransportAllowed, credentialTransportMessage } from './account-access'
-import { ApiError } from './system'
+import { ApiError } from './errors'
 import { createWorkspaceApi } from './workspace'
 import { credentialFixture, discoveryFixture, indexAccount } from '@/test/account-access-fixture'
 

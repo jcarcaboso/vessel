@@ -2,7 +2,7 @@ import { emptyFilters, filterOperations, type Filters } from './activity-filters
 import { useEffect, useRef, useState } from 'react'
 import type { ActivityDocument } from '@/api/activity'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { Button } from '@/components/ui/button'
 import { OperationsTable } from './OperationsTable'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'

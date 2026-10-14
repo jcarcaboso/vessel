@@ -1,5 +1,5 @@
 import type { WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { emptyStructuredReview, hasStructuredReview, type PlanEntry, type PlayFields, type PlayPlan, type PlaySummary, type SavedEvidence, type SavedPlay } from '@/api/plays'
 import { isChartDrawing, type ChartDrawing } from '@/components/chart/drawings'
 import { createDraft, createEvidenceId, type DraftEvidence, type PlayDraft } from './draft'

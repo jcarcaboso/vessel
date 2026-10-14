@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { candleIntervals, type CandleInterval } from '@/api/workspace'
+import { candleIntervals, type CandleInterval } from '@/api/candles'
 import { isDrawingKind } from '@/components/chart/drawingTools'
 import type { DrawingKind } from '@/components/chart/drawings'
 import { defaultIndicators, migrateLegacyIndicators, normalizeIndicators, type IndicatorSettings } from '@/components/chart/indicators'

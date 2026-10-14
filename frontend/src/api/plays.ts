@@ -1,4 +1,4 @@
-import type { ImageMarkup } from '@/features/plays/markup'
+import type { ImageMarkup } from './markup'
 
 export const playStatuses = ['draft', 'planned', 'paused', 'open', 'closed', 'cancelled'] as const
 export type PlayStatus = typeof playStatuses[number]

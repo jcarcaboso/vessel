@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import type { DraftEvidence } from './draft'
 import { createEvidence, evidenceAccept, evidenceLimits, evidenceProblem, formatBytes, imageUrl, releaseImageUrl } from './evidence'
-import { flattenMarkup, hasMarks, markedFileName, markupDataUrl, type ImageMarkup } from './markup'
+import type { ImageMarkup } from '@/api/markup'
+import { flattenMarkup, hasMarks, markedFileName, markupDataUrl } from './markup'
 import { MarkupEditor } from './MarkupEditor'
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC', hour12: false })

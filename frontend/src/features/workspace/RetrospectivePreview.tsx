@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CreateRetrospectivePlayRequest, RetrospectivePreview as Preview } from '@/api/retrospective'
 import type { WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { newDiaryRequestId } from '@/api/diary'
 import { Button } from '@/components/ui/button'
 import { money, time } from './format'

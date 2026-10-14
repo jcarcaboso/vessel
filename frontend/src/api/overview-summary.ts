@@ -1,5 +1,5 @@
-import { ApiError } from './system'
-import { portfolioIcons } from '@/features/workspace/portfolio-icons'
+import { ApiError } from './errors'
+import { isPortfolioIconKey } from './portfolio-icons'
 
 export type OverviewGroup = 'portfolio' | 'account'
 export type OverviewPeriod = '7' | '30' | '90' | 'all'
@@ -61,7 +61,7 @@ export function isOverviewSummary(v: unknown, query: OverviewQuery): v is Overvi
   return new Set(v.rows.map(r => object(r) ? r.id : null)).size === v.rows.length && v.rows.every(r => {
     if (!object(r) || !text(r.id, 48) || !text(r.name) || !totals(r.totals) || r.totals.accountCount < 1 || r.totals.accountCount > total.accountCount) return false
     if (query.groupBy === 'account' ? !r.id.startsWith('account:') || !guid(r.id.slice(8)) || r.icon !== null || !text(r.venueId, 64) || r.totals.accountCount !== 1 :
-      !(r.id === 'unassigned' || r.id.startsWith('portfolio:') && guid(r.id.slice(10))) || r.venueId !== null || !(typeof r.icon === 'string' && Object.hasOwn(portfolioIcons, r.icon))) return false
+      !(r.id === 'unassigned' || r.id.startsWith('portfolio:') && guid(r.id.slice(10))) || r.venueId !== null || !isPortfolioIconKey(r.icon)) return false
     if (query.groupBy === 'portfolio' && query.scope !== 'all' && !query.scope.startsWith('account:') && r.id.toLowerCase() !== query.scope.toLowerCase() ||
       query.groupBy === 'account' && query.scope.startsWith('account:') && r.id.toLowerCase() !== query.scope.toLowerCase()) return false
     return r.shareOfBalance === null ? r.totals.balance.amountUsd === null || total.balance.amountUsd === null || decimal(total.balance.amountUsd) && /^-?0(?:\.0+)?$/.test(total.balance.amountUsd) || total.balance.amountUsd.startsWith('-') :

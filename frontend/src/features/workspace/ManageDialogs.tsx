@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -9,7 +9,7 @@ import { useVenues } from '@/api/venues'
 import { AccountCredential } from './AccountCredential'
 import { PortfolioAccounts } from './PortfolioAccounts'
 import { PortfolioIconPicker } from './PortfolioIcon'
-import { defaultPortfolioIcon, type PortfolioIconKey } from './portfolio-icons'
+import { defaultPortfolioIcon, type PortfolioIconKey } from '@/api/portfolio-icons'
 
 const noAccounts: BrokerAccount[] = []
 const noPortfolios: Portfolio[] = []

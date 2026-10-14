@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Check, ChevronDown, Star } from 'lucide-react'
 import { Popover } from 'radix-ui'
-import { candleIntervals, type CandleInterval } from '@/api/workspace'
+import { candleIntervals, type CandleInterval } from '@/api/candles'
 import { intervalLabel, intervalName } from './intervals'
 
 export function TimeframeBar({ value, favorites, onChange, onFavoritesChange, available = candleIntervals }: {

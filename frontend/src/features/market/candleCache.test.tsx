@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { createWorkspaceApi, type CandleSeries, type VenueCandle, type WorkspaceApi } from '@/api/workspace'
 import { candleSeriesFixture } from '@/test/workspace-fixture'
 import { candleCache, candleLimit, clearCandleCache, evictAccountCandles, pageLifetime } from './candleCache'

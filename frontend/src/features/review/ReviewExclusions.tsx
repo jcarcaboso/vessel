@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReviewExclusions as Exclusions, ReviewQuery } from '@/api/review'
 import type { WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 
 export function ReviewExclusions({ api, initialQuery, onOpenPlay }: {
   api: WorkspaceApi; initialQuery: ReviewQuery; onOpenPlay: (id: string, signal: AbortSignal) => Promise<void>

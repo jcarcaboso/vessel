@@ -1,26 +1,12 @@
 /**
- * Vector marks drawn over an evidence image. Coordinates are natural image pixels, so marks keep
- * their place at any display size. The original image is never modified; the marked version is
- * rendered from these shapes (as SVG on screen, flattened to PNG for download).
+ * Drawing and rendering of evidence markup (the shapes are the API contract in `@/api/markup`).
+ * The original image is never modified; the marked version is rendered from the shapes
+ * (as SVG on screen, flattened to PNG for download).
  */
+import type { ImageMarkup, MarkupPoint, MarkupShape } from '@/api/markup'
 
 export type MarkupTool = 'select' | 'pen' | 'marker' | 'arrow' | 'box' | 'text'
 export type MarkupSize = 's' | 'm' | 'l'
-export interface MarkupPoint { x: number; y: number }
-
-export type MarkupShape =
-  | { id: string; kind: 'pen' | 'marker'; color: string; width: number; points: MarkupPoint[] }
-  | { id: string; kind: 'arrow' | 'box'; color: string; width: number; from: MarkupPoint; to: MarkupPoint }
-  | { id: string; kind: 'text'; color: string; size: number; at: MarkupPoint; text: string }
-
-export interface ImageMarkup {
-  width: number
-  height: number
-  shapes: MarkupShape[]
-}
-
-/** Mirrors the server validation of saved markup. */
-export const markupLimits = { shapes: 200, points: 2000, text: 280 }
 
 export const markupColors = ['#ff5c5c', '#ffd23f', '#4ade80', '#60a5fa', '#ffffff', '#111111'] as const
 const strokeScale: Record<MarkupSize, number> = { s: 0.003, m: 0.005, l: 0.009 }

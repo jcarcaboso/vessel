@@ -3,7 +3,7 @@ import { render, renderHook, screen, waitFor, within } from '@testing-library/re
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { SizingDocument } from '@/api/sizing'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import type { WorkspaceApi } from '@/api/workspace'
 import { accountFixture, portfolioFixture, sizingFixture } from '@/test/workspace-fixture'
 import { createDraft, createExit, type DraftExit, type PlayDraft } from './draft'

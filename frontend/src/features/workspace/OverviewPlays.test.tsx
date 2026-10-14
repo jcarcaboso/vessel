@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { isPlaySummary, type PlaySummary } from '@/api/plays'
 import { createWorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { accountFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { OverviewPlays } from './OverviewPlays'
 

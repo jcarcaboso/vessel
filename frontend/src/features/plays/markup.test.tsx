@@ -6,7 +6,8 @@ import type { DraftEvidence } from './draft'
 import { createEvidence } from './evidence'
 import { EvidencePanel } from './EvidencePanel'
 import { MarkupEditor } from './MarkupEditor'
-import { hitShape, markedFileName, markupSvg, moveShape, strokeWidth, textSize, type ImageMarkup } from './markup'
+import type { ImageMarkup } from '@/api/markup'
+import { hitShape, markedFileName, markupSvg, moveShape, strokeWidth, textSize } from './markup'
 
 const base: ImageMarkup = { width: 1000, height: 500, shapes: [] }
 

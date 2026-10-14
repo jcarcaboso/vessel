@@ -1,5 +1,7 @@
-import type { CandleInterval, CandleSeries, VenueCandle, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import type { CandleInterval } from '@/api/candles'
+import type { CandleSeries, VenueCandle, WorkspaceApi } from '@/api/workspace'
+import { ApiError } from '@/api/errors'
+import { onApiEvent } from '@/api/events'
 import type { ChartCandle } from '@/components/chart/types'
 
 export interface CandleState {
@@ -73,7 +75,10 @@ export class CandleCache {
   private clock = 0
   generation = 0
   private invalidations = new Set<{ accountId: string; callback: () => void }>()
-  constructor(private readonly api: WorkspaceApi) {}
+  constructor(private readonly api: WorkspaceApi) {
+    // A rejected token ends every chart; a deleted or disabled account ends its own.
+    onApiEvent(api, event => event.type === 'unauthorized' ? this.invalidate() : this.invalidate(event.accountId))
+  }
 
   entry(accountId: string, instrument: string, interval: CandleInterval) {
     const key = JSON.stringify([accountId, instrument, interval])

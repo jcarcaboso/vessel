@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { BrokerAccount, InstrumentCatalog, VenueInstrument, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { useVenues } from '@/api/venues'
 
 /** Trading pair label, e.g. BTC/USDC. */

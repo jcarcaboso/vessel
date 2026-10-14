@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { ApiError, getSystem, type SystemInfo } from '@/api/system'
+import { ApiError } from '@/api/errors'
+import { getSystem, type SystemInfo } from '@/api/system'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { clearCandleCache } from '@/features/market/candleCache'
 import { Button } from '@/components/ui/button'

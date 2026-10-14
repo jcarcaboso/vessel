@@ -1,4 +1,5 @@
-import { portfolioIconKey, portfolioIconKeys, portfolioIcons, type PortfolioIconKey } from './portfolio-icons'
+import { portfolioIconKeys, type PortfolioIconKey } from '@/api/portfolio-icons'
+import { portfolioIconKey, portfolioIcons } from './portfolio-icons'
 
 export function PortfolioIcon({ icon, size = 21 }: { icon: string | undefined; size?: number }) {
   const Icon = portfolioIcons[portfolioIconKey(icon)].icon

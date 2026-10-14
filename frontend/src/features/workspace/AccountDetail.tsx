@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { AccountSnapshot, BrokerAccount, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { Button } from '@/components/ui/button'
 import { ActivityOperations } from './ActivityOperations'
 import { amount, money, time } from './format'

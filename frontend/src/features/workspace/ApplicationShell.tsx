@@ -1,6 +1,7 @@
 import { createRef, useCallback, useEffect, useRef, useState } from 'react'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
-import { ApiError, type SystemInfo } from '@/api/system'
+import { ApiError } from '@/api/errors'
+import type { SystemInfo } from '@/api/system'
 import { Button } from '@/components/ui/button'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { useNotifications } from '@/components/notifications/notifications'
