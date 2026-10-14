@@ -1,0 +1,264 @@
+{
+  "comparedToolingCommit": "bde4f61608663dacac5f5a6ab0b6d703ff3d88a7",
+  "images": 76,
+  "pixelIdentical": 68,
+  "toleranceChanged": 4,
+  "assetsEqual": true,
+  "fixtureEqual": true,
+  "geometryEqual": true,
+  "unmaskedDifferences": [
+    {
+      "file": "graphite-desktop-entry-expanded.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 1,
+        "ratio": 7.716049382716049e-07,
+        "rows": [
+          251,
+          251
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 2.700617283950617e-06,
+      "maxSummedRgbaDelta": 14,
+      "renderedTextEqual": true,
+      "fontStateEqual": true,
+      "inspection": "Rounded corner of the entry selector keyboard focus ring at x314 y251."
+    },
+    {
+      "file": "graphite-desktop-review.png",
+      "before": [
+        1440,
+        1354
+      ],
+      "after": [
+        1440,
+        1354
+      ],
+      "exact": {
+        "changed": 141,
+        "ratio": 7.231659281142295e-05,
+        "rows": [
+          365,
+          372
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 131,
+        "ratio": 6.718775644181848e-05,
+        "rows": [
+          365,
+          372
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.003017037994419826,
+      "maxSummedRgbaDelta": 428,
+      "renderedTextEqual": false,
+      "fontStateEqual": true,
+      "inspection": "Changed glyphs are in the live server Review report time. The report records the distinct asOfUtc values; browser time alone is frozen."
+    },
+    {
+      "file": "graphite-mobile-entry-expanded.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 2,
+        "ratio": 6.0760724267833275e-06,
+        "rows": [
+          233,
+          233
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 1.291165390691457e-05,
+      "maxSummedRgbaDelta": 14,
+      "renderedTextEqual": true,
+      "fontStateEqual": true,
+      "inspection": "Rounded corner of the entry selector keyboard focus ring at x16/18 y233."
+    },
+    {
+      "file": "graphite-mobile-review.png",
+      "before": [
+        390,
+        1922
+      ],
+      "after": [
+        390,
+        1922
+      ],
+      "exact": {
+        "changed": 141,
+        "ratio": 0.00018810533898983432,
+        "rows": [
+          586,
+          593
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 131,
+        "ratio": 0.00017476453480615812,
+        "rows": [
+          586,
+          593
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.00784772806104752,
+      "maxSummedRgbaDelta": 428,
+      "renderedTextEqual": false,
+      "fontStateEqual": true,
+      "inspection": "Changed glyphs are in the live server Review report time. The report records the distinct asOfUtc values; browser time alone is frozen."
+    },
+    {
+      "file": "paper-desktop-accounts.png",
+      "before": [
+        1440,
+        900
+      ],
+      "after": [
+        1440,
+        900
+      ],
+      "exact": {
+        "changed": 10,
+        "ratio": 7.71604938271605e-06,
+        "rows": [
+          149,
+          153
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 3.0864197530864196e-06,
+      "maxSummedRgbaDelta": 3,
+      "renderedTextEqual": true,
+      "fontStateEqual": true,
+      "inspection": "Account records card top-left rounded border at x272-274 y149-153."
+    },
+    {
+      "file": "paper-desktop-review.png",
+      "before": [
+        1440,
+        1354
+      ],
+      "after": [
+        1440,
+        1354
+      ],
+      "exact": {
+        "changed": 85,
+        "ratio": 4.3595109141637946e-05,
+        "rows": [
+          365,
+          372
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 59,
+        "ratio": 3.026013458066634e-05,
+        "rows": [
+          365,
+          372
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.0008131770064007878,
+      "maxSummedRgbaDelta": 438,
+      "renderedTextEqual": false,
+      "fontStateEqual": true,
+      "inspection": "Changed glyphs are in the live server Review report time. The report records the distinct asOfUtc values; browser time alone is frozen."
+    },
+    {
+      "file": "paper-mobile-evidence-marked.png",
+      "before": [
+        390,
+        844
+      ],
+      "after": [
+        390,
+        844
+      ],
+      "exact": {
+        "changed": 5,
+        "ratio": 1.5190181066958317e-05,
+        "rows": [
+          647,
+          650
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 0,
+        "ratio": 0,
+        "rows": null
+      },
+      "meanAbsoluteChannelDelta": 9.873617693522906e-06,
+      "maxSummedRgbaDelta": 3,
+      "renderedTextEqual": true,
+      "fontStateEqual": true,
+      "inspection": "Native evidence-note textarea resize grip at x345-348 y647-650."
+    },
+    {
+      "file": "paper-mobile-review.png",
+      "before": [
+        390,
+        1922
+      ],
+      "after": [
+        390,
+        1922
+      ],
+      "exact": {
+        "changed": 85,
+        "ratio": 0.00011339683556124763,
+        "rows": [
+          586,
+          593
+        ]
+      },
+      "tolerance": {
+        "threshold": 24,
+        "changed": 59,
+        "ratio": 7.871074468368953e-05,
+        "rows": [
+          586,
+          593
+        ]
+      },
+      "meanAbsoluteChannelDelta": 0.0021151845033218603,
+      "maxSummedRgbaDelta": 438,
+      "renderedTextEqual": false,
+      "fontStateEqual": true,
+      "inspection": "Changed glyphs are in the live server Review report time. The report records the distinct asOfUtc values; browser time alone is frozen."
+    }
+  ],
+  "limitations": "Tiny edge/grip differences are still exact differences, not declared identical or masked. Broad legacy sidebar/table text differences were not reproduced in this strict pair; the legacy cause is not proven. Final after-build capture and review remain the parent task."
+}
