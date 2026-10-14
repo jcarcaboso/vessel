@@ -1,12 +1,14 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Vessel.Api;
+using Vessel.Application.Venues;
 
 namespace Vessel.Tests;
 
@@ -26,8 +28,9 @@ public sealed class EndpointTransportTests
         Assert.All(credential, endpoint =>
         {
             Assert.NotNull(endpoint.Metadata.GetMetadata<CredentialEndpoint>());
-            // Routing applies the last size-limit metadata; it must be the credential limit.
-            var limit = Assert.IsType<RequestBodyLimit>(endpoint.Metadata.GetMetadata<IRequestSizeLimitMetadata>());
+            // Only the post-authorization middleware may lower the server limit.
+            Assert.Null(endpoint.Metadata.GetMetadata<IRequestSizeLimitMetadata>());
+            var limit = Assert.IsType<RequestBodyLimit>(endpoint.Metadata.GetMetadata<RequestBodyLimit>());
             Assert.Equal((4096L, "Credential request is too large."), (limit.MaxBytes, limit.TooLargeMessage));
         });
         // The marker never leaks onto routes that carry no token.
@@ -39,14 +42,15 @@ public sealed class EndpointTransportTests
     {
         await using var factory = new CoreApiFactory(Guid.NewGuid());
         var limits = Endpoints(factory)
-            .Where(e => e.Metadata.GetMetadata<IRequestSizeLimitMetadata>() is RequestBodyLimit && e.Metadata.GetMetadata<CredentialEndpoint>() is null)
-            .ToDictionary(Name, e => (RequestBodyLimit)e.Metadata.GetMetadata<IRequestSizeLimitMetadata>()!);
+            .Where(e => e.Metadata.GetMetadata<RequestBodyLimit>() is not null && e.Metadata.GetMetadata<CredentialEndpoint>() is null)
+            .ToDictionary(Name, e => e.Metadata.GetMetadata<RequestBodyLimit>()!);
 
         Assert.Equal(
             ["POST /api/plays/retrospective", "POST /api/plays/{id:guid}/manual-executions",
              "PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}"],
             limits.Keys.Order(StringComparer.Ordinal));
         Assert.All(limits, pair => Assert.Equal("Diary request is too large.", pair.Value.TooLargeMessage));
+        Assert.All(Endpoints(factory), endpoint => Assert.Null(endpoint.Metadata.GetMetadata<IRequestSizeLimitMetadata>()));
         Assert.Equal(131_072, limits["POST /api/plays/retrospective"].MaxBytes);
         Assert.Equal(16_384, limits["POST /api/plays/{id:guid}/manual-executions"].MaxBytes);
         Assert.Equal(16_384, limits["PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}"].MaxBytes);
@@ -84,6 +88,45 @@ public sealed class EndpointTransportTests
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
         Assert.True(response.Headers.CacheControl?.NoStore);
         Assert.Empty(await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Chunked_unauthorized_request_does_not_break_an_immediate_authenticated_retry()
+    {
+        var owner = Guid.NewGuid();
+        var discovery = new SecurityDiscovery([new("123", "Main", "main")]);
+        await using var factory = new CoreApiFactory(owner, new MemoryWorkspaceStore(owner),
+            configure: services => services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry(discovery)));
+        factory.UseKestrel(0);
+        using var client = factory.CreateClient();
+        const string path = "/api/venues/index-fixture/accounts/credential";
+        for (var i = 0; i < 50; i++)
+        {
+            using (var request = new HttpRequestMessage(HttpMethod.Post, path)
+            {
+                Content = new ChunkedContent(Encoding.UTF8.GetBytes(new string(' ', 4096) + "{}"))
+            })
+            {
+                request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+                request.Headers.TransferEncodingChunked = true;
+                using var response = await client.SendAsync(request);
+                Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+                await response.Content.ReadAsStringAsync();
+            }
+            // No pause or new client: the rejected body must not poison a pooled connection.
+            using var retry = new HttpRequestMessage(HttpMethod.Post, path)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    address = SecurityFixture.Address, token = SecurityFixture.Token
+                }), Encoding.UTF8, "application/json")
+            };
+            retry.Headers.Authorization = new AuthenticationHeaderValue("Bearer", CoreApiFactory.Token);
+            using var accepted = await client.SendAsync(retry);
+            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+            Assert.True(accepted.Headers.CacheControl?.NoStore);
+            await accepted.Content.ReadAsStringAsync();
+        }
     }
 
     private static List<RouteEndpoint> Endpoints(CoreApiFactory factory) =>

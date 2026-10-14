@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -12,6 +14,42 @@ namespace Vessel.Tests;
 
 public sealed class CredentialTransportApiTests
 {
+    [Theory]
+    [InlineData("PUT", "/api/accounts/not-a-guid/credential", "http", 2, 403, "Credential entry requires HTTPS outside localhost.")]
+    [InlineData("POST", "/api/accounts/11111111-1111-1111-1111-111111111111/credential", "http", 2, 403, "Credential entry requires HTTPS outside localhost.")]
+    [InlineData("PATCH", "/api/unknown/CREDENTIAL/", "http", 4099, 403, "Credential entry requires HTTPS outside localhost.")]
+    [InlineData("PUT", "/api/unknown/credential", "https", 4099, 413, "Credential request is too large.")]
+    [InlineData("GET", "/api/unknown/credential", "http", 4099, 413, "Credential request is too large.")]
+    [InlineData("PUT", "/unknown/credential", "https", 4099, 413, "Credential request is too large.")]
+    [InlineData("POST", "/api/plays/not-a-guid/manual-executions", "https", 16385, 413, "Diary request is too large.")]
+    [InlineData("DELETE", "/api/plays/retrospective/", "https", 131073, 413, "Diary request is too large.")]
+    public async Task Unmatched_and_wrong_method_requests_preserve_legacy_transport_rejections(
+        string method, string path, string scheme, int bodyBytes, int status, string detail)
+    {
+        await using var factory = new CoreApiFactory(Guid.NewGuid(), connection: "Host=unused.invalid;Database=synthetic",
+            environment: "Production",
+            configure: services => services.AddSingleton<IStartupFilter>(new Peer(IPAddress.Parse("192.0.2.10"))));
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri($"{scheme}://vessel.example.invalid"), AllowAutoRedirect = false
+        });
+        foreach (var authorized in new[] { false, true })
+        {
+            using var request = new HttpRequestMessage(new HttpMethod(method), path)
+            {
+                Content = new StringContent(new string(' ', bodyBytes), Encoding.UTF8, "application/json")
+            };
+            if (authorized) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", CoreApiFactory.Token);
+            using var response = await client.SendAsync(request);
+            Assert.Equal(authorized ? status : 401, (int)response.StatusCode);
+            if (!authorized) continue;
+            Assert.True(response.Headers.CacheControl?.NoStore);
+            Assert.Empty(response.Content.Headers.ContentEncoding);
+            var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(detail, problem.GetProperty("detail").GetString());
+        }
+    }
+
     [Theory]
     // Production plaintext from another machine, with or without a spoofed forwarded scheme.
     [InlineData("Production", "http://vessel.example.invalid", "192.0.2.10", null, null, false)]

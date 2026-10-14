@@ -1,14 +1,11 @@
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
+using static Vessel.Api.EndpointTransport;
 
 namespace Vessel.Api;
 
 public static class PlayEndpoints
 {
-    private const long ManualExecutionBodyBytes = 16_384;
-    private const long RetrospectiveBodyBytes = 131_072;
-    private const string DiaryTooLarge = "Diary request is too large.";
-
     public static void MapPlays(this WebApplication app)
     {
         var api = app.MapGroup("/api/plays").RequireAuthorization();
