@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using System.Text.Json;
 using Vessel.Application.Common;
 using Vessel.Application.Evidence;
+using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
@@ -179,7 +180,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     {
         var kind = source switch
         {
-            "venue" when account.VenueId != "manual" => InstrumentSource.Venue,
+            "venue" when account.VenueId != VenueDescriptor.ManualId => InstrumentSource.Venue,
             "venue" => throw new ProblemException(400, "Manual accounts use manual instrument labels."),
             "manual" => InstrumentSource.Manual,
             _ => throw new ProblemException(400, "Instrument source must be venue or manual.")

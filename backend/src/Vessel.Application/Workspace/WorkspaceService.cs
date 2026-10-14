@@ -240,7 +240,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     private List<PortfolioDto> MapPortfolios(IReadOnlyList<Portfolio> portfolios, IReadOnlyList<Account> accounts,
         IReadOnlyDictionary<Guid, AccountSnapshot> snapshots)
     {
-        decimal? Value(Account a) => a.VenueId == "manual" ? a.ManualAccountValueUsd : snapshots.GetValueOrDefault(a.Id)?.AccountValueUsd;
+        decimal? Value(Account a) => a.VenueId == VenueDescriptor.ManualId ? a.ManualAccountValueUsd : snapshots.GetValueOrDefault(a.Id)?.AccountValueUsd;
         return portfolios.Select(p =>
         {
             var members = accounts.Where(a => a.PortfolioId == p.Id).ToList();
@@ -262,7 +262,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         var accounts = await store.AccountsAsync(ct);
         var snapshots = (await store.SnapshotsAsync(ct)).ToDictionary(s => s.AccountId);
         var dtos = accounts.Select(a => ToDto(a, snapshots.GetValueOrDefault(a.Id))).ToList();
-        decimal? Value(Account a) => a.VenueId == "manual" ? a.ManualAccountValueUsd : snapshots.GetValueOrDefault(a.Id)?.AccountValueUsd;
+        decimal? Value(Account a) => a.VenueId == VenueDescriptor.ManualId ? a.ManualAccountValueUsd : snapshots.GetValueOrDefault(a.Id)?.AccountValueUsd;
         var portfolios = MapPortfolios(await store.PortfoliosAsync(ct), accounts, snapshots);
         var enabled = accounts.Where(a => a.IsEnabled).ToList();
         var known = enabled.Select(Value).Where(v => v.HasValue).ToList();
@@ -311,7 +311,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         var account = await store.MarketDataAccountAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
         if (!account.IsEnabled)
             throw new ProblemException(409, "Enable the account before reading its instrument catalogue.");
-        if (account.VenueId == "manual")
+        if (account.VenueId == VenueDescriptor.ManualId)
             return new(account.VenueId, "perpetuals", InstrumentCatalogScopes.Manual, [],
                 "Manual catalogue: enter a perpetual contract manually. No venue metadata is available.");
         if (venues.Reader(account.VenueId) is not { } reader)
@@ -372,7 +372,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     private async Task<Account> RequireAccount(Guid id, CancellationToken ct) =>
         await store.AccountAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
     private AccountDto ToDto(Account a, AccountSnapshot? s) => new(a.Id, a.PortfolioId, a.Name, a.VenueId, a.Address,
-        Money(a.VenueId == "manual" ? a.ManualAccountValueUsd : s?.AccountValueUsd), a.LastSyncedAtUtc,
+        Money(a.VenueId == VenueDescriptor.ManualId ? a.ManualAccountValueUsd : s?.AccountValueUsd), a.LastSyncedAtUtc,
         a.SyncStatus, a.LastSyncError, a.IsEnabled ? s?.Positions.Count ?? 0 : 0, a.HistoryNotice, a.IsEnabled, a.SettingsRevision,
         s?.StablecoinsObservedAtUtc is null ? null : StablecoinTotals.Sum(s.Stablecoins.Select(balance => balance.Available)),
         s?.StablecoinScope, s?.AccountMode,

@@ -26,7 +26,7 @@ internal static partial class MarketDataGuard
         var account = await store.MarketDataAccountAsync(accountId, ct) ?? throw new ProblemException(404, "Account not found.");
         if (!account.IsEnabled)
             throw new ProblemException(409, "Enable the account before reading market data.");
-        if (account.VenueId == "manual")
+        if (account.VenueId == VenueDescriptor.ManualId)
             throw new ProblemException(409, "No market data provider for manual accounts.");
         return account;
     }

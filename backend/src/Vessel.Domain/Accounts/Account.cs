@@ -27,7 +27,7 @@ public sealed class Account
             throw new DomainValidationException("Invalid account configuration.");
         PortfolioId = portfolioId; Address = address?.ToLowerInvariant(); ManualAccountValueUsd = manualAccountValueUsd;
         SourceId = sourceId ?? Address;
-        SyncStatus = VenueId == "manual" ? "manual" : "not-synced";
+        SyncStatus = VenueId == ManualVenue.Id ? "manual" : "not-synced";
     }
 
     public void UpdateSettings(string name, Guid? portfolioId, bool isEnabled)
@@ -74,6 +74,6 @@ public sealed class Account
         OwnerId = ownerId;
         VenueId = venueId;
         Name = name.Trim();
-        SyncStatus = venueId == "manual" ? "manual" : "not-synced";
+        SyncStatus = venueId == ManualVenue.Id ? "manual" : "not-synced";
     }
 }
