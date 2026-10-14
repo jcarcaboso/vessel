@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Check, CircleAlert, Info, X } from 'lucide-react'
 import { NotificationContext, type NotificationInput, type NotificationTone } from './notifications'
 import './notifications.css'
@@ -6,11 +6,13 @@ import './notifications.css'
 interface Shown extends NotificationInput {
   id: string
   tone: NotificationTone
+  slot: number
 }
 
 const defaultDuration: Record<NotificationTone, number> = { error: 10000, success: 5500, info: 5500 }
 /** Older notifications close when more than this many are shown. */
 const maxShown = 4
+const slots = Array.from({ length: maxShown }, (_, index) => index)
 const icons = { error: CircleAlert, success: Check, info: Info }
 
 let sequence = 0
@@ -22,8 +24,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     setShown(current => current.filter(item => item.id !== idOrKey && item.key !== idOrKey)), [])
   const notify = useCallback((input: NotificationInput) => {
     const id = `notification-${++sequence}`
-    const item: Shown = { ...input, id, tone: input.tone ?? 'info' }
-    setShown(current => [...current.filter(existing => !input.key || existing.key !== input.key), item].slice(-maxShown))
+    setShown(current => {
+      const retained = current.filter(existing => !input.key || existing.key !== input.key).slice(-(maxShown - 1))
+      const slot = slots.find(slot => !retained.some(item => item.slot === slot))!
+      return [...retained, { ...input, id, tone: input.tone ?? 'info', slot }]
+    })
     return id
   }, [])
   const value = useMemo(() => ({ notify, dismiss }), [notify, dismiss])
@@ -31,7 +36,19 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   return <NotificationContext.Provider value={value}>
     {children}
     <section className="notification-viewport" aria-label="Notifications">
-      {shown.map(item => <Notification key={item.id} item={item} onClose={() => dismiss(item.id)} />)}
+      {/* Fixed slots keep the live regions mounted and each toast's focus/timer intact.
+          Reordering keyed slots keeps the original chronological stack and tab order. */}
+      {[...shown.map(item => item.slot), ...slots.filter(slot => !shown.some(item => item.slot === slot))].map(slot => {
+        const item = shown.find(item => item.slot === slot)
+        return <Fragment key={slot}>
+          <div aria-live="polite" aria-relevant="additions text" style={{ display: 'contents' }}>
+            {item && item.tone !== 'error' && <Notification key={item.id} item={item} onClose={() => dismiss(item.id)} />}
+          </div>
+          <div aria-live="assertive" aria-relevant="additions text" style={{ display: 'contents' }}>
+            {item?.tone === 'error' && <Notification key={item.id} item={item} onClose={() => dismiss(item.id)} />}
+          </div>
+        </Fragment>
+      })}
     </section>
   </NotificationContext.Provider>
 }

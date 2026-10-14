@@ -1,6 +1,6 @@
 import { PortfolioDestination } from './PortfolioDestination'
 import { usePortfolioDestination } from './usePortfolioDestination'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { AccountDiscovery, DiscoveredAccount } from '@/api/account-access'
 import { credentialFailureMessage, credentialTransportAllowed } from '@/api/account-access'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
@@ -13,10 +13,31 @@ import { money } from '@/lib/format'
 
 type ImportResult = { account?: BrokerAccount; message: string }
 
-export function WalletAccountImport({ venueId, api, portfolios, accounts, onCreated, onBusy, onClose }: {
+type ImportProps = {
   venueId: string; api: WorkspaceApi; portfolios: Portfolio[]; accounts: BrokerAccount[]
   onCreated: () => void; onBusy: (busy: boolean) => void; onClose: () => void
-}) {
+}
+
+export function WalletAccountImport(props: ImportProps) {
+  const [session, setSession] = useState({ api: props.api, generation: 0 })
+  if (session.api !== props.api) setSession({ api: props.api, generation: session.generation + 1 })
+  return <WalletImportSession key={session.generation} {...props} />
+}
+
+function WalletImportSession({ venueId, api, portfolios, accounts, onCreated, onBusy, onClose }: ImportProps) {
+  const discoveryRequest = useRef<AbortController | null>(null)
+  const alive = useRef(false)
+  useEffect(() => {
+    alive.current = true
+    return () => { alive.current = false; discoveryRequest.current?.abort() }
+  }, [])
+  const startDiscovery = () => {
+    discoveryRequest.current?.abort()
+    const controller = new AbortController()
+    discoveryRequest.current = controller
+    return controller
+  }
+  const currentDiscovery = (controller: AbortController) => alive.current && !controller.signal.aborted && discoveryRequest.current === controller
   const venues = useVenues()
   const [address, setAddress] = useState('')
   const [discovery, setDiscovery] = useState<AccountDiscovery | null>(null)
@@ -35,24 +56,28 @@ export function WalletAccountImport({ venueId, api, portfolios, accounts, onCrea
   const existing = (candidate: DiscoveredAccount) =>
     currentAccounts.find(a => a.venueId === venueId && (a.sourceId ?? a.address) === candidate.sourceId)
   const added = (candidate: DiscoveredAccount) => !!(candidate.existingAccountId || existing(candidate))
-  const begin = () => { setPending(true); onBusy(true); setError(null) }
+  const begin = (blockClose = true) => { setPending(true); onBusy(blockClose); setError(null) }
   const finish = () => { setToken(''); setPending(false); onBusy(false) }
   async function find(event: FormEvent) {
     event.preventDefault(); setError(null); setToken('')
     if (!/^0x[\da-f]{40}$/i.test(address.trim())) { setError('Use a valid public wallet address, starting with 0x.'); return }
-    begin(); setDiscovery(null); setSelected([]); setResults({}); setNamesNotice(null)
+    const controller = startDiscovery()
+    begin(false); setDiscovery(null); setSelected([]); setResults({}); setNamesNotice(null)
     try {
-      const next = await api.discoverAccounts(venueId, address.trim().toLowerCase())
+      const next = await api.discoverAccounts(venueId, address.trim().toLowerCase(), controller.signal)
+      if (!currentDiscovery(controller)) return
       setDiscovery(next); setNames(Object.fromEntries(next.accounts.map(a => [a.sourceId, a.name])))
-    } catch { setError('Could not find accounts for this wallet. Check the address and try again.') }
-    finally { finish() }
+    } catch { if (currentDiscovery(controller)) setError('Could not find accounts for this wallet. Check the address and try again.') }
+    finally { if (currentDiscovery(controller)) finish() }
   }
   async function loadNames() {
     if (!discovery || !token || !credentialTransportAllowed()) return
     const submitted = token
-    setToken(''); setNamesNotice(null); setLoadingNames(true); begin()
+    const controller = startDiscovery()
+    setToken(''); setNamesNotice(null); setLoadingNames(true); begin(false)
     try {
-      const next = await api.discoverAccounts(venueId, discovery.address, undefined, submitted)
+      const next = await api.discoverAccounts(venueId, discovery.address, controller.signal, submitted)
+      if (!currentDiscovery(controller)) return
       // A name the owner already edited belongs to Vessel; do not overwrite it.
       setNames(previous => Object.fromEntries(next.accounts.map(a => {
         const edited = previous[a.sourceId]
@@ -62,9 +87,10 @@ export function WalletAccountImport({ venueId, api, portfolios, accounts, onCrea
       setDiscovery(next)
       setNamesNotice('Venue names loaded where available. Unnamed accounts keep their index label. The token was not saved; re-enter it at import if you also want order access.')
     } catch (cause) {
+      if (!currentDiscovery(controller)) return
       setError(credentialFailureMessage(cause, 'Could not load venue names. Check the read-only token’s wallet, scope and expiry.') +
         ' Public balances and your selections are unchanged.')
-    } finally { setLoadingNames(false); finish() }
+    } finally { if (currentDiscovery(controller)) { setLoadingNames(false); finish() } }
   }
   async function importSelected(event: FormEvent) {
     event.preventDefault()
@@ -76,13 +102,16 @@ export function WalletAccountImport({ venueId, api, portfolios, accounts, onCrea
     begin()
     try {
       const target = await destination.resolve()
+      if (!alive.current) return
       for (const candidate of candidates) {
         let account: BrokerAccount
         try {
           account = await api.createAccount({ venueId, sourceId: candidate.sourceId, name: names[candidate.sourceId]!.trim(),
             portfolioId: target.portfolioId })
+          if (!alive.current) return
           setCreated(previous => [...previous, account]); onCreated()
         } catch (cause) {
+          if (!alive.current) return
           if (target.created) setError('The new portfolio was created and kept. It remains selected. Find wallet again before retrying imports; a duplicate portfolio will not be created.')
           setResults(previous => ({ ...previous, [candidate.sourceId]: { message: cause instanceof ApiError && cause.status === 409
             ? 'Already added. Close this dialog to manage or re-enable the existing account.'
@@ -95,16 +124,18 @@ export function WalletAccountImport({ venueId, api, portfolios, accounts, onCrea
         if (submitted && credentialTransportAllowed()) {
           try {
             await api.saveAccountCredential(account.id, submitted)
+            if (!alive.current) return
             message = 'Imported. Read-only token verified and saved.'
           } catch (cause) {
+            if (!alive.current) return
             message = 'Imported. Token save was not confirmed. Open Manage account to check its status before retrying. ' + credentialFailureMessage(cause)
           }
         }
         setResults(previous => ({ ...previous, [candidate.sourceId]: { account, message } }))
       }
       setSelected([])
-    } catch (cause) { setError(errorMessage(cause, 'Could not create the portfolio. No accounts were imported.')) }
-    finally { finish() }
+    } catch (cause) { if (alive.current) setError(errorMessage(cause, 'Could not create the portfolio. No accounts were imported.')) }
+    finally { if (alive.current) finish() }
   }
   const importable = discovery?.accounts.filter(a => selected.includes(a.sourceId) && !added(a) && !results[a.sourceId]) ?? []
   return <div className="wallet-import" aria-busy={pending}>
@@ -168,7 +199,7 @@ export function WalletAccountImport({ venueId, api, portfolios, accounts, onCrea
           {namesNotice && <p className="field-help" role="status">{namesNotice}</p>}
         </section>}
       <div className="credential-actions">
-        <Button type="button" variant="outline" disabled={pending} onClick={() => { setToken(''); onClose() }}>Done</Button>
+        <Button type="button" variant="outline" disabled={pending} onClick={() => { discoveryRequest.current?.abort(); setToken(''); onClose() }}>Done</Button>
         <Button type="submit" disabled={pending || importable.length === 0}>{pending && !loadingNames ? 'Importing…' : `Import selected${importable.length ? ` (${importable.length})` : ''}`}</Button>
       </div>
       <p className="field-help">Import creates account records only. Open an account and choose Refresh account for current state and bounded recent fills, not full history.</p>

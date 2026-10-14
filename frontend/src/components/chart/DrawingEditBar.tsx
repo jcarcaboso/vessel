@@ -45,7 +45,7 @@ export function DrawingEditBar({ drawing, label, defaultColor, onStyle, onLocked
     {lined && <ChartMenu label="Line style" value={drawing.style?.line ?? 'solid'} options={lineStyles} onChange={line => onStyle({ line })} />}
     {drawing.kind !== 'text' && <ChartMenu label="Line width" value={`${drawing.style?.width ?? 1}`} options={lineWidths}
       onChange={width => onStyle({ width: Number(width) as DrawingLineWidth })} />}
-    {drawing.kind === 'text' && <input aria-label="Note text" value={drawing.text ?? ''} maxLength={200} disabled={drawing.locked}
+    {drawing.kind === 'text' && <input aria-label="Note text" value={drawing.text ?? ''} maxLength={500} disabled={drawing.locked}
       onFocus={onTextFocus} onBlur={onTextBlur} onChange={event => onText(event.target.value)} />}
     <ChartToolbarDivider />
     <ChartIconButton label={drawing.locked ? 'Unlock drawing' : 'Lock drawing'} pressed={drawing.locked === true}
