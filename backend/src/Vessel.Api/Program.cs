@@ -1,10 +1,8 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Api;
 using Vessel.Application.Common;
-using Vessel.Application.Metadata;
 using Vessel.Domain.Common;
 using Vessel.Infrastructure;
 using Vessel.Persistence;
@@ -100,9 +98,7 @@ app.MapGet("/health/ready", async (IServiceProvider services, CancellationToken 
         return Results.Json(new { status = "unavailable" }, statusCode: 503);
     }
 }).AllowAnonymous();
-app.MapGet("/api/system", (ClaimsPrincipal user, Vessel.Application.Venues.IVenueRegistry venues) => SystemMetadata.ForOwner(new JournalOwner(
-    Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!), user.FindFirstValue(ClaimTypes.Name)!), venues))
-    .RequireAuthorization();
+app.MapSystem();
 app.MapWorkspace();
 app.MapEvidence();
 app.MapPlays();

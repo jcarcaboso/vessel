@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Routing;
@@ -49,6 +50,20 @@ public sealed class EndpointTransportTests
         Assert.Equal(131_072, limits["POST /api/plays/retrospective"].MaxBytes);
         Assert.Equal(16_384, limits["POST /api/plays/{id:guid}/manual-executions"].MaxBytes);
         Assert.Equal(16_384, limits["PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}"].MaxBytes);
+    }
+
+    [Fact]
+    public async Task Every_api_route_is_mapped_through_an_authorized_group()
+    {
+        await using var factory = new CoreApiFactory(Guid.NewGuid());
+        var api = Endpoints(factory).Where(e => e.RoutePattern.RawText!.StartsWith("/api/", StringComparison.Ordinal)).ToList();
+
+        Assert.NotEmpty(api);
+        Assert.All(api, endpoint =>
+        {
+            Assert.NotNull(endpoint.Metadata.GetMetadata<IAuthorizeData>());
+            Assert.Null(endpoint.Metadata.GetMetadata<IAllowAnonymous>());
+        });
     }
 
     [Theory]

@@ -6,12 +6,12 @@ public static class ReviewEndpoints
 {
     public static void MapReview(this WebApplication app)
     {
-        app.MapGet("/api/review/exclusions", async (string? period, string? portfolio, Guid? accountId, string? instrument, int? offset,
+        var api = app.MapGroup("/api/review").RequireAuthorization();
+        api.MapGet("/exclusions", async (string? period, string? portfolio, Guid? accountId, string? instrument, int? offset,
             ReviewService service, CancellationToken ct) => Results.Ok(await service.ExclusionsAsync(
-                new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0), ct))).RequireAuthorization();
-        app.MapGet("/api/review", async (string? period, string? portfolio, Guid? accountId, string? instrument, int? offset,
+                new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0), ct)));
+        api.MapGet("", async (string? period, string? portfolio, Guid? accountId, string? instrument, int? offset,
             ReviewService service, CancellationToken ct) =>
-            Results.Ok(await service.GetAsync(new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0), ct)))
-            .RequireAuthorization();
+            Results.Ok(await service.GetAsync(new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0), ct)));
     }
 }
