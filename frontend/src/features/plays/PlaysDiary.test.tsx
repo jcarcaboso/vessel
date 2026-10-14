@@ -533,7 +533,10 @@ describe('diary workspace integration', () => {
   it.each([
     { quote: 'USD', manual: true, accountValue: '1000', label: 'Risk / Main account account value', share: '2%' },
     { quote: 'USDC', manual: false, accountValue: '1000', label: 'Risk / Main account account value · nominal USD/USDC at 1:1', share: '2%' },
+    { quote: 'USDG', manual: false, accountValue: '1000', label: 'Risk / Main account account value · nominal USD/USDG at 1:1', share: '2%' },
+    { quote: 'USDT0', manual: false, accountValue: '1000', label: 'Risk / Main account account value · nominal USD/USDT0 at 1:1', share: '2%' },
     { quote: 'EUR', manual: false, accountValue: '1000', label: 'Risk share', share: 'Unknown' },
+    { quote: 'usdg', manual: false, accountValue: '1000', label: 'Risk share', share: 'Unknown' },
     { quote: 'USD', manual: true, accountValue: null, label: 'Risk / Explicit manual budget', share: '4%' },
   ])('uses an honest named risk reference for $quote, manual=$manual, account value=$accountValue', async ({ quote, manual, accountValue, label, share }) => {
     const venueId = manual ? 'manual' : 'hyperliquid'
@@ -559,7 +562,7 @@ describe('diary workspace integration', () => {
     } else {
       expect(api.instruments).toHaveBeenCalled()
     }
-    if (quote === 'EUR') expect(summary.queryByText(/nominal USD/)).not.toBeInTheDocument()
+    if (quote === 'EUR' || quote === 'usdg') expect(summary.queryByText(/nominal USD/)).not.toBeInTheDocument()
   })
 
   it('preserves free text, structured edits during save, and reports a stale rejected save without clearing dirty work', async () => {

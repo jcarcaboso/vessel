@@ -8,6 +8,7 @@ import { ApiError } from '@/api/system'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { VenueBadge } from '@/components/venues/VenueBadge'
 import { ReadOnlyTokenInput } from './AccountCredential'
 import { money } from './format'
 
@@ -119,7 +120,7 @@ export function WalletAccountImport({ venueId, api, portfolios, accounts, onCrea
       <p className="field-help">Find the main account and subaccounts, then choose which to import. No wallet signing or history refresh.</p>
     </form>
     {discovery && <form className="workspace-form" autoComplete="off" onSubmit={event => { void importSelected(event) }}>
-      <div className="import-heading"><h3>Choose accounts</h3><span className="muted">{discovery.accounts.length} found</span></div>
+      <div className="import-heading"><h3>Choose accounts</h3><VenueBadge venueId={venueId} size="xs" /><span className="muted">{discovery.accounts.length} found</span></div>
       {discovery.accounts.length === 0 && <p className="credential-notice" role="status">No accounts were found for this wallet. Check the address or try another wallet.</p>}
       <div className="discovered-accounts">
         {discovery.accounts.map(candidate => {

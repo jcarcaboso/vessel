@@ -75,7 +75,7 @@ describe('Main application shell', () => {
     await screen.findByRole('button', { name: 'View Main account' })
     await userEvent.click(screen.getByRole('link', { name: 'Accounts' }))
     await userEvent.type(screen.getByRole('textbox', { name: 'Search accounts' }), 'Main')
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Filter by venue' }), 'hyperliquid')
+    await userEvent.click(within(screen.getByRole('group', { name: 'Filter by venue' })).getByRole('button', { name: 'Hyperliquid' }))
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Filter by status' }), 'error')
     await userEvent.click(screen.getByRole('button', { name: 'View Main account' }))
     await userEvent.click(screen.getByRole('button', { name: 'All accounts' }))
@@ -83,7 +83,7 @@ describe('Main application shell', () => {
     await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
     await userEvent.click(screen.getByRole('link', { name: 'Accounts' }))
     expect(screen.getByRole('textbox', { name: 'Search accounts' })).toHaveValue('Main')
-    expect(screen.getByRole('combobox', { name: 'Filter by venue' })).toHaveValue('hyperliquid')
+    expect(within(screen.getByRole('group', { name: 'Filter by venue' })).getByRole('button', { name: 'Hyperliquid' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('combobox', { name: 'Filter by status' })).toHaveValue('error')
   })
   it('retains Activity filters across page navigation', async () => {
@@ -587,7 +587,7 @@ describe('Main application shell', () => {
     expect(screen.getByText(/Portfolios are optional groups/)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Add your first account' }))
     await userEvent.type(screen.getByLabelText('Account name'), 'Unassigned manual')
-    await userEvent.selectOptions(screen.getByLabelText(/Venue/), 'manual')
+    await userEvent.click(screen.getByRole('radio', { name: 'Manual account' }))
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add account' }))
     await waitFor(() => expect(client.createAccount).toHaveBeenCalledWith({ portfolioId: null, name: 'Unassigned manual', venueId: 'manual' }))
     expect(client.createPortfolio).not.toHaveBeenCalled()
@@ -601,7 +601,7 @@ describe('Main application shell', () => {
     await userEvent.click(screen.getByRole('menuitem', { name: 'Add account' }))
     const dialog = screen.getByRole('dialog')
     await userEvent.type(within(dialog).getByLabelText('Account name'), 'Manual broker')
-    await userEvent.selectOptions(within(dialog).getByLabelText('Venue'), 'manual')
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'Manual account' }))
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add account' }))
     await waitFor(() => expect(client.createAccount).toHaveBeenCalledWith({
       portfolioId: null, name: 'Manual broker', venueId: 'manual',

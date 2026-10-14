@@ -1,5 +1,6 @@
 import { createContext, createElement, useContext, useMemo, type ReactNode } from 'react'
 import { isTradeUrlTemplate, type VenueCapabilities, type VenueInfo } from './system'
+import { isVenueLogoKey, type VenueLogoKey } from '@/components/venues/venue-logos'
 
 const instrumentPattern = /^[A-Za-z0-9_-]{1,32}$/
 
@@ -12,6 +13,10 @@ export class Venues {
   can(id: string, capability: keyof VenueCapabilities) { return this.find(id)?.capabilities[capability] === true }
   /** Quote asset of the venue's perpetuals, e.g. USDC. */
   quote(id: string) { return this.find(id)?.quoteAsset ?? null }
+  /** Unit of a venue-reported value: the venue's quote stablecoin, or USD for manual records and venues without one. */
+  valueUnit(id: string) { return this.quote(id) ?? 'USD' }
+  /** Bundled logo key of the venue, or null for the generic icon. */
+  logo(id: string): VenueLogoKey | null { const key = this.find(id)?.logo; return isVenueLogoKey(key) ? key : null }
   /** Venues an account can be added at: manual, or an adapter that can read an account. */
   creatable() { return this.list.filter(venue => venue.id === 'manual' || venue.capabilities.sync) }
 

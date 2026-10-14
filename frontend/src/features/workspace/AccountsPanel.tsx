@@ -8,6 +8,8 @@ import { ApiError } from '@/api/system'
 import { PortfolioDestination } from './PortfolioDestination'
 import { usePortfolioDestination } from './usePortfolioDestination'
 import { AccountRows } from './AccountRows'
+import { VenueBadge } from '@/components/venues/VenueBadge'
+import './accounts.css'
 import { emptyAccountFilters, type AccountFilters } from './account-filters'
 
 export function AccountsPanel({ accounts, portfolios, portfolioFilter, onPortfolioFilter, refreshing, filters, onFiltersChange,
@@ -69,8 +71,6 @@ export function AccountsPanel({ accounts, portfolios, portfolioFilter, onPortfol
         { value: '', label: 'All accounts' }, { value: 'unassigned', label: 'Unassigned' },
         ...portfolios.map(p => ({ value: p.id, label: p.name })),
       ])}
-      {select('Filter by venue', venue, value => update('venue', value), [{ value: '', label: 'All venues' },
-        ...venueIds.map(id => ({ value: id, label: venues.name(id) }))])}
       {select('Filter by status', status, value => update('status', value), [
         { value: '', label: 'All statuses' }, { value: 'enabled', label: 'Enabled' }, { value: 'disabled', label: 'Disabled' },
         { value: 'error', label: 'Refresh failed' }, { value: 'not-synced', label: 'Not refreshed' }, { value: 'manual', label: 'Manual' },
@@ -79,6 +79,14 @@ export function AccountsPanel({ accounts, portfolios, portfolioFilter, onPortfol
       <Button variant="ghost" size="sm" disabled={pending || !portfolioFilter && !search && !venue && !status}
         onClick={() => { onPortfolioFilter(''); onFiltersChange(emptyAccountFilters) }}>Reset filters</Button>
     </div>
+    {venueIds.length > 0 && <div className="venue-filter-chips" role="group" aria-label="Filter by venue">
+      <button type="button" className="venue-filter-chip" aria-pressed={!venue} disabled={pending} onClick={() => update('venue', '')}
+        aria-label="All venues">All venues<span className="venue-chip-count" aria-hidden="true">{accounts.length}</span></button>
+      {venueIds.map(id => <button key={id} type="button" className="venue-filter-chip" aria-pressed={venue === id} disabled={pending}
+        aria-label={venues.name(id)} title={`Show only ${venues.name(id)} accounts`} onClick={() => update('venue', venue === id ? '' : id)}>
+        <VenueBadge venueId={id} size="xs" /><span className="venue-chip-count" aria-hidden="true">{accounts.filter(a => a.venueId === id).length}</span>
+      </button>)}
+    </div>}
     {selected.length > 0 && <form className="accounts-bulk-bar" aria-label="Move selected accounts" aria-busy={pending} onSubmit={event => { void move(event) }}>
       <strong>{selected.length} selected</strong>
       <PortfolioDestination destination={destination} inputId="bulk-portfolio" label="Move to" disabled={pending} />

@@ -103,7 +103,24 @@ public sealed class ActivityOperationsTests
         var op = Assert.Single(OperationAggregator.Aggregate([Fill(0, fee: 1, token: "ETH")]));
         Assert.Null(op.NetResultUsd); Assert.Equal("ETH", Assert.Single(op.OtherFees).Token); Assert.NotEmpty(op.Coverage);
         var stable = Assert.Single(OperationAggregator.Aggregate([Fill(0, fee: 1, token: "USDT")]));
-        Assert.Equal("1", stable.StablecoinFeesNominalUsd); Assert.Null(stable.NetResultUsd);
+        Assert.Equal("1", stable.StablecoinFeesNominalUsd); Assert.Equal("-1", stable.NetResultUsd); Assert.Empty(stable.OtherFees);
+        var lower = Assert.Single(OperationAggregator.Aggregate([Fill(0, fee: 1, token: "usdg")]));
+        Assert.Null(lower.NetResultUsd); Assert.Equal("usdg", Assert.Single(lower.OtherFees).Token);
+    }
+
+    [Fact]
+    public void Listed_stablecoin_fees_are_summed_nominally_across_tokens()
+    {
+        var op = Assert.Single(OperationAggregator.Aggregate([
+            Fill(0, fee: 0.1m, token: "USDC"),
+            Fill(1, fee: 0.3m, token: "USDG", basis: "net-of-fee", pnl: -0.3m),
+            Fill(2, "sell", "close", pnl: 5, fee: 0.0000000000000000000000000002m, token: "USDG"),
+            Fill(3, "sell", "close", pnl: 4.6m, fee: 0.4m, token: "USDH", basis: "net-of-fee")]));
+        Assert.Equal("0.8000000000000000000000000002", op.StablecoinFeesNominalUsd);
+        Assert.Empty(op.OtherFees);
+        Assert.Equal("9.1999999999999999999999999998", op.NetResultUsd);
+        Assert.Equal("10", op.GrossClosedPnlUsd);
+        Assert.DoesNotContain(op.Coverage, c => c.Contains("unknown"));
     }
 
     [Theory]

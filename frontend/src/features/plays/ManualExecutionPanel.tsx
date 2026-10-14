@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { emptyManualDraft, hasManualDraft, manualCorrectionDraft, manualRequest, type ManualExecutionDraft } from './manual'
 import { failure, type SavedState } from './saved'
 import type { DraftEntry } from './draft'
+import { nominalStablecoins } from './stablecoins'
 
 export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form, onChange, onStored, onBegin, working = false, observedVersion }: {
   api: WorkspaceApi
@@ -107,9 +108,9 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
       }
     }
   }
-  const field = (key: 'quantity' | 'price' | 'fee' | 'feeCurrency' | 'source' | 'reason', label: string, max: number, decimal = false) =>
+  const field = (key: 'quantity' | 'price' | 'fee' | 'feeCurrency' | 'source' | 'reason', label: string, max: number, decimal = false, list?: string) =>
     <label htmlFor={`${id}-${key}`}>{label}<input id={`${id}-${key}`} type="text" inputMode={decimal ? 'decimal' : 'text'}
-      maxLength={max} value={form[key]} onChange={event => change({ [key]: event.target.value })} /></label>
+      maxLength={max} value={form[key]} list={list} onChange={event => change({ [key]: event.target.value })} /></label>
 
   return <div className="manual-executions">
     <p className="muted">Owner-entered facts for this Play only. They do not change reported balances or appear in venue-import Activity. Partial entries and exits are supported.</p>
@@ -162,11 +163,12 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
           <label htmlFor={`${id}-side`}>Side<select id={`${id}-side`} value={form.side} disabled={!!form.executionId}
             onChange={event => change({ side: event.target.value as ManualExecutionDraft['side'] })}><option value="">Choose side</option><option value="buy">Buy</option><option value="sell">Sell</option></select></label>
           {field('quantity', 'Execution quantity', 96, true)}{field('price', 'Execution price', 96, true)}
-          {field('fee', 'Fee amount (blank = unknown)', 96, true)}{field('feeCurrency', 'Fee currency', 32)}
+          {field('fee', 'Fee amount (blank = unknown)', 96, true)}{field('feeCurrency', 'Fee currency', 32, false, `${id}-fee-currencies`)}
+          <datalist id={`${id}-fee-currencies`}>{nominalStablecoins.map(symbol => <option key={symbol} value={symbol} />)}</datalist>
           {field('source', 'Source label', 100)}{form.executionId && field('reason', 'Correction reason', 2000)}
         </div>
         <p id={`${id}-time-help`} className="muted">Enter a UTC date and time, such as 2026-10-13T10:00:00.123456Z. Z or +00:00 is optional. Whole microseconds or coarser; finer precision is rejected by the server, never rounded.</p>
-        <p className="muted">Decimal or scientific text is kept exactly. Leave both fee fields blank for unknown. Known zero needs 0 and a currency. The server validates precision, chronology and over-exits; a Closed correction must remain a closed round trip.</p>
+        <p className="muted">Decimal or scientific text is kept exactly. Leave both fee fields blank for unknown. Known zero needs 0 and a currency. Fees in {nominalStablecoins.join(', ')} are deducted at nominal 1:1, without FX or depeg valuation; other currencies are kept but leave the net result unknown. The server validates precision, chronology and over-exits; a Closed correction must remain a closed round trip.</p>
         <Button type="submit" size="sm">{busy ? 'Recording…' : form.executionId ? 'Save correction' : form.attempt ? 'Retry same execution' : 'Record execution'}</Button>
       </fieldset>
       {hasManualDraft(form) && <Button type="button" variant="ghost" size="sm" disabled={pending}

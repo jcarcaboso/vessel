@@ -42,7 +42,7 @@ The Application layer never sees key material.
 - Rotation: retain the old key, add a new key, switch `ActiveKeyId`, restart the API, and re-enter each saved token through account management. New saves use the active key; existing ciphertext can still use the retained keys. Remove the old key only after replacing every credential that uses it. The proposed bulk reseal command is not implemented.
 
 **Persistence:** a table `account_credentials`, one row per account and purpose:
-- `account_id` (FK, cascade delete with the account), `owner_id`, `purpose` (`lighter-read-token`)
+- `account_id` (FK, cascade delete with the account), `owner_id`, `purpose` (`<venueId>-read-token`: `lighter-read-token`, and `lighter-rh-read-token` for Lighter on Robinhood Chain since October 14, 2026)
 - `key_id`, `nonce`, `ciphertext`, `tag`
 - non-secret metadata parsed before sealing: `scope` (`single|all`), `expires_at`, `created_at`, `last_verified_at`, `last_error`
 

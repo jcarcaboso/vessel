@@ -128,7 +128,10 @@ describe('manual executions', () => {
     expect(screen.getByLabelText('Execution time (UTC)')).toHaveValue(precise.occurredAtUtc)
     expect(screen.getByLabelText('Execution time (UTC)')).toHaveAttribute('type', 'text')
     await user.type(screen.getByLabelText('Fee amount (blank = unknown)'), '0.01')
-    await user.type(screen.getByLabelText('Fee currency'), 'USD')
+    const currency = screen.getByLabelText('Fee currency')
+    const suggestions = document.getElementById(currency.getAttribute('list') ?? '')
+    expect([...suggestions?.querySelectorAll('option') ?? []].map(option => option.value)).toEqual(['USDC', 'USDG', 'USDT', 'USDT0', 'USDE', 'USDe', 'USDH'])
+    await user.type(currency, 'USD')
     await user.type(screen.getByLabelText('Correction reason'), 'Statement fee added')
     await user.click(screen.getByRole('button', { name: 'Save correction' }))
     expect(methods.correctManualExecution).toHaveBeenCalledWith(play.summary.id, id, expect.objectContaining({

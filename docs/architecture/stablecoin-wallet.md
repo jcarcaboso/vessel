@@ -51,3 +51,7 @@ See [the core contract](core-workspace-contract.md#october-12-2026-combined-bala
 After migration, the user's configured account was refreshed once under the request. Positive available unified-wallet funds and the supported symbols were verified without copying balances, addresses or credentials to logs/docs. Non-stable assets were excluded, perps fields remained separate and fills deduplicated. Native LAN login verified a nonzero wallet metric and no alert. The preview token and user records remain unchanged.
 
 Primary sources: [account modes](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/account-abstraction-modes), [spot info API](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/spot), [info requests](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint). Token identities were checked against official public spot metadata. No signing or order request occurred.
+
+## Nominal fee and result list (October 14, 2026)
+
+Execution fees and pooled results use a separate Application list, `NominalStablecoins` (USDC, USDG, USDT, USDT0, USDE, USDe and USDH), which adds USDG (Lighter Robinhood collateral) and USDT. It applies to normalized fee-token labels, not to wallet token identities: wallet reads still validate the curated token IDs above and do not gain new assets from it. Both count at nominal 1:1 with no FX or depeg valuation.

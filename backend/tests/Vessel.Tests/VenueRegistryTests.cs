@@ -122,9 +122,13 @@ public sealed class VenueRegistryTests
     public void System_metadata_lists_registered_venues_then_planned_ones_with_manual_last()
     {
         var metadata = SystemMetadata.ForOwner(new JournalOwner(Guid.NewGuid(), "Owner"), Registry());
+        // Lighter has adapters now; only Quantfury remains a planned entry.
         Assert.Equal(["hyperliquid", "other", "quantfury", "manual"], metadata.Venues.Select(v => v.Id));
         Assert.True(metadata.Venues.Single(v => v.Id == "other").Capabilities.Sync);
         Assert.Equal(VenueCapabilities.None, metadata.Venues.Single(v => v.Id == "quantfury").Capabilities);
+        Assert.Equal(VenueLogos.Hyperliquid, metadata.Venues.Single(v => v.Id == "hyperliquid").Logo);
+        Assert.Equal(VenueLogos.Manual, metadata.Venues.Single(v => v.Id == "manual").Logo);
+        Assert.Null(metadata.Venues.Single(v => v.Id == "other").Logo);
 
         // A venue that gains an adapter replaces its planned entry instead of duplicating it.
         var quantfury = new VenueDescriptor("quantfury", "Quantfury", "read-only", VenueSources.None, VenueCapabilities.None);
@@ -132,6 +136,20 @@ public sealed class VenueRegistryTests
             new VenueRegistry([VenueDescriptor.Manual, quantfury], [], [], [], [], [], [], []));
         Assert.Single(registered.Venues, v => v.Id == "quantfury");
         Assert.Equal("read-only", registered.Venues.Single(v => v.Id == "quantfury").Status);
+    }
+
+    [Fact]
+    public void Registration_accepts_only_the_fixed_logo_keys()
+    {
+        Assert.Equal(["hyperliquid", "lighter", "lighter-rh", "risex", "manual"], VenueLogos.All);
+        foreach (var logo in VenueLogos.All)
+            Assert.Equal(logo, new VenueRegistry([Other with { Logo = logo }], [], [], [], [], [], [], []).Descriptor("other")!.Logo);
+        Assert.Null(new VenueRegistry([Other], [], [], [], [], [], [], []).Descriptor("other")!.Logo);
+        foreach (var logo in new[] { "", "Lighter", "https://example.com/logo.svg", "../manual", "folder" })
+        {
+            var error = Assert.Throws<InvalidOperationException>(() => new VenueRegistry([Other with { Logo = logo }], [], [], [], [], [], [], []));
+            if (logo.Length > 0) Assert.DoesNotContain(logo, error.Message);
+        }
     }
 
     private static Play Plan(Account account)

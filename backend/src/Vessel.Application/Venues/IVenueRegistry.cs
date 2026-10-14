@@ -29,7 +29,7 @@ public sealed class VenueRegistry(
     IEnumerable<IMarketContextReader> contexts, IEnumerable<IMarketStream> streams,
     IEnumerable<IVenueAccountDiscovery> discoveries, IEnumerable<IVenueCredentialVerifier> verifiers) : IVenueRegistry
 {
-    private readonly IReadOnlyList<VenueDescriptor> descriptors = descriptors.GroupBy(d => d.Id).Select(g => g.Last()).ToList();
+    private readonly IReadOnlyList<VenueDescriptor> descriptors = Validate(descriptors.GroupBy(d => d.Id).Select(g => g.Last()).ToList());
     private readonly Dictionary<string, IPerpetualVenueReader> readers = Last(readers, r => r.VenueId);
     private readonly Dictionary<string, IVenueOrderReader> orders = Last(orders, r => r.VenueId);
     private readonly Dictionary<string, ICandleReader> candles = Last(candles, r => r.VenueId);
@@ -47,6 +47,11 @@ public sealed class VenueRegistry(
     public IMarketStream? Stream(string venueId) => streams.GetValueOrDefault(venueId);
     public IVenueAccountDiscovery? Discovery(string venueId) => discoveries.GetValueOrDefault(venueId);
     public IVenueCredentialVerifier? CredentialVerifier(string venueId) => verifiers.GetValueOrDefault(venueId);
+
+    private static List<VenueDescriptor> Validate(List<VenueDescriptor> descriptors) =>
+        descriptors.FirstOrDefault(d => !VenueLogos.IsValid(d.Logo)) is { } invalid
+            ? throw new InvalidOperationException($"Venue '{invalid.Id}' registers an unknown logo key.")
+            : descriptors;
 
     private static Dictionary<string, T> Last<T>(IEnumerable<T> items, Func<T, string> venue) =>
         items.GroupBy(venue, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Last(), StringComparer.Ordinal);

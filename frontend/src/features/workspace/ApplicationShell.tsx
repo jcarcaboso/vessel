@@ -11,6 +11,7 @@ import { ActivityOperations } from './ActivityOperations'
 import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
 import { PortfolioIcon } from './PortfolioIcon'
+import { VenueBadge } from '@/components/venues/VenueBadge'
 import type { OverviewQuery } from '@/api/overview-summary'
 import { OverviewScope } from './OverviewScope'
 import { overviewAccounts, resolveOverviewScope } from './overview-scope'
@@ -299,7 +300,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
         {page === 'settings' && <div className="settings-grid">
           <AppearanceSettings />
           <section className="shell-panel settings-panel"><ShieldCheck size={23} /><h2>Private session</h2><p>Connected as {system.owner.displayName}. The token lives only in this browser session's memory and is released on disconnect.</p><dl><div><dt>Authentication</dt><dd>Bearer token</dd></div><div><dt>Market scope</dt><dd>Perpetuals only</dd></div><div><dt>Orders and signing</dt><dd>Not enabled</dd></div><div><dt>Theme</dt><dd className="settings-theme"><CurrentThemeName /><Button variant="outline" size="sm" onClick={() => showAppearanceSection('theme-customizer')}>Customize</Button></dd></div></dl><Button variant="outline" onClick={disconnectSession}><LogOut size={15} />Disconnect session</Button></section>
-          <section className="shell-panel settings-panel"><Database size={23} /><h2>Venue capabilities</h2><p>Accounts can be added at {venues.creatable().map(v => v.name).join(', ')}. A refresh is explicitly requested, not a background job.</p><div className="venue-capability-list">{system.venues.map(v => <div key={v.id}><span>{v.name}</span><span className="workspace-badge">import {v.capabilities.sync ? 'available' : 'unavailable'} · orders {v.capabilities.orders ? 'read-only' : 'unavailable'}</span></div>)}</div><p className="field-help">Some venues require a verified read-only token for order reads. Manage it on the account. No trading keys or orders are sent; retained imports are not complete lifetime history.</p><Button variant="outline" onClick={() => navigate('accounts')}>Manage account access and refresh</Button></section>
+          <section className="shell-panel settings-panel"><Database size={23} /><h2>Venue capabilities</h2><p>Accounts can be added at {venues.creatable().map(v => v.name).join(', ')}. A refresh is explicitly requested, not a background job.</p><div className="venue-capability-list">{system.venues.map(v => <div key={v.id}><VenueBadge venueId={v.id} /><span className="workspace-badge">import {v.capabilities.sync ? 'available' : 'unavailable'} · orders {v.capabilities.orders ? 'read-only' : 'unavailable'}</span></div>)}</div><p className="field-help">Some venues require a verified read-only token for order reads. Manage it on the account. No trading keys or orders are sent; retained imports are not complete lifetime history.</p><Button variant="outline" onClick={() => navigate('accounts')}>Manage account access and refresh</Button></section>
         </div>}
 
       </main>

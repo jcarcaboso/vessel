@@ -9,23 +9,19 @@ namespace Vessel.Infrastructure.Venues.Lighter;
 
 public sealed partial class LighterReader
 {
-    // Stored in the account's 1,000-character HistoryNotice column; the coverage table in
-    // docs/architecture/lighter-state.md carries the detail. A test keeps every sentence combined below that limit.
-    internal const string HistoryNotice =
-        "Incomplete Lighter history: at most the latest 500 perpetual executions, no backfill. " +
-        "Only fee-free executions with reported realized PnL are imported; liquidation, deleverage, settlement and self-trade records are not. " +
-        "USDC perpetual equity only, no spot wallets. Margin is the initial-margin requirement. Reported availability is not guaranteed withdrawal capacity.";
+    // Mainnet notices; each exchange words its own (LighterExchange). These names stay for existing callers.
+    internal static string HistoryNotice => LighterExchange.Mainnet.HistoryNotice;
+    internal static string PageLimitNotice => LighterExchange.Mainnet.PageLimitNotice;
     internal const string NonzeroRateNotice = "The account reports a nonzero maker or taker rate. No fills were imported.";
     internal const string CredentialRefusedNotice = "The optional read-only credential could not be verified. Public reads only; verify or replace the token.";
     internal const string HistoryRetryNotice = "The history credential was refused. Retrying this page once as a public read.";
     internal const string HistoryUnavailableNotice = "Recent execution history is unavailable without a usable read-only token. The public snapshot was refreshed; retained fills were not replaced.";
-    internal const string PageLimitNotice = "The five-page history limit was reached; older executions remain unimported.";
     internal static string MissingPnlNotice(int count) => $"{count} executions omitted because realized PnL was not reported.";
     internal static string FeeNotice(int count) => $"{count} fee-bearing or unverified-fee executions omitted.";
     internal static string SelfTradeNotice(int count) => $"{count} self-trade executions omitted.";
 
     public async Task<PerpetualVenueReadResult> ReadAsync(string sourceId, CancellationToken cancellationToken) =>
-        (await ReadCoreAsync(Index(sourceId), null, cancellationToken)).Result;
+        (await ReadCoreAsync(Index(sourceId, venue), null, cancellationToken)).Result;
 
     public async Task<PerpetualVenueReadResult> ReadAsync(Account account, CancellationToken cancellationToken)
     {
@@ -45,7 +41,7 @@ public sealed partial class LighterReader
             var catalogue = await CatalogueAsync(ct, refresh: true);
             using var account = await AccountAsync(source, ct);
             var snapshot = ReadSnapshot(account.RootElement.GetProperty("accounts")[0], catalogue, timeProvider.GetUtcNow());
-            var notices = new List<string> { HistoryNotice };
+            var notices = new List<string> { venue.HistoryNotice };
             var feeFreeTier = false;
             var fillsAllowed = true;
             if (credential is not null)
@@ -55,11 +51,11 @@ public sealed partial class LighterReader
                     await BindAsync(source, credential, ct);
                     using var limits = await GetAsync("accountLimits?account_index=" + source, ct, credential);
                     var root = limits.RootElement;
-                    var maker = Json.Integer(Json.Property(root, "current_maker_fee_tick"));
-                    var taker = Json.Integer(Json.Property(root, "current_taker_fee_tick"));
+                    var maker = json.Integer(json.Property(root, "current_maker_fee_tick"));
+                    var taker = json.Integer(json.Property(root, "current_taker_fee_tick"));
                     fillsAllowed = maker == 0 && taker == 0;
                     // accountLimits uses tier codes; "standard" is user_tier_name, not user_tier.
-                    feeFreeTier = fillsAllowed && Text(root, "user_tier") == "std";
+                    feeFreeTier = fillsAllowed && Text(json, root, "user_tier") == "std";
                     if (!fillsAllowed) notices.Add(NonzeroRateNotice);
                 }
                 catch (LighterAuthenticationException)
@@ -79,7 +75,8 @@ public sealed partial class LighterReader
             var selfTrades = 0;
             string? cursor = null;
             if (fillsAllowed)
-                for (var page = 0; page < MaxPages; page++)
+                // Each exchange's budget respects its trades weight (Robinhood's is three times mainnet's).
+                for (var page = 0; page < venue.TradePages; page++)
                 {
                     var query = "trades?account_index=" + source +
                         "&market_type=perp&sort_by=timestamp&sort_dir=desc&limit=100&aggregate=false" +
@@ -111,12 +108,12 @@ public sealed partial class LighterReader
                         missingPnl += result.MissingPnl;
                         fees += result.Fees;
                         selfTrades += result.SelfTrades;
-                        cursor = Cursor(trades.RootElement);
+                        cursor = Cursor(json, trades.RootElement);
                     }
                     if (cursor is null) break;
-                    if (!cursors.Add(cursor)) throw Json.Invalid();
+                    if (!cursors.Add(cursor)) throw json.Invalid();
                 }
-            if (cursor is not null) notices.Add(PageLimitNotice);
+            if (cursor is not null) notices.Add(venue.PageLimitNotice);
             if (missingPnl > 0) notices.Add(MissingPnlNotice(missingPnl));
             if (fees > 0) notices.Add(FeeNotice(fees));
             if (selfTrades > 0) notices.Add(SelfTradeNotice(selfTrades));
@@ -126,55 +123,60 @@ public sealed partial class LighterReader
 
     internal static VenueSnapshot ReadSnapshot(JsonElement account, Catalogue catalogue, DateTimeOffset observed)
     {
-        // https://docs.lighter.xyz/trading/multi-asset-margin.md: non-USDC margin changes equity semantics.
-        // Unified USDC-only accounts use the ordinary perps calculation; do not reject them just for their mode.
-        foreach (var asset in Rows(account, "assets", 256).EnumerateArray())
+        var exchange = catalogue.Exchange;
+        var json = exchange.Json;
+        // https://docs.lighter.xyz/trading/multi-asset-margin.md: non-collateral margin changes equity semantics.
+        // Unified collateral-only accounts use the ordinary perps calculation; do not reject them just for their mode.
+        // The exchange's collateral (USDC on mainnet, USDG on Robinhood) must be asset 3. Robinhood margin-enables
+        // tokenized stocks; they are refused rather than valued.
+        foreach (var asset in Rows(json, account, "assets", 256).EnumerateArray())
         {
-            var symbol = Text(asset, "symbol", 24);
-            var margin = Nonnegative(asset, "margin_balance");
-            if (symbol != QuoteAsset && margin != 0)
-                throw new VenueReadException("Lighter non-USDC collateral valuation is not supported. No partial snapshot was imported.");
-            if (symbol == QuoteAsset && Identity(Json.Property(asset, "asset_id")) != "3") throw Json.Invalid();
+            var symbol = Text(json, asset, "symbol", 24);
+            var margin = Nonnegative(json, asset, "margin_balance");
+            if (symbol != exchange.Collateral && margin != 0)
+                throw new VenueReadException(exchange.CollateralUnsupported);
+            if (symbol == exchange.Collateral && Identity(json, json.Property(asset, "asset_id")) != LighterExchange.CollateralAssetId)
+                throw json.Invalid();
         }
-        if (account.TryGetProperty("bo_positions", out var binary) && Json.Array(binary).GetArrayLength() > 0)
-            throw new VenueReadException("Lighter binary positions are not supported. No partial snapshot was imported.");
+        if (account.TryGetProperty("bo_positions", out var binary) && json.Array(binary).GetArrayLength() > 0)
+            throw new VenueReadException(exchange.BinaryUnsupported);
 
         var positions = new List<VenuePosition>();
         var ids = new HashSet<string>(StringComparer.Ordinal);
         var isolatedRequirement = 0m;
-        foreach (var row in Rows(account, "positions", MaxMarkets).EnumerateArray())
+        foreach (var row in Rows(json, account, "positions", MaxMarkets).EnumerateArray())
         {
-            var quantity = Nonnegative(row, "position");
+            var quantity = Nonnegative(json, row, "position");
             if (quantity == 0) continue;
-            var id = Identity(Json.Property(row, "market_id"));
-            var market = catalogue.ById(id) ?? throw new VenueReadException("A Lighter position uses an unsupported market.");
-            if (!ids.Add(id) || Text(row, "symbol", 24) != market.Key) throw Json.Invalid();
-            var sign = Json.Integer(Json.Property(row, "sign"));
-            var mode = Json.Integer(Json.Property(row, "margin_mode"));
-            var fraction = Json.Positive(Json.Property(row, "initial_margin_fraction"));
-            if (sign is not (-1 or 1) || mode is not (0 or 1) || fraction > 100) throw Json.Invalid();
+            var id = Identity(json, json.Property(row, "market_id"));
+            var market = catalogue.ById(id) ?? throw new VenueReadException(exchange.PositionMarketUnsupported);
+            if (!ids.Add(id) || Text(json, row, "symbol", 24) != market.Key) throw json.Invalid();
+            var sign = json.Integer(json.Property(row, "sign"));
+            var mode = json.Integer(json.Property(row, "margin_mode"));
+            var fraction = json.Positive(json.Property(row, "initial_margin_fraction"));
+            if (sign is not (-1 or 1) || mode is not (0 or 1) || fraction > 100) throw json.Invalid();
             // Official IMR = abs(position) * mark * fraction. position_value is the reported mark notional.
             // Isolated allocated_margin is COLLATERAL, not IMR, and must not be used as margin requirement.
-            var notional = Nonnegative(row, "position_value");
+            var notional = Nonnegative(json, row, "position_value");
             var requirement = checked(notional * fraction / 100m);
             if (StrictJson.DecimalUnits(requirement) * 100 * BigInteger.Pow(10, 28) !=
-                StrictJson.DecimalUnits(notional) * StrictJson.DecimalUnits(fraction)) throw Json.Invalid();
-            if (mode == 1) isolatedRequirement = ExactSum(isolatedRequirement, requirement);
+                StrictJson.DecimalUnits(notional) * StrictJson.DecimalUnits(fraction)) throw json.Invalid();
+            if (mode == 1) isolatedRequirement = ExactSum(json, isolatedRequirement, requirement);
             var leverage = 100m / fraction;
-            positions.Add(new(market.Key, quantity * sign, Json.Positive(Json.Property(row, "avg_entry_price")),
-                Number(row, "unrealized_pnl"), requirement,
+            positions.Add(new(market.Key, quantity * sign, json.Positive(json.Property(row, "avg_entry_price")),
+                Number(json, row, "unrealized_pnl"), requirement,
                 leverage <= 1000 && leverage == decimal.Truncate(leverage) ? (int)leverage : null,
                 VenueContractId: id));
         }
-        return new(observed, "lighter-perps-account", Number(account, "total_asset_value"), null,
-            ExactSum(Nonnegative(account, "cross_initial_margin_requirement"), isolatedRequirement), positions,
-            AvailableMarginUsd: Json.OptionalAmount(account, "available_balance"));
+        return new(observed, exchange.SnapshotScope, Number(json, account, "total_asset_value"), null,
+            ExactSum(json, Nonnegative(json, account, "cross_initial_margin_requirement"), isolatedRequirement), positions,
+            AvailableMarginUsd: json.OptionalAmount(account, "available_balance"));
     }
 
-    private static decimal ExactSum(decimal first, decimal second)
+    private static decimal ExactSum(StrictJson json, decimal first, decimal second)
     {
         var result = checked(first + second);
-        if (StrictJson.DecimalUnits(result) != StrictJson.DecimalUnits(first) + StrictJson.DecimalUnits(second)) throw Json.Invalid();
+        if (StrictJson.DecimalUnits(result) != StrictJson.DecimalUnits(first) + StrictJson.DecimalUnits(second)) throw json.Invalid();
         return result;
     }
 
@@ -189,37 +191,40 @@ public sealed partial class LighterReader
     // Mainnet omits these fields on some public responses. Absence is NOT evidence of zero.
     internal static FillPage ReadFills(JsonElement root, Catalogue catalogue, string source, DateTimeOffset latest, bool standardTier)
     {
+        var json = catalogue.Exchange.Json;
+        // Standard-account fills are fee-free; the fee token and quote are the exchange's collateral.
+        var collateral = catalogue.Exchange.Collateral;
         var fills = new List<VenueFill>();
         var missingPnl = 0;
         var fees = 0;
         var selfTrades = 0;
-        foreach (var row in Rows(root, "trades", PageSize).EnumerateArray())
+        foreach (var row in Rows(json, root, "trades", PageSize).EnumerateArray())
         {
-            var marketId = Identity(Json.Property(row, "market_id"));
+            var marketId = Identity(json, json.Property(row, "market_id"));
             if (catalogue.SpotIds.Contains(marketId)) continue;
-            var market = catalogue.ById(marketId) ?? throw Json.Invalid();
-            var ask = Identity(Json.Property(row, "ask_account_id")) == source;
-            var bid = Identity(Json.Property(row, "bid_account_id")) == source;
-            if (!ask && !bid) throw Json.Invalid();
+            var market = catalogue.ById(marketId) ?? throw json.Invalid();
+            var ask = Identity(json, json.Property(row, "ask_account_id")) == source;
+            var bid = Identity(json, json.Property(row, "bid_account_id")) == source;
+            if (!ask && !bid) throw json.Invalid();
             // A self-trade has two account roles and cannot become a single execution fact without inventing semantics.
             // Omit it like other unsupported records; failing would block every refresh while it stays in recent history.
             if (ask && bid) { selfTrades++; continue; }
             var side = ask ? ExecutionFacts.Sell : ExecutionFacts.Buy;
-            var maker = Json.Boolean(Json.Property(row, "is_maker_ask")) == ask;
+            var maker = json.Boolean(json.Property(row, "is_maker_ask")) == ask;
             var role = maker ? "maker" : "taker";
-            var before = Number(row, role + "_position_size_before");
-            var quantity = Json.Positive(Json.Property(row, "size"));
+            var before = Number(json, row, role + "_position_size_before");
+            var quantity = json.Positive(json.Property(row, "size"));
             var effect = Effect(side, before, quantity);
-            if (row.TryGetProperty(role + "_position_sign_changed", out var changed)) Json.Boolean(changed);
-            var type = Text(row, "type");
-            if (type is not ("trade" or "liquidation" or "deleverage" or "market-settlement")) throw Json.Invalid();
+            if (row.TryGetProperty(role + "_position_sign_changed", out var changed)) json.Boolean(changed);
+            var type = Text(json, row, "type");
+            if (type is not ("trade" or "liquidation" or "deleverage" or "market-settlement")) throw json.Invalid();
 
             // Trade fee fields are rates, not fee amounts. Never apply the other counterparty's tier to this account.
             // If a rate is absent and the tier has not been verified, the execution's fee is unknown.
             // Standard TWAP and integrator fees must still pass the explicit per-execution checks.
             var hasFee = row.TryGetProperty(role + "_fee", out var rate);
-            var rateValue = hasFee ? Json.Integer(rate) : 0;
-            var integratorRate = row.TryGetProperty("integrator_" + role + "_fee", out var integrator) ? Json.Integer(integrator) : 0;
+            var rateValue = hasFee ? json.Integer(rate) : 0;
+            var integratorRate = row.TryGetProperty("integrator_" + role + "_fee", out var integrator) ? json.Integer(integrator) : 0;
             if (rateValue != 0 || integratorRate != 0 || (!hasFee && !standardTier) || type != "trade")
             {
                 fees++;
@@ -227,13 +232,13 @@ public sealed partial class LighterReader
             }
             var pnlName = ask ? "ask_account_pnl" : "bid_account_pnl";
             if (!row.TryGetProperty(pnlName, out var pnlValue)) { missingPnl++; continue; }
-            var pnl = Json.Number(pnlValue);
-            var id = ExactId(row, "trade_id", "trade_id_str");
-            var orderId = ExactId(row, ask ? "ask_id" : "bid_id", ask ? "ask_id_str" : "bid_id_str");
-            var at = Json.Timestamp(Json.Property(row, "timestamp"), latest.ToUnixTimeMilliseconds());
-            var price = Json.Positive(Json.Property(row, "price"));
-            var hash = Text(row, "tx_hash", 256);
-            if (!hash.All(char.IsAsciiHexDigit)) throw Json.Invalid();
+            var pnl = json.Number(pnlValue);
+            var id = ExactId(json, row, "trade_id", "trade_id_str");
+            var orderId = ExactId(json, row, ask ? "ask_id" : "bid_id", ask ? "ask_id_str" : "bid_id_str");
+            var at = json.Timestamp(json.Property(row, "timestamp"), latest.ToUnixTimeMilliseconds());
+            var price = json.Positive(json.Property(row, "price"));
+            var hash = Text(json, row, "tx_hash", 256);
+            if (!hash.All(char.IsAsciiHexDigit)) throw json.Invalid();
             var direction = effect switch
             {
                 ExecutionFacts.Open => ask ? "Open Short" : "Open Long",
@@ -243,13 +248,13 @@ public sealed partial class LighterReader
             // Project only validated fields; never persist unknown server fields which might echo an auth header.
             var raw = JsonSerializer.Serialize(new
             {
-                trade_id = id, market_id = marketId, type, ask_account_id = Identity(Json.Property(row, "ask_account_id")),
-                bid_account_id = Identity(Json.Property(row, "bid_account_id")), order_id = orderId,
-                size = Text(row, "size"), price = Text(row, "price"), realized_pnl = Json.Text(pnlValue),
+                trade_id = id, market_id = marketId, type, ask_account_id = Identity(json, json.Property(row, "ask_account_id")),
+                bid_account_id = Identity(json, json.Property(row, "bid_account_id")), order_id = orderId,
+                size = Text(json, row, "size"), price = Text(json, row, "price"), realized_pnl = json.Text(pnlValue),
                 timestamp = at.ToUnixTimeMilliseconds(), tx_hash = hash, account_role = role,
-                position_size_before = Text(row, role + "_position_size_before"), fee_rate = rateValue
+                position_size_before = Text(json, row, role + "_position_size_before"), fee_rate = rateValue
             });
-            fills.Add(new(id, market.Key, side, direction, price, quantity, 0, QuoteAsset, pnl, at, orderId, hash, raw,
+            fills.Add(new(id, market.Key, side, direction, price, quantity, 0, collateral, pnl, at, orderId, hash, raw,
                 effect, standardTier ? ExecutionFacts.FeeStandardAccountFree : ExecutionFacts.FeeReported,
                 ExecutionFacts.PnlGross, marketId));
         }

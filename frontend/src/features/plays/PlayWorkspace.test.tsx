@@ -45,6 +45,17 @@ describe('Play draft workspace', () => {
     </VenuesProvider>)
     await waitFor(() => expect(screen.getByRole('link', { name: /Open 1000PEPE/ })).toHaveAttribute('href', 'https://trade.example/kPEPE'))
   })
+  it('shows the chosen account venue beside the label, leaving the select its full row', async () => {
+    const rh = { ...accountFixture, name: 'Robinhood perps', venueId: 'lighter-rh', sourceId: '7', address: null }
+    render(<AccountWorkspace accounts={[rh]} api={catalogueApi} />)
+    const select = screen.getByRole('combobox', { name: 'Account' })
+    expect(screen.getByRole('option', { name: 'Robinhood perps · Lighter · Robinhood' })).toBeInTheDocument()
+    await userEvent.selectOptions(select, rh.id)
+    const heading = screen.getByText('Account', { selector: 'label' }).parentElement!
+    expect(heading.querySelector('.venue-badge')).toHaveTextContent('Lighter · Robinhood')
+    expect(heading.querySelector('[data-logo="lighter-rh"]')).not.toBeNull()
+    expect(select.parentElement!.querySelector('.venue-badge')).toBeNull()
+  })
   it('clears venue context when a reload disables or removes the chosen account', async () => {
     const venue = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}` }
     const onDraft = vi.fn<(draft: PlayDraft) => void>()

@@ -4,6 +4,7 @@ import type { SizingDocument } from '@/api/sizing'
 import { ExternalLink, Info, PencilLine, RefreshCw } from 'lucide-react'
 import { statusLabels, type PlayStatus } from '@/api/plays'
 import { useVenues } from '@/api/venues'
+import { VenueBadge } from '@/components/venues/VenueBadge'
 import { Input } from '@/components/ui/input'
 import type { DraftEvidence, PlayDraft } from './draft'
 import { captureFileName, createEvidence, evidenceLimits } from './evidence'
@@ -19,6 +20,7 @@ import { PlanNotices } from './PlanNotices'
 import { PositionEditor, defaultMaxLeverage, type SuggestionMarks } from './PositionEditor'
 import { ChartPanel } from './PlayChart'
 import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
+import { isNominalUsdQuote } from './stablecoins'
 import './plays-workspace.css'
 
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, notice,
@@ -87,8 +89,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const riskAmount = account?.accountValueUsd && Number(account.accountValueUsd) > 0 ? account.accountValueUsd
     : draft.budgetOverride && Number(draft.budgetOverride) > 0 ? draft.budgetOverride : null
   const riskName = account?.accountValueUsd && Number(account.accountValueUsd) > 0 ? `${account.name} account value` : 'Explicit manual budget'
-  const riskReference = riskAmount && (units.quote === 'USD' || units.quote === 'USDC')
-    ? { name: units.quote === 'USDC' ? `${riskName} · nominal USD/USDC at 1:1` : riskName, amount: riskAmount, quote: units.quote } : null
+  // Listed stablecoins count as nominal USD at 1:1, with no FX or depeg valuation.
+  const riskReference = riskAmount && isNominalUsdQuote(units.quote)
+    ? { name: units.quote === 'USD' ? riskName : `${riskName} · nominal USD/${units.quote} at 1:1`, amount: riskAmount, quote: units.quote } : null
 
   const tradeUrl = account ? venues.tradeUrl(account.venueId, draft.instrument, draft.instrumentSource, instrumentInfo?.venueContractId) : null
   // In a read-only Play, the chart can still be viewed but not edited.
@@ -174,14 +177,16 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         {portfolios.map(portfolio => <option key={portfolio.id} value={portfolio.id}>{portfolio.name}</option>)}
         {enabledAccounts.some(account => account.portfolioId === null) && <option value="unassigned">Unassigned accounts</option>}
       </select></label>
-      <div className="plays-account-field"><label htmlFor={`${fieldId}-account`} className="field-label">Account</label>
+      <div className="plays-account-field">
+        {/* The venue sits beside the label so the select keeps its full width for long account names. */}
+        <div className="plays-field-heading plays-account-heading"><label htmlFor={`${fieldId}-account`}>Account</label>
+          {account && <VenueBadge venueId={account.venueId} size="xs" className="plays-account-venue" />}</div>
         <div className="plays-select-row">
           <select id={`${fieldId}-account`} value={lockInstrument ? draft.accountId : accountId} disabled={lockInstrument || (loading && !accounts.length)} onChange={event => chooseAccount(event.target.value)}>
             <option value="">Choose an account</option>
             {lockInstrument && !account && <option value={draft.accountId}>Unavailable or disabled account</option>}
             {filteredAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {venues.name(account.venueId)}</option>)}
-          </select>
-          {onReload && <button type="button" className="plays-reload-accounts" aria-label="Reload accounts" title="Reload accounts"
+          </select>          {onReload && <button type="button" className="plays-reload-accounts" aria-label="Reload accounts" title="Reload accounts"
             onClick={onReload} disabled={loading} aria-busy={loading}>
             <RefreshCw size={13} className={loading ? 'is-spinning' : ''} aria-hidden="true" /></button>}
         </div>
