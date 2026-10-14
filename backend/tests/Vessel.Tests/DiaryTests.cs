@@ -57,6 +57,7 @@ public sealed class ManualLedgerTests
     [Theory]
     [InlineData(null, null)]
     [InlineData("1", "BTC")]
+    [InlineData("1", "usdg")]
     public void Unknown_or_unconverted_cost_is_not_zero(string? fee, string? currency)
     {
         var ledger = ManualLedger.Calculate(Play(), [Row("entry", "1", "100", 0, fee, currency), Row("exit", "1", "110", 1, side: "sell")]);
@@ -71,6 +72,22 @@ public sealed class ManualLedgerTests
         var ledger = ManualLedger.Calculate(Play(), [Row("entry", "1", "100", 0, "0", "BTC"), Row("exit", "1", "110", 1, "2", "USDC", "sell")]);
         Assert.True(ledger.FeesComplete);
         Assert.Equal(8, ledger.Net);
+    }
+
+    [Fact]
+    public void Listed_stablecoin_costs_are_deducted_nominally_together()
+    {
+        var play = Play();
+        var ledger = ManualLedger.Calculate(play, [Row("entry", "1", "100", 0, "0.5", "USDG"),
+            Row("exit", "1", "110", 1, "0.25", "USDC", "sell")]);
+        Assert.True(ledger.FeesComplete);
+        Assert.Equal(9.25m, ledger.Net);
+        play.MarkPlanned(At);
+        play.MarkOpen("Filled.", At.AddSeconds(1));
+        play.MarkClosed("Exited.", At.AddSeconds(2));
+        var outcome = PlayOutcomeCalculator.Outcome(new ClosedPlayFacts(play, [], ledger.Projection.ToList(),
+            ManualSource: true, ManualFeesComplete: ledger.FeesComplete))!;
+        Assert.Equal((9.25m, true), (outcome.NetResult, outcome.FeesComplete));
     }
 
     [Fact]

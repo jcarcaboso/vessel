@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Activity;
 using Vessel.Application.Common;
 using Vessel.Application.Overview;
+using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 
@@ -200,6 +201,18 @@ public sealed class OverviewSummaryTests
             realized.Coverage.TotalAccountCount, realized.Coverage.ContributingOperationCount, realized.Coverage.ExcludedOperationCount));
         Assert.Contains(realized.Coverage.Reasons, r => r.Reason.Contains("Incomplete") && r.Count == 1);
         Assert.Contains(realized.Coverage.Reasons, r => r.Reason.Contains("net result") && r.Count == 1);
+    }
+
+    [Fact]
+    public async Task Listed_stablecoin_fees_pool_nominally_across_venues_with_the_caveat_visible()
+    {
+        var usdc = Account(); var usdg = Account(); var lower = Account();
+        Operation(usdc, Now.AddHours(-1), 10, 1); Operation(usdg, Now.AddHours(-1), 5, 0.5m, "USDG");
+        Operation(lower, Now.AddHours(-1), 100, 1, "usdg");
+        var result = await service.GetAsync("account", "30", "all", default);
+        Assert.Equal("13.5", result.Totals.RealizedResult.AmountUsd);
+        Assert.Equal((2, 1), (result.Totals.RealizedResult.Coverage.ContributingOperationCount, result.Totals.RealizedResult.Coverage.ExcludedOperationCount));
+        Assert.Contains(NominalStablecoins.Caveat, result.ScopeNote);
     }
 
     [Fact]

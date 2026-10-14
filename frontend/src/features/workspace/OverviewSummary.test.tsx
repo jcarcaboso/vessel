@@ -27,6 +27,8 @@ describe('Overview summary', () => {
     expect(screen.getAllByText('$2.00 unrealized').every(e => e.classList.contains('overview-positive'))).toBe(true)
     expect(screen.getAllByText(/\$0\.0000000000000000000000000001/).every(e => e.classList.contains('overview-negative'))).toBe(true)
     expect(screen.getByText('balance: 1 · Balance unavailable.')).toBeInTheDocument()
+    // Pooled balances add venue quote stablecoins (USDC, USDG…) at nominal 1:1.
+    expect(screen.getByText('Nominal USD · listed stablecoins at 1:1')).toBeInTheDocument()
     fireEvent.click(within(table).getByRole('button', { name: 'Scope overview to Swing trading' }))
     expect(onQuery).toHaveBeenLastCalledWith({ ...query, scope: document.rows[0]!.id })
     fireEvent.click(within(table).getByText('100.00%'))

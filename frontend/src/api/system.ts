@@ -2,6 +2,7 @@ import { candleIntervals, type CandleInterval } from './candles'
 import { ApiError } from './errors'
 import { isGuid, isRecord } from './guards'
 import { createApiCall } from './request'
+import { isVenueLogoKey, type VenueLogoKey } from './venue-logos'
 
 export const manualVenueId = 'manual'
 
@@ -28,6 +29,8 @@ export interface VenueInfo {
   intervals: CandleInterval[]
   /** Five significant figures, or each instrument's tick. */
   priceRule: 'significant-figures' | 'tick-size'
+  /** Bundled logo key from the fixed set. A key this browser does not know is dropped, showing the generic icon. */
+  logo?: VenueLogoKey
 }
 
 export interface SystemInfo {
@@ -85,7 +88,7 @@ function isSystemInfo(value: unknown): value is SystemInfo {
 
 /** Token stays in the caller's runtime memory; never put it in an environment variable or URL. */
 export async function getSystem(token: string): Promise<SystemInfo> {
-  return createApiCall(token)('/api/system', {
+  const body = await createApiCall(token)('/api/system', {
     timeout: 8_000, validate: isSystemInfo,
     unavailable: 'Vessel API is unavailable. Check that the API is running and the proxy target is correct.',
     invalidJson: 'The API returned an invalid system response.',
@@ -104,4 +107,11 @@ export async function getSystem(token: string): Promise<SystemInfo> {
       return new ApiError('http', `The API request failed with HTTP ${response.status}.`, response.status)
     },
   })
+  return { ...body, venues: body.venues.map(withKnownLogo) }
+}
+
+/** Unknown or malformed logo keys keep the venue usable with a generic icon. */
+function withKnownLogo(venue: VenueInfo): VenueInfo {
+  const { logo, ...rest } = venue as VenueInfo & { logo?: unknown }
+  return isVenueLogoKey(logo) ? { ...rest, logo } : rest
 }

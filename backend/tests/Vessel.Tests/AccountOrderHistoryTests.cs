@@ -242,6 +242,7 @@ public sealed class AccountOrderHistoryTests
     [InlineData("hyperliquid", 516)]
     [InlineData("risex", 340)]
     [InlineData("lighter", 902)]
+    [InlineData("lighter-rh", 902)]
     public async Task Optional_failure_notice_fits_with_each_venues_maximum_public_coverage(string venue, int combinedLength)
     {
         var coverage = AccountHistoryNoticeBudget.CombinedCases().Where(c => c.Venue == venue).MaxBy(c => c.Public.Length);
@@ -250,6 +251,7 @@ public sealed class AccountOrderHistoryTests
         account.RecordSync(AccountHistoryOrders.At, coverage.Public);
         account.RecordOrderHistoryNotice(coverage.Orders);
         var notice = await service.RetainAccountOrdersAsync(account.Id, default);
+        Assert.Equal(1, orders.Reads);
         Assert.Equal(coverage.Public + "\nOrder history: " + notice, account.HistoryNotice);
         Assert.Equal(combinedLength, account.HistoryNotice!.Length);
         Assert.True(account.HistoryNotice.Length <= 1000);
@@ -281,6 +283,7 @@ internal sealed class AccountHistoryOrders(string venueId = "hyperliquid") : IVe
     internal static VenueDescriptor Descriptor(string venue) => venue switch
     {
         "lighter" => LighterReader.Descriptor,
+        "lighter-rh" => LighterExchange.Robinhood.Descriptor,
         "risex" => RisexReader.Descriptor,
         _ => HyperliquidPerpetualReader.Descriptor
     };
@@ -318,10 +321,16 @@ internal sealed class AccountHistoryCredential(string? token) : IAccountCredenti
 
 internal static class AccountHistoryNoticeBudget
 {
-    public static string LighterCappedOrders => LighterReader.OrdersNotice + LighterReader.OrdersPageLimitNotice;
+    public static string LighterCappedOrders => Capped(LighterExchange.Mainnet);
+
+    public static string Capped(LighterExchange exchange) => exchange.OrdersNotice + LighterReader.OrdersPageLimitNotice;
 
     public static string LighterPublic(string credentialNotice, string terminalNotice, int missingPnl = 500, int fees = 500, int selfTrades = 500) =>
-        string.Join(" ", new[] { LighterReader.HistoryNotice, credentialNotice, terminalNotice,
+        Public(LighterExchange.Mainnet, credentialNotice, terminalNotice, missingPnl, fees, selfTrades);
+
+    public static string Public(LighterExchange exchange, string credentialNotice, string terminalNotice,
+        int missingPnl = 500, int fees = 500, int selfTrades = 500) =>
+        string.Join(" ", new[] { exchange.HistoryNotice, credentialNotice, terminalNotice,
             LighterReader.MissingPnlNotice(missingPnl), LighterReader.FeeNotice(fees), LighterReader.SelfTradeNotice(selfTrades) }
             .Where(text => !string.IsNullOrEmpty(text)));
 
@@ -330,10 +339,14 @@ internal static class AccountHistoryNoticeBudget
         // A refused bind clears the token, so it cannot also cause an authenticated-page retry.
         // A failed page clears the cursor, so unavailable history and the page cap cannot coexist.
         // Counters share at most 500 rows; use the maximum three-digit width for each conservatively.
-        foreach (var credential in new[] { "", LighterReader.CredentialRefusedNotice, LighterReader.HistoryRetryNotice })
-        foreach (var terminal in new[] { "", LighterReader.PageLimitNotice, LighterReader.HistoryUnavailableNotice })
-            yield return ("lighter", LighterPublic(credential, terminal), LighterCappedOrders);
-        yield return ("lighter", string.Join(" ", LighterReader.HistoryNotice, LighterReader.NonzeroRateNotice), LighterCappedOrders);
+        // Every Lighter exchange is checked: a longer exchange name must still fit.
+        foreach (var exchange in LighterExchange.All)
+        {
+            foreach (var credential in new[] { "", LighterReader.CredentialRefusedNotice, LighterReader.HistoryRetryNotice })
+            foreach (var terminal in new[] { "", exchange.PageLimitNotice, LighterReader.HistoryUnavailableNotice })
+                yield return (exchange.VenueId, Public(exchange, credential, terminal), Capped(exchange));
+            yield return (exchange.VenueId, string.Join(" ", exchange.HistoryNotice, LighterReader.NonzeroRateNotice), Capped(exchange));
+        }
         yield return ("hyperliquid", Literal(typeof(HyperliquidPerpetualReader), "HistoryNotice"), Literal(typeof(HyperliquidPerpetualReader), "OrdersNotice"));
         yield return ("risex", Literal(typeof(RisexReader), "HistoryNotice"), Literal(typeof(RisexReader), "OrdersNotice"));
     }

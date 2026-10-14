@@ -46,6 +46,20 @@ describe('GET /api/system', () => {
     mockResponse({ ...systemFixture, venues: [{ ...indexVenue, credentialSetupUrl }, ...systemFixture.venues.filter(v => v.id !== indexVenue.id)] })
     await expect(getSystem('token')).rejects.toMatchObject({ kind: 'invalid-response' })
   })
+  it('keeps logo keys from the fixed set, including the Robinhood Lighter venue', async () => {
+    mockResponse(systemFixture)
+    const system = await getSystem('token')
+    expect(Object.fromEntries(system.venues.map(v => [v.id, v.logo]))).toEqual({
+      hyperliquid: 'hyperliquid', 'lighter-rh': 'lighter-rh', quantfury: undefined, manual: 'manual',
+    })
+  })
+  it.each(['binance', 'https://venue.example/logo.png', '../lighter', '', 7, null, {}, 'Lighter', 'constructor', '__proto__'])('treats unknown logo %j as absent without rejecting the contract', async logo => {
+    mockResponse({ ...systemFixture, venues: systemFixture.venues.map(v => v.id === 'hyperliquid' ? { ...v, logo } : v) })
+    const system = await getSystem('token')
+    const hyperliquid = system.venues.find(v => v.id === 'hyperliquid')!
+    expect(hyperliquid).not.toHaveProperty('logo')
+    expect(hyperliquid.name).toBe('Hyperliquid')
+  })
   it('uses the exact path and a plain Bearer header, without cookies or token URLs', async () => {
     const request = mockResponse(systemFixture)
     await expect(getSystem(' runtime-token ')).resolves.toEqual(systemFixture)

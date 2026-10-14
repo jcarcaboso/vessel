@@ -40,11 +40,11 @@ A valid flip must oppose the computed position and exceed its absolute quantity.
 
 All API monetary values, prices and quantities are decimal strings. The aggregator converts retained .NET decimals into signed `BigInteger` coefficients at scale 28. Sums, subtraction, maximum positions and flip splits remain exact even when differing decimal scales would round during normal decimal addition. Price-times-quantity products retain scale 56. Weighted averages round only at the division boundary, to 28 decimal places, halfway away from zero. Nonterminating averages cannot have a finite exact decimal representation. The scope notice names this precision limit.
 
-Reported closed P&L sums allocated venue facts. The P&L basis is gross, net-of-fee or mixed. Net result follows the existing sizing rule: subtract USDC fees on gross fills only. Net-of-fee fills already include their fees, so no fee is subtracted again. A nonzero gross fee in another token makes net result null, with a coverage reason, rather than converting it or claiming a complete result.
+Reported closed P&L sums allocated venue facts. The P&L basis is gross, net-of-fee or mixed. Net result follows the existing sizing rule: subtract listed nominal stablecoin fees on gross fills only. Net-of-fee fills already include their fees, so no fee is subtracted again. A nonzero gross fee in another token makes net result null, with a coverage reason, rather than converting it or claiming a complete result.
 
 October 14, 2026: the operation summary displays before-fee closed P&L from
 `grossClosedPnlUsd`, followed by fees and the existing net result. The aggregator
-adds back allocated USDC fees only for net-of-fee facts, including negative-fee
+adds back allocated listed stablecoin fees only for net-of-fee facts, including negative-fee
 rebates; gross facts stay unchanged. Before-fee P&L is null with coverage when a
 net-of-fee fact has a nonzero fee in another token. `reportedClosedPnlUsd` and the
 original executions retain the venue's reported values. RISEx net results must
@@ -58,7 +58,7 @@ Incomplete operations, unknown prices/direction and zero entry prices have no
 percentage. Reentries can make this price comparison differ from realized
 return on capital; it is not used in sizing or Review.
 
-The display sums USDC, USDT, USDT0, USDE, USDe and USDH fees as nominal stablecoin units. These are explicit symbol labels from normalized execution facts, not a wallet token-identity validation or FX conversion. All other fee tokens stay in separate exact token totals. A USDT gross fee appears in the nominal stablecoin display but still makes net result unknown, since sizing's USD result supports USDC fees only. Negative reported fees, such as rebates, retain their sign. Unsupported fees on net-of-fee fills do not make net result unknown because that P&L already accounts for them. Separate funding cashflows are not added, and RISEx funding inclusion remains unverified.
+The display sums USDC, USDT, USDT0, USDE, USDe and USDH fees as nominal stablecoin units. These are explicit symbol labels from normalized execution facts, not a wallet token-identity validation or FX conversion. All other fee tokens stay in separate exact token totals. Since October 14, 2026 the display and the net result use the same list (see below), so a USDT or USDG gross fee is deducted nominally. Negative reported fees, such as rebates, retain their sign. Unsupported fees on net-of-fee fills do not make net result unknown because that P&L already accounts for them. Separate funding cashflows are not added, and RISEx funding inclusion remains unverified.
 
 The frontend does not total money. Sign colouring examines decimal strings directly; display formatting reuses the existing decimal-string formatter. Exact API values remain available in numeric-cell titles.
 
@@ -105,3 +105,7 @@ notes move into the drill-down. Entry and exit have separate columns; the exit
 colour follows the direction-adjusted price return. Times are shortened in UTC,
 with full timestamps in a tooltip. Activity uses the shared `NativeSelect` for
 consistent arrow placement, padding and native keyboard behaviour.
+
+## Nominal stablecoin fees (October 14, 2026)
+
+`OperationAggregator`, sizing, Review, Overview and manual ledgers share the Application `NominalStablecoins` list (USDC, USDG, USDT, USDT0, USDE, USDe and USDH; exact, case-sensitive). Its fees are summed with exact integer arithmetic and deducted one-for-one, also when one operation mixes them; any other token stays in `otherFees` and makes the affected result unknown, never converted. The scope note and Overview summary carry the "nominal 1:1, no FX or depeg valuation" caveat because venues settling in USDC and USDG are pooled.

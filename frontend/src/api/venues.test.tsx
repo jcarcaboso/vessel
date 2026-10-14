@@ -12,7 +12,7 @@ describe('Venues', () => {
     expect(venues.isManual('hyperliquid')).toBe(false)
     expect(venues.isManual('unknown-venue')).toBe(false)
     const renamed = new Venues(systemFixture.venues.map(venue => ({ ...venue, name: 'Manual' })))
-    expect(renamed.creatable().map(venue => venue.id)).toEqual(['hyperliquid', manualVenueId])
+    expect(renamed.creatable().map(venue => venue.id)).toEqual(['hyperliquid', 'lighter-rh', manualVenueId])
     expect(renamed.isManual('hyperliquid')).toBe(false)
   })
 
@@ -25,18 +25,36 @@ describe('Venues', () => {
   it('answers capabilities from the API, with none for an unknown venue', () => {
     expect(venues.can('hyperliquid', 'sync')).toBe(true)
     expect(venues.can('hyperliquid', 'stablecoinWallet')).toBe(true)
-    expect(venues.can('lighter', 'sync')).toBe(false)
+    expect(venues.can('quantfury', 'sync')).toBe(false)
     expect(venues.can('manual', 'candles')).toBe(false)
     expect(venues.can('unknown-venue', 'sync')).toBe(false)
   })
 
   it('offers manual and venues that can read an account, not planned ones', () => {
-    expect(venues.creatable().map(v => v.id)).toEqual(['hyperliquid', 'manual'])
+    expect(venues.creatable().map(v => v.id)).toEqual(['hyperliquid', 'lighter-rh', 'manual'])
+  })
+
+  it('reports the bundled logo key, with null for a venue without one, an unknown key or an unknown venue', () => {
+    expect(venues.logo('hyperliquid')).toBe('hyperliquid')
+    expect(venues.logo('lighter-rh')).toBe('lighter-rh')
+    expect(venues.logo('manual')).toBe('manual')
+    expect(venues.logo('quantfury')).toBeNull()
+    expect(venues.logo('unknown-venue')).toBeNull()
+    const forged = new Venues([{ ...systemFixture.venues[0]!, logo: 'https://evil.example/logo.svg' as never }])
+    expect(forged.logo('hyperliquid')).toBeNull()
   })
 
   it('reports the quote asset of a venue', () => {
     expect(venues.quote('hyperliquid')).toBe('USDC')
+    expect(venues.quote('lighter-rh')).toBe('USDG')
     expect(venues.quote('manual')).toBeNull()
+  })
+
+  it('labels venue values with the descriptor quote and keeps the USD fallback', () => {
+    expect(venues.valueUnit('hyperliquid')).toBe('USDC')
+    expect(venues.valueUnit('lighter-rh')).toBe('USDG')
+    expect(venues.valueUnit(manualVenueId)).toBe('USD')
+    expect(venues.valueUnit('unknown-venue')).toBe('USD')
   })
 
   it('builds a trade link only for venue instruments with a safe contract ID', () => {
@@ -45,7 +63,7 @@ describe('Venues', () => {
     expect(venues.tradeUrl('hyperliquid', null, 'venue')).toBeNull()
     expect(venues.tradeUrl('hyperliquid', '../x?y=1', 'venue')).toBeNull()
     expect(venues.tradeUrl('manual', 'BTC', 'venue')).toBeNull()
-    expect(venues.tradeUrl('lighter', 'BTC', 'venue')).toBeNull()
+    expect(venues.tradeUrl('quantfury', 'BTC', 'venue')).toBeNull()
   })
   it('uses the native contract only where the descriptor requests it', () => {
     const native = new Venues([{ ...systemFixture.venues[0]!, tradeUrlTemplate: 'https://trade.example/{venueContractId}' }])

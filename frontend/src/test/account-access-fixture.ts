@@ -4,7 +4,7 @@ import { accountFixture } from './workspace-fixture'
 import { systemFixture } from './system-fixture'
 
 export const indexVenue: VenueInfo = {
-  ...systemFixture.venues[0]!, id: 'lighter', name: 'Lighter', source: 'account-index',
+  ...systemFixture.venues[0]!, id: 'lighter', name: 'Lighter', source: 'account-index', logo: 'lighter',
   credentialSetupUrl: 'https://app.lighter.xyz/read-only-tokens',
   capabilities: { ...systemFixture.venues[0]!.capabilities, accountDiscovery: true, readOnlyCredential: true, stream: false },
 }

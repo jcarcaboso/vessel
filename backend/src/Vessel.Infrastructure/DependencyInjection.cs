@@ -3,9 +3,12 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Vessel.Infrastructure.Credentials;
+using Vessel.Infrastructure.Venues;
 using Vessel.Infrastructure.Venues.Lighter;
+using Vessel.Application.Credentials;
 using Vessel.Application.Evidence;
 using Vessel.Application.MarketData;
 using Vessel.Application.Ownership;
@@ -23,38 +26,48 @@ public static class DependencyInjection
     {
         services.Configure<VesselAuthOptions>(config.GetSection("Vessel:Auth"));
         services.AddSingleton(TimeProvider.System);
+        AddVenueHosts(services, config);
         // Venue modules register their descriptor and adapter ports; use cases find them by venue ID.
         // Catalogue caches hold public data only and outlive the scoped adapters.
         services.AddSingleton(VenueDescriptor.Manual);
         services.AddSingleton<HyperliquidCatalogueCache>();
-        services.AddVenueModule<HyperliquidPerpetualReader>(HyperliquidPerpetualReader.Descriptor, client =>
+        services.AddVenueModule(HyperliquidPerpetualReader.Descriptor, (sp, client) =>
         {
-            client.BaseAddress = new Uri("https://api.hyperliquid.xyz/");
+            client.BaseAddress = Hosts(sp).BaseUri(nameof(VenueHostOptions.Hyperliquid));
             client.Timeout = TimeSpan.FromSeconds(20);
-        });
+        }, (sp, client) => ActivatorUtilities.CreateInstance<HyperliquidPerpetualReader>(sp, client));
         // RISEx: public reads by address, no credential. The API's firewall rejects some default user agents.
         services.AddSingleton<RisexCatalogueCache>();
-        services.AddVenueModule<RisexReader>(RisexReader.Descriptor, client =>
+        services.AddVenueModule(RisexReader.Descriptor, (sp, client) =>
         {
-            client.BaseAddress = new Uri("https://api.rise.trade/");
+            client.BaseAddress = Hosts(sp).BaseUri(nameof(VenueHostOptions.Risex));
             client.Timeout = TimeSpan.FromSeconds(20);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Vessel/1.0 (self-hosted trading journal; read-only)");
-        });
-        // Lighter: the read-only token is added per request by its own handler. No redirects, so Authorization
-        // cannot leave the venue host.
-        services.AddSingleton<LighterCatalogueCache>();
-        services.AddVenueModule<LighterReader>(LighterReader.Descriptor, client =>
+        }, (sp, client) => ActivatorUtilities.CreateInstance<RisexReader>(sp, client));
+        // Lighter and Lighter on Robinhood Chain: one protocol module, one configured instance per exchange, each with
+        // its own client, catalogue cache and reader. The read-only token is added per request by the exchange's own
+        // handler. No redirects, so Authorization cannot leave the venue host.
+        foreach (var exchange in LighterExchange.All)
         {
-            client.BaseAddress = new Uri("https://mainnet.zklighter.elliot.ai/");
-            client.Timeout = TimeSpan.FromSeconds(20);
-        }, builder => builder.AddHttpMessageHandler(() => new LighterAuthenticationHandler())
-            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false }));
+            var id = exchange.VenueId;
+            services.AddKeyedSingleton(id, (sp, _) => new LighterCatalogueCache(sp.GetRequiredService<TimeProvider>(), id));
+            services.AddVenueModule(exchange.Descriptor, (sp, client) =>
+            {
+                client.BaseAddress = Hosts(sp).BaseUri(exchange.HostSection);
+                client.Timeout = TimeSpan.FromSeconds(20);
+            }, (sp, client) => new LighterReader(client, sp.GetRequiredService<TimeProvider>(),
+                sp.GetRequiredService<IAccountCredentialReader>(), sp.GetRequiredKeyedService<LighterCatalogueCache>(id), exchange),
+                builder => builder.AddHttpMessageHandler(() => new LighterAuthenticationHandler(exchange.Name))
+                    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false }));
+        }
         services.AddScoped<IVenueRegistry, VenueRegistry>();
         services.AddSingleton<CandleCache>();
         services.AddSingleton<MarketContextCache>();
         services.AddSingleton<MarketStreamLimiter>();
         services.AddSingleton<IWebSocketTransportFactory, ClientWebSocketTransportFactory>();
-        services.AddSingleton<IMarketStream, HyperliquidMarketStream>();
+        services.AddSingleton<IMarketStream>(sp => new HyperliquidMarketStream(sp.GetRequiredService<IWebSocketTransportFactory>(),
+            sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<HyperliquidMarketStream>>(),
+            Hosts(sp).StreamUri(nameof(VenueHostOptions.Hyperliquid))));
         AddEvidenceStorage(services, config);
         services.AddVesselCredentials(config);
         services.AddHttpContextAccessor();
@@ -80,20 +93,33 @@ public static class DependencyInjection
 
     /// <summary>
     /// Registers a venue module: its descriptor, one logger-free HttpClient named after the venue, and every venue port
-    /// the adapter implements, forwarded to one adapter per scope. A later registration of a port wins in the registry.
+    /// the adapter implements, forwarded to one adapter per scope keyed by venue ID, so several venues may share an
+    /// adapter type (Lighter exchanges). A later registration of a port wins in the registry.
     /// </summary>
     private static void AddVenueModule<TAdapter>(this IServiceCollection services, VenueDescriptor descriptor,
-        Action<HttpClient> configureClient, Action<IHttpClientBuilder>? configureBuilder = null) where TAdapter : class
+        Action<IServiceProvider, HttpClient> configureClient, Func<IServiceProvider, HttpClient, TAdapter> create,
+        Action<IHttpClientBuilder>? configureBuilder = null) where TAdapter : class
     {
         services.AddSingleton(descriptor);
         var name = descriptor.Id;
         var client = services.AddHttpClient(name, configureClient).RemoveAllLoggers();
         configureBuilder?.Invoke(client);
-        var create = ActivatorUtilities.CreateFactory<TAdapter>([typeof(HttpClient)]);
-        services.AddScoped(sp => create(sp, [sp.GetRequiredService<IHttpClientFactory>().CreateClient(name)]));
+        services.AddKeyedScoped(name, (sp, _) => create(sp, sp.GetRequiredService<IHttpClientFactory>().CreateClient(name)));
         foreach (var port in VenuePorts.Where(port => port.IsAssignableFrom(typeof(TAdapter))))
-            services.AddScoped(port, sp => sp.GetRequiredService<TAdapter>());
+            services.AddScoped(port, sp => sp.GetRequiredKeyedService<TAdapter>(name));
     }
+
+    /// <summary>
+    /// Venue hosts are configuration (<c>Vessel:Venues</c>), validated at startup so a bad value fails fast and the
+    /// message names only the key. Defaults are the production hosts.
+    /// </summary>
+    private static void AddVenueHosts(IServiceCollection services, IConfiguration config)
+    {
+        services.AddOptions<VenueHostOptions>().Bind(config.GetSection(VenueHostOptions.Section)).ValidateOnStart();
+        services.AddSingleton<IValidateOptions<VenueHostOptions>, VenueHostValidation>();
+    }
+
+    private static VenueHostOptions Hosts(IServiceProvider sp) => sp.GetRequiredService<IOptions<VenueHostOptions>>().Value;
 
     private static void AddEvidenceStorage(IServiceCollection services, IConfiguration config)
     {

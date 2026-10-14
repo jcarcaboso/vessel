@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { useNotifications } from '@/components/notifications/notifications'
 import { preloadLightweightRenderer } from '@/components/chart/lazy'
 import { useVenues } from '@/api/venues'
+import { VenueBadge } from '@/components/venues/VenueBadge'
 import { ArrowLeft, History, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import type { PlayDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
@@ -484,7 +485,7 @@ function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onD
       {shown.map(play => <li key={play.id}>
         <button type="button" className="plays-list-item" disabled={!!unsaved || busy} onClick={() => onOpen(play.id)} aria-label={`Open ${play.title || 'Untitled play'}`}>
           <span className="plays-list-title"><strong>{play.title || 'Untitled play'}</strong>{play.origin === 'retrospective' && <small>Retrospective · no original plan / R</small>}
-            <small>{play.instrument ? instrumentLabel(venues.quote(play.venueId), play.instrument, play.instrumentSource) : 'No instrument'} · {venues.name(play.venueId)} · {accountName(play.accountId)}</small></span>
+            <small>{play.instrument ? instrumentLabel(venues.quote(play.venueId), play.instrument, play.instrumentSource) : 'No instrument'} · <VenueBadge venueId={play.venueId} size="xs" /> · {accountName(play.accountId)}</small></span>
           <span className={`direction-chip ${play.direction}`}>{play.direction === 'long' ? 'Long' : 'Short'}</span>
           <span className={`badge play-status-${play.status}`}>{statusLabels[play.status]}</span>
           <small className="plays-list-meta">{ended.includes(play.status) && (play.hasReview || play.reviewedAtUtc ? 'Reviewed · ' : 'Pending review · ')}{play.origin !== 'retrospective' && play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated {new Date(play.updatedAtUtc).toLocaleDateString()}</small>

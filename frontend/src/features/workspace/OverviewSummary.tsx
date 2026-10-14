@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { errorMessage } from '@/api/errors'
 import { decimalSign } from '@/lib/decimal'
 import { PortfolioIcon } from './PortfolioIcon'
+import { VenueLogo } from '@/components/venues/VenueBadge'
 import { balanceShare } from './overview-share'
 import { money } from '@/lib/format'
 import './overview-summary.css'
@@ -44,7 +45,7 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
   const available = totals?.available.amountUsd ?? (loadingAll ? fallback.totals.availableBalanceUsd ?? null : null)
   return <>
     <section className="workspace-stat-grid overview-metrics" aria-label="Scoped overview totals">
-      <div className="shell-panel metric"><span>Total balance</span><strong>{money(balance)}</strong>{totals ? <Coverage value={totals.balance} /> : <small>{loadingAll ? `${fallback.totals.balanceAccountCount ?? 0} of ${accountCount} enabled accounts · ${fallback.totals.balanceCoverage ?? 'unavailable'} · loading summary` : current?.error ? 'Balance coverage unavailable' : 'Loading balance coverage…'}</small>}<small>Nominal USD</small></div>
+      <div className="shell-panel metric"><span>Total balance</span><strong>{money(balance)}</strong>{totals ? <Coverage value={totals.balance} /> : <small>{loadingAll ? `${fallback.totals.balanceAccountCount ?? 0} of ${accountCount} enabled accounts · ${fallback.totals.balanceCoverage ?? 'unavailable'} · loading summary` : current?.error ? 'Balance coverage unavailable' : 'Loading balance coverage…'}</small>}<small>Nominal USD · listed stablecoins at 1:1</small></div>
       <div className="shell-panel metric"><span>Available balance</span><strong>{money(available)}</strong>{totals ? <Coverage value={totals.available} /> : <small>{loadingAll ? `${fallback.totals.availableBalanceAccountCount ?? 0} of ${accountCount} enabled accounts · ${fallback.totals.availableBalanceCoverage ?? 'unavailable'} · loading summary` : current?.error ? 'Availability coverage unavailable' : 'Loading availability coverage…'}</small>}<small>Wallet, reported margin or withdrawal</small></div>
       <div className="shell-panel metric"><span>Enabled accounts</span><strong>{totals?.accountCount ?? accountCount}</strong><small>In this scope</small></div>
       <div className="shell-panel metric"><span>Perpetual positions</span><strong>{totals?.openPositionCount ?? (loadingAll ? fallback.totals.openPositionCount : '—')}</strong><small className={signClass(totals?.unrealizedPnl.amountUsd ?? null)}>{money(totals?.unrealizedPnl.amountUsd ?? null)} unrealized</small>{totals && <Coverage value={totals.unrealizedPnl} />}<small>From latest retained snapshots</small></div>
@@ -63,7 +64,7 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
             const share = balanceShare(row.shareOfBalance)
             return <tr key={row.id} onClick={() => onQuery({ ...query, scope: row.id })}>
               <th scope="row"><button className="overview-summary-name" aria-label={`Scope overview to ${row.name}`} onClick={e => { e.stopPropagation(); onQuery({ ...query, scope: row.id }) }}>
-                {row.icon && <PortfolioIcon icon={row.icon} />}<span>{row.name}<small>{row.venueId ? venues.name(row.venueId) : `${row.totals.accountCount} ${row.totals.accountCount === 1 ? 'account' : 'accounts'}`}</small></span>
+                {row.icon ? <PortfolioIcon icon={row.icon} /> : row.venueId ? <VenueLogo venueId={row.venueId} size="md" /> : null}<span>{row.name}<small>{row.venueId ? venues.name(row.venueId) : `${row.totals.accountCount} ${row.totals.accountCount === 1 ? 'account' : 'accounts'}`}</small></span>
               </button></th>
               <td><span>{money(row.totals.balance.amountUsd)}</span><Coverage value={row.totals.balance} /></td>
               <td><span>{money(row.totals.available.amountUsd)}</span><Coverage value={row.totals.available} /></td>

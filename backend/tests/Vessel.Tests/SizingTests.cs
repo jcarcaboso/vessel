@@ -200,6 +200,28 @@ public sealed class SizingServiceTests
         Assert.Equal(-1.02m, outcome.RMultiple);
     }
 
+    [Theory]
+    [InlineData("USDG", "USDG")]
+    [InlineData("USDC", "USDG")]
+    [InlineData("USDT0", "USDe")]
+    public void Fees_in_listed_stablecoins_are_deducted_nominally_even_when_mixed(string entryToken, string exitToken)
+    {
+        var outcome = PlayOutcomeCalculator.Outcome(Closed(Plan(), [new(OrderLinkRole.Entry, Fill(100, 1, fee: 0.5m, token: entryToken)),
+            new(OrderLinkRole.Stop, Fill(95, 1, pnl: -5, fee: 0.25m, token: exitToken))]))!;
+        Assert.Equal((-5.75m, true, PlayOutcomeKind.Loss), (outcome.NetResult, outcome.FeesComplete, outcome.Kind));
+    }
+
+    [Theory]
+    [InlineData("usdg")]
+    [InlineData("PYUSD")]
+    [InlineData("")]
+    public void Fees_in_tokens_outside_the_list_are_never_converted(string token)
+    {
+        var outcome = PlayOutcomeCalculator.Outcome(Closed(Plan(), [new(OrderLinkRole.Entry, Fill(100, 1, fee: 0.5m, token: token)),
+            new(OrderLinkRole.Stop, Fill(95, 1, pnl: -5, fee: 0.25m, token: "USDG"))]))!;
+        Assert.Equal((-5.25m, false), (outcome.NetResult, outcome.FeesComplete));
+    }
+
     [Fact]
     public void Stop_distance_weights_entries_and_stops_and_resolves_percent_at_leverage()
     {

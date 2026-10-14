@@ -1,6 +1,7 @@
 using System.Globalization;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
+using Vessel.Application.Workspace;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
@@ -11,7 +12,6 @@ namespace Vessel.Application.Plays;
 /// <summary>Shared executed result and initial planned risk. Reporting applies its own eligibility and time window.</summary>
 public static class PlayOutcomeCalculator
 {
-    private const string FeeToken = "USDC";
     /// <summary>
     /// Net result and planned risk of one closed Play. Risk uses the plan in force at the first entry fill;
     /// a Play without entry fills or a close time has no outcome.
@@ -53,9 +53,9 @@ public static class PlayOutcomeCalculator
         var gross = fills.Where(f => f.PnlBasis == ExecutionFacts.PnlGross).ToList();
         // Decimal sums can lose a small result between large cancelling exits.
         var net = ToDecimal(fills.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.ClosedPnlUsd)) -
-            gross.Where(f => f.FeeToken == FeeToken).Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Fee)));
+            gross.Where(f => NominalStablecoins.Contains(f.FeeToken)).Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Fee)));
         var feesComplete = facts.ManualFeesComplete && fills.All(f => ExecutionFacts.IsFeeBasis(f.FeeBasis)) &&
-            gross.All(f => !string.IsNullOrWhiteSpace(f.FeeToken) && (f.FeeToken == FeeToken || f.Fee == 0));
+            gross.All(f => !string.IsNullOrWhiteSpace(f.FeeToken) && (NominalStablecoins.Contains(f.FeeToken) || f.Fee == 0));
         var firstEntry = entries.Min(f => f.OccurredAtUtc);
         var revisions = facts.Revisions.OrderBy(r => r.Number).ToList();
         var plan = (revisions.LastOrDefault(r => r.CreatedAtUtc <= firstEntry) ?? revisions.FirstOrDefault())?.Plan ?? facts.Play.Plan;

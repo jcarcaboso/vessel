@@ -32,7 +32,7 @@
 
 .plays-page .plays-draft-fields {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr) minmax(0, 1.2fr) auto minmax(0, .7fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) minmax(0, 1.2fr) auto minmax(0, .6fr);
   gap: 0;
   padding: 16px 0;
   background: var(--card);
@@ -586,6 +586,8 @@
 .plays-page .play-actions .danger-action:hover:not(:disabled) { background: color-mix(in srgb, var(--negative) 12%, transparent); color: var(--negative); }
 .plays-page .plays-heading-actions .plays-venue-link { height: 32px; }
 .plays-page .plays-select-row { display: flex; align-items: center; gap: 6px; }
+.plays-page .plays-account-heading { margin-bottom: 7px; }
+.plays-page .plays-account-venue { flex-shrink: 1; color: var(--muted-foreground); font-size: 9px; font-weight: 500; gap: 5px; }
 .plays-page .plays-select-row select { flex: 1; min-width: 0; }
 .plays-page .plays-reload-accounts { display: inline-grid; flex-shrink: 0; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; color: var(--muted-foreground); background: transparent; cursor: pointer; }
 .plays-page .plays-reload-accounts:disabled { opacity: .5; cursor: default; }

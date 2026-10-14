@@ -7,6 +7,8 @@ import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { VenueLogo } from '@/components/venues/VenueBadge'
+import './accounts.css'
 import { WalletAccountImport } from './WalletAccountImport'
 import { PortfolioAccounts } from './PortfolioAccounts'
 import { PortfolioDestination } from './PortfolioDestination'
@@ -107,11 +109,17 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
   return <Dialog open={open} onOpenChange={next => { if (!pending) { onOpenChange(next); setError(null) } }}>
     <DialogContent className={`workspace-dialog${canDiscover ? ' account-import-dialog' : ''}`}>
       <DialogHeader><DialogTitle>Add an account</DialogTitle><DialogDescription>Import read-only venue accounts or keep a manual record. You choose when to refresh account data.</DialogDescription></DialogHeader>
-      <div className="workspace-form">
-        <label htmlFor="account-venue">Venue</label><select id="account-venue" value={venue} onChange={event => { setVenue(event.target.value); setAddress(''); setError(null) }} disabled={pending}>
-          {choices.map(v => <option key={v.id} value={v.id}>{venues.isManual(v.id) ? 'Manual account' : `${v.name} · read-only perps`}</option>)}
-        </select>
-      </div>
+      <fieldset className="venue-picker" disabled={pending}>
+        <legend>Venue</legend>
+        <div className="venue-picker-grid">{choices.map(v => <label key={v.id} className="venue-card">
+          <input type="radio" className="sr-only" name="account-venue" value={v.id} checked={venue === v.id}
+            aria-label={venues.isManual(v.id) ? 'Manual account' : `${v.name} · read-only perps`}
+            onChange={() => { setVenue(v.id); setAddress(''); setError(null) }} />
+          <VenueLogo venueId={v.id} size="lg" />
+          <span><strong>{venues.isManual(v.id) ? 'Manual account' : v.name}</strong>
+            <small>{venues.isManual(v.id) ? 'Your own record' : `Read-only perps${v.quoteAsset ? ` · ${v.quoteAsset}` : ''}`}</small></span>
+        </label>)}</div>
+      </fieldset>
       {canDiscover ? <WalletAccountImport key={venue} venueId={venue} api={api} portfolios={portfolios} accounts={accounts}
         onCreated={onCreated} onBusy={setPending} onClose={() => onOpenChange(false)} /> :
         <form onSubmit={event => { void submit(event) }} className="workspace-form" aria-busy={pending}>

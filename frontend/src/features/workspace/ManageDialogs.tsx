@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Trash2 } from 'lucide-react'
 import { useVenues } from '@/api/venues'
+import { VenueBadge } from '@/components/venues/VenueBadge'
 import { AccountCredential } from './AccountCredential'
 import { PortfolioAccounts } from './PortfolioAccounts'
 import { PortfolioIconPicker } from './PortfolioIcon'
@@ -170,7 +171,7 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
       {deleting ? <div className="workspace-form">
         {error && <p className="error" role="alert">{error}</p>}
         <div className="management-actions"><Button variant="outline" onClick={() => { setDeleting(false); setError(null) }} disabled={pending}>Keep account</Button><Button variant="destructive" onClick={() => { void remove() }} disabled={pending}>{pending ? 'Deleting…' : 'Delete account'}</Button></div>
-      </div> : <><p className="account-source"><span>Source</span> {venues.name(account.venueId)} · {account.sourceId ?? account.address ?? 'Manual record'}</p>
+      </div> : <><p className="account-source"><span>Source</span> <VenueBadge venueId={account.venueId} size="xs" /> · {account.sourceId ?? account.address ?? 'Manual record'}</p>
       <form className="workspace-form" onSubmit={event => { void save(event) }} aria-busy={pending}>
         <label htmlFor="rename-account">Account name</label><Input id="rename-account" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={pending} autoFocus />
         <label htmlFor="move-account">Portfolio</label><select id="move-account" value={portfolioId} onChange={event => setPortfolioId(event.target.value)} disabled={pending}>

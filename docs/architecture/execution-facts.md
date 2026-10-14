@@ -30,7 +30,7 @@ Matching, lifecycle and sizing used to read Hyperliquid's encoding directly: `"B
 - **Validation:** `VenueFactChecks` rejects adapter output outside the vocabulary before anything is stored. Sync treats it as a venue failure (the account keeps its previous facts and reports a refresh error); an order read answers the usual 502.
 - **Matcher:** plan levels carry `buy`/`sell`; a long entry buys and its exits sell. Retained fills must not contradict the assigned role. Entry links reject close/flip effects, and exit links reject open/flip effects. Owner linking uses the same compatibility rule.
 - **Lifecycle:** unknown effect does not assert a contradiction, but a known flip cannot settle a Play without split attribution. Compatible exits must equal entries in valid chronology, with no known missing fixed-size filled-order executions or resting entry order, before closure. Review retains its stricter requirement for explicit open/close effects.
-- **Sizing:** a Play's net result is the sum of closed PnL minus the USDC fees of `gross` fills only. `net-of-fee` fills already include their fee, and a fee paid in another token on such a fill does not make the result incomplete.
+- **Sizing:** a Play's net result is the sum of closed PnL minus the listed nominal stablecoin fees of `gross` fills only. `net-of-fee` fills already include their fee, and a fee paid in another token on such a fill does not make the result incomplete.
 - **Execution totals** report `closedPnlBasis`: `gross`, `net-of-fee` or `mixed`. The panel labels net-of-fee totals "after fees".
 
 ## Persistence
@@ -47,3 +47,7 @@ Migration `NormalizedExecutionFacts` adds `PositionEffect`, `FeeBasis` and `PnlB
 ## Tests
 
 `ExecutionFactsTests` (Hyperliquid mapping, vocabulary checks), the net-of-fee cases in `SizingTests`, `NormalizedExecutionFactsMigrationTests` (Postgres: conversion, constraints, no pending model changes) and the execution panel's net-of-fee label. Existing matcher, lifecycle and sizing tests run on the normalized values.
+
+## Nominal stablecoin fee tokens (October 14, 2026)
+
+`FeeToken` is still stored exactly as the venue reports it. Fee deduction checks it against the single Application list `NominalStablecoins` (USDC, USDG, USDT, USDT0, USDE, USDe and USDH; ordinal match, so `usdg` is not listed). Listed tokens count one-for-one in USD, without FX or depeg valuation; all other tokens leave gross-basis results unknown. Manual executions use the same list for their fee currency, and the frontend `features/plays/stablecoins.ts` mirrors it (a backend test checks they match).

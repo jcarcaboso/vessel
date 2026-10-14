@@ -2,6 +2,8 @@ import { useState } from 'react'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
 import { useVenues } from '@/api/venues'
 import { Input } from '@/components/ui/input'
+import { VenueLogo } from '@/components/venues/VenueBadge'
+import './accounts.css'
 
 export function PortfolioAccounts({ accounts, portfolios, selected, onChange, disabled, autoFocus = false, maxSelected = 200 }: {
   accounts: BrokerAccount[]; portfolios: Portfolio[]; selected: string[]; onChange: (ids: string[]) => void
@@ -22,6 +24,7 @@ export function PortfolioAccounts({ accounts, portfolios, selected, onChange, di
       <input type="checkbox" aria-label={`Include ${account.name}`} checked={selected.includes(account.id)}
         disabled={disabled || !selected.includes(account.id) && selected.length >= maxSelected}
         onChange={event => onChange(event.target.checked ? [...selected, account.id] : selected.filter(id => id !== account.id))} />
+      <VenueLogo venueId={account.venueId} size="md" />
       <span><strong>{account.name}</strong><small>{venues.name(account.venueId)} · {account.portfolioId ? names[account.portfolioId] ?? 'Portfolio' : 'Unassigned'}{account.isEnabled === false ? ' · Disabled' : ''}</small></span>
     </label>)}</div>
     {!shown.length && <p className="field-help">{accounts.length ? 'No matching accounts.' : 'No existing accounts yet. Add accounts later.'}</p>}

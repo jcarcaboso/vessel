@@ -35,7 +35,7 @@ He gives no fixed loss count or recovery threshold; the ladder below is the owne
 A closed play's outcome comes from its linked fills (entry and exit roles), never from price touches or the plan:
 
 ```text
-Net result      = Σ venue closed PnL − Σ fees paid in USDC
+Net result      = Σ venue closed PnL − Σ fees paid in listed nominal USD stablecoins
 Entry notional  = Σ entry fill quantity × fill price
 Return          = net result ÷ entry notional × 100          (unlevered price-move equivalent)
 Stop distance   = Σ_entries share × Σ_stops stopShare × |entry − stop|  ÷  Σ_entries share × entry
@@ -121,3 +121,7 @@ Suggestions only apply to editable plays. Planned plays change through revisions
 - Backend: `Vessel.Domain/Sizing` (outcomes, record, ladder, limits, settings), `Vessel.Application/Sizing` (service and store port), `SizingStore` and the `SizingSettings` migration (`sizing_settings`, one row per owner, risk 0.1–5 with two decimals).
 - Frontend: `api/sizing.ts`, `features/plays/useSizing.ts`, `suggestions.ts` (`planSuggestions` computes every suggestion once for the panel and the field markers) and `Suggestions.tsx` (the panel). The chart's level popover has no markers.
 - Maximum-stop prices round toward the entry and minimum-target prices away from it (five significant figures), so accepting clears the line.
+
+## Nominal stablecoin fees (October 14, 2026)
+
+For the Lighter Robinhood venue (USDG settlement) the fee rule uses the single Application list `NominalStablecoins` (USDC, USDG, USDT, USDT0, USDE, USDe and USDH, case-sensitive as reported). A gross fill's fee in any listed stablecoin is deducted one-for-one; other fee tokens still leave the outcome's fees incomplete and are never converted. Plays on venues with different quote stablecoins pool into one track record at nominal 1:1, with no FX or depeg valuation, and the sizing notice says so. The arithmetic, ladder and window are unchanged.
