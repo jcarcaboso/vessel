@@ -1,4 +1,5 @@
 import { candleIntervals, type CandleInterval } from './workspace'
+import { isVenueLogoKey, type VenueLogoKey } from '@/components/venues/venue-logos'
 
 export interface VenueCapabilities {
   sync: boolean; instruments: boolean; orders: boolean; candles: boolean
@@ -23,6 +24,8 @@ export interface VenueInfo {
   intervals: CandleInterval[]
   /** Five significant figures, or each instrument's tick. */
   priceRule: 'significant-figures' | 'tick-size'
+  /** Bundled logo key from the fixed set. A key this browser does not know is dropped, showing the generic icon. */
+  logo?: VenueLogoKey
 }
 
 export interface SystemInfo {
@@ -124,5 +127,11 @@ export async function getSystem(token: string): Promise<SystemInfo> {
     throw new ApiError('invalid-response', 'The API returned an invalid system response.')
   }
   if (!isSystemInfo(body)) throw new ApiError('invalid-response', 'The API returned an incompatible system contract.')
-  return body
+  return { ...body, venues: body.venues.map(withKnownLogo) }
+}
+
+/** An unknown, malformed or missing logo is not an incompatible contract: the venue keeps working with the generic icon. */
+function withKnownLogo(venue: VenueInfo): VenueInfo {
+  const { logo, ...rest } = venue as VenueInfo & { logo?: unknown }
+  return isVenueLogoKey(logo) ? { ...rest, logo } : rest
 }

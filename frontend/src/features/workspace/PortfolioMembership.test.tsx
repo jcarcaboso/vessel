@@ -175,7 +175,7 @@ describe('Portfolio membership', () => {
   it('creates a portfolio first for a new account and passes its id', async () => {
     const api = client(), created = vi.fn()
     render(<CreateAccountDialog open onOpenChange={vi.fn()} api={api} portfolios={portfolios} onCreated={created} />)
-    await userEvent.selectOptions(screen.getByLabelText('Venue'), 'manual')
+    await userEvent.click(screen.getByRole('radio', { name: 'Manual account' }))
     await userEvent.type(screen.getByLabelText('Account name'), 'Added')
     await newTarget(); await userEvent.click(screen.getByRole('button', { name: 'Add account' }))
     await waitFor(() => expect(api.createAccount).toHaveBeenCalledWith({ portfolioId: otherPortfolio.id, name: 'Added', venueId: 'manual' }))
@@ -184,7 +184,7 @@ describe('Portfolio membership', () => {
   it('retains a portfolio on failed account creation and retries without duplicating it before shell reload completes', async () => {
     const api = client({ createAccount: vi.fn().mockRejectedValueOnce(new ApiError('http', 'Account unavailable', 503)).mockResolvedValueOnce(accountFixture) }), created = vi.fn()
     render(<CreateAccountDialog open onOpenChange={vi.fn()} api={api} portfolios={[]} onCreated={created} />)
-    await userEvent.selectOptions(screen.getByLabelText('Venue'), 'manual')
+    await userEvent.click(screen.getByRole('radio', { name: 'Manual account' }))
     await userEvent.type(screen.getByLabelText('Account name'), 'Added')
     await newTarget(); await userEvent.click(screen.getByRole('button', { name: 'Add account' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('The new portfolio was created and kept.')
@@ -197,7 +197,7 @@ describe('Portfolio membership', () => {
   it('does not create an account when the new portfolio request fails', async () => {
     const api = client({ createPortfolio: vi.fn().mockRejectedValue(new ApiError('http', 'Cannot create', 503)) })
     render(<CreateAccountDialog open onOpenChange={vi.fn()} api={api} portfolios={[]} onCreated={vi.fn()} />)
-    await userEvent.selectOptions(screen.getByLabelText('Venue'), 'manual'); await userEvent.type(screen.getByLabelText('Account name'), 'Added')
+    await userEvent.click(screen.getByRole('radio', { name: 'Manual account' })); await userEvent.type(screen.getByLabelText('Account name'), 'Added')
     await newTarget(); await userEvent.click(screen.getByRole('button', { name: 'Add account' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Cannot create'); expect(api.createAccount).not.toHaveBeenCalled()
   })
@@ -296,7 +296,7 @@ describe('Portfolio membership', () => {
   it('never silently substitutes Unassigned when a selected portfolio disappears', async () => {
     const api = client(), props = { open: true, onOpenChange: vi.fn(), api, onCreated: vi.fn() }
     const view = render(<CreateAccountDialog {...props} portfolios={portfolios} />)
-    await userEvent.selectOptions(screen.getByLabelText('Venue'), 'manual')
+    await userEvent.click(screen.getByRole('radio', { name: 'Manual account' }))
     await userEvent.type(screen.getByLabelText('Account name'), 'Added')
     await userEvent.selectOptions(screen.getByRole('combobox', { name: /Portfolio/ }), otherPortfolio.id)
     view.rerender(<CreateAccountDialog {...props} portfolios={[portfolioFixture]} />)
@@ -309,7 +309,7 @@ describe('Portfolio membership', () => {
     const api = client({ createAccount: vi.fn().mockRejectedValue(new ApiError('http', 'Account unavailable', 503)) })
     const props = { open: true, onOpenChange: vi.fn(), api, onCreated: vi.fn() }
     const view = render(<CreateAccountDialog {...props} portfolios={[]} />)
-    await userEvent.selectOptions(screen.getByLabelText('Venue'), 'manual')
+    await userEvent.click(screen.getByRole('radio', { name: 'Manual account' }))
     await userEvent.type(screen.getByLabelText('Account name'), 'Added'); await newTarget()
     await userEvent.click(screen.getByRole('button', { name: 'Add account' }))
     await screen.findByRole('alert')
