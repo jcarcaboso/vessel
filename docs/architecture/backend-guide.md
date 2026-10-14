@@ -1,6 +1,6 @@
 # Backend guide
 
-Start here if you are new to the Vessel backend. This guide explains how the code is organised, what each module does, how the modules work together and which rules hold everywhere. It describes the code as of October 14, 2026 (after PR #37). The contracts and state documents in this folder hold the detailed rules for each feature. Where this guide and the code disagree, the code wins; please fix the guide.
+Start here if you are new to the Vessel backend. This guide explains how the code is organised, what each module does, how the modules work together and which rules hold everywhere. It describes this branch as of October 14, 2026, including the first two waves of PR #38. The contracts and state documents in this folder hold the detailed rules for each feature. Where this guide and the code disagree, the code wins; please fix the guide.
 
 Read [`CONTEXT.md`](../../CONTEXT.md) first for the product vocabulary (Play, Plan, Order link, Fill, Portfolio, Account and so on). Improvement work is tracked in [`backend-review.md`](backend-review.md).
 
@@ -48,9 +48,9 @@ flowchart LR
 | --- | --- | --- |
 | Domain | Entities (`Account`, `Portfolio`, `Play`, `PlayOrderLink`, `PlayEvidence`, …), fact records (`ImportedFill`, `ImportedOrder`, `AccountSnapshot`), the execution vocabulary (`ExecutionFacts`) and pure rules (`TrackRecord`, `Exposure`, `SizingLimits`). | EF, HTTP, JSON contracts, venue knowledge. |
 | Application | One folder per feature with its use-case service, request/response DTOs and the store port it needs. Venue ports and the `IVenueRegistry`. | SQL, EF types, `HttpClient` configuration, venue wire formats. |
-| Persistence | `VesselDbContext`, one store class per port, explicit migrations. Also registers the application services (see review item S3). | Business rules beyond locking and storage. |
+| Persistence | `VesselDbContext`, per-entity configurations, one store class per port, explicit migrations. Registers the context and stores. | Business rules beyond locking and storage. |
 | Infrastructure | Bearer authentication and owner context, AES-GCM credential vault, local evidence object store, venue adapters and their caches. | Use-case logic. |
-| Api | `Program.cs` (pipeline), endpoint mapping files, transport rules (HTTPS for credentials, compression, forwarded headers, production config checks). | Business decisions (with one exception, see review item S4). |
+| Api | `Program.cs` pipeline, `ApplicationServices.AddVesselApplication()` use-case registrations, endpoint mapping files and transport rules for credentials, compression, forwarded headers and production configuration. | Business decisions. |
 
 ## How a request flows
 
@@ -59,18 +59,18 @@ flowchart LR
 1. **Startup checks.** Outside Development, `ProductionConfiguration.Validate` refuses to start without a 32+ character token and a connection string.
 2. **Forwarded headers.** Only explicitly configured proxies are trusted (`ForwardedHeadersConfiguration`).
 3. **Security headers.** `nosniff`, `X-Frame-Options: DENY`, `no-referrer`, and `Cache-Control: no-store` on `/api` unless an endpoint set its own policy.
-4. **Error mapping.** Exceptions become RFC 7807 Problem Details. `WorkspaceException(status, message)` maps to its status and safe message; bad bodies map to 400/413; transient database or network failures anywhere in the exception chain map to 503; anything else is a 500 logged once by `SafeExceptionDiagnostics` (trace ID, route, exception type and method names only, never messages or data).
+4. **Error mapping.** Exceptions become RFC 7807 Problem Details. `ProblemException(status, detail)` maps to its status and safe message. `DomainValidationException` maps to 400 and `DomainRuleException` to 409. Bad bodies map to 400/413; transient database or network failures anywhere in the exception chain map to 503. Anything else is a 500 logged once by `SafeExceptionDiagnostics`, with trace ID, route, exception type and method names only, never messages or data.
 5. **Compression.** Only endpoints marked with `CompressMarketData` metadata (instruments, candles, market context) are compressed.
 6. **Authentication and authorization.** `BearerTokenHandler` compares a hash of the bearer token with the configured token in constant time and issues the configured owner identity. The fallback policy makes every endpoint private unless it opts out (`/health/live`, `/health/ready`). Repeated wrong tokens from one address get 429 (`AuthFailureLimiter`).
-7. **Body limits.** Credential routes (4 KiB, HTTPS outside Development and loopback), manual executions (16 KiB) and retrospective creation (128 KiB).
+7. **Endpoint transport.** `CarriesCredential()` marks token routes with the HTTPS guard and a 4 KiB body limit. `WithBodyLimit()` marks manual writes with 16 KiB and retrospective creation with 128 KiB. The guard runs after authorization, before binding, using matched endpoint metadata rather than URL text. Non-loopback credential entry requires HTTPS outside Development.
 8. **Endpoint.** A thin lambda binds the request, calls one application service and returns `Results.Ok/Created/NoContent`.
 
-Application services validate input and throw `WorkspaceException` for every expected failure (400, 404, 409, 413, 415, 429, 502, 503). Despite its name, this exception is used by every module.
+Application services throw `ProblemException` from `Application/Common` for expected request failures. Entities use the two Domain exception types for invalid input and rule conflicts. The API maps them centrally; unrelated `ArgumentException` or `InvalidOperationException` failures remain server errors.
 
 ## Ownership and security model
 
 - **One owner per installation.** The bearer token maps to a configured owner ID (`Vessel:Auth:OwnerId`). `IJournalOwnerContext` exposes it to the application; request bodies never carry an owner.
-- **Every table carries `OwnerId`.** `VesselDbContext` applies a global query filter per entity, foreign keys are composite `(OwnerId, Id)` so even raw SQL cannot link records across owners, and `SaveChanges` rejects tracked rows of another owner (`ValidateOwnership`). Raw SQL repeats the owner condition explicitly.
+- **Every entity implements `IOwned`.** Model construction fails if a mapped entity lacks the owner contract. `VesselDbContext` builds query filters from that contract, and `SaveChanges` checks both current and original owner IDs. Composite owner foreign keys prevent cross-owner relationships. Raw SQL still needs its own explicit owner predicate.
 - **Venue secrets.** Only Lighter needs one: a read-only `ro:` token, verified at the venue, sealed with AES-GCM (associated data binds owner, account and purpose) and stored in `account_credentials`. Keys come from configuration or a mode-600 key file, never from the database. See [`venue-credentials.md`](venue-credentials.md).
 - **No leaks.** Venue payloads, exception messages, tokens and connection strings are never logged or returned. HTTP clients have logging removed; EF error events are downgraded to Debug.
 
@@ -92,7 +92,7 @@ Each Application folder is a feature. The table lists its entry point, what it r
 | Review | `ReviewService` | `IReviewStore` | Scores saved closed Plays: metrics, equity series, groups, exclusions. | [portfolio-review](portfolio-review.md) |
 | Sizing | `SizingService` (+ Domain `TrackRecord`, `Exposure`, `SizingLimits`) | `ISizingStore` | Track record, exposure ladder and suggestion limits. | [sizing-suggestions](sizing-suggestions.md) |
 | Evidence | `EvidenceService`, `EvidenceMarkup`, `EvidenceImage` | `IEvidenceMetadataStore`, `IEvidenceObjectStore` | Images attached to saved Plays, with notes and vector markup kept beside the original bytes. | [chart-plan](chart-plan.md) (captures) |
-| System | `SystemMetadata` | — | `/api/system`: version, owner, venues and their capabilities for the browser. | [venue-registry](venue-registry.md) |
+| Metadata | `SystemMetadata` | — | `/api/system`: version, owner, venues and their capabilities for the browser. | [venue-registry](venue-registry.md) |
 
 ### How the modules depend on each other
 
@@ -126,7 +126,7 @@ Facts flow in one direction: venues produce facts, the owner produces intent (Pl
 
 ## Venue integration
 
-A venue is a **module**: a `VenueDescriptor` plus one adapter class implementing the ports the venue supports. `Infrastructure/DependencyInjection.cs` registers both; `VenueRegistry` indexes them by venue ID.
+A venue is a **module**: a `VenueDescriptor` plus one adapter class implementing the ports the venue supports. `AddVenueModule<TAdapter>()` in `Infrastructure/DependencyInjection.cs` registers the descriptor, a logger-free named HTTP client and a scoped adapter. Its supported reader, discovery and credential-verification ports resolve to that same scoped instance. `VenueRegistry` indexes those ports by venue ID. The shared Hyperliquid stream has its own singleton registration.
 
 | Port | Purpose | Hyperliquid | RISEx | Lighter |
 | --- | --- | --- | --- | --- |
@@ -219,7 +219,7 @@ Note that the account refresh currently holds the account lock while it waits fo
 
 ## Data model
 
-All tables have `OwnerId` and composite owner foreign keys. Decimals use unconstrained PostgreSQL `numeric`.
+All tables have `OwnerId` and composite owner foreign keys. Entity mappings live in `Vessel.Persistence/Configurations`; the context loads them before applying owner filters. A decimal pre-convention maps both `decimal` and nullable decimal properties to unconstrained PostgreSQL `numeric`, independent of mapping order.
 
 | Table | Entity | Notes |
 | --- | --- | --- |
@@ -241,7 +241,7 @@ Migrations live in `Vessel.Persistence/Migrations` and are **never** applied at 
 
 ## Conventions you will meet everywhere
 
-- **Exact numbers.** Financial values are `decimal` in .NET, `numeric` in PostgreSQL and exact invariant strings in JSON (`"0.############################"` formatting). Sums that can exceed `decimal` use 28-place `BigInteger` arithmetic (`ExactAmount`, `StablecoinTotals`). Input that cannot be represented exactly is rejected, never rounded.
+- **Exact numbers.** `Domain/Numerics/ExactDecimal` owns the named parsing profiles and invariant formatting. Profiles preserve each caller's accepted syntax rather than imposing one parser everywhere. Financial facts reject inexact decimal values; plans retain validated text. `ExactAmount` uses 28-place `BigInteger` arithmetic for sums that may exceed `decimal`. Sizing estimates retain their separate eight-place rounding rule. PostgreSQL uses `numeric`, and API amounts are strings.
 - **Unknown is null, not zero.** Missing balances, prices or results stay null, and responses carry coverage (`complete`, `partial`, `unavailable`) or notices explaining what is missing.
 - **Notices are part of the API.** Many responses include a `Notice`/`ScopeNote` string that the browser shows verbatim. They describe the limits of the data (incomplete history, nominal USD, funding not included). Change them deliberately.
 - **Capabilities, not names.** Check `VenueDescriptor.Capabilities`, never `venueId == "hyperliquid"`.
@@ -267,7 +267,7 @@ Development setup is in [`docs/development.md`](../development.md); production i
 dotnet test backend/Vessel.slnx
 ```
 
-- About 1,440 tests in `tests/Vessel.Tests`. Pure rule tests, adapter tests over recorded JSON, API tests through `WebApplicationFactory` with fake venues (`TestVenues`) and PostgreSQL tests.
+- `tests/Vessel.Tests` contains pure rule tests, adapter tests over recorded JSON, API tests through `WebApplicationFactory` with fake venues, and PostgreSQL tests.
 - `[PostgresFact]` tests need `Vessel_TEST_POSTGRES` (CI provides it). Each test migrates a random schema and drops it afterwards; they never touch the development tables.
 - Live venue tests are opt-in (`Vessel_TEST_RISEX_ADDRESS`, `Vessel_TEST_LIGHTER_PUBLIC=1`).
 - `pnpm check` runs the full repository check, as CI does.
@@ -276,22 +276,23 @@ dotnet test backend/Vessel.slnx
 
 ### Add an endpoint
 
-1. Put the request/response records in the feature's `Contracts.cs` and the logic in its service. Throw `WorkspaceException` with a safe message for expected failures.
+1. Put the request/response records in the feature's `Contracts.cs` and the logic in its service. Throw `ProblemException` with a safe message for expected request failures.
 2. Map it in the feature's `*Endpoints.cs` inside an authorized group. Keep the lambda to binding and one service call.
-3. If the service is new, register it (currently in `Persistence/DependencyInjection.cs`).
-4. Add an API test and, if it touches locking or SQL, a `[PostgresFact]` test.
+3. If the service is new, register it in `Api/ApplicationServices.cs`.
+4. Mark token-bearing routes with `CarriesCredential()` and other bounded JSON writes with `WithBodyLimit()`.
+5. Add an API test and, if it touches locking or SQL, a `[PostgresFact]` test.
 
 ### Add a table
 
-1. Add the entity to Domain with `OwnerId` and private setters where it has rules.
-2. In `VesselDbContext`: add the `DbSet`, configure the table, a composite `(OwnerId, …)` foreign key, `HasQueryFilter(x => x.OwnerId == CurrentOwnerId)`, **and** add the type to the `ValidateOwnership` switch (see review item R2).
+1. Add the entity to Domain implementing `IOwned`, with `OwnerId` and private setters where it has rules.
+2. Add the `DbSet` and an `IEntityTypeConfiguration<T>` in `Persistence/Configurations`, including composite owner foreign keys. Owner filtering and save validation apply automatically. Extend ownership tests to cover the new table.
 3. `dotnet ef migrations add Name --project src/Vessel.Persistence --output-dir Migrations` from `backend/`, and review the generated SQL.
 
 ### Add a venue
 
 1. Write the adapter in `Infrastructure/Venues/<Venue>/`, implementing only the ports the venue supports, using `BoundedJsonHttp` and `StrictJson`, mapping into `ExecutionFacts` and canonical instrument keys.
 2. Declare a `VenueDescriptor` with its capabilities, source kind (`evm-address` or `account-index`), candle intervals and price rule.
-3. Register the descriptor and adapter in `Infrastructure/DependencyInjection.cs` with a logger-free, named `HttpClient`.
+3. Call `AddVenueModule<TAdapter>()` in `Infrastructure/DependencyInjection.cs` with the descriptor and client configuration. The helper registers a logger-free named `HttpClient` and the adapter's supported ports. Register a stream separately if it needs a shared lifetime.
 4. Add adapter tests over recorded responses, and a live test behind an environment variable.
 5. Document coverage limits in the venue's notices and in a `docs/architecture/<venue>-…` document.
 
