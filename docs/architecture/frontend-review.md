@@ -2,6 +2,11 @@
 
 A historical review of the frontend architecture and code after PR #37, looking for defects, simplifications and cleanups. Findings describe baseline `6acd5fe`, not later repair commits. The companion [frontend guide](frontend-guide.md) explains how the frontend works. The [backend review](backend-review.md) covers the API.
 
+The [implementation and verification record](../product-review/verification/2026-10-14-frontend.md)
+tracks accepted waves, outstanding review findings, checks and synthetic
+before/after captures. Possible refactors and backend items below remain
+outside this implementation.
+
 **Method.** I read all of `frontend/src` (about 14,600 lines of TypeScript, 1,750 lines of CSS and 12,400 lines of tests in 211 files) and the contracts it implements, and cross-checked the backend DTOs the runtime guards mirror. Baseline at `6acd5fe`: `typecheck` and `lint` pass with no warnings, 1,235 tests pass in 68 files, and `build` passes but warns that the main chunk is 807 kB (243 kB gzip). **No application code was changed during the original review.**
 
 ## What is already in good shape
