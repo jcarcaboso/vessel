@@ -110,7 +110,12 @@ public static partial class PlayDocuments
         return text.Length <= MaxDrawingsLength ? text : throw Invalid("Drawings are too large to save.");
     }
 
-    public static JsonElement ReadDrawings(string stored) => JsonDocument.Parse(stored).RootElement.Clone();
+    /// <summary>The stored drawings as a standalone element; the parsed document returns its pooled buffers.</summary>
+    public static JsonElement ReadDrawings(string stored)
+    {
+        using var document = JsonDocument.Parse(stored);
+        return document.RootElement.Clone();
+    }
 
     private static string Unit(string? unit) => unit is "price" or "percent" ? unit : throw Invalid("Level units are price or percent.");
 

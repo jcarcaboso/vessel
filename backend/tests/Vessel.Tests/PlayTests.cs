@@ -188,6 +188,17 @@ public sealed class PlayDocumentTests
         var many = "{\"a\":[" + string.Join(',', Enumerable.Repeat("{}", 201)) + "]}";
         Assert.Throws<ProblemException>(() => PlayDocuments.NormalizeDrawings(JsonDocument.Parse(many).RootElement));
     }
+
+    [Fact]
+    public void Read_drawings_outlive_the_parsed_document()
+    {
+        const string stored = """{"hyperliquid:BTC":[{"id":"a","points":[{"time":1,"price":"0.000012340"}]}]}""";
+        var drawings = PlayDocuments.ReadDrawings(stored);
+        Assert.Equal(stored, JsonSerializer.Serialize(drawings));
+        Assert.Equal("0.000012340", drawings.GetProperty("hyperliquid:BTC")[0].GetProperty("points")[0].GetProperty("price").GetString());
+        Assert.Equal(JsonValueKind.Object, PlayDocuments.ReadDrawings("{}").ValueKind);
+        Assert.ThrowsAny<JsonException>(() => PlayDocuments.ReadDrawings("{"));
+    }
 }
 
 public sealed class PlayServiceTests
