@@ -166,7 +166,12 @@ async function main() {
         await page.waitForFunction(() => !document.getAnimations().some(animation =>
           animation.playState === 'running' && animation.effect?.getComputedTiming().iterations !== Infinity), null, { timeout: 15_000 })
         await page.waitForTimeout(250)
-        assert.deepEqual(report.errors, [], 'Browser/network errors before capture')
+        // These two planning warnings are intentional domain states, not renderer failures.
+        // Everything else exposed as an alert must fail rather than become a success image.
+        const alerts = await page.locator('[role="alert"]:not(.size-over-budget):not(.leverage-warning)').evaluateAll(elements =>
+          elements.filter(el => el.getClientRects().length > 0).map(el => el.textContent))
+        for (const alert of alerts) report.errors.push(redact(`${tag}: rendered alert: ${alert}`))
+        assert.deepEqual(report.errors, [], 'Browser/network/render errors before capture')
         assert.deepEqual(report.blocked, [], 'Forbidden requests before capture')
       }
       const shot = async (name, keepPointer = false) => {
