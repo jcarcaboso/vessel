@@ -1,13 +1,13 @@
 # Frontend review, October 14, 2026
 
-A review of the frontend architecture and code after PR #37, looking for defects, simplifications and cleanups. The companion [frontend guide](frontend-guide.md) explains how the frontend works. The [backend review](backend-review.md) covers the API.
+A historical review of the frontend architecture and code after PR #37, looking for defects, simplifications and cleanups. Findings describe baseline `6acd5fe`, not later repair commits. The companion [frontend guide](frontend-guide.md) explains how the frontend works. The [backend review](backend-review.md) covers the API.
 
-**Method.** I read all of `frontend/src` (about 14,600 lines of TypeScript, 1,750 lines of CSS and 12,400 lines of tests in 211 files) and the contracts it implements, and cross-checked the backend DTOs the runtime guards mirror. Baseline at `6acd5fe`: `typecheck` and `lint` pass with no warnings, 1,235 tests pass in 68 files, and `build` passes but warns that the main chunk is 807 kB (243 kB gzip). **No code was changed for this review.**
+**Method.** I read all of `frontend/src` (about 14,600 lines of TypeScript, 1,750 lines of CSS and 12,400 lines of tests in 211 files) and the contracts it implements, and cross-checked the backend DTOs the runtime guards mirror. Baseline at `6acd5fe`: `typecheck` and `lint` pass with no warnings, 1,235 tests pass in 68 files, and `build` passes but warns that the main chunk is 807 kB (243 kB gzip). **No application code was changed during the original review.**
 
 ## What is already in good shape
 
 - **The token never leaves memory.** `ConnectionGate` keeps it in the `WorkspaceApi` closure; no storage, URL or `VITE_*` variable sees it. Requests omit credentials, refuse redirects and never show raw server bodies.
-- **Every response is validated.** Hand-written guards check shapes, bounds, exact decimal strings and cross-field invariants before data reaches React.
+- **JSON response bodies have runtime guards.** Hand-written guards check shapes, bounds, exact decimal strings and cross-field invariants before data reaches React. Binary response bodies use binary handling rather than JSON guards; SSE events are validated separately.
 - **Exact numbers stay exact.** Amounts remain strings; `Intl.NumberFormat` formats the original string, and shares and comparisons use `BigInt` where precision matters.
 - **Capabilities, not names.** The `Venues` context answers what a venue can do; almost no code branches on a venue ID.
 - **Shell memory is deliberate.** Drafts, filters and the Overview scope live in the shell and survive navigation; a new `WorkspaceApi` identity resets them, and stale responses are discarded by generation keys.
@@ -119,7 +119,7 @@ Some differences are contract rules, most are accidents, and nothing says which.
 
 **Where.** `api/workspace.ts:519` (`request`) and `:544`/`:560` (`send` and `json`); `getSystem` in `api/system.ts` is a third.
 
-**Problem.** Both pipelines build the bearer header, combine abort and timeout signals, clear the candle cache on 401/403, map errors and validate bodies, but they differ in default timeout (10 s and 15 s), the 404 message ("account or portfolio" against "play or image") and the invalid-response wording. Which one an endpoint uses is historical, so `/api/review` reports a missing route as "This account or portfolio is no longer available."
+**Problem.** Both pipelines build the bearer header, combine abort and timeout signals, clear the candle cache on 401/403, map errors and validate bodies, but they differ in default timeout (10 s and 15 s), the 404 message ("account or portfolio" against "play or image") and the invalid-response wording. Which one an endpoint uses is historical. At baseline `6acd5fe`, `/api/review` uses `json` and reports a missing route as "This play or image is no longer available."
 
 **Suggestion.** One internal `call(path, { validate, method, body, accept, timeout, notFound, badGateway, tooMany, safeError })` used by every endpoint, each endpoint stating its own timeout and messages explicitly (keeping today's values). Keep accepting any 2xx through `response.ok`, so `POST /api/plays/retrospective` may move from 200 to 201 (backend item N14).
 
