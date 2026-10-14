@@ -175,7 +175,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
             {sized.quantity !== null && draft.sizingMode === 'margin' && <span>≈ <strong>{formatQuantity(sized.quantity, units)}</strong></span>}
             <small>at {leverage}×</small>
             {liquidation !== null && <span className="size-liquidation" data-testid="liquidation-estimate"
-              title="Estimated for isolated margin with every entry filled at its planned price; ignores fees, funding and margin tiers. Cross margin liquidates further away. The venue shows the real price once the position is open.">
+              title="Estimated for isolated margin with every entry filled at its planned price; ignores fees, funding and margin tiers. Cross margin depends on shared collateral and other positions; it is not always safer. The venue shows the actual liquidation estimate.">
               Liq. ≈ <strong>{formatDraggedPrice(liquidation)}</strong></span>}
           </p> : null}
           {overBudget && <p id={`${prefix}-over-budget`} className="size-over-budget" role="alert">

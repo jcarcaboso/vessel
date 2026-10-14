@@ -1,0 +1,29 @@
+{
+  "syntheticOnly": true,
+  "manualTotals": {
+    "enteredQuantity": "1",
+    "exitedQuantity": "1",
+    "openQuantity": "0",
+    "grossResultUsd": "-1",
+    "netResultUsd": "-1.3",
+    "feesComplete": true
+  },
+  "manualRecords": 3,
+  "manualHistory": 4,
+  "reviewRevisions": 2,
+  "originalPlanUnchanged": true,
+  "retrospectiveNet": "11.8",
+  "retrospectiveReturnPercent": "5.9",
+  "retrospectiveInitialR": null,
+  "retrospectivePlanRevisions": 0,
+  "structuredOnlyReviewRecognized": true,
+  "combinedReviewNet": "10.5",
+  "exclusions": 1,
+  "unchangedImportedFills": 4,
+  "noStoreHeaders": true,
+  "migration": {
+    "preservedPlanReviewStatusVersion": true,
+    "origin": "Planned",
+    "reviewedAtUtc": null
+  }
+}

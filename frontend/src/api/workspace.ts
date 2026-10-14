@@ -12,7 +12,15 @@ import {
   type LinkOrder, type PlayExecution, type PlayFields, type PlayHistory, type PlaySummary, type SavedEvidence, type SavedPlay, type StatusRequest,
 } from './plays'
 import { isSizingDocument, type SizingDocument } from './sizing'
-import { isReviewDocument, reviewPath, type ReviewDocument, type ReviewQuery } from './review'
+import { isReviewDocument, reviewPath, isReviewExclusions, reviewExclusionsPath, type ReviewDocument, type ReviewQuery, type ReviewExclusions } from './review'
+import {
+  isRetrospectivePreview, isCreateRetrospectivePlayRequest, retrospectivePreviewPath, retrospectivePlayPath,
+  type RetrospectivePreview, type CreateRetrospectivePlayRequest,
+} from './retrospective'
+import {
+  isManualExecutions, isManualExecutionInput, isManualExecutionCorrection,
+  type ManualExecutions, type ManualExecutionInput, type ManualExecutionCorrection,
+} from './diary'
 import type { ImageMarkup } from '@/features/plays/markup'
 
 export interface Portfolio {
@@ -233,6 +241,9 @@ export interface WorkspaceApi {
   overviewSummary(query: OverviewQuery, signal?: AbortSignal): Promise<OverviewSummaryDocument>
   activity(accountId?: string, signal?: AbortSignal): Promise<ActivityDocument>
   review(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewDocument>
+  reviewExclusions?(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewExclusions>
+  retrospectivePreview?(accountId: string, operationId: string, signal?: AbortSignal): Promise<RetrospectivePreview>
+  createRetrospectivePlay?(body: CreateRetrospectivePlayRequest, signal?: AbortSignal): Promise<SavedPlay>
   overview(signal?: AbortSignal): Promise<Overview>
   portfolios(signal?: AbortSignal): Promise<Portfolio[]>
   accounts(signal?: AbortSignal): Promise<BrokerAccount[]>
@@ -266,6 +277,9 @@ export interface WorkspaceApi {
   updatePlay(id: string, fields: PlayFields & { expectedVersion: number; revisionReason?: string }): Promise<SavedPlay>
   changePlayStatus(id: string, expectedVersion: number, request: StatusRequest): Promise<SavedPlay>
   playHistory(id: string, signal?: AbortSignal): Promise<PlayHistory>
+  manualExecutions?(id: string, signal?: AbortSignal): Promise<ManualExecutions>
+  addManualExecution?(id: string, input: ManualExecutionInput, signal?: AbortSignal): Promise<ManualExecutions>
+  correctManualExecution?(id: string, executionId: string, input: ManualExecutionCorrection, signal?: AbortSignal): Promise<ManualExecutions>
   deletePlay(id: string): Promise<void>
   playExecution(id: string, signal?: AbortSignal): Promise<PlayExecution>
   /** Refreshes the account's fills and orders at the venue, links what matches and applies status changes. */
@@ -573,6 +587,19 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     changePlayStatus: (id, expectedVersion, request) =>
       json(`${playPath(id)}/status`, isSavedPlay, { method: 'POST', body: JSON.stringify({ expectedVersion, ...request }) }),
     playHistory: (id, signal) => json(`${playPath(id)}/history`, isPlayHistory, withSignal(signal)),
+    manualExecutions: (id, signal) => json(`${playPath(id)}/manual-executions`,
+      (v): v is ManualExecutions => isManualExecutions(v) && v.play.summary.id === id, withSignal(signal)),
+    addManualExecution: (id, input, signal) => {
+      if (!isManualExecutionInput(input)) return Promise.reject(new ApiError('invalid-response', 'Provide valid manual execution facts, a UTC time and a request identity.'))
+      return json(`${playPath(id)}/manual-executions`, (v): v is ManualExecutions => isManualExecutions(v) && v.play.summary.id === id,
+        { method: 'POST', body: JSON.stringify(input), ...withSignal(signal) })
+    },
+    correctManualExecution: (id, executionId, input, signal) => {
+      if (!isManualExecutionCorrection(input)) return Promise.reject(new ApiError('invalid-response', 'Provide valid correction facts and a reason.'))
+      return json(`${playPath(id)}/manual-executions/${resourceId(executionId)}`,
+        (v): v is ManualExecutions => isManualExecutions(v) && v.play.summary.id === id,
+        { method: 'PUT', body: JSON.stringify(input), ...withSignal(signal) })
+    },
     deletePlay: id => json(playPath(id), none, { method: 'DELETE' }),
     playExecution: (id, signal) => json(`${playPath(id)}/execution`, isPlayExecution, withSignal(signal)),
     checkPlayExecution: (id, signal) => json(`${playPath(id)}/execution/check`, isPlayExecution, { method: 'POST', ...withSignal(signal) }, 45_000),
@@ -600,6 +627,15 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     deleteEvidence: id => json(evidencePath(id), none, { method: 'DELETE' }),
     sizing: signal => json('/api/sizing', isSizingDocument, withSignal(signal)),
     review: (query, signal) => json(reviewPath(query), isReviewDocument, withSignal(signal)),
+    reviewExclusions: (query, signal) => json(reviewExclusionsPath(query), isReviewExclusions, withSignal(signal)),
+    retrospectivePreview: (accountId, operationId, signal) => json(retrospectivePreviewPath(resourceId(accountId), operationId),
+      (v): v is RetrospectivePreview => isRetrospectivePreview(v, fill) && v.operation.accountId === accountId && v.operation.id === operationId, withSignal(signal)),
+    createRetrospectivePlay: (input, signal) => {
+      if (!isCreateRetrospectivePlayRequest(input)) return Promise.reject(new ApiError('invalid-response', 'Provide a valid retrospective request and preview fingerprint.'))
+      return json(retrospectivePlayPath(), (v): v is SavedPlay => isSavedPlay(v) &&
+        v.summary.accountId === input.accountId && v.summary.origin === 'retrospective',
+        { method: 'POST', body: JSON.stringify(input), ...withSignal(signal) })
+    },
     updateSizingSettings: settings => json('/api/sizing/settings', isSizingDocument,
       { method: 'PUT', body: JSON.stringify({ riskPercent: settings.riskPercent }) }),
     activity: (id, signal) => request(`/api/activity${id !== undefined ? `?${new URLSearchParams({ accountId: resourceId(id) })}` : ''}`,

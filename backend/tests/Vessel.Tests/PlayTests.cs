@@ -30,6 +30,8 @@ internal sealed class MemoryPlayStore(Guid owner) : IPlayStore
     public List<Play> Plays { get; } = [];
     public List<PlayPlanRevision> Revisions { get; } = [];
     public List<PlayStatusChange> Changes { get; } = [];
+    public List<PlayReviewRevision> Reviews { get; } = [];
+    public List<PlayOrderLink> Links { get; } = [];
     public List<string> EvidenceKeys { get; } = [];
     public int Saves { get; private set; }
     public Task<List<Play>> ListAsync(CancellationToken ct) => Task.FromResult(Plays.Where(p => p.OwnerId == owner).ToList());
@@ -37,12 +39,16 @@ internal sealed class MemoryPlayStore(Guid owner) : IPlayStore
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => Task.FromResult(Accounts.SingleOrDefault(a => a.Id == id && a.OwnerId == owner));
     public Task<List<PlayPlanRevision>> RevisionsAsync(Guid playId, CancellationToken ct) => Task.FromResult(Revisions.Where(r => r.PlayId == playId).ToList());
     public Task<List<PlayStatusChange>> StatusChangesAsync(Guid playId, CancellationToken ct) => Task.FromResult(Changes.Where(c => c.PlayId == playId).ToList());
+    public Task<List<PlayReviewRevision>> ReviewsAsync(Guid playId, CancellationToken ct) => Task.FromResult(Reviews.Where(c => c.PlayId == playId).ToList());
+    public Task<List<PlayOrderLink>> LinkedPlanReferencesAsync(Guid playId, CancellationToken ct) => Task.FromResult(Links.Where(l => l.PlayId == playId && l.State == OrderLinkState.Linked).ToList());
     public void Add(Play play) => Plays.Add(play);
     public void Add(PlayPlanRevision revision) => Revisions.Add(revision);
     public void Add(PlayStatusChange change) => Changes.Add(change);
+    public void Add(PlayReviewRevision revision) => Reviews.Add(revision);
     public HashSet<string> FilledEntries { get; } = [];
     public Task<IReadOnlySet<string>> FilledEntryIdsAsync(Guid playId, CancellationToken ct) => Task.FromResult<IReadOnlySet<string>>(FilledEntries);
     public Task SaveAsync(CancellationToken ct) { Saves++; return Task.CompletedTask; }
+    public Task<T> WithPlayLockAsync<T>(Guid id, Func<Task<T>> action, CancellationToken ct) => action();
     public Task<IReadOnlyList<string>> DeleteAsync(Play play, CancellationToken ct)
     {
         Plays.Remove(play);

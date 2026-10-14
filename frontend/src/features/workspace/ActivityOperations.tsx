@@ -1,20 +1,25 @@
 import { emptyFilters, filterOperations, type Filters } from './activity-filters'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ActivityDocument } from '@/api/activity'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
 import { Button } from '@/components/ui/button'
 import { OperationsTable } from './OperationsTable'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { RetrospectivePreview } from './RetrospectivePreview'
 import './activity-operations.css'
 
 export function ActivityOperations({ api, accounts, portfolios = [], accountId, compact = false, filters: showFilters = false, reloadGeneration = 0,
-  filterValues, onFiltersChange, scopeAccountIds }: {
+  filterValues, onFiltersChange, scopeAccountIds, onOpenPlay, onCreated }: {
   api: WorkspaceApi; accounts: BrokerAccount[]; portfolios?: Portfolio[]; accountId?: string | undefined; compact?: boolean; filters?: boolean; reloadGeneration?: number
   scopeAccountIds?: readonly string[]; filterValues?: Filters; onFiltersChange?: (filters: Filters) => void
+  onOpenPlay?: (id: string, signal: AbortSignal) => Promise<void>; onCreated?: () => void
 }) {
   const [state, setState] = useState<{ key: string; api: WorkspaceApi; document: ActivityDocument | null; error: string | null; receivedAt: number } | null>(null)
   const [retry, setRetry] = useState(0)
   const [localFilters, setLocalFilters] = useState(emptyFilters)
+  const [selection, setSelection] = useState<{ accountId: string; operationId: string } | null>(null)
+  const trigger = useRef<HTMLElement | null>(null)
   const selectedFilters = filterValues ?? localFilters
   const setFilters = onFiltersChange ?? setLocalFilters
   const key = JSON.stringify([accountId, reloadGeneration, retry])
@@ -55,7 +60,16 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
       <Button variant="outline" size="sm" onClick={() => setFilters(emptyFilters)}>Reset filters</Button>
     </fieldset>}
     <p className="workspace-scope-note in-panel" role="status">Showing {visible.length} of {loaded.length} loaded operations{document.omittedOperationCount > 0 ? ` · ${document.omittedOperationCount} older operations omitted` : ''}.{showFilters && ' Dates filter the latest execution, in UTC.'}</p>
-    <OperationsTable operations={visible} accounts={accounts} compact={compact} />
-    {!compact && <><details className="operation-scope"><summary>Scope and coverage</summary><p className="workspace-scope-note">{document.scopeNote}</p>{document.coverage.filter(c => enabled.some(a => a.id === c.accountId)).map((c, index) => <p className="workspace-scope-note" key={index}><strong>{accounts.find(a => a.id === c.accountId)?.name}{c.contractId ? ` · ${c.contractId}` : ''}</strong>: {c.notice}</p>)}</details></>}
+    <OperationsTable operations={visible} accounts={accounts} compact={compact} onPreview={operation => {
+      trigger.current = window.document.activeElement instanceof HTMLElement ? window.document.activeElement : null
+      setSelection({ accountId: operation.accountId, operationId: operation.id })
+    }} />
+    {!compact && <><details className="operation-scope"><summary>Scope and coverage</summary><p className="workspace-scope-note">{document.scopeNote}</p><p className="workspace-scope-note">Activity describes retained imported operations, not account balances or saved-Play Review. Manual Play executions do not enter this feed. Retrospective creation requires an inspected, eligible server preview.</p>{document.coverage.filter(c => enabled.some(a => a.id === c.accountId)).map((c, index) => <p className="workspace-scope-note" key={index}><strong>{accounts.find(a => a.id === c.accountId)?.name}{c.contractId ? ` · ${c.contractId}` : ''}</strong>: {c.notice}</p>)}</details></>}
+    <Dialog open={selection !== null && enabled.some(a => a.id === selection.accountId)} onOpenChange={open => { if (!open) setSelection(null) }}>
+      <DialogContent className="retrospective-dialog" onCloseAutoFocus={event => { event.preventDefault(); trigger.current?.focus() }}>
+        <DialogHeader><DialogTitle>Retrospective operation preview</DialogTitle><DialogDescription>Inspect original facts and associations before confirming a completed Play.</DialogDescription></DialogHeader>
+        {selection && enabled.some(a => a.id === selection.accountId) && <RetrospectivePreview api={api} {...selection} {...(onOpenPlay ? { onOpenPlay } : {})} {...(onCreated ? { onCreated } : {})} />}
+      </DialogContent>
+    </Dialog>
   </div>
 }

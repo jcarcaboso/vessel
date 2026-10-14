@@ -1,5 +1,7 @@
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Vessel.Domain.Plays;
 
@@ -7,6 +9,14 @@ namespace Vessel.Domain.Plays;
 public enum PlayStatus { Draft, Planned, Paused, Open, Closed, Cancelled }
 
 public enum InstrumentSource { Venue, Manual }
+public enum PlayOrigin { Planned, Retrospective }
+
+public sealed record ReviewAnswers(string? Adherence = null, string? MistakeTag = null, string Lesson = "", string NextAction = "")
+{
+    [JsonIgnore]
+    public bool IsAnswered => Adherence is not null || !string.IsNullOrWhiteSpace(MistakeTag) ||
+        !string.IsNullOrWhiteSpace(Lesson) || !string.IsNullOrWhiteSpace(NextAction);
+}
 
 public enum CancelReason { Invalidated, Missed, ChangedMind, Expired, Mistake, Other }
 
@@ -34,6 +44,15 @@ public sealed class Play
     public string Plan { get; private set; } = null!;
     public string Drawings { get; private set; } = "{}";
     public string Review { get; private set; } = "";
+    public PlayOrigin Origin { get; private set; }
+    public string? ReviewAdherence { get; private set; }
+    public string? ReviewMistakeTag { get; private set; }
+    public string ReviewLesson { get; private set; } = "";
+    public string ReviewNextAction { get; private set; } = "";
+    public int ReviewRevision { get; private set; }
+    public DateTimeOffset? ReviewedAtUtc { get; private set; }
+    public ReviewAnswers Answers => new(ReviewAdherence, ReviewMistakeTag, ReviewLesson, ReviewNextAction);
+    public bool HasReview => !string.IsNullOrWhiteSpace(Review) || Answers.IsAnswered;
     /// <summary>The latest plan revision number; zero while the Play is a Draft.</summary>
     public int PlanRevision { get; private set; }
     /// <summary>Increases on every change, for optimistic concurrency.</summary>
@@ -77,7 +96,7 @@ public sealed class Play
         Touch(now);
     }
 
-    public void Annotate(string title, string drawings, string review, DateTimeOffset now)
+    public PlayReviewRevision? Annotate(string title, string drawings, string review, DateTimeOffset now, ReviewAnswers? answers = null)
     {
         ArgumentNullException.ThrowIfNull(title);
         ArgumentNullException.ThrowIfNull(review);
@@ -85,12 +104,63 @@ public sealed class Play
         title = title.Trim();
         if (title.Length > MaxTitleLength) throw new ArgumentException($"Titles are limited to {MaxTitleLength} characters.");
         if (review.Length > MaxReviewLength) throw new ArgumentException($"Reviews are limited to {MaxReviewLength} characters.");
-        if (title == Title && drawings == Drawings && review == Review) return;
-        if (!IsEditable && (title != Title || drawings != Drawings))
+        answers ??= Answers;
+        if (answers.Lesson is null || answers.NextAction is null ||
+            answers.Adherence is not (null or "followed" or "deviated" or "not-applicable") ||
+            answers.MistakeTag?.Length > 100 || answers.Lesson.Length > 4000 || answers.NextAction.Length > 4000 ||
+            new[] { answers.MistakeTag, answers.Lesson, answers.NextAction }.Any(s => s?.Any(char.IsControl) == true))
+            throw new ArgumentException("Review answers must be bounded plain text with a valid adherence.");
+        if (answers.IsAnswered && Status is not (PlayStatus.Closed or PlayStatus.Cancelled))
+            throw new PlayRuleException("Structured review answers are only available for closed or cancelled Plays.");
+        if (Origin == PlayOrigin.Retrospective && answers.Adherence is not (null or "not-applicable"))
+            throw new PlayRuleException("A retrospective Play has no contemporaneous plan to assess adherence against.");
+        var changedReview = review != Review || answers != Answers;
+        var sameDrawings = SameDocument(drawings, Drawings);
+        if (title == Title && sameDrawings && !changedReview) return null;
+        if (!IsEditable && (title != Title || !sameDrawings))
             throw new PlayRuleException("Closed and cancelled Plays keep their plan; only the review can change.");
         Title = title;
         Drawings = drawings;
         Review = review;
+        ReviewAdherence = answers.Adherence;
+        ReviewMistakeTag = answers.MistakeTag;
+        ReviewLesson = answers.Lesson;
+        ReviewNextAction = answers.NextAction;
+        Touch(now);
+        if (!changedReview) return null;
+        ReviewedAtUtc = HasReview ? now : null;
+        return new PlayReviewRevision(this, checked(++ReviewRevision), now);
+    }
+
+    public static Play Retrospective(Guid id, Account account, PerpetualInstrument instrument, string emptyPlan,
+        DateTimeOffset closedAt, DateTimeOffset now, string title)
+    {
+        var play = new Play(id, account, instrument, InstrumentSource.Venue, emptyPlan, now);
+        play.Origin = PlayOrigin.Retrospective;
+        play.Status = PlayStatus.Closed;
+        play.EndedAtUtc = closedAt;
+        ArgumentNullException.ThrowIfNull(title);
+        title = title.Trim();
+        if (title.Length > MaxTitleLength) throw new ArgumentException($"Titles are limited to {MaxTitleLength} characters.");
+        play.Title = title;
+        return play;
+    }
+
+    public PlayStatusChange RecordManualOpen(DateTimeOffset now) => Status == PlayStatus.Planned
+        ? Transition(PlayStatus.Open, null, "Owner-recorded manual entry, not a venue observation.", now)
+        : throw new PlayRuleException("Only a planned Play can open from manual facts.");
+
+    public PlayStatusChange RecordManualClose(DateTimeOffset closedAt, DateTimeOffset now)
+    {
+        if (Status != PlayStatus.Open) throw new PlayRuleException("Only an open Play can close from manual facts.");
+        var change = Transition(PlayStatus.Closed, null, "Owner-recorded manual ledger is flat.", now);
+        EndedAtUtc = closedAt;
+        return change;
+    }
+
+    public void RecordManualCorrection(DateTimeOffset? closedAt, DateTimeOffset now)
+    {
+        if (Status == PlayStatus.Closed) EndedAtUtc = closedAt ?? throw new PlayRuleException("A closed manual ledger must stay closed.");
         Touch(now);
     }
 
@@ -98,7 +168,7 @@ public sealed class Play
     public PlayPlanRevision? ChangePlan(string plan, string? reason, DateTimeOffset now)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(plan);
-        if (plan == Plan) return null;
+        if (SameDocument(plan, Plan)) return null;
         if (!IsEditable) throw new PlayRuleException("Closed and cancelled Plays keep their plan.");
         if (Status == PlayStatus.Draft)
         {
@@ -177,6 +247,14 @@ public sealed class Play
     {
         Version = checked(Version + 1);
         UpdatedAtUtc = now;
+    }
+
+    private static bool SameDocument(string left, string right)
+    {
+        if (left == right) return true;
+        using var a = JsonDocument.Parse(left);
+        using var b = JsonDocument.Parse(right);
+        return JsonElement.DeepEquals(a.RootElement, b.RootElement);
     }
 }
 

@@ -93,9 +93,14 @@ public sealed class ApiTests
         Assert.Equal("https://app.hyperliquid.xyz/trade/{venueContractId}", hyperliquid.GetProperty("tradeUrlTemplate").GetString());
         Assert.All(new[] { "sync", "instruments", "orders", "candles", "marketContext", "stream", "stablecoinWallet" },
             name => Assert.True(hyperliquid.GetProperty("capabilities").GetProperty(name).GetBoolean(), name));
-        foreach (var id in new[] { "quantfury", "manual" })
+        foreach (var id in new[] { "quantfury" })
             Assert.All(venues[id].GetProperty("capabilities").EnumerateObject(), capability => Assert.False(capability.Value.GetBoolean(), $"{id}.{capability.Name}"));
         Assert.Equal("none", venues["manual"].GetProperty("source").GetString());
+        Assert.True(venues["manual"].GetProperty("capabilities").GetProperty("manualExecutions").GetBoolean());
+        Assert.All(venues["manual"].GetProperty("capabilities").EnumerateObject().Where(c => c.Name != "manualExecutions"),
+            c => Assert.False(c.Value.GetBoolean()));
+        Assert.All(new[] { "hyperliquid", "risex", "lighter", "quantfury" },
+            id => Assert.False(venues[id].GetProperty("capabilities").GetProperty("manualExecutions").GetBoolean()));
         Assert.Equal("significant-figures", hyperliquid.GetProperty("priceRule").GetString());
         Assert.Equal(["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M"],
             hyperliquid.GetProperty("intervals").EnumerateArray().Select(i => i.GetString()));

@@ -25,11 +25,12 @@ public static class PlayOutcomeCalculator
         // A net-of-fee closed PnL already has its fee taken off; only gross PnL needs the fee subtracted.
         var gross = fills.Where(f => f.PnlBasis == ExecutionFacts.PnlGross).ToList();
         var net = fills.Sum(f => f.ClosedPnlUsd) - gross.Where(f => f.FeeToken == FeeToken).Sum(f => f.Fee);
-        var feesComplete = gross.All(f => f.FeeToken == FeeToken || f.Fee == 0);
+        var feesComplete = facts.ManualFeesComplete && fills.All(f => ExecutionFacts.IsFeeBasis(f.FeeBasis)) &&
+            gross.All(f => !string.IsNullOrWhiteSpace(f.FeeToken) && (f.FeeToken == FeeToken || f.Fee == 0));
         var firstEntry = entries.Min(f => f.OccurredAtUtc);
         var revisions = facts.Revisions.OrderBy(r => r.Number).ToList();
         var plan = (revisions.LastOrDefault(r => r.CreatedAtUtc <= firstEntry) ?? revisions.FirstOrDefault())?.Plan ?? facts.Play.Plan;
-        decimal? risk = StopDistance(PlayDocuments.Read(plan)) is { } distance ? notional * distance : null;
+        decimal? risk = facts.Play.Origin != PlayOrigin.Retrospective && StopDistance(PlayDocuments.Read(plan)) is { } distance ? notional * distance : null;
         return new PlayOutcome(facts.Play.Id, closedAt, net, notional, risk, feesComplete);
     }
 

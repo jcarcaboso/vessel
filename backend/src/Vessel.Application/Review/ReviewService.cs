@@ -14,8 +14,10 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
 {
     public const int PageSize = 50;
     public static readonly string[] Periods = ["day", "week", "month", "year", "all"];
-    private const string Notice = "Saved closed Plays only, from their linked executions. Unassigned imported fills are not Plays. " +
-        "Retrospective imported-Play grouping is not implemented. Retained venue history can be incomplete; All is not lifetime history. " +
+    private const string Notice = "Saved closed Plays only, from linked imported executions or explicit owner-entered manual facts. " +
+        "Manual facts are estimates, not venue balance reconciliation or imported Activity. Retrospective Plays have no contemporaneous " +
+        "plan or initial-risk R and are excluded from the sizing ladder. Return percent is net/executed entry notional, not return on margin. " +
+        "Unassigned imported fills are not Plays. Retained venue history can be incomplete; All is not lifetime history. " +
         "Results are nominal USD and include reported execution fees once. Separate funding cashflows are not added; " +
         "whether RISEx reported realized P&L includes funding remains unverified. Balanced retained fills are not proof of full venue history. " +
         "Accounts use current portfolio membership; disabled accounts are excluded. Open-play counts are current, not a historical cohort.";
@@ -47,7 +49,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
                 a.PortfolioId?.ToString() == query.Portfolio)).Select(a => a.Id).ToHashSet();
         var evaluated = facts.ClosedPlays.Where(f => scoped.Contains(f.Play.AccountId) &&
             (query.Instrument is null || f.Play.ContractId == query.Instrument))
-            .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true)).ToList();
+            .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 })).ToList();
         var accepted = evaluated.Where(e => e.Result is not null)
             .OrderBy(e => e.ClosedAt).ThenBy(e => e.Facts.Play.Id).ToList();
         var current = accepted.Where(e => InPeriod(e.ClosedAt, from, now)).ToList();
@@ -83,7 +85,8 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
             .Select(e => new ReviewPlayDto(e.Facts.Play.Id, e.Facts.Play.Title, e.Facts.Play.AccountId,
                 accounts[e.Facts.Play.AccountId].Name, e.Facts.Play.VenueId, e.Facts.Play.ContractId!, e.ClosedAt,
                 Number(e.Result!.NetResult), Number(e.Result.ReturnPercent), Number(e.Result.RMultiple),
-                !string.IsNullOrWhiteSpace(e.Facts.Play.Review))).ToList();
+                e.Facts.Play.HasReview, e.Facts.Play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned",
+                e.Facts.ManualSource ? "manual" : "imported")).ToList();
         return new ReviewDto(now, from ?? current.FirstOrDefault()?.ClosedAt, query.Period, "USD",
             options, Periods.Select(period => {
                 var selected = accepted.Where(e => InPeriod(e.ClosedAt, From(period, now), now)).ToList();
@@ -93,6 +96,61 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
             new ReviewCoverageDto(candidates.Count, candidates.Count(e => e.Exclusion == "fees"),
                 candidates.Count(e => e.Exclusion == "executions"), facts.OpenPlays, facts.UnassignedFills, facts.FirstFillAtUtc, Notice),
             page, query.Offset, query.Offset + page.Count < current.Count ? query.Offset + page.Count : null);
+    }
+
+    public async Task<ReviewExclusionsDto> ExclusionsAsync(ReviewQuery query, CancellationToken ct)
+    {
+        // Run the same filter validation as reporting, then evaluate one fresh snapshot with the same boundary.
+        var now = time.GetUtcNow();
+        var from = From(query.Period, now);
+        if (query.Portfolio is not ("all" or "unassigned") &&
+            (!Guid.TryParse(query.Portfolio, out var portfolio) || portfolio == Guid.Empty))
+            throw new WorkspaceException(400, "Choose a valid portfolio.");
+        if (Guid.TryParse(query.Portfolio, out var normalized)) query = query with { Portfolio = normalized.ToString() };
+        if (query.AccountId == Guid.Empty || query.Offset is < 0 or > 1_000_000 ||
+            query.Instrument is { } instrument && (string.IsNullOrWhiteSpace(instrument) || instrument.Length > 128 || instrument != instrument.Trim()))
+            throw new WorkspaceException(400, "Invalid review filters.");
+        var facts = await store.ReadAsync(query, now, ct);
+        var accounts = facts.Accounts.Where(a => a.IsEnabled && (query.AccountId is null || a.Id == query.AccountId) &&
+            (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
+                a.PortfolioId?.ToString() == query.Portfolio)).ToDictionary(a => a.Id);
+        var excluded = facts.ClosedPlays.Where(f => accounts.ContainsKey(f.Play.AccountId) &&
+            (query.Instrument is null || f.Play.ContractId == query.Instrument))
+            .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 }))
+            .Where(e => e.Exclusion is not null && InPeriod(e.ClosedAt, from, now))
+            .OrderByDescending(e => e.ClosedAt).ThenBy(e => e.Facts.Play.Id).ToList();
+        var items = excluded.Skip(query.Offset).Take(PageSize).Select(e => new ReviewExclusionDto(e.Facts.Play.Id,
+            e.Facts.Play.Title, e.Facts.Play.AccountId, accounts[e.Facts.Play.AccountId].Name,
+            e.Facts.Play.ContractId ?? "", ExclusionReasons(e.Facts, now, e.Exclusion!))).ToList();
+        return new(items, excluded.Count, query.Offset, query.Offset + items.Count < excluded.Count ? query.Offset + items.Count : null, Notice);
+    }
+
+    private static IReadOnlyList<string> ExclusionReasons(ClosedPlayFacts facts, DateTimeOffset now, string exclusion)
+    {
+        var reasons = ExecutionIntegrity.Problems(ExecutionIntegrity.EntrySide(PlayDocuments.Read(facts.Play.Plan)),
+            facts.Fills.ToList(), facts.IncompleteOrders ?? []);
+        if (exclusion == "fees" || facts.Fills.Any(f => !ExecutionFacts.IsFeeBasis(f.Fill.FeeBasis) ||
+            string.IsNullOrWhiteSpace(f.Fill.FeeToken) || f.Fill.PnlBasis == ExecutionFacts.PnlGross &&
+                f.Fill.Fee != 0 && f.Fill.FeeToken != "USDC"))
+        {
+            reasons.AddRange(facts.Fills.Where(f => !ExecutionFacts.IsFeeBasis(f.Fill.FeeBasis) ||
+                string.IsNullOrWhiteSpace(f.Fill.FeeToken) || f.Fill.PnlBasis == ExecutionFacts.PnlGross &&
+                f.Fill.Fee != 0 && f.Fill.FeeToken != "USDC").Select(f =>
+                    $"Fill {f.Fill.SourceFillId} of order {f.Fill.OrderId} has missing or unsupported fee inputs ({f.Fill.FeeToken}, {f.Fill.FeeBasis})."));
+            if (!facts.ManualFeesComplete) reasons.Add("Manual costs are unknown or lack supported USD conversion; they are not treated as zero.");
+        }
+        if (exclusion == "executions")
+        {
+            reasons.AddRange(facts.Fills.Where(f => f.Fill.AccountId != facts.Play.AccountId || f.Fill.ContractId != facts.Play.ContractId ||
+                f.Fill.PositionEffect is not (ExecutionFacts.Open or ExecutionFacts.Close) || f.Fill.Price <= 0 || f.Fill.Quantity <= 0 ||
+                f.Fill.OccurredAtUtc > now).Select(f => $"Fill {f.Fill.SourceFillId} of order {f.Fill.OrderId} has invalid identity, effect, quantity, price or time."));
+            if (facts.Fills.Select(f => f.Fill.Id).Distinct().Count() != facts.Fills.Count) reasons.Add("Repeated fill IDs prevent a unique execution result.");
+            if (facts.Fills.Where(f => f.Role == OrderLinkRole.Entry).Sum(f => f.Fill.Quantity) !=
+                facts.Fills.Where(f => f.Role != OrderLinkRole.Entry).Sum(f => f.Fill.Quantity))
+                reasons.Add("Retained entry and exit quantities do not form a closed round trip.");
+            if (reasons.Count == 0) reasons.Add("Complete opening and closing executions or executed entry notional are unavailable.");
+        }
+        return DiaryService.BoundedReasons(reasons);
     }
 
     private sealed record Evaluated(ClosedPlayFacts Facts, DateTimeOffset ClosedAt, PlayOutcome? Result, string? Exclusion);
@@ -118,12 +176,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         if (side is not (ExecutionFacts.Buy or ExecutionFacts.Sell) || entries.Any(f => f.Fill.Side != side) ||
             exits.Any(f => f.Fill.Side != (side == ExecutionFacts.Buy ? ExecutionFacts.Sell : ExecutionFacts.Buy)))
             return incomplete;
-        decimal balance = 0;
-        foreach (var group in fills.GroupBy(f => f.Fill.OccurredAtUtc).OrderBy(g => g.Key))
-        {
-            balance += group.Sum(f => f.Role == OrderLinkRole.Entry ? f.Fill.Quantity : -f.Fill.Quantity);
-            if (balance < 0) return incomplete;
-        }
+        if (!ExecutionIntegrity.Chronological(fills)) return incomplete;
         var result = PlayOutcomeCalculator.Outcome(facts);
         if (result is not null && !HasCompleteInitialRisk(facts, entries.Min(f => f.Fill.OccurredAtUtc), side))
             result = result with { PlannedRisk = null };
@@ -136,7 +189,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         // Review never treats a retrospective or partially specified plan as known initial risk.
         // The sizing assistant retains its existing fallback/partial-plan estimate.
         var revision = facts.Revisions.Where(r => r.CreatedAtUtc <= entryAt).OrderBy(r => r.Number).LastOrDefault();
-        if (revision is null) return false;
+        if (facts.Play.Origin == PlayOrigin.Retrospective || revision is null) return false;
         var plan = PlayDocuments.Read(revision.Plan);
         if ((plan.Direction == "long" ? ExecutionFacts.Buy : ExecutionFacts.Sell) != side) return false;
         static decimal Positive(string value) =>
@@ -178,7 +231,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
             Number(gain), Number(loss), Number(Ratio(gain, loss)), Number(Ratio(wins.Sum(o => o.NetResult), -losses.Sum(o => o.NetResult))),
             Number(Average(wins.Select(o => o.NetResult))), Number(Average(losses.Select(o => -o.NetResult))),
             Number(Ratio(running, plays.Count)), Number(Average(risks.Select(o => o.RMultiple!.Value))), risks.Count,
-            plays.Count(p => !string.IsNullOrWhiteSpace(p.Facts.Play.Review)), plays.Count == 0 ? null : Number(drawdown),
+            plays.Count(p => p.Facts.Play.HasReview), plays.Count == 0 ? null : Number(drawdown),
             maxWins, maxLosses);
     }
 

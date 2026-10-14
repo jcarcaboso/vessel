@@ -1,0 +1,64 @@
+.position-risk-summary {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  color: var(--foreground);
+}
+
+.position-risk-summary .position-risk-metrics,
+.plays-page .summary .position-risk-summary .position-risk-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px 17px;
+  margin: 0;
+  padding: 0;
+}
+
+.position-risk-summary .position-risk-coverage,
+.plays-page .summary .position-risk-summary .position-risk-coverage {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 17px;
+  margin: 16px 0 0;
+  padding: 0;
+}
+
+.position-risk-summary dt { color: var(--muted-foreground); font-size: 10px; }
+.position-risk-summary dd {
+  margin: 6px 0 0;
+  font-size: 15px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.position-risk-summary small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.position-risk-summary .position-risk-coverage dd,
+.plays-page .summary .position-risk-summary .position-risk-coverage dd { font-size: 11px; }
+.position-risk-summary dd[data-tone="loss"] { color: var(--negative); }
+.position-risk-summary dd[data-tone="gain"] { color: var(--positive); }
+.position-risk-summary dd[data-incomplete="true"],
+.position-risk-summary dd[data-warning="true"] { color: var(--warning); }
+.position-risk-summary .position-risk-note {
+  margin: 14px 0 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+@media (max-width: 850px) {
+  .position-risk-summary .position-risk-metrics,
+  .plays-page .summary .position-risk-summary .position-risk-metrics,
+  .position-risk-summary .position-risk-coverage,
+  .plays-page .summary .position-risk-summary .position-risk-coverage {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+}

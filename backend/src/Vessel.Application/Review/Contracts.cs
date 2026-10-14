@@ -32,7 +32,11 @@ public sealed record ReviewGroupsDto(IReadOnlyList<ReviewGroupDto> Portfolios, I
     IReadOnlyList<ReviewGroupDto> Assets);
 public sealed record ReviewPointDto(DateTimeOffset AtUtc, string Net, string Cumulative, string Drawdown, int Count);
 public sealed record ReviewPlayDto(Guid Id, string Title, Guid AccountId, string AccountName, string VenueId,
-    string Instrument, DateTimeOffset ClosedAtUtc, string Net, string ReturnPercent, string? RMultiple, bool Reviewed);
+    string Instrument, DateTimeOffset ClosedAtUtc, string Net, string ReturnPercent, string? RMultiple, bool Reviewed,
+    string Origin = "planned", string ExecutionSource = "imported");
+public sealed record ReviewExclusionDto(Guid PlayId, string Title, Guid AccountId, string AccountName, string Instrument,
+    IReadOnlyList<string> Reasons);
+public sealed record ReviewExclusionsDto(IReadOnlyList<ReviewExclusionDto> Items, int Total, int Offset, int? NextOffset, string Notice);
 public sealed record ReviewCoverageDto(int ClosedCandidates, int IncompleteFees, int IncompleteExecutions, int OpenPlays,
     int UnassignedFills, DateTimeOffset? FirstFillAtUtc, string Notice);
 public sealed record ReviewDto(DateTimeOffset AsOfUtc, DateTimeOffset? FromUtc, string Period, string Currency,

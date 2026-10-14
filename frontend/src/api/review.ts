@@ -20,6 +20,14 @@ export interface ReviewPoint { atUtc: string; net: string; cumulative: string; d
 export interface ReviewPlay {
   id: string; title: string; accountId: string; accountName: string; venueId: string; instrument: string
   closedAtUtc: string; net: string; returnPercent: string; rMultiple: string | null; reviewed: boolean
+  origin?: 'planned' | 'retrospective'
+  executionSource?: 'imported' | 'manual'
+}
+export interface ReviewExclusion {
+  playId: string; title: string; accountId: string; accountName: string; instrument: string; reasons: string[]
+}
+export interface ReviewExclusions {
+  items: ReviewExclusion[]; total: number; offset: number; nextOffset: number | null; notice: string
 }
 export interface ReviewAccount {
   id: string; name: string; portfolioId: string | null; venueId: string
@@ -58,7 +66,10 @@ export const isReviewMetrics = (v: unknown): v is ReviewMetrics => object(v) &&
 const group = (v: unknown) => object(v) && text(v.id, 128) && text(v.name) && text(v.detail, 2000) && isReviewMetrics(v.metrics)
 const play = (v: unknown) => object(v) && guid(v.id) && text(v.title) && guid(v.accountId) && text(v.accountName) &&
   text(v.venueId, 64) && text(v.instrument, 128) && date(v.closedAtUtc) && decimal(v.net) &&
-  decimal(v.returnPercent) && nullableDecimal(v.rMultiple) && typeof v.reviewed === 'boolean'
+  decimal(v.returnPercent) && nullableDecimal(v.rMultiple) && typeof v.reviewed === 'boolean' &&
+  (v.origin === undefined || v.origin === 'planned' || v.origin === 'retrospective') &&
+  (v.executionSource === undefined || v.executionSource === 'imported' || v.executionSource === 'manual') &&
+  (v.origin !== 'retrospective' || v.rMultiple === null)
 const account = (v: unknown) => object(v) && guid(v.id) && text(v.name) && (v.portfolioId === null || guid(v.portfolioId)) &&
   text(v.venueId, 64) && nullableDate(v.lastSyncedAtUtc) && text(v.syncStatus, 32) &&
   (v.historyNotice === null || text(v.historyNotice, 1000))
@@ -82,4 +93,19 @@ export function reviewPath(query: ReviewQuery): string {
   if (query.instrument) params.set('instrument', query.instrument)
   if (query.offset !== undefined) params.set('offset', String(query.offset))
   return `/api/review?${params}`
+}
+
+export const isReviewExclusions = (v: unknown): v is ReviewExclusions => object(v) &&
+  list(v.items, item => object(item) && guid(item.playId) && text(item.title) && guid(item.accountId) &&
+    text(item.accountName) && text(item.instrument, 128) && list(item.reasons, reason => text(reason, 2000) && reason.trim().length > 0) &&
+    (item.reasons as string[]).length > 0, 50) &&
+  count(v.total) && count(v.offset) && (v.items as unknown[]).length <= v.total &&
+  (v.items as unknown[]).length === Math.min(50, Math.max(0, v.total - v.offset)) &&
+  new Set((v.items as ReviewExclusion[]).map(item => item.playId)).size === (v.items as unknown[]).length &&
+  (v.nextOffset === null ? v.offset + (v.items as unknown[]).length >= v.total :
+    count(v.nextOffset) && v.nextOffset === v.offset + (v.items as unknown[]).length && v.nextOffset < v.total && v.nextOffset > v.offset) &&
+  text(v.notice, 4000)
+
+export function reviewExclusionsPath(query: ReviewQuery): string {
+  return reviewPath(query).replace('/api/review?', '/api/review/exclusions?')
 }

@@ -1,0 +1,32 @@
+{
+  "syntheticOnly": true,
+  "date": "2026-10-14",
+  "scenario": "Held successful manual HTTP response beyond request timeout; navigated Plays to Settings to Plays to All plays before release. Retried the same uncertain execution after release.",
+  "pendingManualPostCalls": 1,
+  "retryDisabledAfterNavigation": true,
+  "discardDisabledAfterNavigation": true,
+  "newPlayDisabledAfterNavigation": true,
+  "postCallsAfterRetry": 2,
+  "formClearedAfterReplay": true,
+  "status": "open",
+  "manualRecords": 1,
+  "manualHistory": 1,
+  "totals": {
+    "enteredQuantity": "1",
+    "exitedQuantity": "0",
+    "openQuantity": "1",
+    "grossResultUsd": "0",
+    "netResultUsd": null,
+    "feesComplete": false
+  },
+  "overviewNewPlayDuringSave": {
+    "realApiResponseHeldWithUnchangedBodyAndHeaders": true,
+    "pendingSaveRequests": 1,
+    "localReviewRevertedWhilePending": true,
+    "titleBeforeRelease": "Navigation safety QA",
+    "titleAfterRelease": "Navigation safety QA",
+    "serverReviewSaved": true,
+    "localRevertedReviewPreservedAsUnsaved": true,
+    "newBlankDraftNotCreated": true
+  }
+}

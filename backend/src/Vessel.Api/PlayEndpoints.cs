@@ -14,6 +14,16 @@ public static class PlayEndpoints
             var result = await service.CreateAsync(request, ct);
             return Results.Created($"/api/plays/{result.Summary.Id}", result);
         });
+        api.MapPost("/retrospective", async (CreateRetrospectiveRequest request, DiaryService service, CancellationToken ct) =>
+            Results.Ok(await service.CreateRetrospectiveAsync(request, ct)));
+        api.MapGet("/{id:guid}/manual-executions", async (Guid id, DiaryService service, CancellationToken ct) =>
+            Results.Ok(await service.ManualAsync(id, ct)));
+        api.MapPost("/{id:guid}/manual-executions", async (Guid id, ManualExecutionRequest request, DiaryService service, CancellationToken ct) =>
+            Results.Ok(await service.RecordAsync(id, null, request, ct)));
+        api.MapPut("/{id:guid}/manual-executions/{executionId:guid}", async (Guid id, Guid executionId, ManualExecutionRequest request,
+            DiaryService service, CancellationToken ct) => Results.Ok(await service.RecordAsync(id, executionId, request, ct)));
+        app.MapGet("/api/activity/retrospective", async (Guid accountId, string operationId, DiaryService service, CancellationToken ct) =>
+            Results.Ok(await service.PreviewAsync(accountId, operationId, ct))).RequireAuthorization();
         api.MapGet("/{id:guid}", async (Guid id, PlayService service, CancellationToken ct) => Results.Ok(await service.GetAsync(id, ct)));
         api.MapPut("/{id:guid}", async (Guid id, UpdatePlayRequest request, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.UpdateAsync(id, request, ct)));

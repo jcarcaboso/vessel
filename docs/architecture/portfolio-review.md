@@ -7,14 +7,25 @@ The Play workspace layout is unchanged.
 
 ## Scope
 
-Review reports saved, closed Plays from their linked imported execution facts.
+Review reports saved, closed Plays from their linked imported execution facts
+or explicit manual execution ledger.
 It does not assign fills, change lifecycle, sync a venue, invent a trading
 thesis or persist a score. No sample results appear in the production page.
 
-There is not yet a confirmed retrospective imported-Play entity or grouping
-workflow. Unassigned fills therefore appear in coverage, not as scored Plays.
-The proposal's origin filter remains mock-only. This is an explicit limit of
-the implementation, not a claim that all imported trading history is reviewed.
+October 13 adds owner-confirmed retrospective Plays through the Activity
+preview/confirmation workflow. Only complete unassigned round trips that can
+be linked as whole orders are eligible. The record has an explicit retrospective
+origin, no invented plan and no initial-risk R. Return still means net divided
+by executed entry notional, not margin. Unassigned fills remain coverage, not
+scored Plays, until that confirmation. See
+[the diary contract](diary-completion-contract.md).
+
+Review exclusion counts open a paginated list of affected Plays and concrete
+reasons using `GET /api/review/exclusions` with the same filters. Reasons
+identify offending order/fill IDs where available. Each record has at most
+100 reasons, including an explicit omitted-count notice when necessary.
+Source labels distinguish imported and manual facts. Structured review answers
+count as reviewed only when saved, as does existing nonblank text.
 
 All portfolios includes enabled accounts without a portfolio, once each.
 Disabled accounts are excluded. Historical grouping follows current portfolio
@@ -53,11 +64,13 @@ geometry/sign. Even the displayed chart minimum uses an exact comparison.
 This first single-user implementation loads retained closed-Play facts into
 memory. There is no silent history cap, but very large histories will need
 database-side reporting before the memory/query cost becomes acceptable.
-No schema migration, cache, background job or new package is required.
+The original Review delivery needed no migration. The October 13 manual and
+retrospective workflows use the explicit DiaryCompletion migration. There is
+no financial cache, background job or new package.
 
 ## Eligibility and coverage
 
-A scored Play must have distinct linked fills with:
+A scored imported Play must have distinct linked fills with:
 
 - Both entry and exit quantities, all positive, with positive prices.
 - The Play's account and contract on every fill.
@@ -98,7 +111,7 @@ within the selected time and account/asset scope.
 | Drawdown | Largest drop from a prior peak in cumulative closed-Play P&L, starting at zero in the selected window. Not equity drawdown. |
 | Streaks | Consecutive positive/negative outcomes in close-time/Play-ID order. Scratches do not break them. |
 | Realized R | Net P&L / an initial planned-risk estimate, only when the plan qualifies below. |
-| Reviewed | A saved nonblank written review. Does not establish plan adherence or decision quality. |
+| Reviewed | Saved nonblank review text or at least one answered structured field. Does not establish plan adherence or decision quality. |
 
 Missing denominators are null/N/A, not infinity. Empty performance is null,
 distinct from a real zero result. Aggregate batting, payoff and profit factor
@@ -131,6 +144,8 @@ within-bucket losses; the drawdown metric uses each closed Play. A text table
 exposes chart values without pointer interaction.
 
 ## Browser behavior and verification
+
+October 13 integrity correction: known missing fixed-size filled-order executions are now read by `SizingStore` and carried with `ClosedPlayFacts`, so lifecycle, sizing and Review share the same missing-execution rule. Review reuses the execution chronology check and retains its stricter positive quantities/prices, explicit open/close effects, account/instrument identity, complete-fee and initial-risk eligibility. This does not add retrospective attribution, change the reporting window or import funding.
 
 Changing filters aborts superseded requests and hides old metrics until the
 new response arrives. Portfolio changes clear the account filter. Removed

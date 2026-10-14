@@ -47,11 +47,11 @@ An append-only snapshot of a planned play's plan, with the reason it changed. Pl
 _Avoid_: Overwriting the original plan
 
 **Order link**:
-The association of one venue order with one level of a play: an entry, one of its stops or targets, or an unplanned exit. Fills reach a play only through linked orders. Links are automatic when unambiguous, suggested otherwise, and remembered when the owner declines them.
+The association of one venue order with one level of a play: an entry, one of its stops or targets, or an unplanned exit. Imported fills reach a play through linked orders. Links are automatic when unambiguous, suggested otherwise, and remembered when the owner declines them.
 _Avoid_: Assigning fills by account and instrument alone
 
 **Execution progress**:
-How much of a play's planned entries and exits linked fills have covered. Derived from venue facts, never from price touches.
+How much of a play's entries and exits recorded executions have covered. Derived from imported or explicitly owner-recorded facts, never from price touches.
 
 **Entry**:
 One planned tranche of the play's full position, with a share of its total quantity, its own entry price, stop loss, and take-profit targets. An entry is not evidence that a trade occurred.
@@ -164,6 +164,21 @@ Distinct active plays that can share the same broker account and instrument. The
 **Imported execution**:
 A venue-reported fill retained with its source identity and provenance, independently of any thesis or play association.
 _Avoid_: Original trading intent
+
+**Manual execution**:
+An actual entry or exit recorded by the owner, with its source, time, price,
+quantity and known or unknown costs. It is not a venue-confirmed import.
+_Avoid_: Planned entry, simulated fill
+
+**Execution correction**:
+An owner-recorded amendment to a manual execution that retains the prior values
+and the reason for changing them.
+_Avoid_: Silently replacing history
+
+**Retrospective Play**:
+An owner-confirmed grouping of completed imported executions for later review.
+It records what happened without claiming that a plan was documented beforehand.
+_Avoid_: Original thesis, inferred initial risk
 
 **Retrospective review**:
 A trader's analysis added after an execution, which does not claim to be the reasoning documented before the trade.

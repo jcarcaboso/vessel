@@ -86,7 +86,7 @@ export function EvidencePanel({ evidence, onChange }: {
     <div className="evidence-toolbar">
       <div>
         <strong id={`${id}-title`}>Images</strong>
-        <small>{evidence.length} of {evidenceLimits.maxItems} · Kept in this browser until the play is saved</small>
+        <small>{evidence.length} of {evidenceLimits.maxItems} · Unsaved images, notes and marks stay in this session until saved</small>
       </div>
       <input ref={input} type="file" accept={evidenceAccept} multiple hidden onChange={event => void upload(event)} />
       <Button type="button" size="sm" variant="outline" disabled={full} title={full ? `At most ${evidenceLimits.maxItems} images` : undefined}
@@ -121,6 +121,8 @@ export function EvidencePanel({ evidence, onChange }: {
             <span className="evidence-name" title={describe(item)}>{item.source === 'capture' ? item.context || 'Chart' : item.name}</span>
             <time dateTime={item.addedAt} title={`${timeFormat.format(new Date(item.addedAt))} UTC`}>{timeFormat.format(new Date(item.addedAt))}</time>
           </div>
+          <small className="evidence-state">{!item.serverId ? 'Unsaved image' : !item.savedState || item.note !== item.savedState.note || JSON.stringify(item.markup) !== JSON.stringify(item.savedState.markup)
+            ? 'Image saved · note or marks unsaved' : 'Saved to this Play'}</small>
           {noteField(item, index, 2)}
         </li>)}
       </ul>}
@@ -128,7 +130,8 @@ export function EvidencePanel({ evidence, onChange }: {
       {viewed && <DialogContent className="plays-entry-dialog evidence-dialog"
         onEscapeKeyDown={event => { if (editing) event.preventDefault() }}>
         <DialogTitle>{describe(viewed)}</DialogTitle>
-        <DialogDescription>{viewed.source === 'capture' ? 'Captured' : 'Added'} {timeFormat.format(new Date(viewed.addedAt))} UTC · {formatBytes(viewed.image.size)}. Kept in this browser until the play is saved.</DialogDescription>
+        <DialogDescription>{viewed.source === 'capture' ? 'Captured' : 'Added'} {timeFormat.format(new Date(viewed.addedAt))} UTC · {formatBytes(viewed.image.size)}.
+          {viewed.serverId ? ' Image stored with this Play; changes to notes or marks need saving.' : ' Unsaved image, kept only in this session until saved.'}</DialogDescription>
         {editing
           ? <MarkupEditor imageUrl={imageUrl(viewed.image)} alt={describe(viewed)} markup={viewed.markup}
             onChange={markup => setMarkup(viewed.id, markup)} onDone={() => { setEditing(false); setView('marked') }} />

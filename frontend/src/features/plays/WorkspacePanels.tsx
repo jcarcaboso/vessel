@@ -2,12 +2,15 @@ import { useId, useState, type FormEvent, type ReactNode } from 'react'
 import { useVenues } from '@/api/venues'
 import { NotebookPen, Pencil, Plus, RotateCcw } from 'lucide-react'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
+import { emptyStructuredReview, type StructuredReview } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { money } from '../workspace/format'
 import type { DraftEvidence, PlayDraft } from './draft'
 import { EvidencePanel } from './EvidencePanel'
+import { PositionRiskSummary } from './PositionRiskSummary'
+import type { RiskReference } from './position-risk-summary'
 import { averageEntryPrice, formatDraggedPrice, leverageOf } from './levels'
 import { defaultSizeUnits, formatMoney, formatQuantity, positionSize, type SizeUnits } from './sizing'
 import './plays-workspace.css'
@@ -74,10 +77,11 @@ export function AvailableBudget({ draft, onChange, available = null }: {
   </div>
 }
 
-export function CapitalContext({ accounts, portfolios, draft }: {
+export function CapitalContext({ accounts, portfolios, draft, retrospective = false }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   draft: PlayDraft
+  retrospective?: boolean
 }) {
   const account = accounts.find(item => item.id === draft.accountId && item.isEnabled !== false)
   const portfolio = portfolios.find(item => item.id === account?.portfolioId)
@@ -106,8 +110,8 @@ export function CapitalContext({ accounts, portfolios, draft }: {
         {wallet && metric('Available', account.availableStablecoinNominalUsd, 'Wallet total minus amounts held by open orders.')}
         {wallet && !unified && metric('Perps equity', account.accountValueUsd, 'Perpetual account value at the venue.')}
         {!wallet && account && metric('Account value', account.accountValueUsd)}
-        <div title="Committed margin as a share of the balance"><dt>Margin / balance</dt><dd data-placeholder={share(sized.margin) === '—'}>{share(sized.margin)}</dd></div>
-        <div title="Position size (notional) as a share of the balance"><dt>Exposure / balance</dt><dd data-placeholder={share(sized.notional) === '—'}>{share(sized.notional)}</dd></div>
+        {!retrospective && <><div title="Committed margin as a share of the balance"><dt>Margin / balance</dt><dd data-placeholder={share(sized.margin) === '—'}>{share(sized.margin)}</dd></div>
+          <div title="Position size (notional) as a share of the balance"><dt>Exposure / balance</dt><dd data-placeholder={share(sized.notional) === '—'}>{share(sized.notional)}</dd></div></>}
       </dl>
     </div>
   </section>
@@ -121,7 +125,8 @@ const journalSections = [
   ['review', 'Review', 'What happened, and what did you learn?'],
 ] as const
 
-export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceRequest = 0, readOnly = false, execution }: {
+export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceRequest = 0, readOnly = false, execution,
+  structuredReview, onStructuredReviewChange, terminal = false, retrospective = false }: {
   notes: PlayDraft['notes']
   onChange: (notes: PlayDraft['notes']) => void
   evidence?: DraftEvidence[]
@@ -132,37 +137,65 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   readOnly?: boolean
   /** Linked venue orders and fills of a saved play, shown as an Execution tab before the review. */
   execution?: ReactNode
+  structuredReview?: StructuredReview | undefined
+  onStructuredReviewChange?: (review: StructuredReview) => void
+  terminal?: boolean
+  retrospective?: boolean
 }) {
   const id = useId()
-  const [tab, setTab] = useState('thesis')
+  const [tab, setTab] = useState(retrospective ? 'review' : 'thesis')
   const [shownRequest, setShownRequest] = useState(evidenceRequest)
   if (shownRequest !== evidenceRequest) {
     setShownRequest(evidenceRequest)
     setTab('evidence')
   }
+  const sections = retrospective ? journalSections.filter(([key]) => key === 'evidence' || key === 'review') : journalSections
+  const currentTab = sections.some(([key]) => key === tab) || execution && tab === 'execution' ? tab : retrospective ? 'review' : 'thesis'
+  const review = structuredReview ?? emptyStructuredReview()
+  const changeReview = (patch: Partial<StructuredReview>) => onStructuredReviewChange?.({ ...review, ...patch })
   return <section className="panel journal-panel" aria-label="Play journal" data-testid="journal-panel">
-    <Tabs value={tab} onValueChange={setTab} className="journal-tabs">
+    <Tabs value={currentTab} onValueChange={setTab} className="journal-tabs">
       <header className="panel-heading journal-header">
         <div className="journal-heading"><span className="journal-icon" aria-hidden="true"><NotebookPen size={15} /></span><h2>Play journal</h2></div>
         <TabsList className="journal-tab-list" aria-label="Journal sections">
-          {journalSections.map(([key, label]) => <TabsTrigger key={key} value={key}>{label}
+          {sections.map(([key, label]) => <TabsTrigger key={key} value={key}>{label}
             {key === 'evidence' && evidence.length > 0 && <span className="journal-tab-count" aria-hidden="true">{evidence.length}</span>}
-          </TabsTrigger>).flatMap((trigger, index) => execution && journalSections[index]![0] === 'evidence'
+          </TabsTrigger>).flatMap((trigger, index) => execution && sections[index]![0] === 'evidence'
             ? [trigger, <TabsTrigger key="execution" value="execution">Execution</TabsTrigger>] : [trigger])}
         </TabsList>
       </header>
-      {journalSections.map(([key, label, help]) => <TabsContent key={key} value={key} className="journal-tab-content">
+      <details className="journal-context"><summary>Journal context</summary>
+        <p>{retrospective ? 'Retrospective review, recorded after execution. No original plan, thesis, initial stop or initial-risk R is available.'
+          : 'Plan notes describe intent, not execution. Review is separate from the plan and keeps its own revision history.'} Unsaved notes and images stay in this session until saved.</p>
+      </details>
+      {sections.map(([key, label, help]) => <TabsContent key={key} value={key} className="journal-tab-content">
         {key === 'evidence' && onEvidenceChange && <EvidencePanel evidence={evidence} onChange={onEvidenceChange} />}
         <label className="sr-only" htmlFor={`${id}-${key}`}>{label}</label>
         <textarea id={`${id}-${key}`} value={notes[key]} placeholder={help} readOnly={readOnly && key !== 'review'}
           onChange={(event) => onChange({ ...notes, [key]: event.target.value })} />
+        {key === 'review' && onStructuredReviewChange && <fieldset className="structured-review" disabled={!terminal}>
+          <legend>Structured review <small>optional</small></legend>
+          {!terminal && <p className="muted">Structured answers are available after Closed or Cancelled. Your free-text note stays readable.</p>}
+          <label htmlFor={`${id}-adherence`}>Plan adherence<select id={`${id}-adherence`} value={review.adherence ?? ''}
+            onChange={event => changeReview({ adherence: (event.target.value || null) as StructuredReview['adherence'] })}>
+            <option value="">Unanswered</option>
+            {!retrospective && <><option value="followed">Followed</option><option value="deviated">Deviated</option></>}
+            <option value="not-applicable">Not applicable</option>
+          </select></label>
+          <label htmlFor={`${id}-mistake`}>Mistake tag<input id={`${id}-mistake`} maxLength={100} value={review.mistakeTag ?? ''}
+            onChange={event => changeReview({ mistakeTag: event.target.value || null })} /></label>
+          <label htmlFor={`${id}-lesson`}>Lesson<textarea id={`${id}-lesson`} maxLength={4000} value={review.lesson}
+            onChange={event => changeReview({ lesson: event.target.value })} /></label>
+          <label htmlFor={`${id}-next`}>Next action<textarea id={`${id}-next`} maxLength={4000} value={review.nextAction}
+            onChange={event => changeReview({ nextAction: event.target.value })} /></label>
+        </fieldset>}
       </TabsContent>)}
       {execution && <TabsContent value="execution" className="journal-tab-content">{execution}</TabsContent>}
     </Tabs>
   </section>
 }
 
-export function PositionSummary({ draft, units = defaultSizeUnits, instrumentName }: { draft: PlayDraft; units?: SizeUnits; instrumentName?: string }) {
+export function PositionSummary({ draft, units = defaultSizeUnits, instrumentName, riskReference }: { draft: PlayDraft; units?: SizeUnits; instrumentName?: string; riskReference?: RiskReference | null | undefined }) {
   const count = draft.entries.length
   // Same quantity-weighted planned average as the chart's AVG line, for one or more priced entries.
   const average = averageEntryPrice(draft.entries, 1)
@@ -183,5 +216,6 @@ export function PositionSummary({ draft, units = defaultSizeUnits, instrumentNam
     <dl>
       {values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd data-placeholder={isPlaceholder(value)}>{value}</dd></div>)}
     </dl>
+    <PositionRiskSummary draft={draft} units={units} riskReference={riskReference ?? null} />
   </section>
 }

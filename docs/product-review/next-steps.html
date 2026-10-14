@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Vessel development next steps</title>
+<style>
+  :root{color-scheme:dark;--bg:#101316;--card:#191e24;--text:#edf1f6;--muted:#b1bdcc;--line:#394553;--green:#a1ddb8;--amber:#f3d390;--red:#ffb2a9;--blue:#b5d1ff}
+  *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:90px}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  a{color:var(--blue);text-underline-offset:4px}a:focus-visible,summary:focus-visible{outline:3px solid var(--amber);outline-offset:5px}
+  .skip{position:absolute;top:-80px;left:16px;background:var(--card);padding:12px;z-index:10}.skip:focus{top:12px}
+  header,main,footer{max-width:1100px;margin:auto;padding:0 24px}header{padding-top:40px;padding-bottom:28px}
+  .eyebrow{font-size:13px;color:var(--muted)}h1{font-size:clamp(32px,5vw,52px);line-height:1.15;letter-spacing:-.03em;margin:18px 0}h2{font-size:28px;line-height:1.25;margin:0 0 12px}h3{font-size:19px;line-height:1.35;margin:0 0 10px}
+  p{margin:8px 0 15px}.lead{font-size:20px;max-width:850px;color:var(--muted)}.lead strong{color:var(--text)}.muted,small{color:var(--muted)}small{font-size:13px}
+  nav{position:sticky;top:0;background:var(--bg);z-index:5;border-block:1px solid var(--line)}nav div{max-width:1100px;margin:auto;padding:12px 24px;display:flex;gap:24px;white-space:nowrap;overflow:auto}nav a{font-size:14px}
+  section{padding:32px 0;border-bottom:1px solid var(--line)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+  article,.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px}.tag{display:inline-block;font-size:12px;font-weight:700;border:1px solid currentColor;border-radius:6px;padding:2px 8px;margin-bottom:14px}
+  .p0{color:var(--red)}.p1{color:var(--amber)}.p2{color:var(--blue)}.p3{color:var(--green)}.example{border-left:2px solid var(--line);padding-left:14px;color:var(--muted);font-size:14px}
+  .callout{border-left:3px solid var(--amber);padding:4px 0 4px 18px;margin-top:22px}ul,ol{padding-left:22px}li{margin:7px 0}details{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}summary{cursor:pointer;color:var(--blue)}
+  .sequence{display:grid;gap:14px;counter-reset:step}.step{counter-increment:step;display:grid;grid-template-columns:36px 1fr;gap:16px}.step:before{content:counter(step,decimal-leading-zero);color:var(--blue);font-weight:700}.step p{margin-bottom:6px}
+  code{font:.9em ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}footer{padding-top:24px;padding-bottom:36px;color:var(--muted);font-size:13px}
+  @media(max-width:650px){header,main,footer{padding-left:18px;padding-right:18px}.grid{grid-template-columns:1fr}article,.panel{padding:18px}.lead{font-size:18px}nav div{padding-inline:18px;gap:18px}}
+  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  @media print{body{background:white;color:#111}nav,.skip{display:none}article,.panel{background:white;border-color:#bbb}a,small,.muted,.lead,.example,.tag{color:#222}article{break-inside:avoid}}
+</style>
+</head>
+<body>
+<a class="skip" href="#must">Skip to development priorities</a>
+<header>
+  <div class="eyebrow">Vessel · Development roadmap · October 13, 2026</div>
+  <h1>From must have to nice to have</h1>
+  <p class="lead"><strong>Finish the trading diary before expanding the toolbox.</strong> Fix the facts, make manual and imported trades reviewable, then improve planning and learning.</p>
+  <p><a href="2026-10-13-development-roadmap.md">Full roadmap with acceptance criteria</a> · <a href="2026-10-13.html">Back to product review</a></p>
+  <p class="muted">P0 fixes and all five P1 must-haves are implemented in the working branch. Full integrated checks pass, and both independent adversarial Sol review tracks cleared the final fixes on October 14. The sections below retain the original acceptance criteria. P2/P3 remain proposals, not authorized implementation.</p>
+  <p><a href="verification/2026-10-13-p1.md">Delivery verification and application captures</a> · <a href="screenshots/2026-10-13-p1/money-summary.png">Money summary</a> · <a href="screenshots/2026-10-13-p1/retrospective-preview.png">Retrospective confirmation</a></p>
+</header>
+<nav aria-label="Roadmap sections"><div><a href="#blocker">P0 Fix first</a><a href="#must">P1 Must have</a><a href="#important">P2 Important next</a><a href="#nice">P3 Nice to have</a><a href="#sequence">Build sequence</a></div></nav>
+<main>
+  <section id="blocker" aria-labelledby="blocker-title">
+    <span class="tag p0">P0 · Release blocker</span>
+    <h2 id="blocker-title">01 Fix the six confirmed defects</h2>
+    <p>Incomplete fills, exits before entries, incompatible link roles, terminal unlinking, direction changes after fills, and evidence edits lost during Save.</p>
+    <div class="panel"><h3>Acceptance is more than a passing save</h3><p>Done only after all six regression cases, valid concurrent/partial trades, full checks and isolated database tests pass, and independent review is complete.</p><p class="example">Order quantity 2, retained opening quantity 1 and closing quantity 1 must mean incomplete history, not a confirmed complete trade.</p><small>Existing inconsistent Closed records need diagnosis. Preventing new bugs does not repair old records. No silent reopening or rewriting.</small></div>
+  </section>
+  <section id="must" aria-labelledby="must-title">
+    <span class="tag p1">P1 · Complete the core diary</span>
+    <h2 id="must-title">The next five deliveries</h2>
+    <p class="muted">A trade should be recordable, understandable and reviewable. These changes reuse the existing screens and approved layout.</p>
+    <div class="grid">
+      <article><h3>02 Explain data quality</h3><p>Open the actual excluded records from Review. Explain missing fills, incompatible links, incomplete costs and stale checks beside the result.</p><p class="example">"Order A reports 2 executed; 1 retained. Inspect executions." Unknown must not look like zero.</p><small>Depends on 01. No repair button without a real correction workflow.</small></article>
+      <article><h3>03 Manual executions</h3><p>Record user-supplied entry/exit time, side, quantity, price and fees. Derive lifecycle from those facts and preserve correction history.</p><p class="example">Entry 1 at 100; exits 0.4 at 105 and 0.6 at 95. Open after the first exit, Closed after the second. Gross result −1 before fees.</p><small>Depends on 01–02 and an agreed manual-fact contract. No "mark profitable" shortcut.</small></article>
+      <article><h3>04 Review imported history</h3><p>Start a retrospective record from Activity after inspecting executions and existing associations. Preserve original imported facts.</p><p class="example">An old operation can receive a lesson without inventing its original thesis, stop or initial-risk R.</p><small>Share the provenance contract with 03. Mixed operations are not automatically one Play.</small></article>
+      <article><h3>05 Whole-position money summary</h3><p>Add total planned loss, gain, R:R and reference-based risk share to the existing Summary. Show missing price/stop/target coverage.</p><p class="example">Two 0.5-unit risks total 1. Remove a stop and show 0.5 known plus unknown exposure, not "total risk 0.5".</p><small>Depends on 01. Can run alongside manual/retrospective work once validation policy is settled.</small></article>
+      <article><h3>06 Short structured review</h3><p>Keep free text. Add optional adherence, mistake tag, lesson and next action. Preserve amendments and use the existing Needs review queue.</p><p class="example">A win that broke the rules is a win with a process violation. A disciplined loss is not a process failure.</p><small>Depends on 01 and the record-origin contract. Retrospective adherence can be "not applicable".</small></article>
+      <article><h3>UI fixes alongside these features</h3><p>Accurate save-state and scope copy. Account-first onboarding. Compact mobile context. Clear partial-plan labels. Keyboard and contrast checks.</p><p class="example">Keep chart, editor, journal, capital context and Summary in their approved positions.</p><small>No separate redesign or replacement dashboard.</small></article>
+    </div>
+  </section>
+  <section id="important" aria-labelledby="important-title">
+    <span class="tag p2">P2 · Important next</span>
+    <h2 id="important-title">Make daily use reliable</h2>
+    <div class="grid">
+      <article><h3>07 History and unattended tracking</h3><p>Coverage and server paging first. Bounded backfill second. Opt-in durable sync/monitoring third.</p><p class="example">Restart safely, retain each fill once and never replay historical imports as fresh alerts.</p><small>Must exist before promising tracking while the browser is closed.</small></article>
+      <article><h3>08 Funding and cashflow accounting</h3><p>Keep fees, funding, deposits and transfers separate. Start at account/instrument level. Preserve gross/net basis.</p><p class="example">Gross +120, fees 35, funding cost 110 means −25 for the covered scope. Missing funding is unknown, not zero.</p><small>Depends on retention/coverage. No arbitrary split across concurrent Plays.</small></article>
+      <article><h3>09 Protection and portfolio risk</h3><p>Compare observed working-stop quantity with exposure. Show known planned risk beside unmeasured exposure and observation freshness.</p><p class="example">Position quantity 1, stop coverage 0.6: show 0.4 uncovered. A stale observation cannot prove protection.</p><small>Depends on execution integrity, whole-position calculations and venue-specific semantics.</small></article>
+      <article><h3>10 Search, duplicate and export</h3><p>Search/paging for Plays, clean duplicate-to-Draft and one-Play export with notes, evidence and tested redaction.</p><p class="example">Reuse a plan without copying its fills, result or completed review.</p><small>Small slices can ship before the full monitor. Export complements operator backups.</small></article>
+      <article><h3>11 Strategy versions and checklists</h3><p>Generic hypothesis, a few rules, explanatory image and frozen strategy version on each Play. Keep definition and results separate.</p><p class="example">Version 2 cannot rewrite the rules on version 1's trades. Comparisons show sample count and coverage.</p><small>Refine the existing strategy plan after structured review. Implementation still needs approval.</small></article>
+    </div>
+    <div class="callout"><strong>Honest limitations are a P1 requirement.</strong> The funding importer and durable monitor can come later, but the current UI must not claim funding-complete performance or continuous protection.</div>
+  </section>
+  <section id="nice" aria-labelledby="nice-title">
+    <span class="tag p3">P3 · Nice to have</span>
+    <h2 id="nice-title">Choose from real usage</h2>
+    <div class="grid">
+      <article><h3>Useful small additions</h3><ul><li>Deterministic weekly review after structured lessons exist.</li><li>Calendar using existing result calculations.</li><li>Timestamped context snapshots and factual tags.</li><li>Saved views, shortcuts and convenient mobile capture.</li></ul></article>
+      <article><h3>Features with heavier prerequisites</h3><ul><li>External notifications after durable events and delivery handling.</li><li>Candle archive, then MAE/MFE, replay and counterfactual analysis.</li><li>Opt-in AI note summaries only after privacy/export controls and usable review inputs.</li></ul></article>
+    </div>
+    <p class="muted">Do not prioritize more venues, indicators, themes, social features or automatic trade grades over a working diary. Lighter, RISEx, themes, saved Plays, analytics and backup instructions already exist.</p>
+  </section>
+  <section id="sequence" aria-labelledby="sequence-title">
+    <h2 id="sequence-title">Recommended delivery sequence</h2>
+    <div class="sequence">
+      <div class="step"><div><h3>Finish 01 and make problems visible with 02</h3><p>Verify the Opus patch and diagnose existing inconsistencies. Do not mark them repaired by assumption.</p></div></div>
+      <div class="step"><div><h3>Authorize 03 and settle the shared origin contract</h3><p>Manual executions are the next main feature. Deliver retrospective review 04 separately.</p></div></div>
+      <div class="step"><div><h3>Complete planning and reflection with 05–06</h3><p>The whole-position Summary is the best independent second stream. Structured review follows the agreed origin model.</p></div></div>
+      <div class="step"><div><h3>Build 07, then 08–09</h3><p>Retention supports funding and reliable protection observations. Search/export slices from 10 need not wait for the monitor.</p></div></div>
+      <div class="step"><div><h3>Add 11, then select P3 features</h3><p>Strategy comparisons need trustworthy records and structured reviews. Later tools should answer demonstrated needs.</p></div></div>
+    </div>
+    <p class="callout"><strong>Next feature to approve:</strong> manual executions. <strong>Best parallel feature:</strong> the whole-position money summary. Neither starts automatically from this roadmap.</p>
+    <details><summary>Development gates for every slice</summary><ul><li>Small contract before changes to origin, accounting, corrections, jobs or strategy history.</li><li>Regression, owner-scope, concurrency and retry tests.</li><li>Synthetic databases only; no owner-data migrations during tests.</li><li>Exact values, unknown states and read-only venue access preserved.</li><li>Rendered keyboard, contrast and responsive checks for UI changes.</li><li>Passing tests is not a deployment or a profitability claim.</li></ul></details>
+  </section>
+</main>
+<footer>Proposed order, not a dated release commitment. <a href="2026-10-13-development-roadmap.md">Full acceptance criteria and repository contracts</a> · <a href="2026-10-13-product-delta.md">Supporting product delta</a><br>Static local page. No scripts, external fonts, analytics or remote assets.</footer>
+</body>
+</html>

@@ -5,18 +5,20 @@ import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
 import { defaultReviewQuery, reviewPeriods, type ReviewDocument, type ReviewGroupBy, type ReviewQuery } from '@/api/review'
 import { ReviewChart } from './ReviewChart'
+import { ReviewExclusions } from './ReviewExclusions'
 import { negative, reviewDate, reviewMoney, reviewMultiple, reviewPercent, tone } from './format'
 import './review.css'
 
 const definitions = [
-  ['Closed-play P&L', 'One saved, fully closed Play counts once. The full result is attributed to its last linked exit, not the day it was refreshed. Partial exits on open Plays are excluded. Reported execution fees are deducted once according to the venue P&L basis; Separate funding cashflows are not added. Whether RISEx reported realized P&L includes funding remains unverified.'],
+  ['Closed-play P&L', 'One saved, fully closed Play counts once, including eligible manual records and confirmed retrospective operations. The full result is attributed to its actual last exit, not the day it was refreshed or reviewed. Partial exits on open Plays are excluded. Reported execution fees are deducted once according to the venue P&L basis. Separate funding cashflows are not added. Whether RISEx reported realized P&L includes funding remains unverified.'],
   ['Batting average', 'Wins divided by wins plus losses. Positive net P&L wins, negative loses, exact zero is a scratch. Scratches do not break streaks.'],
   ['Average gain / loss', 'Mean winning return divided by the absolute mean losing return. Play return is net P&L divided by executed entry notional, not margin or account equity. Each Play has equal weight. The sizing assistant still uses its own last-20-decided-Play window.'],
   ['Profit factor and expectancy', 'Profit factor is total winning net P&L divided by absolute losing net P&L. Expectancy is the average net result of all scored Plays, including scratches, not a forecast. Missing denominators are N/A.'],
   ['Drawdown', 'The metric is the largest drop from a preceding peak in cumulative closed-play P&L, starting at zero for this period. The chart uses closing values per day, or larger labeled buckets for long histories; it can hide losses between points. Neither is account-equity drawdown.'],
   ['Risk and reviews', 'Realized R uses an initial planned-risk estimate: executed entry notional × share-weighted stop distance. A revision must predate entry and every planned entry must have complete, valid stops. It is not actual loss risk or a retrospective estimate; incomplete risk stays unknown. Written reviews do not establish plan adherence or decision quality.'],
   ['Scope', 'All portfolios pools individual outcomes and includes unassigned enabled accounts once. Current portfolio membership applies to historical results. Disabled accounts are excluded. Asset keys retain their contract multipliers; no symbol aliases are guessed. Amounts are nominal USD, not stablecoin FX-adjusted values.'],
-  ['Imports and coverage', 'Linked imported fills contribute to saved Plays. Unassigned fills are not scored Plays; confirmed retrospective imported-Play grouping is not yet available. Missing openings, unmatched quantities, flips, unsupported fees and incomplete links are excluded, not treated as zero. Retained history may be bounded and is not lifetime performance.'],
+  ['Imports and coverage', 'Linked imported fills contribute to saved Plays. Unassigned fills are not scored Plays. Activity can preview a completed operation for owner-confirmed retrospective creation when its full facts and associations permit it. Missing openings, unmatched quantities, flips, unsupported fees and incomplete links are excluded, not treated as zero. Retained history may be bounded and is not lifetime performance.'],
+  ['Record sources', 'A retrospective Play has original execution times and a separate creation/review time, not an invented pre-trade plan or initial-risk R. Manual execution facts belong to their saved Play and eligible Review results only. They do not change venue balances or imported Activity. Account balances, retained operations and saved-Play performance are separate scopes.'],
   ['Time', '1D, 7D, Month and Year mean rolling 24-hour, 7-day, 30-day and 365-day windows ending at the displayed report time, in UTC. All means all retained eligible results. Open-play counts describe current state. Drill-down pages read a fresh snapshot; results may change after sync or link edits.'],
 ]
 
@@ -50,7 +52,7 @@ function ReviewPlays({ api, initialQuery, onOpenPlay }: {
   const [opening, setOpening] = useState<string | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
   const openingRequest = useRef<AbortController | null>(null)
-  useEffect(() => () => openingRequest.current?.abort(), [])
+  useEffect(() => () => openingRequest.current?.abort(), [api])
   async function open(id: string) {
     openingRequest.current?.abort()
     const controller = new AbortController()
@@ -66,9 +68,10 @@ function ReviewPlays({ api, initialQuery, onOpenPlay }: {
     {openError && <p role="alert">{openError}</p>}
     {report && <>
       <div className="pr-detail-summary"><span>Net P&L<strong className={tone(report.metrics.net)}>{reviewMoney(report.metrics.net, true)}</strong></span><span>Planned risk<strong>{report.metrics.riskCount} / {report.metrics.count}</strong></span><span>Written reviews<strong>{report.metrics.reviewed} / {report.metrics.count}</strong></span></div>
-      <div className="pr-table-scroll pr-play-list"><table><caption className="sr-only">Contributing closed Plays</caption><thead><tr><th>Play / account</th><th>Closed UTC</th><th>Net P&L</th><th>R</th><th>Review</th></tr></thead><tbody>
-        {report.plays.map(play => <tr key={play.id}><th scope="row"><button className="pr-play-link" disabled={opening !== null} onClick={() => { void open(play.id) }} aria-label={`Open Play ${play.title || play.instrument}`}>{play.title || play.instrument}<ArrowUpRight size={12} /></button><small>{play.instrument} · {play.accountName}</small><small>{play.venueId}{opening === play.id ? ' · Opening…' : ''}</small></th><td>{reviewDate(play.closedAtUtc, true)}</td><td className={tone(play.net)}>{reviewMoney(play.net, true)}</td><td>{reviewMultiple(play.rMultiple)}</td><td>{play.reviewed ? 'Written' : 'Not yet'}</td></tr>)}
-        {!report.plays.length && <tr><td colSpan={5}>No scored Plays in this selection.</td></tr>}
+      <p className="pr-exclusion-notice">Return is net P&amp;L / executed entry notional, not margin or account equity. Retrospective initial-risk R is unavailable.</p>
+      <div className="pr-table-scroll pr-play-list"><table><caption className="sr-only">Contributing closed Plays</caption><thead><tr><th>Play / account</th><th>Closed UTC</th><th>Net P&L</th><th>Return</th><th>R</th><th>Review</th></tr></thead><tbody>
+        {report.plays.map(play => <tr key={play.id}><th scope="row"><button className="pr-play-link" disabled={opening !== null} onClick={() => { void open(play.id) }} aria-label={`Open Play ${play.title || play.instrument}`}>{play.title || play.instrument}<ArrowUpRight size={12} /></button><small>{play.instrument} · {play.accountName}</small><small>{play.venueId}{opening === play.id ? ' · Opening…' : ''}</small><small>{play.origin === 'retrospective' ? 'Retrospective · imported executions' : play.executionSource === 'manual' ? 'Planned · manual executions' : play.executionSource === 'imported' ? 'Planned · imported executions' : 'Planned · execution source not reported'}</small></th><td>{reviewDate(play.closedAtUtc, true)}</td><td className={tone(play.net)}>{reviewMoney(play.net, true)}</td><td>{reviewPercent(play.returnPercent)}</td><td>{reviewMultiple(play.rMultiple)}</td><td>{play.reviewed ? 'Written' : 'Not yet'}</td></tr>)}
+        {!report.plays.length && <tr><td colSpan={6}>No scored Plays in this selection.</td></tr>}
       </tbody></table></div>
       <div className="pr-pagination"><button className="pr-outline-button" disabled={report.offset === 0} onClick={() => setQuery({ ...query, offset: Math.max(0, report.offset - 50) })}>Previous</button><span>{report.plays.length ? report.offset + 1 : 0}–{report.offset + report.plays.length} of {report.metrics.count}</span><button className="pr-outline-button" disabled={report.nextOffset === null} onClick={() => { if (report.nextOffset !== null) setQuery({ ...query, offset: report.nextOffset }) }}>Next</button></div>
     </>}
@@ -83,6 +86,7 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay }: {
   const [group, setGroup] = useState<ReviewGroupBy>('portfolios')
   const [methods, setMethods] = useState(false)
   const [detail, setDetail] = useState<{ title: string; query: ReviewQuery } | null>(null)
+  const [exclusions, setExclusions] = useState<ReviewQuery | null>(null)
   const trigger = useRef<HTMLElement | null>(null)
   const { report, loading, error, options } = useReport(api, query, reload + reloadGeneration)
   const remember = () => { trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }
@@ -92,6 +96,7 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay }: {
     const filter = id === undefined ? {} : group === 'portfolios' ? { portfolio: id } : group === 'accounts' ? { accountId: id } : { instrument: id }
     setDetail({ title, query: { ...query, ...filter, offset: 0 } })
   }
+  const inspectExclusions = () => { remember(); setExclusions({ ...query, offset: 0 }) }
   const accounts = options?.accounts.filter(a => query.portfolio === 'all' ||
     (query.portfolio === 'unassigned' ? a.portfolioId === null : a.portfolioId === query.portfolio)) ?? []
   const stats = report?.metrics
@@ -109,7 +114,7 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay }: {
       <label><span>Asset</span><span className="pr-select"><select value={query.instrument ?? ''} onChange={e => setQuery(previous => { const next = { ...previous }; if (e.target.value) next.instrument = e.target.value; else delete next.instrument; return next })}><option value="">All assets</option>{options?.instruments.map(asset => <option key={asset}>{asset}</option>)}{query.instrument && !options?.instruments.includes(query.instrument) && <option value={query.instrument}>{query.instrument} · unavailable</option>}</select><ChevronDown size={14} aria-hidden="true" /></span></label>
       <button className="pr-reset" disabled={!filtered} onClick={() => setQuery({ ...defaultReviewQuery, period: query.period })}><SlidersHorizontal size={15} />Reset</button>
     </section>
-    <div className="pr-scope"><span>Nominal USD{query.portfolio === 'all' ? ' · includes unassigned' : ''}</span><span>Closed Plays · reported P&L</span></div>
+    <div className="pr-scope"><span>Nominal USD{query.portfolio === 'all' ? ' · includes unassigned' : ''}</span><span>Saved closed Plays · not account balances or all Activity</span></div>
     {loading && <div className="pr-loading" role="status">Loading review…</div>}
     {error && <div className="pr-empty" role="alert"><p>{error}</p><button className="pr-outline-button" onClick={() => setReload(n => n + 1)}>Retry review</button></div>}
     {report && stats && <>
@@ -142,16 +147,21 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay }: {
         </tbody>{groups.length > 0 && <tfoot><tr><th scope="row">Combined result</th><td>{stats.count}</td><td>{reviewPercent(stats.batting, true)}</td><td>{reviewMultiple(stats.payoff)}</td><td>{reviewMultiple(stats.profitFactor)}</td><td className={tone(stats.net)}>{reviewMoney(stats.net, true)}</td><td /></tr></tfoot>}</table></div>
       </section>
       <section className="pr-coverage" aria-label="Data coverage"><ShieldCheck size={16} /><details><summary>{stats.count} scored · {report.coverage.incompleteFees + report.coverage.incompleteExecutions} excluded · {stats.reviewed} reviewed</summary>
-        <p>{report.coverage.incompleteFees} incomplete fees · {report.coverage.incompleteExecutions} incomplete executions · {report.coverage.openPlays} currently open</p>
-        <p>{report.coverage.unassignedFills} unassigned fills in this period. Imported-Play grouping is not available.</p>
+        <p><button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteFees} incomplete fees</button> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteExecutions} incomplete executions</button> · {report.coverage.openPlays} currently open</p>
+        <p>{report.coverage.unassignedFills} unassigned fills in this period. Inspect completed operations in Activity to preview retrospective creation.</p>
+        <p>{stats.count} scored Plays have an executed-entry-notional return. Initial planned-risk inputs are available for {stats.riskCount} of {stats.count}; retrospective initial-risk R stays unknown.</p>
+        <p>Manual execution results only affect saved-Play Review, never account balances or imported Activity. Fees follow the reported gross/net-of-fee basis. Separate funding cashflows are not added; RISEx funding inclusion is unverified.</p>
         <p>{report.coverage.notice}</p>
         {report.coverage.firstFillAtUtc && <p>Earliest retained fill in this scope: {reviewDate(report.coverage.firstFillAtUtc, true)}.</p>}
         <ul>{activeAccounts.map(a => <li key={a.id}><strong>{a.name}</strong> · {a.syncStatus} · {a.lastSyncedAtUtc ? `last refreshed ${reviewDate(a.lastSyncedAtUtc, true)}` : 'not refreshed'}{a.historyNotice && <p>{a.historyNotice}</p>}</li>)}</ul>
-      </details></section>
+      </details><button className="pr-outline-button" onClick={inspectExclusions} aria-label={`Inspect exclusions (${report.coverage.incompleteFees + report.coverage.incompleteExecutions})`}>{report.coverage.incompleteFees + report.coverage.incompleteExecutions} excluded</button></section>
     </>}
     <Dialog open={methods} onOpenChange={setMethods}><DialogContent className="pr-dialog" onCloseAutoFocus={restore}><DialogHeader><DialogTitle>Definitions</DialogTitle><DialogDescription>Closed-Play results from retained execution facts.</DialogDescription></DialogHeader><div className="pr-methods">{definitions.map(([title, text]) => <section key={title}><h3>{title}</h3><p>{text}</p></section>)}</div></DialogContent></Dialog>
     <Dialog open={detail !== null} onOpenChange={open => { if (!open) setDetail(null) }}><DialogContent className="pr-dialog pr-detail-dialog" onCloseAutoFocus={restore}><DialogHeader><DialogTitle>{detail?.title}</DialogTitle><DialogDescription>Contributing closed Plays. Select a Play to open its journal.</DialogDescription></DialogHeader>
       {detail && <ReviewPlays api={api} initialQuery={detail.query} onOpenPlay={onOpenPlay} />}
+    </DialogContent></Dialog>
+    <Dialog open={exclusions !== null} onOpenChange={open => { if (!open) setExclusions(null) }}><DialogContent className="pr-dialog pr-detail-dialog" onCloseAutoFocus={restore}><DialogHeader><DialogTitle>Excluded Plays</DialogTitle><DialogDescription>Exact server reasons for this Review period and scope. Open the saved Play to inspect its records.</DialogDescription></DialogHeader>
+      {exclusions && <ReviewExclusions api={api} initialQuery={exclusions} onOpenPlay={onOpenPlay} />}
     </DialogContent></Dialog>
   </section>
 }

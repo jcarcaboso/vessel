@@ -34,15 +34,19 @@ public sealed record FeeTotalDto(string Token, string Amount);
 public sealed record ExecutionTotalsDto(string EnteredQuantity, string ExitedQuantity, string OpenQuantity,
     string ClosedPnlUsd, string ClosedPnlBasis, IReadOnlyList<FeeTotalDto> Fees);
 
+/// <summary><paramref name="Issues"/> say why linked fills cannot settle the play; their quantities stay out of the totals when they contradict it.</summary>
 public sealed record PlayExecutionDto(Guid PlayId, string Status, bool Tracked, string? Reason, DateTimeOffset? CheckedAtUtc,
     ExecutionTotalsDto Totals, IReadOnlyList<EntryProgressDto> Entries, IReadOnlyList<OrderLinkDto> Links,
-    IReadOnlyList<OrderLinkDto> Suggestions, IReadOnlyList<ExecutionOrderDto> UnlinkedOrders, string Notice);
+    IReadOnlyList<OrderLinkDto> Suggestions, IReadOnlyList<ExecutionOrderDto> UnlinkedOrders, string Notice, IReadOnlyList<string> Issues);
 
 // Application owns this bounded port; EF details stay in Persistence. Reads are owner-filtered.
 public interface IPlayExecutionStore
 {
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);
-    /// <summary>Planned, paused and open Plays of the account, tracked for status changes.</summary>
+    /// <summary>
+    /// Planned, paused and open Plays of the account, tracked for status changes with their committed values and locked
+    /// until the transaction ends, so owner status and plan changes take turns with linking.
+    /// </summary>
     Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct);
     Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct);
     /// <summary>Inserts new orders and updates the status of known ones.</summary>

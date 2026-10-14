@@ -17,3 +17,22 @@
 .operation-filters select:focus-visible, .operation-filters input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .operation-scope, .operation-originals { padding: 16px; color: var(--muted-foreground); font-size: 12px; }
 .operation-scope summary, .operation-originals summary { cursor: pointer; color: var(--foreground); }
+.retrospective-dialog { max-width: min(900px, calc(100% - 2rem)) !important; max-height: calc(100dvh - 40px); overflow-y: auto; }
+.retrospective-preview { min-width: 0; display: grid; gap: 12px; font-size: 12px; color: var(--foreground); }
+.retrospective-preview .workspace-scope-note { margin: 0; overflow-wrap: anywhere; }
+.retrospective-preview h3 { font-size: 13px; font-weight: 600; margin: 0; }
+.retrospective-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.retrospective-times { display: flex; flex-wrap: wrap; gap: 16px; margin: 0; }
+.retrospective-times dt { color: var(--muted-foreground); }
+.retrospective-times dd { margin: 4px 0 0; }
+.retrospective-field { display: grid; gap: 6px; }
+.retrospective-field input, .retrospective-field textarea { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--field); color: var(--foreground); font: inherit; }
+.retrospective-field input:focus-visible, .retrospective-field textarea:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.retrospective-fills { max-width: 100%; }
+.retrospective-fills .workspace-table { font-size: 11px; }
+.retrospective-fills .workspace-table td { min-width: 140px; max-width: 250px; white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+.retrospective-preview > button { justify-self: start; max-width: 100%; white-space: normal; }
+@media (max-width: 420px) {
+  .retrospective-dialog { padding: 16px !important; }
+  .retrospective-times { gap: 12px; }
+}

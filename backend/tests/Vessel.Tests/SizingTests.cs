@@ -139,10 +139,11 @@ public sealed class SizingServiceTests
         new(id, id, "#b9c9e4", share, price, stops, [new PlanExit(id + "-target", "price", "120", "100")]);
 
     private static ImportedFill Fill(decimal price, decimal quantity, decimal pnl = 0, decimal fee = 0.1m, string token = "USDC", int minutes = 0,
-        string pnlBasis = ExecutionFacts.PnlGross) => new()
+        string pnlBasis = ExecutionFacts.PnlGross, string side = ExecutionFacts.Buy, string effect = ExecutionFacts.Unknown) => new()
     {
         Id = Guid.NewGuid(), Price = price, Quantity = quantity, ClosedPnlUsd = pnl, Fee = fee, FeeToken = token, PnlBasis = pnlBasis,
-        OccurredAtUtc = Planned.AddMinutes(30 + minutes), OrderId = "o", ContractId = "BTC", SourceFillId = "f", Side = ExecutionFacts.Buy, Direction = "", TransactionHash = "",
+        OccurredAtUtc = Planned.AddMinutes(30 + minutes), OrderId = "o", ContractId = "BTC", SourceFillId = "f", Side = side, PositionEffect = effect,
+        Direction = "", TransactionHash = "",
     };
 
     private ClosedPlayFacts Closed(PlayPlanDocument plan, IEnumerable<LinkedFill> fills, PlayPlanDocument? revised = null, int closedDay = 2)
@@ -217,8 +218,11 @@ public sealed class SizingServiceTests
     [Fact]
     public async Task Get_uses_the_default_risk_and_reports_the_record_newest_first()
     {
-        store.Closed.Add(Closed(Plan(), [new(OrderLinkRole.Entry, Fill(100, 1, fee: 0)), new(OrderLinkRole.Stop, Fill(95, 1, pnl: -5, fee: 0))], closedDay: 2));
-        store.Closed.Add(Closed(Plan(), [new(OrderLinkRole.Entry, Fill(100, 1, fee: 0)), new(OrderLinkRole.Target, Fill(110, 1, pnl: 10, fee: 0))], closedDay: 3));
+        // A long's stop and target sell.
+        store.Closed.Add(Closed(Plan(), [new(OrderLinkRole.Entry, Fill(100, 1, fee: 0)),
+            new(OrderLinkRole.Stop, Fill(95, 1, pnl: -5, fee: 0, side: ExecutionFacts.Sell))], closedDay: 2));
+        store.Closed.Add(Closed(Plan(), [new(OrderLinkRole.Entry, Fill(100, 1, fee: 0)),
+            new(OrderLinkRole.Target, Fill(110, 1, pnl: 10, fee: 0, side: ExecutionFacts.Sell))], closedDay: 3));
         var sizing = await Service.GetAsync(default);
         Assert.Equal("1.25", sizing.Settings.RiskPercent);
         Assert.Equal(("full", "1", "1.25", "10", "2"), (sizing.Exposure.Level, sizing.Exposure.Multiplier, sizing.Limits.EffectiveRiskPercent,
@@ -227,6 +231,23 @@ public sealed class SizingServiceTests
         Assert.Equal(["win", "loss"], sizing.Record.Recent.Select(r => r.Outcome));
         Assert.Equal(("10", "10", "5", "2"), (sizing.Record.Recent[0].NetResultUsd, sizing.Record.Recent[0].ReturnPercent,
             sizing.Record.Recent[0].RiskUsd, sizing.Record.Recent[0].RMultiple));
+    }
+
+    [Fact]
+    public async Task Closed_records_their_fills_cannot_settle_are_not_scored()
+    {
+        LinkedFill In(int minutes = 0) => new(OrderLinkRole.Entry, Fill(100, 1, fee: 0, minutes: minutes, effect: ExecutionFacts.Open));
+        LinkedFill Out(int minutes = 5, decimal quantity = 1, string side = ExecutionFacts.Sell, string effect = ExecutionFacts.Close) =>
+            new(OrderLinkRole.Target, Fill(110, quantity, pnl: 10, fee: 0, minutes: minutes, side: side, effect: effect));
+        store.Closed.Add(Closed(Plan(), [In(), Out()]));
+        store.Closed.Add(Closed(Plan(), [In(minutes: 10), Out()]));
+        store.Closed.Add(Closed(Plan(), [In(), Out(side: ExecutionFacts.Buy, effect: ExecutionFacts.Open)]));
+        store.Closed.Add(Closed(Plan(), [In(), Out(effect: ExecutionFacts.Flip)]));
+        store.Closed.Add(Closed(Plan(), [In(), Out(quantity: 2)]));
+        // The entry order filled 2 at the venue, but only this one execution is retained.
+        store.Closed.Add(Closed(Plan(), [In(), Out()]) with { IncompleteOrders = ["o"] });
+        var sizing = await Service.GetAsync(default);
+        Assert.Equal((1, 1), (sizing.Record.ClosedPlays, sizing.Record.Wins));
     }
 
     [Fact]

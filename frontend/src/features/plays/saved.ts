@@ -1,8 +1,9 @@
 import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/system'
-import type { PlanEntry, PlayFields, PlayPlan, PlaySummary, SavedEvidence, SavedPlay } from '@/api/plays'
+import { emptyStructuredReview, hasStructuredReview, type PlanEntry, type PlayFields, type PlayPlan, type PlaySummary, type SavedEvidence, type SavedPlay } from '@/api/plays'
 import { isChartDrawing, type ChartDrawing } from '@/components/chart/drawings'
 import { createDraft, createEvidenceId, type DraftEvidence, type PlayDraft } from './draft'
+import { hasManualDraft, type ManualExecutionDraft } from './manual'
 
 export const failure = (cause: unknown) => cause instanceof ApiError ? cause.message : 'The change could not be completed. Try again.'
 
@@ -20,18 +21,27 @@ export interface PlaysSession {
   view: 'list' | 'editor'
   draft: PlayDraft
   saved: SavedState | null
+  manual?: ManualExecutionDraft
+  /** Latest whole document observed, even when dirty fields keep an older editable baseline. */
+  observedPlay?: { api: WorkspaceApi; id: string; accountId: string; version: number; conflict: boolean } | null
 }
-export const createPlaysSession = (): PlaysSession => ({ view: 'list', draft: createDraft(), saved: null })
+export const createPlaysSession = (): PlaysSession => ({ view: 'list', draft: createDraft(), saved: null, observedPlay: null })
+
+export function observedPlayVersion(session: PlaysSession, api: WorkspaceApi) {
+  const { saved, observedPlay } = session
+  return Math.max(saved?.summary.version ?? 0, observedPlay?.api === api && observedPlay.id === saved?.summary.id &&
+    observedPlay.accountId === saved.summary.accountId ? observedPlay.version : 0)
+}
 
 /** A new editor must never replace unsaved work, including changes to a saved Play. */
 export function startNewPlay(session: PlaysSession): PlaysSession {
-  const unsaved = session.saved ? isDirty(session.draft, session.saved) : hasDraftContent(session.draft)
+  const unsaved = (session.saved ? isDirty(session.draft, session.saved) : hasDraftContent(session.draft)) || hasManualDraft(session.manual)
   return { ...(unsaved ? session : createPlaysSession()), view: 'editor' }
 }
 
 export function hasDraftContent(draft: PlayDraft) {
   return !!(draft.title.trim() || draft.accountId || draft.instrument || draft.evidence.length || draft.notes.review.trim() ||
-    Object.values(draft.drawings).some(items => items.length) || planContent(draft) !== blankPlanContent)
+    hasStructuredReview(draft.structuredReview) || Object.values(draft.drawings).some(items => items.length) || planContent(draft) !== blankPlanContent)
 }
 
 export function planFromDraft(draft: PlayDraft): PlayPlan {
@@ -53,6 +63,7 @@ export function fieldsFromDraft(draft: PlayDraft): PlayFields {
   return {
     accountId: draft.accountId, instrument: draft.instrument || null, instrumentSource: draft.instrumentSource,
     title: draft.title, plan: planFromDraft(draft), drawings: draft.drawings, review: draft.notes.review,
+    structuredReview: draft.structuredReview ?? emptyStructuredReview(),
   }
 }
 
@@ -88,7 +99,7 @@ export function draftFromSaved(play: SavedPlay, evidence: DraftEvidence[]): Play
     instrumentSource: play.summary.instrumentSource, direction: play.plan.direction, sizingMode: play.plan.sizingMode,
     size: play.plan.size, leverage: play.plan.leverage, budgetOverride: play.plan.budgetOverride,
     entries: play.plan.entries.map((entry: PlanEntry) => ({ ...entry, stops: entry.stops.map(stop => ({ ...stop })), targets: entry.targets.map(target => ({ ...target })) })),
-    notes: { ...play.plan.notes, review: play.review },
+    notes: { ...play.plan.notes, review: play.review }, structuredReview: play.structuredReview ?? emptyStructuredReview(),
     drawings, evidence,
   }
 }
@@ -106,6 +117,7 @@ export function draftEvidenceFromSaved(item: SavedEvidence, image: Blob): DraftE
 /** Loads a saved Play with its evidence images. */
 export async function loadSavedPlay(api: WorkspaceApi, id: string, signal?: AbortSignal) {
   const [play, items] = await Promise.all([api.play(id, signal), api.evidence(id, signal)])
+  if (play.summary.id !== id) throw new ApiError('invalid-response', 'The API returned a different Play. Your current work was kept.')
   const evidence = await Promise.all(items.map(async item => draftEvidenceFromSaved(item, await api.evidenceImage(item.id, signal))))
   const draft = draftFromSaved(play, evidence)
   return { draft, saved: savedState(play, draft) }
@@ -143,6 +155,19 @@ export async function syncEvidence(api: WorkspaceApi, playId: string, evidence: 
   }
   // Deletions that failed stay in the saved list, so the next save retries them.
   return { evidence: result, error, pendingDeletes }
+}
+
+/**
+ * Applies what a save stored to evidence edited meanwhile. Only the server identity and saved state move over, so
+ * notes and marks changed while saving stay and still count as unsaved; removed images stay removed, and their
+ * server IDs in the saved state let the next save delete them.
+ */
+export function mergeSavedEvidence(current: DraftEvidence[], synced: DraftEvidence[]): DraftEvidence[] {
+  const stored = new Map(synced.map(item => [item.id, item]))
+  return current.map(item => {
+    const result = stored.get(item.id)
+    return result?.serverId ? { ...item, serverId: result.serverId, ...(result.savedState ? { savedState: result.savedState } : {}) } : item
+  })
 }
 
 const levelText = (level: { unit: string; value: string }) => level.value === '' ? 'blank' : level.unit === 'percent' ? `${level.value}%` : level.value

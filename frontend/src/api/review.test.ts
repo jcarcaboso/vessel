@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { defaultReviewQuery, isReviewDocument, reviewPath } from './review'
+import { defaultReviewQuery, isReviewDocument, isReviewExclusions, reviewExclusionsPath, reviewPath } from './review'
 import { createWorkspaceApi } from './workspace'
 import { emptyReview, reviewFixture } from '@/test/review-fixture'
 
@@ -42,5 +42,32 @@ describe('Review API', () => {
   it('does not use mocked performance when the endpoint fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('server details', { status: 500 })))
     await expect(createWorkspaceApi('token').review(defaultReviewQuery)).rejects.toThrow()
+  })
+  it('keeps executed-notional returns for retrospective Plays and rejects invented R', () => {
+    const play = { ...reviewFixture.plays[0]!, origin: 'retrospective', executionSource: 'imported', rMultiple: null }
+    expect(isReviewDocument({ ...reviewFixture, plays: [play] })).toBe(true)
+    expect(isReviewDocument({ ...reviewFixture, plays: [{ ...play, returnPercent: null }] })).toBe(false)
+    expect(isReviewDocument({ ...reviewFixture, plays: [{ ...play, rMultiple: '2' }] })).toBe(false)
+    expect(isReviewDocument({ ...reviewFixture, plays: [{ ...play, executionSource: 'guessed' }] })).toBe(false)
+  })
+  it('validates bounded exclusion pages and preserves exact record reasons', async () => {
+    const play = reviewFixture.plays[0]!
+    const page = { items: [{ playId: play.id, title: play.title, accountId: play.accountId,
+      accountName: play.accountName, instrument: play.instrument, reasons: ['Order 84321 is missing fill 12345678-1234-1234-1234-123456789abc.'] }],
+      total: 1, offset: 0, nextOffset: null, notice: 'Same Review period and scope.' }
+    expect(isReviewExclusions(page)).toBe(true)
+    expect(isReviewExclusions({ ...page, nextOffset: 0 })).toBe(false)
+    expect(isReviewExclusions({ ...page, total: 2 })).toBe(false)
+    expect(isReviewExclusions({ ...page, items: [page.items[0], page.items[0]], total: 2 })).toBe(false)
+    expect(isReviewExclusions({ ...page, items: [{ ...page.items[0], reasons: Array.from({ length: 200 }, (_, i) => `Fill ${i} has unsupported fees.`) }] })).toBe(true)
+    expect(isReviewExclusions({ ...page, items: Array.from({ length: 51 }, () => page.items[0]), total: 51 })).toBe(false)
+    expect(isReviewExclusions({ ...page, items: [{ ...page.items[0], reasons: [] }] })).toBe(false)
+    expect(isReviewExclusions({ ...page, items: [{ ...page.items[0], playId: '../foreign' }] })).toBe(false)
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(page)))
+    vi.stubGlobal('fetch', fetch)
+    const query = { ...defaultReviewQuery, instrument: 'A&B/#', offset: 0 }
+    expect(await createWorkspaceApi('token').reviewExclusions!(query)).toEqual(page)
+    expect(fetch).toHaveBeenCalledWith(reviewExclusionsPath(query), expect.objectContaining({ cache: 'no-store', credentials: 'omit' }))
+    expect(new URL(reviewExclusionsPath(query), 'http://localhost').searchParams.get('instrument')).toBe('A&B/#')
   })
 })

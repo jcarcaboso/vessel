@@ -6,10 +6,12 @@ import { leverageOf } from './levels'
 import { estimatedLiquidation } from './sizing'
 
 /** Problems in the plan, with the corrections that clear them. Shown between the play fields and the workspace. */
-export function PlanNotices({ draft, onChange, readOnly = false, maxLeverage = null, maintenanceMargin = null }: {
+export function PlanNotices({ draft, onChange, readOnly = false, lockDirection = false, maxLeverage = null, maintenanceMargin = null }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
   readOnly?: boolean
+  /** A play with entry fills keeps its direction, so switching it is not offered. */
+  lockDirection?: boolean
   /** Venue maximum for the contract, for the liquidation estimate. */
   maxLeverage?: number | null
   /** Maintenance margin fraction the venue states for the contract, or null. */
@@ -30,7 +32,9 @@ export function PlanNotices({ draft, onChange, readOnly = false, maxLeverage = n
       </div>
     </div>
   </section>
-  const { swapped, reversed } = planFixes(draft)
+  const fixes = planFixes(draft)
+  const swapped = fixes.swapped
+  const reversed = lockDirection ? null : fixes.reversed
   const other = draft.direction === 'long' ? 'Short' : 'Long'
   return <section className="plays-notifications" aria-label="Plan notifications">
     <div className="plays-notification is-error" role="alert">

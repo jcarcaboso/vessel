@@ -295,7 +295,7 @@ public sealed class AccountManagementPostgresTests
     }
 
     // Observe PostgreSQL's actual wait, not a timing assumption about an unfinished task.
-    private static async Task WaitForLock(CoreDatabase database, int pid)
+    internal static async Task WaitForLock(CoreDatabase database, int pid)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await using var connection = new NpgsqlConnection(database.ConnectionString); await connection.OpenAsync(deadline.Token);

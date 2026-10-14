@@ -105,7 +105,9 @@ public sealed class HyperliquidCanonicalMigrationTests
         var planBefore = await db.Plays.Where(p => p.Id == play).Select(p => p.Plan).SingleAsync();
         await db.Database.ExecuteSqlRawAsync(UpSql);
         await db.Database.ExecuteSqlRawAsync(UpSql);
-        var plays = await db.Plays.IgnoreQueryFilters().ToDictionaryAsync(p => p.Id);
+        // This is a historical schema. Read only its columns, not today's full Play model.
+        var plays = await db.Database.SqlQueryRaw<MigratedPlay>(
+            """SELECT "Id", "ContractId", "Plan"::text AS "Plan", "Drawings"::text AS "Drawings" FROM plays""").ToDictionaryAsync(p => p.Id);
         Assert.Equal("1000PEPE", plays[play].ContractId);
         Assert.Equal("1000DOGS", plays[anotherOwner].ContractId);
         Assert.Equal("BTC", plays[btc].ContractId);
@@ -132,6 +134,8 @@ public sealed class HyperliquidCanonicalMigrationTests
         Assert.Equal(2, await db.Database.SqlQueryRaw<int>(
             """SELECT count(*)::int AS "Value" FROM play_plan_revisions WHERE "Plan" -> 'notes' ->> 'thesis' = 'keep kPEPE and hyperliquid:kPEPE verbatim'""").SingleAsync());
     }
+
+    private sealed record MigratedPlay(Guid Id, string? ContractId, string Plan, string Drawings);
 
     [PostgresFact]
     public async Task Canonical_migration_rejects_drawing_collisions_without_overwriting_or_partial_rewrites()

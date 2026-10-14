@@ -222,6 +222,129 @@ namespace Vessel.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Plays.DiaryRequest", b =>
+                {
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PayloadHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Response")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("OwnerId", "Id");
+
+                    b.ToTable("diary_requests", (string)null);
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.ManualExecution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EntryId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Fee")
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<string>("FeeCurrency")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Price")
+                        .IsRequired()
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<string>("Quantity")
+                        .IsRequired()
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Side")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "PlayId", "OccurredAtUtc");
+
+                    b.ToTable("manual_executions", (string)null);
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.ManualExecutionHistory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("After")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Before")
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid>("ExecutionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "PlayId", "OccurredAtUtc");
+
+                    b.ToTable("manual_execution_history", (string)null);
+                });
+
             modelBuilder.Entity("Vessel.Domain.Plays.Play", b =>
                 {
                     b.Property<Guid>("Id")
@@ -254,6 +377,11 @@ namespace Vessel.Persistence.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<Guid>("OwnerId")
                         .HasColumnType("uuid");
 
@@ -271,6 +399,30 @@ namespace Vessel.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(20000)
                         .HasColumnType("character varying(20000)");
+
+                    b.Property<string>("ReviewAdherence")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ReviewLesson")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("ReviewMistakeTag")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ReviewNextAction")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<int>("ReviewRevision")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("ReviewedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -405,6 +557,41 @@ namespace Vessel.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_play_plan_revisions_number", "\"Number\" >= 1");
                         });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.PlayReviewRevision", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Review")
+                        .IsRequired()
+                        .HasMaxLength(20000)
+                        .HasColumnType("character varying(20000)");
+
+                    b.Property<string>("StructuredReview")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "PlayId", "Number")
+                        .IsUnique();
+
+                    b.ToTable("play_review_revisions", (string)null);
                 });
 
             modelBuilder.Entity("Vessel.Domain.Plays.PlayStatusChange", b =>
@@ -828,6 +1015,26 @@ namespace Vessel.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Plays.ManualExecution", b =>
+                {
+                    b.HasOne("Vessel.Domain.Plays.Play", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "PlayId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.ManualExecutionHistory", b =>
+                {
+                    b.HasOne("Vessel.Domain.Plays.Play", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "PlayId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Vessel.Domain.Plays.Play", b =>
                 {
                     b.HasOne("Vessel.Domain.Accounts.Account", null)
@@ -855,6 +1062,16 @@ namespace Vessel.Persistence.Migrations
                         .HasForeignKey("OwnerId", "PlayId")
                         .HasPrincipalKey("OwnerId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.PlayReviewRevision", b =>
+                {
+                    b.HasOne("Vessel.Domain.Plays.Play", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "PlayId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

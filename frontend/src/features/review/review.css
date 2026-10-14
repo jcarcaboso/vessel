@@ -10,9 +10,23 @@
 .pr-play-link { display: inline-flex; align-items: center; gap: 7px; background: none; border: 0; padding: 0; color: inherit; text-align: left; cursor: pointer; font: inherit; }
 .pr-play-link:disabled { opacity: .6; cursor: default; }
 .pr-play-link:hover { text-decoration: underline; }
+.pr-play-link:focus-visible, .pr-count-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
 .pr-pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--pr-muted); font-size: 11px; }
 .pr-pagination button:disabled { opacity: .5; }
 .pr-coverage details { min-width: 0; }
+.pr-coverage { flex-wrap: wrap; }
+.pr-count-link { text-decoration: underline; text-underline-offset: 3px; color: var(--foreground); }
+.pr-exclusion-notice { color: var(--muted-foreground); font-size: 12px; line-height: 1.6; }
+.pr-exclusion-list { list-style: none; padding: 0; margin: 0; }
+.pr-exclusion-list > li { padding: 16px 0; border-bottom: 1px solid var(--border); }
+.pr-exclusion-list p, .pr-exclusion-list small { color: var(--muted-foreground); }
+.pr-exclusion-list small, .pr-exclusion-list li { overflow-wrap: anywhere; }
+.pr-exclusion-list ul { padding-left: 20px; margin-top: 10px; }
+.pr-exclusion-pagination { flex-wrap: wrap; }
+@media (max-width: 420px) {
+  .pr-exclusion-pagination > span { order: -1; flex-basis: 100%; text-align: center; }
+  .pr-exclusion-pagination .pr-outline-button { flex: 1 1 100px; white-space: normal; padding: 8px; }
+}
 .pr-coverage ul { list-style: none; padding: 0; color: var(--pr-muted); font-size: 10px; }
 .pr-coverage li { margin-top: 12px; }
 .portfolio-review button { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }

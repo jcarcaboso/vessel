@@ -4,6 +4,20 @@ October 3, 2026. After PR #4 merged, the owner asked to save Plays, link the ins
 
 ## Three independent tracks
 
+October 13 diary completion adds explicit manual executions and retrospective
+origin. Read [the bounded diary contract](diary-completion-contract.md).
+Manual execution records on manual accounts can move a Planned Play through
+Open to Closed. Corrections retain their before/after history and cannot reopen
+a terminal Play. Retrospective Plays are created Closed after the owner
+confirms eligible imported facts; they do not manufacture a Planned transition.
+Structured review and all later review amendments preserve frozen plans.
+
+Execution/link/plan mutations now serialize through account, execution advisory
+and Play locks. Fresh plan/fill checks happen under those locks. This protects
+terminal links and filled or linked plan references from stale concurrent
+changes. The existing sync operation still holds its account transaction while
+reading the venue; the new diary paths do not make venue HTTP requests.
+
 A Play's lifecycle is split into three tracks rather than one combined status:
 
 | Track | Driven by | Values |
@@ -29,7 +43,7 @@ Draft ──► Planned ◄──► Paused
 - **Planned**: committed to the plan, orders expected on the venue. Planning records plan revision 1. The account and instrument are fixed from here on.
 - **Paused**: orders withdrawn while the idea stays valid. Only reachable before any fill. Resuming returns to Planned. A fill that arrives while paused still wins: the Play becomes Open and is flagged for review.
 - **Open**: at least one linked entry fill.
-- **Closed**: all linked entry quantity has exited and no linked entry order is still resting. A flat venue position is not enough, because concurrent Plays can share one account and instrument.
+- **Closed**: compatible linked exit quantity equals linked entry quantity, execution chronology is valid, no fixed-size filled order has known missing executions, and no linked entry order is still resting. Over-exits and contradictory fills prevent closure. A flat venue position is not enough, because concurrent Plays can share one account and instrument.
 - **Cancelled**: never filled. Keeps a reason (invalidated, missed, changed mind, expired, mistake, other) and an optional note. Missed and abandoned ideas are review material.
 
 Closed and Cancelled are final. A follow-up idea is a new Play rather than a reopened one. Imported history without a plan will enter as Open or Closed, marked retrospective, with no invented thesis.
@@ -42,7 +56,7 @@ Stops, targets and entries that have not been taken can always change, because c
 - Planning saves revision 1, reason "Planned".
 - In Planned, Paused and Open, a plan change requires a reason and creates the next revision. Title, drawings and the review note do not create revisions.
 - Revisions are append-only snapshots of the plan: direction, sizing, leverage, budget override, entries with stops and targets, thesis, invalidation, strategy and evidence notes.
-- Once fills are linked, only entries without fills can change their entry price or share. That rule arrives with order linking.
+- Once entry fills are linked, direction stays fixed. Only entries without fills can change their entry price or share. Stops and targets can still change with a revision reason.
 
 ## Venue link
 
@@ -119,9 +133,9 @@ October 3, 2026. Step 2 is implemented on branch `t3code/play-execution`, stacke
 - **Level fit**: entries need the entry side and an order that is neither reduce-only nor a position TP/SL. Stops need a trigger order that is not a take profit. Targets accept limit or take-profit orders, not stop orders. Orders placed before the Play was created never match it.
 - **Unplanned exit**: when no level matches, an exit-side order on an Open Play links as an unplanned exit if it reduces the position (reduce-only, position TP/SL, or its fills close) and was placed after the Play's first linked entry fill.
 - **Automatic vs. confirmation**: one candidate links automatically. Several (concurrent Plays on the same level) become suggestions; the owner links one ("Link here") or declines ("Not this play"). Unlinking is remembered as dismissed and never re-proposed for that level; other suggestions for the order return if it is unlinked.
-- **Manual fallback**: other live or filled orders on the instrument since the Play was created (latest 20) can be linked by hand to any level or as an unplanned exit. An order belongs to at most one level of one Play (unique index on linked orders).
-- **Status**: the first linked entry fill moves Planned or Paused to Open (the note names the fill; a paused Play is flagged "Filled while paused"). Open becomes Closed when linked exit fills cover all linked entry fills and no linked entry order is still open. These changes are recorded with source `venue`. There is no automatic reverse transition.
-- **Edits**: after planning, an entry with linked fills keeps its price and share and cannot be removed. Its stops and targets, and untaken entries, can still change with a revision reason.
+- **Manual fallback**: other live or filled orders on the instrument since the Play was created (latest 20) can be linked by hand to a compatible level or as an unplanned exit. Side, reduce-only/position-TP/SL flags and retained fill effects constrain the role; owner attribution cannot reinterpret an execution. An order belongs to at most one level of one Play (unique index on linked orders).
+- **Status**: the first compatible linked entry fill moves Planned or Paused to Open (the note names the fill; a paused Play is flagged "Filled while paused"). Open becomes Closed only when compatible exits equal entries, chronology is valid, no fixed-size filled order has known missing executions and no linked entry order is still open. These changes are recorded with source `venue`. There is no automatic reverse transition.
+- **Edits**: after planning, an entry with linked fills keeps its price and share and cannot be removed. The Play also keeps its direction. Its stops and targets, and untaken entries, can still change with a revision reason.
 - **Several stops**: each stop of an entry is its own level, like each target. Stop and target links carry the level ID (`levelId`, formerly `targetId` for targets only).
 
 ### Checking
@@ -129,6 +143,14 @@ October 3, 2026. Step 2 is implemented on branch `t3code/play-execution`, stacke
 `POST /api/plays/{id}/execution/check` runs the existing account sync (fills and snapshot), reads orders, then matches and applies transitions under a per-account advisory lock. It repeats matching while statuses move, so an entry and its exit in the same window settle in one check. `GET /api/plays/{id}/execution` returns the stored state; `POST …/execution/links` and `DELETE …/execution/links/{linkId}` link and unlink.
 
 The browser checks a tracked Play when it is opened or its status changes, and every 60 seconds while the tab is visible. The server-side monitor (step 4) will replace this polling. The editor shows linked orders and fills, suggestions and other orders in an Execution journal tab, so the locked layout is unchanged.
+
+### October 13 integrity corrections
+
+Automatic matching checks retained fill side/effect and the time of an exit's first execution against this Play's first compatible entry fill. A resting bracket may be placed before entry and execute afterward. Existing incompatible links remain inspectable, but their fills are excluded from progress totals and block closure. A flip cannot be assigned wholly to an entry or exit; split-fill attribution remains unsupported.
+
+Execution responses include an `issues` list, displayed as "Not reconciled". The shared integrity checks cover role contradictions, chronology, over-exits and known missing fixed-size filled-order executions. Cancelled/rejected remaining quantity does not prove an execution, and position-sized TP/SL orders do not establish a fixed missing-fill bound.
+
+Closed and Cancelled Plays retain actual order links. Declining an old suggestion does not alter execution facts and remains allowed. Existing inconsistent terminal records are not automatically repaired or reopened. Sizing excludes newly ineligible historical records, so its displayed track record can change without a migration.
 
 ### Verification
 
