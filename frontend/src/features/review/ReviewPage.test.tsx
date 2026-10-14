@@ -14,6 +14,17 @@ function setup(review = vi.fn().mockResolvedValue(reviewFixture)) {
 }
 
 describe('Production portfolio review', () => {
+  it('names period and breakdown toggle groups and keeps pressed state and keyboard operation', async () => {
+    const { user } = setup()
+    const periods = await screen.findByRole('group', { name: 'Performance period' })
+    const grouping = screen.getByRole('group', { name: 'Break down results by' })
+    expect(within(periods).getAllByRole('button', { pressed: true })).toHaveLength(1)
+    const accounts = within(grouping).getByRole('button', { name: 'Accounts' })
+    accounts.focus()
+    await user.keyboard('{Enter}')
+    expect(accounts).toHaveAttribute('aria-pressed', 'true')
+    expect(within(grouping).getAllByRole('button', { pressed: true })).toEqual([accounts])
+  })
   it('renders server statistics and discloses coverage without proposal-only labels', async () => {
     const { user } = setup()
     expect(await screen.findByRole('region', { name: 'Performance scorecard' })).toBeVisible()
