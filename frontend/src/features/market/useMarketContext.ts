@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MarketContext, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError, errorMessage } from '@/api/errors'
 import { candleCache } from './candleCache'
 
 /**
@@ -25,7 +25,7 @@ export function useMarketContext(api: WorkspaceApi, accountId: string, instrumen
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) candleCache(api).invalidate()
       if (error instanceof ApiError && (error.status === 404 || error.status === 409)) candleCache(api).invalidate(accountId)
       if (!abort.signal.aborted) setState(previous => ({ key, context: previous.key === key ? previous.context : null,
-        error: error instanceof ApiError ? error.message : 'Market statistics could not be loaded.' }))
+        error: errorMessage(error, 'Market statistics could not be loaded.') }))
     })
   }, [api, accountId, instrument, key, enabled])
 

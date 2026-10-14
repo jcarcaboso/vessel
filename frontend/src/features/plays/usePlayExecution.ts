@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
 import type { LinkOrder, PlayExecution } from '@/api/plays'
-import { failure } from './saved'
+import { errorMessage } from '@/api/errors'
 
 /** How often an open play view checks the venue while the tab is visible. */
 export const executionCheckInterval = 60_000
@@ -28,7 +28,7 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
       const next = await action(id)
       if (current.current === id) { setExecution(next); setError(null) }
     } catch (cause) {
-      if (current.current === id) setError(failure(cause))
+      if (current.current === id) setError(errorMessage(cause, 'The change could not be completed. Try again.'))
     } finally {
       if (current.current === id) setBusy(false)
     }
@@ -52,7 +52,7 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
       if (controller.signal.aborted) return
       setExecution(next)
       if (active(next)) void check()
-    }).catch(cause => { if (!controller.signal.aborted) setError(failure(cause)) })
+    }).catch(cause => { if (!controller.signal.aborted) setError(errorMessage(cause, 'The change could not be completed. Try again.')) })
     return () => controller.abort()
     // A status change (planning, resuming) can start tracking, so it reloads too.
   }, [api, playId, status, check])

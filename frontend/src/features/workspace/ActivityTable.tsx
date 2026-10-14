@@ -1,6 +1,7 @@
 import { OperationDirection } from './OperationDirection'
 import { sideDirection, resultSign } from './activity-format'
-import type { BrokerAccount, ImportedFill } from '@/api/workspace'
+import type { ImportedFill } from '@/api/fills'
+import type { BrokerAccount } from '@/api/workspace'
 import { amount, money, time } from './format'
 import { Inbox } from 'lucide-react'
 

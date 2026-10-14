@@ -1,8 +1,14 @@
 import { overviewSummaryPath, isOverviewSummary, type OverviewQuery, type OverviewSummaryDocument } from './overview-summary'
 import { isActivityDocument, type ActivityDocument } from './activity'
 import { SseOverflowError, SseParser } from './sse'
-import { ApiError } from './system'
-import { clearCandleCache, evictAccountCandles } from '@/features/market/candleCache'
+import { candleIntervals, type CandleInterval } from './candles'
+import { ApiError } from './errors'
+import { createApiCall } from './request'
+import { emitApiEvent } from './events'
+import { isImportedFill, type ImportedFill } from './fills'
+import {
+  isCount, isFilledText, isGuid, isNonNegativeDecimal, isNullOr, isPlainDecimal, isPositiveCount, isRecord, isText, isTimestamp,
+} from './guards'
 import {
   accountIndex, credentialSaveMessage, credentialTransportAllowed, credentialTransportMessage,
   type AccountCredential, type AccountDiscovery,
@@ -21,7 +27,7 @@ import {
   isManualExecutions, isManualExecutionInput, isManualExecutionCorrection,
   type ManualExecutions, type ManualExecutionInput, type ManualExecutionCorrection,
 } from './diary'
-import type { ImageMarkup } from '@/features/plays/markup'
+import type { ImageMarkup } from './markup'
 
 export interface Portfolio {
   id: string
@@ -61,8 +67,6 @@ export interface InstrumentCatalog {
   instruments: VenueInstrument[]
   notice: string
 }
-export const candleIntervals = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '1d', '3d', '1w', '1M'] as const
-export type CandleInterval = typeof candleIntervals[number]
 /** Venue trade candle. OHLCV stay exact decimal strings; times are UTC Unix milliseconds. */
 export interface VenueCandle {
   openTime: number
@@ -156,29 +160,6 @@ export interface AccountSettingsExpectation {
   accountId: string
   settingsRevision: number
 }
-export interface ImportedFill {
-  id: string
-  accountId: string
-  contractId: string
-  side: string
-  direction: string
-  price: string
-  quantity: string
-  fee: string
-  feeToken: string
-  closedPnlUsd: string
-  occurredAtUtc: string
-  orderId: string
-  sourceFillId: string
-  transactionHash: string
-  /** open, close, flip or unknown. */
-  positionEffect: string
-  /** reported, or standard-account-free when the account tier trades without fees. */
-  feeBasis: string
-  /** gross (fee separate) or net-of-fee (already taken off the closed PnL). */
-  pnlBasis: string
-  playId: string | null
-}
 export interface AccountSnapshot {
   observedAtUtc: string
   valueScope: string
@@ -241,9 +222,9 @@ export interface WorkspaceApi {
   overviewSummary(query: OverviewQuery, signal?: AbortSignal): Promise<OverviewSummaryDocument>
   activity(accountId?: string, signal?: AbortSignal): Promise<ActivityDocument>
   review(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewDocument>
-  reviewExclusions?(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewExclusions>
-  retrospectivePreview?(accountId: string, operationId: string, signal?: AbortSignal): Promise<RetrospectivePreview>
-  createRetrospectivePlay?(body: CreateRetrospectivePlayRequest, signal?: AbortSignal): Promise<SavedPlay>
+  reviewExclusions(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewExclusions>
+  retrospectivePreview(accountId: string, operationId: string, signal?: AbortSignal): Promise<RetrospectivePreview>
+  createRetrospectivePlay(body: CreateRetrospectivePlayRequest, signal?: AbortSignal): Promise<SavedPlay>
   overview(signal?: AbortSignal): Promise<Overview>
   portfolios(signal?: AbortSignal): Promise<Portfolio[]>
   accounts(signal?: AbortSignal): Promise<BrokerAccount[]>
@@ -277,9 +258,9 @@ export interface WorkspaceApi {
   updatePlay(id: string, fields: PlayFields & { expectedVersion: number; revisionReason?: string }): Promise<SavedPlay>
   changePlayStatus(id: string, expectedVersion: number, request: StatusRequest): Promise<SavedPlay>
   playHistory(id: string, signal?: AbortSignal): Promise<PlayHistory>
-  manualExecutions?(id: string, signal?: AbortSignal): Promise<ManualExecutions>
-  addManualExecution?(id: string, input: ManualExecutionInput, signal?: AbortSignal): Promise<ManualExecutions>
-  correctManualExecution?(id: string, executionId: string, input: ManualExecutionCorrection, signal?: AbortSignal): Promise<ManualExecutions>
+  manualExecutions(id: string, signal?: AbortSignal): Promise<ManualExecutions>
+  addManualExecution(id: string, input: ManualExecutionInput, signal?: AbortSignal): Promise<ManualExecutions>
+  correctManualExecution(id: string, executionId: string, input: ManualExecutionCorrection, signal?: AbortSignal): Promise<ManualExecutions>
   deletePlay(id: string): Promise<void>
   playExecution(id: string, signal?: AbortSignal): Promise<PlayExecution>
   /** Refreshes the account's fills and orders at the venue, links what matches and applies status changes. */
@@ -298,181 +279,140 @@ export interface WorkspaceApi {
   updateSizingSettings(settings: { riskPercent: string }): Promise<SizingDocument>
 }
 
-const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
-const text = (v: unknown): v is string => typeof v === 'string'
-const nullableText = (v: unknown) => v === null || text(v)
-const guid = (v: unknown) => text(v) && /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(v)
-const decimal = (v: unknown): v is string => text(v) && v.length <= 100 && /^-?\d+(\.\d+)?$/.test(v)
-const nullableDecimal = (v: unknown) => v === null || decimal(v)
-const date = (v: unknown) => text(v) && Number.isFinite(Date.parse(v))
-const count = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
+const coverages = ['complete', 'partial', 'unavailable']
 const validExpected = (ids: string[] | undefined, expected: AccountSettingsExpectation[] | undefined) =>
   expected === undefined || Array.isArray(expected) && !!ids?.length && expected.length === ids.length &&
-  expected.every(e => object(e) && guid(e.accountId) && ids.includes(e.accountId) && count(e.settingsRevision) && e.settingsRevision > 0) &&
+  expected.every(e => isRecord(e) && isGuid(e.accountId) && ids.includes(e.accountId) && isPositiveCount(e.settingsRevision)) &&
   new Set(expected.map(e => e.accountId)).size === expected.length
-const instrumentCatalog = (v: unknown): v is InstrumentCatalog => object(v) &&
-  text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 &&
+const instrumentCatalog = (v: unknown): v is InstrumentCatalog => isRecord(v) && isFilledText(v.venueId, 64) &&
   v.marketScope === 'perpetuals' && ['venue-perpetuals', 'manual'].includes(String(v.scope)) &&
   Array.isArray(v.instruments) && v.instruments.length <= 10_000 &&
-  v.instruments.every((i: unknown) => object(i) && text(i.contractId) && i.contractId.trim() === i.contractId &&
-    i.contractId.length > 0 && i.contractId.length <= 128 && count(i.quantityDecimals) &&
-    (i.quantityDecimals as number) <= 28 && count(i.maxLeverage) && (i.maxLeverage as number) > 0 &&
-    text(i.quoteAsset) && /^[A-Za-z0-9]{1,16}$/.test(i.quoteAsset) &&
+  v.instruments.every((i: unknown) => isRecord(i) && isFilledText(i.contractId, 128) && i.contractId.trim() === i.contractId &&
+    isCount(i.quantityDecimals) && i.quantityDecimals <= 28 && isPositiveCount(i.maxLeverage) &&
+    isText(i.quoteAsset) && /^[A-Za-z0-9]{1,16}$/.test(i.quoteAsset) &&
     (i.priceStep == null || typeof i.priceStep === 'number' && Number.isFinite(i.priceStep) && i.priceStep > 0) &&
-    (i.category == null || text(i.category) && i.category.length <= 32) &&
-    (i.venueContractId == null || text(i.venueContractId) && i.venueContractId.length <= 128) &&
+    (i.category == null || isText(i.category, 32)) &&
+    (i.venueContractId == null || isText(i.venueContractId, 128)) &&
     (i.maintenanceMarginFraction == null || typeof i.maintenanceMarginFraction === 'number' && i.maintenanceMarginFraction > 0 &&
       i.maintenanceMarginFraction < 1)) &&
   new Set(v.instruments.map((i: VenueInstrument) => i.contractId)).size === v.instruments.length &&
-  (v.scope !== 'manual' || v.instruments.length === 0) && text(v.notice) && v.notice.length <= 1000
-const epoch = (v: unknown): v is number => count(v) && (v as number) > 0
-const unsignedDecimal = (v: unknown): v is string => decimal(v) && !v.startsWith('-')
-const candle = (v: unknown): v is VenueCandle => object(v) && epoch(v.openTime) && epoch(v.closeTime) &&
-  v.closeTime >= v.openTime && ['open', 'high', 'low', 'close', 'volume'].every(k => unsignedDecimal(v[k])) &&
-  (v.trades === null || count(v.trades))
-const candleSeries = (query: CandleQuery) => (v: unknown): v is CandleSeries => object(v) &&
-  text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 &&
+  (v.scope !== 'manual' || v.instruments.length === 0) && isText(v.notice, 1000)
+const candle = (v: unknown): v is VenueCandle => isRecord(v) && isPositiveCount(v.openTime) && isPositiveCount(v.closeTime) &&
+  v.closeTime >= v.openTime && ['open', 'high', 'low', 'close', 'volume'].every(k => isNonNegativeDecimal(v[k])) &&
+  isNullOr(v.trades, isCount)
+const candleSeries = (query: CandleQuery) => (v: unknown): v is CandleSeries => isRecord(v) && isFilledText(v.venueId, 64) &&
   v.instrument === query.instrument && v.interval === query.interval && v.priceSource === 'trades' &&
   Array.isArray(v.candles) && v.candles.length <= 5_000 && v.candles.every(candle) &&
   v.candles.every((c: VenueCandle, i: number, all: VenueCandle[]) => i === 0 || c.openTime > all[i - 1]!.openTime) &&
-  count(v.requestedFrom) && epoch(v.requestedTo) && v.requestedTo >= (v.requestedFrom as number) && date(v.retrievedAt) &&
-  typeof v.historyExhausted === 'boolean' && text(v.notice) && v.notice.length <= 1000
-const marketContext = (instrument: string) => (v: unknown): v is MarketContext => object(v) &&
-  text(v.venueId) && v.venueId.length > 0 && v.venueId.length <= 64 && v.instrument === instrument &&
-  ['markPrice', 'oraclePrice', 'dayNotionalVolume', 'openInterest'].every(k => unsignedDecimal(v[k])) &&
-  (v.previousDayPrice === null || unsignedDecimal(v.previousDayPrice)) &&
-  (v.midPrice === null || unsignedDecimal(v.midPrice)) && decimal(v.fundingRate) && nullableDecimal(v.premium) &&
-  date(v.observedAt) && text(v.notice) && v.notice.length <= 1000
-const streamStatus = (v: unknown): v is MarketStreamStatus => object(v) &&
-  ['live', 'reconnecting', 'stale'].includes(String(v.state)) && text(v.observedAt) && v.observedAt.length <= 40 && date(v.observedAt)
+  isCount(v.requestedFrom) && isPositiveCount(v.requestedTo) && v.requestedTo >= v.requestedFrom && isTimestamp(v.retrievedAt) &&
+  typeof v.historyExhausted === 'boolean' && isText(v.notice, 1000)
+const marketContext = (instrument: string) => (v: unknown): v is MarketContext => isRecord(v) &&
+  isFilledText(v.venueId, 64) && v.instrument === instrument &&
+  ['markPrice', 'oraclePrice', 'dayNotionalVolume', 'openInterest'].every(k => isNonNegativeDecimal(v[k])) &&
+  isNullOr(v.previousDayPrice, isNonNegativeDecimal) && isNullOr(v.midPrice, isNonNegativeDecimal) &&
+  isPlainDecimal(v.fundingRate) && isNullOr(v.premium, isPlainDecimal) && isTimestamp(v.observedAt) && isText(v.notice, 1000)
+const streamStatus = (v: unknown): v is MarketStreamStatus => isRecord(v) &&
+  ['live', 'reconnecting', 'stale'].includes(String(v.state)) && isTimestamp(v.observedAt, 40)
 const streamLimit = 1024 * 1024
 const instrumentPattern = /^[A-Za-z0-9_-]{1,32}$/
-const portfolio = (v: unknown): v is Portfolio => object(v) && guid(v.id) && text(v.name) &&
-  count(v.accountCount) && nullableDecimal(v.totalValueUsd) &&
-  ['complete', 'partial', 'unavailable'].includes(String(v.valueCoverage)) &&
-  (v.balanceUsd === undefined || nullableDecimal(v.balanceUsd)) &&
-  (v.balanceCoverage === undefined || ['complete', 'partial', 'unavailable'].includes(String(v.balanceCoverage))) &&
-  (v.availableBalanceUsd === undefined || nullableDecimal(v.availableBalanceUsd)) &&
-  (v.availableBalanceAccountCount === undefined || count(v.availableBalanceAccountCount)) &&
-  (v.enabledAccountCount === undefined || count(v.enabledAccountCount)) &&
-  (v.availableBalanceCoverage === undefined || text(v.availableBalanceCoverage) && ['complete', 'partial', 'unavailable'].includes(v.availableBalanceCoverage)) &&
-  (v.icon === undefined || (text(v.icon) && v.icon.length <= 40))
-const account = (v: unknown): v is BrokerAccount => object(v) && guid(v.id) &&
-  (v.portfolioId === null || guid(v.portfolioId)) && text(v.name) && text(v.venueId) &&
-  nullableText(v.address) && nullableDecimal(v.accountValueUsd) &&
-  (v.sourceId === undefined || nullableText(v.sourceId)) &&
-  (v.lastSyncedAtUtc === null || date(v.lastSyncedAtUtc)) &&
+const portfolio = (v: unknown): v is Portfolio => isRecord(v) && isGuid(v.id) && isText(v.name) &&
+  isCount(v.accountCount) && isNullOr(v.totalValueUsd, isPlainDecimal) &&
+  coverages.includes(String(v.valueCoverage)) &&
+  (v.balanceUsd === undefined || isNullOr(v.balanceUsd, isPlainDecimal)) &&
+  (v.balanceCoverage === undefined || coverages.includes(String(v.balanceCoverage))) &&
+  (v.availableBalanceUsd === undefined || isNullOr(v.availableBalanceUsd, isPlainDecimal)) &&
+  (v.availableBalanceAccountCount === undefined || isCount(v.availableBalanceAccountCount)) &&
+  (v.enabledAccountCount === undefined || isCount(v.enabledAccountCount)) &&
+  (v.availableBalanceCoverage === undefined || isText(v.availableBalanceCoverage) && coverages.includes(v.availableBalanceCoverage)) &&
+  (v.icon === undefined || isText(v.icon, 40))
+const account = (v: unknown): v is BrokerAccount => isRecord(v) && isGuid(v.id) &&
+  isNullOr(v.portfolioId, isGuid) && isText(v.name) && isText(v.venueId) &&
+  isNullOr(v.address, isText) && isNullOr(v.accountValueUsd, isPlainDecimal) &&
+  (v.sourceId === undefined || isNullOr(v.sourceId, isText)) &&
+  isNullOr(v.lastSyncedAtUtc, isTimestamp) &&
   ['manual', 'not-synced', 'synced', 'error'].includes(String(v.syncStatus)) &&
-  nullableText(v.lastSyncError) && count(v.positionCount) && nullableText(v.historyNotice) &&
+  isNullOr(v.lastSyncError, isText) && isCount(v.positionCount) && isNullOr(v.historyNotice, isText) &&
   (v.isEnabled === undefined || typeof v.isEnabled === 'boolean') &&
-  (v.availableStablecoinNominalUsd === undefined || nullableDecimal(v.availableStablecoinNominalUsd)) &&
-  (v.stablecoinScope === undefined || nullableText(v.stablecoinScope)) &&
-  (v.accountMode === undefined || nullableText(v.accountMode)) &&
-  (v.totalStablecoinNominalUsd === undefined || nullableDecimal(v.totalStablecoinNominalUsd)) &&
-  (v.balanceUsd === undefined || nullableDecimal(v.balanceUsd)) &&
-  (v.availableBalanceUsd === undefined || nullableDecimal(v.availableBalanceUsd)) &&
+  (v.availableStablecoinNominalUsd === undefined || isNullOr(v.availableStablecoinNominalUsd, isPlainDecimal)) &&
+  (v.stablecoinScope === undefined || isNullOr(v.stablecoinScope, isText)) &&
+  (v.accountMode === undefined || isNullOr(v.accountMode, isText)) &&
+  (v.totalStablecoinNominalUsd === undefined || isNullOr(v.totalStablecoinNominalUsd, isPlainDecimal)) &&
+  (v.balanceUsd === undefined || isNullOr(v.balanceUsd, isPlainDecimal)) &&
+  (v.availableBalanceUsd === undefined || isNullOr(v.availableBalanceUsd, isPlainDecimal)) &&
   (v.availableBalanceSource === undefined || v.availableBalanceSource === null ||
-    text(v.availableBalanceSource) && ['wallet', 'margin', 'withdrawable'].includes(v.availableBalanceSource)) &&
-  (v.settingsRevision === undefined || typeof v.settingsRevision === 'number' && count(v.settingsRevision) && v.settingsRevision > 0)
-const fill = (v: unknown): v is ImportedFill => object(v) && guid(v.id) && guid(v.accountId) &&
-  ['contractId', 'direction', 'feeToken', 'orderId', 'sourceFillId', 'transactionHash'].every(k => text(v[k])) &&
-  (v.side === 'buy' || v.side === 'sell') && ['open', 'close', 'flip', 'unknown'].includes(v.positionEffect as string) &&
-  ['reported', 'standard-account-free'].includes(v.feeBasis as string) && ['gross', 'net-of-fee'].includes(v.pnlBasis as string) &&
-  ['price', 'quantity', 'fee', 'closedPnlUsd'].every(k => decimal(v[k])) && date(v.occurredAtUtc) && (v.playId === null || guid(v.playId))
-const discovery = (venueId: string, address: string) => (v: unknown): v is AccountDiscovery => object(v) &&
-  v.venueId === venueId && text(v.address) && v.address.toLowerCase() === address.toLowerCase() &&
-  text(v.notice) && v.notice.length <= 2000 && Array.isArray(v.accounts) && v.accounts.length <= 1000 &&
-  v.accounts.every((a: unknown) => object(a) && accountIndex(a.sourceId) && text(a.name) && a.name.length <= 200 &&
-    ['main', 'subaccount'].includes(String(a.accountType)) && nullableDecimal(a.accountValueUsd) &&
-    (a.collateralUsd === undefined || nullableDecimal(a.collateralUsd)) &&
-    (a.availableBalanceUsd === undefined || nullableDecimal(a.availableBalanceUsd)) &&
-    (a.existingAccountId === null || guid(a.existingAccountId)) && (a.isEnabled === null || typeof a.isEnabled === 'boolean')) &&
+    isText(v.availableBalanceSource) && ['wallet', 'margin', 'withdrawable'].includes(v.availableBalanceSource)) &&
+  (v.settingsRevision === undefined || isPositiveCount(v.settingsRevision))
+const discovery = (venueId: string, address: string) => (v: unknown): v is AccountDiscovery => isRecord(v) &&
+  v.venueId === venueId && isText(v.address) && v.address.toLowerCase() === address.toLowerCase() &&
+  isText(v.notice, 2000) && Array.isArray(v.accounts) && v.accounts.length <= 1000 &&
+  v.accounts.every((a: unknown) => isRecord(a) && accountIndex(a.sourceId) && isText(a.name, 200) &&
+    ['main', 'subaccount'].includes(String(a.accountType)) && isNullOr(a.accountValueUsd, isPlainDecimal) &&
+    (a.collateralUsd === undefined || isNullOr(a.collateralUsd, isPlainDecimal)) &&
+    (a.availableBalanceUsd === undefined || isNullOr(a.availableBalanceUsd, isPlainDecimal)) &&
+    isNullOr(a.existingAccountId, isGuid) && (a.isEnabled === null || typeof a.isEnabled === 'boolean')) &&
   new Set(v.accounts.map(a => a.sourceId)).size === v.accounts.length
-const credential = (v: unknown): v is AccountCredential => object(v) && typeof v.storageConfigured === 'boolean' &&
+const credential = (v: unknown): v is AccountCredential => isRecord(v) && typeof v.storageConfigured === 'boolean' &&
   Object.keys(v).every(k => ['storageConfigured', 'credential'].includes(k)) &&
-  (v.credential === null || object(v.credential) &&
+  (v.credential === null || isRecord(v.credential) &&
     Object.keys(v.credential).every(k => ['scope', 'expiresAt', 'lastVerifiedAt', 'status'].includes(k)) &&
-    ['single', 'all'].includes(String(v.credential.scope)) && date(v.credential.expiresAt) &&
-    (v.credential.lastVerifiedAt === null || date(v.credential.lastVerifiedAt)) &&
+    ['single', 'all'].includes(String(v.credential.scope)) && isTimestamp(v.credential.expiresAt) &&
+    isNullOr(v.credential.lastVerifiedAt, isTimestamp) &&
     ['valid', 'expiring', 'expired', 'unavailable'].includes(String(v.credential.status)))
-const wallet = (v: unknown): v is StablecoinWallet | null => v === null || object(v) &&
-  date(v.observedAtUtc) && text(v.accountMode) && text(v.scope) && decimal(v.totalNominalUsd) &&
-  decimal(v.availableNominalUsd) && text(v.notice) && Array.isArray(v.balances) &&
-  v.balances.every(b => object(b) && text(b.symbol) && count(b.tokenIndex) && text(b.tokenId) &&
-    decimal(b.total) && decimal(b.held) && decimal(b.available))
-const snapshot = (v: unknown): v is AccountSnapshot | null => v === null || object(v) &&
-  date(v.observedAtUtc) && text(v.valueScope) && ['accountValueUsd', 'withdrawableUsd', 'marginUsedUsd'].every(k => nullableDecimal(v[k])) &&
-  (v.availableMarginUsd === undefined || nullableDecimal(v.availableMarginUsd)) &&
-  Array.isArray(v.positions) && v.positions.every(p => object(p) && text(p.contractId) &&
-    ['signedQuantity', 'entryPrice', 'unrealizedPnlUsd', 'marginUsedUsd'].every(k => decimal(p[k])) &&
+const wallet = (v: unknown): v is StablecoinWallet | null => v === null || isRecord(v) &&
+  isTimestamp(v.observedAtUtc) && isText(v.accountMode) && isText(v.scope) && isPlainDecimal(v.totalNominalUsd) &&
+  isPlainDecimal(v.availableNominalUsd) && isText(v.notice) && Array.isArray(v.balances) &&
+  v.balances.every(b => isRecord(b) && isText(b.symbol) && isCount(b.tokenIndex) && isText(b.tokenId) &&
+    isPlainDecimal(b.total) && isPlainDecimal(b.held) && isPlainDecimal(b.available))
+const snapshot = (v: unknown): v is AccountSnapshot | null => v === null || isRecord(v) &&
+  isTimestamp(v.observedAtUtc) && isText(v.valueScope) &&
+  ['accountValueUsd', 'withdrawableUsd', 'marginUsedUsd'].every(k => isNullOr(v[k], isPlainDecimal)) &&
+  (v.availableMarginUsd === undefined || isNullOr(v.availableMarginUsd, isPlainDecimal)) &&
+  Array.isArray(v.positions) && v.positions.every(p => isRecord(p) && isText(p.contractId) &&
+    ['signedQuantity', 'entryPrice', 'unrealizedPnlUsd', 'marginUsedUsd'].every(k => isPlainDecimal(p[k])) &&
     (p.leverage === null || typeof p.leverage === 'number' && Number.isInteger(p.leverage) && p.leverage > 0)) &&
   (v.stablecoinWallet === undefined || wallet(v.stablecoinWallet))
-const overview = (v: unknown): v is Overview => object(v) && Array.isArray(v.portfolios) && v.portfolios.every(portfolio) &&
-  Array.isArray(v.accounts) && v.accounts.every(account) && object(v.totals) &&
-  ['portfolioCount', 'accountCount', 'valuedAccountCount', 'openPositionCount', 'importedFillCount'].every(k => object(v.totals) && count(v.totals[k])) &&
-  nullableDecimal(v.totals.totalAccountValueUsd) &&
-  (v.totals.availableStablecoinNominalUsd === undefined || nullableDecimal(v.totals.availableStablecoinNominalUsd)) &&
-  (v.totals.stablecoinAccountCount === undefined || count(v.totals.stablecoinAccountCount)) &&
-  (v.totals.totalBalanceUsd === undefined || nullableDecimal(v.totals.totalBalanceUsd)) &&
-  (v.totals.availableBalanceUsd === undefined || nullableDecimal(v.totals.availableBalanceUsd)) &&
-  ['balanceAccountCount', 'availableBalanceAccountCount', 'enabledAccountCount'].every(k => object(v.totals) &&
-    (v.totals[k] === undefined || count(v.totals[k]))) &&
-  ['balanceCoverage', 'availableBalanceCoverage'].every(k => object(v.totals) &&
-    (v.totals[k] === undefined || ['complete', 'partial', 'unavailable'].includes(String(v.totals[k])))) &&
-  Array.isArray(v.recentActivity) && v.recentActivity.every(fill) && text(v.scopeNote)
+const overview = (v: unknown): v is Overview => isRecord(v) && Array.isArray(v.portfolios) && v.portfolios.every(portfolio) &&
+  Array.isArray(v.accounts) && v.accounts.every(account) && isRecord(v.totals) &&
+  ['portfolioCount', 'accountCount', 'valuedAccountCount', 'openPositionCount', 'importedFillCount'].every(k => isRecord(v.totals) && isCount(v.totals[k])) &&
+  isNullOr(v.totals.totalAccountValueUsd, isPlainDecimal) &&
+  (v.totals.availableStablecoinNominalUsd === undefined || isNullOr(v.totals.availableStablecoinNominalUsd, isPlainDecimal)) &&
+  (v.totals.stablecoinAccountCount === undefined || isCount(v.totals.stablecoinAccountCount)) &&
+  (v.totals.totalBalanceUsd === undefined || isNullOr(v.totals.totalBalanceUsd, isPlainDecimal)) &&
+  (v.totals.availableBalanceUsd === undefined || isNullOr(v.totals.availableBalanceUsd, isPlainDecimal)) &&
+  ['balanceAccountCount', 'availableBalanceAccountCount', 'enabledAccountCount'].every(k => isRecord(v.totals) &&
+    (v.totals[k] === undefined || isCount(v.totals[k]))) &&
+  ['balanceCoverage', 'availableBalanceCoverage'].every(k => isRecord(v.totals) &&
+    (v.totals[k] === undefined || coverages.includes(String(v.totals[k])))) &&
+  Array.isArray(v.recentActivity) && v.recentActivity.every(isImportedFill) && isText(v.scopeNote)
 
 export function createWorkspaceApi(token: string): WorkspaceApi {
-  const bearer = token.trim()
-  if (!bearer) throw new ApiError('missing-token', 'Enter your Vessel API token.')
+  const call = createApiCall(token, () => emitApiEvent(api, { type: 'unauthorized' }))
+  const workspaceRequest = { timeout: 10_000, notFound: 'This account or portfolio is no longer available.',
+    noContent: 'The API returned no workspace data.', invalidData: 'The API returned incompatible workspace data.' }
+  const playRequest = { timeout: 15_000, notFound: 'This play or image is no longer available.',
+    noContent: 'The API returned no play data.', invalidData: 'The API returned incompatible play data.' }
   const resourceId = (id: string) => {
-    if (!guid(id)) throw new ApiError('invalid-response', 'The account identifier is invalid.')
+    if (!isGuid(id)) throw new ApiError('invalid-response', 'The account identifier is invalid.')
     return id
   }
   const accountPath = (id: string) => `/api/accounts/${resourceId(id)}`
-  async function httpError(response: Response, badGateway?: string, tooMany?: string,
-    notFound = 'This account or portfolio is no longer available.'): Promise<ApiError> {
-    if (response.status === 401 || response.status === 403) {
-      return new ApiError('unauthorized', 'Your API token was rejected. Disconnect and connect again.', response.status)
-    }
-    let detail = response.status === 502 && badGateway ? badGateway : response.status === 429 && tooMany ? tooMany : 'The request could not be completed.'
-    if ([400, 409, 413, 415].includes(response.status)) {
-      try {
-        const problem: unknown = await response.json()
-        if (object(problem) && text(problem.detail) && problem.detail.length <= 500) detail = problem.detail
-      } catch { /* The safe default remains when a proxy returns non-JSON. */ }
-    }
-    if (response.status === 404) detail = notFound
-    if (response.status === 503) detail = 'The service is unavailable. Check the database and server configuration.'
-    // Only the server-generated trace format is shown, so a proxy cannot inject text.
-    const reference = response.headers.get('X-Correlation-ID')
-    if (response.status >= 500 && reference && /^[\da-f]{32}$/.test(reference)) detail += ` Reference: ${reference}`
-    return new ApiError('http', detail, response.status)
-  }
   async function marketStream(id: string, query: MarketStreamQuery, signal: AbortSignal, onEvent: (event: MarketStreamEvent) => void) {
     if (!instrumentPattern.test(query.instrument) || !candleIntervals.includes(query.interval)) {
       throw new ApiError('invalid-response', 'The live chart request is invalid.')
     }
     const path = `${accountPath(id)}/market-stream?${new URLSearchParams({ instrument: query.instrument, interval: query.interval })}`
     const interrupted = () => new ApiError('unavailable', 'The live market stream was interrupted.')
-    // Only the wait for response headers is bounded; an open stream is long-lived by design.
-    const connect = new AbortController()
-    const timer = setTimeout(() => connect.abort(), 25_000)
+    // The pipeline bounds the header read, not the lifetime of the stream.
     let response: Response
     try {
-      response = await fetch(path, {
-        headers: { Authorization: `Bearer ${bearer}`, Accept: 'text/event-stream' },
-        credentials: 'omit', redirect: 'error', cache: 'no-store', signal: AbortSignal.any([signal, connect.signal]),
-      })
-    } catch {
+      response = await call(path, { ...workspaceRequest, ...withSignal(signal), timeout: 25_000, accept: 'text/event-stream',
+        unavailable: 'The live market stream did not connect. Check the API and try again.',
+        badGateway: 'Venue market data is unavailable. Try refreshing the chart.',
+        tooMany: 'Too many live chart streams. Close another chart and try again.',
+        read: async response => response })
+    } catch (cause) {
       if (signal.aborted) return
-      throw new ApiError('unavailable', 'The live market stream did not connect. Check the API and try again.')
-    } finally {
-      clearTimeout(timer)
-    }
-    if (response.status === 401 || response.status === 403) clearCandleCache(api)
-    if (!response.ok) {
-      throw await httpError(response, 'Venue market data is unavailable. Try refreshing the chart.',
-        'Too many live chart streams. Close another chart and try again.')
+      throw cause
     }
     if (!response.body || !/^text\/event-stream\b/i.test(response.headers.get('Content-Type') ?? '')) {
       await response.body?.cancel().catch(() => undefined)
@@ -516,168 +456,101 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       signal.removeEventListener('abort', stop)
     }
   }
-  async function request<T>(path: string, validate: (v: unknown) => v is T, options: RequestInit = {}, timeout = 10_000, badGateway?: string, safeError?: string): Promise<T> {
-    let response: Response
-    try {
-      const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout)
-      response = await fetch(path, {
-        ...options, headers: { Authorization: `Bearer ${bearer}`, Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}) },
-        credentials: 'omit', redirect: 'error', cache: 'no-store', signal,
-      })
-    } catch {
-      throw new ApiError('unavailable', safeError ?? 'The request did not complete. Check the API and try again.')
-    }
-    // Credential failures must never echo provider or proxy response bodies.
-    if (response.status === 401 || response.status === 403) clearCandleCache(api)
-    if (!response.ok) throw safeError ? new ApiError('http', safeError, response.status) : await httpError(response, badGateway)
-    if (response.status === 204) {
-      const noContent: unknown = undefined
-      if (validate(noContent)) return noContent
-      throw new ApiError('invalid-response', safeError ?? 'The API returned no workspace data.')
-    }
-    let body: unknown
-    try { body = await response.json() } catch { throw new ApiError('invalid-response', safeError ?? 'The API returned invalid data.') }
-    if (!validate(body)) throw new ApiError('invalid-response', safeError ?? 'The API returned incompatible workspace data.')
-    return body
-  }
-  // Plays and evidence: JSON bodies, multipart uploads and image downloads share auth and error handling.
-  async function send(path: string, options: RequestInit & { accept?: string } = {}, timeout = 15_000) {
-    let response: Response
-    const { accept = 'application/json', ...init } = options
-    try {
-      const signal = init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout)
-      response = await fetch(path, {
-        ...init, headers: { Authorization: `Bearer ${bearer}`, Accept: accept, ...(typeof init.body === 'string' ? { 'Content-Type': 'application/json' } : {}) },
-        credentials: 'omit', redirect: 'error', cache: 'no-store', signal,
-      })
-    } catch {
-      throw new ApiError('unavailable', 'The request did not complete. Check the API and try again.')
-    }
-    if (response.status === 401 || response.status === 403) clearCandleCache(api)
-    if (!response.ok) throw await httpError(response, undefined, undefined, 'This play or image is no longer available.')
-    return response
-  }
-  async function json<T>(path: string, validate: (v: unknown) => v is T, options: RequestInit = {}, timeout?: number): Promise<T> {
-    const response = await send(path, options, timeout)
-    if (response.status === 204) {
-      const noContent: unknown = undefined
-      if (validate(noContent)) return noContent
-      throw new ApiError('invalid-response', 'The API returned no play data.')
-    }
-    let body: unknown
-    try { body = await response.json() } catch { throw new ApiError('invalid-response', 'The API returned invalid data.') }
-    if (!validate(body)) throw new ApiError('invalid-response', 'The API returned incompatible play data.')
-    return body
-  }
   const playPath = (id: string) => {
-    if (!guid(id)) throw new ApiError('invalid-response', 'The play identifier is invalid.')
+    if (!isGuid(id)) throw new ApiError('invalid-response', 'The play identifier is invalid.')
     return `/api/plays/${id}`
   }
   const evidencePath = (id: string) => {
-    if (!guid(id)) throw new ApiError('invalid-response', 'The image identifier is invalid.')
+    if (!isGuid(id)) throw new ApiError('invalid-response', 'The image identifier is invalid.')
     return `/api/evidence/${id}`
   }
   const none = (v: unknown): v is undefined => v === undefined
   const withSignal = (signal?: AbortSignal) => signal ? { signal } : {}
   const api: WorkspaceApi = {
-    plays: signal => json('/api/plays', (v): v is PlaySummary[] => Array.isArray(v) && v.every(isPlaySummary), withSignal(signal)),
-    play: (id, signal) => json(playPath(id), isSavedPlay, withSignal(signal)),
-    createPlay: fields => json('/api/plays', isSavedPlay, { method: 'POST', body: JSON.stringify(fields) }),
-    updatePlay: (id, fields) => json(playPath(id), isSavedPlay, { method: 'PUT', body: JSON.stringify(fields) }),
+    plays: signal => call('/api/plays', { ...playRequest, validate: (v): v is PlaySummary[] => Array.isArray(v) && v.every(isPlaySummary), ...withSignal(signal) }),
+    play: (id, signal) => call(playPath(id), { ...playRequest, validate: isSavedPlay, ...withSignal(signal) }),
+    createPlay: fields => call('/api/plays', { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify(fields) }),
+    updatePlay: (id, fields) => call(playPath(id), { ...playRequest, validate: isSavedPlay, method: 'PUT', body: JSON.stringify(fields) }),
     changePlayStatus: (id, expectedVersion, request) =>
-      json(`${playPath(id)}/status`, isSavedPlay, { method: 'POST', body: JSON.stringify({ expectedVersion, ...request }) }),
-    playHistory: (id, signal) => json(`${playPath(id)}/history`, isPlayHistory, withSignal(signal)),
-    manualExecutions: (id, signal) => json(`${playPath(id)}/manual-executions`,
-      (v): v is ManualExecutions => isManualExecutions(v) && v.play.summary.id === id, withSignal(signal)),
+      call(`${playPath(id)}/status`, { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion, ...request }) }),
+    playHistory: (id, signal) => call(`${playPath(id)}/history`, { ...playRequest, validate: isPlayHistory, ...withSignal(signal) }),
+    manualExecutions: (id, signal) => call(`${playPath(id)}/manual-executions`, { ...playRequest, validate: (v): v is ManualExecutions => isManualExecutions(v) && v.play.summary.id === id, ...withSignal(signal) }),
     addManualExecution: (id, input, signal) => {
       if (!isManualExecutionInput(input)) return Promise.reject(new ApiError('invalid-response', 'Provide valid manual execution facts, a UTC time and a request identity.'))
-      return json(`${playPath(id)}/manual-executions`, (v): v is ManualExecutions => isManualExecutions(v) && v.play.summary.id === id,
-        { method: 'POST', body: JSON.stringify(input), ...withSignal(signal) })
+      return call(`${playPath(id)}/manual-executions`, { ...playRequest, validate: (v): v is ManualExecutions => isManualExecutions(v) && v.play.summary.id === id, method: 'POST', body: JSON.stringify(input), ...withSignal(signal) })
     },
     correctManualExecution: (id, executionId, input, signal) => {
       if (!isManualExecutionCorrection(input)) return Promise.reject(new ApiError('invalid-response', 'Provide valid correction facts and a reason.'))
-      return json(`${playPath(id)}/manual-executions/${resourceId(executionId)}`,
-        (v): v is ManualExecutions => isManualExecutions(v) && v.play.summary.id === id,
-        { method: 'PUT', body: JSON.stringify(input), ...withSignal(signal) })
+      return call(`${playPath(id)}/manual-executions/${resourceId(executionId)}`, { ...playRequest, validate: (v): v is ManualExecutions => isManualExecutions(v) && v.play.summary.id === id, method: 'PUT', body: JSON.stringify(input), ...withSignal(signal) })
     },
-    deletePlay: id => json(playPath(id), none, { method: 'DELETE' }),
-    playExecution: (id, signal) => json(`${playPath(id)}/execution`, isPlayExecution, withSignal(signal)),
-    checkPlayExecution: (id, signal) => json(`${playPath(id)}/execution/check`, isPlayExecution, { method: 'POST', ...withSignal(signal) }, 45_000),
-    linkOrder: (id, link) => json(`${playPath(id)}/execution/links`, isPlayExecution, { method: 'POST', body: JSON.stringify(link) }),
+    deletePlay: id => call(playPath(id), { ...playRequest, validate: none, method: 'DELETE' }),
+    playExecution: (id, signal) => call(`${playPath(id)}/execution`, { ...playRequest, validate: isPlayExecution, ...withSignal(signal) }),
+    checkPlayExecution: (id, signal) => call(`${playPath(id)}/execution/check`, { ...playRequest, validate: isPlayExecution, method: 'POST', ...withSignal(signal), timeout: 45_000 }),
+    linkOrder: (id, link) => call(`${playPath(id)}/execution/links`, { ...playRequest, validate: isPlayExecution, method: 'POST', body: JSON.stringify(link) }),
     unlinkOrder: (id, linkId) => {
-      if (!guid(linkId)) return Promise.reject(new ApiError('invalid-response', 'The link identifier is invalid.'))
-      return json(`${playPath(id)}/execution/links/${linkId}`, isPlayExecution, { method: 'DELETE' })
+      if (!isGuid(linkId)) return Promise.reject(new ApiError('invalid-response', 'The link identifier is invalid.'))
+      return call(`${playPath(id)}/execution/links/${linkId}`, { ...playRequest, validate: isPlayExecution, method: 'DELETE' })
     },
-    evidence: (playId, signal) => json(`${playPath(playId)}/evidence`, (v): v is SavedEvidence[] => Array.isArray(v) && v.every(isSavedEvidence), withSignal(signal)),
-    evidenceImage: async (id, signal) => {
-      const response = await send(`${evidencePath(id)}/content`, { ...withSignal(signal), accept: 'image/*' }, 60_000)
-      return response.blob()
-    },
+    evidence: (playId, signal) => call(`${playPath(playId)}/evidence`, { ...playRequest, validate: (v): v is SavedEvidence[] => Array.isArray(v) && v.every(isSavedEvidence), ...withSignal(signal) }),
+    evidenceImage: (id, signal) => call(`${evidencePath(id)}/content`, { ...playRequest, ...withSignal(signal),
+      timeout: 60_000, accept: 'image/*', read: response => response.blob() }),
     uploadEvidence: (playId, image, fields) => {
       const form = new FormData()
       form.append('file', image, fields.name)
       form.append('source', fields.source)
       form.append('note', fields.note)
       if (fields.markup) form.append('markup', JSON.stringify(fields.markup))
-      return json(`${playPath(playId)}/evidence`, isSavedEvidence, { method: 'POST', body: form }, 60_000)
+      return call(`${playPath(playId)}/evidence`, { ...playRequest, validate: isSavedEvidence, method: 'POST', body: form, timeout: 60_000 })
     },
-    updateEvidenceNote: (id, note) => json(evidencePath(id), isSavedEvidence, { method: 'PATCH', body: JSON.stringify({ note }) }),
-    updateEvidenceMarkup: (id, markup) => json(`${evidencePath(id)}/markup`, isSavedEvidence,
-      markup ? { method: 'PUT', body: JSON.stringify(markup) } : { method: 'DELETE' }),
-    deleteEvidence: id => json(evidencePath(id), none, { method: 'DELETE' }),
-    sizing: signal => json('/api/sizing', isSizingDocument, withSignal(signal)),
-    review: (query, signal) => json(reviewPath(query), isReviewDocument, withSignal(signal)),
-    reviewExclusions: (query, signal) => json(reviewExclusionsPath(query), isReviewExclusions, withSignal(signal)),
-    retrospectivePreview: (accountId, operationId, signal) => json(retrospectivePreviewPath(resourceId(accountId), operationId),
-      (v): v is RetrospectivePreview => isRetrospectivePreview(v, fill) && v.operation.accountId === accountId && v.operation.id === operationId, withSignal(signal)),
+    updateEvidenceNote: (id, note) => call(evidencePath(id), { ...playRequest, validate: isSavedEvidence, method: 'PATCH', body: JSON.stringify({ note }) }),
+    updateEvidenceMarkup: (id, markup) => call(`${evidencePath(id)}/markup`, { ...playRequest, validate: isSavedEvidence, ...(markup ? { method: 'PUT', body: JSON.stringify(markup) } : { method: 'DELETE' }) }),
+    deleteEvidence: id => call(evidencePath(id), { ...playRequest, validate: none, method: 'DELETE' }),
+    sizing: signal => call('/api/sizing', { ...playRequest, validate: isSizingDocument, ...withSignal(signal) }),
+    review: (query, signal) => call(reviewPath(query), { ...playRequest, validate: isReviewDocument, ...withSignal(signal) }),
+    reviewExclusions: (query, signal) => call(reviewExclusionsPath(query), { ...playRequest, validate: isReviewExclusions, ...withSignal(signal) }),
+    retrospectivePreview: (accountId, operationId, signal) => call(retrospectivePreviewPath(resourceId(accountId), operationId), { ...playRequest, validate: (v): v is RetrospectivePreview => isRetrospectivePreview(v) && v.operation.accountId === accountId && v.operation.id === operationId, ...withSignal(signal) }),
     createRetrospectivePlay: (input, signal) => {
       if (!isCreateRetrospectivePlayRequest(input)) return Promise.reject(new ApiError('invalid-response', 'Provide a valid retrospective request and preview fingerprint.'))
-      return json(retrospectivePlayPath(), (v): v is SavedPlay => isSavedPlay(v) &&
-        v.summary.accountId === input.accountId && v.summary.origin === 'retrospective',
-        { method: 'POST', body: JSON.stringify(input), ...withSignal(signal) })
+      return call(retrospectivePlayPath(), { ...playRequest, validate: (v): v is SavedPlay => isSavedPlay(v) &&
+        v.summary.accountId === input.accountId && v.summary.origin === 'retrospective', method: 'POST', body: JSON.stringify(input), ...withSignal(signal) })
     },
-    updateSizingSettings: settings => json('/api/sizing/settings', isSizingDocument,
-      { method: 'PUT', body: JSON.stringify({ riskPercent: settings.riskPercent }) }),
-    activity: (id, signal) => request(`/api/activity${id !== undefined ? `?${new URLSearchParams({ accountId: resourceId(id) })}` : ''}`,
-      (v): v is ActivityDocument => isActivityDocument(v, fill) && (id === undefined ||
-        v.operations.every(op => op.accountId.toLowerCase() === id.toLowerCase()) && v.coverage.every(c => c.accountId.toLowerCase() === id.toLowerCase())), signal ? { signal } : {}),
-    overviewSummary: (query, signal) => request(overviewSummaryPath(query), (v): v is OverviewSummaryDocument => isOverviewSummary(v, query), signal ? { signal } : {}),
-    overview: signal => request('/api/overview', overview, signal ? { signal } : {}),
-    portfolios: signal => request('/api/portfolios', (v): v is Portfolio[] => Array.isArray(v) && v.every(portfolio), signal ? { signal } : {}),
-    accounts: signal => request('/api/accounts', (v): v is BrokerAccount[] => Array.isArray(v) && v.every(account), signal ? { signal } : {}),
-    account: (id, signal) => request(accountPath(id), account, signal ? { signal } : {}),
-    instruments: (id, signal) => request(`${accountPath(id)}/instruments`, instrumentCatalog, signal ? { signal } : {},
-      25_000, 'The venue instrument catalogue is unavailable. Try again or enter a manual label.'),
+    updateSizingSettings: settings => call('/api/sizing/settings', { ...playRequest, validate: isSizingDocument, method: 'PUT', body: JSON.stringify({ riskPercent: settings.riskPercent }) }),
+    activity: (id, signal) => call(`/api/activity${id !== undefined ? `?${new URLSearchParams({ accountId: resourceId(id) })}` : ''}`, { ...workspaceRequest, validate: (v): v is ActivityDocument => isActivityDocument(v) && (id === undefined ||
+        v.operations.every(op => op.accountId.toLowerCase() === id.toLowerCase()) && v.coverage.every(c => c.accountId.toLowerCase() === id.toLowerCase())), ...withSignal(signal) }),
+    overviewSummary: (query, signal) => call(overviewSummaryPath(query), { ...workspaceRequest, validate: (v): v is OverviewSummaryDocument => isOverviewSummary(v, query), ...withSignal(signal) }),
+    overview: signal => call('/api/overview', { ...workspaceRequest, validate: overview, ...withSignal(signal) }),
+    portfolios: signal => call('/api/portfolios', { ...workspaceRequest, validate: (v): v is Portfolio[] => Array.isArray(v) && v.every(portfolio), ...withSignal(signal) }),
+    accounts: signal => call('/api/accounts', { ...workspaceRequest, validate: (v): v is BrokerAccount[] => Array.isArray(v) && v.every(account), ...withSignal(signal) }),
+    account: (id, signal) => call(accountPath(id), { ...workspaceRequest, validate: account, ...withSignal(signal) }),
+    instruments: (id, signal) => call(`${accountPath(id)}/instruments`, { ...workspaceRequest, validate: instrumentCatalog, ...withSignal(signal), timeout: 25_000, badGateway: 'The venue instrument catalogue is unavailable. Try again or enter a manual label.' }),
     candles: (id, query, signal) => {
       if (!instrumentPattern.test(query.instrument) || !candleIntervals.includes(query.interval) ||
-        (query.endTime !== undefined && !epoch(query.endTime))) {
+        (query.endTime !== undefined && !isPositiveCount(query.endTime))) {
         return Promise.reject(new ApiError('invalid-response', 'The chart request is invalid.'))
       }
       const params = new URLSearchParams({ instrument: query.instrument, interval: query.interval })
       if (query.endTime !== undefined) params.set('endTime', String(query.endTime))
       if (query.refresh === true) params.set('refresh', 'true')
-      return request(`${accountPath(id)}/candles?${params}`, candleSeries(query), signal ? { signal } : {},
-        25_000, 'Venue candles are unavailable. Try refreshing the chart.')
+      return call(`${accountPath(id)}/candles?${params}`, { ...workspaceRequest, validate: candleSeries(query), ...withSignal(signal), timeout: 25_000, badGateway: 'Venue candles are unavailable. Try refreshing the chart.' })
     },
     marketContext: (id, instrument, signal) => {
       if (!instrumentPattern.test(instrument)) return Promise.reject(new ApiError('invalid-response', 'The market request is invalid.'))
-      return request(`${accountPath(id)}/market-context?${new URLSearchParams({ instrument })}`, marketContext(instrument),
-        signal ? { signal } : {}, 25_000, 'Venue market statistics are unavailable.')
+      return call(`${accountPath(id)}/market-context?${new URLSearchParams({ instrument })}`, { ...workspaceRequest, validate: marketContext(instrument), ...withSignal(signal), timeout: 25_000, badGateway: 'Venue market statistics are unavailable.' })
     },
     marketStream,
     createPortfolio: (name, icon, accountIds, expected) => {
       if (!validExpected(accountIds, expected)) return Promise.reject(new ApiError('invalid-response', 'Reload accounts and provide one positive settings revision per selected account.'))
-      return request('/api/portfolios', portfolio, { method: 'POST', body: JSON.stringify({ name, icon, accountIds, expected }) })
+      return call('/api/portfolios', { ...workspaceRequest, validate: portfolio, method: 'POST', body: JSON.stringify({ name, icon, accountIds, expected }) })
     },
     moveAccounts: (accountIds, portfolioId, expected) => {
-      if (!accountIds.length || accountIds.length > 200 || !accountIds.every(guid) || new Set(accountIds).size !== accountIds.length ||
-          portfolioId !== null && !guid(portfolioId)) return Promise.reject(new ApiError('invalid-response', 'Choose between 1 and 200 distinct accounts and a valid portfolio.'))
+      if (!accountIds.length || accountIds.length > 200 || !accountIds.every(isGuid) || new Set(accountIds).size !== accountIds.length ||
+          portfolioId !== null && !isGuid(portfolioId)) return Promise.reject(new ApiError('invalid-response', 'Choose between 1 and 200 distinct accounts and a valid portfolio.'))
       if (!validExpected(accountIds, expected)) return Promise.reject(new ApiError('invalid-response', 'Reload accounts and provide one positive settings revision per selected account.'))
-      return request('/api/accounts/portfolio', (v): v is BrokerAccount[] => Array.isArray(v) && v.length === accountIds.length &&
-        v.every(a => account(a) && accountIds.includes(a.id) && a.portfolioId === portfolioId && count(a.settingsRevision) && a.settingsRevision! > 0) &&
-        new Set(v.map(a => a.id)).size === v.length, { method: 'POST', body: JSON.stringify({ accountIds, portfolioId, expected }) })
+      return call('/api/accounts/portfolio', { ...workspaceRequest, validate: (v): v is BrokerAccount[] => Array.isArray(v) && v.length === accountIds.length &&
+        v.every(a => account(a) && accountIds.includes(a.id) && a.portfolioId === portfolioId && isPositiveCount(a.settingsRevision)) &&
+        new Set(v.map(a => a.id)).size === v.length, method: 'POST', body: JSON.stringify({ accountIds, portfolioId, expected }) })
     },
-    createAccount: body => request('/api/accounts', account, { method: 'POST', body: JSON.stringify(body) }),
+    createAccount: body => call('/api/accounts', { ...workspaceRequest, validate: account, method: 'POST', body: JSON.stringify(body) }),
     discoverAccounts: (venueId, address, signal, token) => {
       if (!/^[a-z][a-z\d-]{0,63}$/.test(venueId) || !/^0x[\da-f]{40}$/i.test(address)) {
         return Promise.reject(new ApiError('invalid-response', 'Use a valid venue and public wallet address.'))
@@ -686,38 +559,32 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
         if (!credentialTransportAllowed()) return Promise.reject(new ApiError('http', credentialTransportMessage))
         if (!token.trim() || token.length > 512) return Promise.reject(new ApiError('http', credentialSaveMessage))
         token = token.trim()
-        return request(`/api/venues/${venueId}/accounts/credential`, discovery(venueId, address),
-          { ...withSignal(signal), method: 'POST', body: JSON.stringify({ address, token }) }, 30_000, undefined,
-          'Could not load venue names. Check the read-only token’s wallet, scope and expiry.')
+        return call(`/api/venues/${venueId}/accounts/credential`, { ...workspaceRequest, validate: discovery(venueId, address), ...withSignal(signal), method: 'POST', body: JSON.stringify({ address, token }), timeout: 30_000, safeError: 'Could not load venue names. Check the read-only token’s wallet, scope and expiry.' })
       }
-      return request(`/api/venues/${venueId}/accounts?${new URLSearchParams({ address })}`, discovery(venueId, address),
-        withSignal(signal), 30_000, undefined, 'Could not find accounts for this wallet. Check the address and try again.')
+      return call(`/api/venues/${venueId}/accounts?${new URLSearchParams({ address })}`, { ...workspaceRequest, validate: discovery(venueId, address), ...withSignal(signal), timeout: 30_000, safeError: 'Could not find accounts for this wallet. Check the address and try again.' })
     },
-    accountCredential: (id, signal) => request(`${accountPath(id)}/credential`, credential, withSignal(signal), 10_000,
-      undefined, 'Credential status is unavailable. Retry or ask the operator to check credential storage.'),
+    accountCredential: (id, signal) => call(`${accountPath(id)}/credential`, { ...workspaceRequest, validate: credential, ...withSignal(signal), timeout: 10_000, safeError: 'Credential status is unavailable. Retry or ask the operator to check credential storage.' }),
     saveAccountCredential: (id, token) => {
       if (!credentialTransportAllowed()) return Promise.reject(new ApiError('http', credentialTransportMessage))
       if (!token.trim() || token.length > 512) return Promise.reject(new ApiError('http', credentialSaveMessage))
       token = token.trim()
-      return request(`${accountPath(id)}/credential`, credential, { method: 'PUT', body: JSON.stringify({ token }) },
-        30_000, undefined, credentialSaveMessage)
+      return call(`${accountPath(id)}/credential`, { ...workspaceRequest, validate: credential, method: 'PUT', body: JSON.stringify({ token }), timeout: 30_000, safeError: credentialSaveMessage })
     },
-    deleteAccountCredential: id => request(`${accountPath(id)}/credential`, none, { method: 'DELETE' }, 10_000,
-      undefined, 'Could not remove the credential. Refresh its status before trying again.'),
-    updatePortfolio: (id, { name, icon }) => request(`/api/portfolios/${resourceId(id)}`, portfolio, { method: 'PATCH', body: JSON.stringify({ name, icon }) }),
-    deletePortfolio: id => request(`/api/portfolios/${resourceId(id)}`, (v): v is undefined => v === undefined, { method: 'DELETE' }),
+    deleteAccountCredential: id => call(`${accountPath(id)}/credential`, { ...workspaceRequest, validate: none, method: 'DELETE', timeout: 10_000, safeError: 'Could not remove the credential. Refresh its status before trying again.' }),
+    updatePortfolio: (id, { name, icon }) => call(`/api/portfolios/${resourceId(id)}`, { ...workspaceRequest, validate: portfolio, method: 'PATCH', body: JSON.stringify({ name, icon }) }),
+    deletePortfolio: id => call(`/api/portfolios/${resourceId(id)}`, { ...workspaceRequest, validate: (v): v is undefined => v === undefined, method: 'DELETE' }),
     updateAccount: async (id, settings) => {
-      const updated = await request(accountPath(id), account, { method: 'PUT', body: JSON.stringify(settings) })
-      if (updated.isEnabled === false) evictAccountCandles(api, id)
+      const updated = await call(accountPath(id), { ...workspaceRequest, validate: account, method: 'PUT', body: JSON.stringify(settings) })
+      if (updated.isEnabled === false) emitApiEvent(api, { type: 'account-removed', accountId: id })
       return updated
     },
     deleteAccount: async id => {
-      await request(accountPath(id), (v): v is undefined => v === undefined, { method: 'DELETE' })
-      evictAccountCandles(api, id)
+      await call(accountPath(id), { ...workspaceRequest, validate: (v): v is undefined => v === undefined, method: 'DELETE' })
+      emitApiEvent(api, { type: 'account-removed', accountId: id })
     },
-    snapshot: (id, signal) => request(`${accountPath(id)}/snapshot`, snapshot, signal ? { signal } : {}),
-    fills: (id, signal) => request(`${accountPath(id)}/fills`, (v): v is ImportedFill[] => Array.isArray(v) && v.every(fill), signal ? { signal } : {}),
-    sync: (id, signal) => request(`${accountPath(id)}/sync`, account, { method: 'POST', ...withSignal(signal) }, 30_000, 'The venue refresh failed. Previous account data is still available.'),
+    snapshot: (id, signal) => call(`${accountPath(id)}/snapshot`, { ...workspaceRequest, validate: snapshot, ...withSignal(signal) }),
+    fills: (id, signal) => call(`${accountPath(id)}/fills`, { ...workspaceRequest, validate: (v): v is ImportedFill[] => Array.isArray(v) && v.every(isImportedFill), ...withSignal(signal) }),
+    sync: (id, signal) => call(`${accountPath(id)}/sync`, { ...workspaceRequest, validate: account, method: 'POST', ...withSignal(signal), timeout: 30_000, badGateway: 'The venue refresh failed. Previous account data is still available.' }),
   }
   return api
 }

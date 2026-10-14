@@ -6,7 +6,8 @@ import type { DraftEvidence } from './draft'
 import { createEvidence } from './evidence'
 import { EvidencePanel } from './EvidencePanel'
 import { MarkupEditor } from './MarkupEditor'
-import { hitShape, markedFileName, markupSvg, moveShape, strokeWidth, textSize, type ImageMarkup } from './markup'
+import { isImageMarkup, type ImageMarkup } from '@/api/markup'
+import { hitShape, markedFileName, markupSvg, moveShape, strokeWidth, textSize } from './markup'
 
 const base: ImageMarkup = { width: 1000, height: 500, shapes: [] }
 
@@ -46,6 +47,20 @@ describe('Markup model', () => {
     expect(moveShape(base, markup.shapes[0]!, 800, -150)).toMatchObject({ from: { x: 900, y: 0 }, to: { x: 1000, y: 50 } })
     expect(markedFileName('chart.png')).toBe('chart-marked.png')
     expect(markedFileName('vessel-capture')).toBe('vessel-capture-marked.png')
+  })
+
+  it('selects, hits and moves saved marks whose unused fields the server returns as null', () => {
+    const unused = { width: null, points: null, from: null, to: null, at: null, size: null, text: null }
+    const saved = { ...base, shapes: [
+      { ...unused, id: 'arrow', kind: 'arrow', color: '#4ade80', width: 4, from: { x: 100, y: 100 }, to: { x: 300, y: 100 } },
+      { ...unused, id: 'pen', kind: 'pen', color: '#ff5c5c', width: 4, points: [{ x: 100, y: 300 }, { x: 300, y: 300 }] },
+      { ...unused, id: 'text', kind: 'text', color: '#ffffff', size: 20, at: { x: 600, y: 300 }, text: 'Retest' },
+    ] } as unknown as ImageMarkup
+    expect(hitShape(saved, { x: 200, y: 101 }, 3)?.id).toBe('arrow')
+    expect(hitShape(saved, { x: 200, y: 301 }, 3)?.id).toBe('pen')
+    expect(hitShape(saved, { x: 610, y: 310 }, 3)?.id).toBe('text')
+    expect(moveShape(base, saved.shapes[0]!, 10, 10)).toMatchObject({ from: { x: 110, y: 110 }, to: { x: 310, y: 110 } })
+    expect(markupSvg(saved, 'arrow')).toContain('stroke="#8fb8ff"')
   })
 })
 
@@ -93,6 +108,8 @@ describe('Markup editor', () => {
     expect(onMarkup.mock.lastCall![0].shapes).toHaveLength(2)
     drag([300, 100], [450, 200])
     expect(onMarkup.mock.lastCall![0].shapes[2]).toMatchObject({ kind: 'box', from: { x: 600, y: 200 }, to: { x: 900, y: 400 } })
+    // What the editor produces is what the server accepts and what the API guard lets back in.
+    expect(isImageMarkup(onMarkup.mock.lastCall![0])).toBe(true)
 
     await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
     expect(onMarkup.mock.lastCall![0].shapes).toHaveLength(2)
@@ -112,6 +129,7 @@ describe('Markup editor', () => {
     const input = screen.getByRole('textbox', { name: 'Mark text' })
     await userEvent.type(input, 'Liquidity sweep{Enter}')
     expect(onMarkup.mock.lastCall![0].shapes[0]).toMatchObject({ kind: 'text', text: 'Liquidity sweep', at: { x: 100, y: 100 }, size: 32 })
+    expect(isImageMarkup(onMarkup.mock.lastCall![0])).toBe(true)
     expect(screen.queryByRole('textbox', { name: 'Mark text' })).toBeNull()
 
     await userEvent.click(screen.getByRole('button', { name: 'Select and move' }))

@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
 

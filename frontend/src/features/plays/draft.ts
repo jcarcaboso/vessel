@@ -1,6 +1,6 @@
 import type { ChartDrawing } from '@/components/chart/drawings'
 import type { StructuredReview } from '@/api/plays'
-import type { ImageMarkup } from './markup'
+import type { ImageMarkup } from '@/api/markup'
 
 /**
  * A stop or target. A percent value is the return on margin at the play's leverage, so the price

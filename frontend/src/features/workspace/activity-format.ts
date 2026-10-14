@@ -1,4 +1,4 @@
-import type { ImportedFill } from '@/api/workspace'
+import type { ImportedFill } from '@/api/fills'
 
 /** A fill's own trade side from the normalized side, never venue wording: a buy is Long, a sell is Short. */
 export function sideDirection(fill: ImportedFill): 'long' | 'short' {

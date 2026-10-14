@@ -1,3 +1,7 @@
+import {
+  hasNoControlCharacters, isDiaryDecimal, isDiaryNonNegativeDecimal, isDiaryPositiveDecimal, isFilledText, isGuid, isNonBlankText,
+  isPositiveCount, isRecord, isText, isUtcTimestamp,
+} from './guards'
 import { isSavedPlay, type SavedPlay } from './plays'
 
 export interface ManualExecutionInput {
@@ -34,36 +38,24 @@ export interface ManualExecutions {
   notice: string
 }
 
-const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
-const text = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max
-const guid = (v: unknown) => text(v, 36) && /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(v)
-const utc = (v: unknown) => text(v, 64) && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|\+00:00)$/.test(v) &&
-  Number.isFinite(Date.parse(v)) && new Date(v).toISOString().slice(0, 19) === v.slice(0, 19)
-const decimal = (v: unknown) => text(v, 96) && /^[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d{1,2})?$/.test(v)
-const nonnegative = (v: unknown) => decimal(v) && !(v as string).startsWith('-')
-const positive = (v: unknown) => nonnegative(v) && /[1-9]/.test((v as string).split(/[eE]/)[0]!)
-const plain = (v: string) => !Array.from(v).some(char => {
-  const code = char.charCodeAt(0)
-  return code < 32 || code >= 127 && code <= 159
-})
 const facts = (v: Record<string, unknown>) => ['entry', 'exit'].includes(v.role as string) &&
-  (v.role === 'entry' ? text(v.entryId, 64) && !!v.entryId : v.entryId === null) && utc(v.occurredAtUtc) &&
-  ['buy', 'sell'].includes(v.side as string) && positive(v.quantity) && positive(v.price) &&
-  ((v.fee === null && v.feeCurrency === null) || nonnegative(v.fee) && text(v.feeCurrency, 32) && /^[A-Za-z0-9_-]+$/.test(v.feeCurrency)) &&
-  text(v.source, 100) && !!v.source.trim() && v.source === v.source.trim() && plain(v.source)
-export const isManualExecutionInput = (v: unknown): v is ManualExecutionInput => object(v) && guid(v.requestId) &&
-  typeof v.expectedVersion === 'number' && Number.isSafeInteger(v.expectedVersion) && v.expectedVersion > 0 && facts(v)
+  (v.role === 'entry' ? isFilledText(v.entryId, 64) : v.entryId === null) && isUtcTimestamp(v.occurredAtUtc) &&
+  ['buy', 'sell'].includes(v.side as string) && isDiaryPositiveDecimal(v.quantity) && isDiaryPositiveDecimal(v.price) &&
+  ((v.fee === null && v.feeCurrency === null) || isDiaryNonNegativeDecimal(v.fee) && isText(v.feeCurrency, 32) && /^[A-Za-z0-9_-]+$/.test(v.feeCurrency)) &&
+  isNonBlankText(v.source, 100) && v.source === v.source.trim() && hasNoControlCharacters(v.source)
+export const isManualExecutionInput = (v: unknown): v is ManualExecutionInput => isRecord(v) && isGuid(v.requestId) &&
+  isPositiveCount(v.expectedVersion) && facts(v)
 export const isManualExecutionCorrection = (v: unknown): v is ManualExecutionCorrection => isManualExecutionInput(v) &&
-  object(v) && text(v.reason, 2000) && !!v.reason.trim() && plain(v.reason)
-export const isManualExecutionRecord = (v: unknown): v is ManualExecutionRecord => object(v) && guid(v.id) &&
-  facts(v) && utc(v.createdAtUtc) && utc(v.updatedAtUtc)
-export const isManualExecutions = (v: unknown): v is ManualExecutions => object(v) && isSavedPlay(v.play) &&
+  isRecord(v) && isNonBlankText(v.reason, 2000) && hasNoControlCharacters(v.reason)
+export const isManualExecutionRecord = (v: unknown): v is ManualExecutionRecord => isRecord(v) && isGuid(v.id) &&
+  facts(v) && isUtcTimestamp(v.createdAtUtc) && isUtcTimestamp(v.updatedAtUtc)
+export const isManualExecutions = (v: unknown): v is ManualExecutions => isRecord(v) && isSavedPlay(v.play) &&
   Array.isArray(v.records) && v.records.length <= 200 && v.records.every(isManualExecutionRecord) && Array.isArray(v.history) && v.history.length <= 1000 &&
-  v.history.every(h => object(h) && guid(h.id) && guid(h.executionId) && (h.reason === null || text(h.reason, 2000)) && utc(h.occurredAtUtc) &&
-    (h.before === null || isManualExecutionRecord(h.before)) && isManualExecutionRecord(h.after)) && object(v.totals) &&
-  ['enteredQuantity', 'exitedQuantity', 'openQuantity'].every(key => nonnegative((v.totals as Record<string, unknown>)[key])) &&
-  (v.totals.grossResultUsd === null || decimal(v.totals.grossResultUsd)) &&
-  (v.totals.netResultUsd === null || decimal(v.totals.netResultUsd)) && typeof v.totals.feesComplete === 'boolean' && text(v.notice, 4000)
+  v.history.every(h => isRecord(h) && isGuid(h.id) && isGuid(h.executionId) && (h.reason === null || isText(h.reason, 2000)) && isUtcTimestamp(h.occurredAtUtc) &&
+    (h.before === null || isManualExecutionRecord(h.before)) && isManualExecutionRecord(h.after)) && isRecord(v.totals) &&
+  ['enteredQuantity', 'exitedQuantity', 'openQuantity'].every(key => isDiaryNonNegativeDecimal((v.totals as Record<string, unknown>)[key])) &&
+  (v.totals.grossResultUsd === null || isDiaryDecimal(v.totals.grossResultUsd)) &&
+  (v.totals.netResultUsd === null || isDiaryDecimal(v.totals.netResultUsd)) && typeof v.totals.feesComplete === 'boolean' && isText(v.notice, 4000)
 
 /** GUID request identities also work on LAN HTTP where randomUUID is unavailable. */
 export function newDiaryRequestId() {

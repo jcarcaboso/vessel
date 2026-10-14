@@ -1,4 +1,4 @@
-import type { CandleInterval } from '@/api/workspace'
+import type { CandleInterval } from '@/api/candles'
 
 const units: Record<string, [string, string]> = { m: ['minute', ''], h: ['hour', ''], d: ['day', 'D'], w: ['week', 'W'], M: ['month', 'M'] }
 

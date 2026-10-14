@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, Check, ChevronDown, ChevronRight, Info, RefreshCw, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import type { WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { errorMessage } from '@/api/errors'
 import { defaultReviewQuery, reviewPeriods, type ReviewDocument, type ReviewGroupBy, type ReviewQuery } from '@/api/review'
 import { ReviewChart } from './ReviewChart'
 import { ReviewExclusions } from './ReviewExclusions'
@@ -31,7 +31,7 @@ function useReport(api: WorkspaceApi, query: ReviewQuery, generation: number) {
       if (active) setLoaded({ api, query, generation, value, error: null })
     }).catch(error => {
       if (active) setLoaded(previous => ({ api, query, generation, value: previous?.api === api ? previous.value : null,
-        error: error instanceof ApiError ? error.message : 'The review could not be loaded.' }))
+        error: errorMessage(error, 'The review could not be loaded.') }))
     })
     return () => { active = false; controller.abort() }
   }, [api, query, generation])
@@ -59,7 +59,7 @@ function ReviewPlays({ api, initialQuery, onOpenPlay }: {
     openingRequest.current = controller
     setOpening(id); setOpenError(null)
     try { await onOpenPlay(id, controller.signal) }
-    catch (cause) { if (!controller.signal.aborted) setOpenError(cause instanceof ApiError ? cause.message : 'The Play could not be opened.') }
+    catch (cause) { if (!controller.signal.aborted) setOpenError(errorMessage(cause, 'The Play could not be opened.')) }
     finally { if (!controller.signal.aborted) setOpening(null) }
   }
   return <>
