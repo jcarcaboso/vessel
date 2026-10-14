@@ -12,6 +12,26 @@ import { hitShape, markedFileName, markupSvg, moveShape, strokeWidth, textSize }
 const base: ImageMarkup = { width: 1000, height: 500, shapes: [] }
 
 describe('Markup model', () => {
+  it('uses the drawing token only for selection and leaves exported marks unchanged', () => {
+    const markup: ImageMarkup = { ...base, shapes: [
+      { id: 'box', kind: 'box', color: '#ff5c5c', width: 5, from: { x: 10, y: 20 }, to: { x: 80, y: 90 } },
+    ] }
+    const original = markupSvg(markup)
+    const root = document.documentElement
+    const previous = root.style.getPropertyValue('--chart-drawing')
+    try {
+      for (const color of ['#8fb8ff', '#123456']) {
+        root.style.setProperty('--chart-drawing', color)
+        expect(markupSvg(markup, 'box')).toContain(`stroke="${color}"`)
+        expect(markupSvg(markup, 'box')).toContain('stroke="#ff5c5c"')
+        expect(markupSvg(markup)).toBe(original)
+      }
+    } finally {
+      if (previous) root.style.setProperty('--chart-drawing', previous)
+      else root.style.removeProperty('--chart-drawing')
+    }
+  })
+
   it('renders every kind as SVG sized like the image and escapes text', () => {
     const svg = markupSvg({ ...base, shapes: [
       { id: 'p', kind: 'pen', color: '#ff5c5c', width: 5, points: [{ x: 1, y: 2 }, { x: 30, y: 40 }] },

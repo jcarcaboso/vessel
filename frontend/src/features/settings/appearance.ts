@@ -147,6 +147,7 @@ export function themeTokens({ theme, colors, radius, candleUpEdge, candleDownEdg
     '--positive': colors.positive,
     '--negative': colors.negative,
     '--warning': colors.warning,
+    '--shadow-color': theme.scheme === 'dark' ? '#000000' : colors.foreground,
     '--chart-drawing': theme.drawing,
     '--chart-candle-up': colors.candleUp,
     '--chart-candle-up-edge': candleUpEdge,
@@ -159,6 +160,8 @@ export function themeTokens({ theme, colors, radius, candleUpEdge, candleDownEdg
 export function applyAppearance(appearance: Appearance, root: HTMLElement = document.documentElement) {
   const resolved = resolveTheme(appearance)
   for (const [name, value] of Object.entries(themeTokens(resolved))) root.style.setProperty(name, value)
+  root.classList.toggle('dark', resolved.theme.scheme === 'dark')
+  root.ownerDocument.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved.colors.background)
   root.style.colorScheme = resolved.theme.scheme
   root.dataset.theme = resolved.theme.id
   root.dataset.scheme = resolved.theme.scheme

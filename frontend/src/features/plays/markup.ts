@@ -150,7 +150,8 @@ export function markupSvg(markup: ImageMarkup, selectedId: string | null = null)
     const box = shapeBounds(selected)
     const pad = Math.max(4, Math.max(markup.width, markup.height) * 0.006)
     const dash = round(pad * 1.5)
-    return `<rect x="${round(box.x - pad)}" y="${round(box.y - pad)}" width="${round(box.width + pad * 2)}" height="${round(box.height + pad * 2)}" fill="none" stroke="#8fb8ff" stroke-width="${round(pad / 3)}" stroke-dasharray="${dash} ${dash}"/>`
+    const selectionColor = getComputedStyle(document.documentElement).getPropertyValue('--chart-drawing').trim() || '#8fb8ff'
+    return `<rect x="${round(box.x - pad)}" y="${round(box.y - pad)}" width="${round(box.width + pad * 2)}" height="${round(box.height + pad * 2)}" fill="none" stroke="${escape(selectionColor)}" stroke-width="${round(pad / 3)}" stroke-dasharray="${dash} ${dash}"/>`
   })() : ''
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${markup.width}" height="${markup.height}" viewBox="0 0 ${markup.width} ${markup.height}">${markup.shapes.map(shapeSvg).join('')}${outline}</svg>`
 }
