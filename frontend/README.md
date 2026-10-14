@@ -1,5 +1,7 @@
 # Vessel frontend
 
+> **New to the frontend?** Start with the [frontend guide](../docs/architecture/frontend-guide.md), which covers the current structure, modules, state ownership and conventions. Parts of this file record earlier phases and are out of date (see item R1 in the [frontend review](../docs/architecture/frontend-review.md)).
+
 React/Vite/TypeScript with Graphite and editable shadcn-derived controls. The default page is the main application shell, not the Play editor. `features/plays/` and the separate `../prototype/` remain for later Play integration.
 
 ## Run and check
