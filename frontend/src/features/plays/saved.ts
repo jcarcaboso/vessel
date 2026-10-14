@@ -116,8 +116,10 @@ export function draftEvidenceFromSaved(item: SavedEvidence, image: Blob): DraftE
 /** Loads a saved Play with its evidence images. */
 export async function loadSavedPlay(api: WorkspaceApi, id: string, signal?: AbortSignal) {
   const [play, items] = await Promise.all([api.play(id, signal), api.evidence(id, signal)])
+  signal?.throwIfAborted()
   if (play.summary.id !== id) throw new ApiError('invalid-response', 'The API returned a different Play. Your current work was kept.')
   const evidence = await Promise.all(items.map(async item => draftEvidenceFromSaved(item, await api.evidenceImage(item.id, signal))))
+  signal?.throwIfAborted()
   const draft = draftFromSaved(play, evidence)
   return { draft, saved: savedState(play, draft) }
 }

@@ -1,0 +1,43 @@
+import { act, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import type { WorkspaceApi } from '@/api/workspace'
+import type { PlayHistory } from '@/api/plays'
+import { ApiError } from '@/api/errors'
+import { HistoryDialog } from './PlayDialogs'
+import { savedPlayFixture } from '@/test/workspace-fixture'
+
+function deferred() {
+  let resolve!: (value: PlayHistory) => void
+  let reject!: (cause: unknown) => void
+  const promise = new Promise<PlayHistory>((yes, no) => { resolve = yes; reject = no })
+  return { resolve, reject, promise }
+}
+const history = (reason: string): PlayHistory => ({ statusChanges: [], revisions: [{ number: 1, status: 'planned',
+  reason, createdAtUtc: '2026-10-14T12:00:00Z', plan: savedPlayFixture.plan }] })
+
+describe('history request lifetime', () => {
+  it.each(['play', 'api'] as const)('clears old history on %s replacement and suppresses late history and errors', async replacement => {
+    const first = deferred(), second = deferred()
+    const read = vi.fn<WorkspaceApi['playHistory']>().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const api = { playHistory: read } as unknown as WorkspaceApi
+    const otherApi = { playHistory: read } as unknown as WorkspaceApi
+    const { rerender, unmount } = render(<HistoryDialog api={api} playId="one" onClose={vi.fn()} />)
+    const firstSignal = read.mock.calls[0]![1]!
+    rerender(<HistoryDialog api={replacement === 'api' ? otherApi : api} playId={replacement === 'play' ? 'two' : 'one'} onClose={vi.fn()} />)
+    expect(firstSignal.aborted).toBe(true)
+    await act(async () => { second.resolve(history('Current history')) })
+    await act(async () => { first.resolve(history('Stale history')) })
+    expect(screen.getByText('Plan revision 1 · Current history')).toBeInTheDocument()
+    expect(screen.queryByText(/Stale history/)).not.toBeInTheDocument()
+    const third = deferred()
+    read.mockReturnValueOnce(third.promise)
+    rerender(<HistoryDialog api={api} playId="three" onClose={vi.fn()} />)
+    expect(screen.getByRole('status')).toHaveTextContent('Loading history')
+    expect(screen.queryByText(/Current history/)).not.toBeInTheDocument()
+    const thirdSignal = read.mock.calls[2]![1]!
+    unmount()
+    expect(thirdSignal.aborted).toBe(true)
+    await act(async () => { third.reject(new ApiError('unavailable', 'Stale error.')) })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})

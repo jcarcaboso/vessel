@@ -3,10 +3,11 @@ import { Download, ImagePlus, PenLine, Trash2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import type { DraftEvidence } from './draft'
-import { createEvidence, evidenceAccept, evidenceLimits, evidenceProblem, formatBytes, imageUrl, releaseImageUrl } from './evidence'
+import { createEvidence, evidenceAccept, evidenceLimits, evidenceProblem, formatBytes } from './evidence'
 import type { ImageMarkup } from '@/api/markup'
 import { flattenMarkup, hasMarks, markedFileName, markupDataUrl } from './markup'
 import { MarkupEditor } from './MarkupEditor'
+import { useObjectUrl } from './useObjectUrl'
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC', hour12: false })
 const describe = (item: DraftEvidence) => item.source === 'capture' ? `Chart capture${item.context ? ` · ${item.context}` : ''}` : item.name
@@ -14,10 +15,16 @@ const itemLabel = (item: DraftEvidence, index: number) => `Image ${index + 1}: $
 
 /** The image with its marks layered on top; both share the same fit, so the marks stay aligned. */
 function MarkedImage({ item, marked, alt, fit }: { item: DraftEvidence; marked: boolean; alt: string; fit: 'cover' | 'contain' }) {
+  const url = useObjectUrl(item.image)
   return <span className="marked-image" data-fit={fit}>
-    <img src={imageUrl(item.image)} alt={alt} />
+    <img src={url} alt={alt} />
     {marked && hasMarks(item.markup) && <img className="marked-image-overlay" src={markupDataUrl(item.markup)} alt="" data-testid="marks-overlay" />}
   </span>
+}
+
+function EvidenceMarkupEditor({ item, onChange, onDone }: { item: DraftEvidence; onChange: (markup: ImageMarkup | null) => void; onDone: () => void }) {
+  const url = useObjectUrl(item.image)
+  return url ? <MarkupEditor imageUrl={url} alt={describe(item)} markup={item.markup} onChange={onChange} onDone={onDone} /> : null
 }
 
 function save(blob: Blob, name: string) {
@@ -55,7 +62,6 @@ export function EvidencePanel({ evidence, onChange }: {
     else setError('The marked image could not be created. The original is unchanged.')
   }
   const remove = (item: DraftEvidence) => {
-    releaseImageUrl(item.image)
     onChange(current => current.filter(other => other.id !== item.id))
     setConfirming(null)
     if (viewing === item.id) setViewing(null)
@@ -134,7 +140,7 @@ export function EvidencePanel({ evidence, onChange }: {
         <DialogDescription>{viewed.source === 'capture' ? 'Captured' : 'Added'} {timeFormat.format(new Date(viewed.addedAt))} UTC · {formatBytes(viewed.image.size)}.
           {viewed.serverId ? ' Image stored with this Play; changes to notes or marks need saving.' : ' Unsaved image, kept only in this session until saved.'}</DialogDescription>
         {editing
-          ? <MarkupEditor imageUrl={imageUrl(viewed.image)} alt={describe(viewed)} markup={viewed.markup}
+          ? <EvidenceMarkupEditor item={viewed}
             onChange={markup => setMarkup(viewed.id, markup)} onDone={() => { setEditing(false); setView('marked') }} />
           : <>
             <div className="evidence-view-bar">

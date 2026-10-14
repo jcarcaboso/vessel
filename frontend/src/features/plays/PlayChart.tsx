@@ -267,7 +267,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   const editedRef = levelEdit ? parseOverlayId(levelEdit.id) : null
   const editedIndex = editedRef ? entries.findIndex(entry => entry.id === editedRef.entryId) : -1
   const levelEditor = levelEdit && editedIndex >= 0 && editable ? <LevelEditor key={levelEdit.id} entries={entries} entry={entries[editedIndex]!}
-    overlayId={levelEdit.id} anchor={levelEdit.anchor} direction={direction} leverage={leverage} onApply={applyEntry}
+    overlayId={levelEdit.id} anchor={levelEdit.anchor} direction={direction} leverage={leverage} priceStep={priceStep} onApply={applyEntry}
     onClose={() => setLevelEdit(null)} /> : null
   const drawingProps = {
     drawings, selectedDrawingId: editor.selectedId, tool: editor.tool, magnet: preferences.magnet,

@@ -4,8 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input'
 import { addEntry as withEntry, createNextEntry, removeEntry as withoutEntry, splitEqually as equalSplit, type DraftEntry, type PlayDraft } from './draft'
 import { EntryForm } from './EntryForm'
-import { formatDraggedPrice, keepPercentLevelPrices, leverageOf, percentLevels } from './levels'
-import { LeverageChangeDialog } from './LeverageChangeDialog'
+import { formatDraggedPrice, leverageOf, percentLevels } from './levels'
 import { AvailableBudget } from './WorkspacePanels'
 import {
   convertSize, defaultSizeUnits, estimatedLiquidation, formatMoney, formatQuantity, formatRewardToRisk, marginOverBudget, positionSize, rewardToRisk, sizeForBudget, type SizeUnits,
@@ -30,10 +29,11 @@ function allocatedShare(entries: DraftEntry[]) {
   if (!shares.length || shares.some(share => !Number.isFinite(share))) return null
   return Number(shares.reduce((total, share) => total + share, 0).toFixed(2))
 }
-export function PositionEditor({ draft, onChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, maintenanceMargin = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null, checkBudget = true,
+export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, maintenanceMargin = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null, checkBudget = true,
   marks = null }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
+  onLeverageChange: (value: string) => void
   selectedId: string
   selectionRequest?: number
   onSelect: (id: string) => void
@@ -91,7 +91,6 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   // Percentage stops and targets are returns at the leverage, so with any of them a new leverage is
   // previewed in the controls and only applied once the owner chooses what happens to those levels.
   const [leverageDraft, setLeverageDraft] = useState<string | null>(null)
-  const [pendingLeverage, setPendingLeverage] = useState<number | null>(null)
   const needsConfirmation = percentLevels(draft.entries).length > 0
   const shownLeverage = leverageDraft ?? draft.leverage
   const clampLeverage = (value: string) => value === '' ? '' : String(Math.min(leverageLimit, Math.max(1, Math.round(Number(value)))))
@@ -99,24 +98,15 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
   function updateLeverage(value: string) {
     const next = clampLeverage(value)
     if (needsConfirmation) setLeverageDraft(next)
-    else onChange({ ...draft, leverage: next })
+    else onLeverageChange(next)
   }
 
   /** Asks about percentage levels before applying a previewed leverage. A blank value goes back to the current one. */
   function commitLeverage(value = leverageDraft) {
     if (value === null || !needsConfirmation) return
     if (value === '' || Number(value) === leverage) { setLeverageDraft(null); return }
-    setLeverageDraft(value)
-    setPendingLeverage(Number(value))
-  }
-
-  function finishLeverage(apply?: 'prices' | 'percentages') {
-    if (apply && pendingLeverage !== null) onChange({
-      ...draft, leverage: String(pendingLeverage),
-      entries: apply === 'prices' ? keepPercentLevelPrices(draft.entries, leverage, pendingLeverage) : draft.entries,
-    })
-    setPendingLeverage(null)
     setLeverageDraft(null)
+    onLeverageChange(value)
   }
 
   const sized = positionSize(draft, leverage)
@@ -202,9 +192,7 @@ export function PositionEditor({ draft, onChange, selectedId, selectionRequest =
           </div>
         </div>
         {leverage > leverageLimit && <p className="leverage-warning" role="alert">{leverage}× is above the {leverageLimit}× venue maximum for {instrumentName || 'this contract'}.</p>}
-        {pendingLeverage !== null && <LeverageChangeDialog draft={draft} from={leverage} to={pendingLeverage} units={units}
-          onKeepPrices={() => finishLeverage('prices')} onKeepPercentages={() => finishLeverage('percentages')} onCancel={() => finishLeverage()} />}
-      </div>
+          </div>
         <div className="entries-heading">
           <h3>Entries <span className="entry-count">{draft.entries.length}</span></h3>
           <span className="entries-allocated" data-complete={allocated === 100} title="Share of the position's quantity given to entries">{allocated === null ? '—' : `${allocated}%`}</span>
