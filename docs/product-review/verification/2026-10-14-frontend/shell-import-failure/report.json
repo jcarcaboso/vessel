@@ -1,0 +1,15 @@
+{
+  "source": "665a36f21823f6d9a9d9d5f1d183da18b63e4c26",
+  "status": "failed",
+  "checks": [],
+  "shots": [
+    "graphite-desktop-failed-import.png"
+  ],
+  "expectedInjectedErrors": [
+    "graphite-desktop: Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+  ],
+  "unexpectedErrors": [],
+  "blocked": [],
+  "attempts": {},
+  "failure": "locator.waitFor: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('region', { name: 'Performance scorecard', exact: true }) to be visible\u001b[22m\n"
+}
