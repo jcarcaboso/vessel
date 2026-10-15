@@ -1,0 +1,17 @@
+# Include on EVERY Compose command to keep an existing local-folder installation.
+services:
+  rustfs:
+    profiles: ["unused-storage"]
+  storage-init:
+    profiles: ["unused-storage"]
+  api:
+    environment:
+      Vessel__Evidence__Storage__Provider: Local
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - evidence:/var/lib/vessel/evidence
+
+volumes:
+  evidence:

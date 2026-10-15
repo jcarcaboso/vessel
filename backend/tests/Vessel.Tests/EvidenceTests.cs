@@ -215,6 +215,7 @@ public sealed class EvidenceTests : IDisposable
     [InlineData("Owner/item.png")]
     [InlineData("owner/item")]
     [InlineData("owner\\item.png")]
+    [InlineData("owner/item.png\n")]
     public async Task Local_store_rejects_keys_it_did_not_generate(string key)
     {
         var local = new LocalEvidenceObjectStore(root);
@@ -350,15 +351,15 @@ public sealed class EvidenceApiTests : IDisposable
     {
         // A plain host: WebApplicationFactory's deferred host can dispose its services before the startup error surfaces.
         var builder = Host.CreateApplicationBuilder();
-        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Vessel:Evidence:Storage:Provider"] = "S3" });
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Vessel:Evidence:Storage:Provider"] = "Unknown" });
         builder.Services.AddVesselInfrastructure(builder.Configuration);
         using var host = builder.Build();
         var error = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
-        Assert.Contains("Provider must be Local", error.Message);
+        Assert.Contains("Provider must be Local or S3", error.Message);
     }
 
     [Fact]
-    public void Default_settings_use_local_storage_under_the_content_root()
+    public void Default_settings_use_the_legacy_local_folder()
     {
         var defaults = new EvidenceSettings();
         Assert.Equal(("Local", "data/evidence", 10L * 1024 * 1024, 50),

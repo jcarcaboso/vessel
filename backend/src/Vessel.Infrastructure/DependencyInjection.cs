@@ -1,3 +1,5 @@
+using Amazon.Runtime;
+using Amazon.S3;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
@@ -121,23 +123,37 @@ public static class DependencyInjection
 
     private static VenueHostOptions Hosts(IServiceProvider sp) => sp.GetRequiredService<IOptions<VenueHostOptions>>().Value;
 
-    private static void AddEvidenceStorage(IServiceCollection services, IConfiguration config)
+    /// <summary>Shared by the API and explicit offline evidence-copy command.</summary>
+    public static void AddEvidenceStorage(IServiceCollection services, IConfiguration config)
     {
         services.AddOptions<EvidenceSettings>().Bind(config.GetSection(EvidenceSettings.Section))
-            .Validate(s => s.MaxUploadBytes > 0 && s.MaxPerPlay > 0, "Vessel:Evidence limits must be positive.")
-            // Fail at startup rather than on the first upload. Further providers (S3-compatible) plug in here.
-            .Validate(s => s.Storage.Provider == EvidenceSettings.LocalProvider,
-                "Vessel:Evidence:Storage:Provider must be Local; other storage providers are not available yet.")
-            .Validate(s => !string.IsNullOrWhiteSpace(s.Storage.Local.RootPath), "Vessel:Evidence:Storage:Local:RootPath is required.")
             .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<EvidenceSettings>, EvidenceStorageValidation>();
         services.AddSingleton(sp =>
         {
             var settings = sp.GetRequiredService<IOptions<EvidenceSettings>>().Value;
             return new EvidenceLimits(settings.MaxUploadBytes, settings.MaxPerPlay);
         });
+        services.AddSingleton<IAmazonS3>(sp =>
+        {
+            var s3 = sp.GetRequiredService<IOptions<EvidenceSettings>>().Value.Storage.S3;
+            return new AmazonS3Client(new BasicAWSCredentials(s3.AccessKeyId, s3.SecretAccessKey), new AmazonS3Config
+            {
+                ServiceURL = s3.Endpoint,
+                AuthenticationRegion = s3.Region,
+                ForcePathStyle = s3.ForcePathStyle,
+                // Use SigV4 payload signing, not optional AWS-only streaming checksum trailers.
+                RequestChecksumCalculation = RequestChecksumCalculation.WHEN_REQUIRED,
+                ResponseChecksumValidation = ResponseChecksumValidation.WHEN_REQUIRED,
+                Timeout = TimeSpan.FromSeconds(30),
+                MaxErrorRetry = 2
+            });
+        });
         services.AddSingleton<IEvidenceObjectStore>(sp =>
         {
             var settings = sp.GetRequiredService<IOptions<EvidenceSettings>>().Value.Storage;
+            if (settings.Provider == EvidenceSettings.S3Provider)
+                return new S3EvidenceObjectStore(sp.GetRequiredService<IAmazonS3>(), settings.S3.Bucket);
             var contentRoot = sp.GetRequiredService<IHostEnvironment>().ContentRootPath;
             return new LocalEvidenceObjectStore(Path.GetFullPath(settings.Local.RootPath, contentRoot));
         });

@@ -68,12 +68,54 @@ Saved Plays can hold images (`GET/POST /api/plays/{playId}/evidence`, `GET /api/
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `Vessel__Evidence__Storage__Provider` | `Local` | Storage adapter. Other values fail startup until their adapter exists. |
+| `Vessel__Evidence__Storage__Provider` | `Local` | Backward-compatible local folder unless explicitly set to `S3` (RustFS or another compatible service). Unknown providers fail startup. |
+| `Vessel__Evidence__Storage__S3__Endpoint` | `http://localhost:9000` | Server-side S3 origin; use HTTPS outside the private Docker network/loopback. No credentials, paths or queries in the URL. |
+| `Vessel__Evidence__Storage__S3__Bucket` | `vessel-evidence` | Private, pre-created bucket. |
+| `Vessel__Evidence__Storage__S3__Region` | `us-east-1` | S3 signing region. |
+| `Vessel__Evidence__Storage__S3__ForcePathStyle` | `true` | Path-style addressing for RustFS; configurable for other S3 providers. |
+| `Vessel__Evidence__Storage__S3__AccessKeyId` / `SecretAccessKey` | None | Required with `S3`, server-only configuration. Never set `VITE_*` keys. |
 | `Vessel__Evidence__Storage__Local__RootPath` | `data/evidence` | Absolute, or relative to the API content root (git-ignored). |
 | `Vessel__Evidence__MaxUploadBytes` | `10485760` | Largest accepted image. |
 | `Vessel__Evidence__MaxPerPlay` | `50` | Images per Play. |
 
-Back up the evidence directory with the database; a database backup alone does not preserve images.
+Back up the object store (or local directory) with the database; a database backup alone does not preserve images.
+S3 credentials alone do not select S3. An explicitly selected S3 provider with incomplete configuration
+fails startup; outages never redirect reads or writes to the local folder.
+See [evidence storage](../docs/architecture/evidence-storage.md) for guarantees and copying existing objects,
+and [deployment](../deploy/README.md) for private RustFS, external S3 and local-folder configurations.
+
+The API binary also supplies explicit offline copy commands (not schema migrations):
+
+```sh
+dotnet Vessel.Api.dll evidence-copy-to-s3 --source /absolute/local/evidence/root
+dotnet Vessel.Api.dll evidence-copy-to-s3 --source /absolute/local/evidence/root --apply
+# Reverse: use the current S3 settings as source and export to a private local folder.
+dotnet Vessel.Api.dll evidence-copy-to-local --destination /absolute/private/evidence-export
+dotnet Vessel.Api.dll evidence-copy-to-local --destination /absolute/private/evidence-export --apply
+```
+
+Run from a compatible published API installation, with `ConnectionStrings__Vessel`
+and `Vessel__Evidence__Storage__S3__*` configured in its server
+environment. The command does not load the repository `.env` automatically. Stop
+writers and take coordinated backups first. Each pair defaults to a read-only dry
+run; `--apply` copies database-referenced originals and reads back/verifies their
+size and SHA-256. Matching destination objects are skipped; differing objects
+are never overwritten. Source originals, metadata, notes/markup and active-provider
+settings are never changed. For export, S3 settings identify the **source**;
+for upload, they identify the **destination**. Set `umask 077` and use a trusted
+private local directory. Dry-run export creates no files or directories.
+To change providers, export from the old S3, configure the command for the new
+S3, then upload that local root. Keep writers stopped through both steps and
+switch the API only after successful verification. See the
+[portable-copy/cutover checklist](../docs/architecture/evidence-storage.md#s3-to-local-or-another-s3-provider)
+and Docker commands. These helpers copy referenced originals only, not the
+database or an entire bucket backup.
+
+For destination-copy credentials on AWS S3, grant GetObject/PutObject on the
+objects **and `s3:ListBucket` on the destination bucket**. The helper never
+lists objects, but AWS otherwise hides missing keys behind 403, which must
+remain a hard failure. Keep the extra permission on the offline copy role;
+normal API credentials do not need it.
 
 ## Explicit migrations
 

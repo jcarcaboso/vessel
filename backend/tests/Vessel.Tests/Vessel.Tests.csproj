@@ -9,4 +9,8 @@
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
   <ItemGroup><None Include="Fixtures/**/*.json" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
+  <ItemGroup>
+    <None Include="Fixtures/Evidence/*.png;Fixtures/Evidence/*.webp" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../../prototype/assets/previews/graphite.jpg" Link="Fixtures/Evidence/original.jpg" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

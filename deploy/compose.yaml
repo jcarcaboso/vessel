@@ -1,4 +1,43 @@
 services:
+  rustfs:
+    image: rustfs/rustfs:1.0.1
+    environment:
+      RUSTFS_ACCESS_KEY: ${VESSEL_S3_ACCESS_KEY_ID:-}
+      RUSTFS_SECRET_KEY: ${VESSEL_S3_SECRET_ACCESS_KEY:-}
+      RUSTFS_VOLUMES: /data
+      RUSTFS_CONSOLE_ENABLE: "false"
+    # No built-in/default credentials, even if the operator forgot to configure them.
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - ': "$${RUSTFS_ACCESS_KEY:?Set VESSEL_S3_ACCESS_KEY_ID}" "$${RUSTFS_SECRET_KEY:?Set VESSEL_S3_SECRET_ACCESS_KEY}"; exec /entrypoint.sh rustfs'
+    volumes:
+      - objects:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+    restart: unless-stopped
+
+  storage-init:
+    image: amazon/aws-cli:2.38.1
+    environment:
+      AWS_ACCESS_KEY_ID: ${VESSEL_S3_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${VESSEL_S3_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${VESSEL_S3_REGION:-us-east-1}
+      AWS_ENDPOINT_URL: http://rustfs:9000
+      AWS_EC2_METADATA_DISABLED: "true"
+      AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
+      VESSEL_S3_BUCKET: ${VESSEL_S3_BUCKET:-vessel-evidence}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - 'aws s3api head-bucket --bucket "$$VESSEL_S3_BUCKET" >/dev/null 2>&1 || aws s3api create-bucket --bucket "$$VESSEL_S3_BUCKET" >/dev/null'
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    restart: "no"
+
   postgres:
     image: postgres:18-alpine
     environment:
@@ -33,13 +72,20 @@ services:
       Vessel__Auth__Token: ${Vessel__Auth__Token:?Set a generated token of at least 32 characters}
       Vessel__Auth__OwnerId: ${Vessel__Auth__OwnerId:?Set a non-empty GUID}
       Vessel__Auth__OwnerName: ${Vessel__Auth__OwnerName:-Owner}
+      Vessel__Evidence__Storage__Provider: S3
+      Vessel__Evidence__Storage__S3__Endpoint: ${VESSEL_S3_ENDPOINT:-http://rustfs:9000}
+      Vessel__Evidence__Storage__S3__Bucket: ${VESSEL_S3_BUCKET:-vessel-evidence}
+      Vessel__Evidence__Storage__S3__Region: ${VESSEL_S3_REGION:-us-east-1}
+      Vessel__Evidence__Storage__S3__ForcePathStyle: ${VESSEL_S3_FORCE_PATH_STYLE:-true}
+      Vessel__Evidence__Storage__S3__AccessKeyId: ${VESSEL_S3_ACCESS_KEY_ID:-}
+      Vessel__Evidence__Storage__S3__SecretAccessKey: ${VESSEL_S3_SECRET_ACCESS_KEY:-}
       # Nginx emits one sanitized hop, in both HTTP and TLS modes.
       Vessel__ForwardedHeaders__KnownProxies__0: ${VESSEL_WEB_IP:-172.30.86.10}
       Vessel__ForwardedHeaders__ForwardLimit: "1"
-    volumes:
-      - evidence:/var/lib/vessel/evidence
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      storage-init:
         condition: service_completed_successfully
     restart: unless-stopped
 
@@ -67,4 +113,4 @@ networks:
 
 volumes:
   postgres:
-  evidence:
+  objects:

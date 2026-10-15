@@ -178,6 +178,7 @@ public sealed class ServerDiagnosticTests
             {
                 ["Vessel:Auth:Token"] = CoreApiFactory.Token,
                 ["Vessel:Auth:OwnerId"] = Guid.NewGuid().ToString(),
+                ["Vessel:Evidence:Storage:Provider"] = "Local",
                 ["ConnectionStrings:Vessel"] = connection
             }));
             builder.ConfigureLogging(logging => logging.ClearProviders().SetMinimumLevel(LogLevel.Error).AddProvider(Logs));

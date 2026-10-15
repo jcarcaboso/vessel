@@ -7,6 +7,9 @@ using Vessel.Domain.Common;
 using Vessel.Infrastructure;
 using Vessel.Persistence;
 
+if (args.FirstOrDefault() is "evidence-copy-to-s3" or "evidence-copy-to-local")
+    return EvidenceCopyCommand.RunAsync(args[1..], Console.Out, toLocal: args[0] == "evidence-copy-to-local").GetAwaiter().GetResult();
+
 var builder = WebApplication.CreateBuilder(args);
 if (!builder.Environment.IsDevelopment()) ProductionConfiguration.Validate(builder.Configuration);
 builder.Services.AddVesselInfrastructure(builder.Configuration);
@@ -107,5 +110,6 @@ app.MapReview();
 if (app.Environment.IsDevelopment()) app.MapOpenApi().RequireAuthorization();
 
 app.Run();
+return 0;
 
 public partial class Program;

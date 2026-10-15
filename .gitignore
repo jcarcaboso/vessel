@@ -15,5 +15,5 @@ frontend/dist/
 __pycache__/
 *.pyc
 
-# Local evidence storage (development default in appsettings.json)
+# Default local evidence storage
 backend/src/Vessel.Api/data/

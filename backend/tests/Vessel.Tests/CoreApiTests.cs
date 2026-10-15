@@ -37,8 +37,9 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
         {
             ["Vessel:Auth:Token"] = Token,
             ["Vessel:Auth:OwnerId"] = owner.ToString(),
+            ["Vessel:Evidence:Storage:Provider"] = "Local",
             ["ConnectionStrings:Vessel"] = connection
-        }.Concat(settings ?? []).ToDictionary()));
+        }.Concat(settings ?? []).GroupBy(pair => pair.Key).ToDictionary(group => group.Key, group => group.Last().Value)));
         builder.ConfigureServices(services =>
         {
             if (store is not null) services.AddSingleton(store);
