@@ -12,7 +12,7 @@ import { activityFillsFixture, activityFixture, activityPage, operationFixture }
 import { retrospectiveFixture, retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
 import { discoveryFixture, indexAccount, indexVenue } from '@/test/account-access-fixture'
 import { discrepancyFixture, monitorEventFixture, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
-import type { MonitorStreamEvent } from '@/api/monitor'
+import type { MonitorEventPage, MonitorStreamEvent } from '@/api/monitor'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
@@ -55,6 +55,20 @@ describe('Main application shell', () => {
     await userEvent.click(screen.getByRole('button', { name: /^Disconnect .*session$/ }))
     expect(vi.mocked(client.monitorStream).mock.calls[0]![1].aborted).toBe(true)
     expect(client.runAccountMonitor).not.toHaveBeenCalled()
+  })
+  it('reads the event head before any stored workspace read and streams from it', async () => {
+    let head!: (page: MonitorEventPage) => void
+    const client = api({ overview: vi.fn().mockResolvedValue(overviewFixture),
+      monitorEvents: vi.fn(() => new Promise<MonitorEventPage>(resolve => { head = resolve })) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await screen.findByText('Loading your workspace…')
+    expect(client.overview).not.toHaveBeenCalled()
+    expect(client.monitor).not.toHaveBeenCalled()
+    expect(client.monitorStream).not.toHaveBeenCalled()
+    await act(async () => head({ events: [], nextSequence: '12', resetRequired: true }))
+    await screen.findByRole('button', { name: 'View Main account' })
+    expect(client.overview).toHaveBeenCalledOnce()
+    expect(vi.mocked(client.monitorStream).mock.calls[0]![0]).toBe('12')
   })
   it('refreshes stored saved state on owner events while keeping dirty Play work and avoiding notifications', async () => {
     let emit!: (event: MonitorStreamEvent) => void

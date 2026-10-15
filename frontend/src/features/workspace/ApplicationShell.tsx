@@ -140,16 +140,18 @@ function Shell({ system, disconnect, api }: ShellProps) {
   // Derived from the request generation so Reload shows progress and a repeated
   // failure visibly clears and returns, without a synchronous effect render.
   const loading = loaded === null || loaded.api !== api || loaded.key !== reloadKey
-  const pending = loading && data === null
+  // Stored reads wait for the event head cursor, so the stream covers every change after them.
+  const pending = (loading && data === null) || !monitor.cursorReady
   const error = loading ? null : loadError
+  const cursorReady = monitor.cursorReady
   useEffect(() => {
-    if (disconnectedApi === api) return
+    if (disconnectedApi === api || !cursorReady) return
     const controller = new AbortController()
     let active = true
     api.overview(controller.signal).then(next => { if (active) { setData(next); setOverviewQuery(query => { const scope = resolveOverviewScope(query.scope, next.accounts, next.portfolios); return scope === query.scope ? query : { ...query, scope } }); setLoadError(null); setLoaded({ api, key: reloadKey }) } })
       .catch(cause => { if (active) { setLoadError(errorMessage(cause, 'The workspace could not be loaded.')); setLoaded({ api, key: reloadKey }) } })
     return () => { active = false; controller.abort() }
-  }, [api, reloadKey, disconnectedApi])
+  }, [api, reloadKey, disconnectedApi, cursorReady])
   useEffect(() => {
     if (!menuOpen) return
     const previousOverflow = document.body.style.overflow
@@ -282,7 +284,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
         {pending && <div className="workspace-loading" role="status">Loading your workspace…</div>}
         {!pending && !data && !error && <div className="workspace-alert">No workspace data is available.</div>}
 
-        {playsLifetime.visited && <div hidden={page !== 'plays'}>
+        {playsLifetime.visited && cursorReady && <div hidden={page !== 'plays'}>
           <PageErrorBoundary resetKey={page} key={playsLifetime.generation}>
             <Suspense fallback={<PageLoading />}>
               <PlaysPage workRef={playsLifetime.work} active={page === 'plays' && disconnectedApi !== api} accounts={accounts} portfolios={portfolios}
@@ -297,7 +299,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
           </PageErrorBoundary>
         </div>}
         <PageErrorBoundary key={page}><div className="page-settle">
-        {page === 'review' && <Suspense fallback={<PageLoading />}><ReviewPage api={api} reloadGeneration={reloadKey} onOpenPlay={viewPlay} /></Suspense>}
+        {page === 'review' && cursorReady && <Suspense fallback={<PageLoading />}><ReviewPage api={api} reloadGeneration={reloadKey} onOpenPlay={viewPlay} /></Suspense>}
 
         {page === 'overview' && data && <OverviewPage data={data} api={api} monitors={monitor.summary?.accounts ?? []} overviewQuery={overviewQuery} setOverviewQuery={setOverviewQuery}
           reloadKey={reloadKey} refreshAllAction={refreshAllAction} refreshing={refreshing} onAddAccount={() => setAccountDialog(true)}

@@ -56,6 +56,7 @@ export interface MonitorEvent {
   source: { trigger: string; orderIds?: string[]; fillIds?: string[] }
   data: Record<string, unknown>
 }
+export interface MonitorEventPage { events: MonitorEvent[]; nextSequence: string; resetRequired: boolean }
 export type MonitorStreamEvent = { type: 'event'; event: MonitorEvent } |
   { type: 'status'; status: { state: 'ready' | 'reset'; nextSequence: string } }
 
@@ -105,3 +106,6 @@ export function monitorFrame(event: string, data: string): MonitorStreamEvent | 
   }
   return null
 }
+
+export const isMonitorEventPage = (v: unknown): v is MonitorEventPage => object(v) && Array.isArray(v.events) && v.events.length <= 200 &&
+  v.events.every(isMonitorEvent) && isSequence(v.nextSequence) && typeof v.resetRequired === 'boolean'

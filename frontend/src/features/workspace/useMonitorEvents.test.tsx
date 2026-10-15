@@ -4,11 +4,14 @@ import type { MonitorStreamEvent } from '@/api/monitor'
 import type { WorkspaceApi } from '@/api/workspace'
 import { monitorEventFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
 import { ApiError } from '@/api/errors'
-import { headCursor, reconnectDelay, useMonitorEvents } from './useMonitorEvents'
+import { reconnectDelay, stableStream, useMonitorEvents } from './useMonitorEvents'
 
+/** The head the client reads before any stored state; the fixture event lies after it. */
+const headSequence = '9007199254740990'
 function client() {
   const connections: { after: string; signal: AbortSignal; emit: (frame: MonitorStreamEvent) => void; finish: () => void }[] = []
   const api = {
+    monitorEvents: vi.fn().mockResolvedValue({ events: [], nextSequence: headSequence, resetRequired: true }),
     monitor: vi.fn().mockResolvedValue(monitorSummaryFixture),
     monitorStream: vi.fn((after: string, signal: AbortSignal, emit: (frame: MonitorStreamEvent) => void) => new Promise<void>(resolve => {
       connections.push({ after, signal, emit, finish: resolve })
@@ -21,9 +24,53 @@ function client() {
 beforeEach(() => vi.useFakeTimers())
 afterEach(() => vi.useRealTimers())
 const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
-const head = { type: 'status', status: { state: 'reset', nextSequence: '1' } } as const
+const ready = (nextSequence = headSequence) => ({ type: 'status', status: { state: 'ready', nextSequence } }) as const
 
 describe('one shell monitor subscription', () => {
+  it('reads the head before stored state and streams from it, so a change committed in between is delivered without a second load', async () => {
+    const { api, connections } = client()
+    const reload = vi.fn()
+    const view = renderHook(() => useMonitorEvents(api, true, reload, 0))
+    // Stored reads (the shell's and the summary) wait for the head cursor.
+    expect(view.result.current.cursorReady).toBe(false)
+    expect(api.monitor).not.toHaveBeenCalled()
+    await advance(0)
+    expect(api.monitorEvents).toHaveBeenCalledOnce()
+    expect(view.result.current.cursorReady).toBe(true)
+    expect(api.monitor).toHaveBeenCalledOnce()
+    expect(connections[0]!.after).toBe(headSequence)
+    // The server replays a change committed after the head read but before the stream opened.
+    act(() => {
+      connections[0]!.emit(ready())
+      connections[0]!.emit({ type: 'event', event: monitorEventFixture })
+    })
+    await advance(250)
+    expect(reload).toHaveBeenCalledOnce()
+  })
+  it('does not reload for the opening ready status of a fresh load', async () => {
+    const { api, connections } = client()
+    const reload = vi.fn()
+    renderHook(() => useMonitorEvents(api, true, reload, 0))
+    await advance(0)
+    act(() => connections[0]!.emit(ready()))
+    await advance(300)
+    expect(reload).not.toHaveBeenCalled()
+  })
+  it('falls back to the stream head and reloads once when the head cannot be read', async () => {
+    const { api, connections } = client()
+    vi.mocked(api.monitorEvents).mockRejectedValueOnce(new ApiError('unavailable', 'Down.'))
+    const reload = vi.fn()
+    const view = renderHook(() => useMonitorEvents(api, true, reload, 0))
+    await advance(0)
+    expect(view.result.current.cursorReady).toBe(true)
+    expect(connections[0]!.after).not.toBe(headSequence)
+    act(() => connections[0]!.emit({ type: 'status', status: { state: 'reset', nextSequence: '41' } }))
+    await advance(250)
+    expect(reload).toHaveBeenCalledOnce()
+    act(() => connections[0]!.finish())
+    await advance(2000)
+    expect(connections[1]!.after).toBe('41')
+  })
   it('debounces owner events and reset into stored reloads without browser persistence or venue reads', async () => {
     const { api, connections } = client()
     const reload = vi.fn()
@@ -31,7 +78,7 @@ describe('one shell monitor subscription', () => {
     const view = renderHook(() => useMonitorEvents(api, true, reload, 0))
     await advance(0)
     act(() => {
-      connections[0]!.emit(head)
+      connections[0]!.emit(ready())
       connections[0]!.emit({ type: 'event', event: monitorEventFixture })
       connections[0]!.emit({ type: 'event', event: { ...monitorEventFixture, sequence: '9007199254740994' } })
       connections[0]!.emit({ type: 'status', status: { state: 'reset', nextSequence: '9007199254740995' } })
@@ -51,8 +98,9 @@ describe('one shell monitor subscription', () => {
     const { api, connections } = client()
     const reload = vi.fn()
     renderHook(() => useMonitorEvents(api, true, reload, 0))
+    await advance(0)
     act(() => {
-      connections[0]!.emit(head)
+      connections[0]!.emit(ready())
       connections[0]!.emit({ type: 'event', event: monitorEventFixture })
       connections[0]!.finish()
     })
@@ -74,29 +122,59 @@ describe('one shell monitor subscription', () => {
     const { api, connections } = client()
     const reload = vi.fn()
     renderHook(() => useMonitorEvents(api, true, reload, 0))
+    await advance(0)
     act(() => {
-      connections[0]!.emit(head)
+      connections[0]!.emit({ type: 'status', status: { state: 'ready', nextSequence: '9007199254740999' } })
+      connections[0]!.emit({ type: 'event', event: monitorEventFixture })
       connections[0]!.finish()
     })
     await advance(2000)
-    act(() => {
-      connections[1]!.emit({ type: 'status', status: { state: 'ready', nextSequence: '9007199254740999' } })
-      connections[1]!.emit({ type: 'event', event: monitorEventFixture })
-      connections[1]!.finish()
-    })
-    await advance(4000)
-    expect(connections[2]!.after).toBe(monitorEventFixture.sequence)
+    expect(connections[1]!.after).toBe(monitorEventFixture.sequence)
     expect(reload).toHaveBeenCalledOnce()
+  })
+  it('backs off a ready-then-close loop without reloading the shell on each reconnect', async () => {
+    const { api, connections } = client()
+    vi.spyOn(Math, 'random').mockReturnValue(1)
+    const reload = vi.fn()
+    renderHook(() => useMonitorEvents(api, true, reload, 0))
+    await advance(0)
+    const cycle = (index: number) => act(() => { connections[index]!.emit(ready()); connections[index]!.finish() })
+    cycle(0)
+    for (const [index, delay] of [[1, 2000], [2, 4000], [3, 8000], [4, 16_000]] as const) {
+      await advance(delay - 1)
+      expect(connections).toHaveLength(index)
+      await advance(1)
+      expect(connections).toHaveLength(index + 1)
+      expect(connections[index]!.after).toBe(headSequence)
+      cycle(index)
+    }
+    expect(reload).not.toHaveBeenCalled()
+  })
+  it('ends the backoff once a stream stays open or delivers an event', async () => {
+    const { api, connections } = client()
+    vi.spyOn(Math, 'random').mockReturnValue(1)
+    renderHook(() => useMonitorEvents(api, true, vi.fn(), 0))
+    await advance(0)
+    for (const index of [0, 1, 2]) {
+      act(() => { connections[index]!.emit(ready()); connections[index]!.finish() })
+      await advance(2000 * 2 ** index)
+    }
+    act(() => connections[3]!.emit(ready()))
+    await advance(stableStream)
+    act(() => connections[3]!.finish())
+    await advance(2000)
+    expect(connections).toHaveLength(5)
   })
   it('uses a 60-second stored-data fallback while disconnected and health reads while ready', async () => {
     const { api, connections } = client()
     const reload = vi.fn()
     renderHook(() => useMonitorEvents(api, true, reload, 0))
+    await advance(0)
     await advance(59_999)
     expect(reload).not.toHaveBeenCalled()
     await advance(251)
     expect(reload).toHaveBeenCalledOnce()
-    act(() => connections[0]!.emit({ type: 'status', status: { state: 'ready', nextSequence: '0' } }))
+    act(() => connections[0]!.emit(ready()))
     await advance(250)
     reload.mockClear()
     await advance(60_000)
@@ -108,8 +186,9 @@ describe('one shell monitor subscription', () => {
     const first = client(), second = client()
     const reload = vi.fn()
     const view = renderHook(({ api, enabled }) => useMonitorEvents(api, enabled, reload, 0), { initialProps: { api: first.api, enabled: true } })
+    await advance(0)
     act(() => {
-      first.connections[0]!.emit(head)
+      first.connections[0]!.emit(ready())
       first.connections[0]!.emit({ type: 'event', event: monitorEventFixture })
     })
     view.rerender({ api: second.api, enabled: true })
@@ -117,38 +196,15 @@ describe('one shell monitor subscription', () => {
     act(() => first.connections[0]!.emit({ type: 'event', event: { ...monitorEventFixture, sequence: '999999999999999999' } }))
     await advance(1000)
     expect(reload).not.toHaveBeenCalled()
-    expect(second.connections[0]!.after).toBe(headCursor)
+    expect(second.connections[0]!.after).toBe(headSequence)
     view.rerender({ api: second.api, enabled: false })
     expect(second.connections[0]!.signal.aborted).toBe(true)
     await advance(120_000)
     expect(reload).not.toHaveBeenCalled()
     view.rerender({ api: second.api, enabled: true })
+    await advance(0)
     view.unmount()
     expect(second.connections[1]!.signal.aborted).toBe(true)
-  })
-  it('starts at the head instead of replaying retained history and does not reload for the first status', async () => {
-    const { api, connections } = client()
-    const reload = vi.fn()
-    renderHook(() => useMonitorEvents(api, true, reload, 0))
-    await advance(0)
-    expect(connections[0]!.after).toBe(headCursor)
-    act(() => connections[0]!.emit({ type: 'status', status: { state: 'reset', nextSequence: '41' } }))
-    await advance(300)
-    expect(reload).not.toHaveBeenCalled()
-    act(() => connections[0]!.emit({ type: 'event', event: { ...monitorEventFixture, sequence: '42' } }))
-    await advance(250)
-    expect(reload).toHaveBeenCalledOnce()
-  })
-  it('reloads for the first status after a failed first connection, since events may have been missed', async () => {
-    const { api, connections } = client()
-    vi.mocked(api.monitorStream).mockRejectedValueOnce(new ApiError('unavailable', 'Down.'))
-    const reload = vi.fn()
-    renderHook(() => useMonitorEvents(api, true, reload, 0))
-    await advance(2000)
-    expect(connections[0]!.after).toBe(headCursor)
-    act(() => connections[0]!.emit(head))
-    await advance(250)
-    expect(reload).toHaveBeenCalledOnce()
   })
   it('backs off exponentially with jitter and honours Retry-After', async () => {
     expect(reconnectDelay(1, 0)).toBe(1000)
@@ -180,6 +236,7 @@ describe('one shell monitor subscription', () => {
     vi.mocked(api.monitorStream).mockImplementation(() => Promise.reject(new ApiError('http', 'At most four event streams may be open per owner.', 429,
       new Date(Date.now() + 5_000).toISOString())))
     const view = renderHook(() => useMonitorEvents(api, true, vi.fn(), 0))
+    await advance(0)
     await advance(120_000)
     expect(vi.mocked(api.monitorStream).mock.calls.length).toBeLessThanOrEqual(4)
     expect(view.result.current.notice).toMatch(/too many Vessel tabs/)

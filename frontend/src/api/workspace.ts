@@ -1,8 +1,8 @@
 import { overviewSummaryPath, isOverviewSummary, type OverviewQuery, type OverviewSummaryDocument } from './overview-summary'
 import { activityFillsPath, activityPath, isActivityFills, isActivityPage, type ActivityFills, type ActivityPage, type ActivityQuery } from './activity'
 import { readSseStream, SseOverflowError, SseParser } from './sse'
-import { isAccountMonitor, isMonitorRunAccepted, isMonitorSummary, isSequence, monitorFrame,
-  type AccountMonitor, type MonitorRunAccepted, type MonitorSummary, type MonitorStreamEvent } from './monitor'
+import { isAccountMonitor, isMonitorEventPage, isMonitorRunAccepted, isMonitorSummary, isSequence, monitorFrame,
+  type AccountMonitor, type MonitorEventPage, type MonitorRunAccepted, type MonitorSummary, type MonitorStreamEvent } from './monitor'
 import { candleIntervals, type CandleInterval } from './candles'
 import { ApiError } from './errors'
 import { createApiCall } from './request'
@@ -224,6 +224,8 @@ export interface WorkspaceApi {
   monitor(signal?: AbortSignal): Promise<MonitorSummary>
   accountMonitor(id: string, signal?: AbortSignal): Promise<AccountMonitor>
   runAccountMonitor(id: string, signal?: AbortSignal): Promise<MonitorRunAccepted>
+  /** Stored owner events after a cursor. A cursor outside the retained range returns a reset to the head. */
+  monitorEvents(after: string, limit: number, signal?: AbortSignal): Promise<MonitorEventPage>
   monitorStream(after: string, signal: AbortSignal, onEvent: (event: MonitorStreamEvent) => void): Promise<void>
   dismissPlayDiscrepancy(playId: string, discrepancyId: string, note?: string, signal?: AbortSignal): Promise<void>
   dismissAccountDiscrepancy(accountId: string, discrepancyId: string, note?: string, signal?: AbortSignal): Promise<void>
@@ -485,6 +487,13 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     runAccountMonitor: (id, signal) => call(`${accountPath(id)}/monitor/run`, { ...workspaceRequest,
       validate: (v): v is MonitorRunAccepted => isMonitorRunAccepted(v) && v.monitor.accountId === id, method: 'POST', ...withSignal(signal),
       tooMany: 'A check is already running for this account or it was checked moments ago. Try again when the countdown ends.' }),
+    monitorEvents: (after, limit, signal) => {
+      if (!isSequence(after) || !Number.isInteger(limit) || limit < 1 || limit > 200) {
+        return Promise.reject(new ApiError('invalid-response', 'The event cursor is invalid.'))
+      }
+      return call(`/api/events?${new URLSearchParams({ after, limit: String(limit) })}`, { ...workspaceRequest,
+        validate: isMonitorEventPage, unavailable: 'Monitor events are unavailable.', ...withSignal(signal) })
+    },
     monitorStream: async (after, signal, onEvent) => {
       if (!isSequence(after)) throw new ApiError('invalid-response', 'The event cursor is invalid.')
       if (signal.aborted) return
