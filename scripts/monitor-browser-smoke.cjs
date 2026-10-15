@@ -14,25 +14,35 @@ async function monitorFixture(page, accountId) {
   }
   const monitor = {
     accountId, state: 'stale', lastAttemptAtUtc: now, lastSuccessAtUtc: now,
-    nextRunAtUtc: null, manualState: 'idle', nextManualAllowedAtUtc: null, error: null,
+    nextRunAtUtc: null, manualState: 'idle', runTrigger: null, nextManualAllowedAtUtc: null, error: null,
     workerOnline: false, discrepancies: [issue],
   }
-  let checks = 0, dismissals = 0, finishCheck, startCheck
+  let checks = 0, dismissals = 0, statusReads = 0, finishCheck, startCheck
   const checkStarted = new Promise(resolve => { startCheck = resolve })
   const json = (route, value, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) })
   await page.route('**/api/monitor', route => json(route, {
     workerOnline: monitor.workerOnline, heartbeatAtUtc: now, accounts: [monitor],
   }))
-  await page.route(`**/api/accounts/${accountId}/monitor`, route => json(route, monitor))
+  // Like the real API: the run is accepted as pending with the state unchanged. The worker then runs it,
+  // and the browser sees it finish through stored status reads (or a stream event), not the 202 body.
+  await page.route(`**/api/accounts/${accountId}/monitor`, route => {
+    if (monitor.manualState !== 'idle' && ++statusReads > 1) {
+      if (monitor.manualState === 'pending') monitor.manualState = 'running'
+      else {
+        const now = new Date()
+        Object.assign(monitor, { manualState: 'idle', runTrigger: null, workerOnline: true, state: 'live', lastAttemptAtUtc: now.toISOString(),
+          lastSuccessAtUtc: now.toISOString(), nextRunAtUtc: new Date(now.getTime() + 600_000).toISOString(),
+          nextManualAllowedAtUtc: new Date(now.getTime() + 60_000).toISOString() })
+      }
+    }
+    return json(route, monitor)
+  })
   await page.route(`**/api/accounts/${accountId}/monitor/run`, async route => {
     assert.equal(route.request().method(), 'POST')
     checks++
     await new Promise(resolve => { finishCheck = resolve; startCheck() })
-    monitor.workerOnline = true
-    monitor.state = 'live'
-    monitor.lastSuccessAtUtc = new Date().toISOString()
-    monitor.nextRunAtUtc = new Date(Date.now() + 600_000).toISOString()
-    monitor.nextManualAllowedAtUtc = new Date(Date.now() + 60_000).toISOString()
+    monitor.manualState = 'pending'
+    monitor.runTrigger = 'owner'
     await json(route, { requestId: '00000000-0000-4000-8000-0000000000c1', monitor }, 202)
   })
   await page.route(`**/api/accounts/${accountId}/discrepancies/${issue.id}/dismiss`, async route => {
@@ -71,10 +81,14 @@ async function monitorFixture(page, accountId) {
     await checkStarted
     assert.equal(checks, 1)
     finishCheck()
-    await panel.getByRole('button', { name: /^Check in \d+s$/ }).waitFor()
+    await panel.getByRole('button', { name: /^(Check pending…|Checking…)$/ }).waitFor()
+    assert.ok(await panel.getByRole('button').isDisabled())
+    // No stream event arrives for this synthetic run; the bounded status read must still end it.
+    await panel.getByRole('button', { name: /^Check in \d+s$/ }).waitFor({ timeout: 20_000 })
+    await panel.getByText('Monitored', { exact: true }).waitFor()
     assert.ok(await panel.getByRole('button').isDisabled())
     assert.equal(checks, 1)
-    pass('Check is explicit, blocked in flight and blocked during the server cooldown')
+    pass('Check is explicit, stays pending until stored status completes, and is blocked during the server cooldown')
 
     await warnings.getByRole('textbox', { name: 'Dismissal note for position.excess BTC' }).fill('Reviewed synthetic venue position')
     await warnings.getByRole('button', { name: 'Dismiss', exact: true }).click()

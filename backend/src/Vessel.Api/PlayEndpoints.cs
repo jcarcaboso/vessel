@@ -43,6 +43,8 @@ public static class PlayEndpoints
             Results.Ok(await service.HistoryAsync(id, ct)));
         api.MapGet("/{id:guid}/execution", async (Guid id, PlayExecutionService service, MonitorExecutionView monitor, CancellationToken ct) =>
             Results.Ok(await monitor.ComposeAsync(await service.GetAsync(id, ct), ct)));
+        // Documented API alias (play-monitor-api-contract.md): requests the Play account's monitor run.
+        // The browser uses POST /api/accounts/{id}/monitor/run; backend tests still cover this route.
         api.MapPost("/{id:guid}/execution/check", async (Guid id, HttpContext context, MonitorExecutionView monitor, CancellationToken ct) =>
         {
             try { return Results.Accepted(value: await monitor.RequestAsync(id, ct)); }

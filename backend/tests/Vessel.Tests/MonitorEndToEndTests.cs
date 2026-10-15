@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -202,6 +203,64 @@ public sealed class MonitorEndToEndTests
         await fixture.WaitForReceiptsAsync(events.Events.Count);
     }
 
+    // The browser guards (frontend/src/api/monitor.ts, plays.ts) validate this real HTTP JSON in
+    // frontend/src/test/contracts/monitor-contract.test.ts. Regenerate with VESSEL_UPDATE_CONTRACT_FIXTURES=1.
+    [VesselEventRabbitFact]
+    public async Task Monitor_http_json_matches_the_browser_contract_fixture()
+    {
+        await using var fixture = await MonitorFixture.StartAsync();
+        using var client = fixture.ApiClient();
+        async Task<JsonElement> Read(HttpResponseMessage response)
+        {
+            Assert.True(response.IsSuccessStatusCode, response.StatusCode.ToString());
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            return document.RootElement.Clone();
+        }
+        var previous = await fixture.MonitorAsync();
+        fixture.Clock.Set(previous.NextManualAllowedAtUtc!.Value);
+        JsonElement accepted, running, summary;
+        using (var gate = fixture.Venue.BlockNextRead())
+        {
+            using (var response = await client.PostAsync($"/api/accounts/{fixture.AccountId}/monitor/run", null))
+                accepted = await Read(response);
+            await gate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            using (var response = await client.GetAsync($"/api/accounts/{fixture.AccountId}/monitor")) running = await Read(response);
+            using (var response = await client.GetAsync("/api/monitor")) summary = await Read(response);
+            gate.Release.TrySetResult();
+            await fixture.WaitForRunAsync(previous.Generation + 1);
+        }
+        JsonElement idle, execution, events;
+        using (var response = await client.GetAsync($"/api/accounts/{fixture.AccountId}/monitor")) idle = await Read(response);
+        using (var response = await client.GetAsync($"/api/plays/{fixture.BtcPlay}/execution")) execution = await Read(response);
+        using (var response = await client.GetAsync("/api/events?limit=200")) events = await Read(response);
+        Assert.Equal("pending", accepted.GetProperty("monitor").GetProperty("manualState").GetString());
+        Assert.Equal("owner", running.GetProperty("runTrigger").GetString());
+        Assert.Equal(JsonValueKind.Null, idle.GetProperty("runTrigger").ValueKind);
+        var completed = Assert.Single(events.GetProperty("events").EnumerateArray(),
+            e => e.GetProperty("type").GetString() == "monitor.run-completed");
+        // No HTTP route in this flow produces a discrepancy; serialize one with the API's own options.
+        var json = fixture.ApiJsonOptions();
+        var discrepancy = JsonSerializer.SerializeToElement(new MonitorDiscrepancyDto(Guid.NewGuid(), fixture.AccountId, fixture.BtcPlay,
+            "BTC", "position.excess", "warning", "open", fixture.Clock.GetUtcNow(), fixture.Clock.GetUtcNow(), null, null, null,
+            JsonSerializer.SerializeToElement(new { venueQuantity = "0.100000000000000001", playQuantity = "0.1" })), json);
+        var document = new JsonObject
+        {
+            ["runAccepted"] = JsonNode.Parse(accepted.GetRawText()),
+            ["accountMonitorRunning"] = JsonNode.Parse(running.GetRawText()),
+            ["accountMonitorIdle"] = JsonNode.Parse(idle.GetRawText()),
+            ["summary"] = JsonNode.Parse(summary.GetRawText()),
+            ["playExecution"] = JsonNode.Parse(execution.GetRawText()),
+            ["runCompletedEvent"] = JsonNode.Parse(completed.GetRawText()),
+            ["eventPageNextCursor"] = JsonNode.Parse(events.GetProperty("nextCursor").GetRawText()),
+            ["discrepancy"] = JsonNode.Parse(discrepancy.GetRawText()),
+        };
+        var actual = ContractFixtures.Normalize(document.ToJsonString(new JsonSerializerOptions
+            { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping })) + "\n";
+        var path = ContractFixtures.Path("monitor-api.json");
+        if (Environment.GetEnvironmentVariable("VESSEL_UPDATE_CONTRACT_FIXTURES") == "1") await File.WriteAllTextAsync(path, actual);
+        Assert.Equal(await File.ReadAllTextAsync(path), actual);
+    }
+
     private static void AssertFill(VesselEvent message, Guid play, string role, string quantity,
         string cumulative, string remaining, bool complete, string fillId)
     {
@@ -399,6 +458,8 @@ public sealed class MonitorEndToEndTests
             return play;
         }
 
+        public JsonSerializerOptions ApiJsonOptions() =>
+            api!.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>().Value.SerializerOptions;
         public HttpClient ApiClient()
         {
             var client = api!.CreateClient();
