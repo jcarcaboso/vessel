@@ -58,7 +58,7 @@ function Donut({ allocation, size, focus, emphasis, onScope }: {
         <span className="allocation-swatch" style={{ background: fill(s) }} aria-hidden="true" />
         {s.scope && s.scope !== focus ? <button className="allocation-name" onFocus={() => setHover(s.id)} onBlur={() => setHover(null)}
           onClick={() => onScope(s.scope!)} aria-label={`Show allocation for ${s.name}`} title={s.name}>{s.name}</button> : <span className="allocation-name" title={s.name}>{s.name}</span>}
-        {withVenue && <span className="allocation-venue">{s.venueId && <><VenueLogo venueId={s.venueId} size="sm" />{venues.name(s.venueId)}</>}</span>}
+        {withVenue && <span className="allocation-venue" title={s.venueId ? venues.name(s.venueId) : undefined}>{s.venueId && <><VenueLogo venueId={s.venueId} size="sm" /><span>{venues.name(s.venueId)}</span></>}</span>}
         <span className="allocation-money">{money(s.balanceUsd)}</span>
         <strong className="allocation-share">{s.share}</strong>
       </li>)}
