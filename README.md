@@ -57,8 +57,9 @@ Saved images default to the original local folder when nothing is configured.
 Opt into private S3-compatible storage with `Vessel__Evidence__Storage__Provider=S3`
 and a pre-created bucket plus server-only credentials (RustFS recommended).
 The [deployment examples](deploy/README.md) explicitly select and provision RustFS;
-an [offline copy-and-verify command](docs/architecture/evidence-storage.md#existing-local-folder-installation-explicit-cutover)
-helps migrate existing images without deleting local originals or changing configuration.
+[offline copy-and-verify commands](docs/architecture/evidence-storage.md#s3-to-local-or-another-s3-provider)
+copy images in either direction. Export to a local folder to switch S3 providers
+without deleting originals, rewriting database records or changing configuration automatically.
 
 Then start development:
 

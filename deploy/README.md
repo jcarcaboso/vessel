@@ -194,6 +194,60 @@ local overlay (use the external overlay for external S3) and restart API/web.
 Keep the original volume and backups until authenticated image reads, notes/markup
 and a new upload are verified. See the [complete cutover and rollback checklist](../docs/architecture/evidence-storage.md#existing-local-folder-installation-explicit-cutover).
 
+### Export S3 to Local or switch S3 providers
+
+Use an API image containing `evidence-copy-to-local`; older published images do
+not gain this command from a Compose update. Stop web/API writers and take
+coordinated backups, but leave PostgreSQL and the source S3 running. Preserve
+the project name and installation overlays on every command below (add
+`-f compose.storage-external.yaml` when the source is external S3).
+
+Prepare a dedicated private host folder writable by the container's app user.
+For rootful Docker without user-namespace remapping:
+
+```sh
+sudo install -d -m 700 -o 1654 -g 1654 /private/evidence-export
+docker compose -f compose.yaml run --rm --no-deps \
+  --volume /private/evidence-export:/var/lib/vessel/export \
+  api evidence-copy-to-local --destination /var/lib/vessel/export
+docker compose -f compose.yaml run --rm --no-deps \
+  --volume /private/evidence-export:/var/lib/vessel/export \
+  api evidence-copy-to-local --destination /var/lib/vessel/export --apply
+```
+
+Use the mapped host UID with rootless Docker/user namespaces instead. The S3
+settings still identify the **old/source** bucket. Rerun without `--apply` and
+confirm every image already verifies. Local conflicts are never overwritten.
+`--no-deps` prevents a schema migration or any dependent service startup.
+The host bind mount, not the container's ephemeral filesystem, retains the copy.
+
+For another S3 provider, make a separate mode-600 `.env.copy-destination` from
+the installation's `.env`, retaining the same database/owner/auth values and
+changing only the S3 endpoint, bucket, region, addressing and credentials.
+Provision that private bucket first; keep the running installation unchanged.
+Upload the export through a **read-only** mount:
+
+```sh
+docker compose --env-file .env.copy-destination \
+  -f compose.yaml -f compose.storage-external.yaml run --rm --no-deps \
+  --volume /private/evidence-export:/var/lib/vessel/export:ro \
+  api evidence-copy-to-s3 --source /var/lib/vessel/export
+docker compose --env-file .env.copy-destination \
+  -f compose.yaml -f compose.storage-external.yaml run --rm --no-deps \
+  --volume /private/evidence-export:/var/lib/vessel/export:ro \
+  api evidence-copy-to-s3 --source /var/lib/vessel/export --apply
+```
+
+Keep writers stopped through export/import/cutover. After a successful
+verification rerun, explicitly update the installation's S3 settings, restart
+API/web and verify authenticated image reads and a new upload. Keep the old
+bucket, local copy and coordinated backups until verified. To switch to Local
+instead, persistently mount this export at the configured Local root and select
+`Provider=Local` before restarting. Neither command changes configuration,
+deletes originals or copies database notes/markup; this is not a complete
+application/bucket backup. See the
+[portable-copy guarantees](../docs/architecture/evidence-storage.md#s3-to-local-or-another-s3-provider).
+
 ## Optional Lighter credential storage
 
 Public venue reads do not require a key ring. Saving a verified Lighter `ro:`

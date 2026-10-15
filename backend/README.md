@@ -84,22 +84,32 @@ fails startup; outages never redirect reads or writes to the local folder.
 See [evidence storage](../docs/architecture/evidence-storage.md) for guarantees and copying existing objects,
 and [deployment](../deploy/README.md) for private RustFS, external S3 and local-folder configurations.
 
-The API binary also supplies an explicit offline copy command (not a schema migration):
+The API binary also supplies explicit offline copy commands (not schema migrations):
 
 ```sh
 dotnet Vessel.Api.dll evidence-copy-to-s3 --source /absolute/local/evidence/root
 dotnet Vessel.Api.dll evidence-copy-to-s3 --source /absolute/local/evidence/root --apply
+# Reverse: use the current S3 settings as source and export to a private local folder.
+dotnet Vessel.Api.dll evidence-copy-to-local --destination /absolute/private/evidence-export
+dotnet Vessel.Api.dll evidence-copy-to-local --destination /absolute/private/evidence-export --apply
 ```
 
 Run from a compatible published API installation, with `ConnectionStrings__Vessel`
-and the destination `Vessel__Evidence__Storage__S3__*` configured in its server
+and `Vessel__Evidence__Storage__S3__*` configured in its server
 environment. The command does not load the repository `.env` automatically. Stop
-writers and take coordinated backups first. The first command is a read-only dry
-run; the second copies database-referenced originals and downloads/verifies their
+writers and take coordinated backups first. Each pair defaults to a read-only dry
+run; `--apply` copies database-referenced originals and reads back/verifies their
 size and SHA-256. Matching destination objects are skipped; differing objects
-are never overwritten. Local originals, metadata, notes/markup and active-provider
-settings are never changed. Switch the API to S3 only after successful verification;
-see the linked cutover checklist and Docker commands.
+are never overwritten. Source originals, metadata, notes/markup and active-provider
+settings are never changed. For export, S3 settings identify the **source**;
+for upload, they identify the **destination**. Set `umask 077` and use a trusted
+private local directory. Dry-run export creates no files or directories.
+To change providers, export from the old S3, configure the command for the new
+S3, then upload that local root. Keep writers stopped through both steps and
+switch the API only after successful verification. See the
+[portable-copy/cutover checklist](../docs/architecture/evidence-storage.md#s3-to-local-or-another-s3-provider)
+and Docker commands. These helpers copy referenced originals only, not the
+database or an entire bucket backup.
 
 ## Explicit migrations
 

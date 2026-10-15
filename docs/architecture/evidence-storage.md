@@ -104,31 +104,83 @@ it is the same volume.
    back, or restoring the matching pre-cutover database/storage pair; changing
    only the provider would hide those files.
 
-Reverse migration follows the same rules: stop writers, copy object bytes to the
-same relative paths, verify hashes, select `Local`, then restart. Never treat
-RustFS's `/data` layout as ordinary image files; use the S3 API to migrate bytes.
-An offline full-volume RustFS backup is for restoring the same storage engine,
-not copying into `Local` or another vendor.
+## S3 to Local, or another S3 provider
 
-The command never rewrites database records, changes the saved provider,
-deletes local files, creates buckets or starts the API. Use GetObject/PutObject
-permissions for its dedicated destination credentials and a SELECT-capable
-database principal; listing, deletion and schema-changing permissions are not
-required. Prefer a read-only source mount/snapshot where available. The S3
-provider must support atomic conditional PUTs.
-Run against a trusted, quiescent source (preferably a read-only snapshot).
-Symlink checks are pre-open checks, not atomic filesystem confinement. Keep
-all writers stopped until cutover completes; hash verification is point-in-time.
+Use a local copy as portable staging; neither helper deletes its source or
+changes the API's active provider. Stop all writers and take coordinated
+database/storage/settings/key-ring backups first. Keep writers stopped through
+the entire export, import and cutover so new images cannot be missed.
+
+With `ConnectionStrings__Vessel` and the **current/source**
+`Vessel__Evidence__Storage__S3__*` configured in the command's server environment:
+
+```sh
+umask 077
+dotnet Vessel.Api.dll evidence-copy-to-local --destination /private/evidence-export
+dotnet Vessel.Api.dll evidence-copy-to-local --destination /private/evidence-export --apply
+dotnet Vessel.Api.dll evidence-copy-to-local --destination /private/evidence-export
+```
+
+Use an absolute, trusted private directory, preferably a fresh one; missing
+directories are created only during apply. A dry run reads/verifies the remote
+originals and existing local files, but saves no images and creates no folders.
+Apply streams one image at a time through a private temporary file, verifies
+its database size/SHA-256 **before** publishing the local file, then reopens and
+verifies it. Allow temporary disk space for one image in the OS temporary
+directory as well as the destination copy. Temporary files are deleted on
+close; after a hard process/host crash, inspect the private temporary directory
+for leftovers. Existing matching files are verified/skipped; conflicts,
+missing/corrupt remote originals and local symlinks/reparse points (including
+ancestors and dangling links) fail rather than overwriting or deleting data.
+
+- **Switch to Local:** after a successful rerun, explicitly set `Provider=Local`
+  and `Local:RootPath` to the exported root, then restart and verify authenticated
+  images, notes/markup and a new upload.
+- **Switch S3 provider:** provision a private destination bucket supporting
+  conditional PUT. Change only the one-shot command's S3 endpoint/bucket/region/
+  addressing/credentials to the **new destination**, keeping the same database.
+  Run the existing upload helper against the export:
+
+  ```sh
+  dotnet Vessel.Api.dll evidence-copy-to-s3 --source /private/evidence-export
+  dotnet Vessel.Api.dll evidence-copy-to-s3 --source /private/evidence-export --apply
+  dotnet Vessel.Api.dll evidence-copy-to-s3 --source /private/evidence-export
+  ```
+
+  Only after all images verify, configure the API for that destination and
+  restart. Check authenticated reads, notes/markup and a new upload. Keep both
+  the old bucket and local copy until the cutover and backups are verified.
+
+This exports **database-referenced originals**, not every bucket object or a
+complete application backup. Notes, markup and ownership stay in the database;
+preserve its coordinated backup. Keys and database records need no rewriting.
+RustFS's internal `/data` layout is not an ordinary image folder: use the S3 API
+for portable copies. A full-volume offline RustFS backup restores the same
+storage engine, not another vendor.
+
+Both commands use the same read-only repeatable-read database transaction,
+exit codes and fail-closed rerun rules described above. Neither rewrites
+database records, changes saved configuration, deletes originals, creates
+buckets or starts the API. Export requires GetObject; upload requires
+GetObject/PutObject on the destination. Use a SELECT-capable database principal;
+listing, deletion and schema-changing permissions are not required.
+Filesystem checks are pre-open checks, not atomic confinement. Both source and
+destination directories must be trusted/quiescent; prefer a read-only local
+source snapshot. Hash verification is point-in-time. No automatic sync,
+dual-write or destructive move is implemented.
 
 ## Verification and primary references
 
 - Unit tests cover legacy Local defaults, explicit S3 selection, safe validation,
   conditional writes, key rejection, stream ownership and missing-object/error
-  distinctions, plus offline dry-run/copy/resume, integrity failures and symlinks.
+  distinctions, plus both offline copy directions, dry-run/copy/resume,
+  nonseekable sources, integrity failures and symlinks.
 - `python3 scripts/verify-evidence-storage.py` creates an isolated RustFS
   container, random credentials and test buckets. It checks the actual SDK
   protocol, concurrent no-overwrite writes, cancellation, private reads, missing
   buckets, API authorization, upload/download/delete and idempotent provisioning.
+  The actual CLI picture test exports to Local, stages an upload into a second
+  bucket and verifies authenticated retrieval without changing metadata.
   It never reads the repository `.env` or owner's database. Set `DOTNET` when
   the pinned SDK is installed outside PATH.
 - `python3 scripts/verify-release.py` verifies the default RustFS deployment and

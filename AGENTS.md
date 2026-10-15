@@ -44,6 +44,14 @@ October 15, 2026: releases remain manual to the Docker Hub repository `skorcius/
 
 October 15, 2026: evidence storage supports S3-compatible services, with private RustFS explicitly selected in the deployment Compose example. The owner subsequently clarified backward compatibility: with no storage settings the API stays `Local` at its original root; only `Provider=S3` opts in, and invalid S3 settings/outages never fall back. Follow `docs/architecture/evidence-storage.md` and `deploy/README.md`. Local/external storage overlays omit embedded RustFS. Preserve generated keys, conditional no-overwrite writes, private API-proxied reads and server-only credentials. Existing files are never moved automatically: the explicit `evidence-copy-to-s3 --source /absolute/root [--apply]` offline API command reads metadata in a read-only transaction, dry-runs by default and copies/download-verifies size/SHA-256 without deleting originals, changing metadata or switching providers. Stop writers, back up and retain the local overlay until cutover is verified. No schema migration is needed. Credential key-ring files remain separate secret mounts, not S3 objects. RustFS backups must include its entire stopped data volume; use the S3 API for cross-provider migration. The isolated check is `scripts/verify-evidence-storage.py`; release checks explicitly use S3 and support `--storage local`. Do not apply the S3 Compose file to an older API image without the adapter.
 
+The reverse `evidence-copy-to-local --destination /absolute/root [--apply]`
+command exports verified database-referenced originals from the configured S3
+to a trusted private local folder, preserving the same keys. It is dry-run by
+default, refuses conflicts/symlinks and never deletes S3 originals or changes
+metadata/configuration. Use the local export with `evidence-copy-to-s3` pointed
+at another provider for a staged switch; keep all writers stopped through both
+copies and cutover. Exported images are not a complete database/bucket backup.
+
 ## Project tracking
 
 October 13, 2026: the owner authorized all P1 diary must-haves from the product

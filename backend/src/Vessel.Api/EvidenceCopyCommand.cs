@@ -11,21 +11,23 @@ public static class EvidenceCopyCommand
 {
     private const string Usage = """
         Usage: dotnet Vessel.Api.dll evidence-copy-to-s3 --source /absolute/evidence/root [--apply]
+               dotnet Vessel.Api.dll evidence-copy-to-local --destination /absolute/evidence/root [--apply]
         Stop API/web writers and take coordinated backups first.
         Reads ConnectionStrings__Vessel and Vessel__Evidence__Storage__S3__* from server configuration.
         Dry run by default; --apply copies and downloads/verifies each referenced original.
         Originals, database records and active-provider configuration are never changed.
         """;
 
-    public static async Task<int> RunAsync(string[] args, TextWriter output, CancellationToken ct = default)
+    public static async Task<int> RunAsync(string[] args, TextWriter output, CancellationToken ct = default, bool toLocal = false)
     {
         if (args is ["--help"])
         {
             await output.WriteLineAsync(Usage);
             return 0;
         }
-        var apply = args is ["--source", _, "--apply"];
-        if ((args is not ["--source", _] && !apply) || !Path.IsPathFullyQualified(args[1]))
+        var option = toLocal ? "--destination" : "--source";
+        var apply = args.Length == 3 && args[2] == "--apply";
+        if ((args.Length != 2 && !apply) || args[0] != option || !Path.IsPathFullyQualified(args[1]))
         {
             await output.WriteLineAsync(Usage);
             return 2;
@@ -39,7 +41,7 @@ public static class EvidenceCopyCommand
                 .SetBasePath(AppContext.BaseDirectory)
                 .AddJsonFile("appsettings.json", optional: true)
                 .AddEnvironmentVariables()
-                // This one-shot command targets S3 without changing the API's saved provider configuration.
+                // Select the remote side for this process only, regardless of the API's active provider.
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["Vessel:Evidence:Storage:Provider"] = "S3" })
                 .Build();
             var connectionString = configuration.GetConnectionString("Vessel");
@@ -51,7 +53,8 @@ public static class EvidenceCopyCommand
             var services = new ServiceCollection();
             Vessel.Infrastructure.DependencyInjection.AddEvidenceStorage(services, configuration);
             await using var provider = services.BuildServiceProvider();
-            var copy = new EvidenceStorageCopy(args[1], provider.GetRequiredService<IEvidenceObjectStore>());
+            var remote = provider.GetRequiredService<IEvidenceObjectStore>();
+            var copy = toLocal ? new EvidenceStorageCopy(remote, args[1]) : new EvidenceStorageCopy(args[1], remote);
             var token = cancellation.Token;
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync(token);
@@ -73,7 +76,7 @@ public static class EvidenceCopyCommand
             await output.WriteLineAsync(
                 $"{(apply ? "Copy" : "Dry run")} complete: {count} referenced images, {bytes} bytes; " +
                 $"{copies} {(apply ? "copied and verified" : "would be copied")}, {count - copies} already verified.");
-            await output.WriteLineAsync("No local files, database records or configuration were changed. Keep the originals and backups.");
+            await output.WriteLineAsync("No source images, database records or configuration were changed. Keep the originals and backups.");
             return 0;
         }
         catch (OperationCanceledException)
@@ -96,7 +99,7 @@ public static class EvidenceCopyCommand
         catch (Exception)
         {
             // Never echo connection strings, paths, credentials or SDK/database exception payloads.
-            await output.WriteLineAsync("Copy failed. Check source files, database access and S3 configuration. Originals are unchanged; " +
+            await output.WriteLineAsync("Copy failed. Check local files, database access and S3 configuration. Originals are unchanged; " +
                 "partial copies may remain. Do not switch providers; rerun after resolving the failure.");
             return 1;
         }

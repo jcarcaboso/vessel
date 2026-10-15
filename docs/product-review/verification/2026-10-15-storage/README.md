@@ -131,3 +131,64 @@ Operational limits remain explicit: stop all writers through cutover and use
 a trusted, quiescent source/read-only snapshot. Filesystem checks are not atomic
 confinement. Conditional-upload races fail closed; rerun to verify/skip the
 winner. Keep the originals and coordinated backups after verification.
+
+## S3-to-Local export and provider-switch staging
+
+The owner then requested a reverse helper to keep a portable local copy and
+make changing S3 providers easier. Added
+`evidence-copy-to-local --destination /absolute/root [--apply]`, reusing the
+same metadata/size/SHA-256 checks, read-only transaction and no-overwrite rules.
+No configuration still defaults to Local; neither copy command changes that.
+The configured S3 is the source for export and the destination for upload.
+
+Extended the **actual CLI subprocess** integration against disposable
+PostgreSQL/RustFS with the existing valid PNG, JPEG and WebP fixtures:
+
+1. Export dry-run verified the remote originals without creating the requested
+   local destination directory.
+2. Apply created a portable local tree with identical keys, bytes, lengths and
+   SHA-256 values. Rerun verified/skipped all three.
+3. A differing existing local file failed in both dry-run and apply without
+   overwriting it. Missing and same-size corrupt remote originals failed in
+   both modes without creating a final file for that original.
+4. Uploaded the local export to a **second disposable bucket** using the
+   destination configuration. Authenticated API reads from that bucket
+   returned the same original bytes, lengths, hashes and content types.
+5. Checked that the original local files, restored source-bucket originals
+   and database records (including notes/markup) were unchanged. The test
+   deliberately introduced/restored remote corruption; the copy commands
+   themselves never mutated their sources.
+6. Removed both disposable buckets, temporary local trees and PostgreSQL
+   schema; the script removed its containers, volumes and temporary settings.
+
+This exercises provider-switch staging with two buckets on one real RustFS
+endpoint, **not** a claim of live testing against every S3 vendor. Endpoint,
+region, addressing, bucket and credentials remain independently configurable.
+No new browser session was recorded for this CLI-only follow-up; the earlier
+browser JSON/screenshot still describes the original browser run.
+
+Verification after the export extension:
+
+- Focused copy tests: **46 passed**, including nonseekable sources,
+  nonexistent/trailing-separator destinations, conflicts, bad metadata/bytes,
+  cancellation/key rejection and existing/dangling filesystem links.
+- Real isolated RustFS/PostgreSQL S3-filtered suite: **38 passed**, including
+  the extended CLI picture round-trip and second-bucket/API retrieval.
+- Full backend suite: **1,698 passed**, **129 opt-in/environment-dependent
+  skipped**; the real S3 integration was run separately as above.
+- Independent Sol operations review: no actionable findings; **26 Python
+  tests passed**, plus synthetic base/external/Local Compose configuration
+  checks for stable database identity and retained export mounts/settings.
+- Independent Sol backend static review: no actionable correctness/security/
+  data-loss findings under the documented stopped-writer/trusted-directory
+  requirements. It independently executed the copy/evidence/S3-adapter
+  focused tests with sanitized configuration: **87 passed, zero skipped**.
+
+Nonseekable apply reads stage one image in a mode-600 temporary file on Unix,
+deleted on close, before publishing through the local store's atomic
+create-only rename. Dry runs create no spool files. Disk-full, abrupt host
+crash and mid-stream cancellation recovery were not independently fault-
+injected; pre-open symlink checks remain non-atomic. Use trusted private
+directories, keep writers stopped throughout export/import/cutover, and retain
+coordinated database backups alongside the export. Referenced image bytes alone
+are not a complete application or entire-bucket backup.

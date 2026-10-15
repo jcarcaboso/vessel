@@ -126,6 +126,100 @@ public sealed class EvidenceStorageCopyTests : IDisposable
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Nonseekable_remote_source_exports_to_new_local_root_and_repeated_copy_skips(bool trailingSeparator)
+    {
+        var remote = new NonseekableStore(EvidenceFixtures.Png);
+        var target = Path.Combine(root, "new-export");
+        var copy = new EvidenceStorageCopy(remote, trailingSeparator ? target + Path.DirectorySeparatorChar : target);
+        Assert.True(await copy.CopyAsync(Key, EvidenceFixtures.Png.Length, Hash(EvidenceFixtures.Png), false, default));
+        Assert.False(Directory.Exists(target));
+        Assert.True(await copy.CopyAsync(Key, EvidenceFixtures.Png.Length, Hash(EvidenceFixtures.Png), true, default));
+        Assert.Equal(EvidenceFixtures.Png, await File.ReadAllBytesAsync(Path.Combine(target, Key)));
+        Assert.False(await copy.CopyAsync(Key, EvidenceFixtures.Png.Length, Hash(EvidenceFixtures.Png), true, default));
+        Assert.Single(Directory.GetFiles(target, "*", SearchOption.AllDirectories));
+        Assert.Equal(3, remote.Reads);
+    }
+
+    [Theory]
+    [InlineData(false, "missing")]
+    [InlineData(true, "missing")]
+    [InlineData(false, "hash")]
+    [InlineData(true, "hash")]
+    [InlineData(false, "size")]
+    [InlineData(true, "size")]
+    public async Task Invalid_remote_original_never_creates_final_local_files(bool apply, string failure)
+    {
+        var remote = new NonseekableStore(failure == "missing" ? null : EvidenceFixtures.Png);
+        var target = Path.Combine(root, "new-export");
+        await Assert.ThrowsAsync<EvidenceCopyIntegrityException>(() =>
+            new EvidenceStorageCopy(remote, target).CopyAsync(Key,
+                failure == "size" ? EvidenceFixtures.Png.Length - 1 : EvidenceFixtures.Png.Length,
+                failure == "hash" ? new string('0', 64) : Hash(EvidenceFixtures.Png), apply, default));
+        Assert.False(Directory.Exists(target));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Conflicting_local_destination_is_never_overwritten(bool apply)
+    {
+        var original = new byte[] { 1, 2, 3 };
+        await new LocalEvidenceObjectStore(root).PutAsync(Key, new MemoryStream(original), default);
+        await Assert.ThrowsAsync<EvidenceCopyIntegrityException>(() =>
+            new EvidenceStorageCopy(new NonseekableStore(EvidenceFixtures.Png), root).CopyAsync(
+                Key, EvidenceFixtures.Png.Length, Hash(EvidenceFixtures.Png), apply, default));
+        Assert.Equal(original, await File.ReadAllBytesAsync(Path.Combine(root, Key)));
+        Assert.Single(Directory.GetFiles(root, "*", SearchOption.AllDirectories));
+    }
+
+    [Theory]
+    [InlineData("file", false)]
+    [InlineData("file", true)]
+    [InlineData("directory", false)]
+    [InlineData("directory", true)]
+    [InlineData("ancestor", true)]
+    [InlineData("dangling", true)]
+    public async Task Local_destination_links_are_rejected_before_reading_s3(string kind, bool apply)
+    {
+        var remote = new NonseekableStore(EvidenceFixtures.Png);
+        var target = Path.Combine(root, "export");
+        var outside = Path.Combine(root, "outside");
+        Directory.CreateDirectory(outside);
+        if (kind is "ancestor" or "dangling")
+            Directory.CreateSymbolicLink(target, kind == "dangling" ? Path.Combine(root, "missing") : outside);
+        else
+        {
+            Directory.CreateDirectory(Path.Combine(target, "owner", "play"));
+            if (kind == "directory")
+            {
+                Directory.Delete(Path.Combine(target, "owner", "play"));
+                Directory.CreateSymbolicLink(Path.Combine(target, "owner", "play"), outside);
+            }
+            else File.CreateSymbolicLink(Path.Combine(target, Key), Path.Combine(outside, "missing.png"));
+        }
+        await Assert.ThrowsAsync<EvidenceCopyIntegrityException>(() =>
+            new EvidenceStorageCopy(remote, target).CopyAsync(Key, EvidenceFixtures.Png.Length, Hash(EvidenceFixtures.Png), apply, default));
+        Assert.Equal(0, remote.Reads);
+        Assert.Empty(Directory.GetFiles(outside));
+    }
+
+    [Fact]
+    public async Task Local_export_validates_keys_and_cancellation_before_reading_s3()
+    {
+        var remote = new NonseekableStore(EvidenceFixtures.Png);
+        var copy = new EvidenceStorageCopy(remote, Path.Combine(root, "new-export"));
+        await Assert.ThrowsAsync<ArgumentException>(() => copy.CopyAsync("../outside", 1, new string('0', 64), true, default));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            copy.CopyAsync(Key, EvidenceFixtures.Png.Length, Hash(EvidenceFixtures.Png), true, cancellation.Token));
+        Assert.Equal(0, remote.Reads);
+        Assert.Empty(Directory.GetFiles(root, "*", SearchOption.AllDirectories));
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("--source")]
     [InlineData("--source|relative")]
@@ -138,12 +232,50 @@ public sealed class EvidenceStorageCopyTests : IDisposable
         Assert.Contains("Usage:", output.ToString());
     }
 
-    [Fact]
-    public async Task Cli_help_does_not_require_a_database_or_storage_configuration()
+    [Theory]
+    [InlineData("")]
+    [InlineData("--destination")]
+    [InlineData("--destination|relative")]
+    [InlineData("--destination|/tmp|--overwrite")]
+    [InlineData("--source|/tmp")]
+    [InlineData("--apply")]
+    public async Task Local_cli_requires_an_explicit_absolute_destination(string input)
     {
         using var output = new StringWriter();
-        Assert.Equal(0, await EvidenceCopyCommand.RunAsync(["--help"], output));
+        Assert.Equal(2, await EvidenceCopyCommand.RunAsync(input.Split('|', StringSplitOptions.RemoveEmptyEntries), output, toLocal: true));
+        Assert.Contains("evidence-copy-to-local --destination", output.ToString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Cli_help_does_not_require_a_database_or_storage_configuration(bool toLocal)
+    {
+        using var output = new StringWriter();
+        Assert.Equal(0, await EvidenceCopyCommand.RunAsync(["--help"], output, toLocal: toLocal));
         Assert.Contains("Dry run by default", output.ToString());
+    }
+
+    private sealed class NonseekableStore(byte[]? bytes) : IEvidenceObjectStore
+    {
+        public int Reads { get; private set; }
+        public Task<Stream?> OpenReadAsync(string key, CancellationToken ct)
+        {
+            Reads++;
+            return Task.FromResult<Stream?>(bytes is null ? null : new NonseekableStream(bytes));
+        }
+        public Task PutAsync(string key, Stream content, CancellationToken ct) =>
+            throw new InvalidOperationException("An export must never write to its source.");
+        public Task DeleteAsync(string key, CancellationToken ct) =>
+            throw new InvalidOperationException("Copying must never delete objects.");
+    }
+
+    private sealed class NonseekableStream(byte[] bytes) : MemoryStream(bytes, writable: false)
+    {
+        public override bool CanSeek => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override long Seek(long offset, SeekOrigin loc) => throw new NotSupportedException();
     }
 
     private sealed class CorruptingStore : IEvidenceObjectStore
