@@ -306,7 +306,7 @@ public sealed class ExecutionQuantityPrecisionTests
         public Play Play { get; }
         public List<LinkedFill> Fills { get; } = [];
         public ClosedPlayFacts Facts => new(Play, Plays.Revisions, Fills);
-        public PlayExecutionService Service => new(Plays, Store, null!, TestVenues.With(), new ReviewClock());
+        public PlayExecutionService Service => new(Plays, Store, null!, TestVenues.With(), new ReviewClock(), TestUnitOfWork.None);
 
         public Fixture(string direction = "long")
         {

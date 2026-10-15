@@ -8,11 +8,12 @@ using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence;
 
-public sealed class ExecutionStore(VesselDbContext db) : IPlayExecutionStore
+public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlayExecutionStore
 {
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => db.Accounts.SingleOrDefaultAsync(x => x.Id == id, ct);
     public async Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct)
     {
+        unitOfWork.RequireActive();
         // The row locks make owner status and plan changes wait for this transaction (PlayStore.WithPlayLockAsync).
         // Owner is explicit in raw SQL as well as the global query filter.
         var plays = await db.Plays.FromSqlInterpolated($"""
@@ -30,10 +31,10 @@ public sealed class ExecutionStore(VesselDbContext db) : IPlayExecutionStore
     public Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct) =>
         db.Fills.Where(f => f.AccountId == accountId && orderIds.Contains(f.OrderId)).OrderBy(f => f.OccurredAtUtc).ThenBy(f => f.Id)
             .AsNoTracking().ToListAsync(ct);
-    public void Add(PlayOrderLink link) => db.OrderLinks.Add(link);
-    public void Add(PlayStatusChange change) => db.StatusChanges.Add(change);
+    public void Add(PlayOrderLink link) { unitOfWork.RequireActive(); db.OrderLinks.Add(link); }
+    public void Add(PlayStatusChange change) { unitOfWork.RequireActive(); db.StatusChanges.Add(change); }
 
-    public async Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset observedAt, CancellationToken ct)
+    public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset observedAt, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
         var ids = orders.Select(o => o.OrderId).Distinct().ToList();
         var known = await db.Orders.Where(o => o.AccountId == account.Id && ids.Contains(o.OrderId)).ToDictionaryAsync(o => o.OrderId, ct);
@@ -63,21 +64,14 @@ public sealed class ExecutionStore(VesselDbContext db) : IPlayExecutionStore
             row.StatusAtUtc = order.StatusAtUtc.ToUniversalTime();
             row.ObservedAtUtc = observedAt.ToUniversalTime();
         }
-        await db.SaveChangesAsync(ct);
-    }
+        await unitOfWork.SaveChangesAsync(ct);
+        return true;
+    }, ct);
 
-    public async Task SaveAsync(CancellationToken ct)
-    {
-        try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateConcurrencyException)
-        {
-            throw new ProblemException(409, "This Play changed elsewhere. Reload it and check the venue again.");
-        }
-    }
+    public Task SaveAsync(CancellationToken ct) => unitOfWork.SaveChangesAsync(ct);
 
-    public async Task<T> WithAccountLockAsync<T>(Guid accountId, Func<Task<T>> action, CancellationToken ct)
+    public Task<T> WithAccountLockAsync<T>(Guid accountId, Func<Task<T>> action, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
-        await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         var accounts = await db.Accounts.FromSqlInterpolated(
             $"SELECT * FROM accounts WHERE \"Id\" = {accountId} AND \"OwnerId\" = {db.CurrentOwnerId} FOR UPDATE").ToListAsync(ct);
         var account = accounts.SingleOrDefault() ?? throw new ProblemException(404, "Account not found.");
@@ -85,7 +79,6 @@ public sealed class ExecutionStore(VesselDbContext db) : IPlayExecutionStore
         var key = "vessel-execution:" + accountId;
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);
         var result = await action();
-        if (transaction is not null) await transaction.CommitAsync(ct);
         return result;
-    }
+    }, ct);
 }

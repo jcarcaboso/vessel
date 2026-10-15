@@ -6,17 +6,15 @@ using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence;
 
-public sealed class DiaryStore(VesselDbContext db) : IDiaryStore
+public sealed class DiaryStore(VesselDbContext db, UnitOfWork unitOfWork) : IDiaryStore
 {
-    public async Task<T> WithRequestLockAsync<T>(Guid requestId, Func<Task<T>> action, CancellationToken ct)
+    public Task<T> WithRequestLockAsync<T>(Guid requestId, Func<Task<T>> action, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
-        await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         var key = $"vessel-diary-request:{db.CurrentOwnerId}:{requestId}";
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);
         var result = await action();
-        if (transaction is not null) await transaction.CommitAsync(ct);
         return result;
-    }
+    }, ct);
     public Task<DiaryRequest?> RequestAsync(Guid requestId, CancellationToken ct) =>
         db.DiaryRequests.AsNoTracking().SingleOrDefaultAsync(r => r.Id == requestId, ct);
     public Task<List<ManualExecution>> ManualAsync(Guid playId, CancellationToken ct) =>
@@ -36,8 +34,8 @@ public sealed class DiaryStore(VesselDbContext db) : IDiaryStore
         db.Orders.Where(o => o.AccountId == accountId).AsNoTracking().ToListAsync(ct);
     public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, CancellationToken ct) =>
         db.OrderLinks.Where(l => l.AccountId == accountId).AsNoTracking().ToListAsync(ct);
-    public void Add(ManualExecution execution) => db.ManualExecutions.Add(execution);
-    public void Add(ManualExecutionHistory history) => db.ManualExecutionHistory.Add(history);
-    public void Add(DiaryRequest request) => db.DiaryRequests.Add(request);
-    public void Add(PlayOrderLink link) => db.OrderLinks.Add(link);
+    public void Add(ManualExecution execution) { unitOfWork.RequireActive(); db.ManualExecutions.Add(execution); }
+    public void Add(ManualExecutionHistory history) { unitOfWork.RequireActive(); db.ManualExecutionHistory.Add(history); }
+    public void Add(DiaryRequest request) { unitOfWork.RequireActive(); db.DiaryRequests.Add(request); }
+    public void Add(PlayOrderLink link) { unitOfWork.RequireActive(); db.OrderLinks.Add(link); }
 }

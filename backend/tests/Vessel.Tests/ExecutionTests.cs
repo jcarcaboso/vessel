@@ -243,9 +243,9 @@ public sealed class ExecutionPostgresTests
         public Guid Owner => owner;
         public FixtureReader Reader => reader;
         public FakeOrderReader Orders => orders;
-        public WorkspaceService Workspace { get; } = new(new WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(reader));
-        public PlayService Plays { get; } = new(new PlayStore(db), new MemoryObjectStore(), TimeProvider.System);
-        public PlayExecutionService Execution => new(new PlayStore(db), new ExecutionStore(db), Workspace, TestVenues.With(orders), TimeProvider.System);
+        public WorkspaceService Workspace { get; } = new(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.For(db));
+        public PlayService Plays { get; } = new(new PlayStore(db, TestUnitOfWork.For(db)), new MemoryObjectStore(), TimeProvider.System, TestUnitOfWork.For(db));
+        public PlayExecutionService Execution => new(new PlayStore(db, TestUnitOfWork.For(db)), new ExecutionStore(db, TestUnitOfWork.For(db)), Workspace, TestVenues.With(orders), TimeProvider.System, TestUnitOfWork.For(db));
         public SizingService Sizing => new(new SizingStore(db), new CoreOwner(owner), TimeProvider.System);
     }
 

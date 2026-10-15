@@ -1,0 +1,224 @@
+Vessel W0 Sol evidence, October 14, 2026. Disposable services only.
+SDK 10.0.302; host runtime 10.0.10; runtime-only image Microsoft.NETCore.App/Microsoft.AspNetCore.App 10.0.10, no SDK, uid/gid 1654.
+PostgreSQL 18.6; RabbitMQ 4.3.6; Docker 29.6.2.
+Source commit 55a46250e9ffd99badab1ae032d334b73e2cbe56.
+
+Resolved package graph, relevant packages:
+JasperFx/2.87.1
+JasperFx.Events/2.87.1
+JasperFx.RuntimeCompiler/5.0.0
+JasperFx.SourceGenerator/2.87.1
+Microsoft.EntityFrameworkCore/10.0.10
+Microsoft.EntityFrameworkCore.Abstractions/10.0.10
+Microsoft.EntityFrameworkCore.Analyzers/10.0.10
+Microsoft.EntityFrameworkCore.Design/10.0.4
+Microsoft.EntityFrameworkCore.Relational/10.0.10
+Npgsql/10.0.3
+Npgsql.EntityFrameworkCore.PostgreSQL/10.0.3
+Npgsql.NetTopologySuite/9.0.4
+RabbitMQ.Client/7.2.2
+Weasel.Core/9.45.0
+Weasel.EntityFrameworkCore/9.45.0
+Weasel.Postgresql/9.45.0
+WolverineFx/6.50.0
+WolverineFx.EntityFrameworkCore/6.50.0
+WolverineFx.Newtonsoft/6.50.0
+WolverineFx.Postgresql/6.50.0
+WolverineFx.RabbitMQ/6.50.0
+WolverineFx.RDBMS/6.50.0
+WolverineFx.RuntimeCompilation/6.50.0
+
+== image-digests.txt ==
+sha256:c293117fcecda7344b5480222e813b9f673d7abd69b1dd95eff239b768b04f59 ["postgres@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873"]
+sha256:30fb3e92f938ed166ba72c2bb9fe5b71c80a3b2d75e0f335f81c113eb8cee90e ["rabbitmq@sha256:8dd6e3570ddaa2ef82a6c3a8950e79c1f73893adfbdddbc374fc1f1ac8a0f5dd"]
+sha256:58bf70bca311b8e7301e724fd73bde6430fbe96f330b9609c035456298ce083f ["mcr.microsoft.com/dotnet/aspnet@sha256:f1126d438ccc359f51cc6d4701a8deae513856cf10f5fe645d29ea6403dcac6b"]
+
+
+== build.log ==
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+== missing.log ==
+START_FAILED AggregateException: One or more errors occurred. (The Wolverine message storage for database 'default' is missing (could not read '"w0_missing".wolverine_incoming_envelopes'). Run 'resources setup' / IHost.SetupResources(), or enable auto-provisioning with AutoBuildMessageStorageOnStartup.)
+
+== setup.log ==
+PASS explicit setup of Vessel migrations and both Wolverine schemas
+
+== tx.log ==
+PASS real VesselDbContext is sealed
+PASS business event not visible before OUTER commit
+INNER mode=tx outer_tx_present=True event_visible=0 consumer_effect=0
+FINAL mode=tx status=Planned events=0 outgoing_total=0 EventId=c59fec03-6390-449a-8dfb-a8241f0443f8
+PASS outer rollback is atomic
+PASS second inner saves still do not commit
+PASS event visible after outer commit
+PASS outbox durable beside committed event before explicit flush
+PASS open/closed changes committed by outer store
+PASS post-outer-commit flush EventId=965002a4-5b87-4747-8ca6-63e72d75ea3c
+
+== bad-helper.log ==
+PASS real VesselDbContext is sealed
+PASS business event not visible before OUTER commit
+INNER mode=bad-helper outer_tx_present=False event_visible=1 consumer_effect=1
+FINAL mode=bad-helper status=Open events=1 outgoing_total=0 EventId=6250901a-c382-4e0f-8504-50ac27024ce6
+
+== early-flush.log ==
+PASS real VesselDbContext is sealed
+PASS business event not visible before OUTER commit
+INNER mode=early-flush outer_tx_present=True event_visible=0 consumer_effect=1
+FINAL mode=early-flush status=Planned events=0 outgoing_total=0 EventId=9a380a86-5e25-4f2c-9267-7d64e2019746
+
+== map-model.log ==
+MAP table=w0_api.wolverine_incoming_envelopes excluded_from_ef_migrations=True
+MAP table=w0_api.wolverine_outgoing_envelopes excluded_from_ef_migrations=True
+
+== map-tx.log ==
+PASS real VesselDbContext is sealed
+PASS business event not visible before OUTER commit
+INNER mode=tx outer_tx_present=True event_visible=0 consumer_effect=0
+FINAL mode=tx status=Planned events=0 outgoing_total=0 EventId=09b04e82-82af-4868-8a2e-4f1cdd6db499
+PASS outer rollback is atomic
+PASS second inner saves still do not commit
+PASS event visible after outer commit
+PASS outbox durable beside committed event before explicit flush
+PASS open/closed changes committed by outer store
+PASS post-outer-commit flush EventId=12074cf8-b075-4cb4-b1ed-4b74473328be
+
+== crash.log ==
+PASS real VesselDbContext is sealed
+PASS business event not visible before OUTER commit
+INNER mode=crash outer_tx_present=True event_visible=0 consumer_effect=0
+COMMITTED_NO_FLUSH EventId=114fa798-a617-4b6a-a63d-07a93f991190 PlayId=47c6918b-6913-46bf-ad48-45c838b5771c
+
+== recover.log ==
+API_RECOVERY_READY
+      Ejected stale node 39fa435c-8f29-4b1c-81d7-e351eda7a6fa (assigned node number 8) after 1 consecutive missed health checks; its last health check was at 10/14/2026 13:57:05 +00:00. Its node record has been deleted and every inbox and outbox envelope it owned has been released for recovery
+
+== outage.log ==
+OUTAGE_READY stop disposable broker, then press Enter
+      Ejected stale node 06e3ca71-dfea-4718-8f53-0c99b0118db6 (assigned node number 11) after 1 consecutive missed health checks; its last health check was at 10/14/2026 14:00:33 +00:00. Its node record has been deleted and every inbox and outbox envelope it owned has been released for recovery
+PASS real VesselDbContext is sealed
+PASS business event not visible before OUTER commit
+INNER mode=outage outer_tx_present=True event_visible=0 consumer_effect=0
+FINAL mode=outage status=Open events=1 outgoing_total=1 EventId=8176a3e4-0d0f-4ba3-9eeb-b0cfbc8b4ff3
+OUTAGE_FLUSH_QUEUED
+
+== outage-recover.log ==
+API_RECOVERY_READY
+
+== worker-after-outage.log ==
+WORKER_READY
+HANDLED EventId=8176a3e4-0d0f-4ba3-9eeb-b0cfbc8b4ff3 owner=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+HANDLED EventId=12074cf8-b075-4cb4-b1ed-4b74473328be owner=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+
+== duplicates.log ==
+PUBLISHED mode=duplicates EventId=1fb4172f-c98a-48ab-b7e7-9ab966483b4c
+
+== owners.log ==
+PUBLISHED mode=owners EventId=64563f86-3c6f-4c87-9b66-c0e0f90631e6
+
+== unrouted.log ==
+UNROUTED EventId=f3ace478-c379-4352-90ce-42fd091578b0 outgoing_total=0
+
+== envelope-replay.log ==
+REPLAYED EnvelopeId=08df29fc-0b6c-8ed2-bc24-115880c40000 copies=2
+
+== replay-worker.log ==
+WORKER_READY
+      Paused listener at rabbitmq://queue/vessel.w0.effects — inbox database unavailable
+      Duplicate incoming envelope detected
+      Wolverine.Persistence.Durability.DuplicateIncomingEnvelopeException: Duplicate incoming envelope with message id 08df29fc-0b6c-8ed2-bc24-115880c40000 at rabbitmq://queue/vessel.w0.effects
+HANDLED EventId=4896dc64-2c17-42d8-95c3-43cddb9573c2 owner=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+HANDLED EventId=d3664992-129b-4f31-8f6f-39818133a34d owner=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+
+== after-replay.log ==
+PUBLISHED mode=runtime EventId=d3664992-129b-4f31-8f6f-39818133a34d
+
+== owner-stress-before.txt ==
+aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa|12
+bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb|1
+
+
+== owner-stress-after.txt ==
+aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa|33
+bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb|21
+
+
+== owner-stress-worker.log ==
+WORKER_READY
+HANDLE_BEGIN EventId=a048b6e0-878f-4d7d-aad7-0b23b5b8241e owner=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+HANDLE_BEGIN EventId=d43e7bc2-eaa7-4cf6-96fc-9d87bef83a6d owner=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+HANDLE_BEGIN EventId=0ab7b092-ea87-4637-b0be-21b19fa92502 owner=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+HANDLE_BEGIN EventId=b9bae4a2-6217-49e9-918d-2a022be29d6f owner=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+HANDLED EventId=d43e7bc2-eaa7-4cf6-96fc-9d87bef83a6d owner=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+HANDLED EventId=a048b6e0-878f-4d7d-aad7-0b23b5b8241e owner=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+HANDLED EventId=0ab7b092-ea87-4637-b0be-21b19fa92502 owner=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+HANDLED EventId=b9bae4a2-6217-49e9-918d-2a022be29d6f owner=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+HANDLE_BEGIN EventId=b7e5eb7c-f602-4f0c-810d-01682d8ad41d owner=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+HANDLE_BEGIN EventId=600cdb16-ee79-472f-b57f-bdb0e0541315 owner=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+HANDLE_BEGIN EventId=e16d2a0c-3717-4089-b9c6-ab3c8c3e3ad0 owner=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+HANDLE_BEGIN EventId=1e93895b-63c4-491b-8058-72330e5adad4 owner=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+... 41 HANDLED lines, no Owner bleed error.
+
+== runtime-final.log ==
+Cannot load library libgssapi_krb5.so.2 
+Error: libgssapi_krb5.so.2: cannot open shared object file: No such file or directory
+WORKER_READY
+HANDLED EventId=89145452-fb89-487a-99f2-478853e2fd2d owner=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+
+== runtime-setup.log ==
+Cannot load library libgssapi_krb5.so.2 
+Error: libgssapi_krb5.so.2: cannot open shared object file: No such file or directory
+PASS explicit setup of Vessel migrations and both Wolverine schemas
+
+== channel-confirms.txt ==
+[{'confirm': True, 'transactional': False, 'prefetch_count': 100}, {'confirm': True, 'transactional': False, 'prefetch_count': 8}]
+
+
+== exchange.txt ==
+{'name': 'vessel.w0.events', 'type': 'topic', 'durable': True, 'auto_delete': False}
+
+
+== final-schema.txt ==
+  nspname  
+-----------
+ w0_api
+ w0_worker
+(2 rows)
+
+ count 
+-------
+     0
+(1 row)
+
+
+
+Independent SQL/broker observations:
+tx: rollback Planned/events 0/API outgoing 0; commit Closed/event 1/API outgoing 1 before explicit flush.
+crash exit 73: API outgoing 1, still 1 after 8 seconds with only worker alive; API restart -> 0 and one matching business delivery.
+outage: API outgoing 1, matching delivery 0 while broker stopped; broker and API restart -> outgoing 0, matching delivery 1.
+same business EventId 1fb4172f-c98a-48ab-b7e7-9ab966483b4c: two HANDLED invocations, one delivery row and one effect increment.
+owners: three rejected messages; valid A and B delivered only to their own accounts.
+same envelope 08df29fc-0b6c-8ed2-bc24-115880c40000: two broker copies, one incoming row, one HANDLED invocation; next distinct message handled.
+prestarted worker absent: rabbitmqctl showed vessel.w0.effects quorum/durable=true/consumers=0/messages_ready=2.
+unbound no.binding topic: outgoing_total=0 and no consumer side effect. This is intentional proof of loss despite confirms.
+runtime-final: dotnet --list-sdks returned no rows; id uid=1654(app); 10.0.10 runtime; handler ran against real broker/DB with read-only /app.
+final DB schemas w0_api and w0_worker, no w0_missing; worker dead letters 0.
+
+Cleanup verified: vessel-w0-sol-pg, vessel-w0-sol-rabbit and runtime containers removed; vessel-w0-sol-net removed.
+New anonymous volumes 13bf00a3789c232e5b5d12b583c6d6c772b8e85d0ffc304ec776f58c1dee820e and d258d6b2087547da1cf70df6cf2eb54c57816d82a36061cadd5967791b4ab22d removed.
+No W0 host processes remained. Final build succeeded with 0 warnings / 0 errors.
+
+== independent parent rerun, October 14, 2026 ==
+Built W0.csproj --no-restore: 0 warnings / 0 errors.
+Fresh disposable services; ephemeral loopback ports; explicit W0 connection overrides.
+Initial attempt timed out at RabbitMQ readiness, before tests; resources cleaned.
+Second attempt used RabbitMQ server +S 2:2 and CLI +S 1:1:
+PASS missing storage rejected; no schema created
+PASS tx: outer rollback and commit/flush assertions
+PASS tx-mapped: outer rollback and commit/flush assertions
+REPRODUCED unsafe bad-helper: status=Open events=1 consumer_effect=1
+REPRODUCED unsafe early-flush: status=Planned events=0 consumer_effect=1
+All parent-created containers, volumes and network cleaned.
+Parent did not repeat the full crash/outage/owner/runtime-image matrix.

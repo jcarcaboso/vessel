@@ -41,7 +41,7 @@ public sealed class ExactNumberCharacterizationTests
     {
         var owner = Guid.NewGuid();
         var store = new MemoryWorkspaceStore(owner);
-        try { await new WorkspaceService(store, new CoreOwner(owner), TestVenues.With()).CreateAccountAsync(new(null, "Manual", "manual", ManualAccountValueUsd: text), default); }
+        try { await new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(), TestUnitOfWork.None).CreateAccountAsync(new(null, "Manual", "manual", ManualAccountValueUsd: text), default); }
         catch (ProblemException e) when (e.Message == "Manual account value must be an exact nonnegative decimal string.") { return "x"; }
         return Describe(store.Accounts.Single().ManualAccountValueUsd!.Value);
     }

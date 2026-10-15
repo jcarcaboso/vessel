@@ -406,8 +406,7 @@ public sealed class DiaryArithmeticRegressionTests
         public int LinkReads { get; private set; }
         private readonly MemorySizingStore sizing = new();
         public List<ClosedPlayFacts> Closed => sizing.Closed;
-        public DiaryService Service => new(Plays, this, this,
-            new VenueRegistry([VenueDescriptor.Manual], [], [], [], [], [], [], []), new ReviewClock());
+        public DiaryService Service => new(Plays, this, this, new VenueRegistry([VenueDescriptor.Manual], [], [], [], [], [], [], []), new ReviewClock(), TestUnitOfWork.None);
         public ReviewService Review => new(this, new ReviewClock());
         public SizingService Sizing => new(sizing, new CoreOwner(Account.OwnerId), new ReviewClock());
 

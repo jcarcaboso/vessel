@@ -352,8 +352,7 @@ public sealed class DiaryPostgresTests
         Side = side, OrderType = "limit", LimitPrice = 100, OriginalSize = quantity, RemainingSize = 0,
         PlacedAtUtc = At, Status = "filled", VenueStatus = "filled", StatusAtUtc = At.AddSeconds(2), ObservedAtUtc = At.AddSeconds(3)
     };
-    internal static DiaryService Service(VesselDbContext db) => new(new PlayStore(db), new DiaryStore(db), new ExecutionStore(db),
-        TestVenues.With(), TimeProvider.System);
+    internal static DiaryService Service(VesselDbContext db) => new(new PlayStore(db, TestUnitOfWork.For(db)), new DiaryStore(db, TestUnitOfWork.For(db)), new ExecutionStore(db, TestUnitOfWork.For(db)), TestVenues.With(), TimeProvider.System, TestUnitOfWork.For(db));
 
     [PostgresFact]
     public async Task Retrospective_preview_atomic_creation_provenance_review_only_save_and_sizing_exclusion()
@@ -491,7 +490,7 @@ public sealed class DiaryPostgresTests
         // An unfilled linked entry is already protected.
         await using (var editing = database.Context(owner))
         {
-            var service = new PlayService(new PlayStore(editing), new MemoryObjectStore(), TimeProvider.System);
+            var service = new PlayService(new PlayStore(editing, TestUnitOfWork.For(editing)), new MemoryObjectStore(), TimeProvider.System, TestUnitOfWork.For(editing));
             var dto = await service.GetAsync(play.Id, default);
             Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.UpdateAsync(play.Id,
                 new(dto.Summary.Version, account.Id, "BTC", "venue", dto.Summary.Title, dto.Plan with
@@ -500,15 +499,15 @@ public sealed class DiaryPostgresTests
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var syncing = database.Context(owner);
-        var sync = new WorkspaceStore(syncing).WithAccountLockAsync(account.Id, async _ =>
+        var sync = TestUnitOfWork.For(syncing).ExecuteAsync(() => new WorkspaceStore(syncing, TestUnitOfWork.For(syncing)).WithAccountLockAsync(account.Id, async _ =>
         {
             entered.TrySetResult(); await release.Task;
             syncing.Fills.Add(Imported(account, "synced", "pending", "buy", "open", 1, 100, 0));
             await syncing.SaveChangesAsync(); return true;
-        }, default);
+        }, default), default);
         await entered.Task;
         await using var writing = database.Context(owner);
-        var editor = new PlayService(new PlayStore(writing), new MemoryObjectStore(), TimeProvider.System);
+        var editor = new PlayService(new PlayStore(writing, TestUnitOfWork.For(writing)), new MemoryObjectStore(), TimeProvider.System, TestUnitOfWork.For(writing));
         var current = await editor.GetAsync(play.Id, default);
         var update = editor.UpdateAsync(play.Id, new(current.Summary.Version, account.Id, "BTC", "venue", current.Summary.Title,
             current.Plan with { Entries = [current.Plan.Entries[0] with { Stops = [new("stop-1", "price", "97", "100")] }] },

@@ -55,7 +55,8 @@ public interface IPlayExecutionStore
     Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct);
     void Add(PlayOrderLink link);
     void Add(PlayStatusChange change);
+    /// <summary>Persists through the active unit of work, without committing.</summary>
     Task SaveAsync(CancellationToken ct);
-    /// <summary>Serializes reconciliation of one account across requests and processes.</summary>
+    /// <summary>Requires an active unit of work; serializes reconciliation across requests and processes until it completes.</summary>
     Task<T> WithAccountLockAsync<T>(Guid accountId, Func<Task<T>> action, CancellationToken ct);
 }

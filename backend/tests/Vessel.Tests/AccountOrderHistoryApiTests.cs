@@ -375,7 +375,7 @@ public sealed class AccountOrderHistoryApiTests
         var venues = AccountHistoryOrders.Registry(reader, orders);
         // Run the production public and order phases separately to force the interleaving between their locks.
         await using var older = database.Context(owner);
-        var olderWorkspace = new WorkspaceService(new WorkspaceStore(older), new CoreOwner(owner), venues);
+        var olderWorkspace = new WorkspaceService(new WorkspaceStore(older, TestUnitOfWork.For(older)), new CoreOwner(owner), venues, TestUnitOfWork.For(older));
         await olderWorkspace.SyncAsync(account.Id, default);
         reader.Result = reader.Result with
         {
@@ -384,7 +384,7 @@ public sealed class AccountOrderHistoryApiTests
         };
         await using (var newer = database.Context(owner))
         {
-            var workspace = new WorkspaceService(new WorkspaceStore(newer), new CoreOwner(owner), venues);
+            var workspace = new WorkspaceService(new WorkspaceStore(newer, TestUnitOfWork.For(newer)), new CoreOwner(owner), venues, TestUnitOfWork.For(newer));
             await workspace.SyncAsync(account.Id, default);
             reader.Fail = true;
             Assert.Equal(502, (await Assert.ThrowsAsync<ProblemException>(() => workspace.SyncAsync(account.Id, default))).StatusCode);
@@ -393,7 +393,7 @@ public sealed class AccountOrderHistoryApiTests
         Assert.Equal("error", failed.SyncStatus);
         Assert.Contains(orders.Result.Notice, failed.HistoryNotice);
         orders.Failure = new HttpRequestException("synthetic optional failure");
-        var execution = new PlayExecutionService(new PlayStore(older), new ExecutionStore(older), olderWorkspace, venues, TimeProvider.System);
+        var execution = new PlayExecutionService(new PlayStore(older, TestUnitOfWork.For(older)), new ExecutionStore(older, TestUnitOfWork.For(older)), olderWorkspace, venues, TimeProvider.System, TestUnitOfWork.For(older));
         await execution.RetainAccountOrdersAsync(account.Id, default);
         var retained = (await client.GetFromJsonAsync<AccountDto>($"/api/accounts/{account.Id}"))!;
         Assert.Equal((failed.SyncStatus, failed.LastSyncError, failed.LastSyncedAtUtc, failed.SettingsRevision),
@@ -535,9 +535,8 @@ public sealed class AccountOrderHistoryApiTests
         Assert.Equal(HttpStatusCode.BadGateway, failed.StatusCode);
         await using var verify = database.Context(owner);
         var row = await verify.Accounts.SingleAsync();
-        var workspace = new WorkspaceService(new WorkspaceStore(verify), new CoreOwner(owner), AccountHistoryOrders.Registry(reader, orders));
-        var execution = new PlayExecutionService(new PlayStore(verify), new ExecutionStore(verify), workspace,
-            AccountHistoryOrders.Registry(reader, orders), TimeProvider.System, new AccountHistoryCredential("ro:synthetic-only"));
+        var workspace = new WorkspaceService(new WorkspaceStore(verify, TestUnitOfWork.For(verify)), new CoreOwner(owner), AccountHistoryOrders.Registry(reader, orders), TestUnitOfWork.For(verify));
+        var execution = new PlayExecutionService(new PlayStore(verify, TestUnitOfWork.For(verify)), new ExecutionStore(verify, TestUnitOfWork.For(verify)), workspace, AccountHistoryOrders.Registry(reader, orders), TimeProvider.System, TestUnitOfWork.For(verify), new AccountHistoryCredential("ro:synthetic-only"));
         await execution.RetainAccountOrdersAsync(account.Id, default);
         Assert.Equal("error", row.SyncStatus);
         Assert.NotNull(row.LastSyncError);

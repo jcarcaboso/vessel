@@ -7,10 +7,10 @@ namespace Vessel.Application.Credentials;
 
 // Kept separate from the management service: venue verifiers may themselves depend on this reader.
 public sealed class AccountCredentialReader(IWorkspaceStore accounts, IAccountCredentialStore credentials,
-    IJournalOwnerContext owner, ICredentialVault vault, TimeProvider time) : IAccountCredentialReader
+    IJournalOwnerContext owner, ICredentialVault vault, TimeProvider time, IUnitOfWork unitOfWork) : IAccountCredentialReader
 {
     public Task<string?> ReadAsync(Guid accountId, CancellationToken cancellationToken) =>
-        accounts.WithAccountLockAsync(accountId, async account =>
+        unitOfWork.ExecuteAsync(() => accounts.WithAccountLockAsync(accountId, async account =>
         {
             if (account.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
             if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before reading its credential.");
@@ -20,12 +20,12 @@ public sealed class AccountCredentialReader(IWorkspaceStore accounts, IAccountCr
                 return null;
             try { return vault.Open(owner.OwnerId, accountId, purpose, credential.Sealed()); }
             catch (CredentialStorageException) { return null; }
-        }, cancellationToken);
+        }, cancellationToken), cancellationToken);
 
     public const string RefusedError = "refused";
 
     public Task MarkRefusedAsync(Guid accountId, CancellationToken cancellationToken) =>
-        accounts.WithAccountLockAsync(accountId, async account =>
+        unitOfWork.ExecuteAsync(() => accounts.WithAccountLockAsync(accountId, async account =>
         {
             if (account.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
             var credential = await credentials.FindAsync(accountId, account.VenueId + "-read-token", cancellationToken);
@@ -34,7 +34,7 @@ public sealed class AccountCredentialReader(IWorkspaceStore accounts, IAccountCr
             credential.LastError = RefusedError;
             await credentials.SaveAsync(credential, cancellationToken);
             return true;
-        }, cancellationToken);
+        }, cancellationToken), cancellationToken);
 
     // Play execution status is polled while a play is open. Taking the account row lock here would queue
     // every poll behind a running refresh, and decrypting would expose the token for no reason.

@@ -184,7 +184,11 @@ public sealed class ServerDiagnosticTests
             builder.ConfigureLogging(logging => logging.ClearProviders().SetMinimumLevel(LogLevel.Error).AddProvider(Logs));
             builder.ConfigureServices(services =>
             {
-                if (error is not null) services.AddSingleton<IWorkspaceStore>(new ThrowingStore(error));
+                if (error is not null)
+                {
+                    services.AddSingleton<IWorkspaceStore>(new ThrowingStore(error));
+                    services.AddSingleton<Vessel.Application.Ownership.IUnitOfWork>(TestUnitOfWork.None);
+                }
                 if (cancelCaller) services.AddSingleton<IStartupFilter>(new CancelCaller());
             });
         }

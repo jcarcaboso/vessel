@@ -17,9 +17,8 @@ public sealed class WorkspaceBalanceTests
         store = new(owner);
         var nonWallet = new VenueDescriptor("public-perps", "Public perps", "read-only", VenueSources.EvmAddress,
             VenueCapabilities.None with { Sync = true });
-        service = new(store, new CoreOwner(owner),
-            new VenueRegistry([VenueDescriptor.Manual, Vessel.Infrastructure.Venues.Hyperliquid.HyperliquidPerpetualReader.Descriptor, nonWallet],
-                [], [], [], [], [], [], []));
+        service = new(store, new CoreOwner(owner), new VenueRegistry([VenueDescriptor.Manual, Vessel.Infrastructure.Venues.Hyperliquid.HyperliquidPerpetualReader.Descriptor, nonWallet],
+                [], [], [], [], [], [], []), TestUnitOfWork.None);
     }
 
     private Account Add(Guid? portfolio, string venue, decimal? equity, decimal? withdrawable = null,

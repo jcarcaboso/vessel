@@ -56,8 +56,8 @@ public sealed class AccountOrderHistoryTests
         var venues = new VenueRegistry([descriptor with { Capabilities = descriptor.Capabilities with { Orders = supportsOrders } }],
             [], readerAvailable ? [orders] : [], [], [], [], [], []);
         var store = new RetentionStore();
-        var workspace = new WorkspaceService(accounts, new CoreOwner(owner), venues);
-        return (new(null!, store, workspace, venues, TimeProvider.System, credentials), account, store);
+        var workspace = new WorkspaceService(accounts, new CoreOwner(owner), venues, TestUnitOfWork.None);
+        return (new(null!, store, workspace, venues, TimeProvider.System, TestUnitOfWork.None, credentials), account, store);
     }
 
     [Fact]

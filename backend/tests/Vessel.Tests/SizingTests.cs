@@ -307,9 +307,9 @@ public sealed class SizingPostgresTests
         var reader = new FixtureReader();
         reader.Result = reader.Result with { Fills = [] };
         var orders = new FakeOrderReader();
-        var workspace = new WorkspaceService(new WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(reader));
-        var plays = new PlayService(new PlayStore(db), new MemoryObjectStore(), TimeProvider.System);
-        var execution = new Vessel.Application.Plays.Execution.PlayExecutionService(new PlayStore(db), new ExecutionStore(db), workspace, TestVenues.With(orders), TimeProvider.System);
+        var workspace = new WorkspaceService(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.For(db));
+        var plays = new PlayService(new PlayStore(db, TestUnitOfWork.For(db)), new MemoryObjectStore(), TimeProvider.System, TestUnitOfWork.For(db));
+        var execution = new Vessel.Application.Plays.Execution.PlayExecutionService(new PlayStore(db, TestUnitOfWork.For(db)), new ExecutionStore(db, TestUnitOfWork.For(db)), workspace, TestVenues.With(orders), TimeProvider.System, TestUnitOfWork.For(db));
         var sizing = new SizingService(new SizingStore(db), new CoreOwner(owner), TimeProvider.System);
         var account = await workspace.CreateAccountAsync(new(null, "Venue", "hyperliquid", "0x" + Guid.NewGuid().ToString("N") + "00000000"), default);
 

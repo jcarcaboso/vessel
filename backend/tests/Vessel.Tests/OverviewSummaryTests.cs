@@ -22,7 +22,7 @@ public sealed class OverviewSummaryTests
     {
         store = new(owner);
         activityStore = new(store, owner);
-        service = new(store, new(store, new CoreOwner(owner), TestVenues.With()), new(activityStore, store, new Clock()), new Clock());
+        service = new(store, new(store, new CoreOwner(owner), TestVenues.With(), TestUnitOfWork.None), new(activityStore, store, new Clock()), new Clock());
     }
     private sealed class Clock : TimeProvider { public override DateTimeOffset GetUtcNow() => Now; }
     private sealed class SummaryActivityStore(MemoryWorkspaceStore store, Guid owner) : IActivityStore

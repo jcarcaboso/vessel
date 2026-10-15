@@ -7,7 +7,7 @@ using Vessel.Domain.Plays;
 
 namespace Vessel.Persistence;
 
-public sealed class PlayStore(VesselDbContext db) : IPlayStore
+public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlayStore
 {
     public Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct) => scope.Kind switch
     {
@@ -100,25 +100,17 @@ public sealed class PlayStore(VesselDbContext db) : IPlayStore
         ids.AddRange(await db.ManualExecutions.Where(r => r.PlayId == playId && r.Role == "entry").Select(r => r.EntryId!).Distinct().ToListAsync(ct));
         return ids.ToHashSet(StringComparer.Ordinal);
     }
-    public void Add(Play play) => db.Plays.Add(play);
+    public void Add(Play play) { unitOfWork.RequireActive(); db.Plays.Add(play); }
     public Task<List<PlayOrderLink>> LinkedPlanReferencesAsync(Guid playId, CancellationToken ct) =>
         db.OrderLinks.Where(l => l.PlayId == playId && l.State == OrderLinkState.Linked).AsNoTracking().ToListAsync(ct);
-    public void Add(PlayPlanRevision revision) => db.PlanRevisions.Add(revision);
-    public void Add(PlayStatusChange change) => db.StatusChanges.Add(change);
-    public void Add(PlayReviewRevision revision) => db.ReviewRevisions.Add(revision);
+    public void Add(PlayPlanRevision revision) { unitOfWork.RequireActive(); db.PlanRevisions.Add(revision); }
+    public void Add(PlayStatusChange change) { unitOfWork.RequireActive(); db.StatusChanges.Add(change); }
+    public void Add(PlayReviewRevision revision) { unitOfWork.RequireActive(); db.ReviewRevisions.Add(revision); }
 
-    public async Task SaveAsync(CancellationToken ct)
-    {
-        try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateConcurrencyException)
-        {
-            throw new ProblemException(409, "This Play changed elsewhere. Reload it before saving again.");
-        }
-    }
+    public Task SaveAsync(CancellationToken ct) => unitOfWork.SaveChangesAsync(ct);
 
-    public async Task<T> WithPlayLockAsync<T>(Guid id, Func<Task<T>> action, CancellationToken ct, Guid? destinationAccountId = null)
+    public Task<T> WithPlayLockAsync<T>(Guid id, Func<Task<T>> action, CancellationToken ct, Guid? destinationAccountId = null) => unitOfWork.ParticipateAsync(async () =>
     {
-        await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         var accountId = await db.Plays.Where(p => p.Id == id).Select(p => (Guid?)p.AccountId).SingleOrDefaultAsync(ct)
             ?? throw new ProblemException(404, "Play not found.");
         if (destinationAccountId is { } destination && destination != accountId)
@@ -127,10 +119,10 @@ public sealed class PlayStore(VesselDbContext db) : IPlayStore
             // Reuse the management key before either account row to avoid destination FK key-share deadlocks.
             var key = "vessel-management:" + db.CurrentOwnerId;
             await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);
-            await new WorkspaceStore(db).WithAccountLockAsync(destination, _ => Task.FromResult(true), ct);
+            await new WorkspaceStore(db, unitOfWork).WithAccountLockAsync(destination, _ => Task.FromResult(true), ct);
         }
         // Lock order is account row -> execution advisory -> Play row everywhere.
-        await new ExecutionStore(db).WithAccountLockAsync(accountId, () => Task.FromResult(true), ct);
+        await new ExecutionStore(db, unitOfWork).WithAccountLockAsync(accountId, () => Task.FromResult(true), ct);
         // The same row lock ExecutionStore.ActivePlaysAsync takes; evidence and history inserts only need a key share.
         var plays = await db.Plays.FromSqlInterpolated(
             $"SELECT * FROM plays WHERE \"Id\" = {id} AND \"OwnerId\" = {db.CurrentOwnerId} FOR NO KEY UPDATE").ToListAsync(ct);
@@ -139,22 +131,19 @@ public sealed class PlayStore(VesselDbContext db) : IPlayStore
         if (plays.SingleOrDefault()?.AccountId != accountId)
             throw new ProblemException(409, "The Play moved to another account. Reload before editing.");
         var result = await action();
-        if (transaction is not null) await transaction.CommitAsync(ct);
         return result;
-    }
+    }, ct);
 
-    public async Task<IReadOnlyList<string>> DeleteAsync(Play play, CancellationToken ct)
+    public Task<IReadOnlyList<string>> DeleteAsync(Play play, CancellationToken ct) => unitOfWork.ParticipateAsync<IReadOnlyList<string>>(async () =>
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var evidence = await db.Evidence.Where(x => x.PlayId == play.Id).ToListAsync(ct);
         db.Evidence.RemoveRange(evidence);
         db.PlanRevisions.RemoveRange(await db.PlanRevisions.Where(x => x.PlayId == play.Id).ToListAsync(ct));
         db.StatusChanges.RemoveRange(await db.StatusChanges.Where(x => x.PlayId == play.Id).ToListAsync(ct));
         db.OrderLinks.RemoveRange(await db.OrderLinks.Where(x => x.PlayId == play.Id).ToListAsync(ct));
-        await db.SaveChangesAsync(ct);
+        await unitOfWork.SaveChangesAsync(ct);
         db.Plays.Remove(play);
         await SaveAsync(ct);
-        await transaction.CommitAsync(ct);
         return evidence.Select(x => x.ObjectKey).ToList();
-    }
+    }, ct);
 }

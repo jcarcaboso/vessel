@@ -14,7 +14,7 @@ namespace Vessel.Tests;
 public sealed class DraftMovePostgresTests
 {
     private static PlayService Service(VesselDbContext db) =>
-        new(new PlayStore(db), new MemoryObjectStore(), new ManualTime(DateTimeOffset.UnixEpoch));
+        new(new PlayStore(db, TestUnitOfWork.For(db)), new MemoryObjectStore(), new ManualTime(DateTimeOffset.UnixEpoch), TestUnitOfWork.For(db));
 
     private static UpdatePlayRequest Update(PlayDto play, Guid accountId, string? title = null, string? review = null) =>
         new(play.Summary.Version, accountId, play.Summary.Instrument, play.Summary.InstrumentSource,
@@ -134,15 +134,15 @@ public sealed class DraftMovePostgresTests
         await moving.Database.OpenConnectionAsync();
         var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var workspace = new WorkspaceStore(disabling);
-        var disable = workspace.WithManagementLockAsync(() => workspace.WithAccountLockAsync(second.Summary.AccountId, async account =>
+        var workspace = new WorkspaceStore(disabling, TestUnitOfWork.For(disabling));
+        var disable = TestUnitOfWork.For(disabling).ExecuteAsync(() => workspace.WithManagementLockAsync(() => workspace.WithAccountLockAsync(second.Summary.AccountId, async account =>
         {
             reached.TrySetResult();
             await release.Task.WaitAsync(TimeSpan.FromSeconds(10));
             account.UpdateSettings(account.Name, account.PortfolioId, false);
             await workspace.SaveAsync(default);
             return true;
-        }, default), default);
+        }, default), default), default);
         Task<PlayDto>? move = null;
         string? waitEvent = null;
         try
@@ -228,19 +228,22 @@ public sealed class DraftMovePostgresTests
     }
 
     [PostgresFact]
-    public async Task Move_uses_an_existing_transaction_and_rolls_back_account_annotations_and_history_together()
+    public async Task Move_participates_in_outer_unit_of_work_and_rolls_back_account_annotations_and_history_together()
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var (first, second) = await Seed(database, owner);
         await using var moving = database.Context(owner);
-        await using var transaction = await moving.Database.BeginTransactionAsync();
-        var result = await Service(moving).UpdateAsync(first.Summary.Id,
-            Update(first, second.Summary.AccountId, "Tentative", "Tentative review"), default);
-        Assert.Equal(second.Summary.AccountId, result.Summary.AccountId);
-        Assert.Equal("Tentative review", result.Review);
-        await AssertUnchanged(database, owner, first);
-        await transaction.RollbackAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => TestUnitOfWork.For(moving).ExecuteAsync<bool>(async () =>
+        {
+            var result = await Service(moving).UpdateAsync(first.Summary.Id,
+                Update(first, second.Summary.AccountId, "Tentative", "Tentative review"), default);
+            Assert.Equal(second.Summary.AccountId, result.Summary.AccountId);
+            Assert.Equal("Tentative review", result.Review);
+            await AssertUnchanged(database, owner, first);
+            throw new InvalidOperationException("Roll back the outer operation.");
+        }, default));
+        Assert.Empty(moving.ChangeTracker.Entries());
         await AssertUnchanged(database, owner, first);
     }
 
