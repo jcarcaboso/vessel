@@ -21,6 +21,7 @@ const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAs
 function streamClient(fail?: () => unknown) {
   const connections: { after: string; emit: (frame: MonitorStreamEvent) => void }[] = []
   const api = {
+    monitorEvents: vi.fn().mockResolvedValue({ events: [], nextSequence: '7', resetRequired: true }),
     monitor: vi.fn().mockResolvedValue({ workerOnline: true, heartbeatAtUtc: null, accounts: [] }),
     monitorStream: vi.fn((after: string, signal: AbortSignal, emit: (frame: MonitorStreamEvent) => void) => {
       connections.push({ after, emit })
@@ -38,15 +39,16 @@ describe('finding 3: monitor stream startup and reconnect', () => {
     const reload = vi.fn()
     renderHook(() => useMonitorEvents(api, true, reload, 0))
     await advance(0)
-    act(() => connections[0]!.emit({ type: 'status', status: { state: 'ready', nextSequence: '0' } }))
+    act(() => connections[0]!.emit({ type: 'status', status: { state: 'ready', nextSequence: '7' } }))
     await advance(300)
-    expect(connections[0]!.after).not.toBe('0')
+    expect(connections[0]!.after).toBe('7')
     expect(reload).not.toHaveBeenCalled()
   })
   it('backs off when the server refuses a fifth stream with 429', async () => {
     vi.useFakeTimers()
     const { api } = streamClient(() => new ApiError('http', 'The request could not be completed.', 429, new Date(Date.now() + 5_000).toISOString()))
     renderHook(() => useMonitorEvents(api, true, vi.fn(), 0))
+    await advance(0)
     await advance(120_000)
     // Fixed 5 s retry yields ~25 attempts in two minutes.
     expect((api.monitorStream as ReturnType<typeof vi.fn>).mock.calls.length).toBeLessThanOrEqual(8)
@@ -57,10 +59,19 @@ describe('finding 4: account detail order', () => {
   it('renders the back button and heading before the monitor panel', () => {
     const api = { snapshot: vi.fn(() => new Promise(() => {})) } as unknown as WorkspaceApi
     render(<AccountDetail account={{ ...accountFixture, venueId: 'hyperliquid', syncStatus: 'synced', sourceId: '7' }} api={api}
-      refreshing={false} onSync={vi.fn()} onBack={vi.fn()} onManage={vi.fn()} monitor={{ ...monitorFixture, accountId: accountFixture.id }} />)
+      refreshing={false} onSync={vi.fn()} onBack={vi.fn()} onManage={vi.fn()} monitor={{ ...monitorFixture, accountId: accountFixture.id, state: 'stale' }} />)
     const back = screen.getByRole('button', { name: /All accounts/ })
+    const heading = screen.getByRole('heading', { name: accountFixture.name })
+    const source = screen.getByText('Source')
+    const note = screen.getByText(/Refresh account rereads supported current state/)
     const panel = screen.getByRole('region', { name: 'Background monitor' })
-    expect(back.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const tiles = screen.getByText('Available balance')
+    const order = [back, heading, source, note, panel, tiles]
+    for (let index = 1; index < order.length; index++) {
+      expect(order[index - 1]!.compareDocumentPosition(order[index]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    // The exceptional monitor badge stays inside the heading section.
+    expect(heading.closest('section')).toContainElement(screen.getByText('Monitor stale', { selector: '.monitor-badge' }))
   })
 })
 

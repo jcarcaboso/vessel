@@ -46,10 +46,7 @@ export function useMonitorRun(api: WorkspaceApi, monitor: AccountMonitor | null,
       retryAtUtc = cause instanceof ApiError ? cause.retryAtUtc : undefined
     } finally {
       if (!work.controller.signal.aborted) {
-        try { read = await api.accountMonitor(accountId, work.controller.signal); accept(read) } catch {
-          statusUnknown = true
-          error = `${error ? `${error} ` : ''}Monitor status could not be refreshed.`
-        }
+        try { read = await api.accountMonitor(accountId, work.controller.signal); accept(read) } catch { statusUnknown = true }
       }
       work.busy = false
       if (!work.controller.signal.aborted) {
@@ -60,8 +57,10 @@ export function useMonitorRun(api: WorkspaceApi, monitor: AccountMonitor | null,
     }
   }, [api, accountId])
 
-  // The completion event normally ends pending/running. A bounded stored read covers a missed event.
-  const active = !!shown && shown.manualState !== 'idle'
+  // The completion event normally ends pending/running, and a later read lifts an unknown status.
+  // A bounded stored read covers a missed event or a failed read without waiting for the parent.
+  const unknown = currentRequest?.unknownSource !== undefined && currentRequest.unknownSource === monitor
+  const active = !!shown && (shown.manualState !== 'idle' || unknown)
   useEffect(() => {
     const work = session.current
     if (!active || !accountId || !work || work.api !== api || work.accountId !== accountId) return
@@ -75,8 +74,13 @@ export function useMonitorRun(api: WorkspaceApi, monitor: AccountMonitor | null,
         api.accountMonitor(accountId, signal).then(next => {
           if (signal.aborted) return
           setResult({ api, signal: work.controller.signal, source: latest.current.monitor, monitor: next })
-          setRequest(current => current && current.api === api && current.accountId === accountId && !current.busy && current.error && !current.retryAtUtc
-            ? { ...current, error: null } : current)
+          // A fresh read restores Check (cooldown still applies) and retires non-cooldown failures.
+          setRequest(current => {
+            if (!current || current.api !== api || current.accountId !== accountId || current.busy) return current
+            const next = { ...current, error: current.retryAtUtc ? current.error : null }
+            delete next.unknownSource
+            return next
+          })
           if (next.manualState === 'idle') latest.current.onChanged?.()
           else if (polls < runPollLimit) poll()
         }).catch(() => { if (!signal.aborted && polls < runPollLimit) poll() })
@@ -95,6 +99,8 @@ export function useMonitorRun(api: WorkspaceApi, monitor: AccountMonitor | null,
     return () => clearTimeout(timer)
   }, [retryAt])
   const stale = currentRequest?.progress != null && currentRequest.progress !== progress(shown)
-  return { monitor: shown, check, busy: currentRequest?.busy ?? false, error: stale ? null : currentRequest?.error ?? null,
-    retryAtUtc: currentRequest?.retryAtUtc, statusUnavailable: currentRequest?.unknownSource !== undefined && currentRequest.unknownSource === monitor }
+  const failure = stale ? null : currentRequest?.error ?? null
+  const message = unknown ? `${failure ? `${failure} ` : ''}Monitor status could not be refreshed.` : failure
+  return { monitor: shown, check, busy: currentRequest?.busy ?? false, error: message,
+    retryAtUtc: currentRequest?.retryAtUtc, statusUnavailable: unknown }
 }

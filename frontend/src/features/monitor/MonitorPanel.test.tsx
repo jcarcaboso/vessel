@@ -247,4 +247,26 @@ describe('monitor controls', () => {
     view.rerender(<Controls api={api} monitor={{ ...monitorFixture, lastAttemptAtUtc: '2026-10-14T10:05:00Z' }} />)
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
+  it('lifts the unknown-status block on the next successful stored read without a new monitor prop, keeping the cooldown', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime('2026-10-14T10:00:00Z')
+    const api = client({
+      runAccountMonitor: vi.fn().mockRejectedValue(new ApiError('http', 'Cooling down.', 429, '2026-10-14T10:00:10Z')),
+      accountMonitor: vi.fn().mockRejectedValueOnce(new Error('Unavailable'))
+        .mockResolvedValue({ ...monitorFixture, nextManualAllowedAtUtc: '2026-10-14T10:00:20Z' }),
+    })
+    render(<Controls api={api} />)
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Check' })))
+    expect(screen.getByText(/Check is blocked until stored monitor status/)).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Monitor status could not be refreshed.')
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000) })
+    expect(api.accountMonitor).toHaveBeenCalledTimes(2)
+    expect(screen.queryByText(/Check is blocked until stored monitor status/)).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Cooling down.')
+    expect(screen.getByRole('alert')).not.toHaveTextContent('could not be refreshed')
+    expect(screen.getByRole('button', { name: /^Check in \d+s$/ })).toBeDisabled()
+    await act(async () => { await vi.advanceTimersByTimeAsync(17_000) })
+    expect(screen.getByRole('button', { name: 'Check' })).toBeEnabled()
+    expect(api.accountMonitor).toHaveBeenCalledTimes(2)
+  })
 })
