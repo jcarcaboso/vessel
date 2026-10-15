@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import select
 import shutil
 import socket
 import ssl
@@ -163,16 +164,32 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             body = json.dumps(body).encode()
         conn = self.connect()
         try:
-            try:
+            if early_response:
+                self.send_until_answered(conn, method, path, body, headers)
+            else:
                 conn.request(method, path, body, headers)
-            except (BrokenPipeError, ConnectionResetError):
-                # A proxy may reject a declared oversize body before the client finishes sending it.
-                if not early_response:
-                    raise
             response = conn.getresponse()
             return response.status, response.getheaders(), response.read()
         finally:
             conn.close()
+
+    @staticmethod
+    def send_until_answered(conn, method, path, body, headers):
+        # A proxy may answer a declared oversize body and close before the client finishes sending it. Stop sending
+        # once a response is waiting: writing on after a TLS peer closes fails (SSLEOFError on Python 3.12) and
+        # leaves the response unreadable.
+        conn.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
+        for name, value in {**headers, 'Content-Length': str(len(body))}.items():
+            conn.putheader(name, value)
+        conn.endheaders()
+        view = memoryview(body)
+        for offset in range(0, len(view), 65536):
+            if select.select([conn.sock], [], [], 0)[0]:
+                return
+            try:
+                conn.sock.sendall(view[offset:offset + 65536])
+            except (BrokenPipeError, ConnectionResetError, ssl.SSLEOFError):
+                return
 
     def malformed_chunked(self, path):
         raw = socket.create_connection(('localhost' if self.tls else '127.0.0.1', self.https_port if self.tls else self.http_port), timeout=15)
