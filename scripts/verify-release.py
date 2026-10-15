@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from dev import verification_environment
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -56,6 +57,7 @@ class Check:
         self.name = 'vessel-check-' + secrets.token_hex(5)
         self.images = {kind: f'{self.name}:{kind}' for kind in ('api', 'web')}
         self.token = secrets.token_hex(32)
+        self.s3_access, self.s3_secret = secrets.token_hex(16), secrets.token_hex(32)
         self.owner = str(uuid.uuid4())
         self.http_port, self.https_port, self.redirect_port = port(), port(), port()
         self.projects = [self.name, self.name + '-restore']
@@ -64,7 +66,7 @@ class Check:
         self.fixture = False
 
     def prepare(self):
-        for file in ('compose.yaml', 'compose.tls.yaml', 'compose.credentials.yaml', 'Caddyfile'):
+        for file in ('compose.yaml', 'compose.tls.yaml', 'compose.credentials.yaml', 'compose.storage-local.yaml', 'Caddyfile'):
             shutil.copyfile(ROOT / 'deploy' / file, self.temp / file)
         # Pick an unused subnet, not the development or deployment defaults.
         networks = [json.loads(line) for line in run('docker', 'network', 'ls', '--format', 'json', capture_output=True, text=True).stdout.splitlines()]
@@ -107,6 +109,8 @@ class Check:
         (self.temp / '.env').write_text(f'''POSTGRES_PASSWORD={secrets.token_hex(24)}
 Vessel__Auth__Token={self.token}
 Vessel__Auth__OwnerId={self.owner}
+VESSEL_S3_ACCESS_KEY_ID={self.s3_access}
+VESSEL_S3_SECRET_ACCESS_KEY={self.s3_secret}
 VESSEL_WEB_BIND=127.0.0.1:{self.http_port}
 VESSEL_NETWORK_SUBNET={network}.0/24
 VESSEL_NETWORK_GATEWAY={network}.1
@@ -122,6 +126,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
 
     def compose(self, *args, project=None, **kwargs):
         files = ['compose.yaml', 'local.yaml', 'compose.credentials.yaml']
+        if self.args.storage == 'local':
+            files.append('compose.storage-local.yaml')
         if self.tls:
             files.append('compose.tls.yaml')
         if self.fixture:
@@ -129,7 +135,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         cmd = ['docker', 'compose', '--project-directory', str(self.temp), '-p', project or self.name]
         for file in files:
             cmd += ['-f', str(self.temp / file)]
-        return run(*cmd, *args, **kwargs)
+        # The private synthetic .env must win over the caller's deployment/S3 settings.
+        return run(*cmd, *args, env=verification_environment(), **kwargs)
 
     def expect(self, condition, label, group=None):
         if not condition:
@@ -302,10 +309,14 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
 
     def restore(self):
         self.compose('stop', 'web', 'api', stdout=subprocess.DEVNULL)
+        service, directory, uid = ('rustfs', '/data', '10001') if self.args.storage == 's3' else ('api', '/var/lib/vessel/evidence', '1654')
+        if self.args.storage == 's3':
+            # RustFS stores object metadata too; take its complete volume offline.
+            self.compose('stop', 'rustfs', stdout=subprocess.DEVNULL)
         with (self.temp / 'vessel.dump').open('wb') as out:
             self.compose('exec', '-T', 'postgres', 'pg_dump', '-U', 'vessel', '-d', 'vessel', '-Fc', stdout=out)
         with (self.temp / 'evidence.tar.gz').open('wb') as out:
-            self.compose('run', '--rm', '--no-deps', '-T', '--entrypoint', 'tar', 'api', '-C', '/var/lib/vessel/evidence', '-czf', '-', '.', stdout=out)
+            self.compose('run', '--rm', '--no-deps', '-T', '--entrypoint', 'tar', service, '-C', directory, '-czf', '-', '.', stdout=out)
         # Copy the same ring bytes to a separate restoration location and mount it.
         with (self.temp / 'ring.backup').open('wb') as out:
             self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', '--entrypoint', 'sh', 'api', '-c', 'cat /run/secrets/vessel-credential-keys.json', stdout=out)
@@ -321,7 +332,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         with (self.temp / 'vessel.dump').open('rb') as source:
             self.compose('exec', '-T', 'postgres', 'pg_restore', '-U', 'vessel', '-d', 'vessel', '--no-owner', '--no-privileges', '--exit-on-error', project=project, stdin=source)
         with (self.temp / 'evidence.tar.gz').open('rb') as source:
-            self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', '--entrypoint', 'sh', 'api', '-c', 'tar -xzf - -C /var/lib/vessel/evidence && chown -R 1654:1654 /var/lib/vessel/evidence', project=project, stdin=source, stdout=subprocess.DEVNULL)
+            self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', '--entrypoint', 'sh', service, '-c',
+                         f'tar -xzf - -C {directory} && chown -R {uid}:{uid} {directory}', project=project, stdin=source, stdout=subprocess.DEVNULL)
         self.compose('run', '--rm', 'migrate', project=project, stdout=subprocess.DEVNULL)
         self.compose('up', '-d', '--wait', project=project, stdout=subprocess.DEVNULL)
         self.ready()
@@ -383,4 +395,5 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--browser-module', help='Absolute existing Playwright module path, no dependency install.')
+    parser.add_argument('--storage', choices=('s3', 'local'), default='s3', help='Storage/restore path to check (default: private RustFS).')
     Check(parser.parse_args()).main()

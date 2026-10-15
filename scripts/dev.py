@@ -33,7 +33,7 @@ def configuration():
         if key in values:
             env[key] = values[key]
     for key, value in values.items():
-        if configuration_key(key).startswith("vessel:credentials:"):
+        if configuration_key(key).startswith(("vessel:credentials:", "vessel:evidence:")):
             env[key] = value
     if values.get("ConnectionStrings__Vessel"):
         env["ConnectionStrings__Vessel"] = values["ConnectionStrings__Vessel"]
@@ -49,8 +49,18 @@ def configuration():
 
 
 def configuration_key(key):
-    # .NET accepts both separators and compares configuration keys without case.
-    return key.replace("__", ":").casefold()
+    # .NET accepts both separators, ignores case and strips these host prefixes.
+    key = key.casefold()
+    for prefix in ("dotnet_", "aspnetcore_"):
+        if key.startswith(prefix):
+            key = key[len(prefix):]
+            break
+    # .NET maps CUSTOMCONNSTR_*, POSTGRESQLCONNSTR_* and other *CONNSTR_*
+    # aliases into ConnectionStrings. Conservatively treat every such alias as secret.
+    prefix, separator, name = key.partition("_")
+    if separator and prefix.endswith("connstr"):
+        return "connectionstrings:" + name.replace("__", ":")
+    return key.replace("__", ":")
 
 
 def frontend_environment():
@@ -59,7 +69,18 @@ def frontend_environment():
     return {key: value for key, value in os.environ.items()
             if not configuration_key(key).startswith(("vessel:", "connectionstrings:"))
             and not key.casefold().startswith("infisical_")
+            and not key.casefold().startswith(("vessel_s3_", "rustfs_", "aws_"))
             and key not in ["POSTGRES_PASSWORD", "Vessel_TEST_POSTGRES"]}
+
+
+def verification_environment():
+    # Synthetic checks must not inherit a caller's owner, DB, key ring or storage.
+    # Reuse the .NET separator/case-aware filter, then remove Compose overrides.
+    return {key: value for key, value in frontend_environment().items()
+            if not key.upper().startswith(("VESSEL_", "COMPOSE_"))
+            # Do not let host settings select a caller's appsettings/secrets directory.
+            and configuration_key(key) not in ("contentroot", "environment", "applicationname",
+                                                "hostingstartupassemblies", "hostingstartupexcludeassemblies")}
 
 
 def main():

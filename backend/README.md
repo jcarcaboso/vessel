@@ -68,12 +68,19 @@ Saved Plays can hold images (`GET/POST /api/plays/{playId}/evidence`, `GET /api/
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `Vessel__Evidence__Storage__Provider` | `Local` | Storage adapter. Other values fail startup until their adapter exists. |
+| `Vessel__Evidence__Storage__Provider` | `S3` | `S3` (RustFS or another compatible service) or `Local`. Unknown providers fail startup. |
+| `Vessel__Evidence__Storage__S3__Endpoint` | `http://localhost:9000` | Server-side S3 origin; use HTTPS outside the private Docker network/loopback. No credentials, paths or queries in the URL. |
+| `Vessel__Evidence__Storage__S3__Bucket` | `vessel-evidence` | Private, pre-created bucket. |
+| `Vessel__Evidence__Storage__S3__Region` | `us-east-1` | S3 signing region. |
+| `Vessel__Evidence__Storage__S3__ForcePathStyle` | `true` | Path-style addressing for RustFS; configurable for other S3 providers. |
+| `Vessel__Evidence__Storage__S3__AccessKeyId` / `SecretAccessKey` | None | Required with `S3`, server-only configuration. Never set `VITE_*` keys. |
 | `Vessel__Evidence__Storage__Local__RootPath` | `data/evidence` | Absolute, or relative to the API content root (git-ignored). |
 | `Vessel__Evidence__MaxUploadBytes` | `10485760` | Largest accepted image. |
 | `Vessel__Evidence__MaxPerPlay` | `50` | Images per Play. |
 
-Back up the evidence directory with the database; a database backup alone does not preserve images.
+Back up the object store (or local directory) with the database; a database backup alone does not preserve images.
+See [evidence storage](../docs/architecture/evidence-storage.md) for guarantees and copying existing objects,
+and [deployment](../deploy/README.md) for private RustFS, external S3 and local-folder configurations.
 
 ## Explicit migrations
 

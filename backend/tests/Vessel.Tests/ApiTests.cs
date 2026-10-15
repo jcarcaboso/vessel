@@ -183,6 +183,7 @@ public sealed class ApiTests
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Vessel:Auth:Token"] = token,
+                ["Vessel:Evidence:Storage:Provider"] = "Local",
                 ["Vessel:Auth:OwnerId"] = ownerId ?? "11111111-1111-1111-1111-111111111111",
                 ["Vessel:Auth:OwnerName"] = ownerName ?? "Owner",
                 ["ConnectionStrings:Vessel"] = null

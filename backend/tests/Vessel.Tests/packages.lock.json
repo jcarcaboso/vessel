@@ -40,6 +40,19 @@
         "resolved": "3.1.5",
         "contentHash": "tKi7dSTwP4m5m9eXPM2Ime4Kn7xNf4x4zT9sdLO/G4hZVnQCRiMTWoSZqI/pYTVeI27oPPqHBKYI/DjJ9GsYgA=="
       },
+      "AWSSDK.Core": {
+        "type": "Transitive",
+        "resolved": "4.0.102.11",
+        "contentHash": "K9PP9/qHQ7pqSB0lYwStJrpXQ8P1xc7Fbn3CyPg8EX78p4+yz8dhIiwiRc3aVbVrUZxmPAPRvmZm+ey1euIXGg=="
+      },
+      "AWSSDK.S3": {
+        "type": "Transitive",
+        "resolved": "4.0.104.4",
+        "contentHash": "Qi+NicEv1md8Vxm6c40zf5pRsQ9DzPm4UwewjxSk4zbHpdzAMZK8bDZJGdp4Za9/vHP8GTbSdnDuseZQ5h9tmw==",
+        "dependencies": {
+          "AWSSDK.Core": "[4.0.102.11, 5.0.0)"
+        }
+      },
       "Microsoft.AspNetCore.OpenApi": {
         "type": "Transitive",
         "resolved": "10.0.10",
@@ -480,15 +493,15 @@
         "dependencies": {
           "Microsoft.AspNetCore.OpenApi": "[10.0.10, )",
           "Microsoft.OpenApi": "[2.12.2, )",
-          "Vessel.Application": "[1.0.0, )",
-          "Vessel.Infrastructure": "[1.0.0, )",
-          "Vessel.Persistence": "[1.0.0, )"
+          "Vessel.Application": "[0.1.0, )",
+          "Vessel.Infrastructure": "[0.1.0, )",
+          "Vessel.Persistence": "[0.1.0, )"
         }
       },
       "vessel.application": {
         "type": "Project",
         "dependencies": {
-          "Vessel.Domain": "[1.0.0, )"
+          "Vessel.Domain": "[0.1.0, )"
         }
       },
       "vessel.domain": {
@@ -497,7 +510,8 @@
       "vessel.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "Vessel.Application": "[1.0.0, )"
+          "AWSSDK.S3": "[4.0.104.4, )",
+          "Vessel.Application": "[0.1.0, )"
         }
       },
       "vessel.persistence": {
@@ -506,8 +520,8 @@
           "Microsoft.EntityFrameworkCore": "[10.0.10, )",
           "Microsoft.EntityFrameworkCore.Relational": "[10.0.10, )",
           "Npgsql.EntityFrameworkCore.PostgreSQL": "[10.0.3, )",
-          "Vessel.Application": "[1.0.0, )",
-          "Vessel.Domain": "[1.0.0, )"
+          "Vessel.Application": "[0.1.0, )",
+          "Vessel.Domain": "[0.1.0, )"
         }
       }
     }

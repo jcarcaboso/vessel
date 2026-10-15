@@ -1,0 +1,42 @@
+[
+  {
+    "format": "png",
+    "width": 320,
+    "height": 180,
+    "sizeBytes": 1394,
+    "sha256": "bd1ba6aec85be6a33e4cba218231438c959c1b444f9cf3d12e54504df6ebe283",
+    "browserDownloadAfterRestartMatchesOriginal": true,
+    "savedThroughBrowser": true,
+    "presentInRustfsInventory": true,
+    "apiReadAfterRestartMatchesOriginal": true,
+    "anonymousApiReadStatus": 401,
+    "browserDecodedAfterReload": true,
+    "markupTextAfterReload": "S3 verified"
+  },
+  {
+    "format": "jpg",
+    "width": 1440,
+    "height": 1056,
+    "sizeBytes": 150523,
+    "sha256": "99a3c43b74fdb548610381c655e7cac85f43804beaa58ef09657e27726419d71",
+    "browserDownloadAfterRestartMatchesOriginal": true,
+    "savedThroughBrowser": true,
+    "presentInRustfsInventory": true,
+    "apiReadAfterRestartMatchesOriginal": true,
+    "anonymousApiReadStatus": 401,
+    "browserDecodedAfterReload": true
+  },
+  {
+    "format": "webp",
+    "width": 320,
+    "height": 180,
+    "sizeBytes": 906,
+    "sha256": "e053eb73d7a80c8adccafde2c7d886be8fb6344bf59c8059f24eb8c053250ac4",
+    "browserDownloadAfterRestartMatchesOriginal": true,
+    "savedThroughBrowser": true,
+    "presentInRustfsInventory": true,
+    "apiReadAfterRestartMatchesOriginal": true,
+    "anonymousApiReadStatus": 401,
+    "browserDecodedAfterReload": true
+  }
+]

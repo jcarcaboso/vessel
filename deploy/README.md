@@ -21,13 +21,17 @@ never upgrades an installation.
 
 Install Docker Engine with Docker Compose 2.24.4 or newer on a Linux amd64 host, OpenSSL,
 `uuidgen` and Python 3. Provide persistent disk space for PostgreSQL and evidence
-images, plus a DNS name for remote TLS use. The optional TLS overlay supplies Caddy.
+images in private RustFS S3-compatible storage, plus a DNS name for remote TLS use.
+RustFS 1.0.1 is the default; local folders and external S3 remain configurable.
+The optional TLS overlay supplies Caddy.
 The optional credential-key helper needs a source checkout.
 
 Copy this `deploy/` directory to a private operator directory outside the source
 checkout. Do not reuse the development `.env`, database or LAN preview services.
 In default HTTP mode only web publishes a port. In the TLS overlay only Caddy
-publishes ports. PostgreSQL and API have no host ports.
+publishes ports. PostgreSQL, API and RustFS have no host ports; the RustFS console
+is disabled. **Existing folder installations must select the local overlay or
+complete the storage cutover below before switching to the new default.**
 
 ## Configure an installation
 
@@ -59,6 +63,10 @@ replacements = {
         subprocess.check_output(["openssl", "rand", "-hex", "48"], text=True).strip(),
     "REPLACE_WITH_GENERATED_GUID":
         subprocess.check_output(["uuidgen"], text=True).strip(),
+    "REPLACE_WITH_GENERATED_S3_ACCESS_KEY":
+        subprocess.check_output(["openssl", "rand", "-hex", "16"], text=True).strip(),
+    "REPLACE_WITH_GENERATED_S3_SECRET_KEY":
+        subprocess.check_output(["openssl", "rand", "-hex", "32"], text=True).strip(),
 }
 for placeholder, value in replacements.items():
     if text.count(placeholder) != 1:
@@ -83,6 +91,63 @@ Web is pinned to `172.30.86.10`; optional Caddy is pinned to `172.30.86.20`.
 If these overlap a host, VPN or Docker network, change `VESSEL_NETWORK_SUBNET`,
 `VESSEL_NETWORK_GATEWAY`, `VESSEL_WEB_IP` and `VESSEL_TLS_PROXY_IP` together.
 Keep both service IPs inside the subnet and distinct from its gateway.
+
+## Image storage: RustFS by default
+
+The default Compose file starts private RustFS, waits for its health check and
+runs `storage-init` once to create `VESSEL_S3_BUCKET` (default `vessel-evidence`).
+API startup waits for successful initialization as well as migrations. Re-running
+initialization does not erase the bucket. Original images live in the `objects`
+volume; notes, markup and ownership stay in PostgreSQL. All image access passes
+through the authenticated Vessel API; do not enable public bucket policies or CORS.
+
+Generate the S3 credentials above, keep `.env` private and retain the same pair
+across restarts/restores. The bundled, dedicated single-owner RustFS uses that
+pair for both administration and API access. For a shared object store, use a
+separate private bucket and bucket-scoped runtime credentials with the external
+option below; do not reuse an administrator key from another installation.
+Vessel's venue credential ring stays on its separate secret mount, never in S3.
+
+### Existing/external S3-compatible service
+
+Provision a private bucket separately and set `VESSEL_S3_ENDPOINT` (an HTTPS
+origin, without path/query/credentials), `VESSEL_S3_BUCKET`, `VESSEL_S3_REGION`,
+`VESSEL_S3_ACCESS_KEY_ID` and `VESSEL_S3_SECRET_ACCESS_KEY`. Set
+`VESSEL_S3_FORCE_PATH_STYLE=false` if the provider requires virtual-host addressing.
+Grant the API only `s3:GetObject`, `s3:PutObject` and `s3:DeleteObject` on that
+bucket's objects. Keep list/create/backup privileges with the operator.
+
+```sh
+docker compose -f compose.yaml -f compose.storage-external.yaml up -d
+```
+
+This omits the bundled RustFS and initializer. API startup validates configuration
+but does not provision or probe an external bucket. The provider must support
+atomic conditional PUT (`If-None-Match: *`); never weaken this to allow overwrites.
+Use the provider's backup/restore process, not the RustFS volume commands below.
+
+### Local folder / preserving an existing installation
+
+```sh
+docker compose -f compose.yaml -f compose.storage-local.yaml up -d
+```
+
+This selects `Local`, omits RustFS/initialization and retains the original
+`evidence:/var/lib/vessel/evidence` volume. S3 credentials are not needed. Keep the
+same Compose project name to reuse existing data. Outside Docker, select
+`Vessel__Evidence__Storage__Provider=Local` and optionally
+`Vessel__Evidence__Storage__Local__RootPath`.
+
+Include your selected storage overlay on **every** Compose command, together
+with TLS/credential overlays when used. Do not enable the internal
+`unused-storage` profile. Local and external overlays are alternatives.
+
+Changing provider does **not** move existing files. Stop writers, copy every
+original with its existing `owner/play/image.ext` key and verify sizes/SHA-256
+before switching; see [the cutover checklist](../docs/architecture/evidence-storage.md).
+No database migration is needed. These changes require a newly built/published
+API image containing the S3 adapter; API images without this adapter support
+only local storage. Do not apply the new Compose default to an old image.
 
 ## Optional Lighter credential storage
 
@@ -334,8 +399,9 @@ umask 077
 mkdir -p backups
 docker compose stop web api
 docker compose exec -T postgres pg_dump -U vessel -d vessel -Fc > backups/vessel.dump
-docker compose run --rm --no-deps --entrypoint tar api \
-  -C /var/lib/vessel/evidence -czf - . > backups/evidence.tar.gz
+docker compose stop rustfs
+docker compose run --rm --no-deps -T --entrypoint tar rustfs \
+  -C /data -czf - . > backups/objects.tar.gz
 docker compose up -d
 ```
 
@@ -344,10 +410,20 @@ separate protected destination. Save the owner GUID and operator settings
 privately too. Do not put the keys inside the database or evidence archive.
 PostgreSQL 18 stores its data below the named volume mounted at
 `/var/lib/postgresql`. Do not copy a live data directory as a substitute for
-`pg_dump`. Evidence uses its own named volume at `/var/lib/vessel/evidence`,
-writable by the non-root API. Restore both and the same key ring into a
+`pg_dump`. RustFS uses the named `objects` volume at `/data`, owned by UID 10001.
+Archive the **entire** stopped volume, including RustFS metadata, and initially
+restore with the same RustFS version. This is not a directory of original images;
+use the S3 API for cross-provider copies. Restore it, the database and the same key ring into a
 disposable deployment before relying on the procedure. The local release
 verification exercises the restore below with synthetic records and evidence.
+
+With `compose.storage-local.yaml`, keep web/API stopped but replace the RustFS
+stop/archive commands with:
+
+```sh
+docker compose -f compose.yaml -f compose.storage-local.yaml run --rm --no-deps -T \
+  --entrypoint tar api -C /var/lib/vessel/evidence -czf - . > backups/evidence.tar.gz
+```
 
 ## Isolated restore
 
@@ -374,12 +450,16 @@ docker compose -p vessel-restore-check exec -T postgres \
 # docker compose -p vessel-restore-check exec -T postgres \
 #   psql -U vessel -d vessel -v ON_ERROR_STOP=1 < /private/backups/vessel.sql
 
-# Extract only your trusted evidence archive. API is stopped; root fixes ownership.
+# Extract only your trusted RustFS archive before RustFS/API start.
 docker compose -p vessel-restore-check run --rm --no-deps -T \
-  --user 0 --entrypoint sh api -c \
-  'tar -xzf - -C /var/lib/vessel/evidence && chown -R 1654:1654 /var/lib/vessel/evidence' \
-  < /private/backups/evidence.tar.gz
+  --user 0 --entrypoint sh rustfs -c \
+  'tar -xzf - -C /data && chown -R 10001:10001 /data' \
+  < /private/backups/objects.tar.gz
 ```
+
+For a local-folder backup, include `compose.storage-local.yaml`, restore
+`evidence.tar.gz` using service `api`, path `/var/lib/vessel/evidence` and UID/GID
+`1654:1654` instead. Never extract a RustFS archive into the API's evidence root.
 
 Place the original credential ring in a separate mode-700 secret directory,
 not the operator directory, database or evidence archive. Preserve every original
@@ -423,6 +503,10 @@ database, pushes images or calls a registry login. Public image pulls are needed
 
 ```sh
 python3 scripts/verify-release.py
+# Retained local-folder deployment and restore:
+python3 scripts/verify-release.py --storage local
+# Smaller real-S3 protocol/authorization check (no database or app image build):
+python3 scripts/verify-evidence-storage.py
 # Optional production browser CSP check, using an already available Playwright:
 python3 scripts/verify-release.py --browser-module /absolute/path/to/playwright
 # When Playwright's default browser is unavailable, set CHROMIUM_PATH to a
@@ -450,7 +534,7 @@ failure categories, not raw dependency details.
 
 - `/health/live` only proves the API process responds.
 - `/health/ready` returns 200 when PostgreSQL is reachable and there are no pending
-  migrations. A 503 reveals no database details. It does not verify venue access.
+  migrations. A 503 reveals no database details. It does not verify venue or object-store access.
 - If API does not start, check the generated token length, owner GUID, migration
   exit status, database health and optional key-file mode/readability.
 - If Lighter reports insecure transport, check HTTPS and trusted proxy addresses.
@@ -461,6 +545,10 @@ failure categories, not raw dependency details.
 - If a different non-Docker deployment mounts an existing evidence directory,
   ensure UID 1654 can write it. Docker initializes a fresh named volume with the
   image directory's ownership.
+- For S3 failures, check `storage-init` exit status, RustFS health, bucket name
+  and server-only credentials without printing them. Confirm an authenticated
+  upload/read, not just API readiness. Missing bucket/access/outage errors do not
+  fall back to local files.
 
 ## Build locally from source
 

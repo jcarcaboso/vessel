@@ -51,7 +51,15 @@ corepack install
 pnpm install --frozen-lockfile
 ```
 
-Configure private values in the ignored root `.env` as described in [development setup](docs/development.md), then:
+Configure private values in the ignored root `.env` as described in [development setup](docs/development.md).
+
+Saved images default to private S3-compatible storage (RustFS recommended).
+Configure a pre-created bucket and server-only credentials, or explicitly set
+`Vessel__Evidence__Storage__Provider=Local` for local-folder development.
+The [deployment examples](deploy/README.md) provision private RustFS by default;
+[existing-image cutover](docs/architecture/evidence-storage.md) is explicit.
+
+Then start development:
 
 ```sh
 pnpm db:up

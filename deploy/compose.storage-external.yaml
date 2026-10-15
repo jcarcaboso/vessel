@@ -1,0 +1,10 @@
+# Use an existing PRIVATE S3-compatible bucket; Vessel never creates it at runtime.
+services:
+  rustfs:
+    profiles: ["unused-storage"]
+  storage-init:
+    profiles: ["unused-storage"]
+  api:
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
