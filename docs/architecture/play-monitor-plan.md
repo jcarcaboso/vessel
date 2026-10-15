@@ -33,8 +33,9 @@ Settled on October 15, after review of the stack and before any of it merged:
 - **No production subscription yet.** The placeholder `monitor` event consumer is removed. Tests and the release check use a verification subscription. The Notification Hub will be the first real one.
 - **Notification Hub boundary.** A future single `notifications` subscription owns per-owner rules and hands work to per-provider queues. Only the boundary is fixed here; it has its own plan. See [Notification Hub](#notification-hub-future).
 - **Messaging is one adapter, features are modules.** Wolverine and RabbitMQ code leaves `Vessel.Persistence` for one messaging infrastructure project. Feature modules (monitor now, notifications later) register their own topology, handlers and hosted services. The worker image runs the modules named in `Vessel:Worker:Modules`, so modules can scale as separate services. See [Modules and hosts](#modules-and-hosts).
-- **Neutral event names.** Events already cover monitor and credential changes, so `PlayEvent` becomes `VesselEvent` and the tables lose their `play_` prefix. Type strings and the catalogue do not change.
-- **Contract corrections.** Optional fields serialize as explicit `null`; events within one transaction are sequenced in causal order; account deletion removes that account's event identities. See [Event contract](#event-contract).
+- **Neutral event names.** Events already cover monitor and credential changes, so `PlayEvent` becomes `VesselEvent` and the tables lose their `play_` prefix. Type strings do not change.
+- **Contract corrections.** Optional fields serialize as explicit `null`; events within one transaction are sequenced in causal order; account deletion removes that account's event identities. The catalogue's dedup keys now match the code, and `monitor.run-completed` is added. See [Event contract](#event-contract).
+- **Delivery contract tightened** after an independent review: inline listeners with receipt-driven settlement, one dispatcher for live delivery and catch-up, an explicit watermark and retention protocol, immutable filters, a mandatory epoch rotation on restore, and starting defaults. See [Topics, subscriptions and delivery](#topics-subscriptions-and-delivery).
 - **Review corrections** to the unit of work, worker and discrepancy rules are recorded in [Review corrections, October 15](#review-corrections-october-15).
 - **Migrations change in place.** Nothing in the stack is merged or deployed, so its migrations are edited in place instead of adding rename migrations. Any development database that applied the branch migrations must be recreated.
 
@@ -103,9 +104,9 @@ W0 recommends keeping Wolverine behind these ports rather than writing a replace
 
 ### Modules and hosts
 
-- **One messaging adapter.** Wolverine and RabbitMQ code moves out of `Vessel.Persistence` into one infrastructure project, `Vessel.Messaging`. It references Application and Persistence and plugs into the unit of work through Persistence's participant hook. Persistence keeps the event tables, cursor, dedup and receipts, and references no Wolverine or RabbitMQ package. The architecture tests encode this direction: Domain → nothing; Application → Domain; Persistence → Application, Domain; Messaging → Application, Persistence; API and Worker → the projects they compose. Domain and Application keep no package references.
-- **Feature modules.** A small Vessel-owned module contract lets each feature declare its own services, subscriptions (name, filters, ordering, limits, handler), command queues and handlers, and hosted services. The messaging adapter turns those declarations into Wolverine and RabbitMQ configuration. Its core holds no feature names, and no central function hard-codes API or worker roles. A module has two sides: what any host needs in order to publish to it (for example the `RunAccountMonitor` route), and what a host that runs it adds (listeners, handlers, schedulers).
-- **Worker modules by configuration.** `Vessel:Worker:Modules` lists the modules a worker runs, default `["monitor"]`. The monitor worker (Compose service `worker`) and, later, `worker-notifications` are separate services from the same image and scale independently. An unknown module name stops startup.
+- **One messaging adapter.** Wolverine and RabbitMQ code moves out of `Vessel.Persistence` into one infrastructure project, `Vessel.Messaging`. It references Application and Persistence and plugs into the unit of work through Persistence's participant hook. Persistence keeps the event tables, cursor, dedup and receipts, and references no Wolverine or RabbitMQ package. The architecture tests encode this direction with new rows for Messaging and Worker: Domain → nothing; Application → Domain; Persistence → Application, Domain; Messaging → Application, Persistence; API and Worker → the projects they compose, including Messaging. Domain and Application keep no package references.
+- **Feature modules.** A small Vessel-owned module contract lets each feature declare its services, subscriptions (name, filter, limits, handler), command queues and handlers, and hosted services. Shared transport and module descriptors live in `Vessel.Messaging` (for example `Modules/Monitor`), business ports in Application, and worker-only hosted-service registration in `Vessel.Worker`. A small explicit registry lists the compiled-in modules; there is no plugin discovery. No central function hard-codes API or worker roles. A module has two sides: what any host needs in order to publish to it (for example the `RunAccountMonitor` route), and what a host that runs it adds (listeners, handlers, schedulers).
+- **Worker modules by configuration.** `Vessel:Worker:Modules` lists the modules a worker runs, default `["monitor"]`. The monitor worker (Compose service `worker`) and, later, `worker-notifications` are separate services from the same image and scale independently. An unknown module name stops startup. Changing a deployment's module set needs an explicit drain of its envelope schema first.
 - **Replica-safe maintenance.** Catch-up and retention sweeps run in workers and are safe with several replicas: claims use `FOR UPDATE SKIP LOCKED` or advisory locks. A subscription's catch-up runs in the deployment that hosts that subscription.
 - **Provisioning covers every module.** The explicit provision step declares the topology of every known module and registers their subscriptions, whichever modules a given deployment runs. Runtime never declares topology.
 
@@ -151,15 +152,15 @@ Clarified on October 15:
 | `event_dedup` | Dedup key → event ID, with the subject account; survives pruning | Same transaction |
 | `event_baselines`, `event_fills` | Per account watch start and known fill identities; survive pruning | Same transaction |
 | Outbox envelope (Wolverine, PostgreSQL) | One copy per event or command waiting to be sent to RabbitMQ; removed once the broker confirms | Same transaction |
-| `event_subscriptions` | Per owner and subscription: owner module, the sequence it became responsible from, the low-water mark of contiguous settled sequences, lag status and any explicit gap | Provision step; then by the subscriber |
+| `event_subscriptions` | Per owner and subscription: owning module, filter fingerprint, the sequence it became responsible from, the low-water mark, lag status and any explicit gap | Inserted by the provision step; then advanced by the subscriber |
 | `event_receipts` | Per subscription and event: `pending`, `delivered`, `skipped`, `expired` or `failed`, attempts, next attempt, safe error | By the subscriber only |
 | `monitor_accounts` | The record of pending manual monitor requests (see [Scheduling](#scheduling-and-the-unit-of-work)) | Same transaction as the admission |
-| RabbitMQ exchange, queues and dead-letter queues | Messages in transit, and messages a subscriber gave up on | By the relay and the broker |
+| RabbitMQ exchange, queues and dead-letter queues | Messages in transit, and diagnostic copies of dead-lettered deliveries | By the relay and the broker |
 
 Publishers write no per-subscriber rows. The earlier `event_deliveries` and `play_event_envelopes` tables, the `Vessel:Events:DurableConsumers` setting and the republish sweep are removed.
 
-- **Broker recovery.** PostgreSQL holds retained events and each subscription's progress. An empty or lost broker delays delivery but loses nothing for a registered subscription: its catch-up sweep finds unsettled events in the database. Pending manual monitor requests also live in PostgreSQL, so command recovery does not depend on the broker. Queues and bindings are still provisioned before publishers start, for timeliness; a dropped or unroutable publish is no longer a loss. Broker volume backups stay optional, provided this path passes the release test. Lost broker diagnostics and dead-letter contents are not reconstructed.
-- **At-least-once delivery.** A receipt is unique per owner, subscription and event. Handlers are idempotent on the event ID. Database-only effects and the receipt commit together. An external send followed by a crash can still repeat after retry; restoring an older database can also lose receipts for messages already sent. The Notification Hub must handle those limits rather than promise exactly-once delivery.
+- **Broker recovery.** PostgreSQL holds retained events and each subscription's progress. An empty or lost broker delays delivery for a registered subscription: its catch-up sweep finds unsettled events still in retained history. Pending manual monitor requests also live in PostgreSQL, so command recovery does not depend on the broker. Queues and bindings are still provisioned before publishers start, for timeliness; a dropped or unroutable publish is no longer a loss. Broker volume backups stay optional, provided this path passes the release test. Lost broker diagnostics and dead-letter contents are not reconstructed.
+- **At-least-once delivery** within each subscription's retained responsibility window, with explicit terminal failures and gaps. A receipt is unique per owner, subscription and event. Handlers are idempotent on the event ID. Database-only effects and the receipt commit together. An external send followed by a crash can still repeat after retry; restoring an older database can also lose receipts for messages already sent. The Notification Hub must handle those limits rather than promise exactly-once delivery.
 - **Catch-up cursor.** A fixed overlap does not make an ordinary database sequence safe against a transaction that commits late. Event numbers are allocated through one owner cursor row, held until the event transaction commits. Allocate near the end of the transaction, in a consistent lock order, with no network calls. A sequence below the cursor can therefore never appear later, so readers and low-water marks can advance safely, and a missing sequence (removed with a deleted account) counts as settled. A cursor outside retained history, from another stream epoch or ahead of the database returns an explicit reset requiring a state reload.
 - **Retention:** `Vessel:Events:RetentionDays`, default 90 for every event type, confirmed by the owner. See [Retention](#retention) for how subscriptions hold it. Event deduplication/baseline records survive history pruning so an old fill cannot become a new event. A Play's history does not depend on events: status changes, plan revisions, links, fills and discrepancies keep it.
 
@@ -176,15 +177,16 @@ Publishers write no per-subscriber rows. The earlier `event_deliveries` and `pla
   - a named volume for durable queues, excluded from backups;
   - quorum queues on a single node;
   - both publisher-confirmation switches enabled explicitly;
-  - durable exchanges, queues, dead-letter queues and topic bindings provisioned before producers start, by the explicit provision step only. W0 confirmed that an unbound topic can be acknowledged and removed from the outbox without delivery; with subscriber-side catch-up that costs latency, not data. Confirmations do not replace topology validation or subscriber receipts;
+  - durable exchanges, queues and topic bindings, with each queue's dead-letter exchange, routing and dead-letter queue, provisioned before producers start, by the explicit provision step only. W0 confirmed that an unbound topic can be acknowledged and removed from the outbox without delivery; with subscriber-side catch-up that costs latency within the retention window, not data. Confirmations do not replace topology validation or subscriber receipts;
   - plain AMQP inside the private Compose network, the same trust boundary as API → PostgreSQL today. TLS is required if the broker ever leaves the host.
   - Upgrades follow RabbitMQ's rule of enabling all feature flags before the next version.
 - **Migrations:** keep `AutoBuildMessageStorageOnStartup = AutoCreate.None`. The one-shot `migrate` path applies the existing EF bundle, then the explicit provision step: `IHost.SetupResources()` for every deployment's envelope storage, the broker topology of every module, and subscription registrations. W0 proved this setup path and missing-storage startup rejection in 6.50.0. Envelope mappings are excluded from EF migrations; they do not provision the full Wolverine schema. Keep the default storage-error policy and durability agents enabled. Missing-table checks are not a complete schema-drift check, so upgrades also require storage validation.
-- **Envelope isolation:** use `wolverine_api` and `wolverine_worker` schemas in the same database, with distinct service names. A service name alone does not isolate recovery. Replicas of the same deployment share its schema; a worker deployment with a different module set (for example `worker-notifications`) gets its own schema and service name, so one deployment never recovers envelopes it has no route for. Do not confuse Wolverine's envelope node-owner number with Vessel's journal owner ID.
+- **Envelope isolation:** one schema per logical deployment, with explicit configured names and service names in the same database: `wolverine_api`, `wolverine_monitor` and later `wolverine_notifications`. A service name alone does not isolate recovery. Replicas of one deployment share its schema; startup rejects reuse of a schema by a deployment with a different module set, so no deployment recovers envelopes it has no route for. Do not confuse Wolverine's envelope node-owner number with Vessel's journal owner ID.
 - **Runtime packaging:** the tested option is `WolverineFx.RuntimeCompilation` with dynamic handlers in the runtime-only .NET 10 image, non-root and with a read-only application directory. No SDK is required in that tested image. Pregenerated handlers remain an optional, untested alternative. Pin the tested package family and reconcile EF Design/tooling versions during authorized integration; do not silently upgrade Vessel's EF runtime.
 - **Credentials overlay:** mounts the key ring read-only into the worker as well, since it opens Lighter read tokens. The API still seals them. The worker never logs or forwards a token.
 - **Heartbeat:** the worker writes a heartbeat row (instance, version, modules, started, last beat), which the API reports so the UI can say "Monitor offline". It also writes a heartbeat file that its Docker healthcheck reads. Both advance only after a productive scheduling pass (see [Health and visibility](#health-and-visibility)), not on liveness alone.
 - **Upgrades and backups:** stop web, api and every worker service before a backup or upgrade, then run migrate (EF bundle and provisioning) and start them again. A worker stopped during a run loses nothing: runs are idempotent, so the next run repeats the work.
+- **Restore:** stop every host → restore the database → `rotate-event-epoch` → provision → start. The rotation is mandatory; see [Browser live updates](#browser-live-updates).
 
 ### Owner scope in the worker
 
@@ -196,7 +198,7 @@ Publishers write no per-subscriber rows. The earlier `event_deliveries` and `pla
 
 - **Unit:** one account. All its Planned, Paused and Open venue Plays share one run.
 - **Eligible accounts:** enabled; venue with the `Sync` and `Orders` capabilities; a source identity; and at least one Planned, Paused or Open venue Play, or a Closed or Cancelled Play with linked exits or entries that may still be resting. Keep checking those orders at the normal interval until fresh evidence confirms they are no longer resting, even if the owner dismisses their warning. This lets `protection.orphaned` and `entry.orphaned` be detected and cleared after the last active Play closes. A required credential that is missing or unusable suspends venue reads and leaves a visible `credential-error`, rather than making the account disappear from monitoring.
-- **Exit watches:** a watch resolves when a read reports that specific order in a terminal state (filled, cancelled, rejected), whether or not the read covers the whole open-order book. Concluding that the order is gone from its absence still needs a complete open-order read. A watch has a bounded, configurable lifetime; a venue that can never report completeness ends it with a visible `unverifiable` outcome rather than watching forever or claiming the order is gone.
+- **Exit and entry-orphan watches:** a watch resolves when a read reports that specific order in a terminal state (filled, cancelled, rejected), whether or not the read covers the whole open-order book. Concluding that the order is gone from its absence still needs a complete open-order read. A watch lasts at most 7 days (configurable). After that it ends with a persistent, visible `unverifiable` outcome: it never resolves the orphan discrepancy or claims the order is gone.
 - **`monitor_accounts`:** one row per account holding:
   - state, interval and `next_run_at`;
   - lease holder and `lease_until`;
@@ -254,10 +256,12 @@ A discrepancy is a flagged record. It never changes a status or a link. It opens
 
 Targets smaller than the position are not flagged, because scaling out is normal.
 
-Whole-position stops and coverage (October 15):
-- **Shared whole-position orders.** A resting whole-position stop or target (for example a Hyperliquid position TP/SL) linked to any Open Play on the instrument covers every Open Play there. When the venue position equals the expected total, `protection.missing` is false for the siblings too. Otherwise their coverage is unknown, never a critical missing stop. One account-level order is never counted independently for several Plays.
-- **Single Play.** With exactly one Open Play on the instrument and the venue position equal to its open quantity, a whole-position stop establishes coverage, so `protection.short`, `protection.excess` and `protection.cancelled` are decidable for it.
-- **Unknown is not degraded.** Coverage that is structurally unknown (for example siblings sharing an order while the position differs) is shown as unknown and does not degrade the monitor. Only missing or stale evidence (an incomplete or failed read, a history gap) does.
+Whole-position orders and coverage (October 15):
+- **Stops and targets are separate.** Stop coverage and target coverage are evaluated separately; a target never establishes stop protection.
+- **Shared whole-position stop.** A resting whole-position stop (for example a Hyperliquid position SL) linked to an Open Play covers its sibling Open Plays only when it is on the same account and native contract, is an actual stop, and closes on the side compatible with their exposure. Then, when the venue position equals the expected total, `protection.missing` is false for the siblings. Otherwise their coverage is unknown, never a critical missing stop. One account-level order is never counted independently for several Plays.
+- **Opposing Plays.** When opposite Plays net out on a one-way account, per-Play protection is unknown unless the allocation of protection to each Play is demonstrable. Equality of the net position alone never establishes per-Play protection.
+- **Single Play.** With exactly one Open Play on the instrument and the venue position equal to its open quantity, a whole-position stop establishes its stop coverage, so `protection.short`, `protection.excess` and `protection.cancelled` are decidable for it.
+- **Unknown is not degraded.** Coverage that is structurally unknown (shared stops while the position differs, netted opposite Plays) is shown as unknown and does not degrade the monitor. Only missing or stale evidence (an incomplete or failed read, a history gap) does.
 - **Reduce-only orders** cannot flip a position. They do not count towards `protection.excess` when the Play is the only Open Play on the instrument; the check stays when siblings exist.
 - **One record per cause.** For the same orders, `protection.cancelled` supersedes `protection.missing` and `protection.short`: one record, not two or three.
 - **`level.drift` is decided per order.** It is raised if any priced linked order drifts; it is unknown only for unpriced orders.
@@ -281,7 +285,7 @@ Whole-position stops and coverage (October 15):
 - the note;
 - details with exact decimal strings.
 
-One open record exists per account, kind and subject. When an open record's details change (a partial fill, a quantity change), its details are updated in place without a new `discrepancy.opened`; its identity and `OpenedAt` are kept. Only a resolved or dismissed record can re-open.
+One open record exists per account, kind and subject. When an open record's details change (a partial fill, a quantity change), its details are updated in place and no event is emitted; its identity and `OpenedAt` are kept. Only a resolved or dismissed record can re-open; re-opening increments its revision, so it raises a new `discrepancy.opened`.
 
 **Evaluation loads only what it needs:** Open Plays, terminal Plays still under exit or entry-orphan watch, and fills on the relevant contracts and orders since the earliest open entry. There are no growth-based caps that disable every check once an account has a long history.
 
@@ -337,10 +341,13 @@ Discrepancies are evaluated on the current state, so a problem that resolved its
 | `execution.filled` | New linked fill quantity on an entry, stop, target or exit order; `complete` says whether the order is fully filled | info; warning for stops | `order:{accountId}:{orderId}:filled:{cumulativeQuantity}` |
 | `link.needs-confirmation` | An ambiguous order became a suggestion | warning | `link:{linkId}:suggested` |
 | `execution.link-changed` | An owner or the matcher links, confirms, unlinks or dismisses a link; data carries previous/current state | info | Stable link-change identity allocated with the mutation |
-| `discrepancy.opened` | A confirmed discrepancy; data carries its kind and details | per kind | `discrepancy:{id}:opened` |
-| `discrepancy.resolved` | Cleared or dismissed | info | `discrepancy:{id}:resolved` |
-| `monitor.state-changed` | An account moves between monitor states | warning when leaving `live`, info when returning | `monitor:{accountId}:{state}:{since}` |
-| `credential.expiring` | A read-only token expires within 14 days | warning | `credential:{accountId}:{expiresAt}:expiring` |
+| `discrepancy.opened` | A confirmed discrepancy opens or re-opens; data carries its kind and details. Updates to an open record emit nothing. | per kind | `discrepancy:{id}:{revision}:opened` |
+| `discrepancy.resolved` | Cleared or dismissed | info | `discrepancy:{id}:{revision}:resolved` |
+| `monitor.state-changed` | An account moves between monitor states | warning when leaving `live`, info when returning | `monitor:{accountId}:{generation}:{state}` |
+| `monitor.run-completed` | An owner-requested run completes | info | `monitor-run:{accountId}:{requestId}` |
+| `credential.expiring` | A read-only token expires within 14 days | warning | `credential:{accountId}:{credentialRevision}:expiring` |
+
+A state transition outside a monitor run (for example on account disable) needs its own persisted identity for the `{generation}` part, never a value recomputed at read time.
 
 Versioning:
 - Adding optional fields keeps the version.
@@ -356,57 +363,80 @@ Fill accounting cannot rely on the 90-day event history. Keep a durable source-i
 
 ## Topics, subscriptions and delivery
 
-Settled by the owner on October 15. The model is Azure Service Bus topics and subscriptions, built on RabbitMQ through Wolverine.
+Settled by the owner on October 15. The model is Azure Service Bus topics and subscriptions, built on RabbitMQ through Wolverine. Delivery is at least once within each subscription's retained responsibility window, with explicit terminal failures and gaps.
 
 ### Topic
 
 - **One topic:** the durable topic exchange `vessel.events`. The routing key is the event type, for example `play.closed`.
-- **Publishers** (the API and worker modules) append the event and its outbox envelope in the unit of work and publish it once after commit. They know nothing about subscriptions and write no per-subscriber rows.
+- **Publishers** (the API and worker modules) append the event and its outbox envelope in the unit of work and publish it once after commit, through Wolverine's durable outbox. They know nothing about subscriptions, write no per-subscriber rows and never inspect which versions subscribers support.
 
 ### Subscriptions
 
 - **One durable quorum queue per subscriber:** `vessel.events.sub.<name>`. Its bindings are its filter rules, for example `play.#` or `discrepancy.*`.
-- **Limits:** a delivery limit (`x-delivery-limit`) and its own dead-letter queue, `vessel.events.sub.<name>.dlq`. Single-active-consumer when the subscriber needs ordering.
-- **Ownership:** the subscribing module declares the subscription. Only the explicit provision step creates the queue, bindings and dead-letter queue, and registers the subscription in PostgreSQL. Nothing is declared at runtime.
-- **Acknowledgement:** a subscription listener acknowledges a message only after its receipt has committed, so the broker's delivery limit counts real failures. The receipt, not Wolverine's envelope inbox, is the deduplication record.
+- **Immutable filter.** A subscription name's filter never changes. Its registration stores a filter fingerprint, and provisioning rejects a changed filter; a different filter needs a new name.
+- **Dead-lettering:** provisioning declares the queue's dead-letter exchange, routing and bound queue `vessel.events.sub.<name>.dlq`, and a quorum delivery limit (`x-delivery-limit`, default 20). The delivery limit is only a transport guard; receipt attempts are the business retry limit.
+- **Ownership:** the subscribing module declares the subscription. Only the explicit provision step creates the topology and registers the subscription in PostgreSQL. Nothing is declared at runtime.
+- **Unordered in this stack.** For a later ordered subscription: it serializes advancement in PostgreSQL and drains in sequence order, with broker delivery only waking it. Single-active-consumer is an optimization there, not the source of correctness.
+- **Versions.** A subscriber that receives an event version it does not support records a visible subscription failure. Compatibility comes from upgrading the subscriber, an upcaster or a coordinated release, never from producers checking.
 
 ### Subscriber state in PostgreSQL
 
-- **Registration** (`event_subscriptions`): name, owner, owning module, the sequence it became responsible from, a low-water mark of contiguous settled sequences, lag status and any explicit gap. A subscription added later is not responsible for earlier history: it starts from the owner's current sequence when it is registered.
-- **Receipts** (`event_receipts`): per subscription and event, `pending`, `delivered`, `skipped`, `expired` or `failed`, with attempts, next attempt time and a safe error.
-- **Settled** means a terminal receipt (`delivered`, `skipped`, `expired`, `failed`) or an event outside the subscription's filter. The low-water mark advances over contiguous settled sequences; because sequences are commit-ordered, a missing sequence below the cursor is settled too.
+- **Registration** (`event_subscriptions`): name, owner, owning module, filter fingerprint, the sequence it became responsible from, a low-water mark, lag status and any explicit gap. A new subscription starts at the owner's current sequence unless an explicit replay is requested. Provisioning is insert-only for an existing registration: it never resets its start or progress.
+- **Receipts** (`event_receipts`): per owner, subscription and event, `pending`, `delivered`, `skipped`, `expired` or `failed`, with attempts, next attempt time and a safe error.
 
-### Processing
+### One dispatcher
 
-- The handler is idempotent on the event ID. It reads the event by ID from PostgreSQL, which is authoritative over the message body. Its database-only effects and the receipt commit in one transaction.
-- A message is never settled from its body alone. One whose event is not in the database (for example after a database restore) is dead-lettered and logged by IDs. One the subscription is not responsible for, or already settled, is acknowledged without effect.
-- An owner-mismatched message is rejected to the dead-letter queue and logged by IDs, never silently acknowledged.
-- Delivery stays at least once. External sends can repeat.
+Live delivery and catch-up use the same dispatcher. In one transaction it:
+1. acquires and locks the receipt for (owner, subscription, event), creating it if absent;
+2. checks the owner, that the event exists and is at or above the logical retention floor, the subscription's responsibility, terminal state, expiry, retry deadline and attempts;
+3. runs the handler's database-only effects;
+4. settles the receipt.
+
+Subscription handlers in this stack are database-only. The Notification Hub later enqueues provider work transactionally; nothing sends externally while holding the receipt lock.
+
+### Settlement
+
+Event-subscription and command listeners use Wolverine's inline listener mode, not the durable inbox: a 6.50 durable-inbox listener persists and settles the broker delivery before the handler runs, and on RabbitMQ 4.3 a nack does not count towards `x-delivery-limit`. The durable outbox stays. A pinned-version integration test proves this behavior.
+
+| Outcome | Database | Broker delivery |
+|---|---|---|
+| Success | Effects and terminal receipt commit together | Ack after commit |
+| Retryable failure | Effects roll back; the receipt durably records the attempt, `pending` and `next_attempt_at` | Ack: catch-up owns the retry |
+| Terminal failure (attempt cap, unsupported version) | Receipt commits `failed` | Dead-letter, for diagnosis |
+| Invalid owner, unknown event | No effects, no receipt | Dead-letter, logged by IDs |
+| Already settled, not responsible, below the floor | No effects | Ack |
+
+Commands have no event receipts. For `RunAccountMonitor`, the pending request in `monitor_accounts` and its request ID are the durable hand-off and dedup: the listener acks once the command is validated against that work. Venue polling belongs to the scheduler and run executor, not the listener.
+
+### Dead-letter queues
+
+Dead-letter queues are diagnostic transport artifacts, not authoritative work. Receipt state controls retries. Broker redrive from a dead-letter queue never reopens a terminal receipt. An explicit, bounded admin command retries or resets retained `failed` receipts and preserves their attempt history.
 
 ### Catch-up
 
 Recovery is subscriber-side; there is no producer-side republish loop.
-- A bounded catch-up sweep per subscription reads committed events after its low-water mark that match its filter, are older than a grace period and have no terminal receipt.
-- It processes them from the database, through the same handler, without republishing through the broker.
-- Retries back off exponentially. After the attempt cap the receipt is `failed`, which is visible. An event past its `expiresAt` is recorded `expired` instead of sent.
-- The sweep covers a lost broker, an unroutable publish, a dead-lettered message and a subscriber that was down.
+- A bounded sweep per subscription (every 30 s, batch 100) dispatches committed events after its low-water mark that match its filter, were detected more than 30 s ago and have no terminal receipt or a due retry.
+- Retries share one attempt cap (12) across live delivery and catch-up, backing off from 1 minute, doubling to 1 hour, with ±20% jitter. An event past its `expiresAt` settles `expired`.
+- The sweep covers a lost broker, an unroutable publish, a dead-lettered or acked-for-retry message and a subscriber that was down.
 
-### Retention
+### Watermarks and retention
 
-- Retention deletes only a contiguous prefix of events, all older than `RetentionDays` and none above the lowest low-water mark of the active subscriptions. Their receipts go with them.
-- A subscription whose low-water mark falls behind the retention window is marked `lagging` and stops holding retention. The pruned range becomes an explicit gap on its registration, visible in health. Deregistering a subscription releases it.
-- Retention never holds the owner cursor lock while it scans. It raises the retention floor in a short transaction, so readers stop asking for the range, then deletes below the floor with set-based batches.
+- **Low-water mark.** Advancement captures a committed high-water sequence, then moves the mark monotonically (under the subscription lock or compare-and-set) across a bounded prefix in which every sequence is settled: an event outside the filter, a terminal receipt, or a legitimate hole such as an account deletion. Sequences are commit-ordered, so a hole below the high-water mark never fills later.
+- **Retention decisions** are serialized per owner. Retention deletes only a contiguous prefix of events, all older than `RetentionDays` and none above the lowest low-water mark of the active subscriptions.
+- **Floor publication** is a short transaction: it revalidates registrations and watermarks, marks a subscription whose mark falls behind the retention window `lagging` and records its explicit gap, and raises the floor atomically. It never holds the owner cursor lock while scanning. Physical deletion below the floor follows in repeatable set-based batches, receipts included. Every delivery path respects the logical floor.
+- A lagging subscription stops holding retention; its gap is visible in health. Deregistering a subscription releases it.
 - Dedup and baseline identities survive pruning.
 
 ### Commands
 
-- Commands are point-to-point queues owned by the receiving module: `RunAccountMonitor` goes to `vessel.commands.monitor`, with its own delivery limit and dead-letter queue.
+- Commands are point-to-point queues owned by the receiving module: `RunAccountMonitor` goes to `vessel.commands.monitor`, with its own dead-letter queue and transport delivery limit.
 - PostgreSQL stays the record: pending manual requests live in `monitor_accounts`, and the request ID makes a duplicate command harmless.
 
 ### Browser live updates
 
 - The API's event stream is a non-durable database-cursor reader. It streams committed `events` rows in cursor order and polls briefly between them; it is not a subscription and keeps no receipts.
-- The cursor carries a stream epoch with the sequence. The epoch is stored with the owner cursor; the documented restore procedure rotates it with an explicit command, and the release check covers it. A restored database is therefore always detected, even once it has grown past the browser's sequence, and the browser is told to reset and reload state. A cursor ahead of the database or below the retention floor resets too.
+- The cursor carries the stream epoch with the sequence. A cursor from another epoch, ahead of the database or below the retention floor gets a reset requiring a state reload.
+- **Epoch rotation.** The explicit `rotate-event-epoch` command is a mandatory step of the restore procedure: stop every host → restore → `rotate-event-epoch` → provision → start. `migrate` does not rotate it. A restore is detected only when this procedure rotates the epoch before any host starts.
 - Popups, their acknowledgement and channel-specific settings belong to the Notification Hub.
 
 ### In this stack
@@ -417,7 +447,8 @@ No durable production subscription is required yet. The no-op `monitor` event co
 
 A separate plan. Only its boundary is fixed:
 - **One subscription,** `notifications`. It owns per-owner rules (channels, minimum severity, event types), grouping by `runId`, the relevance and expiry rechecks at delivery, and a delivery record per notification and channel.
-- **Providers behind queues.** The hub hands provider jobs to `vessel.notify.<provider>` queues (`telegram`, `discord`, `in-app`). Each provider implements an Application port such as `INotificationChannel`, with its own rate limits, retries and dead-letter queue.
+- **Atomic hand-off.** In the transaction that settles its subscription receipt, the hub creates the durable pending work for each channel and its outbox message.
+- **Providers** consume `vessel.notify.<provider>` queues (`telegram`, `discord`, `in-app`), which are transport only: a provider recovers unsettled work from the hub's records, using stable delivery identities. Each implements an Application port such as `INotificationChannel`, with its own rate limits, retries and dead-letter queue.
 - **Adding a provider** never changes publishers or the event contract.
 - It runs as the `notifications` worker module.
 
@@ -436,7 +467,7 @@ A separate plan. Only its boundary is fixed:
 
 - **Productive heartbeat.** The heartbeat row and file advance only after a scheduling pass completes (discovery and claims), not merely because the process is alive. A worker that cannot schedule shows as `offline`.
 - **Safe logs.** Failure logs include the exception type name and IDs, never payloads, messages from venue responses or secrets.
-- **Exit watches** that reach their lifetime without proof show `unverifiable` on the Play.
+- **Exit and entry-orphan watches** that reach their lifetime without proof show a persistent `unverifiable` on the Play.
 - **Subscriptions** that are `lagging`, have a gap or hold `failed` receipts are reported with worker health and logged by name.
 
 The UI shows this inside existing areas; the approved layout does not change:
@@ -474,13 +505,15 @@ Review of the stack found these defects; the owner accepted the corrections. Eac
 - replace configured durable consumers, publisher-written `event_deliveries` and the republish sweep with topics, subscriptions, receipts and subscriber-side catch-up;
 - move Wolverine and RabbitMQ code into `Vessel.Messaging`; rename `PlayEvent` types and tables to neutral names;
 - explicit `null`, causal order within a transaction, account-deletion cleanup;
-- retention by contiguous prefix and low-water marks, without holding the cursor lock while scanning;
-- a stream epoch on the browser cursor;
+- the watermark and retention protocol, without holding the cursor lock while scanning;
+- a stream epoch on the browser cursor, rotated by `rotate-event-epoch` in the restore procedure;
+- inline listeners and the settlement table, one dispatcher, immutable filters, insert-only provisioning;
 - owner-mismatched messages dead-lettered and logged, not silently acknowledged;
+- catalogue dedup keys aligned with the code (`discrepancy:{id}:{revision}:…`, `monitor:{accountId}:{generation}:{state}`, `credential:{accountId}:{credentialRevision}:expiring`);
 - the no-op `monitor` event consumer removed; tests use a verification subscription.
 
 **#45 worker** ([Scheduling](#scheduling-and-the-unit-of-work), [Health and visibility](#health-and-visibility)):
-- an exit watch resolves on a reported terminal order regardless of book completeness; absence still needs a complete read; bounded lifetime with an `unverifiable` outcome;
+- an exit watch resolves on a reported terminal order regardless of book completeness; absence still needs a complete read; a 7-day lifetime ending in a persistent `unverifiable` outcome;
 - venue `Retry-After` clamped to 1 hour;
 - heartbeat and health reflect a productive scheduling pass; logs include exception type names only;
 - refresh outcomes leave check backoff, `stale` and the due time alone; a refresh refused with 429 is never replayed by the worker; superseded runs are not failures; the manual cooldown does not gate scheduled claims and is at most the interval;
@@ -488,17 +521,18 @@ Review of the stack found these defects; the owner accepted the corrections. Eac
 - upgrades and backups stop web, api and worker.
 
 **#46 discrepancies** ([Discrepancies](#discrepancies)):
-- a shared whole-position stop covers sibling Plays when the venue position equals the expected total, otherwise unknown, never critical missing;
-- a single Play with a matching venue position gets decidable whole-position coverage; structural unknowns do not degrade the monitor;
+- stop and target coverage are separate; a shared whole-position stop (same account and native contract, a real stop, compatible closing side) covers sibling Plays when the venue position equals the expected total, otherwise unknown, never critical missing;
+- netted opposite Plays on a one-way account have unknown per-Play protection unless allocation is demonstrable;
+- a single Play with a matching venue position gets decidable whole-position stop coverage; structural unknowns do not degrade the monitor;
 - reduce-only orders do not count towards `protection.excess` for a lone Play;
 - new `entry.orphaned` (critical) for a resting linked entry on a Closed or Cancelled Play;
 - `protection.cancelled` supersedes `protection.missing` and `protection.short` for the same orders;
-- open records update their details in place without a new `discrepancy.opened`;
+- open records update their details in place without an event; a re-opened record gets a new revision and event;
 - bounded `fill.unlinked` details;
 - `level.drift` decided per order;
 - evaluation loads only relevant Plays, orders and fills, with no growth-based caps.
 
-**#47 monitor UI:** follows the cursor epoch and reset, and shows unknown coverage, `unverifiable` exit watches and `entry.orphaned` within the existing layout.
+**#47 monitor UI:** adds `monitor.run-completed` for owner-requested runs, follows the cursor epoch and reset, and shows unknown coverage, `unverifiable` exit watches and `entry.orphaned` within the existing layout.
 
 ## Delivery steps
 
@@ -535,8 +569,8 @@ The earlier Claude attempt failed at a provider limit. The replacement Sol inves
 - Commit-ordered owner cursors, causal order within a transaction, pre-watch fill baselines and retention-safe event identity, including removal on account deletion.
 - Events from the existing transitions and links in `PlayExecutionService`, serialized with explicit `null`.
 - `Vessel.Messaging`: Wolverine persistence and post-commit dispatch at the tested unit-of-work boundary, with regression tests for premature commit and pre-commit dispatch. Persistence keeps no Wolverine reference.
-- The module contract, the `vessel.events` topic and the subscription machinery: registration, receipts, low-water marks, catch-up, dead-letter queues and subscription-aware retention. No producer-side republish or per-subscriber rows written by publishers.
-- Explicit provisioning of envelope storage, topology and subscription registrations.
+- The module contract and registry, the `vessel.events` topic and the subscription machinery: inline listeners, the shared dispatcher and settlement, registrations with filter fingerprints, receipts, low-water marks, catch-up, dead-letter queues, the bounded admin retry and subscription-aware retention. No producer-side republish or per-subscriber rows written by publishers.
+- Explicit, insert-only provisioning of envelope storage, topology (including dead-letter exchanges) and subscription registrations, and the `rotate-event-epoch` command.
 - RabbitMQ in Compose and the relay.
 - The `play.opened`, `play.closed`, `execution.filled` and `link.needs-confirmation` contracts, with golden tests from the real producers.
 - Migration, contract and verification-subscription tests.
@@ -546,7 +580,7 @@ The earlier Claude attempt failed at a provider limit. The replacement Sol inves
 - `Vessel.Worker` selecting modules from `Vessel:Worker:Modules` (default `["monitor"]`).
 - The monitor module: `monitor_accounts`, the scheduler, the `vessel.commands.monitor` queue and `RunAccountMonitor` with owner scope; owner-mismatched commands dead-lettered.
 - Venue reads outside the lock; clamped venue `Retry-After`; refresh outcomes kept separate from check scheduling.
-- Exit watches that resolve on a reported terminal order and end as `unverifiable` after their lifetime.
+- Exit and entry-orphan watches that resolve on a reported terminal order and end as `unverifiable` after 7 days.
 - Health states, `monitor.state-changed` and `credential.expiring`.
 - The productive heartbeat, and replica-safe catch-up and retention sweeps.
 - `monitor/run`, and retiring `execution/check` and the browser's venue polling.
@@ -588,7 +622,7 @@ The owner wants alerts when price reaches a Play's drawings (lines, levels, rang
   - one event per transition, with stable dedup keys;
   - timeliness and relevance;
   - every discrepancy kind, including the confirmation run, several Plays sharing an instrument, opposite Plays netting out and lot rounding;
-  - shared whole-position stops, the single-Play coverage case, reduce-only orders, `entry.orphaned`, cancelled-over-missing precedence and silent detail updates;
+  - shared whole-position stops (including a target that must not count as a stop, a mismatched contract or side, and netted opposite Plays), the single-Play coverage case, reduce-only orders, `entry.orphaned`, cancelled-over-missing precedence and silent detail updates;
   - owner scope in handlers.
 - **PostgreSQL** (disposable database, as today):
   - the unit of work commits once, rolls back intermediate saves and cannot be completed by nested stores;
@@ -597,17 +631,19 @@ The owner wants alerts when price reaches a Play's drawings (lines, levels, rang
   - a repeated dedup key is ignored, including after event history has been pruned;
   - a delayed commit cannot be skipped by the cursor reader or a subscription's low-water mark; an expired cursor, a cursor ahead of the database or one from another epoch requests a reset;
   - events within a transaction follow causal order, and optional fields serialize as `null`;
-  - a subscription registered later is not responsible for earlier events; catch-up processes only matching, unsettled events past the grace period, backs off, ends `failed` at the cap and `expired` past `expiresAt`;
-  - retention deletes only a contiguous prefix below the lowest active low-water mark, marks a lagging subscription with an explicit gap, and does not hold the cursor lock while scanning;
+  - a subscription registered later is not responsible for earlier events; re-provisioning never resets its start or progress, and a changed filter is rejected;
+  - live delivery and catch-up race on one receipt without double effects; catch-up processes only matching, unsettled events past the grace period, backs off, ends `failed` at the shared cap and `expired` past `expiresAt`; an admin retry preserves attempt history;
+  - the low-water mark advances monotonically over non-matching events, terminal receipts and account-deletion holes, never past an unsettled event;
+  - retention deletes only a contiguous prefix below the lowest active low-water mark, records gaps for lagging subscriptions in the floor transaction, repeats physical deletion safely, never serves events below the floor and does not hold the cursor lock while scanning;
   - account deletion removes that account's baselines, fill identities, events, dedup rows and receipts;
   - two schedulers do not own a current lease together; a stale lease holder cannot commit;
   - scheduled, manual and confirmation requests coalesce, including redelivered commands;
   - account disable/source/credential changes during network reads reject stale results;
   - migrations have no pending model changes, and Wolverine storage is applied only by `migrate`.
 - **Worker:** fake venue adapters take a Play from Planned to Open to Closed with no browser. Also covered: a refused credential, a history gap, incomplete reads that neither confirm nor clear a discrepancy, closed-Play orphan exits and entries, exit watches resolved by a terminal order on an incomplete read and ending `unverifiable`, clamped `Retry-After`, refresh outcomes that leave check scheduling alone, superseded runs, the productive heartbeat, grace deadlines, and late or superseded events after simulated downtime. Two worker replicas run catch-up and retention without double processing.
-- **Broker** (opt-in, disposable RabbitMQ container): an owner link in the API reaches a verification subscription; a broker restart; duplicate delivery is ignored; catch-up recovers a lost queue, an unroutable publish and a dead-lettered message from PostgreSQL; an owner-mismatched message is dead-lettered; a lost command is recovered from `monitor_accounts`.
+- **Broker** (opt-in, disposable RabbitMQ container, pinned Wolverine and RabbitMQ versions): inline listeners settle each row of the settlement table as specified, including ack after a retryable failure and dead-lettering of a terminal one into the provisioned dead-letter queue; an owner link in the API reaches a verification subscription; a broker restart; duplicate delivery is ignored; catch-up recovers a lost queue and an unroutable publish from PostgreSQL; redriving a dead-lettered message does not reopen its receipt; an owner-mismatched message is dead-lettered; a lost command is recovered from `monitor_accounts`.
 - **Frontend:** event handling, fallback polling, monitor status texts and Dismiss.
-- **Release:** `scripts/verify-release.py` covers the worker entrypoint and healthcheck, RabbitMQ not being published, explicit provisioning with a verification subscription, and backup and restore without the broker volume, including the epoch reset.
+- **Release:** `scripts/verify-release.py` covers the worker entrypoint and healthcheck, RabbitMQ not being published, explicit provisioning with a verification subscription, and backup and restore without the broker volume through the documented procedure. After the restored database has advanced beyond the browser's former sequence, an old-epoch browser cursor reconnects and gets a reset.
 
 ## Authorization and delivery tracking
 
