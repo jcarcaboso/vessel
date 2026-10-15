@@ -11,7 +11,7 @@ import { InfoTip } from '@/components/ui/info-tip'
 
 /** A short source tag on a figure; the tag opens the full description. */
 function SourcePill({ text, detail }: { text: string; detail: string }) {
-  return <InfoTip label={detail} className="value-tag" trigger={text}>{detail}</InfoTip>
+  return <InfoTip className="value-tag" trigger={text}>{detail}</InfoTip>
 }
 
 export function AccountDetail({ account, api, refreshing, busy = refreshing, onSync, onBack, onManage, reloadGeneration = 0, onOpenPlay, onCreated }: {

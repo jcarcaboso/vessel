@@ -10,7 +10,7 @@
 .chart-header-stats { display: flex; flex-wrap: wrap; gap: 6px 26px; min-width: 0; }
 .chart-header-stats div { display: grid; gap: 2px; }
 .chart-header-stats dt { color: var(--muted-foreground); font-size: var(--text-2xs); white-space: nowrap; }
-.chart-header-stats dt small { margin-left: 4px; font-size: var(--text-2xs); opacity: .8; }
+.chart-header-stats dt small { margin-left: 4px; font-size: var(--text-2xs); }
 .chart-header-stats dd { color: var(--foreground); font-size: var(--text-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .chart-header-stats dd[data-tone="up"] { color: var(--positive); }
 .chart-header-stats dd[data-tone="down"] { color: var(--negative); }

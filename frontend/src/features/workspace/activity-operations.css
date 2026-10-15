@@ -21,7 +21,7 @@
 .operation-status.partial, .operation-status.incomplete { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 35%, var(--border)); }
 .operation-status.incomplete { border-style: dashed; }
 .operation-status.closed { color: var(--muted-foreground); }
-.operation-timezone { font-size: var(--text-2xs); opacity: .8; }
+.operation-timezone { font-size: var(--text-2xs); }
 .operation-dates { white-space: nowrap; }
 .operation-entry, .operation-fees { color: var(--muted-foreground); }
 .operation-pnl { display: flex; align-items: center; gap: 8px; }

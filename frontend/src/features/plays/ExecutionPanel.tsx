@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import type { LinkOrder, PlayExecution, PlaySummary } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { Link2, Link2Off, RefreshCw } from 'lucide-react'
@@ -6,6 +5,10 @@ import type { DraftEntry } from './draft'
 import { describeOrder, fillSummary, levelName, levelOptions, orderFitsRole } from './execution'
 import { NativeSelect } from '@/components/ui/native-select'
 import { InfoTip } from '@/components/ui/info-tip'
+import { useJournalState } from './journal-state'
+
+// One shared empty object, so an untouched panel does not look like new state on every render.
+const noChoices: Record<string, string> = {}
 
 const time = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
@@ -27,7 +30,8 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   onLink: (request: LinkOrder) => void
   onUnlink: (linkId: string) => void
 }) {
-  const [choices, setChoices] = useState<Record<string, string>>({})
+  // The chosen roles belong to the journal, not to this tab: expanding the journal remounts the panel. Scoped by play.
+  const [choices, setChoices] = useJournalState(`execution-choices:${execution?.playId ?? ''}`, noChoices)
   if (!execution) return <div className="execution-panel"><p className="muted" role="status">{error ?? 'Loading execution…'}</p></div>
   const retrospective = origin === 'retrospective'
   const editable = !retrospective && ['planned', 'paused', 'open'].includes(execution.status)

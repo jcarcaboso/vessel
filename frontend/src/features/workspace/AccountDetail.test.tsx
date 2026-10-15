@@ -16,13 +16,14 @@ describe('Account detail value unit', () => {
   it('states the venue quote stablecoin for a venue-reported value', () => {
     detail('lighter-rh', 'synced')
     expect(screen.getByText('Account value · reported')).toBeInTheDocument()
-    // The caption is a short source pill whose name carries the full description.
-    expect(screen.getByRole('button', { name: 'Perpetuals equity in USDG · nominal' })).toHaveTextContent(/^USDG$/)
+    // The caption is a short source pill named by its visible text, with the full description as its description.
+    expect(screen.getByRole('button', { name: 'USDG' })).toHaveTextContent(/^USDG$/)
+    expect(screen.getByRole('button', { name: 'USDG' })).toHaveAccessibleDescription('Perpetuals equity in USDG · nominal')
     expect(screen.getByText('$1,250.12')).toBeInTheDocument()
   })
   it('keeps manual values as entered', () => {
     detail('manual', 'manual')
     expect(screen.getByText('Known manual value')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Entered manually' })).toHaveTextContent(/^manual$/)
+    expect(screen.getByRole('button', { name: 'manual' })).toHaveAccessibleDescription('Entered manually')
   })
 })

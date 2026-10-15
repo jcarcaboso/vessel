@@ -121,11 +121,11 @@ describe('Main application shell', () => {
     expect(screen.getByRole('combobox', { name: 'Period' })).toHaveValue('30')
   })
   it.each([
-    ['lighter', 'margin', '131.89123456789012345678901234', '$131.89', 'Venue-reported available margin · not guaranteed withdrawable'],
-    ['risex', 'margin', '0', '$0.00', 'Venue-reported available margin · not guaranteed withdrawable'],
-    ['hyperliquid', 'withdrawable', '35', '$35.00', 'Venue-reported perps withdrawable'],
-    ['risex', null, null, '—', 'Not reported by this venue'],
-  ] as const)('shows the selected available source in %s account rows and detail', async (venueId, source, value, display, note) => {
+    ['lighter', 'margin', '131.89123456789012345678901234', '$131.89', 'reported margin', 'Venue-reported available margin · not guaranteed withdrawable'],
+    ['risex', 'margin', '0', '$0.00', 'reported margin', 'Venue-reported available margin · not guaranteed withdrawable'],
+    ['hyperliquid', 'withdrawable', '35', '$35.00', 'reported withdrawal', 'Venue-reported perps withdrawable'],
+    ['risex', null, null, '—', 'not reported', 'Not reported by this venue'],
+  ] as const)('shows the selected available source in %s account rows and detail', async (venueId, source, value, display, pill, note) => {
     const account = { ...accountFixture, venueId, availableBalanceUsd: value, availableBalanceSource: source }
     const client = api({
       overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [account] }),
@@ -140,7 +140,10 @@ describe('Main application shell', () => {
     await screen.findByText('No positions in the latest snapshot')
     const available = screen.getByText('Available balance').closest('.metric')!
     expect(available).toHaveTextContent(display)
-    expect(within(available as HTMLElement).getByRole('button', { name: note })).toBeInTheDocument()
+    // The source pill is named by its visible text; the explanation is its description.
+    const sourcePill = within(available as HTMLElement).getByRole('button', { name: pill })
+    expect(sourcePill).toHaveTextContent(pill)
+    expect(sourcePill).toHaveAccessibleDescription(note)
     if (source === 'margin') expect(available).toHaveTextContent('Perps withdrawable —')
   })
   it('shows portfolio available balance with enabled-account coverage, not the equity subtotal', async () => {
@@ -151,7 +154,9 @@ describe('Main application shell', () => {
     await userEvent.click(screen.getByRole('link', { name: 'Portfolios' }))
     const tile = (await screen.findByRole('button', { name: 'Open Swing trading' })).closest('article')!
     expect(within(tile).getByRole('button', { name: 'Open Swing trading' })).toHaveTextContent('Available balance $131.89')
-    expect(within(tile).getByRole('button', { name: 'Availability coverage 1 of 2 enabled accounts' })).toHaveTextContent('1/2')
+    const partial = within(tile).getByRole('button', { name: '1/2 Availability coverage' })
+    expect(partial).toHaveTextContent('1/2')
+    expect(partial).toHaveAccessibleDescription(/^1 of 2 enabled accounts\./)
   })
   it('shows combined total and available balances with coverage, and rereads after refresh', async () => {
     const refreshed = { ...overviewFixture, totals: { ...overviewFixture.totals, totalBalanceUsd: '240', availableBalanceUsd: '95',
@@ -167,7 +172,9 @@ describe('Main application shell', () => {
     expect(total).toHaveTextContent('$210.00')
     expect(within(total as HTMLElement).queryByRole('button', { name: /coverage/ })).not.toBeInTheDocument()
     expect(available).toHaveTextContent('$80.00')
-    expect(within(available as HTMLElement).getByRole('button', { name: 'Availability coverage 2 of 3 enabled accounts' })).toHaveTextContent('2/3')
+    const partial = within(available as HTMLElement).getByRole('button', { name: '2/3 Availability coverage' })
+    expect(partial).toHaveTextContent('2/3')
+    expect(partial).toHaveAccessibleDescription(/^2 of 3 enabled accounts\./)
     await userEvent.click(screen.getByRole('button', { name: 'Refresh Main account' }))
     await waitFor(() => expect(total).toHaveTextContent('$240.00'))
     expect(available).toHaveTextContent('$95.00')
@@ -281,7 +288,7 @@ describe('Main application shell', () => {
     await waitFor(() => expect(client.overview).toHaveBeenCalledTimes(3))
     expect(screen.getByRole('row', { name: /Main account/ })).toHaveTextContent('Disabled')
     await userEvent.click(screen.getByRole('link', { name: 'Portfolios' }))
-    expect(within(screen.getByRole('button', { name: 'Open Second' }).closest('article')!).getByRole('button', { name: 'Balance coverage unavailable' }))
+    expect(within(screen.getByRole('button', { name: 'Open Second' }).closest('article')!).getByRole('button', { name: 'unavailable Balance coverage' }))
       .toHaveAccessibleDescription(/Enabled account balances are unavailable\./)
     await userEvent.click(screen.getByRole('button', { name: 'Open Second' }))
     await userEvent.click(screen.getByRole('button', { name: 'Manage Main account' }))
@@ -315,7 +322,7 @@ describe('Main application shell', () => {
     const tile = await screen.findByRole('button', { name: `Open ${portfolioFixture.name}` })
     expect(within(tile).getByText('$750.00')).toBeInTheDocument()
     // Complete coverage shows no pill, and the perps-only subtotal is not shown beside the balance.
-    expect(within(tile.closest('article')!).queryByRole('button', { name: /^Balance coverage/ })).not.toBeInTheDocument()
+    expect(within(tile.closest('article')!).queryByRole('button', { name: /Balance coverage$/ })).not.toBeInTheDocument()
     expect(within(tile).queryByText(/\$0\.00/)).not.toBeInTheDocument()
   })
   it('opens contributing Plays from Review through the existing saved editor', async () => {
@@ -844,7 +851,10 @@ describe('Main application shell', () => {
     expect(screen.getByText('Wallet funds, not guaranteed trading margin.')).toBeInTheDocument()
     // Perps equity stays a separate labelled figure, never summed with the wallet.
     expect(screen.getByText('Wallet stablecoins available').closest('.metric')).toHaveTextContent('Perps equity $0.00')
-    expect(screen.getByRole('button', { name: 'Wallet total minus held · nominal' })).toHaveTextContent(/^wallet$/)
+    // Both figures carry a pill named by its visible text, "wallet", with its own explanation as the description.
+    const pill = (title: string) => within(screen.getByText(title).closest('.metric') as HTMLElement).getByRole('button', { name: 'wallet' })
+    expect(pill('Wallet stablecoins available')).toHaveAccessibleDescription(/nominal total minus held$/)
+    expect(pill('Available balance')).toHaveAccessibleDescription('Wallet total minus held · nominal')
     expect(screen.getByText('Perps withdrawable $0.00')).toBeInTheDocument()
   })
   it('names an unreported withdrawable amount and shows no wallet note for a venue without a wallet', async () => {
@@ -861,7 +871,7 @@ describe('Main application shell', () => {
     })
     render(<ApplicationShell system={system} disconnect={vi.fn()} api={client} />)
     await userEvent.click(await screen.findByRole('button', { name: 'View Main account' }))
-    expect(await screen.findByRole('button', { name: 'Not reported by this venue' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'not reported' })).toHaveAccessibleDescription('Not reported by this venue')
     expect(screen.getByText('Account value · reported')).toBeInTheDocument()
     expect(screen.queryByText(/perpetuals equity:/)).not.toBeInTheDocument()
     expect(screen.queryByText(/risex-perps-account/)).not.toBeInTheDocument()

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ExecutionOrder, PlayExecution } from '@/api/plays'
 import { ExecutionPanel } from './ExecutionPanel'
 import { createDraft } from './draft'
+import { PlayJournal } from './WorkspacePanels'
 import { fillSummary } from './execution'
 
 const entry = { ...createDraft().entries[0]!, id: 'e1', name: 'Entry 1', price: '100' }
@@ -95,5 +96,44 @@ describe('execution panel', () => {
     view.rerender(<ExecutionPanel execution={{ ...execution, status: 'closed' }} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     expect(screen.queryByRole('button', { name: /Unlink/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Other orders on this instrument' })).not.toBeInTheDocument()
+  })
+
+  it('keeps order roles chosen by hand when the journal expands, collapses or changes tab', async () => {
+    const onLink = vi.fn()
+    const user = userEvent.setup()
+    render(<PlayJournal notes={createDraft().notes} onChange={vi.fn()} status="open"
+      execution={<ExecutionPanel execution={execution} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={onLink} onUnlink={vi.fn()} />} />)
+    await user.click(screen.getByRole('tab', { name: 'Execution' }))
+    const level = (scope: HTMLElement = document.body) => within(scope).getByRole('combobox', { name: 'Level for order 13' })
+    await user.selectOptions(level(), 'exit')
+    expect(level()).toHaveValue('exit')
+
+    // Expanding mounts a new Execution tab in the dialog; the choice comes along.
+    await user.click(screen.getByRole('button', { name: 'Expand journal' }))
+    const dialog = screen.getByRole('dialog', { name: 'Play journal' })
+    expect(level(dialog)).toHaveValue('exit')
+    expect(within(dialog).getByRole('button', { name: 'Link' })).toBeEnabled()
+    await user.selectOptions(level(dialog), 'target|e1|t1')
+    await user.click(within(dialog).getByRole('button', { name: 'Close expanded journal' }))
+
+    // Closing returns the choice made in the dialog, and another tab does not drop it either.
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(level()).toHaveValue('target|e1|t1')
+    await user.click(screen.getByRole('tab', { name: 'Thesis' }))
+    await user.click(screen.getByRole('tab', { name: 'Execution' }))
+    expect(level()).toHaveValue('target|e1|t1')
+    await user.click(within(screen.getByRole('region', { name: 'Other orders on this instrument' })).getByRole('button', { name: 'Link' }))
+    expect(onLink).toHaveBeenCalledWith({ orderId: '13', role: 'target', entryId: 'e1', levelId: 't1' })
+  })
+
+  it('keeps the choices of one play apart from another play in the same journal', async () => {
+    const user = userEvent.setup()
+    const panel = (playId: string) => <PlayJournal notes={createDraft().notes} onChange={vi.fn()} status="open"
+      execution={<ExecutionPanel execution={{ ...execution, playId }} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />} />
+    const view = render(panel('00000000-0000-4000-8000-000000000001'))
+    await user.click(screen.getByRole('tab', { name: 'Execution' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Level for order 13' }), 'exit')
+    view.rerender(panel('00000000-0000-4000-8000-000000000002'))
+    expect(screen.getByRole('combobox', { name: 'Level for order 13' })).toHaveValue('')
   })
 })

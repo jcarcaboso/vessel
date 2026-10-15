@@ -135,6 +135,8 @@
   h2 { font-size: var(--text-lg); font-weight: 600; letter-spacing: var(--tracking-title); }
   p, dt { color: var(--muted-foreground); }
   button, input, textarea, select { font: inherit; }
+  /* Placeholders are text: the browser default is a fixed grey that misses 4.5:1 on light fields. */
+  input::placeholder, textarea::placeholder { color: var(--muted-foreground); opacity: 1; }
   button, select { cursor: pointer; }
   button:disabled { cursor: default; }
   :is(button, input, textarea, select, [tabindex]):focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }

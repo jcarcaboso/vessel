@@ -206,7 +206,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       <div className="plays-context-status"><span className="field-label">Status</span><span className="plays-status-pills">
         <span className={`badge play-status-${status}`} title={readOnly && !retrospective ? 'The plan is kept as it was; review and images can change' : undefined}>{statusLabels[status]}</span>
         {revision !== null && <span className="badge play-revision" title="Saved plan changes ask for a reason">Revision {revision}</span>}
-        {retrospective && <InfoTip label="About retrospective plays" className="badge play-retrospective" trigger="Retrospective">
+        {retrospective && <InfoTip className="badge play-retrospective" trigger="Retrospective">
           Recorded after execution: no original plan, thesis, initial stop or initial-risk R.</InfoTip>}
       </span></div>
     </fieldset>

@@ -6,8 +6,9 @@ type Status = 'complete' | 'partial' | 'unavailable'
 const plural = (count: number, noun: string) => `${count} ${count === 1 ? noun : `${noun}s`}`
 
 /**
- * Coverage stays visible only while it is incomplete: a compact warning pill whose accessible name states the coverage
- * and whose tooltip lists the reasons. Complete coverage renders nothing.
+ * Coverage stays visible only while it is incomplete: a compact warning pill whose accessible name starts with its text
+ * and names what it covers, and whose tooltip (and accessible description) states the counts and lists the reasons.
+ * Complete coverage renders nothing.
  */
 export function CoverageBadge({ covered, total, noun = 'account', status, reasons = [], excluded = 0, closed, label }: {
   /** Covered and total items; when unknown, the server status alone is shown. */
@@ -26,9 +27,8 @@ export function CoverageBadge({ covered, total, noun = 'account', status, reason
   if (complete) return null
   const coverage = counted ? `${covered} of ${plural(total, noun)}` : status ?? 'partial'
   const pill = !accountsComplete ? `${covered}/${total}` : excluded > 0 ? `${excluded} excluded` : status === 'unavailable' ? 'unavailable' : 'partial'
-  const name = [`${label ? `${label} coverage` : 'Coverage'} ${coverage}`, closed !== undefined && `${closed} closed`, excluded > 0 && `${excluded} excluded`]
-    .filter(Boolean).join(', ')
-  return <InfoTip label={name} className="workspace-badge warning-badge coverage-badge" trigger={pill}>
+  // The name starts with the visible pill and says what it covers; the counts and reasons are the description.
+  return <InfoTip label={label ? `${label} coverage` : 'coverage'} className="workspace-badge warning-badge coverage-badge" trigger={pill}>
     <span>{counted ? coverage : `Coverage ${coverage}`}{closed !== undefined ? ` · ${closed} closed` : ''}{excluded > 0 ? ` · ${excluded} excluded` : ''}.</span>
     {counted && status === 'unavailable' && <span>Coverage unavailable.</span>}
     {reasons.map((reason, index) => <span key={index}>{reason}</span>)}
@@ -44,5 +44,5 @@ export function SummaryCoverageBadge({ value: { coverage }, operations = false, 
 
 /** The nominal-USD tag on pooled balance figures: venue quote stablecoins are added at 1:1. The tag opens the detail. */
 export function NominalUsdTag({ detail = 'Listed stablecoins at 1:1.' }: { detail?: string }) {
-  return <InfoTip label="About nominal USD" className="value-tag" trigger="Nominal USD">{detail}</InfoTip>
+  return <InfoTip className="value-tag" trigger="Nominal USD">{detail}</InfoTip>
 }

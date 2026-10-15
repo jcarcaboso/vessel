@@ -12,10 +12,10 @@ import { VenuesProvider } from '@/api/venues'
 import type { PlayStatus } from '@/api/plays'
 import { systemFixture } from '@/test/system-fixture'
 
-function Workspace({ disabled = false, status = 'draft' }: { disabled?: boolean; status?: PlayStatus }) {
+function Workspace({ disabled = false, status = 'draft', retrospective = false }: { disabled?: boolean; status?: PlayStatus; retrospective?: boolean }) {
   const [draft, setDraft] = useState(createDraft)
   return <PlayWorkspace accounts={[{ ...accountFixture, isEnabled: !disabled }]} portfolios={[portfolioFixture]} api={createWorkspaceApi('test-only')} draft={draft} onChange={setDraft}
-    status={status} />
+    status={status} retrospective={retrospective} />
 }
 
 function AccountWorkspace({ accounts, api }: { accounts: BrokerAccount[]; api: WorkspaceApi }) {
@@ -149,6 +149,13 @@ describe('Play draft workspace', () => {
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
     expect(screen.queryByRole('button', { name: 'Save budget' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
+  })
+
+  it('names the retrospective pill by its visible text and keeps the explanation as its description', () => {
+    render(<Workspace status="closed" retrospective />)
+    const pill = screen.getByRole('button', { name: 'Retrospective' })
+    expect(pill).toHaveTextContent('Retrospective')
+    expect(pill).toHaveAccessibleDescription(/^Recorded after execution: no original plan/)
   })
 
   it('keeps original thesis and retrospective review independent', async () => {

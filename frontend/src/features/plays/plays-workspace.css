@@ -356,7 +356,7 @@
 .plays-page .leverage-presets { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
 .plays-page .leverage-presets button { min-width: 38px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted-foreground); background: var(--field); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; cursor: pointer; }
 .plays-page .leverage-presets button:hover { color: var(--foreground); }
-.plays-page .leverage-presets button[aria-pressed="true"] { border-color: var(--ring); color: var(--ring); background: var(--accent); }
+.plays-page .leverage-presets button[aria-pressed="true"] { border-color: var(--ring); color: var(--brand-ink); background: var(--accent); }
 
 .plays-page .entry-sidebar { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0 16px 16px; }
 .plays-page .entry-card { margin-bottom: 13px; overflow: hidden; border: 1px solid var(--line); border-left: 3px solid var(--entry-color); border-radius: calc(var(--radius) + 2px); background: var(--card); transition: border-color .16s var(--ease-out), box-shadow .16s var(--ease-out); }

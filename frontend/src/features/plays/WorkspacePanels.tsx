@@ -12,6 +12,7 @@ import { money } from '@/lib/format'
 import type { DraftEvidence, PlayDraft } from './draft'
 import { EvidencePanel } from './EvidencePanel'
 import { journalReviewVisible } from './journal'
+import { JournalStateContext, useJournalStore } from './journal-state'
 import { PositionRiskSummary } from './PositionRiskSummary'
 import type { RiskReference } from './position-risk-summary'
 import { averageEntryPrice, formatDraggedPrice, leverageOf } from './levels'
@@ -148,6 +149,7 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   retrospective?: boolean
 }) {
   const id = useId()
+  const state = useJournalStore()
   const [tab, setTab] = useState(retrospective ? 'review' : 'thesis')
   const [expanded, setExpanded] = useState(false)
   const expandButton = useRef<HTMLButtonElement>(null)
@@ -234,7 +236,8 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
     {execution && <TabsContent value="execution" className="journal-tab-content" data-section="execution">{execution}</TabsContent>}
   </Tabs>
 
-  return <section className="panel journal-panel" aria-label="Play journal" data-testid="journal-panel">
+  // The dialog is portaled but still inside this provider, so both views share the tabs' working state.
+  return <JournalStateContext.Provider value={state}><section className="panel journal-panel" aria-label="Play journal" data-testid="journal-panel">
     {expanded ? <>
       <header className="journal-header">{heading(false)}</header>
       <p className="journal-parked">Journal open in the expanded view.</p>
@@ -246,7 +249,7 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
         {journal(true)}
       </DialogContent>
     </Dialog>
-  </section>
+  </section></JournalStateContext.Provider>
 }
 
 export function PositionSummary({ draft, units = defaultSizeUnits, instrumentName, riskReference }: { draft: PlayDraft; units?: SizeUnits; instrumentName?: string; riskReference?: RiskReference | null | undefined }) {

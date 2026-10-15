@@ -4,6 +4,16 @@
 
 - Overview Allocation panel: donuts of each portfolio's share of the total and
   each account's share of its portfolio, following the Overview scope.
+- Visual refresh: a readable type scale, a signature accent per theme, lit panels,
+  a new mark, a depth-contour texture and ruled journal notes; layout unchanged.
+- Play journal: one header row, an Expand journal dialog, more default height and
+  a Review tab only once a Play is open or ended.
+- Default Play titles (`BTC Long · 15 Oct 2026`) when saved without a name.
+- Distinct asset, venue and account in Play lists; Accounts grouping by venue or
+  address; one shared select style.
+- Less helper text: pills, info tips, coverage badges shown only when incomplete
+  and one "About these numbers" disclosure, keeping required notices.
+- Allocation slices clear their selection on a second click.
 
 ## 0.1.1 - October 15, 2026
 
