@@ -105,6 +105,9 @@ services:
       Vessel__Evidence__Storage__S3__AccessKeyId: ${VESSEL_S3_ACCESS_KEY_ID:-}
       Vessel__Evidence__Storage__S3__SecretAccessKey: ${VESSEL_S3_SECRET_ACCESS_KEY:-}
       Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_USER:?Set RABBITMQ_USER}:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}@rabbitmq:5672/"
+      Vessel__Monitor__Interval: ${VESSEL_MONITOR_INTERVAL:-00:10:00}
+      Vessel__Monitor__ProtectionGrace: ${VESSEL_MONITOR_PROTECTION_GRACE:-00:10:00}
+      Vessel__Monitor__ManualCooldown: ${VESSEL_MONITOR_MANUAL_COOLDOWN:-00:01:00}
       # Nginx emits one sanitized hop, in both HTTP and TLS modes.
       Vessel__ForwardedHeaders__KnownProxies__0: ${VESSEL_WEB_IP:-172.30.86.10}
       Vessel__ForwardedHeaders__ForwardLimit: "1"
@@ -113,6 +116,28 @@ services:
         condition: service_completed_successfully
       storage-init:
         condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    image: skorcius/vessel:api-${VESSEL_VERSION:-0.1.1}
+    entrypoint: ["/app/worker"]
+    environment:
+      DOTNET_ENVIRONMENT: Production
+      ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      Vessel__Auth__OwnerId: ${Vessel__Auth__OwnerId:?Set a non-empty GUID}
+      Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_USER:?Set RABBITMQ_USER}:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}@rabbitmq:5672/"
+      Vessel__Monitor__Interval: ${VESSEL_MONITOR_INTERVAL:-00:10:00}
+      Vessel__Monitor__ProtectionGrace: ${VESSEL_MONITOR_PROTECTION_GRACE:-00:10:00}
+      Vessel__Monitor__ManualCooldown: ${VESSEL_MONITOR_MANUAL_COOLDOWN:-00:01:00}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/app/worker-health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 6
     restart: unless-stopped
 
   web:

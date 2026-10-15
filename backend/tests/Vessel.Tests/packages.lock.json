@@ -1029,6 +1029,15 @@
           "Vessel.Application": "[0.1.1, )",
           "Vessel.Domain": "[0.1.1, )"
         }
+      },
+      "vessel.worker": {
+        "type": "Project",
+        "dependencies": {
+          "Vessel.Application": "[0.1.1, )",
+          "Vessel.Infrastructure": "[0.1.1, )",
+          "Vessel.Messaging": "[0.1.1, )",
+          "Vessel.Persistence": "[0.1.1, )"
+        }
       }
     }
   }

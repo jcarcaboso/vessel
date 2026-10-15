@@ -20,6 +20,7 @@ builder.Services.AddVesselPersistence(builder.Configuration);
 builder.Services.AddVesselApplication();
 // The API publishes events and module commands; it runs no module and never provisions at startup.
 builder.AddVesselMessaging(MessagingHosting.ApiDeployment);
+builder.Services.AddVesselMonitoring(builder.Configuration);
 builder.Services.AddOpenApi();
 builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
 builder.Services.AddResponseCompression(options =>
@@ -113,6 +114,7 @@ app.MapPlays();
 app.MapSizing();
 app.MapReview();
 app.MapVesselEvents();
+app.MapMonitor();
 if (app.Environment.IsDevelopment()) app.MapOpenApi().RequireAuthorization();
 
 app.Run();

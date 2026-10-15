@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+file="${Vessel__Monitor__HeartbeatFile:-/tmp/vessel-worker-heartbeat}"
+test -r "$file" || exit 1
+heartbeat="$(cat "$file")"
+case "$heartbeat" in ''|*[!0-9]*) exit 1 ;; esac
+now="$(date +%s)"
+age="$((now - heartbeat))"
+test "$age" -ge 0 && test "$age" -le 90

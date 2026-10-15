@@ -18,20 +18,21 @@ Releases are published by the repository's Release workflow when an annotated
 
 Install Docker Engine with Docker Compose 2.24.4 or newer on a Linux amd64 host, OpenSSL,
 `uuidgen` and Python 3. Provide persistent disk space for PostgreSQL and evidence
-images in private RustFS S3-compatible storage, plus a DNS name for remote TLS use.
-RustFS 1.0.1 is the default; local folders and external S3 remain configurable.
-This Compose example deliberately sets `Provider=S3`. The API itself remains
-backward-compatible: no storage settings means `Local`, not an automatic S3 choice.
-The optional TLS overlay supplies Caddy.
+images in private RustFS S3-compatible storage and the RabbitMQ volume, plus a DNS
+name for remote TLS use. RustFS 1.0.1 is the default; local folders and external S3
+remain configurable. This Compose example deliberately sets `Provider=S3`. The API
+itself remains backward-compatible: no storage settings means `Local`, not an
+automatic S3 choice. The worker never reads evidence storage. The optional TLS
+overlay supplies Caddy.
 The optional credential-key helper needs a source checkout.
 
 Copy this `deploy/` directory to a private operator directory outside the source
 checkout. Do not reuse the development `.env`, database or LAN preview services.
-In default HTTP mode only web publishes a port, plus the loopback-bound RabbitMQ
-management page. In the TLS overlay only Caddy publishes ports besides that page.
-PostgreSQL, API, RustFS and RabbitMQ AMQP have no host ports; the RustFS console
-is disabled. **Existing folder installations must select the local overlay or
-complete the storage cutover below before switching to the new default.**
+In default HTTP mode only web publishes a port. In the TLS overlay Caddy replaces
+that web port. RabbitMQ management is separately published on loopback for
+troubleshooting. PostgreSQL, API, worker, AMQP and RustFS have no host ports; the
+RustFS console is disabled. **Existing folder installations must select the local
+overlay or complete the storage cutover below before switching to the new default.**
 
 ## Configure an installation
 
@@ -59,6 +60,8 @@ text = path.read_text()
 replacements = {
     "REPLACE_WITH_GENERATED_HEX_PASSWORD":
         subprocess.check_output(["openssl", "rand", "-hex", "32"], text=True).strip(),
+    "REPLACE_WITH_GENERATED_BROKER_PASSWORD":
+        subprocess.check_output(["openssl", "rand", "-hex", "32"], text=True).strip(),
     "REPLACE_WITH_GENERATED_TOKEN":
         subprocess.check_output(["openssl", "rand", "-hex", "48"], text=True).strip(),
     "REPLACE_WITH_GENERATED_GUID":
@@ -81,6 +84,9 @@ PY
 
 Keep the password hexadecimal. Compose inserts it into an Npgsql connection
 string, so a custom password must not contain connection-string delimiters.
+Keep `RABBITMQ_USER=vessel` or choose a lowercase ASCII username. The broker
+password must be hexadecimal because Compose places it in the private AMQP URI.
+Never use `guest`, print that URI, or publish AMQP outside the private network.
 Set `Vessel__Auth__OwnerName` if desired. Keep the generated owner GUID for the
 life of this installation. Changing it hides existing owner-scoped records.
 
@@ -371,12 +377,57 @@ docker compose up -d
 docker compose ps -a
 ```
 
-Compose waits for healthy PostgreSQL and RabbitMQ, runs `/app/migrate` as a
-deliberate one-shot step (EF migrations, then messaging provisioning), then starts
-API and waits for readiness before starting web. The migration bundle reads
-`ConnectionStrings__Vessel` from its environment through the design-time factory.
-The password is not an argument and neither step prints it. The API never applies
-migrations or provisions messaging at startup.
+Compose waits for healthy PostgreSQL and RabbitMQ, then runs `/app/migrate` as a
+deliberate one-shot step. The wrapper runs the EF bundle, then messaging provisioning
+(envelope storage, broker topology and insert-only subscription registrations).
+It then starts API and worker and waits for API readiness before starting web.
+The EF bundle reads `ConnectionStrings__Vessel` from its environment through the
+design-time factory. The password is not an argument and the bundle does not
+print it. Neither API nor worker migrates or auto-provisions message storage at
+startup. Missing storage is a setup error, not permission to migrate a live database.
+
+The worker uses `/app/worker` in the same versioned API image. It scopes every
+database operation to the configured owner before constructing a DbContext.
+Every 30 seconds it writes a database heartbeat and a local heartbeat file.
+`/app/worker-health` rejects a missing or older-than-90-second file. API monitor
+responses separately report worker offline from the database heartbeat.
+
+### Monitor and broker settings
+
+`VESSEL_MONITOR_INTERVAL`, `VESSEL_MONITOR_PROTECTION_GRACE` and
+`VESSEL_MONITOR_MANUAL_COOLDOWN` are TimeSpan strings, such as `00:10:00`.
+They map to `Vessel:Monitor:Interval`, `ProtectionGrace` and `ManualCooldown`.
+The defaults are ten minutes, ten minutes and sixty seconds. Interval is
+validated from one through sixty minutes and scheduling adds ten-percent
+jitter. Failed checks also start the manual cooldown. Check and account Refresh
+share admission and the two-account read limit.
+Venue HTTP 429 `Retry-After` deadlines are retained in PostgreSQL per owner and
+venue. Check, Refresh and scheduled work respect the longest deadline across
+API and worker instances; a shorter later response cannot shorten it. A missing
+or invalid `Retry-After` uses a sixty-second delay. The API exposes the effective
+manual deadline and returns it as `Retry-After` when admission is throttled.
+
+`Vessel:Monitor:HeartbeatTimeout` defaults to `00:01:30`, with a minimum
+`00:00:30`. `Vessel:Monitor:HeartbeatFile` defaults to
+`/tmp/vessel-worker-heartbeat`. The packaged health script uses a fixed
+90-second freshness limit. `Vessel:Events:RetentionDays` defaults to 90.
+Pruning leaves pending delivery work and deduplication history intact.
+
+RabbitMQ is pinned to `rabbitmq:4.3.6-management`, with a named `rabbitmq`
+volume and a stable hostname. Durable quorum queues, the `vessel.events`
+topic exchange and consumer bindings are declared by the explicit provisioning
+step. Publisher confirmations do not replace consumer receipts.
+`VESSEL_RABBITMQ_MANAGEMENT_BIND` defaults to `127.0.0.1:15672`. Use an SSH tunnel
+or an HTTPS proxy to reach it remotely, never plain HTTP to the internet.
+Before upgrading RabbitMQ, enable the current version's feature flags and follow
+its supported upgrade path.
+
+PostgreSQL is the record; RabbitMQ is transport. Pending event deliveries are
+republished every scheduler tick with stable business event IDs. Pending manual
+requests are also recovered from PostgreSQL, using the original request ID.
+Broker volume loss and restoration of an older database require isolated release
+verification before assuming recovery. Do not add the broker volume to the
+database/evidence backup archive without a separate broker backup procedure.
 
 Open your HTTPS URL and connect with the configured Vessel API token from your
 private operator file. Do not confuse it with a Lighter read-only token. Vessel
@@ -541,15 +592,15 @@ Back up first, read the changelog, and set `VESSEL_VERSION` to the chosen releas
 
 ```sh
 docker compose pull
-docker compose stop web api
+docker compose stop web api worker
 docker compose up -d
 docker compose ps -a
 ```
 
 `up` restarts the completed migration service and applies any pending migrations
-before API starts. Re-running it against the same version is idempotent. Stop web
-and API first when a schema change is expected, so no old process uses the schema
-while it changes. This
+before API and worker start. Re-running it against the same version is idempotent.
+Stop web, API and worker first when a schema change is expected, so no old process
+uses the schema while it changes. This
 ordering is the explicit deployment migration step, not API startup migration.
 Do not use `docker compose restart` to upgrade or apply migrations. Failed
 migrations block API startup; inspect the migration logs before proceeding.
@@ -559,14 +610,14 @@ new schema is incompatible with the old image.
 
 ## Backups
 
-Keep backups private and test restores in an isolated installation. Stop web and
-API to keep database references and evidence consistent, then (the RabbitMQ volume
-is excluded: subscribers recover unsettled events from PostgreSQL):
+Keep backups private and test restores in an isolated installation. Stop web, API
+and worker to keep database references and evidence consistent, then (the RabbitMQ
+volume is excluded: subscribers recover unsettled events from PostgreSQL):
 
 ```sh
 umask 077
 mkdir -p backups
-docker compose stop web api
+docker compose stop web api worker
 docker compose exec -T postgres pg_dump -U vessel -d vessel -Fc > backups/vessel.dump
 docker compose stop rustfs
 docker compose run --rm --no-deps -T --entrypoint tar rustfs \

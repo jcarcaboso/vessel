@@ -5,6 +5,7 @@ using Vessel.Application.Venues;
 using Vessel.Application.Credentials;
 using Vessel.Application.Workspace;
 using Vessel.Application.Ownership;
+using Vessel.Application.Monitoring;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
@@ -17,11 +18,36 @@ namespace Vessel.Application.Plays.Execution;
 /// Unambiguous orders link automatically; ambiguous ones become suggestions for the owner. Read-only at the venue.
 /// </summary>
 public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore store, WorkspaceService workspace,
-    IVenueRegistry venues, TimeProvider time, IUnitOfWork unitOfWork, IAccountCredentialReader? credentials = null)
+    IVenueRegistry venues, TimeProvider time, IUnitOfWork unitOfWork, IAccountCredentialReader? credentials = null) : IMonitorImporter
 {
     private const int MaxUnlinkedOrders = 20;
     private const string Notice = "Orders and fills come from the venue and link to this play by order ID. " +
         "Price touches are never treated as fills. Quantities are base units from linked fills; closed PnL and fees are as the venue reports them.";
+
+    /// <summary>Retain an already-read order observation inside the caller's fenced account transaction. No linking or network reads.</summary>
+    public Task RetainAsync(Account account, VenueOrderReadResult orders, CancellationToken ct) =>
+        store.WithAccountLockAsync(account.Id, async () =>
+        {
+            await store.UpsertOrdersAsync(account, orders.Orders, orders.ObservedAtUtc, ct);
+            return true;
+        }, ct);
+
+    /// <summary>Reuse execution matching and integrity checks with imported facts, without another venue/catalogue read.</summary>
+    public Task ReconcileImportedAsync(Account account, VenueOrderReadResult orders,
+        IReadOnlyList<VenueInstrument> instruments, CancellationToken ct) =>
+        store.WithAccountLockAsync(account.Id, async () =>
+        {
+            var ticks = venues.Descriptor(account.VenueId)?.PriceRule == PriceRules.TickSize
+                ? instruments.Where(i => i.PriceStep is > 0).GroupBy(i => i.ContractId, StringComparer.Ordinal)
+                    .ToDictionary(g => g.Key, g => g.First().PriceStep!.Value, StringComparer.Ordinal)
+                : new Dictionary<string, decimal>(StringComparer.Ordinal);
+            await ReconcileAsync(account, orders, ticks, ct);
+            return true;
+        }, ct);
+
+    Task IMonitorImporter.ReconcileAsync(Account account, VenueOrderReadResult orders,
+        IReadOnlyList<VenueInstrument> instruments, CancellationToken ct) =>
+        ReconcileImportedAsync(account, orders, instruments, ct);
 
     /// <summary>Retains bounded venue order history on explicit account refresh, without linking orders or changing Plays.</summary>
     public Task<string?> RetainAccountOrdersAsync(Guid accountId, CancellationToken ct) =>

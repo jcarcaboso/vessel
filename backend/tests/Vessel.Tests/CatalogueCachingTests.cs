@@ -23,7 +23,7 @@ public sealed class CatalogueCachingTests
     private sealed class NoCredentials : IAccountCredentialReader
     {
         public Task<string?> ReadAsync(Guid accountId, CancellationToken ct) => throw new InvalidOperationException("Public metadata must not read credentials.");
-        public Task MarkRefusedAsync(Guid accountId, CancellationToken ct) => throw new InvalidOperationException();
+        public Task MarkRefusedAsync(Guid accountId, string attemptedRevision, CancellationToken ct) => throw new InvalidOperationException();
     }
 
     private static string LighterMarket(int id, bool active = true, bool frozen = false) => $$"""

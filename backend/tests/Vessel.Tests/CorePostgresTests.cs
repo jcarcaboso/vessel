@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Vessel.Application.Common;
 using Vessel.Application.Workspace;
@@ -181,7 +182,9 @@ public sealed class CorePostgresTests
     public async Task Real_api_refresh_uses_fixture_reader_and_returns_safe_failure_and_foreign_404()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); var reader = new FixtureReader();
-        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString, reader: reader); using var client = factory.AuthorizedClient();
+        var clock = new RefreshClock(reader.Result.Snapshot.ObservedAtUtc);
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString, reader: reader,
+            configure: services => services.AddSingleton<TimeProvider>(clock)); using var client = factory.AuthorizedClient();
         var portfolioResponse = await client.PostAsJsonAsync("/api/portfolios", new CreatePortfolioRequest("API")); Assert.Equal(HttpStatusCode.Created, portfolioResponse.StatusCode);
         var portfolio = (await portfolioResponse.Content.ReadFromJsonAsync<PortfolioDto>())!;
         var accountResponse = await client.PostAsJsonAsync("/api/accounts", new CreateAccountRequest(portfolio.Id, "Venue", "hyperliquid", "0x1111111111111111111111111111111111111111"));
@@ -191,7 +194,13 @@ public sealed class CorePostgresTests
         Assert.Equal(1, reader.Reads);
         var fills = (await client.GetFromJsonAsync<FillDto[]>($"/api/accounts/{account.Id}/fills"))!; Assert.Single(fills); Assert.Null(fills[0].PlayId);
         var body = await client.GetStringAsync("/api/overview"); Assert.DoesNotContain("secret", body); Assert.DoesNotContain("ownerId", body); Assert.DoesNotContain("rawJson", body);
-        reader.Fail = true; var failure = await client.PostAsync($"/api/accounts/{account.Id}/sync", null); Assert.Equal(HttpStatusCode.BadGateway, failure.StatusCode);
+        reader.Fail = true;
+        var cooling = await client.PostAsync($"/api/accounts/{account.Id}/sync", null);
+        Assert.Equal(HttpStatusCode.TooManyRequests, cooling.StatusCode); Assert.Equal(1, reader.Reads);
+        Assert.Equal(TimeSpan.FromSeconds(60), cooling.Headers.RetryAfter?.Delta);
+        clock.Now += TimeSpan.FromMinutes(1);
+        var failure = await client.PostAsync($"/api/accounts/{account.Id}/sync", null); Assert.Equal(HttpStatusCode.BadGateway, failure.StatusCode);
+        Assert.Equal(2, reader.Reads);
         Assert.DoesNotContain("secret", await failure.Content.ReadAsStringAsync());
         Assert.NotNull(await client.GetFromJsonAsync<SnapshotDto>($"/api/accounts/{account.Id}/snapshot"));
         await using var foreignFactory = new CoreApiFactory(Guid.NewGuid(), connection: database.ConnectionString, reader: reader); using var foreignClient = foreignFactory.AuthorizedClient();
@@ -199,6 +208,12 @@ public sealed class CorePostgresTests
         Assert.Equal(HttpStatusCode.NotFound, (await foreignClient.GetAsync($"/api/accounts/{account.Id}/fills")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await foreignClient.PostAsync($"/api/accounts/{account.Id}/sync", null)).StatusCode);
         Assert.Empty((await foreignClient.GetFromJsonAsync<OverviewDto>("/api/overview"))!.Accounts);
+    }
+
+    private sealed class RefreshClock(DateTimeOffset now) : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = now;
+        public override DateTimeOffset GetUtcNow() => Now;
     }
 
     [PostgresFact]

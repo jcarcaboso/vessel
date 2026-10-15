@@ -8,7 +8,7 @@ using Vessel.Infrastructure.Venues.Risex;
 namespace Vessel.Tests;
 
 /// <summary>RISEx adapter against recorded response shapes (October 5, 2026). The address is synthetic.</summary>
-public sealed class RisexAdapterTests
+public sealed partial class RisexAdapterTests
 {
     private const string Address = "0x00000000000000000000000000000000000000aa";
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-10-05T12:00:00Z");

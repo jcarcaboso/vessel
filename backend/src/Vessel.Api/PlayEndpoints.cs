@@ -1,3 +1,4 @@
+using Vessel.Application.Monitoring;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using static Vessel.Api.EndpointTransport;
@@ -40,14 +41,19 @@ public static class PlayEndpoints
             Results.Ok(await service.ChangeStatusAsync(id, request, ct)));
         api.MapGet("/{id:guid}/history", async (Guid id, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.HistoryAsync(id, ct)));
-        api.MapGet("/{id:guid}/execution", async (Guid id, PlayExecutionService service, CancellationToken ct) =>
-            Results.Ok(await service.GetAsync(id, ct)));
-        api.MapPost("/{id:guid}/execution/check", async (Guid id, PlayExecutionService service, CancellationToken ct) =>
-            Results.Ok(await service.CheckAsync(id, ct)));
-        api.MapPost("/{id:guid}/execution/links", async (Guid id, LinkOrderRequest request, PlayExecutionService service, CancellationToken ct) =>
-            Results.Ok(await service.LinkAsync(id, request, ct)));
-        api.MapDelete("/{id:guid}/execution/links/{linkId:guid}", async (Guid id, Guid linkId, PlayExecutionService service, CancellationToken ct) =>
-            Results.Ok(await service.UnlinkAsync(id, linkId, ct)));
+        api.MapGet("/{id:guid}/execution", async (Guid id, PlayExecutionService service, MonitorExecutionView monitor, CancellationToken ct) =>
+            Results.Ok(await monitor.ComposeAsync(await service.GetAsync(id, ct), ct)));
+        api.MapPost("/{id:guid}/execution/check", async (Guid id, HttpContext context, MonitorExecutionView monitor, CancellationToken ct) =>
+        {
+            try { return Results.Accepted(value: await monitor.RequestAsync(id, ct)); }
+            catch (MonitorAdmissionException ex) { return MonitorEndpoints.Busy(context, ex); }
+        });
+        api.MapPost("/{id:guid}/execution/links", async (Guid id, LinkOrderRequest request, PlayExecutionService service,
+            MonitorExecutionView monitor, CancellationToken ct) =>
+            Results.Ok(await monitor.ComposeAsync(await service.LinkAsync(id, request, ct), ct)));
+        api.MapDelete("/{id:guid}/execution/links/{linkId:guid}", async (Guid id, Guid linkId, PlayExecutionService service,
+            MonitorExecutionView monitor, CancellationToken ct) =>
+            Results.Ok(await monitor.ComposeAsync(await service.UnlinkAsync(id, linkId, ct), ct)));
         api.MapDelete("/{id:guid}", async (Guid id, PlayService service, CancellationToken ct) =>
         {
             await service.DeleteAsync(id, ct);

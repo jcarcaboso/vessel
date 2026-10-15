@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 import time
+from urllib.parse import quote
 import ipaddress
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,8 +34,15 @@ def configuration():
         if key in values:
             env[key] = values[key]
     for key, value in values.items():
-        if configuration_key(key).startswith(("vessel:credentials:", "vessel:evidence:")):
+        if configuration_key(key).startswith(("vessel:credentials:", "vessel:evidence:", "vessel:events:",
+                                              "vessel:messaging:", "vessel:monitor:", "vessel:worker:")):
             env[key] = value
+    if not any(configuration_key(key) == "vessel:messaging:rabbitmquri" for key in env):
+        user, password = values.get("RABBITMQ_USER"), values.get("RABBITMQ_PASSWORD")
+        if user and password:
+            env["Vessel__Messaging__RabbitMqUri"] = (
+                f"amqp://{quote(user, safe='')}:{quote(password, safe='')}@127.0.0.1:55672/"
+            )
     if values.get("ConnectionStrings__Vessel"):
         env["ConnectionStrings__Vessel"] = values["ConnectionStrings__Vessel"]
     else:
@@ -69,8 +77,8 @@ def frontend_environment():
     return {key: value for key, value in os.environ.items()
             if not configuration_key(key).startswith(("vessel:", "connectionstrings:"))
             and not key.casefold().startswith("infisical_")
-            and not key.casefold().startswith(("vessel_s3_", "rustfs_", "aws_"))
-            and key not in ["POSTGRES_PASSWORD", "Vessel_TEST_POSTGRES"]}
+            and not key.casefold().startswith(("vessel_s3_", "rustfs_", "aws_", "rabbitmq_", "vessel_test_"))
+            and key.casefold() != "postgres_password"}
 
 
 def verification_environment():
@@ -92,9 +100,13 @@ def main():
             ["dotnet", "ef", "database", "update", "--project", "src/Vessel.Persistence"],
             cwd=ROOT / "backend", env=env, check=True,
         )
+        subprocess.run(
+            ["dotnet", "run", "--project", "backend/src/Vessel.Api", "--no-launch-profile", "--", "provision-messaging"],
+            cwd=ROOT, env=env, check=True,
+        )
         return
-    if mode not in ["run", "api", "lan"]:
-        raise SystemExit("Use run, api, lan, or migrate.")
+    if mode not in ["run", "api", "worker", "lan"]:
+        raise SystemExit("Use run, api, worker, lan, or migrate.")
     host = "127.0.0.1"
     if mode == "lan":
         host = os.environ.get("Vessel_DEV_HOST", "")
@@ -117,10 +129,16 @@ def main():
             api_command += ["--configuration", "Release", "--no-build", "--no-launch-profile",
                             "--urls", "http://127.0.0.1:5080"]
             env["ASPNETCORE_ENVIRONMENT"] = "Development"
-        processes.append(subprocess.Popen(
-            api_command,
-            cwd=ROOT, env=env, start_new_session=True,
-        ))
+        if mode != "worker":
+            processes.append(subprocess.Popen(
+                api_command,
+                cwd=ROOT, env=env, start_new_session=True,
+            ))
+        if mode in ["run", "worker", "lan"]:
+            processes.append(subprocess.Popen(
+                ["dotnet", "run", "--project", "backend/src/Vessel.Worker", "--no-launch-profile"],
+                cwd=ROOT, env=env, start_new_session=True,
+            ))
         if mode in ["run", "lan"]:
             # Do not give the frontend process database credentials or the API token.
             processes.append(subprocess.Popen(
@@ -128,7 +146,7 @@ def main():
                 cwd=ROOT, env=frontend_environment(), start_new_session=True,
             ))
             print(f"Frontend: http://{host}:5180 · API: http://127.0.0.1:5080", flush=True)
-            print("Token is read privately from root .env. Stop with Ctrl+C; PostgreSQL remains mounted.", flush=True)
+            print("Worker runs separately. Stop with Ctrl+C; PostgreSQL and RabbitMQ remain mounted.", flush=True)
         while True:
             for process in processes:
                 if process.poll() is not None:

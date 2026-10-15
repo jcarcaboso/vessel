@@ -88,6 +88,7 @@ public static class MessagingHosting
                 options.Discovery.IncludeType(command.Handler!);
             }
             options.Policies.OnException<EventDeadLetterException>().MoveToErrorQueue();
+            options.Policies.OnException<CommandDeadLetterException>().MoveToErrorQueue();
             configure?.Invoke(options);
         });
         return builder;

@@ -1,0 +1,26 @@
+using Vessel.Application.Monitoring;
+
+namespace Vessel.Api;
+
+public static class MonitorEndpoints
+{
+    public static void MapMonitor(this WebApplication app)
+    {
+        var api = app.MapGroup("/api").RequireAuthorization();
+        api.MapGet("/monitor", async (MonitorCoordinator monitor, CancellationToken ct) =>
+            Results.Ok(await monitor.SummaryAsync(ct)));
+        api.MapGet("/accounts/{id:guid}/monitor", async (Guid id, MonitorCoordinator monitor, CancellationToken ct) =>
+            Results.Ok(await monitor.AccountAsync(id, ct)));
+        api.MapPost("/accounts/{id:guid}/monitor/run", async (Guid id, HttpContext context, MonitorCoordinator monitor, CancellationToken ct) =>
+        {
+            try { return Results.Accepted(value: await monitor.RequestAsync(id, ct)); }
+            catch (MonitorAdmissionException ex) { return Busy(context, ex); }
+        });
+    }
+
+    public static IResult Busy(HttpContext context, MonitorAdmissionException error)
+    {
+        context.Response.Headers.RetryAfter = error.RetryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return Results.Problem(statusCode: 429, title: "This account check is running or cooling down.");
+    }
+}

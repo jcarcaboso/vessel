@@ -13,7 +13,7 @@ public sealed class MonitorModule : IVesselModule
 {
     public const string ModuleName = "monitor";
     public string Name => ModuleName;
-    public IReadOnlyList<CommandQueue> Commands { get; } = [new("monitor", typeof(MonitorAccountCommand))];
+    public IReadOnlyList<CommandQueue> Commands { get; } = [new("monitor", typeof(MonitorAccountCommand), typeof(MonitorCommandListener))];
     public IReadOnlyList<EventSubscription> Subscriptions { get; } = [];
     public void AddRunningServices(IServiceCollection services, IConfiguration configuration) { }
 }

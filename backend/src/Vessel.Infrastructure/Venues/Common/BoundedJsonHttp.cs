@@ -56,6 +56,16 @@ public sealed class BoundedJsonHttp(HttpClient httpClient, TimeProvider timeProv
     public async Task<JsonDocument> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+        {
+            var now = timeProvider.GetUtcNow();
+            var retry = response.Headers.RetryAfter;
+            var delta = retry?.Delta ?? TimeSpan.FromSeconds(60);
+            var deadline = retry?.Date?.ToUniversalTime() ??
+                (delta > DateTimeOffset.MaxValue - now ? DateTimeOffset.MaxValue : now + delta);
+            // No response body, request URL or authorization information crosses the adapter boundary.
+            throw new VenueRateLimitException(deadline < now ? now : deadline);
+        }
         if (!response.IsSuccessStatusCode)
             throw new VenueReadException(unavailable);
         if (response.Content.Headers.ContentLength > maxResponseBytes)

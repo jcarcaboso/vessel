@@ -8,6 +8,8 @@ RUN dotnet restore Vessel.slnx --locked-mode && dotnet tool restore
 ARG VERSION=0.1.3
 RUN dotnet publish src/Vessel.Api/Vessel.Api.csproj -c Release --no-restore \
     -p:Version=${VERSION} -o /out/api
+RUN dotnet publish src/Vessel.Worker/Vessel.Worker.csproj -c Release --no-restore \
+    -p:Version=${VERSION} -o /out/worker
 # The design-time factory needs a syntactically valid connection, never a live database or a secret.
 RUN ConnectionStrings__Vessel='Host=localhost;Database=vessel;Username=vessel' \
     dotnet ef migrations bundle --project src/Vessel.Persistence --configuration Release \
@@ -25,8 +27,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && mkdir -p /var/lib/vessel/evidence && chown app:app /var/lib/vessel/evidence
 WORKDIR /app
 COPY --from=build /out/api/ ./
+COPY --from=build /out/worker/ /app/worker-host/
 COPY --from=build --chmod=755 /out/migrate-ef /app/migrate-ef
-COPY --chmod=755 deploy/migrate /app/migrate
+COPY --chmod=755 deploy/migrate deploy/worker deploy/worker-health /app/
 ENV ASPNETCORE_HTTP_PORTS=8080 \
     ASPNETCORE_ENVIRONMENT=Production \
     Vessel__Evidence__Storage__Local__RootPath=/var/lib/vessel/evidence

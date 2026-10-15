@@ -41,6 +41,11 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
             "ConnectionStrings__Vessel": "test-connection",
             "POSTGRES_PASSWORD": "test-password",
             "Vessel_TEST_POSTGRES": "test-database",
+            "Vessel_TEST_EVENT_RABBIT": "test-broker",
+            "RABBITMQ_USER": "test-user",
+            "RABBITMQ_PASSWORD": "test-broker-password",
+            "rabbitmq_password": "test-lowercase-broker-password",
+            "Vessel__Messaging__RabbitMqUri": "amqp://test:secret@localhost",
             "INFISICAL_TOKEN": "test-infisical-access-token",
             "infisical_client_secret": "test-infisical-client-secret",
             "Vessel__Evidence__Storage__S3__SecretAccessKey": "test-s3-secret",
@@ -90,6 +95,21 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
                 with self.subTest(key=key), patch.dict(os.environ, {"PATH": "/bin", key: "synthetic-secret"}, clear=True):
                     self.assertEqual({"PATH": "/bin"}, dev.frontend_environment())
                     self.assertEqual({"PATH": "/bin"}, dev.verification_environment())
+
+    def test_monitor_configuration_and_broker_secrets_stay_in_server_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text(
+                "ConnectionStrings__Vessel=test-connection\n"
+                "RABBITMQ_USER=local-user\nRABBITMQ_PASSWORD=space /@secret\n"
+                "Vessel__Monitor__Interval=00:20:00\n"
+            )
+            with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True):
+                environment = dev.configuration()
+                self.assertEqual("00:20:00", environment["Vessel__Monitor__Interval"])
+                self.assertEqual("amqp://local-user:space%20%2F%40secret@127.0.0.1:55672/",
+                                 environment["Vessel__Messaging__RabbitMqUri"])
+                self.assertEqual({}, dev.frontend_environment())
 
 
 if __name__ == "__main__":

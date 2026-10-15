@@ -294,13 +294,14 @@ public sealed class AccountSecurityTests
         var service = SecurityFixture.Service(owner, store, credentials, vault);
         await service.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
         var reader = new AccountCredentialReader(store, credentials, new CoreOwner(owner), vault, SecurityFixture.Clock, TestUnitOfWork.None);
-        await reader.MarkRefusedAsync(account.Id, default);
+        var attempt = (await reader.ReadAttemptAsync(account.Id, default))!;
+        await reader.MarkRefusedAsync(account.Id, attempt.Revision, default);
         Assert.Equal(AccountCredentialReader.RefusedError, credentials.Stored!.LastError);
         Assert.Equal("unavailable", (await service.GetAsync(account.Id, default)).Credential!.Status);
         Assert.False(await reader.IsUsableAsync(account, default));
         Assert.Null(await reader.ReadAsync(account.Id, default));
         await Assert.ThrowsAsync<ProblemException>(() =>
-            new AccountCredentialReader(store, credentials, new CoreOwner(Guid.NewGuid()), vault, SecurityFixture.Clock, TestUnitOfWork.None).MarkRefusedAsync(account.Id, default));
+            new AccountCredentialReader(store, credentials, new CoreOwner(Guid.NewGuid()), vault, SecurityFixture.Clock, TestUnitOfWork.None).MarkRefusedAsync(account.Id, attempt.Revision, default));
         await service.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
         Assert.Null(credentials.Stored!.LastError);
         Assert.True(await reader.IsUsableAsync(account, default));

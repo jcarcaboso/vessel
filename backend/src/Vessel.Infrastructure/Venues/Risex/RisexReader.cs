@@ -130,35 +130,50 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
         {
             var catalogue = await CatalogueAsync(token);
             using var portfolio = await GetAsync($"/v1/portfolio/details?account={address}", token);
-            var snapshot = ReadSnapshot(Data(portfolio), catalogue, timeProvider.GetUtcNow());
+            var snapshot = ReadSnapshot(Data(portfolio), catalogue, timeProvider.GetUtcNow(), out var positionsComplete);
             var fills = new List<VenueFill>();
+            var fillCoverage = new RawFillReadCoverage();
+            var hasNextPage = false;
             for (var page = 1; page <= MaxFillPages; page++)
             {
                 using var history = await GetAsync($"/v1/trade-history?account={address}&limit={PageSize}&page={page}", token);
                 var data = Data(history);
                 fills.AddRange(ReadFills(data, catalogue, latest));
-                if (!Json.Boolean(Json.Property(data, "has_next_page"))) break;
+                fillCoverage.Observe(Json.Property(data, "trades"), row => Nanoseconds(Json.Property(row, "time"), latest));
+                hasNextPage = Json.Boolean(Json.Property(data, "has_next_page"));
+                if (!hasNextPage) break;
             }
             return new PerpetualVenueReadResult(snapshot,
                 catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument).ToList(),
                 fills.GroupBy(f => (f.ContractId, f.SourceFillId)).Select(g => g.First()).OrderByDescending(f => f.OccurredAtUtc).ToList(),
-                HistoryNotice);
+                HistoryNotice, PositionsComplete: positionsComplete,
+                FillHistoryTruncated: hasNextPage || fillCoverage.Count == MaxFillPages * PageSize,
+                OldestRawFillAtUtc: fillCoverage.OldestAtUtc);
         }, cancellationToken);
     }
 
     /// <summary>Signed sizes and decimal strings from portfolio details. RISEx reports no withdrawable amount, so it stays unknown.</summary>
     internal static VenueSnapshot ReadSnapshot(JsonElement data, RisexCatalogue catalogue, DateTimeOffset observedAt)
+        => ReadSnapshot(data, catalogue, observedAt, out _);
+
+    private static VenueSnapshot ReadSnapshot(JsonElement data, RisexCatalogue catalogue, DateTimeOffset observedAt,
+        out bool positionsComplete)
     {
+        positionsComplete = true; // Portfolio details returns current positions without pagination.
         var summary = Json.Property(data, "summary");
         var positions = new List<VenuePosition>();
         var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in Json.Array(Json.Property(data, "positions")).EnumerateArray())
         {
             var sizeText = Json.TextOrEmpty(Json.Property(item, "size"), 64);
-            if (sizeText.Length == 0) continue;
+            if (sizeText.Length == 0) { positionsComplete = false; continue; }
             var size = Json.ParseDecimal(sizeText);
             if (size == 0) continue;
-            if (catalogue.ById(Json.Text(Json.Property(item, "market_id"), 20)) is not { } market) continue;
+            if (catalogue.ById(Json.Text(Json.Property(item, "market_id"), 20)) is not { } market)
+            {
+                positionsComplete = false;
+                continue;
+            }
             if (!keys.Add(market.Key)) throw Json.Invalid();
             var leverage = Json.Nonnegative(Json.Property(item, "leverage"));
             positions.Add(new(market.Key, size, Json.Positive(Json.Property(item, "avg_entry_price")),
@@ -247,7 +262,8 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             var orders = ReadOrders(Data(history), catalogue, latest).Concat(ReadTpslOrders(Data(tpsl), catalogue, latest))
                 .GroupBy(o => o.OrderId, StringComparer.Ordinal).Select(g => g.OrderByDescending(o => o.StatusAtUtc).First())
                 .OrderByDescending(o => o.PlacedAtUtc).ToList();
-            return new VenueOrderReadResult(orders, timeProvider.GetUtcNow(), OrdersNotice);
+            // Both reads are bounded history pages, not /orders/open plus a complete TP/SL list.
+            return new VenueOrderReadResult(orders, timeProvider.GetUtcNow(), OrdersNotice, OpenOrdersComplete: false);
         }, cancellationToken);
     }
 

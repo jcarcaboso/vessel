@@ -316,7 +316,7 @@ internal sealed class AccountHistoryCredential(string? token) : IAccountCredenti
         ct.ThrowIfCancellationRequested(); AccountId = accountId; AfterRead?.Invoke();
         return Task.FromResult(Token);
     }
-    public Task MarkRefusedAsync(Guid accountId, CancellationToken ct) => throw new NotSupportedException();
+    public Task MarkRefusedAsync(Guid accountId, string attemptedRevision, CancellationToken ct) => throw new NotSupportedException();
 }
 
 internal static class AccountHistoryNoticeBudget

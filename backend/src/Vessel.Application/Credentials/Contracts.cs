@@ -18,6 +18,8 @@ public sealed class CredentialStorageException() : Exception("Credential storage
 public interface IAccountCredentialReader
 {
     Task<string?> ReadAsync(Guid accountId, CancellationToken cancellationToken);
+    async Task<CredentialAttempt?> ReadAttemptAsync(Guid accountId, CancellationToken cancellationToken) =>
+        await ReadAsync(accountId, cancellationToken) is { } token ? new(token, "") : null;
 
     /// <summary>
     /// Metadata-only check for status displays and polling: no account lock and no decryption.
@@ -30,7 +32,19 @@ public interface IAccountCredentialReader
     /// Records that the venue explicitly refused the stored token, so it is no longer read or reported as usable
     /// until it is verified again. Not for timeouts or outages.
     /// </summary>
-    Task MarkRefusedAsync(Guid accountId, CancellationToken cancellationToken);
+    Task MarkRefusedAsync(Guid accountId, string attemptedRevision, CancellationToken cancellationToken);
+}
+
+// Not a record: generated ToString must never print the token. Revision identifies the sealed
+// envelope, so re-verifying the same plaintext also protects it from an older in-flight refusal.
+public sealed class CredentialAttempt(string token, string revision)
+{
+    public string Token { get; } = token;
+    public string Revision { get; } = revision;
+    public static string RevisionOf(AccountCredential credential) => Convert.ToHexString(
+        global::System.Security.Cryptography.SHA256.HashData(credential.Ciphertext.Concat(credential.Tag).Concat(credential.Nonce)
+            .Concat(global::System.Text.Encoding.UTF8.GetBytes(
+                $"{credential.KeyId}|{credential.Purpose}|{credential.LastVerifiedAt:O}|{credential.ExpiresAt:O}")).ToArray()));
 }
 
 public interface IAccountCredentialStore

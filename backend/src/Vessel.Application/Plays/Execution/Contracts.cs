@@ -3,6 +3,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Application.Venues;
+using Vessel.Application.Monitoring;
 
 namespace Vessel.Application.Plays.Execution;
 
@@ -37,7 +38,11 @@ public sealed record ExecutionTotalsDto(string EnteredQuantity, string ExitedQua
 /// <summary><paramref name="Issues"/> say why linked fills cannot settle the play; their quantities stay out of the totals when they contradict it.</summary>
 public sealed record PlayExecutionDto(Guid PlayId, string Status, bool Tracked, string? Reason, DateTimeOffset? CheckedAtUtc,
     ExecutionTotalsDto Totals, IReadOnlyList<EntryProgressDto> Entries, IReadOnlyList<OrderLinkDto> Links,
-    IReadOnlyList<OrderLinkDto> Suggestions, IReadOnlyList<ExecutionOrderDto> UnlinkedOrders, string Notice, IReadOnlyList<string> Issues);
+    IReadOnlyList<OrderLinkDto> Suggestions, IReadOnlyList<ExecutionOrderDto> UnlinkedOrders, string Notice, IReadOnlyList<string> Issues)
+{
+    public AccountMonitorDto? Monitor { get; init; }
+    public IReadOnlyList<MonitorDiscrepancyDto> Discrepancies { get; init; } = [];
+}
 
 // Application owns this bounded port; EF details stay in Persistence. Reads are owner-filtered.
 public interface IPlayExecutionStore

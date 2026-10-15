@@ -35,14 +35,26 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
             }
             var book = Array(open.RootElement);
             if (book.GetArrayLength() > MaxOrders) throw new VenueReadException(InvalidResponse);
+            var openOrdersComplete = book.GetArrayLength() < MaxOrders;
+            var openIds = new HashSet<string>(StringComparer.Ordinal);
             var observed = timeProvider.GetUtcNow();
             foreach (var item in book.EnumerateArray())
             {
                 // The open book is the current truth and overrides an older history entry.
                 var order = ReadOrder(item, contracts, latestTimestamp, "open", VenueOrderStatus.Open, observed);
-                if (order is not null) orders[order.OrderId] = order;
+                if (order is not null)
+                {
+                    if (!openIds.Add(order.OrderId)) openOrdersComplete = false;
+                    orders[order.OrderId] = order;
+                }
+                else if (IsPrimaryContract(Text(Property(item, "coin")))) openOrdersComplete = false;
+                // Nested children are not projected by ReadOrder. Never claim their absence.
+                if (item.TryGetProperty("children", out var children) &&
+                    (children.ValueKind != JsonValueKind.Array || children.GetArrayLength() > 0))
+                    openOrdersComplete = false;
             }
-            return new VenueOrderReadResult(orders.Values.OrderByDescending(o => o.PlacedAtUtc).ToList(), observed, OrdersNotice);
+            return new VenueOrderReadResult(orders.Values.OrderByDescending(o => o.PlacedAtUtc).ToList(), observed, OrdersNotice,
+                OpenOrdersComplete: openOrdersComplete);
         }, cancellationToken);
     }
 

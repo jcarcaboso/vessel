@@ -87,13 +87,44 @@ public static class VenueFactChecks
     public static bool Valid(VenueOrder order) => ExecutionFacts.IsSide(order.Side);
 }
 
+/// <summary>A current snapshot and imported executions within the adapter's supported perpetual scope.</summary>
+/// <param name="PositionsComplete">
+/// True only when the read establishes every current position within the snapshot's supported venue scope.
+/// It does not cover other DEXs, wallets or unsupported products. False means unknown or incomplete;
+/// an absent position must not be interpreted as flat. Independent responses are not an atomic snapshot.
+/// </param>
+/// <param name="FillHistoryComplete">
+/// True only for verified complete execution history within the supported scope, without truncation or omitted facts.
+/// Bounded recent fills do not establish lifetime completeness or a gap-free time window, even below their cap.
+/// False means unknown or incomplete; an absent fill must not be interpreted as no execution.
+/// </param>
+/// <param name="FillHistoryTruncated">
+/// True when a raw response/page cap was reached or another page remains unread, before any fact filtering.
+/// False when the bounded raw read finished without a known limit; this is not lifetime completeness.
+/// Null means unavailable or partial, so whether a limit was reached is unknown.
+/// </param>
+/// <param name="OldestRawFillAtUtc">
+/// Oldest validated execution timestamp across all raw rows read, before contract, fee or PnL filtering.
+/// Null for no rows, an unavailable/partial read, or any raw row without a valid timestamp.
+/// This is an observed boundary, not a covered-window start or proof of gap-free history.
+/// </param>
 public sealed record PerpetualVenueReadResult(
     VenueSnapshot Snapshot,
     IReadOnlyList<VenueInstrument> Instruments,
     IReadOnlyList<VenueFill> Fills,
-    string HistoryNotice);
+    string HistoryNotice,
+    bool PositionsComplete = false,
+    bool FillHistoryComplete = false,
+    bool? FillHistoryTruncated = null,
+    DateTimeOffset? OldestRawFillAtUtc = null);
 
-public sealed class VenueReadException(string message) : Exception(message);
+public class VenueReadException(string message) : Exception(message);
+
+/// <summary>A safe rate-limit category; the deadline comes from Retry-After, never the response body.</summary>
+public sealed class VenueRateLimitException(DateTimeOffset retryAtUtc) : VenueReadException("The venue rate limit requires a later retry.")
+{
+    public DateTimeOffset RetryAtUtc { get; } = retryAtUtc;
+}
 
 /// <summary>The owner's credential input is unusable (format, expiry or wrong wallet); not a venue outage.</summary>
 public sealed class VenueCredentialRejectedException() : Exception("The read-only token is not valid for this wallet.");

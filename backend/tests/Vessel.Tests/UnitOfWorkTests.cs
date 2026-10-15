@@ -980,8 +980,9 @@ public sealed class UnitOfWorkTests
             throw new InvalidOperationException("Use the Account overload.");
         public async Task<PerpetualVenueReadResult> ReadAsync(Account account, CancellationToken cancellationToken)
         {
-            Opened = await credentials.ReadAsync(account.Id, cancellationToken) == SecurityFixture.Token;
-            await credentials.MarkRefusedAsync(account.Id, cancellationToken);
+            var attempt = await credentials.ReadAttemptAsync(account.Id, cancellationToken);
+            Opened = attempt?.Token == SecurityFixture.Token;
+            await credentials.MarkRefusedAsync(account.Id, attempt!.Revision, cancellationToken);
             throw new VenueReadException("The venue refused the request.");
         }
     }
