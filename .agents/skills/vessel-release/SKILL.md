@@ -44,9 +44,12 @@ section of `docs/development.md` first.
 
 ## Verify
 
-- Run `scripts/check.sh` with pinned pnpm on `PATH`. Set `Vessel_TEST_POSTGRES`
-  to a disposable synthetic PostgreSQL 18 instance so database tests run.
-  Never use the owner's connection. Report opt-in live-test skips separately.
+- Finish version and source edits before running `scripts/check.sh` with pinned
+  pnpm on `PATH`. A build started before those edits does not verify the release;
+  rebuild and rerun affected checks after any subsequent source change. Set
+  `Vessel_TEST_POSTGRES` to a disposable synthetic PostgreSQL 18 instance so
+  database tests run. Never use the owner's connection. Report opt-in live-test
+  skips separately.
 - Run `python3 scripts/verify-release.py`. It builds throwaway images and tests
   HTTP/TLS proxy trust, headers, compression, SSE, upload limits and isolated
   backup/restore. Let its cleanup finish. If a check fails, stop before tagging
@@ -79,9 +82,11 @@ exclusions intact and never pass keys or tokens as build arguments.
 
 Inspect only selected image metadata to verify `linux/amd64`, the version and
 revision labels, and inspect packaged application version metadata. Do not
-dump environments or Docker credential configuration. After verification,
-create an annotated `v$VERSION` tag on `$REVISION`. Push the branch and tag when
-the request authorizes remote Git updates, without force or `--tags`.
+dump environments or Docker credential configuration. Push the candidate branch
+when remote Git updates are authorized, then confirm hosted CI passes for that
+exact revision before creating and pushing the annotated `v$VERSION` tag.
+Do not use force or `--tags`. If a correction is needed after a tag was pushed,
+report the mismatch and obtain the owner's direction rather than moving the tag.
 
 ## Manual publication
 
