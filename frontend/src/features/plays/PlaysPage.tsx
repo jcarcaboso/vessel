@@ -2,6 +2,7 @@ import { errorMessage } from '@/api/errors'
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { isReviewed, pagedPlayViews, playSearchLength, statusLabels, type PlayCounts, type PlayList as PlayListPage, type PlayListQuery, type PlayStatus, type PlayView, type SavedPlay, type StatusRequest } from '@/api/plays'
+import type { AccountMonitor } from '@/api/monitor'
 import { Button } from '@/components/ui/button'
 import { Pager } from '@/components/ui/pager'
 import { isPageSize } from '@/components/ui/paging'
@@ -18,6 +19,7 @@ import { PlayIdentity } from './PlayIdentity'
 import { ExecutionPanel } from './ExecutionPanel'
 import { ManualExecutionPanel } from './ManualExecutionPanel'
 import { emptyManualDraft, hasManualDraft } from './manual'
+import { useMonitorRun } from '@/features/monitor/useMonitorRun'
 import { usePlayExecution } from './usePlayExecution'
 import { useSizing } from './useSizing'
 import { planIssues, planIssueSummary } from './planChecks'
@@ -36,13 +38,15 @@ const ended: PlayStatus[] = ['closed', 'cancelled']
 type DialogKind = null | 'revision' | 'cancel' | 'delete' | 'history'
 type WorkKind = 'save' | 'status' | 'open' | 'delete' | 'manual'
 
-export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList }: {
+export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [] }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
   session: PlaysSession
   onSession: (session: PlaysSession) => void
   onReload?: (() => void) | undefined
+  reloadGeneration?: number
+  accountMonitors?: AccountMonitor[]
   loading?: boolean
   requestedPlayId?: string | null
   onRequestedPlayHandled?: () => void
@@ -148,21 +152,34 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const account = accounts.find(item => item.id === (saved?.summary.accountId ?? draft.accountId))
   const manual = !!account && venues.can(account.venueId, 'manualExecutions')
   const retrospective = saved?.summary.origin === 'retrospective'
-  // Loaded once per page visit; without it the sizing suggestions stay hidden.
-  const sizing = useSizing(api)
-  const tracking = usePlayExecution(api, visible && session.view === 'editor' && saved && !manual ? saved.summary.id : null, saved?.summary.status)
+  // Record-based suggestions also follow accepted stored-state reloads.
+  const sizing = useSizing(api, visible ? reloadGeneration : 0)
+  const tracking = usePlayExecution(api, visible && session.view === 'editor' && saved && !manual ? saved.summary.id : null, saved?.summary.status, reloadGeneration)
+  const { reload: reloadExecution } = tracking
+  const monitorChanged = useCallback(() => { reloadExecution(); onReload?.() }, [reloadExecution, onReload])
+  const executionMonitor = visible && account?.isEnabled !== false ? tracking.execution?.monitor ?? null : null
+  const monitorRun = useMonitorRun(api, executionMonitor ? accountMonitors.find(item => item.accountId === executionMonitor.accountId) ?? executionMonitor : null, monitorChanged)
 
   // Linked fills move a play to Open or Closed on the server; take the new status and version.
   const venueStatus = tracking.execution?.playId === saved?.summary.id ? tracking.execution?.status : undefined
+  const storedGeneration = useRef<{ api: WorkspaceApi; id: string; generation: number; status: string | undefined } | null>(null)
+  const storedAccept = useRef(acceptStoredPlay)
+  useEffect(() => { storedAccept.current = acceptStoredPlay }, [acceptStoredPlay])
+  const [storedReadError, setStoredReadError] = useState<string | null>(null)
   useEffect(() => {
     const state = latest.current.saved
-    if (!visible || !venueStatus || !state || venueStatus === state.summary.status) return
+    if (!visible || !state) return
+    const previous = storedGeneration.current
+    storedGeneration.current = { api, id: state.summary.id, generation: reloadGeneration, status: venueStatus }
+    const reloaded = previous?.api === api && previous.id === state.summary.id && previous.generation !== reloadGeneration
+    if (previous?.api === api && previous.id === state.summary.id && previous.generation === reloadGeneration && previous.status === venueStatus) return
+    if (!reloaded && (!venueStatus || venueStatus === state.summary.status)) return
     const controller = new AbortController()
     api.play(state.summary.id, controller.signal).then(play => {
-      if (!controller.signal.aborted) acceptStoredPlay(play)
-    }).catch(cause => { if (!controller.signal.aborted) setError(errorMessage(cause, 'The change could not be completed. Try again.')) })
+      if (!controller.signal.aborted) { storedAccept.current(play); setStoredReadError(null) }
+    }).catch(cause => { if (!controller.signal.aborted) setStoredReadError(errorMessage(cause, 'The change could not be completed. Try again.')) })
     return () => controller.abort()
-  }, [visible, api, saved?.summary.id, saved?.summary.status, venueStatus, acceptStoredPlay, setError])
+  }, [visible, api, venueStatus, reloadGeneration, saved?.summary.id])
   // The server keeps the direction once an entry has filled: it decides which side closes the position.
   const filled = venueStatus !== undefined && !!tracking.execution?.links.some(link => link.role === 'entry' && link.fills.length > 0)
   const dirty = useMemo(() => saved ? isDirty(draft, saved) : hasDraftContent(draft), [draft, saved])
@@ -367,7 +384,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     session.observedPlay.accountId === saved.summary.accountId && session.observedPlay.conflict
     ? <div className="workspace-alert" role="alert">The saved Play changed elsewhere. Your edits and their original version were kept. Copy any edits you want to keep, then discard the local copy from All plays and reopen the latest saved Play before saving.</div> : null
   if (session.view === 'list') {
-    return <>{requested}{conflict}<PlayList api={api} accounts={accounts} busy={busy !== null} list={listState} onList={setListState}
+    return <>{requested}{conflict}{storedReadError && <p className="error" role="status">{storedReadError}</p>}<PlayList reloadGeneration={reloadGeneration} api={api} accounts={accounts} busy={busy !== null} list={listState} onList={setListState}
       unsaved={unsaved ? draft.title.trim() || 'Untitled play' : null}
       onOpen={id => { void open(id) }}
       onNew={() => { if (activeWork.current.current) return; setError(null); update(startNewPlay(session)) }}
@@ -411,7 +428,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // The status badge, a revision pill and the buttons say what the owner can do; no banner restates them.
   const revision = saved && locked && !retrospective && saved.summary.planRevision > 1 ? saved.summary.planRevision : null
 
-  return <>{requested}{conflict}
+  return <>{requested}{conflict}{storedReadError && <p className="error" role="status">{storedReadError}</p>}
     <Button variant="ghost" size="sm" className="plays-back" onClick={() => update({ view: 'list' })}><ArrowLeft size={14} />All plays</Button>
     <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={draft} onChange={next => update({ draft: next })}
       {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} revision={revision} lockInstrument={locked}
@@ -424,7 +441,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         onChange={form => { if (mounted.current && currentApi.current === api && latest.current.saved?.summary.id === saved?.summary.id) update({ manual: form }) }}
         onStored={acceptStoredPlay} onBegin={() => latest.current.saved?.summary.id === saved?.summary.id ? beginWork('manual') : null} />
         : saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}
-        entries={draft.entries} direction={draft.direction} origin={saved.summary.origin} onCheck={() => { void tracking.check() }} onLink={request => { void tracking.link(request) }}
+        entries={draft.entries} direction={draft.direction} origin={saved.summary.origin} monitor={monitorRun.monitor} monitorBusy={monitorRun.busy} monitorError={monitorRun.error} retryAtUtc={monitorRun.retryAtUtc} monitorUnavailable={monitorRun.statusUnavailable}
+        onDismiss={tracking.dismiss} onCheck={() => { void monitorRun.check() }} onLink={request => { void tracking.link(request) }}
         onUnlink={linkId => { void tracking.unlink(linkId) }} /> : undefined} />
     {dialog === 'revision' && saved && <RevisionDialog revision={saved.summary.planRevision} pending={saving} error={dialogError}
       onSave={reason => { void save(reason) }} onClose={() => setDialog(null)} />}
@@ -437,10 +455,11 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
 
 const count = new Intl.NumberFormat('en-US')
 
-function PlayList({ api, accounts, busy, unsaved, list, onList, onOpen, onNew, onContinue, onDiscard }: {
+function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList, onOpen, onNew, onContinue, onDiscard }: {
   api: WorkspaceApi
   accounts: BrokerAccount[]
   busy: boolean
+  reloadGeneration: number
   /** Title of the play with unsaved changes, if any. */
   unsaved: string | null
   list: PlaysListState
@@ -476,7 +495,8 @@ function PlayList({ api, accounts, busy, unsaved, list, onList, onOpen, onNew, o
 
   const paged = pagedPlayViews.includes(list.view)
   const query: PlayListQuery = { view: list.view, ...(list.q ? { q: list.q } : {}), ...(paged ? { page: list.page, pageSize: list.pageSize } : {}) }
-  const rowsKey = JSON.stringify([query, generation])
+  // Accepted stored-state reloads (owner events) reread the page like a finished owner action.
+  const rowsKey = JSON.stringify([query, generation, reloadGeneration])
   // `requested` produced the rows; `key` is the request they answer, which differs when the server clamped the page.
   const [rows, setRows] = useState<{ api: WorkspaceApi; key: string; requested: string; page?: PlayListPage; error?: string } | null>(null)
   const adopted = useRef<string | null>(null)
@@ -485,10 +505,10 @@ function PlayList({ api, accounts, busy, unsaved, list, onList, onOpen, onNew, o
     adopted.current = null
     if (skip) return
     const controller = new AbortController()
-    const [request, at] = JSON.parse(rowsKey) as [PlayListQuery, number]
+    const [request, at, reloaded] = JSON.parse(rowsKey) as [PlayListQuery, number, number]
     api.plays(request, controller.signal).then(page => {
       if (controller.signal.aborted) return
-      const answered = request.page === undefined || page.page === request.page ? rowsKey : JSON.stringify([{ ...request, page: page.page }, at])
+      const answered = request.page === undefined || page.page === request.page ? rowsKey : JSON.stringify([{ ...request, page: page.page }, at, reloaded])
       setRows({ api, key: answered, requested: rowsKey, page })
     }).catch(cause => { if (!controller.signal.aborted) setRows({ api, key: rowsKey, requested: rowsKey, error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
     return () => controller.abort()
@@ -500,11 +520,11 @@ function PlayList({ api, accounts, busy, unsaved, list, onList, onOpen, onNew, o
     adopted.current = rows.key
     onList({ ...list, page: rows.page.page })
   }, [api, list, onList, rows, rowsKey])
-  const countsKey = JSON.stringify([list.q, generation])
+  const countsKey = JSON.stringify([list.q, generation, reloadGeneration])
   const [counts, setCounts] = useState<{ api: WorkspaceApi; key: string; counts: PlayCounts | null } | null>(null)
   useEffect(() => {
     const controller = new AbortController()
-    const q = (JSON.parse(countsKey) as [string, number])[0]
+    const q = (JSON.parse(countsKey) as [string, number, number])[0]
     api.playCounts(q ? { q } : {}, controller.signal).then(next => { if (!controller.signal.aborted) setCounts({ api, key: countsKey, counts: next }) })
       .catch(() => { if (!controller.signal.aborted) setCounts({ api, key: countsKey, counts: null }) })
     return () => controller.abort()

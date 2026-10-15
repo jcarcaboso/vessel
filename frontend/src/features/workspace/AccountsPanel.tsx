@@ -1,5 +1,6 @@
 import type { ManagementEvent } from './management-events'
 import { useId, useState, type ReactNode, type FormEvent } from 'react'
+import type { AccountMonitor } from '@/api/monitor'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
@@ -20,7 +21,8 @@ const groupOptions: { value: AccountGroupBy; label: string }[] = [
 ]
 
 export function AccountsPanel({ accounts, portfolios, portfolioFilter, onPortfolioFilter, refreshing, filters, onFiltersChange,
-  refreshAction, api, onChanged, onReload, onDetail, onSync, onManage, onAdd }: {
+  monitors = [], refreshAction, api, onChanged, onReload, onDetail, onSync, onManage, onAdd }: {
+  monitors?: AccountMonitor[]
   api: WorkspaceApi; onChanged: (event: ManagementEvent) => void; onReload: () => void
   accounts: BrokerAccount[]; portfolios: Portfolio[]; portfolioFilter: string
   onPortfolioFilter: (value: string) => void; refreshing: string | null; refreshAction: ReactNode
@@ -111,6 +113,6 @@ export function AccountsPanel({ accounts, portfolios, portfolioFilter, onPortfol
     {error && <p className="error bulk-error" role="alert">{error}</p>}
     {!shown.length ? <div className="workspace-empty"><Wallet size={30} /><strong>No accounts in this view</strong>
       <Button onClick={onAdd}>Add account</Button></div> :
-      <AccountRows selection={{ selected, onChange: choose, disabled: pending }} accounts={shown} groups={groupBy === 'none' ? undefined : groupAccounts(shown, groupBy)} portfolioNames={names} refreshing={refreshing} onDetail={onDetail} onSync={onSync} onManage={onManage} />}
+      <AccountRows monitors={monitors} selection={{ selected, onChange: choose, disabled: pending }} accounts={shown} groups={groupBy === 'none' ? undefined : groupAccounts(shown, groupBy)} portfolioNames={names} refreshing={refreshing} onDetail={onDetail} onSync={onSync} onManage={onManage} />}
   </section>
 }

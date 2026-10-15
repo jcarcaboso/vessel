@@ -31,7 +31,7 @@ const sessionFor = (play: SavedPlay): PlaysSession => {
 const execution = (play: SavedPlay): PlayExecution => ({
   playId: play.summary.id, status: play.summary.status, tracked: false, reason: 'No imported tracking.', checkedAtUtc: null,
   totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
-  entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Facts only.', issues: [],
+  entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Facts only.', issues: [], monitor: null, discrepancies: [],
 })
 
 const manualLedger = (play: SavedPlay): ManualExecutions => ({

@@ -13,6 +13,7 @@ async function main() {
   try {
     const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1512, height: 1120 } })
     const page = await context.newPage()
+    const verifyMonitor = await require('./monitor-browser-smoke.cjs')(page, process.env.VESSEL_RELEASE_CHART_ACCOUNT)
     await page.exposeFunction('recordCspViolation', entry => violations.push(entry))
     await page.addInitScript(() => document.addEventListener('securitypolicyviolation', event => window.recordCspViolation({ directive: event.violatedDirective, blocked: event.blockedURI })))
     page.on('console', message => { if (message.type() === 'error') failures.push(message.text()) })
@@ -61,7 +62,8 @@ async function main() {
     if (await show.count()) await show.click()
     else await page.getByRole('tab', { name: 'Evidence', exact: true }).click()
     await page.locator('.evidence-thumb').first().waitFor()
-    assert.ok(await page.locator('.evidence-thumb img').first().evaluate(async img => { await img.decode(); return img.naturalWidth > 0 && img.src.startsWith('blob:') }))
+    // Object URLs are acquired after React commits; an attached img can still have no src.
+    assert.ok(await page.locator('.evidence-thumb img[src^="blob:"]').first().evaluate(async img => { await img.decode(); return img.naturalWidth > 0 && img.src.startsWith('blob:') }))
     pass('blob chart capture image renders')
     await page.locator('.evidence-thumb').first().click()
     await page.getByRole('button', { name: 'Mark up', exact: true }).click()
@@ -75,14 +77,14 @@ async function main() {
     await page.mouse.up()
     await page.getByRole('button', { name: 'Done', exact: true }).click()
     await page.getByRole('button', { name: 'Marked', exact: true }).waitFor()
-    assert.ok(await page.locator('.evidence-dialog-image img').first().evaluate(async img => { await img.decode(); return img.naturalWidth > 0 }))
+    assert.ok(await page.locator('.evidence-dialog-image img[src^="blob:"]').first().evaluate(async img => { await img.decode(); return img.naturalWidth > 0 }))
     assert.ok(await page.locator('.evidence-dialog-image .marked-image-overlay').evaluate(async img => { await img.decode(); return img.naturalWidth > 0 && img.src.startsWith('data:') }))
     pass('vector markup and marked data-URL overlay render')
     await page.getByRole('button', { name: 'Close', exact: true }).click()
     const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
     await page.locator('.evidence-panel input[type=file]').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: image })
     await page.waitForFunction(() => document.querySelectorAll('.evidence-thumb').length === 2)
-    assert.ok(await page.locator('.evidence-thumb').nth(1).locator('img').first().evaluate(async img => { await img.decode(); return img.naturalWidth > 0 }))
+    assert.ok(await page.locator('.evidence-thumb').nth(1).locator('img[src^="blob:"]').first().evaluate(async img => { await img.decode(); return img.naturalWidth > 0 }))
     pass('image upload renders')
     // Exercise data: rendering explicitly as markup serialization uses data URLs.
     assert.ok(await page.evaluate(async () => {
@@ -103,6 +105,7 @@ async function main() {
     pass('built-in light/dark themes, inline styles and named theme builder')
     assert.ok(seen.has('market-stream'))
     pass('same-origin SSE fetch passes CSP connect-src')
+    await verifyMonitor(pass)
     assert.deepEqual(violations, [], 'CSP violations: ' + JSON.stringify(violations))
     assert.deepEqual(failures, [], 'Browser errors: ' + JSON.stringify(failures))
     pass('zero CSP violations and zero browser console/page errors')

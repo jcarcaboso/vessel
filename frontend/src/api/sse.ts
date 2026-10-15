@@ -76,3 +76,29 @@ export class SseParser {
     }
   }
 }
+
+/** Read an authenticated fetch response using the same bounded decoder for every SSE channel. */
+export async function readSseStream(body: ReadableStream<Uint8Array>, signal: AbortSignal, onEvent: (event: SseEvent) => void) {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  const parser = new SseParser(event => { if (!signal.aborted) onEvent(event) })
+  const stop = () => { void reader.cancel().catch(() => undefined) }
+  signal.addEventListener('abort', stop, { once: true })
+  try {
+    if (signal.aborted) return
+    for (;;) {
+      const chunk = await reader.read()
+      if (signal.aborted) return
+      if (chunk.done) {
+        parser.push(decoder.decode())
+        parser.end()
+        return
+      }
+      parser.push(decoder.decode(chunk.value, { stream: true }))
+    }
+  } finally {
+    signal.removeEventListener('abort', stop)
+    await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
+  }
+}

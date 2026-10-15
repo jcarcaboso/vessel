@@ -59,6 +59,8 @@ class Check:
         self.images = {kind: f'{self.name}:{kind}' for kind in ('api', 'web')}
         self.token = secrets.token_hex(32)
         self.s3_access, self.s3_secret = secrets.token_hex(16), secrets.token_hex(32)
+        self.database_password = secrets.token_hex(24)
+        self.broker_password = secrets.token_hex(24)
         self.owner = str(uuid.uuid4())
         self.http_port, self.https_port, self.redirect_port = port(), port(), port()
         self.broker_port = port()
@@ -93,6 +95,10 @@ class Check:
   worker:
     image: {self.images['api']}
     pull_policy: never
+  rabbitmq:
+    environment:
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2"
+      RABBITMQ_CTL_ERL_ARGS: "+S 1:1"
   web:
     image: {self.images['web']}
     pull_policy: never
@@ -111,13 +117,13 @@ class Check:
         run('docker', 'run', '--rm', '--user', '0', '-v', f'{self.key.parent}:/keys', 'node:24-bookworm-slim', 'chown', '1654:1654', '/keys/ring.json', stdout=subprocess.DEVNULL)
 
     def write_env(self, network):
-        (self.temp / '.env').write_text(f'''POSTGRES_PASSWORD={secrets.token_hex(24)}
+        (self.temp / '.env').write_text(f'''POSTGRES_PASSWORD={self.database_password}
 Vessel__Auth__Token={self.token}
 Vessel__Auth__OwnerId={self.owner}
 VESSEL_S3_ACCESS_KEY_ID={self.s3_access}
 VESSEL_S3_SECRET_ACCESS_KEY={self.s3_secret}
 RABBITMQ_USER=vessel
-RABBITMQ_PASSWORD={secrets.token_hex(24)}
+RABBITMQ_PASSWORD={self.broker_password}
 VESSEL_RABBITMQ_MANAGEMENT_BIND=127.0.0.1:{self.broker_port}
 VESSEL_WEB_BIND=127.0.0.1:{self.http_port}
 VESSEL_NETWORK_SUBNET={network}.0/24
@@ -244,6 +250,115 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
                 pass
             time.sleep(1)
         raise AssertionError('Isolated deployment did not become ready.')
+
+    def monitor(self):
+        """Exercise the packaged worker and event API without contacting a venue."""
+        for _ in range(60):
+            summary = self.json('/api/monitor')
+            if summary['workerOnline']:
+                break
+            time.sleep(1)
+        self.expect(summary['workerOnline'], 'packaged worker publishes its heartbeat', 'monitor')
+        for path in ('/api/monitor', '/api/events', '/api/events/stream'):
+            self.expect(self.request(path, auth=False)[0] == 401,
+                        'monitor route requires authentication: ' + path, 'monitor')
+        foreign = str(uuid.uuid4())
+        self.expect(self.request('/api/accounts/' + foreign + '/monitor')[0] == 404,
+                    'unknown account monitor is hidden', 'monitor')
+        self.expect(self.request('/api/accounts/' + self.account + '/monitor/run', 'POST')[0] == 409,
+                    'manual account cannot start venue monitoring', 'monitor')
+        self.expect(self.request('/api/events?after=not-a-cursor')[0] == 400,
+                    'invalid event cursor is rejected', 'monitor')
+        before = self.json('/api/events?limit=200')
+        self.expect(isinstance(before['nextSequence'], str),
+                    'event cursor is an exact decimal string', 'monitor')
+        play = self.json('/api/plays/' + self.play)
+        request = {'expectedVersion': play['summary']['version'], 'status': 'planned'}
+        planned = self.json('/api/plays/' + self.play + '/status', request, 'POST')
+        self.expect(planned['summary']['status'] == 'planned',
+                    'owner action persists with event emission enabled', 'monitor')
+        after = self.json('/api/events?after=' + before['nextSequence'] + '&limit=200')
+        events = [event for event in after['events']
+                  if event['subject'].get('playId') == self.play and event['type'] == 'play.status-changed']
+        self.expect(len(events) == 1, 'one saved status change produces one event', 'monitor')
+        self.expect(self.request('/api/plays/' + self.play + '/status', 'POST', request)[0] == 409,
+                    'stale owner mutation is rejected', 'monitor')
+        again = self.json('/api/events?after=' + before['nextSequence'] + '&limit=200')
+        self.expect([event['id'] for event in again['events']
+                     if event['subject'].get('playId') == self.play] == [event['id'] for event in events],
+                    'rejected retry does not duplicate events', 'monitor')
+        status, headers, _ = self.request('/api/events')
+        self.expect(status == 200 and 'no-store' in dict((key.lower(), value) for key, value in headers).get('cache-control', ''),
+                    'event history is not cacheable', 'monitor')
+        self.monitor_event_id = events[0]['id']
+        self.event_stream(before['nextSequence'], self.monitor_event_id)
+        self.wait_event_delivery(self.monitor_event_id)
+        self.compose('stop', 'rabbitmq', stdout=subprocess.DEVNULL)
+        event_id = self.change_status_event('paused')
+        self.expect(self.event_pending(event_id), 'broker outage leaves a durable pending delivery', 'monitor')
+        self.compose('up', '-d', '--wait', 'rabbitmq', stdout=subprocess.DEVNULL)
+        self.wait_event_delivery(event_id)
+        self.expect(self.json('/api/plays/' + self.play)['summary']['status'] == 'paused',
+                    'broker recovery does not replay the owner mutation', 'monitor')
+
+    def change_status_event(self, status):
+        before = self.json('/api/events?limit=200')
+        play = self.json('/api/plays/' + self.play)
+        self.json('/api/plays/' + self.play + '/status',
+                  {'expectedVersion': play['summary']['version'], 'status': status}, 'POST')
+        after = self.json('/api/events?after=' + before['nextSequence'] + '&limit=200')
+        events = [event for event in after['events']
+                  if event['subject'].get('playId') == self.play and event['type'] == 'play.status-changed']
+        self.expect(len(events) == 1, 'status event commits while broker is unavailable', 'monitor')
+        return events[0]['id']
+
+    def event_stream(self, after, expected_id):
+        connection = self.connect()
+        try:
+            connection.request('GET', '/api/events/stream?after=' + after,
+                               headers={'Authorization': 'Bearer ' + self.token})
+            response = connection.getresponse()
+            self.expect(response.status == 200 and
+                        response.getheader('Content-Type', '').startswith('text/event-stream'),
+                        'authenticated event stream passes through nginx', 'monitor')
+            received = []
+            for _ in range(20):
+                line = response.readline().decode('utf-8').strip()
+                if line.startswith('data: '):
+                    received.append(json.loads(line[6:]))
+                    if received[-1].get('id') == expected_id:
+                        break
+            self.expect(any(item.get('id') == expected_id for item in received),
+                        'SSE catch-up delivers the committed event without a venue read', 'monitor')
+        finally:
+            connection.close()
+
+    def event_pending(self, event_id, project=None):
+        return self.event_delivery_state(event_id, project) in ('pending', 'failed')
+
+    def event_delivery_state(self, event_id, project=None):
+        # Only this check's generated Compose project/database; never a supplied DSN.
+        event_id = str(uuid.UUID(event_id))
+        result = self.compose(
+            'exec', '-T', 'postgres', 'psql', '-U', 'vessel', '-d', 'vessel', '-At', '-c',
+            "SELECT state FROM event_deliveries WHERE owner_id = '" + self.owner +
+            "' AND event_id = '" + event_id + "' AND consumer = 'monitor'",
+            project=project, capture_output=True, text=True)
+        return result.stdout.strip()
+
+    def wait_event_delivery(self, event_id, project=None):
+        for _ in range(90):
+            if self.event_delivery_state(event_id, project) == 'delivered':
+                self.expect(True, 'durable monitor consumer acknowledged event ' + event_id, 'monitor')
+                return
+            time.sleep(1)
+        raise AssertionError('Durable event delivery did not recover: ' + event_id)
+
+    def private_logs(self, project=None):
+        logs = self.compose('logs', '--no-color', 'api', 'worker', 'migrate',
+                            project=project, capture_output=True, text=True).stdout
+        for secret in (self.token, self.database_password, self.broker_password, self.s3_secret):
+            self.expect(secret not in logs, 'application logs omit a synthetic secret', 'security')
 
     def matrix(self):
         status, _, _ = self.request('/api/accounts/00000000-0000-0000-0000-000000000001/credential', 'PUT', {}, {'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '198.51.100.77', 'Forwarded': 'proto=https'})
@@ -378,6 +493,13 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         self.chart_account = self.json('/api/accounts', {'name': 'Synthetic chart', 'venueId': 'hyperliquid', 'address': '0x' + '1' * 40}, 'POST')['id']
 
     def restore(self):
+        # Backup while an event is pending, then discard RabbitMQ's volume along
+        # with the old deployment. Recovery must come from PostgreSQL.
+        self.compose('stop', 'rabbitmq', stdout=subprocess.DEVNULL)
+        self.restore_event_id = self.change_status_event('planned')
+        self.expect(self.event_pending(self.restore_event_id),
+                    'database backup includes pending event work', 'restore')
+        self.private_logs()
         # Every host stops before a backup: web, api and the worker (README upgrade/backup procedure).
         self.compose('stop', 'web', 'api', 'worker', stdout=subprocess.DEVNULL)
         service, directory, uid = ('rustfs', '/data', '10001') if self.args.storage == 's3' else ('api', '/var/lib/vessel/evidence', '1654')
@@ -411,6 +533,11 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         self.compose('run', '--rm', 'migrate', project=project, stdout=subprocess.DEVNULL)
         self.compose('up', '-d', '--wait', project=project, stdout=subprocess.DEVNULL)
         self.ready()
+        self.wait_event_delivery(self.restore_event_id, project)
+        restored_events = self.json('/api/events?limit=200')
+        self.expect(any(event['id'] == self.restore_event_id for event in restored_events['events']),
+                    'event identity survives database restore and broker volume loss', 'restore')
+        self.private_logs(project)
         self.expect(self.request('/health/ready')[0] == 200, 'restored database/migrations ready', 'restore')
         self.expect(self.compose('ps', '--format', 'json', 'worker', project=project, capture_output=True, text=True).stdout.count('"healthy"') == 1,
                     'restored worker healthy without the broker volume', 'restore')
@@ -453,6 +580,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             self.ready()
             self.seed()
             self.worker()
+            self.monitor()
             self.matrix()
             self.transport_fixture()
             self.tls = True

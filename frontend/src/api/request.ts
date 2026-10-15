@@ -40,7 +40,10 @@ async function httpError(response: Response, options: RequestOptions): Promise<A
   if (response.status === 503) detail = 'The service is unavailable. Check the database and server configuration.'
   const reference = response.headers.get('X-Correlation-ID')
   if (response.status >= 500 && reference && /^[\da-f]{32}$/.test(reference)) detail += ` Reference: ${reference}`
-  return new ApiError('http', detail, response.status)
+  const retryAfter = response.headers.get('Retry-After')
+  const retryAt = retryAfter === null ? undefined : /^\d+$/.test(retryAfter) ? Date.now() + Number(retryAfter) * 1000 : Date.parse(retryAfter)
+  return new ApiError('http', detail, response.status,
+    retryAt !== undefined && Number.isFinite(retryAt) && Math.abs(retryAt) <= 8.64e15 ? new Date(retryAt).toISOString() : undefined)
 }
 
 /** The token stays in this session closure. JSON, images and stream headers share the same transport. */

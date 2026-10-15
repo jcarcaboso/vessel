@@ -7,7 +7,7 @@ import type { WorkspaceApi } from '@/api/workspace'
  * suggestions that need it stay hidden and the editor works as before. `updateRisk` saves the risk
  * setting and takes the document the server returns; it rejects so the caller can show why.
  */
-export function useSizing(api: WorkspaceApi) {
+export function useSizing(api: WorkspaceApi, generation = 0) {
   const [sizing, setSizing] = useState<SizingDocument | null>(null)
   useEffect(() => {
     const controller = new AbortController()
@@ -16,7 +16,7 @@ export function useSizing(api: WorkspaceApi) {
       .then(document => { if (!controller.signal.aborted) setSizing(document) })
       .catch(() => { /* Suggestions that need the record stay hidden. */ })
     return () => controller.abort()
-  }, [api])
+  }, [api, generation])
   const updateRisk = useCallback(async (riskPercent: string) => {
     setSizing(await api.updateSizingSettings({ riskPercent }))
   }, [api])

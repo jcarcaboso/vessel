@@ -1,3 +1,4 @@
+import { monitorFixture } from '@/test/monitor-fixture'
 import { screen, within } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
@@ -26,7 +27,7 @@ const execution: PlayExecution = {
     order: order('12', { side: 'sell', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true }), filledQuantity: '0', fills: [] }],
   unlinkedOrders: [order('13', { side: 'sell', limitPrice: '110', reduceOnly: true })],
   notice: 'Orders and fills come from the venue.',
-  issues: [],
+  issues: [], monitor: monitorFixture, discrepancies: [],
 }
 
 describe('execution panel', () => {
@@ -73,7 +74,7 @@ describe('execution panel', () => {
 
     await user.click(within(linked).getByRole('button', { name: 'Unlink Entry 1 order' }))
     expect(onUnlink).toHaveBeenLastCalledWith('00000000-0000-4000-8000-0000000000a1')
-    await user.click(screen.getByRole('button', { name: 'Check venue' }))
+    await user.click(screen.getByRole('button', { name: 'Check' }))
     expect(onCheck).toHaveBeenCalledOnce()
   })
 
@@ -89,10 +90,10 @@ describe('execution panel', () => {
   })
 
   it('explains untracked and closed plays without edit controls', () => {
-    const view = render(<ExecutionPanel execution={{ ...execution, tracked: false, status: 'planned', reason: 'Manual instruments are not tracked at a venue.',
+    const view = render(<ExecutionPanel execution={{ ...execution, tracked: false, monitor: null, status: 'planned', reason: 'Manual instruments are not tracked at a venue.',
       links: [], suggestions: [], unlinkedOrders: [] }} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     expect(screen.getByText('Manual instruments are not tracked at a venue.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Check venue' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Check' })).not.toBeInTheDocument()
     view.rerender(<ExecutionPanel execution={{ ...execution, status: 'closed' }} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     expect(screen.queryByRole('button', { name: /Unlink/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Other orders on this instrument' })).not.toBeInTheDocument()
