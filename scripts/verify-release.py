@@ -61,6 +61,7 @@ class Check:
         self.s3_access, self.s3_secret = secrets.token_hex(16), secrets.token_hex(32)
         self.owner = str(uuid.uuid4())
         self.http_port, self.https_port, self.redirect_port = port(), port(), port()
+        self.broker_port = port()
         self.projects = [self.name, self.name + '-restore']
         self.counts = {}
         self.tls = False
@@ -112,6 +113,9 @@ Vessel__Auth__Token={self.token}
 Vessel__Auth__OwnerId={self.owner}
 VESSEL_S3_ACCESS_KEY_ID={self.s3_access}
 VESSEL_S3_SECRET_ACCESS_KEY={self.s3_secret}
+RABBITMQ_USER=vessel
+RABBITMQ_PASSWORD={secrets.token_hex(24)}
+VESSEL_RABBITMQ_MANAGEMENT_BIND=127.0.0.1:{self.broker_port}
 VESSEL_WEB_BIND=127.0.0.1:{self.http_port}
 VESSEL_NETWORK_SUBNET={network}.0/24
 VESSEL_NETWORK_GATEWAY={network}.1
@@ -368,6 +372,9 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         with (self.temp / 'evidence.tar.gz').open('rb') as source:
             self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', '--entrypoint', 'sh', service, '-c',
                          f'tar -xzf - -C {directory} && chown -R {uid}:{uid} {directory}', project=project, stdin=source, stdout=subprocess.DEVNULL)
+        # The documented restore procedure: rotate the event stream epoch, then migrate and provision.
+        self.compose('run', '--rm', '--no-deps', '--entrypoint', 'dotnet', 'migrate', '/app/Vessel.Api.dll', 'rotate-event-epoch',
+                     project=project, stdout=subprocess.DEVNULL)
         self.compose('run', '--rm', 'migrate', project=project, stdout=subprocess.DEVNULL)
         self.compose('up', '-d', '--wait', project=project, stdout=subprocess.DEVNULL)
         self.ready()

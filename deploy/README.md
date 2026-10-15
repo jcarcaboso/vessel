@@ -27,8 +27,9 @@ The optional credential-key helper needs a source checkout.
 
 Copy this `deploy/` directory to a private operator directory outside the source
 checkout. Do not reuse the development `.env`, database or LAN preview services.
-In default HTTP mode only web publishes a port. In the TLS overlay only Caddy
-publishes ports. PostgreSQL, API and RustFS have no host ports; the RustFS console
+In default HTTP mode only web publishes a port, plus the loopback-bound RabbitMQ
+management page. In the TLS overlay only Caddy publishes ports besides that page.
+PostgreSQL, API, RustFS and RabbitMQ AMQP have no host ports; the RustFS console
 is disabled. **Existing folder installations must select the local overlay or
 complete the storage cutover below before switching to the new default.**
 
@@ -66,6 +67,8 @@ replacements = {
         subprocess.check_output(["openssl", "rand", "-hex", "16"], text=True).strip(),
     "REPLACE_WITH_GENERATED_S3_SECRET_KEY":
         subprocess.check_output(["openssl", "rand", "-hex", "32"], text=True).strip(),
+    "REPLACE_WITH_GENERATED_BROKER_PASSWORD":
+        subprocess.check_output(["openssl", "rand", "-hex", "32"], text=True).strip(),
 }
 for placeholder, value in replacements.items():
     if text.count(placeholder) != 1:
@@ -90,6 +93,47 @@ Web is pinned to `172.30.86.10`; optional Caddy is pinned to `172.30.86.20`.
 If these overlap a host, VPN or Docker network, change `VESSEL_NETWORK_SUBNET`,
 `VESSEL_NETWORK_GATEWAY`, `VESSEL_WEB_IP` and `VESSEL_TLS_PROXY_IP` together.
 Keep both service IPs inside the subnet and distinct from its gateway.
+
+## Event messaging: RabbitMQ
+
+Committed events are recorded in PostgreSQL and relayed after commit through a
+durable outbox to RabbitMQ, which is transport, not the record. Compose runs the
+pinned `rabbitmq:4.3.6-management` image with the `RABBITMQ_USER`/`RABBITMQ_PASSWORD`
+credentials from `.env`, a named `rabbitmq` volume for durable quorum queues and a
+`rabbitmq-diagnostics -q ping` healthcheck. AMQP stays on the private Compose
+network. The management page binds to `VESSEL_RABBITMQ_MANAGEMENT_BIND`
+(default `127.0.0.1:15672`) for troubleshooting; reach it through an SSH tunnel or
+an HTTPS proxy, never plain HTTP on the internet.
+
+Publishers write each event once to the topic exchange `vessel.events`, with the
+event type as routing key. Each subscriber owns a queue `vessel.events.sub.<name>`
+bound by its filter, with a dead-letter exchange and queue `….dlx`/`….dlq` and a
+quorum delivery limit of 20 as a transport guard. Account monitor commands use the
+point-to-point queue `vessel.commands.monitor`. This release registers no
+production subscription; the worker and its monitor module arrive in a later step.
+
+The one-shot `migrate` service applies the EF migrations and then runs
+`provision-messaging`: Wolverine envelope storage for every logical deployment
+(`wolverine_api`, `wolverine_monitor`), the broker topology of every module and
+insert-only subscription registrations. Neither the API nor a worker creates
+storage or declares topology at startup; an unprovisioned API fails to start.
+Administrator commands run in the API image with the server configuration:
+
+```sh
+# Mandatory step of every database restore, before provisioning and starting hosts.
+docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll rotate-event-epoch
+# Return a subscription's failed receipts to pending with a bounded extra budget.
+docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll \
+  retry-event-receipts <name> --limit 100 --attempts 3
+# Remove a subscription's registration, receipts and queue.
+docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll \
+  deregister-event-subscription <name>
+```
+
+A release check can set `Vessel__Messaging__Verification=true` on `migrate` to
+register the `verification` subscription, prove delivery from its receipts and
+then deregister it. Dead-letter queues are diagnostic copies; redriving one never
+reopens a settled receipt.
 
 ## Image storage: RustFS by default
 
@@ -327,11 +371,12 @@ docker compose up -d
 docker compose ps -a
 ```
 
-Compose waits for healthy PostgreSQL, runs `/app/migrate` as a deliberate one-shot
-step, then starts API and waits for readiness before starting web. The migration
-bundle reads `ConnectionStrings__Vessel` from its environment through the
-design-time factory. The password is not an argument and the bundle does not
-print it. The API never applies migrations at startup.
+Compose waits for healthy PostgreSQL and RabbitMQ, runs `/app/migrate` as a
+deliberate one-shot step (EF migrations, then messaging provisioning), then starts
+API and waits for readiness before starting web. The migration bundle reads
+`ConnectionStrings__Vessel` from its environment through the design-time factory.
+The password is not an argument and neither step prints it. The API never applies
+migrations or provisions messaging at startup.
 
 Open your HTTPS URL and connect with the configured Vessel API token from your
 private operator file. Do not confuse it with a Lighter read-only token. Vessel
@@ -515,7 +560,8 @@ new schema is incompatible with the old image.
 ## Backups
 
 Keep backups private and test restores in an isolated installation. Stop web and
-API to keep database references and evidence consistent, then:
+API to keep database references and evidence consistent, then (the RabbitMQ volume
+is excluded: subscribers recover unsettled events from PostgreSQL):
 
 ```sh
 umask 077
@@ -555,7 +601,9 @@ volumes, not an existing installation. Copy the deploy files and create a privat
 `.env` with a new database password, the **same** `Vessel__Auth__OwnerId`, and the
 saved operator settings. You may rotate the Vessel login token. Select the image
 version that produced the backup first. Bind web to an unused loopback port and
-choose an unused subnet and pinned service IPs. Do not start web/API yet.
+choose an unused subnet and pinned service IPs. Do not start web/API yet. The
+broker volume is not restored; RabbitMQ starts empty and subscribers recover
+unsettled retained events from PostgreSQL.
 
 The examples use the default mode; add every applicable `-f` overlay to each
 command. `-p vessel-restore-check` must never name the live project.
@@ -594,7 +642,11 @@ for rootless/user-namespace deployments. Use a regular, non-symlink file. Set
 decrypt the restored credentials.
 
 ```sh
-# This is the explicit migration step after restoring, not API startup.
+# Mandatory after every restore and before any host starts: browser cursors from
+# before the restore must reset, even once the restored stream reaches their sequence.
+docker compose -p vessel-restore-check run --rm --no-deps --entrypoint dotnet migrate \
+  /app/Vessel.Api.dll rotate-event-epoch
+# This is the explicit migration and provisioning step after restoring, not API startup.
 docker compose -p vessel-restore-check run --rm migrate
 docker compose -p vessel-restore-check up -d
 docker compose -p vessel-restore-check ps -a

@@ -2,7 +2,7 @@
 
 October 14, 2026. Shared contract for the authorized backend/frontend workers. Implements the [monitor plan](play-monitor-plan.md), not notification delivery. Existing Play/execution DTO fields and approved layout remain intact.
 
-All routes are authenticated and owner-scoped. Responses use `Cache-Control: no-store`. Times are ISO UTC or null. Decimal values in event/discrepancy details are strings. Sequence cursors are decimal strings, avoiding JavaScript integer precision limits.
+All routes are authenticated and owner-scoped. Responses use `Cache-Control: no-store`. Times are ISO UTC or null. Decimal values in event/discrepancy details are strings. Event sequences are decimal strings, avoiding JavaScript integer precision limits. Browser cursors are opaque strings `{epoch}.{sequence}` (or `0` for a stream not yet seen); the epoch is rotated by the restore procedure.
 
 ## Monitor state
 
@@ -43,12 +43,12 @@ Busy/cooling requests return 429 with `Retry-After`; ineligible accounts return 
 
 ## Events
 
-`GET /api/events?after={sequence}&limit={1..200}` returns:
+`GET /api/events?after={cursor}&limit={1..200}` returns:
 
 ```ts
 interface MonitorEventPage {
   events: MonitorEvent[]
-  nextSequence: string
+  nextCursor: string // {epoch}.{sequence}; resume from it
   resetRequired: boolean
 }
 interface MonitorEvent {
@@ -65,13 +65,17 @@ interface MonitorEvent {
   timeliness: 'timely' | 'late'
   relevance: 'current' | 'superseded'
   expiresAt: string | null
-  subject: { accountId?: string; venueId?: string; contractId?: string; playId?: string; entryId?: string; levelId?: string; discrepancyId?: string }
-  source: { trigger: string; orderIds?: string[]; fillIds?: string[] }
+  // Every optional field is present as an explicit null, never omitted.
+  subject: { accountId: string | null; venueId: string | null; contractId: string | null; playId: string | null;
+             entryId: string | null; levelId: string | null; discrepancyId: string | null }
+  source: { trigger: string; orderIds: string[] | null; fillIds: string[] | null }
   data: Record<string, unknown>
 }
 ```
 
-`GET /api/events/stream?after={sequence}` uses authenticated fetch SSE through the existing decoder. `event` frames contain `MonitorEvent`. `status` frames contain `{ state: 'ready' | 'reset', nextSequence: string }`; reset requires reloading stored state, not replaying historical popups. Keepalive comments need no UI action. Limit to four streams per owner and cancel when the API connection changes/disconnects. One shell subscription serves the browser; broker messages are wake-up hints, not the source of ordered catch-up.
+A cursor from another epoch (a restored database), below the retention floor, ahead of the database or a bare pre-epoch sequence returns `resetRequired: true`, no events and the `nextCursor` to resume from after reloading stored state. `0` starts at the beginning of retained history.
+
+`GET /api/events/stream?after={cursor}` uses authenticated fetch SSE through the existing decoder. `event` frames contain `MonitorEvent` and an SSE `id:` line holding that event's resume cursor. `status` frames contain `{ state: 'ready' | 'reset', nextCursor: string }`; `ready` echoes the accepted cursor normalized with the epoch, and reset requires reloading stored state, not replaying historical popups. Keepalive comments need no UI action. Limit to four streams per owner and cancel when the API connection changes/disconnects. One shell subscription serves the browser; it is a database-cursor reader, not a broker subscription.
 
 The UI reloads stored state on relevant events and polls stored state every 60 seconds when disconnected from the stream. These reads do not contact venues. No event/financial-data browser persistence is introduced.
 

@@ -55,13 +55,36 @@ services:
       retries: 12
     restart: unless-stopped
 
+  rabbitmq:
+    image: rabbitmq:4.3.6-management
+    hostname: vessel-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+    # AMQP stays on the private network. The management page is for troubleshooting, loopback by default.
+    ports:
+      - "${VESSEL_RABBITMQ_MANAGEMENT_BIND:-127.0.0.1:15672}:15672"
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+    restart: unless-stopped
+
   migrate:
     image: skorcius/vessel:api-${VESSEL_VERSION:-0.1.3}
+    # EF migrations, then explicit messaging provisioning. Nothing runs at API startup.
     entrypoint: ["/app/migrate"]
     environment:
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      Vessel__Auth__OwnerId: ${Vessel__Auth__OwnerId:?Set a non-empty GUID}
+      Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_USER:?Set RABBITMQ_USER}:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}@rabbitmq:5672/"
     depends_on:
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     healthcheck:
       disable: true
@@ -81,6 +104,7 @@ services:
       Vessel__Evidence__Storage__S3__ForcePathStyle: ${VESSEL_S3_FORCE_PATH_STYLE:-true}
       Vessel__Evidence__Storage__S3__AccessKeyId: ${VESSEL_S3_ACCESS_KEY_ID:-}
       Vessel__Evidence__Storage__S3__SecretAccessKey: ${VESSEL_S3_SECRET_ACCESS_KEY:-}
+      Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_USER:?Set RABBITMQ_USER}:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}@rabbitmq:5672/"
       # Nginx emits one sanitized hop, in both HTTP and TLS modes.
       Vessel__ForwardedHeaders__KnownProxies__0: ${VESSEL_WEB_IP:-172.30.86.10}
       Vessel__ForwardedHeaders__ForwardLimit: "1"
@@ -116,3 +140,4 @@ networks:
 volumes:
   postgres:
   objects:
+  rabbitmq:
