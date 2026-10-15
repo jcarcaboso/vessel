@@ -80,6 +80,8 @@ A cursor from another epoch (a restored database), below the retention floor, ah
 
 `GET /api/events/stream?after={cursor}` uses authenticated fetch SSE through the existing decoder. `event` frames contain `MonitorEvent` and an SSE `id:` line holding that event's resume cursor. `status` frames contain `{ state: 'ready' | 'reset', nextCursor: string }`; `ready` echoes the accepted cursor normalized with the epoch, and reset requires reloading stored state, not replaying historical popups. Keepalive comments need no UI action. Limit to four streams per owner and cancel when the API connection changes/disconnects. One shell subscription serves the browser; it is a database-cursor reader, not a broker subscription.
 
+Before its first stored-state read the shell reads the current head (an events page after a cursor beyond the retained range returns `resetRequired` with the head as `nextSequence`) and opens the stream from it, so a change committed during the initial load is delivered rather than skipped. Only `frontend/src/api/event-cursor.ts` interprets cursors. Reconnects back off from 2 s to 60 s with jitter, honour `Retry-After`, reset only after a stable connection or an event, and reload stored state only on `reset`.
+
 The UI reloads stored state on relevant events and polls stored state every 60 seconds when disconnected from the stream. These reads do not contact venues. No event/financial-data browser persistence is introduced.
 
 ## Execution and discrepancies
