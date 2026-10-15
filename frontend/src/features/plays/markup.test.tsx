@@ -207,7 +207,7 @@ describe('Marked images in the evidence panel', () => {
     render(<Harness initial={[{ ...marked(), markup: null }]} />)
     await userEvent.click(screen.getByRole('button', { name: /^Open Image 1/ }))
     const viewer = await screen.findByRole('dialog')
-    expect(within(viewer).getByText('No marks yet')).toBeInTheDocument()
+    expect(within(viewer).queryByRole('group', { name: 'Image version' })).not.toBeInTheDocument()
     await userEvent.click(within(viewer).getByRole('button', { name: 'Mark up' }))
     expect(within(viewer).getByRole('toolbar', { name: 'Markup tools' })).toBeInTheDocument()
     await userEvent.keyboard('{Escape}')

@@ -8,7 +8,7 @@ import { Inbox } from 'lucide-react'
 /** Executions inside one operation: the operation row already names its account and instrument. */
 export function ActivityTable({ fills, accounts, compact = false }: { fills: ImportedFill[]; accounts: BrokerAccount[]; compact?: boolean }) {
   const visible = fills.filter(fill => accounts.some(a => a.id === fill.accountId && a.isEnabled !== false))
-  if (!visible.length) return <div className="workspace-empty small-empty"><Inbox size={27} /><strong>No imported executions yet</strong><p>Refresh an exchange account to retrieve recent perpetual fills. Original intent is never inferred from imported history.</p></div>
+  if (!visible.length) return <div className="workspace-empty small-empty"><Inbox size={27} /><strong>No imported executions yet</strong><p>Refresh an exchange account to retrieve recent perpetual fills.</p></div>
   return <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Side</th><th>Time</th><th>Quantity</th><th>Price</th>{!compact && <><th>Reported closed P&amp;L</th><th>Association</th></>}</tr></thead>
     <tbody>{visible.map(fill => <tr key={fill.id}>
       <td><OperationDirection direction={sideDirection(fill)} /></td>

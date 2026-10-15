@@ -83,7 +83,9 @@ describe('suggestions panel', () => {
     expect(field('Whole-position margin (quote units)')).toHaveValue(2500)
     expect(field('Whole-position margin (quote units)')).not.toHaveAttribute('data-suggested')
     expect(screen.queryByTestId('size-suggestion')).not.toBeInTheDocument()
-    expect(screen.getByTestId('suggestions-empty')).toHaveTextContent('within your limits')
+    // The headline already says the plan is within its limits; no empty-state sentence repeats it.
+    expect(screen.queryByTestId('suggestions-empty')).not.toBeInTheDocument()
+    expect(within(panel()).getByRole('button', { name: /^Suggestions/ })).toHaveTextContent('Plan within your limits')
   })
 
   it('applies reduced exposure in quantity mode and says why', async () => {

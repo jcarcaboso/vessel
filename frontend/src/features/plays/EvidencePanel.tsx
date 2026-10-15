@@ -93,7 +93,7 @@ export function EvidencePanel({ evidence, onChange }: {
     <div className="evidence-toolbar">
       <div>
         <strong id={`${id}-title`}>Images</strong>
-        <small>{evidence.length} of {evidenceLimits.maxItems} · Unsaved images, notes and marks stay in this session until saved</small>
+        <small>{evidence.length} of {evidenceLimits.maxItems}</small>
       </div>
       <input ref={input} type="file" accept={evidenceAccept} multiple hidden onChange={event => void upload(event)} />
       <Button type="button" size="sm" variant="outline" disabled={full} title={full ? `At most ${evidenceLimits.maxItems} images` : undefined}
@@ -101,7 +101,7 @@ export function EvidencePanel({ evidence, onChange }: {
     </div>
     {error && <p className="evidence-error" role="alert">{error}</p>}
     {evidence.length === 0
-      ? <div className="evidence-empty"><ImagePlus size={18} aria-hidden="true" /><p>No images yet. Capture the chart with the camera button in its toolbar, or upload a PNG, JPEG or WebP image up to {evidenceLimits.maxBytes / 1024 / 1024} MB.</p></div>
+      ? <div className="evidence-empty"><ImagePlus size={18} aria-hidden="true" /><p>No images yet.</p></div>
       : <ul className="evidence-list" aria-label="Evidence images">
         {evidence.map((item, index) => <li key={item.id} className="evidence-card">
           <div className="evidence-frame">
@@ -137,8 +137,7 @@ export function EvidencePanel({ evidence, onChange }: {
       {viewed && <DialogContent className="plays-entry-dialog evidence-dialog"
         onEscapeKeyDown={event => { if (editing) event.preventDefault() }}>
         <DialogTitle>{describe(viewed)}</DialogTitle>
-        <DialogDescription>{viewed.source === 'capture' ? 'Captured' : 'Added'} {timeFormat.format(new Date(viewed.addedAt))} UTC · {formatBytes(viewed.image.size)}.
-          {viewed.serverId ? ' Image stored with this Play; changes to notes or marks need saving.' : ' Unsaved image, kept only in this session until saved.'}</DialogDescription>
+        <DialogDescription>{viewed.source === 'capture' ? 'Captured' : 'Added'} {timeFormat.format(new Date(viewed.addedAt))} UTC · {formatBytes(viewed.image.size)}{viewed.serverId ? '' : ' · unsaved'}</DialogDescription>
         {editing
           ? <EvidenceMarkupEditor item={viewed}
             onChange={markup => setMarkup(viewed.id, markup)} onDone={() => { setEditing(false); setView('marked') }} />
@@ -149,7 +148,7 @@ export function EvidencePanel({ evidence, onChange }: {
                   <button type="button" aria-pressed={view === 'marked'} onClick={() => setView('marked')}>Marked</button>
                   <button type="button" aria-pressed={view === 'original'} onClick={() => setView('original')}>Original</button>
                 </div>
-                : <span className="evidence-view-note">No marks yet</span>}
+                : null}
               <Button type="button" size="sm" variant="outline" onClick={() => setEditing(true)}><PenLine size={13} aria-hidden="true" />{hasMarks(viewed.markup) ? 'Edit marks' : 'Mark up'}</Button>
               <Button type="button" size="sm" variant="ghost" onClick={() => void download(viewed, view === 'marked')}>
                 <Download size={13} aria-hidden="true" />{view === 'marked' && hasMarks(viewed.markup) ? 'Download marked' : 'Download original'}</Button>

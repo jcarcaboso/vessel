@@ -12,6 +12,7 @@ import { AccountCredential } from './AccountCredential'
 import { PortfolioAccounts } from './PortfolioAccounts'
 import { PortfolioIconPicker } from './PortfolioIcon'
 import { defaultPortfolioIcon, type PortfolioIconKey } from '@/api/portfolio-icons'
+import { NativeSelect } from '@/components/ui/native-select'
 
 const noAccounts: BrokerAccount[] = []
 const noPortfolios: Portfolio[] = []
@@ -92,8 +93,8 @@ export function ManagePortfolioDialog({ portfolio, accounts = noAccounts, portfo
   }
   return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>
     <DialogContent className="workspace-dialog">
-      <DialogHeader><DialogTitle>{deleting ? 'Delete portfolio?' : 'Manage portfolio'}</DialogTitle><DialogDescription>{deleting ?
-        `Delete ${portfolio.name}? Its account records, imported executions, snapshots and plays are kept. Accounts will be unassigned and visible in All accounts.` :
+      <DialogHeader><DialogTitle>{deleting ? 'Delete portfolio?' : 'Manage portfolio'}</DialogTitle><DialogDescription className={deleting ? undefined : 'sr-only'}>{deleting ?
+        `Delete ${portfolio.name}? Its accounts, executions, snapshots and plays are kept; the accounts become Unassigned.` :
         'Change the name, icon and accounts, or remove the grouping without deleting its history.'}</DialogDescription></DialogHeader>
       {deleting ? <div className="workspace-form">
         {error && <p className="error" role="alert">{error}</p>}
@@ -102,7 +103,7 @@ export function ManagePortfolioDialog({ portfolio, accounts = noAccounts, portfo
         <label htmlFor="rename-portfolio">Portfolio name</label><Input id="rename-portfolio" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={pending} autoFocus={!focusAccounts} />
         <PortfolioIconPicker name="manage-portfolio-icon" value={icon ?? portfolio.icon ?? defaultPortfolioIcon} onChange={setIcon} disabled={pending} />
         <PortfolioAccounts accounts={currentAccounts} portfolios={currentPortfolios} selected={selected.filter(id => currentAccounts.some(a => a.id === id))}
-          onChange={setSelected} disabled={pending || needsReload} autoFocus={focusAccounts} maxSelected={currentAccounts.length} />
+          onChange={setSelected} disabled={pending || needsReload} autoFocus={focusAccounts} maxSelected={currentAccounts.length} portfolioId={portfolio.id} />
         {needsReload && <Button type="button" variant="outline" disabled={pending} onClick={() => { void reloadAccounts() }}>Reload accounts</Button>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="management-actions"><Button type="button" variant="ghost" className="danger-action" onClick={() => { setDeleting(true); setError(null) }} disabled={pending}><Trash2 size={14} />Delete</Button><Button type="submit" disabled={pending || needsReload}>{pending ? 'Saving…' : 'Save changes'}</Button></div>
@@ -165,8 +166,8 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
   }
   return <Dialog open onOpenChange={next => { if (!next && !pending && !credentialPending) onClose() }}>
     <DialogContent className="workspace-dialog">
-      <DialogHeader><DialogTitle>{deleting ? 'Delete account permanently?' : 'Manage account'}</DialogTitle><DialogDescription>{deleting ?
-        `Delete ${account.name} and its retained imported executions, snapshots and positions? This cannot be undone here. Accounts with linked Play records cannot be deleted; disable them instead.` :
+      <DialogHeader><DialogTitle>{deleting ? 'Delete account permanently?' : 'Manage account'}</DialogTitle><DialogDescription className={deleting ? undefined : 'sr-only'}>{deleting ?
+        `Delete ${account.name} with its imported executions, snapshots and positions? This cannot be undone here. Accounts linked to Plays cannot be deleted; disable them instead.` :
         'Rename, move or disable this record. The venue and source identity do not change.'}</DialogDescription></DialogHeader>
       {deleting ? <div className="workspace-form">
         {error && <p className="error" role="alert">{error}</p>}
@@ -174,14 +175,13 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
       </div> : <><p className="account-source"><span>Source</span> <VenueBadge venueId={account.venueId} size="xs" /> · {account.sourceId ?? account.address ?? 'Manual record'}</p>
       <form className="workspace-form" onSubmit={event => { void save(event) }} aria-busy={pending}>
         <label htmlFor="rename-account">Account name</label><Input id="rename-account" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={pending} autoFocus />
-        <label htmlFor="move-account">Portfolio</label><select id="move-account" value={portfolioId} onChange={event => setPortfolioId(event.target.value)} disabled={pending}>
-          <option value="">No portfolio · All accounts only</option>{portfolioOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        <label htmlFor="move-account">Portfolio</label><NativeSelect id="move-account" value={portfolioId} onChange={event => setPortfolioId(event.target.value)} disabled={pending}>
+          <option value="">No portfolio</option>{portfolioOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           {portfolioId && !portfolioOptions.some(p => p.id === portfolioId) && <option value={portfolioId}>Current portfolio</option>}
-        </select>
-        <p className="field-help">Choosing No portfolio unlinks it without removing its history.</p>
+        </NativeSelect>
         <label className="account-enabled-control"><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} disabled={pending} />Account enabled</label>
-        <p className="field-help">Disabled accounts keep their records. Imported history and positions are hidden from normal views, excluded from totals, and refresh is blocked. Enable again to restore them.</p>
-        {conflict && <div className="workspace-form"><p className="field-help">These settings may be outdated. Reload to replace this form with the latest saved values, then review before saving. Your stale changes will not be replayed.</p><Button type="button" variant="outline" onClick={() => { void reloadSettings() }} disabled={pending}>Reload current settings</Button></div>}
+        {!enabled && <p className="field-help">Records are kept; history and positions are hidden and excluded from totals, and refresh is blocked.</p>}
+        {conflict && <div className="workspace-form"><p className="field-help">These settings may be outdated. Reload the latest saved values and review them; your changes are not replayed.</p><Button type="button" variant="outline" onClick={() => { void reloadSettings() }} disabled={pending}>Reload current settings</Button></div>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="management-actions"><Button type="button" variant="ghost" className="danger-action" onClick={() => { setDeleting(true); setError(null) }} disabled={pending || credentialPending}><Trash2 size={14} />Delete</Button><Button type="submit" disabled={pending || credentialPending || conflict}>{pending ? 'Saving…' : 'Save settings'}</Button></div>
       </form>

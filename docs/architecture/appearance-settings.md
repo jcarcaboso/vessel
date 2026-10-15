@@ -25,6 +25,7 @@ The owner then asked for a builder that randomizes colour combinations and saves
 - `frontend/src/features/settings/themes.ts` defines the catalogue and contrast checks; `appearance.ts` resolves the selection into CSS custom properties on `<html>` and stores it in `localStorage` under `vessel.appearance`. It is a browser preference, not workspace data, holds nothing sensitive and survives disconnecting. Server-side preference storage is not implemented.
 - `initAppearance()` runs before the first render to avoid a flash of Graphite.
 - Component styles read only tokens (`--background`, `--card`, `--sidebar`, `--positive`, `--chart-candle-*`, …); hard-coded shell colours were replaced by tokens or `color-mix` of tokens. `styles.css` keeps the Graphite values as the fallback.
+- October 15: `styles.css` also derives the design-language tokens (type scale, `--brand*` from `--ring`, `--line`, `--sheen`, elevations, panel/control radii, contour texture) from the theme tokens, so every theme follows them without new customizer colours. See [the visual refresh](../design/visual-refresh/README.md).
 - An open chart re-reads the tokens when the theme changes. Level tags choose dark or white text by the tag colour's luminance (`components/chart/ink.ts`).
 - Light themes use hollow up candles and solid down candles, keeping red and green free for stops and targets.
 

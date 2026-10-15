@@ -6,9 +6,15 @@ import { useVenues } from '@/api/venues'
 /** Trading pair label, e.g. BTC/USDC. */
 export const pairLabel = (instrument: Pick<VenueInstrument, 'contractId' | 'quoteAsset'>) => `${instrument.contractId}/${instrument.quoteAsset}`
 
+/** The base and quote of a displayed instrument: a venue contract gets the venue's quote asset, a manual label stays whole. */
+export function instrumentParts(quote: string | null, instrument: string, source: 'venue' | 'manual') {
+  return { base: instrument, quote: source === 'venue' && quote && instrument ? quote : null }
+}
+
 /** BTC/USDC for a venue contract, given the venue's quote asset; manual labels stay as entered. */
 export function instrumentLabel(quote: string | null, instrument: string, source: 'venue' | 'manual') {
-  return source === 'venue' && quote && instrument ? pairLabel({ contractId: instrument, quoteAsset: quote }) : instrument
+  const parts = instrumentParts(quote, instrument, source)
+  return parts.quote ? pairLabel({ contractId: parts.base, quoteAsset: parts.quote }) : parts.base
 }
 
 export interface InstrumentCatalogState {

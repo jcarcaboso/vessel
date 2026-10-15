@@ -3,7 +3,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { WorkspacePage } from '@/pages/WorkspacePage'
 import { initAppearance } from '@/features/settings/appearance'
-import '@fontsource-variable/inter'
+// The optical-size cut renders large figures and titles as Inter Display, small text as Inter Text.
+import '@fontsource-variable/inter/opsz.css'
 import './styles.css'
 
 initAppearance()

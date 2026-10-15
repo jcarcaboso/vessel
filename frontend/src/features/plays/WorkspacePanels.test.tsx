@@ -4,8 +4,10 @@ import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
+import { emptyStructuredReview } from '@/api/plays'
 import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { AvailableBudget, CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
+import { journalReviewVisible } from './journal'
 import { createDraft, type PlayDraft } from './draft'
 
 function BudgetHarness({ initial = createDraft(), accounts = [], portfolios = [], onChange = vi.fn() }: {
@@ -174,7 +176,7 @@ describe('Play journal', () => {
     const onChange = vi.fn()
     function JournalHarness() {
       const [notes, setNotes] = useState(createDraft().notes)
-      return <PlayJournal notes={notes} onChange={(next) => { setNotes(next); onChange(next) }} />
+      return <PlayJournal notes={notes} status="closed" onChange={(next) => { setNotes(next); onChange(next) }} />
     }
     render(<JournalHarness />)
     // Tabs share the heading row so the note field keeps most of the journal height.
@@ -197,6 +199,116 @@ describe('Play journal', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'Evidence' }))
     expect(screen.getByRole('textbox', { name: 'Evidence' })).toHaveAttribute('placeholder', 'Notes on the evidence')
     expect(screen.getByTestId('journal-panel').querySelector('input[type="file"]')).toBeNull()
+  })
+
+  it('offers the review once a play is Open, Closed or Cancelled, never for Draft, Planned or Paused', () => {
+    const notes = createDraft().notes
+    const { rerender } = render(<PlayJournal notes={notes} onChange={vi.fn()} />)
+    const tabs = () => screen.getAllByRole('tab').map(tab => tab.textContent)
+    expect(tabs()).toEqual(['Thesis', 'Invalidation', 'Strategy', 'Evidence'])
+    for (const status of ['draft', 'planned', 'paused'] as const) {
+      rerender(<PlayJournal notes={notes} onChange={vi.fn()} status={status} />)
+      expect(screen.queryByRole('tab', { name: 'Review' })).not.toBeInTheDocument()
+    }
+    for (const status of ['open', 'closed', 'cancelled'] as const) {
+      rerender(<PlayJournal notes={notes} onChange={vi.fn()} status={status} />)
+      expect(screen.getByRole('tab', { name: 'Review' })).toBeInTheDocument()
+    }
+    // Retrospective plays exist to be reviewed and open on their review.
+    rerender(<PlayJournal key="retrospective" notes={notes} onChange={vi.fn()} status="closed" retrospective />)
+    expect(tabs()).toEqual(['Evidence', 'Review'])
+    expect(screen.getByRole('tab', { name: 'Review' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('never hides a review that was already written, whatever the status', () => {
+    const notes = { ...createDraft().notes, review: 'Written before planning' }
+    const { rerender } = render(<PlayJournal notes={notes} onChange={vi.fn()} status="planned" />)
+    expect(screen.getByRole('tab', { name: 'Review' })).toBeInTheDocument()
+    rerender(<PlayJournal notes={createDraft().notes} onChange={vi.fn()} status="paused" onStructuredReviewChange={vi.fn()}
+      structuredReview={{ ...emptyStructuredReview(), lesson: 'Kept answer' }} />)
+    expect(screen.getByRole('tab', { name: 'Review' })).toBeInTheDocument()
+    rerender(<PlayJournal notes={{ ...createDraft().notes, review: '   ' }} onChange={vi.fn()} status="draft" />)
+    expect(screen.queryByRole('tab', { name: 'Review' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the Review tab while an earlier note is rewritten, and drops it once left empty before the play opens', async () => {
+    function Harness() {
+      const [notes, setNotes] = useState({ ...createDraft().notes, review: 'Written before planning' })
+      return <PlayJournal notes={notes} status="planned" onChange={setNotes} />
+    }
+    render(<Harness />)
+    await userEvent.click(screen.getByRole('tab', { name: 'Review' }))
+    await userEvent.clear(screen.getByRole('textbox', { name: 'Review' }))
+    expect(screen.getByRole('tab', { name: 'Review' })).toHaveAttribute('aria-selected', 'true')
+    await userEvent.type(screen.getByRole('textbox', { name: 'Review' }), 'Rewritten')
+    await userEvent.clear(screen.getByRole('textbox', { name: 'Review' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'Strategy' }))
+    expect(screen.queryByRole('tab', { name: 'Review' })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Strategy' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('falls back to Thesis when the selected Review tab is no longer offered', async () => {
+    const notes = createDraft().notes
+    const { rerender } = render(<PlayJournal notes={notes} onChange={vi.fn()} status="open" />)
+    await userEvent.click(screen.getByRole('tab', { name: 'Review' }))
+    rerender(<PlayJournal notes={notes} onChange={vi.fn()} status="planned" />)
+    expect(screen.queryByRole('tab', { name: 'Review' })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Thesis' })).toHaveAttribute('aria-selected', 'true')
+    // The fallback sticks: offering the review again does not jump back to it.
+    rerender(<PlayJournal notes={notes} onChange={vi.fn()} status="open" />)
+    expect(screen.getByRole('tab', { name: 'Thesis' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('decides review visibility from status, origin and existing answers', () => {
+    const blank = { review: '', structuredReview: emptyStructuredReview() }
+    expect(journalReviewVisible({ status: 'draft', ...blank })).toBe(false)
+    expect(journalReviewVisible({ status: 'planned', ...blank })).toBe(false)
+    expect(journalReviewVisible({ status: 'paused', ...blank })).toBe(false)
+    expect(journalReviewVisible({ status: 'open', ...blank })).toBe(true)
+    expect(journalReviewVisible({ status: 'closed', ...blank })).toBe(true)
+    expect(journalReviewVisible({ status: 'cancelled', ...blank })).toBe(true)
+    expect(journalReviewVisible({ status: 'draft', retrospective: true, ...blank })).toBe(true)
+    expect(journalReviewVisible({ status: 'draft', review: 'Note', structuredReview: undefined })).toBe(true)
+    expect(journalReviewVisible({ status: 'planned', review: '', structuredReview: { ...emptyStructuredReview(), adherence: 'followed' } })).toBe(true)
+  })
+
+  it('expands into an in-page dialog on the same tab and notes, and returns focus on Escape', async () => {
+    const onChange = vi.fn()
+    function JournalHarness() {
+      const [notes, setNotes] = useState({ ...createDraft().notes, strategy: 'Range reclaim' })
+      return <PlayJournal notes={notes} status="open" onChange={(next) => { setNotes(next); onChange(next) }} />
+    }
+    render(<JournalHarness />)
+    await userEvent.click(screen.getByRole('tab', { name: 'Strategy' }))
+    const expand = screen.getByRole('button', { name: 'Expand journal' })
+    await userEvent.click(expand)
+    const dialog = screen.getByRole('dialog', { name: 'Play journal' })
+    // The panel keeps its place; the one live journal moves into the dialog, so ids stay unique.
+    expect(within(screen.getByTestId('journal-panel')).queryByRole('tablist')).toBeNull()
+    expect(within(dialog).getByRole('tab', { name: 'Strategy' })).toHaveAttribute('aria-selected', 'true')
+    const field = within(dialog).getByRole('textbox', { name: 'Strategy' })
+    expect(field).toHaveValue('Range reclaim')
+    await userEvent.type(field, ' at the weekly low')
+    expect(onChange.mock.lastCall![0]).toMatchObject({ strategy: 'Range reclaim at the weekly low' })
+    await userEvent.click(within(dialog).getByRole('tab', { name: 'Review' }))
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Expand journal' })).toHaveFocus()
+    // The tab chosen in the dialog stays selected inline, and the edit made there is kept.
+    expect(screen.getByRole('tab', { name: 'Review' })).toHaveAttribute('aria-selected', 'true')
+    await userEvent.click(screen.getByRole('tab', { name: 'Strategy' }))
+    expect(screen.getByRole('textbox', { name: 'Strategy' })).toHaveValue('Range reclaim at the weekly low')
+  })
+
+  it('closes the expanded journal from its own header button', async () => {
+    render(<PlayJournal notes={createDraft().notes} onChange={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Expand journal' }))
+    const dialog = screen.getByRole('dialog', { name: 'Play journal' })
+    expect(within(dialog).queryByRole('tab', { name: 'Review' })).not.toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close expanded journal' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Expand journal' })).toHaveFocus()
+    expect(screen.getByRole('tablist', { name: 'Journal sections' })).toBeInTheDocument()
   })
 })
 

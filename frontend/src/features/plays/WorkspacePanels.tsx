@@ -1,19 +1,24 @@
-import { useId, useState, type FormEvent, type ReactNode } from 'react'
+import { useId, useRef, useState, type FocusEvent, type FormEvent, type ReactNode } from 'react'
 import { useVenues } from '@/api/venues'
-import { NotebookPen, Pencil, Plus, RotateCcw } from 'lucide-react'
+import { Maximize2, Minimize2, NotebookPen, Pencil, Plus, RotateCcw } from 'lucide-react'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
-import { emptyStructuredReview, type StructuredReview } from '@/api/plays'
+import { emptyStructuredReview, type PlayStatus, type StructuredReview } from '@/api/plays'
+import { ChartIconButton } from '@/components/chart/ChartToolbar'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { money } from '@/lib/format'
 import type { DraftEvidence, PlayDraft } from './draft'
 import { EvidencePanel } from './EvidencePanel'
+import { journalReviewVisible } from './journal'
+import { JournalStateContext, useJournalStore } from './journal-state'
 import { PositionRiskSummary } from './PositionRiskSummary'
 import type { RiskReference } from './position-risk-summary'
 import { averageEntryPrice, formatDraggedPrice, leverageOf } from './levels'
 import { defaultSizeUnits, formatMoney, formatQuantity, positionSize, type SizeUnits } from './sizing'
 import './plays-workspace.css'
+import { NativeSelect } from '@/components/ui/native-select'
 
 const displayMoney = (value: string | null | undefined) => value == null ? 'Unavailable' : money(value)
 // Placeholder values stay readable but recede, so real figures carry the visual weight.
@@ -126,7 +131,7 @@ const journalSections = [
 ] as const
 
 export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceRequest = 0, readOnly = false, execution,
-  structuredReview, onStructuredReviewChange, terminal = false, retrospective = false }: {
+  structuredReview, onStructuredReviewChange, status = 'draft', retrospective = false }: {
   notes: PlayDraft['notes']
   onChange: (notes: PlayDraft['notes']) => void
   evidence?: DraftEvidence[]
@@ -139,60 +144,112 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   execution?: ReactNode
   structuredReview?: StructuredReview | undefined
   onStructuredReviewChange?: (review: StructuredReview) => void
-  terminal?: boolean
+  /** Decides whether the Review tab is offered and whether structured answers can be given. */
+  status?: PlayStatus
   retrospective?: boolean
 }) {
   const id = useId()
+  const state = useJournalStore()
   const [tab, setTab] = useState(retrospective ? 'review' : 'thesis')
+  const [expanded, setExpanded] = useState(false)
+  const expandButton = useRef<HTMLButtonElement>(null)
   const [shownRequest, setShownRequest] = useState(evidenceRequest)
+  // While the owner is writing in the Review tab it stays, even if they clear the note to rewrite it.
+  const [writingReview, setWritingReview] = useState(false)
   if (shownRequest !== evidenceRequest) {
     setShownRequest(evidenceRequest)
     setTab('evidence')
+    setWritingReview(false)
   }
-  const sections = retrospective ? journalSections.filter(([key]) => key === 'evidence' || key === 'review') : journalSections
-  const currentTab = sections.some(([key]) => key === tab) || execution && tab === 'execution' ? tab : retrospective ? 'review' : 'thesis'
+  const terminal = status === 'closed' || status === 'cancelled'
+  const showReview = writingReview || journalReviewVisible({ status, retrospective, review: notes.review, structuredReview })
+  const sections = journalSections.filter(([key]) => (key !== 'review' || showReview) && (!retrospective || key === 'evidence' || key === 'review'))
+  const fallback = retrospective ? 'review' : 'thesis'
+  const currentTab = sections.some(([key]) => key === tab) || execution && tab === 'execution' ? tab : fallback
+  // A Review tab that is no longer offered falls back for good, so it never reappears selected later.
+  if (tab === 'review' && !showReview) setTab(fallback)
   const review = structuredReview ?? emptyStructuredReview()
   const changeReview = (patch: Partial<StructuredReview>) => onStructuredReviewChange?.({ ...review, ...patch })
-  return <section className="panel journal-panel" aria-label="Play journal" data-testid="journal-panel">
-    <Tabs value={currentTab} onValueChange={setTab} className="journal-tabs">
-      <header className="panel-heading journal-header">
-        <div className="journal-heading"><span className="journal-icon" aria-hidden="true"><NotebookPen size={15} /></span><h2>Play journal</h2></div>
-        <TabsList className="journal-tab-list" aria-label="Journal sections">
-          {sections.map(([key, label]) => <TabsTrigger key={key} value={key}>{label}
-            {key === 'evidence' && evidence.length > 0 && <span className="journal-tab-count" aria-hidden="true">{evidence.length}</span>}
-          </TabsTrigger>).flatMap((trigger, index) => execution && sections[index]![0] === 'evidence'
-            ? [trigger, <TabsTrigger key="execution" value="execution">Execution</TabsTrigger>] : [trigger])}
-        </TabsList>
-      </header>
-      <details className="journal-context"><summary>Journal context</summary>
-        <p>{retrospective ? 'Retrospective review, recorded after execution. No original plan, thesis, initial stop or initial-risk R is available.'
-          : 'Plan notes describe intent, not execution. Review is separate from the plan and keeps its own revision history.'} Unsaved notes and images stay in this session until saved.</p>
-      </details>
-      {sections.map(([key, label, help]) => <TabsContent key={key} value={key} className="journal-tab-content">
-        {key === 'evidence' && onEvidenceChange && <EvidencePanel evidence={evidence} onChange={onEvidenceChange} />}
-        <label className="sr-only" htmlFor={`${id}-${key}`}>{label}</label>
-        <textarea id={`${id}-${key}`} value={notes[key]} placeholder={help} readOnly={readOnly && key !== 'review'}
-          onChange={(event) => onChange({ ...notes, [key]: event.target.value })} />
-        {key === 'review' && onStructuredReviewChange && <fieldset className="structured-review" disabled={!terminal}>
-          <legend>Structured review <small>optional</small></legend>
-          {!terminal && <p className="muted">Structured answers are available after Closed or Cancelled. Your free-text note stays readable.</p>}
-          <label htmlFor={`${id}-adherence`}>Plan adherence<select id={`${id}-adherence`} value={review.adherence ?? ''}
-            onChange={event => changeReview({ adherence: (event.target.value || null) as StructuredReview['adherence'] })}>
-            <option value="">Unanswered</option>
-            {!retrospective && <><option value="followed">Followed</option><option value="deviated">Deviated</option></>}
-            <option value="not-applicable">Not applicable</option>
-          </select></label>
-          <label htmlFor={`${id}-mistake`}>Mistake tag<input id={`${id}-mistake`} maxLength={100} value={review.mistakeTag ?? ''}
-            onChange={event => changeReview({ mistakeTag: event.target.value || null })} /></label>
-          <label htmlFor={`${id}-lesson`}>Lesson<textarea id={`${id}-lesson`} maxLength={4000} value={review.lesson}
-            onChange={event => changeReview({ lesson: event.target.value })} /></label>
-          <label htmlFor={`${id}-next`}>Next action<textarea id={`${id}-next`} maxLength={4000} value={review.nextAction}
-            onChange={event => changeReview({ nextAction: event.target.value })} /></label>
-        </fieldset>}
-      </TabsContent>)}
-      {execution && <TabsContent value="execution" className="journal-tab-content">{execution}</TabsContent>}
-    </Tabs>
-  </section>
+
+  const heading = (inDialog: boolean) => <div className="journal-heading">
+    <span className="journal-icon" aria-hidden="true"><NotebookPen size={15} /></span>
+    {inDialog ? <DialogTitle className="journal-title">Play journal</DialogTitle> : <h2 className="journal-title">Play journal</h2>}
+  </div>
+  // The inline and expanded journals are the same tabs over the same notes; only one is mounted at a time.
+  // Tabs switch on pointer down, which removes the Review panel before any blur, so leaving it ends the writing too.
+  const chooseTab = (next: string) => { setTab(next); if (next !== 'review') setWritingReview(false) }
+  const journal = (inDialog: boolean) => <Tabs value={currentTab} onValueChange={chooseTab} className="journal-tabs">
+    <header className="journal-header">
+      {heading(inDialog)}
+      <TabsList variant="line" className="journal-tab-list" aria-label="Journal sections">
+        {sections.map(([key, label]) => <TabsTrigger key={key} value={key}>{label}
+          {key === 'evidence' && evidence.length > 0 && <span className="journal-tab-count" aria-hidden="true">{evidence.length}</span>}
+        </TabsTrigger>).flatMap((trigger, index) => execution && sections[index]![0] === 'evidence'
+          ? [trigger, <TabsTrigger key="execution" value="execution">Execution</TabsTrigger>] : [trigger])}
+      </TabsList>
+      <div className="journal-actions">
+        {inDialog
+          ? <ChartIconButton label="Close expanded journal" icon={<Minimize2 size={15} aria-hidden="true" />} onClick={() => setExpanded(false)} />
+          : <ChartIconButton ref={expandButton} label="Expand journal" icon={<Maximize2 size={15} aria-hidden="true" />} onClick={() => setExpanded(true)} />}
+      </div>
+    </header>
+    {sections.map(([key, label, help]) => <TabsContent key={key} value={key} className="journal-tab-content" data-section={key}
+      {...key === 'review' ? {
+        onFocus: () => setWritingReview(true),
+        onBlur: (event: FocusEvent<HTMLDivElement>) => { if (!event.currentTarget.contains(event.relatedTarget)) setWritingReview(false) },
+      } : {}}>
+      {key === 'evidence' && onEvidenceChange && <EvidencePanel evidence={evidence} onChange={onEvidenceChange} />}
+      <label className="sr-only" htmlFor={`${id}-${key}`}>{label}</label>
+      <textarea id={`${id}-${key}`} className="journal-note" value={notes[key]} placeholder={help} readOnly={readOnly && key !== 'review'}
+        onChange={(event) => onChange({ ...notes, [key]: event.target.value })} />
+      {key === 'review' && onStructuredReviewChange && <fieldset className="structured-review" disabled={!terminal}>
+        <legend><span>Structured review</span>{terminal ? <small>optional</small>
+          : <small title="Structured answers are available after Closed or Cancelled. Your free-text note stays readable.">After close or cancel</small>}</legend>
+        <div className="structured-review-fields">
+          <div className="structured-review-field">
+            <label htmlFor={`${id}-adherence`}>Plan adherence</label>
+            <NativeSelect id={`${id}-adherence`} value={review.adherence ?? ''}
+              onChange={event => changeReview({ adherence: (event.target.value || null) as StructuredReview['adherence'] })}>
+              <option value="">Unanswered</option>
+              {!retrospective && <><option value="followed">Followed</option><option value="deviated">Deviated</option></>}
+              <option value="not-applicable">Not applicable</option>
+            </NativeSelect>
+          </div>
+          <div className="structured-review-field">
+            <label htmlFor={`${id}-mistake`}>Mistake tag</label>
+            <input id={`${id}-mistake`} maxLength={100} value={review.mistakeTag ?? ''} placeholder="e.g. Chased the entry"
+              onChange={event => changeReview({ mistakeTag: event.target.value || null })} />
+          </div>
+          <div className="structured-review-field">
+            <label htmlFor={`${id}-lesson`}>Lesson</label>
+            <textarea id={`${id}-lesson`} maxLength={4000} value={review.lesson}
+              onChange={event => changeReview({ lesson: event.target.value })} />
+          </div>
+          <div className="structured-review-field">
+            <label htmlFor={`${id}-next`}>Next action</label>
+            <textarea id={`${id}-next`} maxLength={4000} value={review.nextAction}
+              onChange={event => changeReview({ nextAction: event.target.value })} />
+          </div>
+        </div>
+      </fieldset>}
+    </TabsContent>)}
+    {execution && <TabsContent value="execution" className="journal-tab-content" data-section="execution">{execution}</TabsContent>}
+  </Tabs>
+
+  // The dialog is portaled but still inside this provider, so both views share the tabs' working state.
+  return <JournalStateContext.Provider value={state}><section className="panel journal-panel" aria-label="Play journal" data-testid="journal-panel">
+    {expanded ? <>
+      <header className="journal-header">{heading(false)}</header>
+      <p className="journal-parked">Journal open in the expanded view.</p>
+    </> : journal(false)}
+    <Dialog open={expanded} onOpenChange={setExpanded}>
+      <DialogContent className="plays-journal-dialog" showCloseButton={false}
+        onCloseAutoFocus={event => { event.preventDefault(); expandButton.current?.focus({ preventScroll: true }) }}>
+        <DialogDescription className="sr-only">The same journal with more room. Edits apply to this play. Escape returns to the workspace.</DialogDescription>
+        {journal(true)}
+      </DialogContent>
+    </Dialog>
+  </section></JournalStateContext.Provider>
 }
 
 export function PositionSummary({ draft, units = defaultSizeUnits, instrumentName, riskReference }: { draft: PlayDraft; units?: SizeUnits; instrumentName?: string; riskReference?: RiskReference | null | undefined }) {

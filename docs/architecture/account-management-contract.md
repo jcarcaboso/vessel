@@ -65,6 +65,10 @@ Venue logos follow the same fixed-set pattern as portfolio icons, but the key co
 
 `VenueBadge` (logo + descriptor name, or compact logo-only with the name as accessible name and tooltip) replaces raw venue text in account rows, account detail, portfolio account checklists, the Manage account source line, Lighter-style import, Overview summary rows, Settings capabilities, the Plays list and account picker (inline only; Plays sections do not move) and Review (names, not IDs). Account rows now show logo, name, venue, shortened source identity (full value as tooltip), a portfolio chip (dashed for Unassigned), balance/availability and a sync column with a toned status badge, last refresh and position count. The Accounts venue filter is a row of logo chips with per-venue counts (`aria-pressed` buttons in a group named "Filter by venue"); the create-account venue picker is a radio group of logo cards. Filters, bulk selection, Refresh all and account detail behaviour are unchanged.
 
+## October 15, 2026: grouping accounts
+
+Accounts has a Group by control (None, Venue, Address) applied after the existing filters and kept in shell memory with them; Reset filters leaves grouping alone. Venue groups follow venue-chip order. Address groups compare EVM addresses case-insensitively across venues; accounts without an address (manual records, and Lighter accounts, whose L1 owner address is not stored or returned today) form a final "No address recorded" group. Group headers show the exact sum of enabled members' `balanceUsd`, or a partial marker when a member has none. Each group is a labelled `<tbody>` with a tri-state "Select all {group} accounts" checkbox; bulk moves are unchanged.
+
 ## Concurrency and ownership
 
 Management and sync must coordinate account row locks. A disable/delete cannot be undone by a late refresh, and unlink cannot race portfolio deletion into a dangling FK. Verify target portfolio ownership before changing the account. Portfolio deletion handles concurrent assignments through FK/locking semantics, not an unchecked in-memory cascade.

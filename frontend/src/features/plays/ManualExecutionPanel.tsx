@@ -1,13 +1,15 @@
-import { errorMessage } from '@/api/errors'
+import { ApiError, errorMessage } from '@/api/errors'
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
 import type { SavedPlay } from '@/api/plays'
 import type { ManualExecutionCorrection, ManualExecutions } from '@/api/diary'
 import { Button } from '@/components/ui/button'
+import { InfoTip } from '@/components/ui/info-tip'
 import { emptyManualDraft, hasManualDraft, manualCorrectionDraft, manualRequest, type ManualExecutionDraft } from './manual'
 import type { SavedState } from './saved'
 import type { DraftEntry } from './draft'
 import { nominalStablecoins } from './stablecoins'
+import { NativeSelect } from '@/components/ui/native-select'
 
 export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form, onChange, onStored, onBegin, working = false, observedVersion }: {
   api: WorkspaceApi
@@ -98,7 +100,10 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
       // An older replay still confirms this frozen request succeeded, but cannot supply current totals.
       onChange(emptyManualDraft())
     } catch (cause) {
-      if (alive.current && latest.current.api === api) setError(errorMessage(cause, 'The change could not be completed. Try again.'))
+      // Conflict advice only when the server reports a version conflict.
+      const conflict = cause instanceof ApiError && cause.status === 409
+      if (alive.current && latest.current.api === api) setError(errorMessage(cause, 'The change could not be completed. Try again.') +
+        (conflict ? ' Reload the ledger and review the facts before editing and resubmitting.' : ''))
     } finally {
       // Page actions must unlock even if the Execution tab was closed during the request.
       finish()
@@ -113,15 +118,14 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
       maxLength={max} value={form[key]} list={list} onChange={event => change({ [key]: event.target.value })} /></label>
 
   return <div className="manual-executions">
-    <p className="muted">Owner-entered facts for this Play only. They do not change reported balances or appear in venue-import Activity. Partial entries and exits are supported.</p>
-    <p className="muted">Only linear USD-quoted contracts, with one base unit per recorded quantity. Inverse contracts, other quote currencies and implicit contract multipliers are unsupported.</p>
+    <p className="muted" title="Inverse contracts, other quote currencies and implicit contract multipliers are unsupported.">Linear USD-quoted contracts only, one base unit per quantity.</p>
     {!enabled ? <p role="status">This account is unavailable or disabled. Manual execution changes are blocked.</p>
       : !saved || summary?.status === 'draft' ? <p role="status">Save the Play, then plan it before recording an execution.</p>
       : summary?.status === 'paused' || summary?.status === 'cancelled' ? <p role="status">Recording requires a Planned or Open Play. Closed Plays allow corrections only.</p> : null}
     {dirty && <p role="status">Save the Play changes before changing executions.</p>}
     {saved && <Button type="button" size="sm" variant="outline" disabled={pending}
       onClick={() => { setError(null); setReload(value => value + 1) }}>Reload manual ledger</Button>}
-    {error && <p className="error" role="alert">{error} After a version conflict, reload the ledger and review the facts before editing and resubmitting.</p>}
+    {error && <p className="error" role="alert">{error}</p>}
     {ledger && <>
       <dl className="manual-totals" aria-label="Manual execution totals">
         <div><dt>Entered quantity</dt><dd>{ledger.totals.enteredQuantity}</dd></div>
@@ -130,7 +134,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
         <div><dt>Gross realized USD</dt><dd>{ledger.totals.grossResultUsd ?? 'Unavailable'}</dd></div>
         <div><dt>Net realized USD</dt><dd>{ledger.totals.netResultUsd ?? 'Unavailable — costs incomplete'}</dd></div>
       </dl>
-      <p className="muted">{ledger.totals.feesComplete ? 'Fees complete.' : 'Unknown fees are not zero.'} {ledger.notice}</p>
+      {(!ledger.totals.feesComplete || ledger.notice) && <p className="muted">{ledger.totals.feesComplete ? '' : 'Unknown fees are not zero. '}{ledger.notice}</p>}
       <ol className="manual-records" aria-label="Manual executions">
         {ledger.records.map(record => <li key={record.id}>
           <strong>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {record.price}</strong>
@@ -150,24 +154,28 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
       </details>
     </>}
     {(canAdd || hasManualDraft(form)) && <form onSubmit={event => { void submit(event) }} noValidate aria-label={form.executionId ? 'Correct manual execution' : 'Record manual execution'}>
-      <fieldset disabled={!permitted || pending}><legend>{form.executionId ? 'Correct execution' : 'Record execution'}</legend>
+      <fieldset disabled={!permitted || pending}><legend>{form.executionId ? 'Correct execution' : 'Record execution'}
+        <InfoTip label="How executions are recorded">
+          <span>Times are UTC, such as 2026-10-13T10:00:00.123456Z; Z or +00:00 is optional. Whole microseconds or coarser; finer precision is rejected by the server, never rounded.</span>
+          <span>Decimal or scientific text is kept exactly. Leave both fee fields blank for unknown; known zero needs 0 and a currency. Fees in {nominalStablecoins.join(', ')} are deducted at nominal 1:1, without FX or depeg valuation; other currencies are kept but leave the net result unknown.</span>
+          <span>The server validates precision, chronology and over-exits; a Closed correction must remain a closed round trip.</span>
+        </InfoTip></legend>
         <div className="manual-fields">
-          <label htmlFor={`${id}-role`}>Role<select id={`${id}-role`} value={form.role} disabled={!!form.executionId}
-            onChange={event => change({ role: event.target.value as 'entry' | 'exit', entryId: '' })}><option value="entry">Entry</option><option value="exit">Exit</option></select></label>
-          {form.role === 'entry' && <label htmlFor={`${id}-entry`}>Saved plan entry<select id={`${id}-entry`} value={form.entryId} disabled={!!form.executionId}
-            onChange={event => change({ entryId: event.target.value })}><option value="">Choose entry</option>{entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>}
+          <label htmlFor={`${id}-role`}>Role<NativeSelect id={`${id}-role`} value={form.role} disabled={!!form.executionId}
+            onChange={event => change({ role: event.target.value as 'entry' | 'exit', entryId: '' })}><option value="entry">Entry</option><option value="exit">Exit</option></NativeSelect></label>
+          {form.role === 'entry' && <label htmlFor={`${id}-entry`}>Saved plan entry<NativeSelect id={`${id}-entry`} value={form.entryId} disabled={!!form.executionId}
+            onChange={event => change({ entryId: event.target.value })}><option value="">Choose entry</option>{entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</NativeSelect></label>}
           <label htmlFor={`${id}-time`}>Execution time (UTC)<input id={`${id}-time`} type="text" maxLength={64}
             placeholder="YYYY-MM-DDTHH:mm:ss.ffffffZ" aria-describedby={`${id}-time-help`} value={form.occurredAtUtc}
             onChange={event => change({ occurredAtUtc: event.target.value })} /></label>
-          <label htmlFor={`${id}-side`}>Side<select id={`${id}-side`} value={form.side} disabled={!!form.executionId}
-            onChange={event => change({ side: event.target.value as ManualExecutionDraft['side'] })}><option value="">Choose side</option><option value="buy">Buy</option><option value="sell">Sell</option></select></label>
+          <label htmlFor={`${id}-side`}>Side<NativeSelect id={`${id}-side`} value={form.side} disabled={!!form.executionId}
+            onChange={event => change({ side: event.target.value as ManualExecutionDraft['side'] })}><option value="">Choose side</option><option value="buy">Buy</option><option value="sell">Sell</option></NativeSelect></label>
           {field('quantity', 'Execution quantity', 96, true)}{field('price', 'Execution price', 96, true)}
           {field('fee', 'Fee amount (blank = unknown)', 96, true)}{field('feeCurrency', 'Fee currency', 32, false, `${id}-fee-currencies`)}
           <datalist id={`${id}-fee-currencies`}>{nominalStablecoins.map(symbol => <option key={symbol} value={symbol} />)}</datalist>
           {field('source', 'Source label', 100)}{form.executionId && field('reason', 'Correction reason', 2000)}
         </div>
-        <p id={`${id}-time-help`} className="muted">Enter a UTC date and time, such as 2026-10-13T10:00:00.123456Z. Z or +00:00 is optional. Whole microseconds or coarser; finer precision is rejected by the server, never rounded.</p>
-        <p className="muted">Decimal or scientific text is kept exactly. Leave both fee fields blank for unknown. Known zero needs 0 and a currency. Fees in {nominalStablecoins.join(', ')} are deducted at nominal 1:1, without FX or depeg valuation; other currencies are kept but leave the net result unknown. The server validates precision, chronology and over-exits; a Closed correction must remain a closed round trip.</p>
+        <p id={`${id}-time-help`} className="sr-only">UTC date and time, such as 2026-10-13T10:00:00.123456Z. Whole microseconds or coarser.</p>
         <Button type="submit" size="sm">{busy ? 'Recording…' : form.executionId ? 'Save correction' : form.attempt ? 'Retry same execution' : 'Record execution'}</Button>
       </fieldset>
       {hasManualDraft(form) && <Button type="button" variant="ghost" size="sm" disabled={pending}

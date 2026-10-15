@@ -1,18 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowDownRight, ArrowRight, ArrowUpRight, BookOpen } from 'lucide-react'
 import { statusLabels, type PlaySummary } from '@/api/plays'
-import { useVenues } from '@/api/venues'
 import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { instrumentLabel } from '@/features/plays/instruments'
+import { PlayIdentity } from '@/features/plays/PlayIdentity'
 import { errorMessage } from '@/api/errors'
 import { time } from '@/lib/format'
 
 const filters = [
-  { id: 'progress', label: 'In progress', description: 'Saved drafts, planned, paused and open plays.' },
-  { id: 'review', label: 'Needs review', description: 'Closed or cancelled plays without a saved review note.' },
-  { id: 'all', label: 'All', description: 'All saved plays, most recently updated first.' },
+  { id: 'progress', label: 'In progress', description: 'Saved drafts, planned, paused and open plays' },
+  { id: 'review', label: 'Needs review', description: 'Closed or cancelled plays without a saved review note' },
+  { id: 'all', label: 'All', description: 'All saved plays, most recently updated first' },
 ] as const
 type Filter = typeof filters[number]['id']
 const ended = (play: PlaySummary) => play.status === 'closed' || play.status === 'cancelled'
@@ -27,7 +26,6 @@ export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpe
   onBrowse: () => void
   onOpen: (id: string, signal: AbortSignal) => Promise<void>
 }) {
-  const venues = useVenues()
   const [filter, setFilter] = useState<Filter>('progress')
   const [retry, setRetry] = useState(0)
   const [result, setResult] = useState<{
@@ -65,12 +63,12 @@ export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpe
   }
 
   return <section className="shell-panel overview-plays" aria-label="Plays overview">
-    <header className="shell-panel-heading"><div><h2>Plays</h2><p>From intention to review</p></div>
+    <header className="shell-panel-heading"><h2>Plays</h2>
       <button className="text-action" onClick={onBrowse}>View all<ArrowRight size={14} /></button>
     </header>
     <Tabs value={filter} onValueChange={value => setFilter(value as Filter)} className="overview-play-tabs">
       <TabsList aria-label="Show overview plays">
-        {filters.map(item => <TabsTrigger key={item.id} value={item.id}>
+        {filters.map(item => <TabsTrigger key={item.id} value={item.id} title={item.description}>
           {item.label}{' '}<span className="overview-play-count">{loaded && !result.error ? plays.filter(play => matches(play, item.id)).length : '—'}</span>
         </TabsTrigger>)}
       </TabsList>
@@ -81,13 +79,13 @@ export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpe
       {filters.map(item => {
         const shown = plays.filter(play => matches(play, item.id))
         return <TabsContent key={item.id} value={item.id}>
-          <p className="overview-play-description">{item.description}</p>
           {loaded && !result.error && (shown.length ? <ul className="overview-play-list">
             {shown.map(play => <li key={play.id}>
-              <button className="overview-play-row" title={play.title || 'Untitled play'} disabled={opening !== null} aria-busy={opening === play.id}
-                aria-label={`Open ${play.title || 'Untitled play'}`} onClick={() => { void open(play.id) }}>
+              <button className="overview-play-row" disabled={opening !== null} aria-busy={opening === play.id}
+                aria-label={`Open ${play.title || 'Untitled play'}`} aria-describedby={`overview-play-identity-${play.id}`} onClick={() => { void open(play.id) }}>
                 <span className="overview-play-copy"><strong>{play.title || 'Untitled play'}</strong>
-                  <small>{play.instrument ? instrumentLabel(venues.quote(play.venueId), play.instrument, play.instrumentSource) : 'No instrument'} · {accounts.find(account => account.id === play.accountId)?.name ?? 'Unknown account'}</small>
+                  <PlayIdentity id={`overview-play-identity-${play.id}`} instrument={play.instrument} source={play.instrumentSource} venueId={play.venueId}
+                    accountName={accounts.find(account => account.id === play.accountId)?.name ?? 'Unknown account'} />
                   <span className={`overview-play-direction ${play.direction}`}>{play.direction === 'long' ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}{play.direction === 'long' ? 'Long' : 'Short'}</span>
                 </span>
                 <span className="overview-play-state">
@@ -98,7 +96,6 @@ export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpe
             </li>)}
           </ul> : <div className="workspace-empty small-empty"><BookOpen size={25} />
             <strong>{item.id === 'progress' ? 'No plays in progress' : item.id === 'review' ? 'No plays waiting for review' : 'No saved plays yet'}</strong>
-            <p>{item.id === 'review' ? 'Closed and cancelled plays appear here until you save a review note.' : 'Open Plays to document an idea and save your plan.'}</p>
             <Button variant="outline" size="sm" onClick={onBrowse}>Open Plays<ArrowRight size={13} /></Button>
           </div>)}
         </TabsContent>

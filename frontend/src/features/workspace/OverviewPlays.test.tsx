@@ -36,8 +36,26 @@ describe('Overview plays', () => {
   it('labels venue instruments with the venue quote asset and keeps manual labels', async () => {
     const venue = { ...summary('open'), venueId: 'hyperliquid', instrumentSource: 'venue' as const }
     render(<OverviewPlays {...props} api={api(vi.fn().mockResolvedValue([venue, summary('draft')]))} />)
-    expect(within(await screen.findByRole('button', { name: 'Open open idea' })).getByText(/^BTC\/USDC · /)).toBeInTheDocument()
-    expect(within(screen.getByRole('button', { name: 'Open draft idea' })).getByText(/^BTC · /)).toBeInTheDocument()
+    const venueRow = await screen.findByRole('button', { name: 'Open open idea' })
+    expect(venueRow.querySelector('.play-asset')).toHaveTextContent(/^BTC\/USDC$/)
+    expect(venueRow.querySelector('.play-asset-quote')).toHaveTextContent('/USDC')
+    const manualRow = screen.getByRole('button', { name: 'Open draft idea' })
+    expect(manualRow.querySelector('.play-asset')).toHaveTextContent(/^BTC$/)
+    expect(manualRow.querySelector('.play-asset-quote')).toBeNull()
+  })
+  it('separates the asset, the venue logo and the account, and describes the row with all three', async () => {
+    const venue = { ...summary('open'), venueId: 'hyperliquid', instrumentSource: 'venue' as const }
+    render(<OverviewPlays {...props} api={api(vi.fn().mockResolvedValue([venue]))} />)
+    const row = await screen.findByRole('button', { name: 'Open open idea' })
+    expect(within(row).getByRole('img', { name: 'Hyperliquid' })).toHaveAttribute('title', 'Hyperliquid')
+    expect(within(row).getByText('Main account')).toBeInTheDocument()
+    expect(within(row).queryByText('Hyperliquid')).not.toBeInTheDocument()
+    expect(row).toHaveAccessibleDescription(/^BTC\/USDC.*Main account$/)
+  })
+  it('names an account that is no longer listed', async () => {
+    const venue = { ...summary('open'), accountId: '99999999-9999-4999-8999-999999999999' }
+    render(<OverviewPlays {...props} api={api(vi.fn().mockResolvedValue([venue]))} />)
+    expect(within(await screen.findByRole('button', { name: 'Open open idea' })).getByText('Unknown account')).toBeInTheDocument()
   })
   it('orders by actual update time and supports keyboard tab navigation', async () => {
     const newer = { ...summary('open'), updatedAtUtc: '2026-10-05T12:00:00Z' }

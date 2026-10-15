@@ -1,10 +1,11 @@
 import { useId, useRef, useState } from 'react'
 import {
   Activity, ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, BarChart3,
-  BookOpen, Check, ChevronDown, ChevronRight, Folder, Info, LayoutDashboard,
+  BookOpen, Check, ChevronRight, Folder, Info, LayoutDashboard,
   Settings2, ShieldCheck, SlidersHorizontal, Wallet,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { NativeSelect } from '@/components/ui/native-select'
 import {
   accounts, AS_OF, assets, breakdown, dailyResults, defaultFilters, eligible, inPeriod, inScope,
   mockPlays, money, multiple, percent, periods, portfolios, shortDate, summarize,
@@ -122,10 +123,10 @@ export function PortfolioReview() {
         <div className="pr-heading"><h1>Portfolio review</h1><button className="pr-outline-button" onClick={showMethods}><Info size={15} />Definitions</button></div>
 
         <section className="pr-filters" aria-label="Review filters">
-          <label><span>Portfolio</span><span className="pr-select"><select value={filters.portfolio} onChange={e => setFilter('portfolio', e.target.value)}><option value="all">All portfolios</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}<option value="unassigned">Unassigned accounts</option></select><ChevronDown size={14} aria-hidden="true" /></span></label>
-          <label><span>Account</span><span className="pr-select"><select value={filters.account} onChange={e => setFilter('account', e.target.value)}><option value="all">All accounts</option>{knownAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select><ChevronDown size={14} aria-hidden="true" /></span></label>
-          <label><span>Asset</span><span className="pr-select"><select value={filters.asset} onChange={e => setFilter('asset', e.target.value)}><option value="all">All assets</option>{assets.map(asset => <option key={asset}>{asset}</option>)}</select><ChevronDown size={14} aria-hidden="true" /></span></label>
-          <label><span>Play origin</span><span className="pr-select"><select value={filters.source} onChange={e => setFilter('source', e.target.value as Source)}><option value="all">All origins</option><option value="planned">Planned Plays</option><option value="imported">Imported Plays</option></select><ChevronDown size={14} aria-hidden="true" /></span></label>
+          <label><span>Portfolio</span><NativeSelect value={filters.portfolio} onChange={e => setFilter('portfolio', e.target.value)}><option value="all">All portfolios</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}<option value="unassigned">Unassigned accounts</option></NativeSelect></label>
+          <label><span>Account</span><NativeSelect value={filters.account} onChange={e => setFilter('account', e.target.value)}><option value="all">All accounts</option>{knownAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</NativeSelect></label>
+          <label><span>Asset</span><NativeSelect value={filters.asset} onChange={e => setFilter('asset', e.target.value)}><option value="all">All assets</option>{assets.map(asset => <option key={asset}>{asset}</option>)}</NativeSelect></label>
+          <label><span>Play origin</span><NativeSelect value={filters.source} onChange={e => setFilter('source', e.target.value as Source)}><option value="all">All origins</option><option value="planned">Planned Plays</option><option value="imported">Imported Plays</option></NativeSelect></label>
           <button className="pr-reset" disabled={!activeFilters} onClick={() => setFilters(defaultFilters)}><SlidersHorizontal size={15} />Reset</button>
         </section>
         <div className="pr-scope"><span>Nominal USD{filters.portfolio === 'all' ? ' · includes unassigned' : ''}</span><span>Closed Plays · funding excluded</span></div>

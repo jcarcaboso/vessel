@@ -31,6 +31,11 @@ describe('Review actionable exclusions', () => {
     expect(await within(dialog).findByText(items[0]!.reasons[0]!)).toBeInTheDocument()
     expect(exclusions).toHaveBeenLastCalledWith({ ...defaultReviewQuery, portfolio: 'unassigned', offset: 0 }, expect.any(AbortSignal))
     expect(within(dialog).getByText(`Play ${items[0]!.playId} · Account ${items[0]!.accountId}`)).toBeInTheDocument()
+    // Exclusion records carry no venue, so only the asset chip and the wallet account are shown.
+    const identity = within(dialog).getAllByRole('button', { name: /^Open excluded Play / })[0]!.closest('li')!.querySelector('.play-identity')!
+    expect(identity.querySelector('.play-asset')).toHaveTextContent(items[0]!.instrument)
+    expect(identity.querySelector('.play-account-name')).toHaveTextContent(items[0]!.accountName)
+    expect(within(identity as HTMLElement).queryByRole('img')).not.toBeInTheDocument()
     exclusions.mockResolvedValue({ ...page, items: [items[50]], offset: 50, nextOffset: null })
     await user.click(within(dialog).getByRole('button', { name: 'Next exclusions' }))
     await within(dialog).findByRole('button', { name: 'Open excluded Play Excluded BTC 51' })
@@ -73,7 +78,7 @@ describe('Review actionable exclusions', () => {
     const dialog = screen.getByRole('dialog')
     expect(await within(dialog).findByText('Retrospective · imported executions')).toBeInTheDocument()
     expect(within(dialog).getByText('Planned · manual executions')).toBeInTheDocument()
-    expect(within(dialog).getByText(/Return is net P&L \/ executed entry notional/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'About return' })).toHaveAccessibleDescription(/Return is net P&L \/ executed entry notional/)
     expect(within(dialog).getAllByText('2.0%')).toHaveLength(2)
     expect(within(dialog).getByText('N/A')).toBeInTheDocument()
   })

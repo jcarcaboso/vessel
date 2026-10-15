@@ -98,7 +98,7 @@ export function LevelEditor({ entries, entry, overlayId, anchor, direction, leve
       <label>Price<input ref={input} inputMode="decimal" value={price} aria-invalid={error !== ''} onChange={event => { setPrice(event.target.value); setPriceEdited(true); setError('') }} /></label>
       {exit && <label>Share <small>% of entry</small><input inputMode="decimal" value={share} onChange={event => { setShare(event.target.value); setError('') }} /></label>}
     </div>
-    {percentUnit && <p className="level-editor-note">Editing this price switches the level from % to price units. Editing only its share keeps %.</p>}
+    {percentUnit && priceEdited && <p className="level-editor-note">Editing this price switches the level from % to price units.</p>}
     {error && <p className="level-editor-error" role="alert">{error}</p>}
     <div className="level-editor-actions">
       <Button type="submit" size="sm">Save</Button>

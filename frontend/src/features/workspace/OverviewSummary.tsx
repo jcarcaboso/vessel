@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Overview, WorkspaceApi } from '@/api/workspace'
-import type { OverviewQuery, OverviewSummaryDocument, SummaryAmount } from '@/api/overview-summary'
+import type { OverviewQuery, OverviewSummaryDocument } from '@/api/overview-summary'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { errorMessage } from '@/api/errors'
@@ -10,23 +10,20 @@ import { VenueLogo } from '@/components/venues/VenueBadge'
 import { balanceShare } from './overview-share'
 import { money } from '@/lib/format'
 import './overview-summary.css'
+import { NativeSelect } from '@/components/ui/native-select'
+import { CoverageBadge, NominalUsdTag, SummaryCoverageBadge } from './CoverageBadge'
 
-function Coverage({ value, operations = false }: { value: SummaryAmount; operations?: boolean }) {
-  const c = value.coverage
-  return <small className="overview-coverage" title={c.reasons.map(r => `${r.count}: ${r.reason}`).join('\n')}>
-    {c.contributingAccountCount} of {c.totalAccountCount} {c.totalAccountCount === 1 ? 'account' : 'accounts'}{operations && ` · ${c.contributingOperationCount} closed`}
-    {c.excludedOperationCount > 0 && ` · ${c.excludedOperationCount} excluded`}
-    {c.reasons.length > 0 && <span className="overview-coverage-limit"> · limited coverage</span>}
-  </small>
-}
+
+
 const signClass = (value: string | null) => {
   const sign = decimalSign(value)
   return sign === 0 ? '' : sign < 0 ? 'overview-negative' : 'overview-positive'
 }
-/** `beforeSummary` renders between the metric tiles and the Summary table. */
-export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallback, accountCount, beforeSummary }: {
+/** `beforeSummary` renders between the metric tiles and the Summary table. `workspaceNote` is the workspace API's scope note,
+ * shown verbatim in the Summary's one disclosure. */
+export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallback, accountCount, beforeSummary, workspaceNote }: {
   api: WorkspaceApi; query: OverviewQuery; onQuery: (query: OverviewQuery) => void; reloadGeneration: number; fallback: Overview; accountCount: number
-  beforeSummary?: ReactNode
+  beforeSummary?: ReactNode; workspaceNote?: string
 }) {
   const venues = useVenues()
   const [retry, setRetry] = useState(0)
@@ -46,18 +43,24 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
   const balance = totals?.balance.amountUsd ?? (loadingAll ? fallback.totals.totalBalanceUsd ?? null : null)
   const available = totals?.available.amountUsd ?? (loadingAll ? fallback.totals.availableBalanceUsd ?? null : null)
   return <>
-    <section className="workspace-stat-grid overview-metrics" aria-label="Scoped overview totals">
-      <div className="shell-panel metric"><span>Total balance</span><strong>{money(balance)}</strong>{totals ? <Coverage value={totals.balance} /> : <small>{loadingAll ? `${fallback.totals.balanceAccountCount ?? 0} of ${accountCount} enabled accounts · ${fallback.totals.balanceCoverage ?? 'unavailable'} · loading summary` : current?.error ? 'Balance coverage unavailable' : 'Loading balance coverage…'}</small>}<small>Nominal USD · listed stablecoins at 1:1</small></div>
-      <div className="shell-panel metric"><span>Available balance</span><strong>{money(available)}</strong>{totals ? <Coverage value={totals.available} /> : <small>{loadingAll ? `${fallback.totals.availableBalanceAccountCount ?? 0} of ${accountCount} enabled accounts · ${fallback.totals.availableBalanceCoverage ?? 'unavailable'} · loading summary` : current?.error ? 'Availability coverage unavailable' : 'Loading availability coverage…'}</small>}<small>Wallet, reported margin or withdrawal</small></div>
-      <div className="shell-panel metric"><span>Enabled accounts</span><strong>{totals?.accountCount ?? accountCount}</strong><small>In this scope</small></div>
-      <div className="shell-panel metric"><span>Perpetual positions</span><strong>{totals?.openPositionCount ?? (loadingAll ? fallback.totals.openPositionCount : '—')}</strong><small className={signClass(totals?.unrealizedPnl.amountUsd ?? null)}>{money(totals?.unrealizedPnl.amountUsd ?? null)} unrealized</small>{totals && <Coverage value={totals.unrealizedPnl} />}<small>From latest retained snapshots</small></div>
-      <div className="shell-panel metric"><span>Imported executions</span><strong>{totals?.importedFillCount ?? (loadingAll ? fallback.totals.importedFillCount : '—')}</strong><small>Retained facts in this scope</small></div>
+    <section className="workspace-stat-grid overview-metrics" aria-label="Scoped overview totals" aria-busy={!current}>
+      <div className="shell-panel metric"><span className="metric-label">Total balance<NominalUsdTag /></span><strong>{money(balance)}</strong>
+        {totals ? <SummaryCoverageBadge value={totals.balance} label="Balance" /> : loadingAll && <CoverageBadge label="Balance" noun="enabled account"
+          covered={fallback.totals.balanceAccountCount ?? 0} total={accountCount} status={fallback.totals.balanceCoverage ?? 'unavailable'} />}</div>
+      <div className="shell-panel metric"><span className="metric-label">Available balance</span><strong>{money(available)}</strong>
+        {totals ? <SummaryCoverageBadge value={totals.available} label="Availability" /> : loadingAll && <CoverageBadge label="Availability" noun="enabled account"
+          covered={fallback.totals.availableBalanceAccountCount ?? 0} total={accountCount} status={fallback.totals.availableBalanceCoverage ?? 'unavailable'} />}</div>
+      <div className="shell-panel metric"><span className="metric-label">Enabled accounts</span><strong>{totals?.accountCount ?? accountCount}</strong></div>
+      <div className="shell-panel metric"><span className="metric-label">Perpetual positions</span><strong>{totals?.openPositionCount ?? (loadingAll ? fallback.totals.openPositionCount : '—')}</strong>
+        <small className={signClass(totals?.unrealizedPnl.amountUsd ?? null)}>{money(totals?.unrealizedPnl.amountUsd ?? null)} unrealized</small>
+        {totals && <SummaryCoverageBadge value={totals.unrealizedPnl} label="Unrealized" />}</div>
+      <div className="shell-panel metric"><span className="metric-label">Imported executions</span><strong>{totals?.importedFillCount ?? (loadingAll ? fallback.totals.importedFillCount : '—')}</strong></div>
     </section>
     {beforeSummary}
     <section className="shell-panel overview-summary" aria-label="Overview summary">
-      <header className="shell-panel-heading"><div><h2>Summary</h2><p>Reported balances and closed operation results</p></div><div className="overview-summary-controls">
+      <header className="shell-panel-heading"><h2>Summary</h2><div className="overview-summary-controls">
         <div className="overview-group-toggle" role="group" aria-label="Summary grouping">{(['portfolio', 'account'] as const).map(group => <Button key={group} variant={query.groupBy === group ? 'secondary' : 'ghost'} size="sm" aria-pressed={query.groupBy === group} onClick={() => onQuery({ ...query, groupBy: group })}>By {group}</Button>)}</div>
-        <label>Result period<select value={query.period} onChange={e => onQuery({ ...query, period: e.target.value as OverviewQuery['period'] })}><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="all">All retained history</option></select></label>
+        <label>Result period<NativeSelect value={query.period} autoComplete="off" onChange={e => onQuery({ ...query, period: e.target.value as OverviewQuery['period'] })}><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="all">All retained history</option></NativeSelect></label>
       </div></header>
       {!current && <div className="workspace-loading" role="status">Loading summary…</div>}
       {current?.error && <div className="workspace-alert" role="alert">{current.error}<Button variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>Retry summary</Button></div>}
@@ -69,18 +72,22 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
               <th scope="row"><button className="overview-summary-name" aria-label={`Scope overview to ${row.name}`} onClick={e => { e.stopPropagation(); onQuery({ ...query, scope: row.id }) }}>
                 {row.icon ? <PortfolioIcon icon={row.icon} /> : row.venueId ? <VenueLogo venueId={row.venueId} size="md" /> : null}<span>{row.name}<small>{row.venueId ? venues.name(row.venueId) : `${row.totals.accountCount} ${row.totals.accountCount === 1 ? 'account' : 'accounts'}`}</small></span>
               </button></th>
-              <td><span>{money(row.totals.balance.amountUsd)}</span><Coverage value={row.totals.balance} /></td>
-              <td><span>{money(row.totals.available.amountUsd)}</span><Coverage value={row.totals.available} /></td>
+              <td><span>{money(row.totals.balance.amountUsd)}</span><SummaryCoverageBadge value={row.totals.balance} label={`${row.name} balance`} /></td>
+              <td><span>{money(row.totals.available.amountUsd)}</span><SummaryCoverageBadge value={row.totals.available} label={`${row.name} availability`} /></td>
               <td><span title={row.shareOfBalance ? `${row.shareOfBalance.numerator} / ${row.shareOfBalance.denominator} · rounded for display` : 'Share unavailable'}>{share.label}</span><span className="overview-share-track" aria-hidden="true"><span style={{ width: share.width }} /></span></td>
-              <td><span>{row.totals.openPositionCount}</span><span className={signClass(row.totals.unrealizedPnl.amountUsd)}>{money(row.totals.unrealizedPnl.amountUsd)} unrealized</span><Coverage value={row.totals.unrealizedPnl} /></td>
-              <td><span className={signClass(row.totals.realizedResult.amountUsd)}>{money(row.totals.realizedResult.amountUsd)}</span><Coverage value={row.totals.realizedResult} operations /></td>
+              <td><span>{row.totals.openPositionCount}</span><span className={signClass(row.totals.unrealizedPnl.amountUsd)}>{money(row.totals.unrealizedPnl.amountUsd)} unrealized</span><SummaryCoverageBadge value={row.totals.unrealizedPnl} label={`${row.name} unrealized`} /></td>
+              <td><span className={signClass(row.totals.realizedResult.amountUsd)}>{money(row.totals.realizedResult.amountUsd)}</span><SummaryCoverageBadge value={row.totals.realizedResult} operations label={`${row.name} realized`} /></td>
             </tr>
           })}
         </tbody></table></div>}
-        {current.document.omittedGroupCount > 0 && <p className="workspace-scope-note">{current.document.omittedGroupCount} groups omitted. Totals include them.</p>}
-        <div className="overview-realized-total">Scope realized result <strong className={signClass(current.document.totals.realizedResult.amountUsd)}>{money(current.document.totals.realizedResult.amountUsd)}</strong><Coverage value={current.document.totals.realizedResult} operations /></div>
-        <details className="operation-scope"><summary>Summary scope and coverage</summary><p className="workspace-scope-note">{current.document.scopeNote}</p><p className="workspace-scope-note">Window ends {new Date(current.document.asOfUtc).toISOString()}{current.document.fromUtc ? `, starts ${new Date(current.document.fromUtc).toISOString()}` : ', all retained history'}.</p>{(['balance', 'available', 'unrealizedPnl', 'realizedResult'] as const).flatMap(name => current.document!.totals[name].coverage.reasons.map((r, i) => <p className="workspace-scope-note" key={`${name}-${i}`}>{name}: {r.count} · {r.reason}</p>))}</details>
+        {current.document.omittedGroupCount > 0 && <p className="overview-omitted">+{current.document.omittedGroupCount} {current.document.omittedGroupCount === 1 ? 'group' : 'groups'}, included in totals</p>}
+        <div className="overview-realized-total">Scope realized result <strong className={signClass(current.document.totals.realizedResult.amountUsd)}>{money(current.document.totals.realizedResult.amountUsd)}</strong><SummaryCoverageBadge value={current.document.totals.realizedResult} operations label="Realized" /></div>
       </>}
+      {(current?.document || workspaceNote) && <details className="operation-scope"><summary>About these numbers</summary>
+        {current?.document && <p className="workspace-scope-note">{current.document.scopeNote}</p>}
+        {workspaceNote && workspaceNote !== current?.document?.scopeNote && <p className="workspace-scope-note">{workspaceNote}</p>}
+        {current?.document && <><p className="workspace-scope-note">Window ends {new Date(current.document.asOfUtc).toISOString()}{current.document.fromUtc ? `, starts ${new Date(current.document.fromUtc).toISOString()}` : ', all retained history'}.</p>{(['balance', 'available', 'unrealizedPnl', 'realizedResult'] as const).flatMap(name => current.document!.totals[name].coverage.reasons.map((r, i) => <p className="workspace-scope-note" key={`${name}-${i}`}>{name}: {r.count} · {r.reason}</p>))}</>}
+      </details>}
     </section>
   </>
 }

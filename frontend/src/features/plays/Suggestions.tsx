@@ -78,8 +78,8 @@ export function SuggestionsPanel({ plan, sizing, draft, leverage, units, onSize,
     <button type="button" className="sizing-suggestions-summary" aria-expanded={open} aria-controls={`${id}-body`} onClick={() => setOpen(!open)}>
       <Lightbulb size={16} aria-hidden="true" />
       <span className="sizing-suggestions-title">
-        <strong>Suggestions{count > 0 && <span className="sizing-suggestions-count">{count}</span>}</strong>
-        <small>From your risk setting and record. Nothing changes until you accept.</small>
+        <strong>Suggestions{count > 0 && <span className="sizing-suggestions-count">{count}</span>}
+          <span className="sizing-suggestions-tag" title="From your risk setting and record. Nothing changes until you accept.">Estimates</span></strong>
       </span>
       {reduced && <span className="sizing-suggestions-exposure">{exposureLabels[exposure.level]}</span>}
       <span className="sizing-suggestions-headline">{headline}</span>
@@ -88,7 +88,7 @@ export function SuggestionsPanel({ plan, sizing, draft, leverage, units, onSize,
     {open && <div id={`${id}-body`} className="sizing-suggestions-body">
       <div className="sizing-suggestions-list">
         <h3>For this plan</h3>
-        {count === 0 && !plan.size && <p className="suggestion-empty" data-testid="suggestions-empty">{emptyReason(plan)}</p>}
+        {count === 0 && !plan.size && emptyReason(plan) && <p className="suggestion-empty" data-testid="suggestions-empty">{emptyReason(plan)}</p>}
         <ul>
           {plan.size && (plan.size.overBudget === null
             ? <SuggestionRow testId="size-suggestion" title="Size" label="Accept suggested size" value={formatSize(plan.size.value)}
@@ -131,11 +131,11 @@ export function SuggestionsPanel({ plan, sizing, draft, leverage, units, onSize,
   </section>
 }
 
-/** Why there is no size suggestion, when there is nothing else to show. */
+/** Why there is no size suggestion; a plan within its limits needs no reason, the headline says so. */
 function emptyReason(plan: PlanSuggestions) {
   if (plan.balance === null) return 'Choose an account with a balance to size by risk.'
   if (plan.lossPerUnit === null) return 'Give each priced entry a stop on the right side to size by risk.'
-  return 'The size, stops, targets and leverage are within your limits.'
+  return null
 }
 
 /** The record and rules behind the suggestions, with the risk per trade editable in place. */

@@ -10,6 +10,7 @@ import {
   convertSize, defaultSizeUnits, estimatedLiquidation, formatMoney, formatQuantity, formatRewardToRisk, marginOverBudget, positionSize, rewardToRisk, sizeForBudget, type SizeUnits,
 } from './sizing'
 import { Equal, Expand, Plus, Trash2 } from 'lucide-react'
+import { NativeSelect } from '@/components/ui/native-select'
 
 const leveragePresets = [1, 5, 10, 25, 50]
 /** Control range when the venue maximum is unknown, e.g. manual instruments. Saved plans accept up to 100×. */
@@ -219,9 +220,9 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
                 <DialogDescription className="sr-only">The same entry form with more room. Escape returns to the list.</DialogDescription>
               </DialogHeader>
               <label htmlFor={`${prefix}-expanded-entry`}>Entry
-                <select id={`${prefix}-expanded-entry`} value={selected?.id ?? ''} onChange={event => selectEntry(event.target.value)}>
+                <NativeSelect density="compact" id={`${prefix}-expanded-entry`} value={selected?.id ?? ''} onChange={event => selectEntry(event.target.value)}>
                   {draft.entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
-                </select>
+                </NativeSelect>
               </label>
               {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} liquidation={liquidation} suggested={marks?.levels ?? null} quantity={sized.quantity} units={units} />}
             </DialogContent>

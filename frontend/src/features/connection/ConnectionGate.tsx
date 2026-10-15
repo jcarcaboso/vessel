@@ -5,6 +5,11 @@ import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { clearCandleCache } from '@/features/market/candleCache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { InfoTip } from '@/components/ui/info-tip'
+import { VesselMark } from '@/components/brand/VesselMark'
+import { LockKeyhole } from 'lucide-react'
+
+const tokenPolicy = 'Kept in memory for this session. Never stored in the browser or sent in a URL.'
 
 export function ConnectionGate({ children }: { children: (system: SystemInfo, disconnect: () => void, api: WorkspaceApi) => ReactNode }) {
   const [token, setToken] = useState('')
@@ -38,19 +43,17 @@ export function ConnectionGate({ children }: { children: (system: SystemInfo, di
   return (
     <main className="connection-page">
       <section className="panel connection-card" aria-labelledby="connection-title">
-        <p className="eyebrow">VESSEL / FOUNDATION</p>
+        <div className="connection-brand" aria-hidden="true"><span className="shell-monogram"><VesselMark size={26} /></span><span>vessel<small>The trading journal</small></span></div>
         <h1 id="connection-title">Connect to your diary</h1>
-        <p>Use the token configured on your self-hosted Vessel API.</p>
         <form onSubmit={(event) => { void connect(event) }} aria-busy={pending}>
-          <label htmlFor="api-token">API token</label>
+          <div className="connection-label"><label htmlFor="api-token">API token</label><InfoTip icon={LockKeyhole} label="How the token is kept" side="right">{tokenPolicy}</InfoTip></div>
           <Input id="api-token" type="password" autoComplete="off" spellCheck={false}
             value={token} onChange={(event) => setToken(event.target.value)} disabled={pending}
             aria-invalid={error !== null} aria-describedby={error ? 'token-policy connection-error' : 'token-policy'} />
-        <p id="token-policy" className="muted">Kept in memory for this session. Never stored in the browser or sent in a URL.</p>
+          <p id="token-policy" className="sr-only">{tokenPolicy}</p>
           {error && <p role="alert" id="connection-error" className="error">{error}</p>}
           <Button type="submit" disabled={pending}>{pending ? 'Connecting…' : 'Connect'}</Button>
         </form>
-        <p className="muted">Self-hosted, read-only venue access. No order placement. Unsaved Play drafts are kept in memory until you save them.</p>
       </section>
     </main>
   )

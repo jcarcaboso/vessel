@@ -19,10 +19,11 @@ import { emptyFilters } from './activity-filters'
 import { OverviewActions } from './OverviewActions'
 import { VenuesProvider, useVenues } from '@/api/venues'
 import {
-  Activity, BarChart3, CircleHelp, Folder, LayoutDashboard,
+  Activity, BarChart3, CircleHelp, Compass, Folder, LayoutDashboard,
   LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, Wallet, BookOpen, X,
 } from 'lucide-react'
 import { PageErrorBoundary } from '@/components/PageErrorBoundary'
+import { VesselMark } from '@/components/brand/VesselMark'
 import { OverviewPage } from './OverviewPage'
 import { PortfoliosPage } from './PortfoliosPage'
 import { useHashPage, type Page } from './useHashPage'
@@ -41,15 +42,25 @@ function PageLoading() {
 }
 
 const pages = [
-  { id: 'overview', label: 'Overview', icon: LayoutDashboard, description: 'Your accounts and recent execution history, in one place.' },
-  { id: 'plays', label: 'Plays', icon: BookOpen, description: 'Document the idea, define the position and keep your reasoning separate from execution.' },
-  { id: 'review', label: 'Review', icon: BarChart3, description: 'Portfolio performance from closed Plays.' },
-  { id: 'portfolios', label: 'Portfolios', icon: Folder, description: 'Group accounts around the way you trade.' },
-  { id: 'accounts', label: 'Accounts', icon: Wallet, description: 'Read-only venue connections and manual account records.' },
-  { id: 'activity', label: 'Activity', icon: Activity, description: 'Imported executions, separate from trading intent.' },
-  { id: 'settings', label: 'Settings', icon: Settings2, description: 'Appearance, your self-hosted workspace and available capabilities.' },
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'plays', label: 'Plays', icon: BookOpen },
+  { id: 'review', label: 'Review', icon: BarChart3 },
+  { id: 'portfolios', label: 'Portfolios', icon: Folder },
+  { id: 'accounts', label: 'Accounts', icon: Wallet },
+  { id: 'activity', label: 'Activity', icon: Activity },
+  { id: 'settings', label: 'Settings', icon: Settings2 },
 ] as const
 type ShellProps = { system: SystemInfo; disconnect: () => void; api: WorkspaceApi }
+
+/** The log line above each page title: today's date, with a greeting on the Overview. */
+function logLine(page: Page, owner: string, now = new Date()) {
+  const date = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' }).format(now)
+  if (page !== 'overview') return date
+  const hour = now.getHours()
+  const greeting = hour >= 5 && hour < 12 ? 'Good morning' : hour >= 12 && hour < 18 ? 'Good afternoon' : 'Good evening'
+  const name = owner.trim().split(/\s+/)[0]
+  return `${greeting}${name ? `, ${name}` : ''} · ${date}`
+}
 
 export function ApplicationShell(props: ShellProps) {
   return <Tooltip.Provider delayDuration={250} skipDelayDuration={400}><NotificationProvider><VenuesProvider venues={props.system.venues}><Shell {...props} /></VenuesProvider></NotificationProvider></Tooltip.Provider>
@@ -230,24 +241,24 @@ function Shell({ system, disconnect, api }: ShellProps) {
   return <div className={`journal-shell ${navigationCollapsed ? 'navigation-collapsed' : ''}`}>
     <a className="skip-content" href="#workspace-content" onClick={event => { event.preventDefault(); document.getElementById('workspace-content')?.focus() }}>Skip to content</a>
     <aside id="workspace-nav" className={`shell-sidebar ${menuOpen ? 'is-open' : ''}`} aria-label="Main navigation" role={menuOpen ? 'dialog' : undefined} aria-modal={menuOpen ? true : undefined}>
-      <a className="shell-brand" href="#overview" aria-label="Vessel overview" title="Vessel overview" onClick={() => navigate('overview')}><span className="shell-monogram" aria-hidden="true">V</span><span className="sidebar-copy">vessel<small>THE TRADING JOURNAL</small></span></a>
+      <a className="shell-brand" href="#overview" aria-label="Vessel overview" title="Vessel overview" onClick={() => navigate('overview')}><span className="shell-monogram" aria-hidden="true"><VesselMark size={24} /></span><span className="sidebar-copy">vessel<small>The trading journal</small></span></a>
       {menuOpen && <button type="button" className="icon-button sidebar-close" aria-label="Close navigation" title="Close navigation" onClick={() => setMenuOpen(false)}><X size={19} aria-hidden="true" /></button>}
       <button type="button" className="icon-button sidebar-toggle" aria-label={navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'} title={navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'} aria-controls="workspace-nav" aria-expanded={!navigationCollapsed} onClick={() => setNavigationCollapsed(collapsed => !collapsed)}>
         {navigationCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
       </button>
-      <div className="nav-section-label">WORKSPACE</div>
+      <div className="nav-section-label">Workspace</div>
       <nav>{pages.filter(p => p.id !== 'settings').map(({ id, label, icon: Icon }) => <a key={id} href={`#${id}`} className={`shell-nav-item ${page === id ? 'active' : ''}`} aria-label={label} title={label} onClick={() => navigate(id)} aria-current={page === id ? 'page' : undefined}><Icon size={18} aria-hidden="true" /><span className="sidebar-copy">{label}</span>{id === 'accounts' && accounts.length > 0 && <small>{accounts.length}</small>}</a>)}</nav>
-      <div className="nav-section-label later-section">LATER</div>
-      <div className="shell-nav-later" role="link" aria-label="Strategies" aria-disabled="true" title="Strategies are not available yet"><Folder size={18} aria-hidden="true" /><span className="sidebar-copy">Strategies</span></div>
+      <div className="nav-section-label later-section">Later</div>
+      <div className="shell-nav-later" role="link" aria-label="Strategies" aria-disabled="true" title="Strategies are not available yet"><Compass size={18} aria-hidden="true" /><span className="sidebar-copy">Strategies</span><small className="sidebar-copy" aria-hidden="true">Soon</small></div>
       <div className="shell-sidebar-bottom">
         <a href="#settings" className={`shell-nav-item ${page === 'settings' ? 'active' : ''}`} aria-label="Settings" title="Settings" aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} aria-hidden="true" /><span className="sidebar-copy">Settings</span></a>
-        <button className="owner-card" onClick={disconnectSession} aria-label={`Disconnect ${system.owner.displayName}'s session`} title={`Disconnect ${system.owner.displayName}'s browser session`}><span className="owner-avatar" aria-hidden="true">{system.owner.displayName.slice(0, 1).toUpperCase()}</span><span className="sidebar-copy"><strong>{system.owner.displayName}</strong><small>Private workspace</small></span><LogOut size={15} aria-hidden="true" /></button>
+        <button className="owner-card" onClick={disconnectSession} aria-label={`Disconnect ${system.owner.displayName}'s session`} title={`Disconnect ${system.owner.displayName}'s browser session`}><span className="owner-avatar" aria-hidden="true">{system.owner.displayName.slice(0, 1).toUpperCase()}</span><span className="sidebar-copy"><strong>{system.owner.displayName}</strong></span><LogOut size={15} aria-hidden="true" /></button>
       </div>
     </aside>
     <div className="shell-main" inert={menuOpen}>
-      <header className="shell-header"><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" title="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} aria-hidden="true" /></button></header>
+      <header className="shell-header"><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" title="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} aria-hidden="true" /></button><span className="shell-header-brand" aria-hidden="true"><VesselMark size={22} />vessel</span></header>
       <main id="workspace-content" className="shell-content" tabIndex={-1}>
-        {page !== 'plays' && page !== 'review' && <section className="shell-page-heading"><div><div className="eyebrow">YOUR PRIVATE WORKSPACE</div><h1>{selectedAccount ? selectedAccount.name : currentPage.label}</h1><p>{currentPage.description}</p></div><div className="shell-heading-actions">
+        {page !== 'plays' && page !== 'review' && <section className="shell-page-heading" key={`heading-${page}`}><div><div className="eyebrow">{logLine(page, system.owner.displayName)}</div><h1>{selectedAccount ? selectedAccount.name : currentPage.label}</h1></div><div className="shell-heading-actions">
           {page !== 'settings' && <Button variant="outline" onClick={reload} disabled={loading || refreshing !== null} aria-busy={loading}><RefreshCw size={14} className={loading ? 'is-spinning' : ''} />Reload</Button>}
           {page === 'overview' ? <OverviewActions disabled={pending || !data} onNewPlay={newPlay} onPortfolio={() => setPortfolioDialog(true)} onAccount={() => setAccountDialog(true)} /> : page === 'portfolios' ? <Button onClick={() => setPortfolioDialog(true)}><Plus size={15} />New portfolio</Button> : page !== 'settings' && page !== 'activity' && <Button onClick={() => setAccountDialog(true)} disabled={pending || !data}><Plus size={15} />Add account</Button>}
         </div></section>}
@@ -264,7 +275,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
             </Suspense>
           </PageErrorBoundary>
         </div>}
-        <PageErrorBoundary key={page}>
+        <PageErrorBoundary key={page}><div className="page-settle">
         {page === 'review' && <Suspense fallback={<PageLoading />}><ReviewPage api={api} reloadGeneration={reloadKey} onOpenPlay={viewPlay} /></Suspense>}
 
         {page === 'overview' && data && <OverviewPage data={data} api={api} overviewQuery={overviewQuery} setOverviewQuery={setOverviewQuery}
@@ -281,10 +292,10 @@ function Shell({ system, disconnect, api }: ShellProps) {
             refreshing={refreshing} refreshAction={refreshAllAction} onDetail={viewAccount} onSync={id => { void sync(id) }} onManage={manageAccount} onAdd={() => setAccountDialog(true)} />)}
 
 
-        {page === 'activity' && data && <section className="shell-panel"><header className="shell-panel-heading"><div><h2>Position operations</h2><p>Retained fills grouped into position round trips, separate from trading intent.</p></div><span className="workspace-badge">Read-only facts</span></header><ActivityOperations api={api} accounts={accounts} portfolios={portfolios} filters filterValues={activityFilters} onFiltersChange={setActivityFilters} reloadGeneration={reloadKey} onOpenPlay={viewPlay} onCreated={reload} /></section>}
+        {page === 'activity' && data && <section className="shell-panel"><header className="shell-panel-heading"><h2>Position operations</h2></header><ActivityOperations api={api} accounts={accounts} portfolios={portfolios} filters filterValues={activityFilters} onFiltersChange={setActivityFilters} reloadGeneration={reloadKey} onOpenPlay={viewPlay} onCreated={reload} /></section>}
 
         {page === 'settings' && <Suspense fallback={<PageLoading />}><SettingsPage system={system} disconnectSession={disconnectSession} onAccounts={() => navigate('accounts')} /></Suspense>}
-        </PageErrorBoundary>
+        </div></PageErrorBoundary>
       </main>
     </div>
     <CreatePortfolioDialog open={portfolioDialog} onOpenChange={setPortfolioDialog} api={api} accounts={accounts} portfolios={portfolios} onCreated={created} />

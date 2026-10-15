@@ -1,9 +1,10 @@
 import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
-import { emptyStructuredReview, hasStructuredReview, type PlanEntry, type PlayFields, type PlayPlan, type PlaySummary, type SavedEvidence, type SavedPlay } from '@/api/plays'
+import { emptyStructuredReview, hasStructuredReview, type PlanEntry, type PlayFields, type PlayPlan, type PlayStatus, type PlaySummary, type SavedEvidence, type SavedPlay } from '@/api/plays'
 import { isChartDrawing, type ChartDrawing } from '@/components/chart/drawings'
 import { createDraft, createEvidenceId, type DraftEvidence, type PlayDraft } from './draft'
 import { hasManualDraft, type ManualExecutionDraft } from './manual'
+import { titleForSave } from './default-title'
 
 
 /** What was last saved, to tell unsaved edits and plan changes (which need a reason) apart. */
@@ -67,6 +68,14 @@ export function fieldsFromDraft(draft: PlayDraft): PlayFields {
     title: draft.title, plan: planFromDraft(draft), drawings: draft.drawings, review: draft.notes.review,
     structuredReview: draft.structuredReview ?? emptyStructuredReview(),
   }
+}
+
+/**
+ * The fields to send when saving. A blank title becomes the default name (asset, direction and date) while the
+ * Play can still change it; saved state and dirtiness keep comparing the title as typed, so only a save names it.
+ */
+export function fieldsToSave(draft: PlayDraft, status: PlayStatus | undefined, now: Date = new Date()): PlayFields {
+  return { ...fieldsFromDraft(draft), title: titleForSave(draft, status, now) }
 }
 
 const planKey = (plan: PlayPlan) => JSON.stringify(plan)

@@ -9,11 +9,13 @@ import { accountFixture, candleSeriesFixture, idleMarketStream, instrumentCatalo
 import { PlayWorkspace } from './PlayWorkspace'
 import { createDraft, type PlayDraft } from './draft'
 import { VenuesProvider } from '@/api/venues'
+import type { PlayStatus } from '@/api/plays'
 import { systemFixture } from '@/test/system-fixture'
 
-function Workspace({ disabled = false }: { disabled?: boolean }) {
+function Workspace({ disabled = false, status = 'draft', retrospective = false }: { disabled?: boolean; status?: PlayStatus; retrospective?: boolean }) {
   const [draft, setDraft] = useState(createDraft)
-  return <PlayWorkspace accounts={[{ ...accountFixture, isEnabled: !disabled }]} portfolios={[portfolioFixture]} api={createWorkspaceApi('test-only')} draft={draft} onChange={setDraft} />
+  return <PlayWorkspace accounts={[{ ...accountFixture, isEnabled: !disabled }]} portfolios={[portfolioFixture]} api={createWorkspaceApi('test-only')} draft={draft} onChange={setDraft}
+    status={status} retrospective={retrospective} />
 }
 
 function AccountWorkspace({ accounts, api }: { accounts: BrokerAccount[]; api: WorkspaceApi }) {
@@ -66,7 +68,7 @@ describe('Play draft workspace', () => {
     view.rerender(<ReloadedWorkspace accounts={[{ ...venue, isEnabled: false }]} onDraft={onDraft} />)
     expect(onDraft.mock.lastCall?.[0]).toMatchObject({ accountId: '', instrument: '', instrumentSource: 'manual', budgetOverride: null })
     expect(screen.getByRole('textbox', { name: 'Perpetual instrument' })).toHaveValue('')
-    expect(screen.queryByText('Manual label, not venue-validated.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'About manual instruments' })).toHaveAccessibleDescription('Manual label, not venue-validated.')
     view.rerender(<ReloadedWorkspace accounts={[]} onDraft={onDraft} />)
     expect(screen.getByRole('combobox', { name: 'Account' })).toHaveValue('')
   })
@@ -92,6 +94,15 @@ describe('Play draft workspace', () => {
     expect(within(screen.getByTestId('summary-panel')).getAllByText('Needs a size').length).toBeGreaterThan(0)
   })
 
+  it('passes the play status to the journal, which offers the review only after the play has opened or ended', () => {
+    const view = render(<Workspace />)
+    expect(screen.getByRole('tablist', { name: 'Journal sections' })).not.toHaveTextContent('Review')
+    view.unmount()
+    render(<Workspace status="cancelled" />)
+    expect(screen.getByRole('tab', { name: 'Review' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Expand journal' })).toBeInTheDocument()
+  })
+
   it('uses a real enabled account without assuming its value is an available budget', async () => {
     render(<Workspace />)
     expect(within(screen.getByTestId('capital-context')).queryByText('$1,250.12')).not.toBeInTheDocument()
@@ -105,13 +116,13 @@ describe('Play draft workspace', () => {
   it('never offers disabled accounts, and allows outlining a draft without accounts', () => {
     render(<Workspace disabled />)
     expect(screen.queryByRole('option', { name: /Main account/ })).not.toBeInTheDocument()
-    expect(screen.getByText(/No enabled accounts yet/)).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'No enabled accounts' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toBeEnabled()
   })
 
   it('does not claim accounts are empty while the account context is still loading', () => {
     render(<PlayWorkspace accounts={[]} portfolios={[]} api={createWorkspaceApi('test-only')} draft={createDraft()} onChange={vi.fn()} loading />)
-    expect(screen.queryByText(/No enabled accounts yet/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'No enabled accounts' })).not.toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Account' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toBeEnabled()
   })
@@ -140,8 +151,15 @@ describe('Play draft workspace', () => {
     expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
   })
 
+  it('names the retrospective pill by its visible text and keeps the explanation as its description', () => {
+    render(<Workspace status="closed" retrospective />)
+    const pill = screen.getByRole('button', { name: 'Retrospective' })
+    expect(pill).toHaveTextContent('Retrospective')
+    expect(pill).toHaveAccessibleDescription(/^Recorded after execution: no original plan/)
+  })
+
   it('keeps original thesis and retrospective review independent', async () => {
-    render(<Workspace />)
+    render(<Workspace status="open" />)
     await userEvent.type(screen.getByRole('textbox', { name: 'Thesis' }), 'Wait for acceptance')
     await userEvent.click(screen.getByRole('tab', { name: 'Review' }))
     expect(screen.getByRole('textbox', { name: 'Review' })).toHaveValue('')

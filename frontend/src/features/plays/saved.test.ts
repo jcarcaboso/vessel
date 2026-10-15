@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDraft, createEntry } from './draft'
 import { savedPlayFixture } from '@/test/workspace-fixture'
-import { createPlaysSession, draftFromSaved, hasDraftContent, loadSavedPlay, observedPlayVersion, savedState, startNewPlay } from './saved'
+import { createPlaysSession, draftFromSaved, fieldsToSave, hasDraftContent, isDirty, loadSavedPlay, observedPlayVersion, savedState, startNewPlay } from './saved'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 
 describe('Unsaved draft protection', () => {
@@ -78,5 +78,29 @@ describe('saved-Play observation cancellation', () => {
     finish(savedPlayFixture)
     await rejected
     expect(methods.evidenceImage).not.toHaveBeenCalled()
+  })
+})
+
+describe('Default title when saving', () => {
+  const day = new Date(2026, 9, 15, 9)
+
+  it('sends the default name for a blank title and the typed one otherwise, leaving the draft untouched', () => {
+    const draft = { ...createDraft(), instrument: 'SOL', direction: 'short' as const }
+    expect(fieldsToSave(draft, undefined, day).title).toBe('SOL Short · 15 Oct 2026')
+    expect(draft.title).toBe('')
+    expect(fieldsToSave({ ...draft, title: 'Breakdown' }, 'draft', day).title).toBe('Breakdown')
+    // Everything else in the fields is what fieldsFromDraft would send.
+    expect(fieldsToSave(draft, undefined, day)).toMatchObject({ instrument: 'SOL', plan: { direction: 'short' } })
+  })
+
+  it('keeps the title of a closed Play blank, so saving its review is still accepted', () => {
+    const draft = { ...draftFromSaved(savedPlayFixture, []), title: '' }
+    expect(fieldsToSave(draft, 'closed', day).title).toBe('')
+  })
+
+  it('does not make a blank, saved Play dirty until it is saved', () => {
+    const blank = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, title: '' } }
+    const draft = draftFromSaved(blank, [])
+    expect(isDirty(draft, savedState(blank, draft))).toBe(false)
   })
 })

@@ -26,7 +26,7 @@ export function AppearanceSettings() {
   const failing = contrastChecks(resolved.colors).filter(check => check.ratio < check.minimum)
   return <section className="shell-panel appearance-panel" aria-labelledby="appearance-heading">
     <header className="shell-panel-heading">
-      <div><h2 id="appearance-heading" tabIndex={-1}>Appearance</h2><p>Choose a theme and adjust its colours. Saved in this browser only; layout never changes between themes.</p></div>
+      <div><h2 id="appearance-heading" tabIndex={-1}>Appearance</h2></div>
       <div className="appearance-jumps">
         <span className="workspace-badge"><Palette size={11} aria-hidden="true" /> {resolved.theme.name}{resolved.customized ? ' · customized' : ''}</span>
         <Button variant="outline" size="sm" onClick={() => showAppearanceSection('theme-builder')}><Dices size={13} />Theme builder</Button>
@@ -49,7 +49,7 @@ export function AppearanceSettings() {
       <ThemeBuilder appearance={appearance} selected={resolved.theme} />
       <div className="theme-customizer">
         <div className="customizer-heading">
-          <div><h3 id="theme-customizer-heading" tabIndex={-1}>Customize {resolved.theme.name}</h3><p>Overrides are kept per theme, so switching back restores them.</p></div>
+          <div><h3 id="theme-customizer-heading" tabIndex={-1}>Customize {resolved.theme.name}</h3></div>
           <div className="customizer-actions">
             <Button variant="outline" size="sm" disabled={!resolved.customized} onClick={() => appearanceStore.resetTheme(resolved.theme.id)}><RotateCcw size={13} />Reset {resolved.theme.name}</Button>
             {appearance.saved.some(saved => saved.id === resolved.theme.id) && <DeleteThemeButton key={resolved.theme.id} theme={resolved.theme} />}
@@ -68,9 +68,10 @@ export function AppearanceSettings() {
             <ThemeSample />
           </fieldset>
         </div>
-        <div className={`contrast-report ${failing.length ? 'has-issues' : ''}`} role="status" aria-label="Readability">
+        {/* The report only shows when a check fails; passing stays announced to screen readers. */}
+        <div className={`contrast-report ${failing.length ? 'has-issues' : 'is-passing'}`} role="status" aria-label="Readability">
           {failing.length === 0
-            ? <><Check size={14} aria-hidden="true" />All {contrastChecks(resolved.colors).length} readability checks pass.</>
+            ? <span className="sr-only">All {contrastChecks(resolved.colors).length} readability checks pass.</span>
             : <><TriangleAlert size={14} aria-hidden="true" /><div><strong>{failing.length} readability {failing.length === 1 ? 'check fails' : 'checks fail'}</strong>
               <ul>{failing.map(check => <li key={check.label}>{check.label}: {check.ratio.toFixed(2)}:1, needs {check.minimum}:1</li>)}</ul></div></>}
         </div>
@@ -81,7 +82,7 @@ export function AppearanceSettings() {
 
 function ThemeCard({ theme, selected, appearance }: { theme: Theme; selected: boolean; appearance: Appearance }) {
   const { colors, radius, customized } = resolveTheme({ ...appearance, themeId: theme.id })
-  return <button type="button" className="theme-card" aria-pressed={selected} onClick={() => appearanceStore.selectTheme(theme.id)}>
+  return <button type="button" className="theme-card" aria-pressed={selected} title={theme.description} onClick={() => appearanceStore.selectTheme(theme.id)}>
     <span className="theme-preview" aria-hidden="true" style={{ background: colors.background, borderColor: colors.border }}>
       <span className="theme-preview-panel" style={{ background: colors.card, borderColor: colors.border, borderRadius: radius / 2 }}>
         <i style={{ background: colors.foreground, width: '62%' }} />
@@ -92,7 +93,6 @@ function ThemeCard({ theme, selected, appearance }: { theme: Theme; selected: bo
     </span>
     <span className="theme-card-copy">
       <strong>{theme.name}{selected && <Check size={13} aria-label="Selected" />}</strong>
-      <small>{theme.description}</small>
       {customized && <span className="workspace-badge">Customized</span>}
     </span>
   </button>
@@ -118,7 +118,7 @@ function ThemeBuilder({ appearance, selected }: { appearance: Appearance; select
   }
   return <div className="theme-builder">
     <div className="customizer-heading">
-      <div><h3 id="theme-builder-heading" tabIndex={-1}>Theme builder</h3><p>Roll random colour combinations; every roll passes the readability checks. Fine-tune below, then save it with your own name.</p></div>
+      <div><h3 id="theme-builder-heading" tabIndex={-1}>Theme builder</h3></div>
     </div>
     <div className="builder-controls">
       <div className="builder-schemes" role="group" aria-label="Random scheme">{schemeOptions.map(option =>
@@ -131,8 +131,9 @@ function ThemeBuilder({ appearance, selected }: { appearance: Appearance; select
     </div>}
     <form className="builder-save" onSubmit={save}>
       <label>
-        <span>Save the current colours ({selected.id === draftThemeId ? 'random draft' : selected.name}{resolveTheme(appearance).customized ? ', customized' : ''}) as</span>
-        <input value={name} maxLength={maxThemeNameLength} placeholder="Theme name" aria-label="Theme name" aria-invalid={error ? true : undefined}
+        <span>Theme name</span>
+        <input value={name} maxLength={maxThemeNameLength} placeholder={selected.id === draftThemeId ? 'Random draft' : selected.name}
+          title={`Saves the current colours (${selected.id === draftThemeId ? 'random draft' : selected.name}${resolveTheme(appearance).customized ? ', customized' : ''})`} aria-invalid={error ? true : undefined}
           aria-describedby={error ? 'theme-name-error' : undefined} onChange={event => { setName(event.target.value); setError(null) }} />
       </label>
       <Button type="submit" size="sm" variant="outline"><Save size={14} />Save theme</Button>

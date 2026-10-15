@@ -26,8 +26,10 @@ describe('PositionRiskSummary', () => {
     expect(value('Priced quantity')).toHaveTextContent('1 ETH')
     for (const label of ['Entry allocation', 'Stop allocation', 'Target allocation', 'Stop coverage', 'Target coverage'])
       expect(value(label)).toHaveTextContent('100% · complete')
-    expect(screen.getByText(/Fees, slippage and funding excluded/)).toHaveTextContent('separate scenarios')
-    expect(screen.getByText(/Actual loss can exceed planned loss/)).toBeInTheDocument()
+    // One short clause states the basis; the rest of the caveat opens from its info icon.
+    expect(screen.getByText('Planned, before fees, slippage and funding')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'About planned estimates' }))
+      .toHaveAccessibleDescription(/Stops and targets are separate scenarios\. Actual loss can exceed planned loss\./)
     expect(screen.queryByText(/max(imum)? loss|realized|initial risk|cross margin liquidates further/i)).not.toBeInTheDocument()
   })
 

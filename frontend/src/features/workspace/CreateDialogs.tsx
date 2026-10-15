@@ -52,7 +52,7 @@ export function CreatePortfolioDialog({ open, onOpenChange, api, accounts = [], 
   }
   return <Dialog open={open} onOpenChange={next => { if (!pending) { onOpenChange(next); setError(null) } }}>
     <DialogContent className="workspace-dialog">
-      <DialogHeader><DialogTitle>New portfolio</DialogTitle><DialogDescription>Group accounts by the way you trade. Portfolio values use available account records, not estimated performance.</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>New portfolio</DialogTitle><DialogDescription className="sr-only">Group accounts by the way you trade.</DialogDescription></DialogHeader>
       <form onSubmit={event => { void submit(event) }} className="workspace-form" aria-busy={pending}>
         <label htmlFor="portfolio-name">Portfolio name</label><Input id="portfolio-name" value={name} onChange={event => setName(event.target.value)} maxLength={200} placeholder="e.g. Swing trading" disabled={pending} autoFocus />
         <PortfolioIconPicker name="new-portfolio-icon" value={icon} onChange={setIcon} disabled={pending} />
@@ -108,7 +108,7 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
   }
   return <Dialog open={open} onOpenChange={next => { if (!pending) { onOpenChange(next); setError(null) } }}>
     <DialogContent className={`workspace-dialog${canDiscover ? ' account-import-dialog' : ''}`}>
-      <DialogHeader><DialogTitle>Add an account</DialogTitle><DialogDescription>Import read-only venue accounts or keep a manual record. You choose when to refresh account data.</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>Add an account</DialogTitle><DialogDescription className="sr-only">Import read-only venue accounts or keep a manual record.</DialogDescription></DialogHeader>
       <fieldset className="venue-picker" disabled={pending}>
         <legend>Venue</legend>
         <div className="venue-picker-grid">{choices.map(v => <label key={v.id} className="venue-card">
@@ -117,7 +117,7 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
             onChange={() => { setVenue(v.id); setAddress(''); setError(null) }} />
           <VenueLogo venueId={v.id} size="lg" />
           <span><strong>{venues.isManual(v.id) ? 'Manual account' : v.name}</strong>
-            <small>{venues.isManual(v.id) ? 'Your own record' : `Read-only perps${v.quoteAsset ? ` · ${v.quoteAsset}` : ''}`}</small></span>
+            {!venues.isManual(v.id) && <small>{`Read-only perps${v.quoteAsset ? ` · ${v.quoteAsset}` : ''}`}</small>}</span>
         </label>)}</div>
       </fieldset>
       {canDiscover ? <WalletAccountImport key={venue} venueId={venue} api={api} portfolios={portfolios} accounts={accounts}
@@ -125,9 +125,9 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
         <form onSubmit={event => { void submit(event) }} className="workspace-form" aria-busy={pending}>
           <PortfolioDestination destination={destination} inputId="account-portfolio" label="Portfolio · optional" disabled={pending} />
           <label htmlFor="account-name">Account name</label><Input id="account-name" value={name} onChange={event => setName(event.target.value)} placeholder="e.g. Main account" maxLength={200} disabled={pending} />
-          {needsAddress ? <><label htmlFor="account-address">Public wallet address</label><Input id="account-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="0x…" maxLength={128} spellCheck={false} autoComplete="off" disabled={pending} /><p className="field-help">Never enter a private key or seed phrase. Adding the account does not automatically import its history.</p></> :
-            needsIndex ? <><label htmlFor="account-source">Account index</label><Input id="account-source" value={address} onChange={event => setAddress(event.target.value)} inputMode="numeric" autoComplete="off" disabled={pending} /><p className="field-help">Use a concrete main or subaccount index. Add an optional read-only token in Manage account after creating the record.</p></> :
-            <><label htmlFor="manual-balance">Known account value · USD <span className="optional">optional</span></label><Input id="manual-balance" value={manualValue} onChange={event => setManualValue(event.target.value)} placeholder="Leave blank if unavailable" inputMode="decimal" disabled={pending} /><p className="field-help">An unavailable value stays unknown, not zero.</p></>}
+          {needsAddress ? <><label htmlFor="account-address">Public wallet address</label><Input id="account-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="0x…" maxLength={128} spellCheck={false} autoComplete="off" disabled={pending} /><p className="field-help">Never enter a private key or seed phrase.</p></> :
+            needsIndex ? <><label htmlFor="account-source">Account index</label><Input id="account-source" value={address} onChange={event => setAddress(event.target.value)} inputMode="numeric" autoComplete="off" disabled={pending} /></> :
+            <><label htmlFor="manual-balance">Known account value · USD <span className="optional">optional</span></label><Input id="manual-balance" value={manualValue} onChange={event => setManualValue(event.target.value)} placeholder="Leave blank if unavailable" inputMode="decimal" disabled={pending} /></>}
           {error && <p role="alert" className="error">{error}</p>}
           <Button type="submit" disabled={pending}>{pending ? 'Adding…' : 'Add account'}</Button>
         </form>}

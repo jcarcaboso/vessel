@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReviewExclusions as Exclusions, ReviewQuery } from '@/api/review'
 import type { WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
+import { PlayIdentity } from '@/features/plays/PlayIdentity'
 
 export function ReviewExclusions({ api, initialQuery, onOpenPlay }: {
   api: WorkspaceApi; initialQuery: ReviewQuery; onOpenPlay: (id: string, signal: AbortSignal) => Promise<void>
@@ -42,7 +43,7 @@ export function ReviewExclusions({ api, initialQuery, onOpenPlay }: {
     <p className="pr-exclusion-notice">{page.notice}</p>
     <ul className="pr-exclusion-list">{page.items.map(item => <li key={item.playId}>
       <button className="pr-play-link" disabled={opening !== null} aria-label={`Open excluded Play ${item.title || item.instrument}`} onClick={() => { void open(item.playId) }}>{item.title || item.instrument}{opening === item.playId ? ' · Opening…' : ''}</button>
-      <p>{item.accountName} · {item.instrument}</p>
+      <PlayIdentity instrument={item.instrument} accountName={item.accountName} />
       <small>Play {item.playId} · Account {item.accountId}</small>
       <ul>{item.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>
     </li>)}</ul>

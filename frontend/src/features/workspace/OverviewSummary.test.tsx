@@ -21,14 +21,19 @@ describe('Overview summary', () => {
     render(<OverviewSummary api={api(document)} query={query} onQuery={onQuery} reloadGeneration={0} fallback={overviewFixture} accountCount={2} />)
     const table = await screen.findByRole('table')
     expect(within(table).getByText('100.00%')).toBeInTheDocument()
-    expect(screen.getAllByText(/1 of 2 accounts/).length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/2 excluded/).length).toBeGreaterThan(0)
+    // Incomplete coverage is a pill: its name starts with the visible text and says what it covers, its description
+    // states the counts; complete coverage shows nothing.
+    expect(screen.getByRole('button', { name: '1/2 Balance coverage' })).toHaveTextContent('1/2')
+    expect(screen.getByRole('button', { name: '1/2 Balance coverage' })).toHaveAccessibleDescription(/^1 of 2 accounts\..*1: Balance unavailable\./)
+    expect(screen.getByRole('button', { name: '1/2 Realized coverage' })).toHaveAccessibleDescription(/^1 of 2 accounts · 3 closed · 2 excluded\./)
+    expect(screen.queryByRole('button', { name: /Unrealized coverage$/ })).not.toBeInTheDocument()
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
     expect(screen.getAllByText('$2.00 unrealized').every(e => e.classList.contains('overview-positive'))).toBe(true)
     expect(screen.getAllByText(/\$0\.0000000000000000000000000001/).every(e => e.classList.contains('overview-negative'))).toBe(true)
     expect(screen.getByText('balance: 1 · Balance unavailable.')).toBeInTheDocument()
     // Pooled balances add venue quote stablecoins (USDC, USDG…) at nominal 1:1.
-    expect(screen.getByText('Nominal USD · listed stablecoins at 1:1')).toBeInTheDocument()
+    expect(screen.getByText('Nominal USD')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Nominal USD' })).toHaveAccessibleDescription('Listed stablecoins at 1:1.')
     fireEvent.click(within(table).getByRole('button', { name: 'Scope overview to Swing trading' }))
     expect(onQuery).toHaveBeenLastCalledWith({ ...query, scope: document.rows[0]!.id })
     fireEvent.click(within(table).getByText('100.00%'))
@@ -70,7 +75,7 @@ describe('Overview summary', () => {
     const document = overviewSummaryFixture(); document.rows = []; document.omittedGroupCount = 1
     render(<OverviewSummary api={api(document)} query={query} onQuery={vi.fn()} reloadGeneration={0} fallback={overviewFixture} accountCount={1} />)
     expect(await screen.findByText('No enabled accounts in this scope.')).toBeInTheDocument()
-    expect(screen.getByText('1 groups omitted. Totals include them.')).toBeInTheDocument()
+    expect(screen.getByText('+1 group, included in totals')).toBeInTheDocument()
   })
   it.each([
     [{ numerator: '1', denominator: '3' }, '33.33%', '33.33%'],

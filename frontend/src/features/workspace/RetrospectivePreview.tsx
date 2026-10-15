@@ -77,15 +77,13 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
   const preview = state.value!
   const op = preview.operation
   return <div className="retrospective-preview">
-    <div className="retrospective-summary"><strong>{op.contractId}</strong><OperationDirection direction={op.direction} /><span className="workspace-badge">{op.status} · {op.playAssociation}</span></div>
-    <p className="workspace-scope-note">Operation {op.id} · Account {op.accountId}</p>
+    <div className="retrospective-summary" title={`Operation ${op.id} · Account ${op.accountId}`}><strong>{op.contractId}</strong><OperationDirection direction={op.direction} /><span className="workspace-badge">{op.status} · {op.playAssociation}</span></div>
     <dl className="retrospective-times"><div><dt>Original opening</dt><dd>{op.openedAtUtc ? time(op.openedAtUtc) : 'Unknown'}</dd></div><div><dt>Original closing</dt><dd>{op.closedAtUtc ? time(op.closedAtUtc) : 'Unknown'}</dd></div><div><dt>Net execution result</dt><dd title={op.netResultUsd ?? 'Unknown'}>{money(op.netResultUsd)}</dd></div></dl>
     <p className="workspace-scope-note">{preview.notice}</p>
-    <p className="workspace-scope-note">P&amp;L basis: {op.pnlBasis}. Fees follow the reported basis, with no second deduction from net-of-fee P&amp;L. Separate funding cashflows are not added; RISEx funding inclusion is unverified.</p>
+    <details className="operation-scope"><summary>Basis</summary><p className="workspace-scope-note">P&amp;L basis: {op.pnlBasis}. Fees follow the reported basis, with no second deduction from net-of-fee P&amp;L. Separate funding cashflows are not added; RISEx funding inclusion is unverified.</p></details>
     {!preview.eligible && <div role="status"><strong>Cannot create a retrospective Play</strong><ul className="operation-coverage">{preview.reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul></div>}
     {op.coverage.length > 0 && <ul className="operation-coverage">{op.coverage.map((reason, i) => <li key={i}>{reason}</li>)}</ul>}
     <h3>Original imported fills and associations</h3>
-    <p className="workspace-scope-note">Exact retained facts below are unchanged. Operation roles and allocated quantities are shown separately.</p>
     <div className="workspace-table-wrap retrospective-fills"><table className="workspace-table"><caption className="sr-only">Original imported fills and associations</caption><thead><tr><th>Record / time</th><th>Side / effect / role</th><th>Original quantity / price</th><th>Original fee / P&amp;L</th><th>Order / Play</th></tr></thead><tbody>{op.fills.map((part, index) => {
       const fill = part.fill
       return <tr key={`${fill.id}-${index}`}><td><strong>{fill.id}</strong><small>{fill.occurredAtUtc}</small><small>Source fill {fill.sourceFillId}</small><small>Transaction {fill.transactionHash || 'Not reported'}</small></td>
@@ -103,7 +101,7 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
       mutation.current?.abort(); const controller = new AbortController(); mutation.current = controller
       void openCreated(createdId, controller)
     }}>Open saved Play</Button>}</div> : preview.eligible && <>
-      <p className="workspace-scope-note">Create a completed retrospective record with today's creation/review time and the original execution times. No pre-trade plan, thesis, stop or initial-risk R is invented. It is excluded from the sizing ladder.</p>
+      <p className="workspace-scope-note">Creates a completed record with the original execution times; no plan, thesis, stop or initial-risk R is invented, and it stays out of the sizing ladder.</p>
       <label className="retrospective-field">Retrospective title<input maxLength={200} value={title} disabled={attempt !== null} onChange={e => setTitle(e.target.value)} /></label>
       <label className="retrospective-field">Review note, optional<textarea maxLength={10_000} rows={3} value={review} disabled={attempt !== null} onChange={e => setReview(e.target.value)} /></label>
       <Button disabled={!title.trim() || saving || conflict} onClick={() => { void create() }}>{saving ? 'Saving retrospective…' : attempt ? 'Retry same creation' : 'Confirm retrospective Play'}</Button>
@@ -111,6 +109,5 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
     </>}
     {saveError && <p className="workspace-alert" role="alert">{saveError}</p>}
     {!saving && !createdId && (!attempt || conflict) && <Button variant="outline" onClick={refresh}>Refresh preview</Button>}
-    {attempt && !conflict && !saving && !createdId && <p className="workspace-scope-note">Title and note are held for the same request until its outcome is confirmed.</p>}
   </div>
 }

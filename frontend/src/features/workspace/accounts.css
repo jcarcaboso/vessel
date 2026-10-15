@@ -2,24 +2,51 @@
 .account-table .account-select-cell { width: 1%; padding-right: 4px; }
 .account-row-name { gap: 11px; }
 .account-row-name > span { display: flex; flex-direction: column; min-width: 0; }
-.account-row-name strong { font-size: 12px; }
+.account-row-name strong { font-size: var(--text-xs); }
 .account-row-name .account-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .account-row-meta > span + span::before { content: '·'; margin-right: 6px; color: var(--muted-foreground); }
 .account-source-id { font-variant-numeric: tabular-nums; letter-spacing: .2px; }
 .account-portfolio {
   display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;
   padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--muted);
-  color: var(--foreground); font-size: 10px; line-height: 1.5;
+  color: var(--foreground); font-size: var(--text-2xs); line-height: 1.5;
 }
 .account-portfolio.is-unassigned { background: transparent; border-style: dashed; color: var(--muted-foreground); }
 .account-table td > .workspace-badge + small { margin-top: 7px; }
 .account-table tr.is-disabled .account-row-name strong { color: var(--muted-foreground); }
 
+/* Group by: a segmented control, the same look as .overview-group-toggle (repeated so Accounts never depends on the Overview stylesheet). */
+.account-group-by { display: inline-flex; align-items: center; gap: 8px; }
+.account-group-by-label { color: var(--muted-foreground); font-size: var(--text-xs); white-space: nowrap; }
+.account-group-toggle { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: calc(var(--radius) + 2px); background: var(--surface-sunken); }
+.account-group-toggle > [data-slot="button"] { height: 28px; border-color: transparent; background: transparent; box-shadow: none; color: var(--muted-foreground); font-size: var(--text-xs); }
+.account-group-toggle > [data-slot="button"][aria-pressed="true"] { border-color: var(--line); background: var(--card); box-shadow: var(--elevation-1); color: var(--foreground); }
+
+/* Group sections: one header row per group whose cells follow the table columns, so a group's balance sits under Balance and the row scrolls with the table. */
+.account-table .account-group-row > * {
+  padding-block: 11px; border-bottom: 1px solid var(--line); box-shadow: inset 0 1px 0 var(--line); vertical-align: middle;
+  background: color-mix(in srgb, var(--brand) 8%, var(--surface-sunken));
+  color: var(--foreground); font-size: var(--text-sm); font-weight: 400; letter-spacing: normal; text-align: left; text-transform: none; white-space: nowrap;
+}
+.account-table .account-group:first-of-type .account-group-row > * { box-shadow: none; }
+.account-group-title { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.account-group-text { display: flex; flex-direction: column; min-width: 0; }
+.account-group-name { display: flex; align-items: center; gap: 9px; }
+.account-group-name > strong { font-size: var(--text-sm); font-weight: 600; letter-spacing: var(--tracking-title); font-feature-settings: var(--figures); }
+.account-table .account-group-row small { display: block; margin-top: 2px; color: var(--muted-foreground); font-size: var(--text-2xs); font-weight: 400; line-height: 1.5; letter-spacing: normal; }
+.account-group-venues { display: inline-flex; align-items: center; gap: 4px; }
+.account-group-glyph {
+  display: inline-grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; border-radius: calc(var(--radius) * .55);
+  border: 1px solid var(--brand-line); background: var(--brand-wash); color: var(--brand-ink);
+}
+.account-group-glyph.is-empty { border-style: dashed; border-color: var(--border); background: transparent; color: var(--muted-foreground); }
+.account-group-balance > strong.is-partial { color: var(--muted-foreground); font-weight: 500; }
+
 .venue-filter-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 22px 0; }
 .venue-filter-chip {
   display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 4px 6px 4px 9px;
   border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--foreground);
-  font-size: 11px; cursor: pointer;
+  font-size: var(--text-xs); cursor: pointer;
 }
 .venue-filter-chip:hover:not(:disabled) { background: var(--accent); }
 .venue-filter-chip[aria-pressed="true"] { border-color: var(--ring); background: color-mix(in srgb, var(--ring) 12%, var(--card)); }
@@ -27,29 +54,35 @@
 .venue-filter-chip:disabled { cursor: not-allowed; opacity: .6; }
 .venue-chip-count {
   display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
-  background: var(--muted); color: var(--muted-foreground); font-size: 10px; font-variant-numeric: tabular-nums;
+  background: var(--muted); color: var(--muted-foreground); font-size: var(--text-2xs); font-variant-numeric: tabular-nums;
 }
 
 .venue-picker { border: 0; margin: 0; padding: 0; min-width: 0; }
-.venue-picker > legend { font-size: 11px; font-weight: 500; margin-bottom: 9px; padding: 0; }
+.venue-picker > legend { font-size: var(--text-xs); font-weight: 500; margin-bottom: 9px; padding: 0; }
 .venue-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .venue-card {
   position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px;
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); cursor: pointer;
 }
 .venue-card > span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.venue-card strong { font-size: 12px; font-weight: 550; overflow-wrap: anywhere; }
-.venue-card small { font-size: 10px; color: var(--muted-foreground); }
+.venue-card strong { font-size: var(--text-xs); font-weight: 550; overflow-wrap: anywhere; }
+.venue-card small { font-size: var(--text-2xs); color: var(--muted-foreground); }
 .venue-card:hover { background: var(--accent); }
 .venue-card:has(input:checked) { border-color: var(--ring); background: color-mix(in srgb, var(--ring) 12%, var(--card)); box-shadow: inset 0 0 0 1px var(--ring); }
 .venue-card:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
 .venue-picker:disabled .venue-card { cursor: not-allowed; opacity: .6; }
 
 .portfolio-account-choice .venue-logo { margin-left: 2px; }
-.account-source .venue-badge { font-size: 11px; color: var(--foreground); }
-.import-heading .venue-badge { font-size: 11px; margin-right: auto; }
+.account-source .venue-badge { font-size: var(--text-xs); color: var(--foreground); }
+.import-heading .venue-badge { font-size: var(--text-xs); margin-right: auto; }
 
 @media (max-width: 550px) {
   .venue-filter-chips { padding: 12px 16px 0; }
   .venue-picker-grid { grid-template-columns: 1fr 1fr; }
 }
+/* One balance figure with its unit, then the separate perps equity and the available balance with its source. */
+.account-table .account-balance { display: flex; align-items: baseline; gap: 5px; }
+.account-table .account-balance-unit { display: inline; margin: 0; color: var(--muted-foreground); font-size: var(--text-2xs); }
+.account-table .account-available { display: flex; align-items: center; gap: 6px; }
+.account-available-source { padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-sunken); font-size: var(--text-2xs); line-height: 16px; }
+.account-th-tip { display: inline-flex; align-items: center; gap: 3px; }

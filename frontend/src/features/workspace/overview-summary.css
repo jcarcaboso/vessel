@@ -1,25 +1,44 @@
-.overview-scope { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; color: var(--muted-foreground); font-size: 12px; }
-.overview-scope select, .overview-summary-controls select { background: var(--card); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--radius); padding: 7px 9px; max-width: 100%; }
+.overview-scope { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; color: var(--muted-foreground); font-size: var(--text-sm); white-space: nowrap; }
+/* View all is level with the select (36px), not with a small button. */
+.overview-scope > [data-slot="button"] { height: 36px; }
+.overview-scope select, .overview-summary-controls select { max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--field); color: var(--foreground); font-size: var(--text-sm); }
+.overview-scope .native-select { min-width: min(100%, 280px); }
 .overview-summary { margin-bottom: 18px; }
 .overview-summary-controls { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
-.overview-summary-controls label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted-foreground); }
-.overview-group-toggle { display: flex; gap: 2px; }
-.overview-summary-scroll { max-width: 100%; overflow-x: auto; }
-.overview-summary-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
-.overview-summary-table th, .overview-summary-table td { padding: 12px 14px; border-top: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
-.overview-summary-table thead th { color: var(--muted-foreground); font-weight: 500; }
-.overview-summary-table tbody tr { cursor: pointer; }
-.overview-summary-table tbody tr:hover { background: var(--card); }
-.overview-summary-table td > span { display: block; font-variant-numeric: tabular-nums; }
-.overview-summary-table .overview-coverage { white-space: normal; min-width: 96px; max-width: 150px; }
-.overview-summary-name > span:not(.venue-logo) { white-space: normal; min-width: 96px; max-width: 180px; overflow-wrap: anywhere; }
-.overview-summary-name { display: flex; gap: 9px; align-items: center; text-align: left; color: var(--foreground); }
-.overview-summary-name > svg { width: 17px; height: 17px; color: var(--muted-foreground); flex-shrink: 0; }
-.overview-summary-name small, .overview-coverage { display: block; color: var(--muted-foreground); font-size: 10px; font-weight: 400; line-height: 1.6; }
+.overview-summary-controls label { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--muted-foreground); white-space: nowrap; }
+/* Grouping is a segmented control: one sunken track, the chosen option raised. */
+.overview-group-toggle { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: calc(var(--radius) + 2px); background: var(--surface-sunken); }
+.overview-group-toggle > [data-slot="button"] { height: 28px; border-color: transparent; background: transparent; box-shadow: none; color: var(--muted-foreground); font-size: var(--text-xs); }
+.overview-group-toggle > [data-slot="button"][aria-pressed="true"] { border-color: var(--line); background: var(--card); box-shadow: var(--elevation-1); color: var(--foreground); }
+.overview-summary-scroll { position: relative; max-width: 100%; overflow-x: auto; }
+.overview-summary-table { width: 100%; border-collapse: collapse; text-align: left; font-size: var(--text-sm); }
+.overview-summary-table th, .overview-summary-table td { padding: 13px 16px; border-top: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+.overview-summary-table thead th { border-top: 0; border-bottom: 1px solid var(--line); background: var(--surface-sunken); color: var(--muted-foreground); font-size: var(--text-2xs); font-weight: 550; letter-spacing: .06em; text-transform: uppercase; }
+.overview-summary-table thead + tbody tr:first-child > * { border-top: 0; }
+.overview-summary-table tbody tr { cursor: pointer; transition: background .14s var(--ease-out); }
+.overview-summary-table tbody tr:hover { background: color-mix(in srgb, var(--accent) 32%, transparent); }
+.overview-summary-table td > span { display: block; font-feature-settings: var(--figures); font-variant-numeric: tabular-nums; }
+.overview-summary-table td > span:first-child { font-weight: 520; }
+.overview-summary-table td > .coverage-badge { margin-top: 5px; }
+.overview-summary-name > span:not(.venue-logo) { white-space: normal; min-width: 96px; max-width: 180px; overflow-wrap: anywhere; font-weight: 560; }
+.overview-summary-name { display: flex; gap: 10px; align-items: center; text-align: left; color: var(--foreground); }
+.overview-summary-name:hover > span:not(.venue-logo) { color: var(--brand-ink); }
+.overview-summary-name > svg { width: 30px; height: 30px; padding: 7px; flex-shrink: 0; border-radius: 9px; color: var(--brand); background: var(--accent); box-shadow: inset 0 0 0 1px var(--brand-line); }
+.overview-summary-name small { display: block; margin-top: 2px; color: var(--muted-foreground); font-size: var(--text-2xs); font-weight: 400; line-height: 1.55; }
 .overview-summary-name:focus-visible, .overview-scope select:focus-visible, .overview-summary-controls select:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
-.overview-share-track { width: 90px; height: 4px; margin-top: 6px; background: var(--muted); border-radius: var(--radius); overflow: hidden; }
-.overview-share-track > span { display: block; height: 100%; background: var(--primary); }
+.overview-share-track { width: 96px; height: 4px; margin-top: 7px; overflow: hidden; border-radius: 999px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); }
+.overview-share-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--brand) 55%, transparent), var(--brand)); }
+.overview-omitted { margin: 0; padding: 10px 18px 0; color: var(--muted-foreground); font-size: var(--text-2xs); }
 .overview-positive { color: var(--positive) !important; }
 .overview-negative { color: var(--negative) !important; }
-.overview-realized-total { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 12px 18px; border-top: 1px solid var(--border); font-size: 12px; }
-@media (max-width: 600px) { .overview-scope { align-items: flex-start; flex-direction: column; gap: 6px; } .overview-summary .shell-panel-heading { align-items: flex-start; flex-direction: column; gap: 12px; } }
+.overview-realized-total { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 14px 18px; border-top: 1px solid var(--line); background: var(--surface-sunken); font-size: var(--text-sm); color: var(--muted-foreground); }
+.overview-realized-total > .coverage-badge { align-self: center; }
+.overview-realized-total > strong { font-size: var(--text-lg); font-weight: 620; letter-spacing: var(--tracking-title); font-feature-settings: var(--figures); }
+@media (max-width: 600px) {
+  /* The label sits above; the select takes the row and View all, when shown, sits beside it. */
+  .overview-scope { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; }
+  .overview-scope > label { grid-column: 1 / -1; }
+  .overview-scope .native-select { width: 100%; min-width: 0; }
+  .overview-scope .native-select:last-child { grid-column: 1 / -1; }
+  .overview-summary .shell-panel-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
+}

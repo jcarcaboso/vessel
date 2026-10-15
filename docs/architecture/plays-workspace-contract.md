@@ -182,3 +182,13 @@ The owner asked for a minimal, clean page with more room for entries.
 - Removing an image while a save/upload is pending does not resurrect it in the editor. If that upload succeeds, its server ID remains in deletion bookkeeping and the next Save deletes it. Discarding the later edits leaves the already-saved image on the server.
 
 These corrections preserve the approved layout. They do not introduce autosave, split-fill attribution, terminal Play reopening, manual executions or a retrospective-record workflow.
+
+## October 15, 2026: journal, default titles and play identity
+
+Follow-ups to the [visual refresh](../design/visual-refresh/README.md), requested by the owner. Section positions are unchanged.
+
+- **Journal**: one header row (icon and title, underline tabs, actions). An "Expand journal" button opens the same live journal in an in-page dialog, like the chart and entry expansions; Close or Escape restores focus. The left column now gives the journal more height (about 1.3 : 1 chart to journal, minimums 460 and 400 pixels; the desktop workspace is `clamp(1000px, 100dvh + 100px, 1180px)`), superseding the earlier 940-pixel, 64/36 figures. Notes keep faint ruled lines. The "Journal context" disclosure was removed.
+- **Review tab**: shown once a Play is Open, Closed or Cancelled; hidden for Draft, Planned and Paused (Paused is only reachable before any fill). A Play that already has review text or structured answers keeps the tab. Retrospective Plays are unchanged.
+- **Default title**: saving a Play whose trimmed title is empty names it `<asset> <Direction> · <D Mon YYYY>` (local save date, fixed English month names), for example `BTC Long · 15 Oct 2026`, and the title input previews it as its placeholder. A typed title is never replaced. Closed and Cancelled Plays are skipped because their title cannot change; legacy blank titles keep the "Untitled play" display fallback.
+- **Play identity**: lists of saved Plays (Plays list, Overview Plays, Review play lists) show the asset as a ticker chip, the venue as its logo (name in the tooltip and accessible name) and the account with a wallet icon, instead of one "asset · venue · account" line.
+- **Less text, again**: notices for revisions and retrospective records are pills beside Status; caveats live in info tooltips (`InfoTip`); sizing suggestions keep their reasoning and an "Estimates" tag; the risk summary states "Planned, before fees, slippage and funding" with the remaining caveats in a tooltip.

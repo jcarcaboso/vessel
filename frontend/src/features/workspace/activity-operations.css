@@ -15,33 +15,33 @@
 .workspace-table .operation-asset { font-size: 14px; font-weight: 650; letter-spacing: .02em; }
 .operation-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; }
 .operation-tags .operation-direction { margin-top: 0; }
-.operation-status { display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 10px; line-height: 1.2; background: var(--card); }
+.operation-status { display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--text-2xs); line-height: 1.2; background: var(--card); }
 .operation-status::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .operation-status.open { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 35%, var(--border)); }
 .operation-status.partial, .operation-status.incomplete { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 35%, var(--border)); }
 .operation-status.incomplete { border-style: dashed; }
 .operation-status.closed { color: var(--muted-foreground); }
-.operation-timezone { font-size: 9px; opacity: .8; }
+.operation-timezone { font-size: var(--text-2xs); }
 .operation-dates { white-space: nowrap; }
 .operation-entry, .operation-fees { color: var(--muted-foreground); }
 .operation-pnl { display: flex; align-items: center; gap: 8px; }
-.operation-return { font-size: 10px; white-space: nowrap; padding: 3px 5px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+.operation-return { font-size: var(--text-2xs); white-space: nowrap; padding: 3px 5px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
 .operation-net { font-weight: 650; }
 .workspace-table .operation-details { margin: 10px 0 14px; white-space: normal; }
 .operation-expanded { background: var(--background); padding: 16px !important; }
-.operation-coverage { margin: 0 0 12px; padding-left: 20px; font-size: 12px; }
+.operation-coverage { margin: 0 0 12px; padding-left: 20px; font-size: var(--text-xs); }
 .operation-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 0 20px 14px; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
-.operation-filters legend { color: var(--muted-foreground); font-size: 12px; padding: 0 6px; }
-.operation-filters label { display: grid; gap: 5px; color: var(--muted-foreground); font-size: 12px; flex: 1 1 150px; }
-.operation-filters select, .operation-filters input { width: 100%; min-height: 36px; padding: 7px 10px; color: var(--foreground); background: var(--field); border: 1px solid var(--border); border-radius: var(--radius); font: inherit; }
+.operation-filters legend { color: var(--muted-foreground); font-size: var(--text-xs); padding: 0 6px; }
+.operation-filters label { display: grid; gap: 5px; color: var(--muted-foreground); font-size: var(--text-xs); flex: 1 1 150px; }
+.operation-filters select, .operation-filters input { width: 100%; min-height: 36px; padding: 7px 10px; color: var(--foreground); background: var(--field); border: 1px solid var(--border); border-radius: var(--radius-control); font: inherit; }
 .operation-filters select:focus-visible, .operation-filters input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .operation-filters > button { min-height: 36px; }
-.operation-scope, .operation-originals { padding: 16px; color: var(--muted-foreground); font-size: 12px; }
+.operation-scope, .operation-originals { padding: 16px; color: var(--muted-foreground); font-size: var(--text-xs); }
 .operation-scope summary, .operation-originals summary { cursor: pointer; color: var(--foreground); }
 .retrospective-dialog { max-width: min(900px, calc(100% - 2rem)) !important; max-height: calc(100dvh - 40px); overflow-y: auto; }
-.retrospective-preview { min-width: 0; display: grid; gap: 12px; font-size: 12px; color: var(--foreground); }
+.retrospective-preview { min-width: 0; display: grid; gap: 12px; font-size: var(--text-xs); color: var(--foreground); }
 .retrospective-preview .workspace-scope-note { margin: 0; overflow-wrap: anywhere; }
-.retrospective-preview h3 { font-size: 13px; font-weight: 600; margin: 0; }
+.retrospective-preview h3 { font-size: var(--text-sm); font-weight: 600; margin: 0; }
 .retrospective-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .retrospective-times { display: flex; flex-wrap: wrap; gap: 16px; margin: 0; }
 .retrospective-times dt { color: var(--muted-foreground); }
@@ -50,10 +50,14 @@
 .retrospective-field input, .retrospective-field textarea { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--field); color: var(--foreground); font: inherit; }
 .retrospective-field input:focus-visible, .retrospective-field textarea:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .retrospective-fills { max-width: 100%; }
-.retrospective-fills .workspace-table { font-size: 11px; }
+.retrospective-fills .workspace-table { font-size: var(--text-xs); }
 .retrospective-fills .workspace-table td { min-width: 140px; max-width: 250px; white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
 .retrospective-preview > button { justify-self: start; max-width: 100%; white-space: normal; }
 @media (max-width: 420px) {
   .retrospective-dialog { padding: 16px !important; }
   .retrospective-times { gap: 12px; }
 }
+/* Ten columns at the larger type scale: tighter gutters keep the table inside the panel on desktop. */
+.workspace-table.operations-table :is(th, td) { padding-left: 12px; padding-right: 12px; }
+.workspace-table.operations-table :is(th, td):first-child { padding-left: 16px; }
+.workspace-table.operations-table th { letter-spacing: .04em; }

@@ -5,6 +5,7 @@ import { cancelReasonLabels, cancelReasons, statusLabels, type CancelReason, typ
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { describePlanChanges } from './saved'
+import { NativeSelect } from '@/components/ui/native-select'
 
 /** Asks why a planned Play's plan changed; the reason is kept with the revision. */
 export function RevisionDialog({ revision, pending, error, onSave, onClose }: {
@@ -14,8 +15,8 @@ export function RevisionDialog({ revision, pending, error, onSave, onClose }: {
   const submit = (event: FormEvent) => { event.preventDefault(); if (reason.trim()) onSave(reason.trim()) }
   return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>
     <DialogContent className="workspace-dialog">
-      <DialogHeader><DialogTitle>Why did the plan change?</DialogTitle><DialogDescription>
-        This saves revision {revision + 1}. The earlier plan stays in the history, so you can compare what you intended with what you changed.
+      <DialogHeader><DialogTitle>Why did the plan change?</DialogTitle><DialogDescription className="sr-only">
+        Saves revision {revision + 1}; the earlier plan stays in the history.
       </DialogDescription></DialogHeader>
       <form className="workspace-form" onSubmit={submit} aria-busy={pending}>
         <label htmlFor="revision-reason">Reason</label>
@@ -38,14 +39,14 @@ export function CancelDialog({ pending, error, onCancel, onClose }: {
   return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>
     <DialogContent className="workspace-dialog">
       <DialogHeader><DialogTitle>Cancel this play?</DialogTitle><DialogDescription>
-        A cancelled play keeps its plan and history for review. Remove any resting orders on the venue yourself; Vessel never sends orders.
+        Its plan and history are kept. Remove resting venue orders yourself.
       </DialogDescription></DialogHeader>
       <form className="workspace-form" onSubmit={submit} aria-busy={pending}>
         <label htmlFor="cancel-reason">Reason</label>
-        <select id="cancel-reason" value={reason} disabled={pending} onChange={event => setReason(event.target.value as CancelReason | '')}>
+        <NativeSelect id="cancel-reason" value={reason} disabled={pending} onChange={event => setReason(event.target.value as CancelReason | '')}>
           <option value="">Choose a reason</option>
           {cancelReasons.map(value => <option key={value} value={value}>{cancelReasonLabels[value]}</option>)}
-        </select>
+        </NativeSelect>
         <label htmlFor="cancel-note">Note <small>optional</small></label>
         <textarea id="cancel-note" value={note} maxLength={2000} rows={3} disabled={pending} onChange={event => setNote(event.target.value)} />
         {error && <p className="error" role="alert">{error}</p>}
@@ -62,7 +63,7 @@ export function DeleteDialog({ pending, error, onDelete, onClose }: {
   return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>
     <DialogContent className="workspace-dialog">
       <DialogHeader><DialogTitle>Delete this draft?</DialogTitle><DialogDescription>
-        The draft, its drawings and its saved images are removed. Planned plays cannot be deleted; cancel them instead so their history stays.
+        The draft, its drawings and its saved images are removed.
       </DialogDescription></DialogHeader>
       <div className="workspace-form">
         {error && <p className="error" role="alert">{error}</p>}
@@ -107,8 +108,8 @@ export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; pla
   ].sort((a, b) => b.at.localeCompare(a.at) || b.key.localeCompare(a.key)) : []
   return <Dialog open onOpenChange={next => { if (!next) onClose() }}>
     <DialogContent className="workspace-dialog play-history-dialog">
-      <DialogHeader><DialogTitle>Play history</DialogTitle><DialogDescription>
-        Saved plan revisions, status changes and review revisions. Retrospective records have no original plan.
+      <DialogHeader><DialogTitle>Play history</DialogTitle><DialogDescription className="sr-only">
+        Saved plan revisions, status changes and review revisions.
       </DialogDescription></DialogHeader>
       {result === null && <p role="status">Loading history…</p>}
       {result && 'error' in result && <p className="error" role="alert">{result.error}</p>}

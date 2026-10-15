@@ -558,7 +558,7 @@ describe('diary workspace integration', () => {
     const summary = within(screen.getByRole('group', { name: 'Planned position money summary' }))
     await waitFor(() => expect(summary.getByText(label).nextElementSibling).toHaveTextContent(share))
     if (manual) {
-      expect(screen.getByText(/Manual plans assume a linear USD quote and one base unit/)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'About manual instruments' })).toHaveAccessibleDescription(/Manual plans assume a linear USD quote and one base unit/)
       expect(api.instruments).not.toHaveBeenCalled()
     } else {
       expect(api.instruments).toHaveBeenCalled()

@@ -66,7 +66,7 @@ describe('Chart panel', () => {
   it('does not invent an instrument or entries for an empty draft', () => {
     render(<ChartPanel entries={[]} selectedId="" instrument="" onSelect={vi.fn()} />)
     expect(screen.getByText('No perpetual instrument selected')).toBeInTheDocument()
-    expect(screen.getByText('No planned entries.')).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Planned entries' })).not.toBeInTheDocument()
   })
 
   it('loads venue candles, plots planned levels and maps level selection to the entry', async () => {
@@ -594,8 +594,10 @@ describe('Chart panel level editing', () => {
     const form = screen.getByRole('form', { name: 'Edit Entry 1 stop' })
     const price = within(form).getByRole('textbox', { name: 'Price' })
     expect(price).toHaveValue('95')
-    expect(within(form).getByText(/Editing this price switches the level from % to price units/)).toBeInTheDocument()
+    // The unit switch is explained only once the price is actually edited.
+    expect(within(form).queryByText(/Editing this price switches the level from % to price units/)).not.toBeInTheDocument()
     await userEvent.clear(price)
+    expect(within(form).getByText(/Editing this price switches the level from % to price units/)).toBeInTheDocument()
     await userEvent.type(price, '92{Enter}')
     expect(shown()[0]!.stop).toMatchObject({ unit: 'price', value: '92' })
     expect(screen.queryByRole('form')).toBeNull()
