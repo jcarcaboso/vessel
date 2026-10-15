@@ -289,6 +289,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 await SettleDiscrepanciesAsync(account, lease, ct);
                 if (!refresh && account.IsEnabled && !await store.EligibleAsync(account.Id, now, ct)) row.Idle();
                 await StateEventAsync(account.Id, discardedState, row, lease.RequestId, "monitor", now, ct);
+                await RunCompletedAsync(lease, row, "superseded", now, ct);
                 return false;
             }
             if (!snapshotApplied) await workspace.SaveRefreshAsync(account, read.Sync, ct);
@@ -371,6 +372,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             await ApplyVenueBudgetAsync(account.VenueId, row, ct);
             if (!await store.EligibleAsync(account.Id, now, ct)) row.Idle();
             await StateEventAsync(account.Id, oldState, row, lease.RequestId, "monitor", now, ct);
+            await RunCompletedAsync(lease, row, "succeeded", now, ct);
             if (captured.CredentialExpiresAtUtc is { } expires && expires > now && expires <= now.AddDays(14))
                 await events.AppendAsync(new("credential.expiring", lease.RequestId,
                     $"credential:{account.Id}:{captured.CredentialRevision}:expiring", "warning", now, now,
@@ -423,6 +425,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             if (account.IsEnabled && !await store.EligibleAsync(account.Id, now, ct)) row.Idle();
             await ApplyVenueBudgetAsync(account.VenueId, row, ct);
             await StateEventAsync(lease.AccountId, old, row, lease.RequestId, "monitor", now, ct);
+            await RunCompletedAsync(lease, row, settingsChanged ? "superseded" : "failed", now, ct);
             return false;
         }, ct), ct);
 
@@ -440,6 +443,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             if (account.IsEnabled && !await store.EligibleAsync(account.Id, now, ct)) row.Idle();
             await ApplyVenueBudgetAsync(account.VenueId, row, ct);
             await StateEventAsync(lease.AccountId, old, row, lease.RequestId, "monitor", now, ct);
+            await RunCompletedAsync(lease, row, "superseded", now, ct);
             return false;
         }, ct), ct);
 
@@ -489,6 +493,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 row.Release();
                 row.Idle();
                 await StateEventAsync(account.Id, old, row, lease.RequestId, "monitor", now, ct);
+                await RunCompletedAsync(lease, row, "superseded", now, ct);
             }
             return SecondsUntil(deadline, now);
         }, ct), ct);
@@ -518,6 +523,24 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             old == "live" && row.State != "idle" ? "warning" : "info", now, now, new(AccountId: accountId), new(trigger),
             JsonSerializer.SerializeToElement(new { previous = old, state = row.State, error = row.Error })), ct);
 
+    /// <summary>
+    /// An owner Check can finish without a state change. Browsers still need a signal that it is idle again, so every
+    /// completed owner Check appends one event, keyed by its request. A deferred Check is still pending: no signal.
+    /// </summary>
+    private Task RunCompletedAsync(MonitorLease lease, MonitorAccount row, string outcome, DateTimeOffset now, CancellationToken ct) =>
+        lease.Trigger != "manual" ? Task.CompletedTask :
+        events.AppendAsync(new("monitor.run-completed", lease.RequestId, $"monitor-run:{lease.AccountId}:{lease.RequestId}",
+            "info", now, now, new(AccountId: lease.AccountId), new("owner"),
+            JsonSerializer.SerializeToElement(new { trigger = lease.Trigger, outcome, state = row.State })), ct);
+
+    // Owner Checks, owner refreshes and scheduled/confirmation runs share admission; the browser labels them apart.
+    private static string? RunTrigger(MonitorAccount row) => row.ManualState == "idle" ? null : row.Trigger switch
+    {
+        "manual" => "owner",
+        "refresh" => "refresh",
+        _ => "scheduled",
+    };
+
     private string[] EligibleVenues() => venues.Descriptors
         .Where(v => v.Capabilities is { Sync: true, Orders: true }).Select(v => v.Id).ToArray();
     private bool EligibleVenue(string venue) => venues.Descriptor(venue) is { Capabilities.Sync: true, Capabilities.Orders: true };
@@ -528,7 +551,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         var state = row.State == "live" && row.LastSuccessAtUtc < time.GetUtcNow() - options.Interval * 2 ? "stale" : row.State;
         return new(row.AccountId, state, row.LastAttemptAtUtc, row.LastSuccessAtUtc,
             row.NextRunAtUtc is null ? null : Later(row.NextRunAtUtc, venueDeadline),
-            row.ManualState, Later(row.NextManualAllowedAtUtc, venueDeadline), row.Error, online,
+            row.ManualState, RunTrigger(row), Later(row.NextManualAllowedAtUtc, venueDeadline), row.Error, online,
             evaluator is null ? [] : await evaluator.ReadAsync(row.AccountId, null, ct));
     }
 }

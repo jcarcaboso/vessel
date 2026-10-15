@@ -21,6 +21,7 @@ interface AccountMonitor {
   lastSuccessAtUtc: string | null
   nextRunAtUtc: string | null
   manualState: 'idle' | 'pending' | 'running'
+  runTrigger: 'owner' | 'refresh' | 'scheduled' | null // who started the pending/running work; null when idle
   nextManualAllowedAtUtc: string | null
   error: string | null // safe server-authored text, never venue payloads or credentials
   workerOnline: boolean
@@ -38,6 +39,8 @@ interface MonitorRunAccepted {
   monitor: AccountMonitor
 }
 ```
+
+The 202 response reports `manualState: 'pending'` and the unchanged state. The browser leaves pending/running when a stream event arrives, including `monitor.run-completed` (info, dedup key `monitor-run:{accountId}:{requestId}`, data `{ trigger, outcome: 'succeeded' | 'failed' | 'superseded', state }`), which every owner Check emits on completion even when the account state did not change; while a displayed account is not idle it also re-reads the stored account monitor every few seconds. Scheduled runs share admission and show as scheduled, not as an owner Check.
 
 Busy/cooling requests return 429 with `Retry-After`; ineligible accounts return 409. The button counts down from server timestamps, disables during pending/running and does not create runs on page load. Scheduled and manual runs share admission. A failed attempt also starts the configured cooldown.
 
@@ -81,7 +84,7 @@ The UI reloads stored state on relevant events and polls stored state every 60 s
 
 ## Execution and discrepancies
 
-`GET /api/plays/{id}/execution` adds `monitor: AccountMonitor | null`, `discrepancies: MonitorDiscrepancy[]` and `watches: MonitorWatch[]`. Keep all existing fields, including P1 execution issues. An untracked/manual/retrospective Play may have null monitor. `POST /api/plays/{id}/execution/check` no longer reads venues: it records the same manual request as `monitor/run` for the Play's account and answers like it (202 `MonitorRunAccepted`, 429 with `Retry-After`, 409 when the Play cannot be monitored).
+`GET /api/plays/{id}/execution` adds `monitor: AccountMonitor | null`, `discrepancies: MonitorDiscrepancy[]` and `watches: MonitorWatch[]`. Keep all existing fields, including P1 execution issues. An untracked/manual/retrospective Play may have null monitor. `POST /api/plays/{id}/execution/check` no longer reads venues: it records the same manual request as `monitor/run` for the Play's account and answers like it (202 `MonitorRunAccepted`, 429 with `Retry-After`, 409 when the Play cannot be monitored); the browser uses `monitor/run`.
 
 ```ts
 // A linked order (exit or entry) of a Closed or Cancelled Play, watched until the venue reports it filled, cancelled
