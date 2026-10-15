@@ -14,7 +14,8 @@ internal static class TestUnitOfWork
 
     /// <summary>
     /// The database-free double keeps <see cref="UnitOfWork"/>'s rules: saves need an active unit, nested units
-    /// participate and flush, and a caught participant failure still fails the outer unit before it saves.
+    /// participate and flush, cancelled participants never run, and a caught participant failure (including a
+    /// cancellation) still fails the outer unit before it saves.
     /// State is per async flow, so the shared <see cref="None"/> instance is safe across parallel tests.
     /// </summary>
     private sealed class MemoryUnitOfWork(Func<CancellationToken, Task>? save = null) : IUnitOfWork
@@ -28,6 +29,8 @@ internal static class TestUnitOfWork
                 outer.RequireActive();
                 try
                 {
+                    // As in UnitOfWork, a cancelled participant never runs and still fails the outer unit.
+                    cancellationToken.ThrowIfCancellationRequested();
                     var nested = await operation();
                     await SaveChangesAsync(cancellationToken);
                     return nested;
@@ -62,6 +65,7 @@ internal static class TestUnitOfWork
             unit.RequireActive();
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (save is not null) await save(cancellationToken);
             }
             catch (Exception error)
@@ -70,6 +74,8 @@ internal static class TestUnitOfWork
                 throw;
             }
         }
+
+        public bool IsActive => current.Value is { Completed: false };
 
         private sealed class Unit
         {

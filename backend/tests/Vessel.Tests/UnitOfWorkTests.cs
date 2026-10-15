@@ -701,6 +701,115 @@ public sealed class UnitOfWorkTests
         }, default));
     }
 
+    // Round 2: object storage cannot be rolled back, so image I/O never runs inside a unit or transaction.
+    [PostgresFact]
+    public async Task Image_storage_entry_points_refuse_enclosing_units_and_never_do_io_in_a_transaction()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var account = Account(owner);
+        var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
+        await using (var seed = database.Context(owner))
+        {
+            seed.Accounts.Add(account);
+            seed.Plays.Add(play);
+            await seed.SaveChangesAsync();
+        }
+        await using var db = database.Context(owner);
+        var work = TestUnitOfWork.For(db);
+        var objects = new TransactionRecordingObjectStore(db);
+        var evidence = new Vessel.Application.Evidence.EvidenceService(new EvidenceStore(db, work), objects,
+            Vessel.Application.Evidence.EvidenceLimits.Default, new CoreOwner(owner), TimeProvider.System, work);
+        var plays = new PlayService(new PlayStore(db, work), objects, TimeProvider.System, work);
+        Task<Vessel.Application.Evidence.EvidenceDto> Upload() =>
+            evidence.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", "upload", null, default);
+        var kept = await Upload();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => work.ExecuteAsync<bool>(async () =>
+        {
+            Assert.Contains("Evidence upload", (await Assert.ThrowsAsync<InvalidOperationException>(Upload)).Message);
+            Assert.Contains("Evidence deletion", (await Assert.ThrowsAsync<InvalidOperationException>(
+                () => evidence.DeleteAsync(kept.Id, default))).Message);
+            Assert.Contains("Play deletion", (await Assert.ThrowsAsync<InvalidOperationException>(
+                () => plays.DeleteAsync(play.Id, default))).Message);
+            throw new InvalidOperationException("Roll back the outer operation.");
+        }, default));
+        await using (var external = await db.Database.BeginTransactionAsync())
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(Upload);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => evidence.DeleteAsync(kept.Id, default));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => plays.DeleteAsync(play.Id, default));
+            await external.RollbackAsync();
+        }
+        db.ChangeTracker.Clear();
+        // Refused before any side effect: the earlier image and its record are untouched.
+        Assert.Equal([("put", false)], objects.Log);
+        Assert.Single(objects.Objects);
+        await using (var verify = database.Context(owner))
+            Assert.Equal(kept.Id, (await verify.Evidence.SingleAsync()).Id);
+
+        await evidence.DeleteAsync(kept.Id, default);
+        await Upload();
+        await plays.DeleteAsync(play.Id, default);
+        Assert.Equal([("put", false), ("delete", false), ("put", false), ("delete", false)], objects.Log);
+        Assert.Empty(objects.Objects);
+        await using (var verify = database.Context(owner))
+        {
+            Assert.Empty(await verify.Evidence.ToListAsync());
+            Assert.Empty(await verify.Plays.ToListAsync());
+        }
+    }
+
+    // Round 2: cancelled participants never run and still fail the outer unit, in the real unit and the double.
+    [PostgresFact]
+    public async Task Cancelled_participants_never_run_and_fail_the_unit()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using var db = database.Context(owner);
+        await CancelledParticipantsFail(TestUnitOfWork.For(db), () => db.Accounts.Add(Account(owner)));
+        await using var verify = database.Context(owner);
+        Assert.Empty(await verify.Accounts.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Memory_unit_of_work_matches_cancelled_participant_rules()
+    {
+        var saves = 0;
+        await CancelledParticipantsFail(TestUnitOfWork.Saving(_ => { saves++; return Task.CompletedTask; }), () => { });
+        Assert.Equal(0, saves);
+    }
+
+    private static async Task CancelledParticipantsFail(IUnitOfWork work, Action write)
+    {
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        var ran = false;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => work.ExecuteAsync(async () =>
+        {
+            write();
+            try
+            {
+                await work.ExecuteAsync(() =>
+                {
+                    ran = true;
+                    return Task.FromResult(true);
+                }, cancelled.Token);
+            }
+            catch (OperationCanceledException) { }
+            return true;
+        }, default));
+        Assert.False(ran);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => work.ExecuteAsync(async () =>
+        {
+            write();
+            try { await work.SaveChangesAsync(cancelled.Token); }
+            catch (OperationCanceledException) { }
+            return true;
+        }, default));
+        Assert.False(work.IsActive);
+    }
+
     private static Account Account(Guid owner)
     {
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
@@ -748,6 +857,24 @@ public sealed class UnitOfWorkTests
             Entered.TrySetResult();
             await Release.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
             return result;
+        }
+    }
+
+    private sealed class TransactionRecordingObjectStore(VesselDbContext db) : Vessel.Application.Evidence.IEvidenceObjectStore
+    {
+        private readonly MemoryObjectStore inner = new();
+        public List<(string Operation, bool InTransaction)> Log { get; } = [];
+        public Dictionary<string, byte[]> Objects => inner.Objects;
+        public Task PutAsync(string key, Stream content, CancellationToken ct)
+        {
+            Log.Add(("put", db.Database.CurrentTransaction is not null));
+            return inner.PutAsync(key, content, ct);
+        }
+        public Task<Stream?> OpenReadAsync(string key, CancellationToken ct) => inner.OpenReadAsync(key, ct);
+        public Task DeleteAsync(string key, CancellationToken ct)
+        {
+            Log.Add(("delete", db.Database.CurrentTransaction is not null));
+            return inner.DeleteAsync(key, ct);
         }
     }
 
