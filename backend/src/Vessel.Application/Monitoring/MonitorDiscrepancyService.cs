@@ -33,14 +33,16 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
             seen.Add(key);
             var row = records.GetValueOrDefault(key);
             var json = JsonSerializer.Serialize(finding.Details);
-            // Event data is capped at 32 KiB. Never silently truncate evidence used for confirmation.
+            // Event data is capped at 32 KiB. Never silently truncate evidence used for confirmation. Display lists are
+            // bounded where they can grow (fills, Plays); anything still larger is the conservative fallback: unknown.
             if (finding.Present is null || Encoding.UTF8.GetByteCount(json) > 16_000)
             {
                 // Structural unknowns are undecidable by design: they neither confirm nor resolve, but are not missing evidence.
                 if (finding.Present is not null) scan.Incomplete = true;
-                row?.InterruptConfirmation();
+                if (row is not null) Unobservable(row);
                 continue;
             }
+            if (row is not null) row.UnverifiableAtUtc = null;
             if (row is null)
             {
                 if (!finding.Present.Value) continue;
@@ -60,7 +62,7 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
             if (row.State == "open" && finding.Present.Value)
             {
                 // An open warning follows its evidence silently. Only a resolved or dismissed record opens again.
-                row.InterruptConfirmation();
+                row.SettleConfirmation();
                 if (row.Fingerprint != fingerprint || !row.InvolvedPlayIds.SequenceEqual(finding.PlayIds) ||
                     !JsonElement.DeepEquals(JsonSerializer.Deserialize<JsonElement>(row.Details), JsonSerializer.Deserialize<JsonElement>(json)))
                 {
@@ -73,7 +75,7 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
             if (row.State == "dismissed" && finding.Present.Value && row.Fingerprint == fingerprint ||
                 row.State == "resolved" && !finding.Present.Value)
             {
-                row.InterruptConfirmation();
+                row.SettleConfirmation();
                 continue;
             }
             if (!finding.Present.Value)
@@ -81,7 +83,7 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
                 // Complete fresh clearance resolves immediately. A terminal exit watch can stop after this
                 // read, so requiring another run would leave its orphan warning permanently open.
                 var publish = row.State == "open";
-                row.InterruptConfirmation();
+                row.SettleConfirmation();
                 row.InvolvedPlayIds = finding.PlayIds;
                 row.Details = json;
                 row.Fingerprint = fingerprint;
@@ -91,8 +93,10 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
                 if (publish) await Publish(row, observation.RunId, observation.Account.VenueId, observation.Trigger, "resolved", now, ct);
                 continue;
             }
+            // A recurrence of a resolved record, or a dismissed one whose evidence changed, awaits confirmation without
+            // changing its public state; the pending fingerprint keeps the account checked until it is decided.
             var pending = fingerprint;
-            if (row.PendingFingerprint != pending)
+            if (row.PendingFingerprint != pending || row.PendingSinceUtc is null)
             {
                 row.PendingFingerprint = pending;
                 row.PendingSinceUtc = finding.At;
@@ -104,7 +108,7 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
                 continue;
             }
             var firstObserved = row.PendingSinceUtc!.Value;
-            row.InterruptConfirmation();
+            row.SettleConfirmation();
             row.InvolvedPlayIds = finding.PlayIds;
             row.Details = json;
             row.Fingerprint = fingerprint;
@@ -119,16 +123,29 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
         foreach (var row in records.Values.Where(x => !seen.Contains((x.Kind, x.SubjectKey))))
         {
             // A missing subject (e.g. retired catalogue identity) is not proof that a condition cleared.
-            row.InterruptConfirmation();
-            if (row.State is "open" or "dismissed" or "candidate") scan.Incomplete = true;
+            Unobservable(row);
+            if (row.UnverifiableAtUtc is null && (row.State is "open" or "dismissed" or "candidate" || row.AwaitsConfirmation))
+                scan.Incomplete = true;
         }
         return new(next, scan.Incomplete, scan.Incomplete ? "Some discrepancy checks lack fresh, complete or consistent evidence." : null);
+
+        // Bounded lifetime: a subject unobservable for too long leaves a visible unverifiable record, not a resolution,
+        // and stops holding the account. A resolved record only drops its outstanding re-confirmation.
+        void Unobservable(PlayDiscrepancy row)
+        {
+            row.InterruptConfirmation();
+            if (row.UnverifiableAtUtc is not null || now - row.LastObservedAtUtc < options.UnobservableLifetime) return;
+            if (row.State == "resolved") row.SettleConfirmation();
+            else row.UnverifiableAtUtc = now;
+        }
     }
+
+    private static bool Visible(PlayDiscrepancy x) => x.ConfirmedAtUtc is not null && x.State != "candidate" || x.UnverifiableAtUtc is not null;
 
     public async Task<IReadOnlyList<MonitorDiscrepancyDto>> ReadAsync(Guid accountId, Guid? playId, CancellationToken ct)
     {
         await RequireSubject(accountId, playId, ct);
-        return (await store.RecordsAsync(accountId, ct)).Where(x => x.ConfirmedAtUtc is not null && x.State != "candidate" &&
+        return (await store.RecordsAsync(accountId, ct)).Where(x => Visible(x) &&
             (playId is null || x.PlayId == playId || x.InvolvedPlayIds.Contains(playId.Value)))
             .OrderByDescending(x => x.ConfirmedAtUtc).ThenBy(x => x.Id).Take(500).Select(Dto).ToArray();
     }
@@ -149,17 +166,20 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
                 throw new ProblemException(400, $"Notes must be plain text of at most {PlayDiscrepancy.MaxNoteLength} characters.");
             await store.LockAsync(accountId, ct);
             var account = await RequireSubject(accountId, playId, ct);
-            var row = (await store.RecordsAsync(accountId, ct)).SingleOrDefault(x => x.Id == discrepancyId && x.ConfirmedAtUtc is not null && x.State != "candidate" &&
+            var row = (await store.RecordsAsync(accountId, ct)).SingleOrDefault(x => x.Id == discrepancyId && Visible(x) &&
                 (playId is null || x.PlayId == playId || x.InvolvedPlayIds.Contains(playId.Value)))
                 ?? throw new ProblemException(404, "Discrepancy not found.");
             if (row.State == "dismissed") return true;
-            if (row.State != "open") throw new ProblemException(409, "Only open discrepancies can be dismissed.");
+            // An unverifiable candidate was never opened: it can be dismissed, but there is no opened event to resolve.
+            var opened = row.State == "open";
+            if (!opened && !(row.State == "candidate" && row.UnverifiableAtUtc is not null))
+                throw new ProblemException(409, "Only open or unverifiable discrepancies can be dismissed.");
             row.State = "dismissed";
             row.DismissedAtUtc = clock.GetUtcNow();
             row.Note = note;
-            row.InterruptConfirmation();
+            row.SettleConfirmation();
             row.Revision++;
-            await Publish(row, Guid.NewGuid(), account.VenueId, "owner", "dismissed", row.DismissedAtUtc.Value, ct);
+            if (opened) await Publish(row, Guid.NewGuid(), account.VenueId, "owner", "dismissed", row.DismissedAtUtc.Value, ct);
             return true;
         }, ct);
 
@@ -184,6 +204,6 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
 
     private static MonitorDiscrepancyDto Dto(PlayDiscrepancy row) => new(row.Id, row.AccountId, row.PlayId, row.ContractId,
         row.Kind, row.Severity, row.State, row.OpenedAtUtc, row.ConfirmedAtUtc, row.ResolvedAtUtc, row.DismissedAtUtc,
-        row.Note, JsonSerializer.Deserialize<JsonElement>(row.Details));
+        row.Note, JsonSerializer.Deserialize<JsonElement>(row.Details), row.UnverifiableAtUtc is null ? null : "unverifiable", row.UnverifiableAtUtc);
     private static DateTimeOffset Earlier(DateTimeOffset? a, DateTimeOffset b) => a is { } value && value < b ? value : b;
 }

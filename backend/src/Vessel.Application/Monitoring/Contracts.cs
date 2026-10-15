@@ -5,9 +5,12 @@ using Vessel.Domain.Monitoring;
 
 namespace Vessel.Application.Monitoring;
 
+/// <param name="Outcome"><c>unverifiable</c> when the subject stayed unobservable beyond the monitor lifetime; the
+/// record is neither resolved nor still checked. Null otherwise.</param>
 public sealed record MonitorDiscrepancyDto(Guid Id, Guid AccountId, Guid? PlayId, string ContractId, string Kind,
     string Severity, string State, DateTimeOffset OpenedAtUtc, DateTimeOffset? ConfirmedAtUtc,
-    DateTimeOffset? ResolvedAtUtc, DateTimeOffset? DismissedAtUtc, string? Note, JsonElement Details);
+    DateTimeOffset? ResolvedAtUtc, DateTimeOffset? DismissedAtUtc, string? Note, JsonElement Details,
+    string? Outcome = null, DateTimeOffset? UnverifiableAtUtc = null);
 public sealed record AccountMonitorDto(Guid AccountId, string State, DateTimeOffset? LastAttemptAtUtc,
     DateTimeOffset? LastSuccessAtUtc, DateTimeOffset? NextRunAtUtc, string ManualState,
     DateTimeOffset? NextManualAllowedAtUtc, string? Error, bool WorkerOnline, IReadOnlyList<MonitorDiscrepancyDto> Discrepancies);

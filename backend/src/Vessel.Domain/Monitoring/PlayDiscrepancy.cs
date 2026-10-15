@@ -26,9 +26,25 @@ public sealed class PlayDiscrepancy : IOwned
     public string? Note { get; set; }
     public long Revision { get; set; }
     public DateTimeOffset LastObservedAtUtc { get; set; }
+    /// <summary>
+    /// The condition awaiting (re-)confirmation, whatever the public state. It is durable monitoring work: it keeps the
+    /// account checked until a fresh observation confirms or clears it.
+    /// </summary>
     public string? PendingFingerprint { get; set; }
+    /// <summary>Start of the current uninterrupted confirmation sequence; null after an unknown observation.</summary>
     public DateTimeOffset? PendingSinceUtc { get; set; }
+    /// <summary>
+    /// Set when the subject stayed unobservable beyond the monitor's lifetime. The record is not resolved: it stays
+    /// visible with an unverifiable outcome and no longer holds the account's monitoring. Cleared by a fresh decision.
+    /// </summary>
+    public DateTimeOffset? UnverifiableAtUtc { get; set; }
 
-    /// <summary>Unknown observations break a confirmation sequence without resolving or reviving a warning.</summary>
-    public void InterruptConfirmation() { PendingFingerprint = null; PendingSinceUtc = null; }
+    public bool AwaitsConfirmation => PendingFingerprint is not null;
+
+    /// <summary>Unknown observations break a confirmation sequence without resolving or reviving a warning. The
+    /// outstanding confirmation itself stays recorded.</summary>
+    public void InterruptConfirmation() => PendingSinceUtc = null;
+
+    /// <summary>A fresh decision confirmed, cleared or matched the record: nothing awaits confirmation.</summary>
+    public void SettleConfirmation() { PendingFingerprint = null; PendingSinceUtc = null; }
 }

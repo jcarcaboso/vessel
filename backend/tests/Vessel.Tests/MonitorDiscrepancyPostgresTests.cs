@@ -148,7 +148,8 @@ public sealed class MonitorDiscrepancyPostgresTests
         var f = new DiscrepancyFixture(); await database.Seed(f);
         await using var scope = database.Scope(f);
         Assert.Equal("20261015073737_PlayDiscrepancies", (await scope.Db.Database.GetPendingMigrationsAsync()).First());
-        await scope.Db.GetService<IMigrator>().MigrateAsync("20261015073737_PlayDiscrepancies");
+        // Step four: the discrepancy table and its unverifiable outcome column.
+        await scope.Db.GetService<IMigrator>().MigrateAsync("20261015172843_PlayDiscrepancyUnverifiable");
         Assert.Empty(await scope.Db.Set<PlayDiscrepancy>().ToListAsync());
         Assert.Equal(f.Store.Fills[0].Quantity, (await scope.Db.Fills.SingleAsync()).Quantity);
         Assert.Equal(f.Play.Status, (await scope.Db.Plays.SingleAsync()).Status);

@@ -11,6 +11,8 @@ public sealed class MonitorOptions
     public string HeartbeatFile { get; set; } = "/tmp/vessel-worker-heartbeat";
     /// <summary>How long a terminal Play's linked order (exit or entry) is watched before it ends as <c>unverifiable</c>.</summary>
     public TimeSpan WatchLifetime { get; set; } = TimeSpan.FromDays(7);
+    /// <summary>How long a discrepancy subject may stay unobservable before its record becomes <c>unverifiable</c>.</summary>
+    public TimeSpan UnobservableLifetime { get; set; } = TimeSpan.FromDays(7);
     public static readonly TimeSpan SchedulerTick = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan Lease = TimeSpan.FromMinutes(5);
     public static readonly TimeSpan FirstRetry = TimeSpan.FromMinutes(1);
@@ -22,9 +24,13 @@ public sealed class MonitorOptions
         if (ManualCooldown < TimeSpan.Zero || ManualCooldown > Interval)
             throw new InvalidOperationException("Vessel:Monitor:ManualCooldown must be between zero and the interval.");
         if (ProtectionGrace < TimeSpan.Zero || ProtectionGrace > TimeSpan.FromHours(24) ||
-            HeartbeatTimeout < SchedulerTick || HeartbeatTimeout > TimeSpan.FromMinutes(10) ||
-            WatchLifetime < TimeSpan.FromHours(1) || WatchLifetime > TimeSpan.FromDays(90))
-            throw new InvalidOperationException("The monitor grace, heartbeat timeout or watch lifetime is outside its supported range.");
+            HeartbeatTimeout < SchedulerTick || HeartbeatTimeout > TimeSpan.FromMinutes(10))
+            throw new InvalidOperationException("The monitor grace or heartbeat timeout is outside its supported range.");
+        // Both lifetimes bound how long work without venue proof is kept before it ends as unverifiable.
+        if (WatchLifetime < TimeSpan.FromHours(1) || WatchLifetime > TimeSpan.FromDays(90))
+            throw new InvalidOperationException("Vessel:Monitor:WatchLifetime must be between 1 hour and 90 days.");
+        if (UnobservableLifetime < TimeSpan.FromHours(1) || UnobservableLifetime > TimeSpan.FromDays(90))
+            throw new InvalidOperationException("Vessel:Monitor:UnobservableLifetime must be between 1 hour and 90 days.");
     }
 
     public TimeSpan NextDelay(int failures, double jitter) => failures switch

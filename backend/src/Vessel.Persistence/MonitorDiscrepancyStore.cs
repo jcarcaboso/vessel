@@ -42,7 +42,8 @@ public sealed class MonitorDiscrepancyStore(VesselDbContext db, UnitOfWork work)
                     // Same terminal watch as MonitorStore eligibility: a linked order not yet proven absent.
                     db.OrderLinks.Any(l => l.PlayId == p.Id && l.State == OrderLinkState.Linked && !watches.Any(e =>
                         e.LinkId == l.Id && e.ResolvedAtUtc != null && e.LinkRevisionAtUtc >= l.UpdatedAtUtc && e.OrderId == l.OrderId)) ||
-                    records.Any(d => d.AccountId == accountId && d.PlayId == p.Id && d.State != "resolved")))
+                    records.Any(d => d.AccountId == accountId && d.PlayId == p.Id && d.UnverifiableAtUtc == null &&
+                        (d.State != "resolved" || d.PendingFingerprint != null))))
             .OrderBy(x => x.Id).ToListAsync(ct);
         var ids = plays.Select(x => x.Id).ToArray();
         var links = await db.OrderLinks.Where(x => x.AccountId == accountId && ids.Contains(x.PlayId))
