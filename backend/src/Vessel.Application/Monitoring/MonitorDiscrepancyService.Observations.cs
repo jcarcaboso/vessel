@@ -34,7 +34,9 @@ public sealed partial class MonitorDiscrepancyService
         PlayOrderLink[] Links, LinkedFill[] Fills, ExactAmount Quantity, DateTimeOffset? FirstEntry,
         DateTimeOffset? LastFill, bool Valid);
     /// <param name="Agrees">Whether the venue position equals the Open Plays' expected total; null without fresh, consistent evidence.</param>
-    private sealed record PositionFacts(PlayFacts[] Open, bool? Agrees);
+    /// <param name="WholeStops">Open Plays with a resting linked whole-position stop, by the stop's closing side.</param>
+    /// <param name="Opposing">Open Plays in both directions net out, so a position match cannot allocate shared coverage.</param>
+    private sealed record PositionFacts(PlayFacts[] Open, bool? Agrees, IReadOnlyDictionary<string, HashSet<Guid>> WholeStops, bool Opposing);
 
     private Scan Observe(MonitorEvaluation observation, MonitorDiscrepancyFacts facts, DateTimeOffset now)
     {
@@ -124,7 +126,10 @@ public sealed partial class MonitorDiscrepancyService
             var actual = positions.Aggregate(default(ExactAmount), (sum, p) => sum + ExactAmount.From(p.SignedQuantity));
             var expectedUnits = Rounded(expected, instrument.QuantityDecimals);
             var actualUnits = Rounded(actual, instrument.QuantityDecimals);
-            comparisons[instrument.ContractId] = new(involved, valid ? actualUnits == expectedUnits : null);
+            var wholeStops = involved.SelectMany(x => WholeStopSides(x).Select(side => (Side: side, x.Play.Id))).GroupBy(x => x.Side, StringComparer.Ordinal)
+                .ToDictionary(x => x.Key, x => x.Select(y => y.Id).ToHashSet(), StringComparer.Ordinal);
+            comparisons[instrument.ContractId] = new(involved, valid ? actualUnits == expectedUnits : null, wholeStops,
+                involved.Select(x => x.Plan.Direction).Distinct().Count() > 1);
             var kind = actualUnits == expectedUnits ? null : actualUnits.IsZero && !expectedUnits.IsZero ? "position.missing" :
                 !expectedUnits.IsZero && actualUnits.Sign != expectedUnits.Sign ? "position.opposite" :
                 BigInteger.Abs(actualUnits) < BigInteger.Abs(expectedUnits) ? "position.short" : "position.excess";
@@ -155,8 +160,10 @@ public sealed partial class MonitorDiscrepancyService
         if (sync.Snapshot.Positions.Any(p => !sync.Instruments.Any(i => Same(i, p.ContractId, p.VenueContractId)))) scan.Incomplete = true;
         return scan;
 
-        bool WholeStop(PlayFacts p) => p.Links.Any(l => l.Role == OrderLinkRole.Stop && Order(l.OrderId) is { IsPositionTpsl: true } order &&
-            Resting(order) && Same(p.Instrument, order.ContractId, order.VenueContractId));
+        // Only an actual linked stop on this account and native contract; a whole-position target never protects.
+        IEnumerable<string> WholeStopSides(PlayFacts p) => p.Links.Where(l => l.Role == OrderLinkRole.Stop).Select(l => Order(l.OrderId))
+            .Where(order => order is { IsPositionTpsl: true } && Resting(order) && Same(p.Instrument, order.ContractId, order.VenueContractId))
+            .Select(order => order!.Side).Distinct(StringComparer.Ordinal);
 
         void ObservePlay(PlayFacts p, PositionFacts? position)
         {
@@ -168,7 +175,9 @@ public sealed partial class MonitorDiscrepancyService
             var completeOrders = knownOrders && orders!.OpenOrdersComplete;
             var freshQuantity = p.Valid && !observation.HistoryGap && p.LastFill <= at;
             var resting = scoped.Where(x => Resting(x.Order)).ToArray();
-            var stops = resting.Where(x => x.Link.Role == OrderLinkRole.Stop).ToArray();
+            // A stop on the entry side closes nothing of this exposure: a sell stop covers a long, a buy stop a short.
+            var exitSide = ExecutionMatcher.ExitSide(p.Plan);
+            var stops = resting.Where(x => x.Link.Role == OrderLinkRole.Stop && x.Order!.Side == exitSide).ToArray();
             var targets = resting.Where(x => x.Link.Role == OrderLinkRole.Target).ToArray();
             var entries = resting.Where(x => x.Link.Role == OrderLinkRole.Entry).ToArray();
             var open = play.Status == PlayStatus.Open;
@@ -176,12 +185,16 @@ public sealed partial class MonitorDiscrepancyService
             var involved = position?.Open ?? [];
             var single = open && involved.Length == 1 && involved[0].Play.Id == play.Id;
             var agrees = position?.Agrees;
-            // A resting whole-position stop covers every Open Play on the instrument. Its quantity is the venue position,
-            // so it establishes this Play's coverage only when this is the instrument's only Open Play and the position
-            // matches. Otherwise coverage is undecidable by design, unless the position evidence itself is missing.
+            // A resting whole-position stop on the same closing side covers every Open Play of that direction on the
+            // instrument. Its quantity is the venue position, so it establishes this Play's coverage only when this is the
+            // instrument's only Open Play and the position matches. Another Play's stop covers this one only when the
+            // position matches and no opposing Plays net out (net equality never allocates per-Play protection).
+            // Otherwise coverage is undecidable by design, unless the position evidence itself is missing.
             var ownWholeStop = stops.Any(x => x.Order!.IsPositionTpsl);
             var ownWholeTarget = targets.Any(x => x.Order!.IsPositionTpsl);
-            var siblingWholeStop = open && involved.Any(x => x.Play.Id != play.Id && WholeStop(x));
+            var sharers = position?.WholeStops.GetValueOrDefault(exitSide);
+            var siblingWholeStop = open && sharers is not null && sharers.Count > (sharers.Contains(play.Id) ? 1 : 0);
+            var shared = siblingWholeStop && position!.Opposing is false && agrees == true;
             var established = single && agrees == true;
             var structural = agrees is not null;
             var stopCoverageKnown = ownWholeStop ? established : !siblingWholeStop;
@@ -224,7 +237,7 @@ public sealed partial class MonitorDiscrepancyService
             var superseded = cancelledPresent == true;
             Add("protection.cancelled", cancelledPresent, stopPresenceKnown && cancelKnown && structural);
             bool? missing = !open ? completeOrders ? false : null : !stopPresenceKnown ? null : superseded || stops.Length > 0 ? false :
-                siblingWholeStop ? agrees == true ? false : null : graceAt <= at;
+                siblingWholeStop ? shared ? false : null : graceAt <= at;
             Add("protection.missing", missing, stopPresenceKnown && structural);
             Add("protection.short", !open ? completeOrders ? false : null : !stopPresenceKnown ? null :
                 superseded || stops.Length == 0 ? false : stopCoverageKnown ? Compare(stopQuantity, p.Quantity, p.Instrument) < 0 : null,
@@ -251,11 +264,13 @@ public sealed partial class MonitorDiscrepancyService
             var priced = resting.Where(x => x.Link.Role != OrderLinkRole.Exit).Select(x => (x.Link, Order: x.Order!,
                 Planned: levels.TryGetValue(x.Link.LevelKey, out var level) ? level.Price : null)).ToArray();
             var levelRows = priced.Select(x => new { orderId = x.Link.OrderId, actualPrice = ExactAmount.From(x.Order.ActingPrice).ToString(),
-                plannedPrice = x.Planned is { } price ? ExactAmount.From(price).ToString() : null }).ToArray();
+                plannedPrice = x.Planned is { } price ? ExactAmount.From(price).ToString() : null,
+                remainingQuantity = ExactAmount.From(x.Order.RemainingSize).ToString() }).ToArray();
             var drift = priced.Any(x => x.Planned is { } price && !ExecutionMatcher.Near(x.Order.ActingPrice, price, p.Instrument.PriceStep));
             var undecided = priced.Any(x => x.Planned is null);
             Add("level.drift", knownOrders && drift ? true : completeOrders && !undecided ? false : null, completeOrders && undecided,
-                new { coverage = details, levels = levelRows }, new { levels = levelRows });
+                // A partial close changes the quantities involved, so a dismissed drift re-arms.
+                new { coverage = details, levels = levelRows }, new { quantity = details.quantity, levels = levelRows });
         }
     }
 
