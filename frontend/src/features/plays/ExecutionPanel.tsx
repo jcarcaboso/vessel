@@ -21,7 +21,7 @@ const pnlBasisNote = {
   mixed: 'Some fills report closed PnL before fees and some after.',
 } as const
 
-export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, onDismiss }: {
+export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, onDismiss, onManageCredential }: {
   execution: PlayExecution | null
   error: string | null
   busy: boolean
@@ -34,6 +34,7 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   monitorUnavailable?: boolean
   retryAtUtc?: string | undefined
   onDismiss?: (id: string, note?: string) => Promise<void>
+  onManageCredential?: (() => void) | undefined
   onCheck: () => void
   onLink: (request: LinkOrder) => void
   onUnlink: (linkId: string) => void
@@ -54,7 +55,7 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
     </div>
     {error && <p className="error" role="alert">{error}</p>}
     {shownMonitor && <MonitorPanel monitor={shownMonitor} busy={busy || monitorBusy} error={monitorError}
-      retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} />}
+      retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} onManageCredential={onManageCredential} />}
     {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} />}
     <dl className="execution-totals">
       <div><dt>Entered</dt><dd>{totals.enteredQuantity}</dd></div>

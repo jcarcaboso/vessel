@@ -163,7 +163,7 @@ describe('stored Play execution', () => {
     expect(view.result.current.error).toBeNull()
   })
 
-  it.each(['play', 'api', 'status', 'disconnect', 'return'] as const)('retires requests and old action callbacks on %s replacement', async replacement => {
+  it.each(['play', 'api', 'disconnect', 'return'] as const)('retires requests and old action callbacks on %s replacement', async replacement => {
     const initial = deferred(), mutation = deferred()
     const first = client(), second = client()
     vi.mocked(first.playExecution).mockReturnValueOnce(initial.promise)
@@ -175,7 +175,7 @@ describe('stored Play execution', () => {
     act(() => { void oldLink({ orderId: 'order-1', role: 'entry' }) })
     view.rerender({ api: replacement === 'api' ? second : first,
       id: replacement === 'disconnect' || replacement === 'return' ? null : replacement === 'play' ? 'other-play' : execution.playId,
-      status: replacement === 'status' ? 'closed' : 'open' })
+      status: 'open' })
     if (replacement === 'return') view.rerender({ api: first, id: execution.playId, status: 'open' })
     expect(vi.mocked(first.playExecution).mock.calls[0]![1]!.aborted).toBe(true)
     expect(vi.mocked(first.linkOrder).mock.calls[0]![2]!.aborted).toBe(true)
@@ -191,6 +191,24 @@ describe('stored Play execution', () => {
     expect(view.result.current.busy).toBe(false)
     expect(first.linkOrder).toHaveBeenCalledOnce()
     expect(second.linkOrder).not.toHaveBeenCalled()
+  })
+
+  it('rereads on a status change without aborting a link already sent, and shows its failure', async () => {
+    const mutation = deferred()
+    const api = client()
+    api.linkOrder = vi.fn().mockReturnValueOnce(mutation.promise)
+    const view = renderHook(({ status }) => usePlayExecution(api, execution.playId, status), { initialProps: { status: 'planned' } })
+    await act(async () => {})
+    let pending!: Promise<void>
+    act(() => { pending = view.result.current.link({ orderId: 'order-1', role: 'entry' }) })
+    view.rerender({ status: 'open' })
+    expect(vi.mocked(api.linkOrder).mock.calls[0]![2]!.aborted).toBe(false)
+    expect(vi.mocked(api.playExecution).mock.calls[0]![1]!.aborted).toBe(true)
+    expect(api.playExecution).toHaveBeenCalledTimes(2)
+    expect(view.result.current.busy).toBe(true)
+    await act(async () => { mutation.reject(new ApiError('http', 'The order belongs to another Play.', 409)); await pending })
+    expect(view.result.current.error).toBe('The order belongs to another Play.')
+    expect(view.result.current.busy).toBe(false)
   })
 
   it('handles StrictMode replay and aborts a pending mutation on unmount', async () => {

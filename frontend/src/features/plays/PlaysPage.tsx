@@ -38,7 +38,7 @@ const ended: PlayStatus[] = ['closed', 'cancelled']
 type DialogKind = null | 'revision' | 'cancel' | 'delete' | 'history'
 type WorkKind = 'save' | 'status' | 'open' | 'delete' | 'manual'
 
-export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [] }: {
+export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [], onManageAccount }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -47,6 +47,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   onReload?: (() => void) | undefined
   reloadGeneration?: number
   accountMonitors?: AccountMonitor[]
+  /** Opens the account's management dialog, where its read-only credential is replaced. */
+  onManageAccount?: ((accountId: string) => void) | undefined
   loading?: boolean
   requestedPlayId?: string | null
   onRequestedPlayHandled?: () => void
@@ -153,10 +155,11 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const manual = !!account && venues.can(account.venueId, 'manualExecutions')
   const retrospective = saved?.summary.origin === 'retrospective'
   // Record-based suggestions also follow accepted stored-state reloads.
-  const sizing = useSizing(api, visible ? reloadGeneration : 0)
+  const sizing = useSizing(api, reloadGeneration, visible)
   const tracking = usePlayExecution(api, visible && session.view === 'editor' && saved && !manual ? saved.summary.id : null, saved?.summary.status, reloadGeneration)
   const { reload: reloadExecution } = tracking
-  const monitorChanged = useCallback(() => { reloadExecution(); onReload?.() }, [reloadExecution, onReload])
+  // A shell reload already rereads the execution through its generation; reload it directly only without one.
+  const monitorChanged = useCallback(() => { if (onReload) onReload(); else reloadExecution() }, [reloadExecution, onReload])
   const executionMonitor = visible && account?.isEnabled !== false ? tracking.execution?.monitor ?? null : null
   const monitorRun = useMonitorRun(api, executionMonitor ? accountMonitors.find(item => item.accountId === executionMonitor.accountId) ?? executionMonitor : null, monitorChanged)
 
@@ -166,6 +169,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const storedAccept = useRef(acceptStoredPlay)
   useEffect(() => { storedAccept.current = acceptStoredPlay }, [acceptStoredPlay])
   const [storedReadError, setStoredReadError] = useState<string | null>(null)
+  // A failed reread describes the Play that was shown; switching Plays or leaving the page drops it.
+  useEffect(() => () => setStoredReadError(null), [visible, saved?.summary.id])
   useEffect(() => {
     const state = latest.current.saved
     if (!visible || !state) return
@@ -442,6 +447,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         onStored={acceptStoredPlay} onBegin={() => latest.current.saved?.summary.id === saved?.summary.id ? beginWork('manual') : null} />
         : saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}
         entries={draft.entries} direction={draft.direction} origin={saved.summary.origin} monitor={monitorRun.monitor} monitorBusy={monitorRun.busy} monitorError={monitorRun.error} retryAtUtc={monitorRun.retryAtUtc} monitorUnavailable={monitorRun.statusUnavailable}
+        {...(onManageAccount && account ? { onManageCredential: () => onManageAccount(account.id) } : {})}
         onDismiss={tracking.dismiss} onCheck={() => { void monitorRun.check() }} onLink={request => { void tracking.link(request) }}
         onUnlink={linkId => { void tracking.unlink(linkId) }} /> : undefined} />
     {dialog === 'revision' && saved && <RevisionDialog revision={saved.summary.planRevision} pending={saving} error={dialogError}

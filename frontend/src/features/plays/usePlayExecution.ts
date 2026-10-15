@@ -3,9 +3,13 @@ import type { WorkspaceApi } from '@/api/workspace'
 import type { LinkOrder, PlayExecution } from '@/api/plays'
 import { errorMessage } from '@/api/errors'
 
-/** Stored execution reads only. The shell owns event-driven and disconnected fallback refreshes. */
+/**
+ * Stored execution reads only. The shell owns event-driven and disconnected fallback refreshes.
+ * Writes belong to the API and Play, not its status: a status change (often caused by the write's own
+ * fills) re-reads the execution but never aborts a link or unlink already sent.
+ */
 export function usePlayExecution(api: WorkspaceApi, playId: string | null, status?: string, generation = 0) {
-  const context = useMemo(() => ({ api, playId, status }), [api, playId, status])
+  const context = useMemo(() => ({ api, playId }), [api, playId])
   const [result, setResult] = useState<{ context: typeof context; execution: PlayExecution } | null>(null)
   const [error, setError] = useState<{ context: typeof context; message: string; source: 'read' | 'action' } | null>(null)
   const [workState, setWorkState] = useState<{ context: typeof context; signal: AbortSignal; busy: boolean } | null>(null)
@@ -29,7 +33,7 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
       }
     }).catch(cause => { if (!controller.signal.aborted && read.current === version) setError({ context, message: errorMessage(cause, 'The change could not be completed. Try again.'), source: 'read' }) })
     return () => controller.abort()
-  }, [api, playId, context, generation, revision])
+  }, [api, playId, context, status, generation, revision])
 
   const run = useCallback(async (action: (id: string, signal: AbortSignal) => Promise<PlayExecution | void>) => {
     const work = session.current
@@ -50,6 +54,7 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
       if (!work.controller.signal.aborted) { setWorkState({ context, signal: work.controller.signal, busy: false }); reload() }
     }
   }, [context, reload])
+  // The error state above shows link/unlink failures; the rejection itself needs no other handler.
   const link = useCallback((request: LinkOrder) => run((id, signal) => api.linkOrder(id, request, signal)).catch(() => undefined), [api, run])
   const unlink = useCallback((linkId: string) => run((id, signal) => api.unlinkOrder(id, linkId, signal)).catch(() => undefined), [api, run])
   const dismiss = useCallback((id: string, note?: string) => run((play, signal) => api.dismissPlayDiscrepancy(play, id, note, signal)), [api, run])

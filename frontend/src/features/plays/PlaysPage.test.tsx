@@ -107,11 +107,11 @@ function fakeServer() {
   return { api, plays, history, evidence, execution }
 }
 
-function Page({ api, accounts = [accountFixture], initial = createPlaysSession(), onControl }: { api: WorkspaceApi; accounts?: BrokerAccount[];
-  initial?: PlaysSession; onControl?: (set: Dispatch<SetStateAction<PlaysSession>>) => void }) {
+function Page({ api, accounts = [accountFixture], initial = createPlaysSession(), onControl, onManageAccount }: { api: WorkspaceApi; accounts?: BrokerAccount[];
+  initial?: PlaysSession; onControl?: (set: Dispatch<SetStateAction<PlaysSession>>) => void; onManageAccount?: (id: string) => void }) {
   const [session, setSession] = useState(initial)
   useEffect(() => { onControl?.(setSession) }, [onControl])
-  return <NotificationProvider><PlaysPage accounts={accounts} portfolios={[portfolioFixture]} api={api} session={session} onSession={setSession} /></NotificationProvider>
+  return <NotificationProvider><PlaysPage accounts={accounts} portfolios={[portfolioFixture]} api={api} session={session} onSession={setSession} onManageAccount={onManageAccount} /></NotificationProvider>
 }
 
 const client = (server: ReturnType<typeof fakeServer>, overrides: Partial<WorkspaceApi> = {}) =>
@@ -550,6 +550,29 @@ describe('venue tracking', () => {
     await user.click(screen.getByRole('tab', { name: 'Execution' }))
     expect(screen.getByRole('button', { name: 'Check' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument()
+  })
+})
+
+describe('monitor credential', () => {
+  it('opens the Play account credential management from the Execution monitor', async () => {
+    const server = fakeServer()
+    const venue = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}` }
+    const api = client(server, { instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}),
+      marketContext: () => new Promise(() => {}),
+      playExecution: vi.fn((id: string) => Promise.resolve({ ...server.execution(server.plays.get(id)!),
+        monitor: { ...monitorFixture, state: 'credential-error' as const } })) })
+    const manage = vi.fn()
+    const user = userEvent.setup()
+    render(<Page api={api} accounts={[venue]} onManageAccount={manage} />)
+    await user.click(await screen.findByRole('button', { name: 'New play' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
+    await pickInstrument(user, 'BTC')
+    await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
+    await user.click(screen.getByRole('button', { name: 'Plan it' }))
+    await user.click(await screen.findByRole('tab', { name: 'Execution' }))
+    await user.click(await screen.findByRole('button', { name: 'Manage account credential' }))
+    expect(manage).toHaveBeenCalledWith(venue.id)
+    expect(screen.queryByRole('link', { name: 'Manage account credential' })).not.toBeInTheDocument()
   })
 })
 
