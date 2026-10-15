@@ -18,9 +18,12 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
     public async Task<MonitorEvaluationResult> EvaluateAsync(MonitorEvaluation observation, CancellationToken ct)
     {
         if (observation.Account.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
-        var facts = await store.LoadAsync(observation.Account.Id, ct);
-        var records = await store.RecordsAsync(observation.Account.Id, ct);
         var now = clock.GetUtcNow();
+        // A Play that ended after the snapshot can still be in it; older endings cannot affect a fresh snapshot.
+        var snapshotAt = observation.Read.Sync.Snapshot.ObservedAtUtc;
+        var recent = now - MonitorOptions.Lease;
+        var facts = await store.LoadAsync(observation.Account.Id, snapshotAt > recent ? snapshotAt : recent, ct);
+        var records = (await store.RecordsAsync(observation.Account.Id, ct)).ToDictionary(x => (x.Kind, x.SubjectKey));
         var scan = Observe(observation, facts, now);
         DateTimeOffset? next = scan.Next;
         var seen = new HashSet<(string, string)>();
@@ -28,12 +31,13 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
         {
             var key = (finding.Kind, finding.Subject);
             seen.Add(key);
-            var row = records.SingleOrDefault(x => x.Kind == key.Kind && x.SubjectKey == key.Subject);
+            var row = records.GetValueOrDefault(key);
             var json = JsonSerializer.Serialize(finding.Details);
             // Event data is capped at 32 KiB. Never silently truncate evidence used for confirmation.
             if (finding.Present is null || Encoding.UTF8.GetByteCount(json) > 16_000)
             {
-                scan.Incomplete = true;
+                // Structural unknowns are undecidable by design: they neither confirm nor resolve, but are not missing evidence.
+                if (finding.Present is not null) scan.Incomplete = true;
                 row?.InterruptConfirmation();
                 continue;
             }
@@ -51,8 +55,22 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
             // A repeated delivery of the same source snapshot is not independent confirmation.
             if (finding.At <= row.LastObservedAtUtc) { scan.Incomplete = true; continue; }
             row.LastObservedAtUtc = finding.At;
-            var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
-            if (row.State is "open" or "dismissed" && finding.Present.Value && row.Fingerprint == fingerprint ||
+            var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+                finding.Identity is null ? json : JsonSerializer.Serialize(finding.Identity))));
+            if (row.State == "open" && finding.Present.Value)
+            {
+                // An open warning follows its evidence silently. Only a resolved or dismissed record opens again.
+                row.InterruptConfirmation();
+                if (row.Fingerprint != fingerprint || !row.InvolvedPlayIds.SequenceEqual(finding.PlayIds) ||
+                    !JsonElement.DeepEquals(JsonSerializer.Deserialize<JsonElement>(row.Details), JsonSerializer.Deserialize<JsonElement>(json)))
+                {
+                    row.InvolvedPlayIds = finding.PlayIds;
+                    row.Details = json;
+                    row.Fingerprint = fingerprint;
+                }
+                continue;
+            }
+            if (row.State == "dismissed" && finding.Present.Value && row.Fingerprint == fingerprint ||
                 row.State == "resolved" && !finding.Present.Value)
             {
                 row.InterruptConfirmation();
@@ -98,7 +116,7 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
             row.Revision++;
             await Publish(row, observation.RunId, observation.Account.VenueId, observation.Trigger, "opened", now, ct);
         }
-        foreach (var row in records.Where(x => !seen.Contains((x.Kind, x.SubjectKey))))
+        foreach (var row in records.Values.Where(x => !seen.Contains((x.Kind, x.SubjectKey))))
         {
             // A missing subject (e.g. retired catalogue identity) is not proof that a condition cleared.
             row.InterruptConfirmation();

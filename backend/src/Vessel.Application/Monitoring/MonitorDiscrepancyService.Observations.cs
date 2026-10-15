@@ -12,20 +12,29 @@ namespace Vessel.Application.Monitoring;
 
 public sealed partial class MonitorDiscrepancyService
 {
-    private static readonly string[] PlayKinds = ["protection.missing", "protection.cancelled", "protection.short", "protection.excess", "protection.orphaned", "level.drift"];
+    private static readonly string[] PlayKinds = ["protection.missing", "protection.cancelled", "protection.short", "protection.excess",
+        "protection.orphaned", "entry.orphaned", "level.drift"];
     private static readonly string[] PositionKinds = ["position.missing", "position.opposite", "position.short", "position.excess", "fill.unlinked"];
+    /// <summary>Unlinked fills listed in details. The count, total and fingerprint always cover all of them.</summary>
+    internal const int MaxListedFills = 20;
+
+    /// <param name="Identity">What the fingerprint covers: the quantities and orders involved. Null means the details.</param>
+    /// <param name="Structural">An unknown that is undecidable by design (shared whole-position coverage, an order whose
+    /// level has no planned price), not missing or stale evidence. It neither confirms nor resolves and does not degrade the run.</param>
     private sealed record Finding(string Kind, string Subject, Guid? PlayId, string Contract, string Native, string Severity,
-        bool? Present, DateTimeOffset At, Guid[] PlayIds, object Details);
+        bool? Present, DateTimeOffset At, Guid[] PlayIds, object Details, object? Identity = null, bool Structural = false);
     private sealed class Scan
     {
         public List<Finding> Findings { get; } = [];
         public bool Incomplete { get; set; }
         public DateTimeOffset? Next { get; set; }
-        public void Add(Finding finding) { Findings.Add(finding); Incomplete |= finding.Present is null; }
+        public void Add(Finding finding) { Findings.Add(finding); Incomplete |= finding.Present is null && !finding.Structural; }
     }
     private sealed record PlayFacts(Play Play, PlayPlanDocument Plan, VenueInstrument Instrument,
         PlayOrderLink[] Links, LinkedFill[] Fills, ExactAmount Quantity, DateTimeOffset? FirstEntry,
         DateTimeOffset? LastFill, bool Valid);
+    /// <param name="Agrees">Whether the venue position equals the Open Plays' expected total; null without fresh, consistent evidence.</param>
+    private sealed record PositionFacts(PlayFacts[] Open, bool? Agrees);
 
     private Scan Observe(MonitorEvaluation observation, MonitorDiscrepancyFacts facts, DateTimeOffset now)
     {
@@ -34,6 +43,7 @@ public sealed partial class MonitorDiscrepancyService
         var sync = observation.Read.Sync;
         var orders = observation.Read.Orders;
         var snapshotAt = sync.Snapshot.ObservedAtUtc;
+        var at = orders?.ObservedAtUtc ?? snapshotAt;
         bool Fresh(DateTimeOffset at) => at <= now && at >= now - MonitorOptions.Lease &&
             (observation.PreviousSuccessAtUtc is null || at > observation.PreviousSuccessAtUtc);
         var positionsFresh = Fresh(snapshotAt) && sync.PositionsComplete;
@@ -47,14 +57,26 @@ public sealed partial class MonitorDiscrepancyService
         var assigned = (facts.AssignmentLinks ?? []).Where(x => x.OwnerId == owner.OwnerId && x.AccountId == observation.Account.Id &&
             x.State is OrderLinkState.Linked or OrderLinkState.Suggested).Select(x => x.OrderId).ToHashSet(StringComparer.Ordinal);
         var retainedFills = facts.Fills.Where(x => x.OwnerId == owner.OwnerId && x.AccountId == observation.Account.Id).ToArray();
-        var retainedOrders = facts.Orders.Where(x => x.OwnerId == owner.OwnerId && x.AccountId == observation.Account.Id).ToArray();
+        var fillsByOrder = retainedFills.ToLookup(x => x.OrderId, StringComparer.Ordinal);
+        var fillsByContract = retainedFills.ToLookup(x => x.ContractId, StringComparer.Ordinal);
+        var retainedOrders = facts.Orders.Where(x => x.OwnerId == owner.OwnerId && x.AccountId == observation.Account.Id)
+            .ToLookup(x => x.OrderId, StringComparer.Ordinal);
         var linked = allLinks.Where(x => x.State == OrderLinkState.Linked).ToArray();
+        var linksByPlay = linked.ToLookup(x => x.PlayId);
         var shared = linked.GroupBy(x => x.OrderId).Where(g => g.Count() != 1).Select(x => x.Key).ToHashSet();
+        var instrumentsByContract = sync.Instruments.ToLookup(x => x.ContractId, StringComparer.Ordinal);
+        var truncatedFills = facts.TruncatedFillContracts ?? new HashSet<string>();
+        // Bounded history falling out of the read does not erase an already retained cancellation.
+        // Only rows actually in this current read can establish a resting order.
+        VenueOrder? Order(string id) => currentOrders.GetValueOrDefault(id) ?? RetainedOrder(retainedOrders[id].SingleOrDefault());
+        bool Resting(VenueOrder? order) => order is { Status: VenueOrderStatus.Open } &&
+            currentOrders.ContainsKey(order.OrderId) && order.StatusAtUtc == at;
+
         var plays = new List<PlayFacts>();
         foreach (var play in facts.Plays.Where(x => x.OwnerId == owner.OwnerId && x.AccountId == observation.Account.Id &&
                      x.InstrumentSource == InstrumentSource.Venue && x.Origin == PlayOrigin.Planned && x.Status != PlayStatus.Draft))
         {
-            var instruments = sync.Instruments.Where(x => x.ContractId == play.ContractId).ToArray();
+            var instruments = play.ContractId is null ? [] : instrumentsByContract[play.ContractId].ToArray();
             if (instruments.Length != 1 || instruments[0].QuantityDecimals is < 0 or > 28)
             {
                 foreach (var kind in PlayKinds) scan.Add(new(kind, "play:" + play.Id, play.Id, play.ContractId ?? "", "", Severity(kind), null, snapshotAt, [play.Id], new { }));
@@ -62,42 +84,47 @@ public sealed partial class MonitorDiscrepancyService
             }
             var instrument = instruments[0];
             var plan = PlayDocuments.Read(play.Plan);
-            var links = linked.Where(x => x.PlayId == play.Id).OrderBy(x => x.OrderId, StringComparer.Ordinal).ToArray();
+            var links = linksByPlay[play.Id].OrderBy(x => x.OrderId, StringComparer.Ordinal).ToArray();
             var linkMap = links.GroupBy(x => x.OrderId).ToDictionary(x => x.Key, x => x.First());
-            var fills = retainedFills.Where(x => linkMap.ContainsKey(x.OrderId)).Select(x => new LinkedFill(linkMap[x.OrderId].Role, x)).ToArray();
-            var knownOrders = retainedOrders.Where(x => linkMap.ContainsKey(x.OrderId)).ToArray();
-            var missing = knownOrders.Where(x => ExecutionIntegrity.MissingExecutions(x, fills.Where(f => f.Fill.OrderId == x.OrderId).Select(f => f.Fill))).Select(x => x.OrderId);
+            var fills = linkMap.Values.SelectMany(l => fillsByOrder[l.OrderId].Select(f => new LinkedFill(l.Role, f))).ToArray();
+            var fillsOf = fills.ToLookup(x => x.Fill.OrderId, x => x.Fill, StringComparer.Ordinal);
+            var knownOrders = linkMap.Keys.SelectMany(id => retainedOrders[id]).ToArray();
+            var missing = knownOrders.Where(x => ExecutionIntegrity.MissingExecutions(x, fillsOf[x.OrderId])).Select(x => x.OrderId);
             var valid = !links.Any(x => shared.Contains(x.OrderId)) &&
                 fills.All(x => Same(instrument, x.Fill.ContractId, x.Fill.VenueContractId) && x.Fill.Quantity > 0 && ExecutionFacts.IsSide(x.Fill.Side)) &&
                 knownOrders.All(x => Same(instrument, x.ContractId, x.VenueContractId) &&
-                    ExecutionIntegrity.RoleConflict(linkMap[x.OrderId].Role, plan, x, fills.Where(f => f.Fill.OrderId == x.OrderId).Select(f => f.Fill)) is null) &&
+                    ExecutionIntegrity.RoleConflict(linkMap[x.OrderId].Role, plan, x, fillsOf[x.OrderId]) is null) &&
                 ExecutionIntegrity.Problems(ExecutionIntegrity.EntrySide(plan), fills, missing).Count == 0;
             var counted = fills.Where(x => !ExecutionIntegrity.Contradicts(x.Role, ExecutionIntegrity.EntrySide(plan), x.Fill)).ToArray();
             var entered = counted.Where(x => x.Role == OrderLinkRole.Entry).ToArray();
             var quantity = ExecutionIntegrity.Quantity(entered.Select(x => x.Fill)) - ExecutionIntegrity.Quantity(counted.Where(x => x.Role != OrderLinkRole.Entry).Select(x => x.Fill));
             if (play.Status == PlayStatus.Open && (entered.Length == 0 || quantity.Units.Sign <= 0)) valid = false;
-            var context = new PlayFacts(play, plan, instrument, links, fills, quantity,
+            plays.Add(new(play, plan, instrument, links, fills, quantity,
                 entered.Length == 0 ? null : entered.Min(x => x.Fill.OccurredAtUtc),
-                fills.Length == 0 ? null : fills.Max(x => x.Fill.OccurredAtUtc), valid);
-            plays.Add(context);
-            ObservePlay(context);
+                fills.Length == 0 ? null : fills.Max(x => x.Fill.OccurredAtUtc), valid));
         }
 
         // Include instruments without open Plays: a nonzero venue position is untracked exposure.
+        var playsByContract = plays.ToLookup(x => x.Instrument.ContractId, StringComparer.Ordinal);
+        var positionsByContract = sync.Snapshot.Positions.ToLookup(x => x.ContractId, StringComparer.Ordinal);
+        var comparisons = new Dictionary<string, PositionFacts>(StringComparer.Ordinal);
         foreach (var instrumentGroup in sync.Instruments.GroupBy(x => x.ContractId))
         {
             if (instrumentGroup.Count() != 1) { scan.Incomplete = true; continue; }
             var instrument = instrumentGroup.Single();
-            var involved = plays.Where(x => x.Play.Status == PlayStatus.Open && x.Instrument == instrument).OrderBy(x => x.Play.Id).ToArray();
+            var onInstrument = playsByContract[instrument.ContractId].ToArray();
+            var involved = onInstrument.Where(x => x.Play.Status == PlayStatus.Open).OrderBy(x => x.Play.Id).ToArray();
             var ids = involved.Select(x => x.Play.Id).ToArray();
-            var positions = sync.Snapshot.Positions.Where(x => x.ContractId == instrument.ContractId).ToArray();
+            var positions = positionsByContract[instrument.ContractId].ToArray();
+            // A Play that closed after the snapshot (now terminal, so not expected) can still be in the venue position.
             var valid = positionsFresh && !observation.HistoryGap && instrument.QuantityDecimals is >= 0 and <= 28 &&
-                involved.All(x => x.Valid && x.LastFill <= snapshotAt) && positions.Length <= 1 &&
-                positions.All(x => Same(instrument, x.ContractId, x.VenueContractId));
+                involved.All(x => x.Valid && x.LastFill <= snapshotAt) && onInstrument.All(x => !(x.LastFill > snapshotAt)) &&
+                positions.Length <= 1 && positions.All(x => Same(instrument, x.ContractId, x.VenueContractId));
             var expected = involved.Aggregate(default(ExactAmount), (sum, p) => sum + (p.Plan.Direction == "long" ? p.Quantity : -p.Quantity));
             var actual = positions.Aggregate(default(ExactAmount), (sum, p) => sum + ExactAmount.From(p.SignedQuantity));
             var expectedUnits = Rounded(expected, instrument.QuantityDecimals);
             var actualUnits = Rounded(actual, instrument.QuantityDecimals);
+            comparisons[instrument.ContractId] = new(involved, valid ? actualUnits == expectedUnits : null);
             var kind = actualUnits == expectedUnits ? null : actualUnits.IsZero && !expectedUnits.IsZero ? "position.missing" :
                 !expectedUnits.IsZero && actualUnits.Sign != expectedUnits.Sign ? "position.opposite" :
                 BigInteger.Abs(actualUnits) < BigInteger.Abs(expectedUnits) ? "position.short" : "position.excess";
@@ -109,32 +136,32 @@ public sealed partial class MonitorDiscrepancyService
             foreach (var type in PositionKinds.Where(x => x != "fill.unlinked"))
                 scan.Add(new(type, Subject(instrument), null, instrument.ContractId, Native(instrument), Severity(type), valid ? type == kind : null, snapshotAt, ids, details));
             var earliest = involved.Where(x => x.FirstEntry is not null).Select(x => x.FirstEntry!.Value).DefaultIfEmpty(DateTimeOffset.MaxValue).Min();
-            var unlinked = retainedFills.Where(x => Same(instrument, x.ContractId, x.VenueContractId) && x.OccurredAtUtc > earliest &&
-                !assigned.Contains(x.OrderId)).OrderBy(x => x.SourceFillId, StringComparer.Ordinal).ToArray();
+            var after = fillsByContract[instrument.ContractId].Where(x => x.OccurredAtUtc > earliest && !assigned.Contains(x.OrderId)).ToArray();
+            var unlinked = after.Where(x => Same(instrument, x.ContractId, x.VenueContractId)).OrderBy(x => x.SourceFillId, StringComparer.Ordinal).ToArray();
             // A retained positive fact remains unlinked even after leaving the bounded recent venue window.
             // Linking/suggestion is local evidence of resolution; absence from recent fills never is.
-            var ambiguousFills = retainedFills.Any(x => x.ContractId == instrument.ContractId && x.OccurredAtUtc > earliest &&
-                !assigned.Contains(x.OrderId) && !Same(instrument, x.ContractId, x.VenueContractId));
+            var ambiguousFills = after.Length != unlinked.Length;
             var fillKnown = assignmentsComplete && Fresh(snapshotAt) && !observation.HistoryGap && !ambiguousFills && involved.All(x => x.Valid) &&
-                unlinked.All(x => x.OccurredAtUtc <= snapshotAt);
+                !truncatedFills.Contains(instrument.ContractId) && unlinked.All(x => x.OccurredAtUtc <= snapshotAt);
+            // Details stay bounded for any number of fills; the fingerprint still covers every fill ID.
             scan.Add(new("fill.unlinked", Subject(instrument), null, instrument.ContractId, Native(instrument), "warning", fillKnown ? unlinked.Length > 0 : null,
-                snapshotAt, ids, new { playIds = ids, nativeContractId = Native(instrument), fills = unlinked.Select(x => new {
-                    fillId = x.SourceFillId, orderId = x.OrderId, side = x.Side, quantity = ExactAmount.From(x.Quantity).ToString() }).ToArray() }));
+                snapshotAt, ids, new { playIds = ids, nativeContractId = Native(instrument), count = unlinked.Length,
+                    totalQuantity = ExecutionIntegrity.Quantity(unlinked).ToString(), fills = unlinked.Take(MaxListedFills).Select(x => new {
+                        fillId = x.SourceFillId, orderId = x.OrderId, side = x.Side, quantity = ExactAmount.From(x.Quantity).ToString() }).ToArray() },
+                new { fillIds = unlinked.Select(x => x.SourceFillId).ToArray() }));
         }
+        foreach (var play in plays) ObservePlay(play, comparisons.GetValueOrDefault(play.Instrument.ContractId));
         // Unknown native products cannot be silently counted under a canonical alias.
         if (sync.Snapshot.Positions.Any(p => !sync.Instruments.Any(i => Same(i, p.ContractId, p.VenueContractId)))) scan.Incomplete = true;
         return scan;
 
-        void ObservePlay(PlayFacts p)
+        bool WholeStop(PlayFacts p) => p.Links.Any(l => l.Role == OrderLinkRole.Stop && Order(l.OrderId) is { IsPositionTpsl: true } order &&
+            Resting(order) && Same(p.Instrument, order.ContractId, order.VenueContractId));
+
+        void ObservePlay(PlayFacts p, PositionFacts? position)
         {
             var play = p.Play;
-            var at = orders?.ObservedAtUtc ?? snapshotAt;
-            // Bounded history falling out of the read does not erase an already retained cancellation.
-            // Only rows actually in this current read can establish a resting order.
-            var scoped = p.Links.Select(l => (Link: l, Order: currentOrders.GetValueOrDefault(l.OrderId) ??
-                RetainedOrder(retainedOrders.SingleOrDefault(x => x.OrderId == l.OrderId)))).ToArray();
-            bool Resting(VenueOrder? order) => order is { Status: VenueOrderStatus.Open } &&
-                currentOrders.ContainsKey(order.OrderId) && order.StatusAtUtc == at;
+            var scoped = p.Links.Select(l => (Link: l, Order: Order(l.OrderId))).ToArray();
             var identityKnown = scoped.All(x => x.Order is null || Same(p.Instrument, x.Order.ContractId, x.Order.VenueContractId));
             var knownOrders = ordersFresh && !duplicateOrders && identityKnown &&
                 scoped.All(x => x.Order is null || x.Order.StatusAtUtc <= at);
@@ -143,47 +170,92 @@ public sealed partial class MonitorDiscrepancyService
             var resting = scoped.Where(x => Resting(x.Order)).ToArray();
             var stops = resting.Where(x => x.Link.Role == OrderLinkRole.Stop).ToArray();
             var targets = resting.Where(x => x.Link.Role == OrderLinkRole.Target).ToArray();
-            var wholeStop = stops.Any(x => x.Order!.IsPositionTpsl);
-            var wholeTarget = targets.Any(x => x.Order!.IsPositionTpsl);
-            var stopQuantity = stops.Where(x => !x.Order!.IsPositionTpsl).Aggregate(default(ExactAmount), (sum, x) => sum + ExactAmount.From(x.Order!.RemainingSize));
-            var targetQuantity = targets.Where(x => !x.Order!.IsPositionTpsl).Aggregate(default(ExactAmount), (sum, x) => sum + ExactAmount.From(x.Order!.RemainingSize));
+            var entries = resting.Where(x => x.Link.Role == OrderLinkRole.Entry).ToArray();
             var open = play.Status == PlayStatus.Open;
             var terminal = play.Status is PlayStatus.Closed or PlayStatus.Cancelled;
+            var involved = position?.Open ?? [];
+            var single = open && involved.Length == 1 && involved[0].Play.Id == play.Id;
+            var agrees = position?.Agrees;
+            // A resting whole-position stop covers every Open Play on the instrument. Its quantity is the venue position,
+            // so it establishes this Play's coverage only when this is the instrument's only Open Play and the position
+            // matches. Otherwise coverage is undecidable by design, unless the position evidence itself is missing.
+            var ownWholeStop = stops.Any(x => x.Order!.IsPositionTpsl);
+            var ownWholeTarget = targets.Any(x => x.Order!.IsPositionTpsl);
+            var siblingWholeStop = open && involved.Any(x => x.Play.Id != play.Id && WholeStop(x));
+            var established = single && agrees == true;
+            var structural = agrees is not null;
+            var stopCoverageKnown = ownWholeStop ? established : !siblingWholeStop;
+            var stopExcessKnown = !ownWholeStop || established;
+            var targetCoverageKnown = !ownWholeTarget || established;
+            // Reduce-only orders cannot exceed the only Open Play's position (e.g. a stop left at full size after a
+            // partial target). With other Open Plays on the instrument they could close those, so they still count.
+            ExactAmount Covered(IEnumerable<(PlayOrderLink Link, VenueOrder? Order)> rows, bool whole, bool excess) =>
+                rows.Where(x => !x.Order!.IsPositionTpsl && !(excess && single && x.Order.ReduceOnly))
+                    .Aggregate(whole && established ? p.Quantity : default, (sum, x) => sum + ExactAmount.From(x.Order!.RemainingSize));
+            var stopQuantity = Covered(stops, ownWholeStop, false);
             var stopPresenceKnown = completeOrders && freshQuantity;
-            var stopQuantityKnown = stopPresenceKnown && !wholeStop;
-            var targetQuantityKnown = completeOrders && freshQuantity && !wholeTarget;
+            var stopQuantityKnown = stopPresenceKnown && stopCoverageKnown;
             var details = new { playIds = new[] { play.Id }, nativeContractId = Native(p.Instrument), quantity = p.Valid ? p.Quantity.ToString() : null,
-                stopQuantity = stopQuantity.ToString(), targetQuantity = targetQuantity.ToString(),
+                stopQuantity = Covered(stops, false, false).ToString(), targetQuantity = Covered(targets, false, false).ToString(),
+                stopCoverage = ownWholeStop || siblingWholeStop ? stopCoverageKnown ? "whole-position" : "unknown" : "orders",
                 orders = scoped.Where(x => x.Link.Role is OrderLinkRole.Stop or OrderLinkRole.Target).Select(x => new { orderId = x.Link.OrderId, role = x.Link.Role.ToString(), level = x.Link.LevelKey,
                     status = x.Order?.Status.ToString(), resting = Resting(x.Order),
                     remainingQuantity = x.Order is null ? null : ExactAmount.From(x.Order.RemainingSize).ToString(),
                     wholePosition = x.Order?.IsPositionTpsl, price = x.Order is null ? null : ExactAmount.From(x.Order.ActingPrice).ToString() }).ToArray() };
-            void Add(string kind, bool? present, object? data = null) => scan.Add(new(kind, "play:" + play.Id, play.Id, p.Instrument.ContractId,
-                Native(p.Instrument), Severity(kind), present, at, [play.Id], data ?? details));
+            // The fingerprint covers the quantities and orders involved, not prices or display fields.
+            object Identity(OrderLinkRole[] roles) => new { quantity = details.quantity, orders = scoped.Where(x => roles.Contains(x.Link.Role))
+                .Select(x => new { orderId = x.Link.OrderId, role = x.Link.Role.ToString(), status = x.Order?.Status.ToString(), resting = Resting(x.Order),
+                    remainingQuantity = x.Order is null ? null : ExactAmount.From(x.Order.RemainingSize).ToString(), wholePosition = x.Order?.IsPositionTpsl }).ToArray() };
+            var protection = Identity([OrderLinkRole.Stop, OrderLinkRole.Target]);
+            void Add(string kind, bool? present, bool undecidable = false, object? data = null, object? identity = null) => scan.Add(new(kind, "play:" + play.Id, play.Id,
+                p.Instrument.ContractId, Native(p.Instrument), Severity(kind), present, at, [play.Id], data ?? details, identity ?? protection,
+                present is null && undecidable));
             var graceAt = p.FirstEntry + options.ProtectionGrace;
             if (open && graceAt > at) scan.Next = Earlier(scan.Next, graceAt.Value);
-            Add("protection.missing", !open ? completeOrders ? false : null : stopPresenceKnown ? stops.Length == 0 && graceAt <= at : null);
-            Add("protection.short", !open ? completeOrders ? false : null : stopQuantityKnown ? stops.Length > 0 && Compare(stopQuantity, p.Quantity, p.Instrument) < 0 : null);
-            var excess = Compare(stopQuantity, p.Quantity, p.Instrument) > 0 || Compare(targetQuantity, p.Quantity, p.Instrument) > 0;
-            Add("protection.excess", !open ? completeOrders ? false : null :
-                knownOrders && freshQuantity && excess ? true : stopQuantityKnown && targetQuantityKnown ? false : null);
+
             var cancelled = scoped.Where(x => x.Link.Role == OrderLinkRole.Stop && x.Order?.Status == VenueOrderStatus.Canceled).ToArray();
-            var cancelKnown = cancelled.All(x => p.Fills.Any(f => f.Fill.OrderId == x.Link.OrderId) ||
+            var filled = p.Fills.Select(x => x.Fill.OrderId).ToHashSet(StringComparer.Ordinal);
+            var cancelKnown = cancelled.All(x => filled.Contains(x.Link.OrderId) ||
                 x.Order!.OriginalSize > 0 && x.Order.RemainingSize == x.Order.OriginalSize);
-            Add("protection.cancelled", completeOrders && (!open || stopQuantityKnown && cancelKnown) ? open && cancelled.Any(x =>
-                !p.Fills.Any(f => f.Fill.OrderId == x.Link.OrderId)) && Compare(stopQuantity, p.Quantity, p.Instrument) < 0 : null);
+            bool? cancelledPresent = !open ? completeOrders ? false : null : !stopPresenceKnown ? null :
+                cancelled.All(x => filled.Contains(x.Link.OrderId)) ? false : !cancelKnown || !stopCoverageKnown ? null :
+                Compare(stopQuantity, p.Quantity, p.Instrument) < 0;
+            // A cancelled stop explains the same gap; it supersedes missing and short protection.
+            var superseded = cancelledPresent == true;
+            Add("protection.cancelled", cancelledPresent, stopPresenceKnown && cancelKnown && structural);
+            bool? missing = !open ? completeOrders ? false : null : !stopPresenceKnown ? null : superseded || stops.Length > 0 ? false :
+                siblingWholeStop ? agrees == true ? false : null : graceAt <= at;
+            Add("protection.missing", missing, stopPresenceKnown && structural);
+            Add("protection.short", !open ? completeOrders ? false : null : !stopPresenceKnown ? null :
+                superseded || stops.Length == 0 ? false : stopCoverageKnown ? Compare(stopQuantity, p.Quantity, p.Instrument) < 0 : null,
+                stopPresenceKnown && structural);
+            var excess = Compare(Covered(stops, ownWholeStop, true), p.Quantity, p.Instrument) > 0 ||
+                Compare(Covered(targets, ownWholeTarget, true), p.Quantity, p.Instrument) > 0;
+            Add("protection.excess", !open ? completeOrders ? false : null :
+                knownOrders && freshQuantity && excess ? true : stopPresenceKnown && stopExcessKnown && targetCoverageKnown ? false : null,
+                stopPresenceKnown && structural);
             // Orphan checks do not depend on lifetime fills or Play execution settlement.
             Add("protection.orphaned", knownOrders && terminal && play.EndedAtUtc <= at && stops.Length + targets.Length > 0 ? true :
                 completeOrders && (!terminal || play.EndedAtUtc <= at) ? false : null);
+            var entryDetails = new { playIds = new[] { play.Id }, nativeContractId = Native(p.Instrument),
+                orders = scoped.Where(x => x.Link.Role == OrderLinkRole.Entry).Select(x => new { orderId = x.Link.OrderId, level = x.Link.LevelKey,
+                    status = x.Order?.Status.ToString(), resting = Resting(x.Order),
+                    remainingQuantity = x.Order is null ? null : ExactAmount.From(x.Order.RemainingSize).ToString(),
+                    price = x.Order is null ? null : ExactAmount.From(x.Order.ActingPrice).ToString() }).ToArray() };
+            Add("entry.orphaned", knownOrders && terminal && play.EndedAtUtc <= at && entries.Length > 0 ? true :
+                completeOrders && (!terminal || play.EndedAtUtc <= at) ? false : null, data: entryDetails, identity: Identity([OrderLinkRole.Entry]));
+
+            // Drift is decided per order: any priced order that drifted is enough. An order whose level has no
+            // planned price (e.g. removed by a revision) cannot be decided, by design.
             var levels = ExecutionMatcher.Levels(p.Plan).ToDictionary(x => x.Key);
-            var priced = resting.Where(x => x.Link.Role != OrderLinkRole.Exit).ToArray();
-            var pricesKnown = priced.All(x => levels.TryGetValue(x.Link.LevelKey, out var level) && level.Price is not null);
-            var driftDetails = new { coverage = details, levels = priced.Select(x => new { orderId = x.Link.OrderId,
-                actualPrice = ExactAmount.From(x.Order!.ActingPrice).ToString(),
-                plannedPrice = levels.TryGetValue(x.Link.LevelKey, out var level) && level.Price is { } price ? ExactAmount.From(price).ToString() : null }).ToArray() };
-            var drift = pricesKnown && priced.Any(x => !ExecutionMatcher.Near(x.Order!.ActingPrice,
-                levels[x.Link.LevelKey].Price!.Value, p.Instrument.PriceStep));
-            Add("level.drift", knownOrders && drift ? true : completeOrders && pricesKnown ? false : null, driftDetails);
+            var priced = resting.Where(x => x.Link.Role != OrderLinkRole.Exit).Select(x => (x.Link, Order: x.Order!,
+                Planned: levels.TryGetValue(x.Link.LevelKey, out var level) ? level.Price : null)).ToArray();
+            var levelRows = priced.Select(x => new { orderId = x.Link.OrderId, actualPrice = ExactAmount.From(x.Order.ActingPrice).ToString(),
+                plannedPrice = x.Planned is { } price ? ExactAmount.From(price).ToString() : null }).ToArray();
+            var drift = priced.Any(x => x.Planned is { } price && !ExecutionMatcher.Near(x.Order.ActingPrice, price, p.Instrument.PriceStep));
+            var undecided = priced.Any(x => x.Planned is null);
+            Add("level.drift", knownOrders && drift ? true : completeOrders && !undecided ? false : null, completeOrders && undecided,
+                new { coverage = details, levels = levelRows }, new { levels = levelRows });
         }
     }
 
@@ -194,7 +266,8 @@ public sealed partial class MonitorDiscrepancyService
         order.VenueStatus, order.StatusAtUtc, order.VenueContractId);
     private static string Subject(VenueInstrument i) => JsonSerializer.Serialize(new[] { i.ContractId, Native(i) });
     private static bool Same(VenueInstrument i, string contract, string? native) => i.ContractId == contract && Native(i) == (native ?? contract);
-    private static string Severity(string kind) => kind is "protection.missing" or "protection.cancelled" or "position.missing" or "position.opposite" ? "critical" : kind == "level.drift" ? "info" : "warning";
+    private static string Severity(string kind) => kind is "protection.missing" or "protection.cancelled" or "entry.orphaned" or
+        "position.missing" or "position.opposite" ? "critical" : kind == "level.drift" ? "info" : "warning";
     private static int Compare(ExactAmount a, ExactAmount b, VenueInstrument i) => Rounded(a, i.QuantityDecimals).CompareTo(Rounded(b, i.QuantityDecimals));
     private static BigInteger Rounded(ExactAmount value, int decimals)
     {

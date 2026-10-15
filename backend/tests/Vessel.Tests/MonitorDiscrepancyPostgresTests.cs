@@ -45,7 +45,7 @@ public sealed class MonitorDiscrepancyPostgresTests
         Assert.Empty(await second.Service.ReadAsync(f.Account.Id, null, default));
         await second.Work.ExecuteAsync(async () =>
         {
-            var facts = await second.Store.LoadAsync(f.Account.Id, default);
+            var facts = await second.Store.LoadAsync(f.Account.Id, f.Clock.Now, default);
             Assert.True(facts.AssignmentLinksComplete);
             Assert.DoesNotContain(facts.Plays, x => x.Id == retro.Id);
             Assert.DoesNotContain(facts.Links, x => x.PlayId == retro.Id);
@@ -87,7 +87,7 @@ public sealed class MonitorDiscrepancyPostgresTests
     }
 
     [PostgresFact]
-    public async Task Capped_account_wide_assignments_cannot_resolve_an_unlinked_fill_warning()
+    public async Task Unrelated_historical_assignments_neither_cap_nor_block_unlinked_fill_resolution()
     {
         await using var database = await DiscrepancyDatabase.Create();
         var f = new DiscrepancyFixture();
@@ -114,19 +114,21 @@ public sealed class MonitorDiscrepancyPostgresTests
         {
             await third.Work.ExecuteAsync(async () =>
             {
-                var facts = await third.Store.LoadAsync(f.Account.Id, default);
+                // Only the loaded fills' orders need assignment coverage, so history cannot grow into a cap.
+                var facts = await third.Store.LoadAsync(f.Account.Id, f.Clock.Now, default);
                 Assert.True(facts.Complete);
-                Assert.False(facts.AssignmentLinksComplete);
-                Assert.Equal(10001, facts.AssignmentLinks!.Count);
+                Assert.True(facts.AssignmentLinksComplete);
+                Assert.Contains(facts.AssignmentLinks!, x => x.OrderId == "extra-order");
+                Assert.DoesNotContain(facts.AssignmentLinks!, x => x.OrderId.StartsWith("historical-"));
                 return true;
             }, default);
-            Assert.True((await third.Evaluate(f.Observation())).Incomplete);
+            Assert.False((await third.Evaluate(f.Observation())).Incomplete);
         }
         f.Advance(60);
         await using var fourth = database.Scope(f);
-        Assert.True((await fourth.Evaluate(f.Observation())).Incomplete);
+        Assert.False((await fourth.Evaluate(f.Observation())).Incomplete);
         var rows = await fourth.Service.ReadAsync(f.Account.Id, null, default);
-        Assert.Contains(rows, x => x.Kind == "fill.unlinked" && x.State == "open");
+        Assert.Equal("resolved", Assert.Single(rows, x => x.Kind == "fill.unlinked").State);
         Assert.Contains(rows, x => x.Kind == "position.excess" && x.State == "open");
     }
 

@@ -35,7 +35,7 @@ public sealed class MonitorDiscrepancyTests
             case "protection.missing": f.VenueOrders.Clear(); break;
             case "protection.cancelled": f.Stop(o => o with { Status = VenueOrderStatus.Canceled }); break;
             case "protection.short": f.Stop(o => o with { RemainingSize = .5m }); break;
-            case "protection.excess": f.Stop(o => o with { RemainingSize = 2m }); break;
+            case "protection.excess": f.Stop(o => o with { RemainingSize = 2m, ReduceOnly = false }); break;
             case "protection.orphaned": f.Play.MarkClosed("fixture", f.Clock.Now.AddMinutes(-1)); break;
             case "level.drift": f.Stop(o => o with { TriggerPrice = 80m }); break;
             case "position.missing": f.Position = 0; break;
@@ -241,9 +241,10 @@ public sealed class MonitorDiscrepancyTests
     {
         var f = new DiscrepancyFixture { Position = 2 }; f.AddPlay("long", 1);
         f.Stop(o => o with { IsPositionTpsl = true, OriginalSize = 0, RemainingSize = 0 });
-        Assert.True((await f.Evaluate()).Incomplete);
-        f.Advance(60); await f.Evaluate();
-        Assert.DoesNotContain(f.Store.Rows, x => x.PlayId == f.Play.Id && x.Kind is "protection.missing" or "protection.short" or "protection.excess" && x.State == "open");
+        // Shared coverage is undecidable by design: unknown, but not missing evidence.
+        Assert.False((await f.Evaluate()).Incomplete);
+        f.Advance(60); Assert.False((await f.Evaluate()).Incomplete);
+        Assert.DoesNotContain(f.Store.Rows, x => x.PlayId == f.Play.Id && x.Kind is "protection.missing" or "protection.short" or "protection.excess");
     }
 
     [Theory]
@@ -259,7 +260,8 @@ public sealed class MonitorDiscrepancyTests
         f.AddOrder("target", OrderLinkRole.Target, 0, 120);
         var index = f.VenueOrders.FindIndex(x => x.OrderId == "target");
         f.VenueOrders[index] = f.VenueOrders[index] with { IsPositionTpsl = true };
-        Assert.True((await f.Evaluate()).Incomplete); // Target quantity coverage is still unknown.
+        // The only Open Play matches the venue position, so the whole-position target's coverage is established.
+        Assert.False((await f.Evaluate()).Incomplete);
         f.Advance(60); await f.Evaluate();
         Assert.Contains(await f.Service.ReadAsync(f.Account.Id, f.Play.Id, default), x => x.Kind == kind && x.State == "open");
         Assert.DoesNotContain(f.Store.Rows, x => x.Kind == "protection.excess" && x.State == "open");
@@ -283,7 +285,7 @@ public sealed class MonitorDiscrepancyTests
         await f.Confirm();
         Assert.DoesNotContain(f.Store.Rows, x => x.Kind is "protection.excess" or "level.drift" && x.State == "open");
         var index = f.VenueOrders.FindIndex(x => x.OrderId == "target");
-        f.VenueOrders[index] = f.VenueOrders[index] with { RemainingSize = 2, TriggerPrice = 123 };
+        f.VenueOrders[index] = f.VenueOrders[index] with { RemainingSize = 2, TriggerPrice = 123, ReduceOnly = false };
         f.Advance(60); await f.Confirm();
         Assert.Contains(f.Store.Rows, x => x.Kind == "protection.excess" && x.State == "open");
         Assert.Contains(f.Store.Rows, x => x.Kind == "level.drift" && x.State == "open");
@@ -371,7 +373,7 @@ public sealed class MonitorDiscrepancyTests
     {
         var f = new DiscrepancyFixture { OrdersComplete = false };
         if (kind == "protection.orphaned") f.Play.MarkClosed("fixture", f.Clock.Now.AddMinutes(-1));
-        if (kind == "protection.excess") f.Stop(o => o with { RemainingSize = 2 });
+        if (kind == "protection.excess") f.Stop(o => o with { RemainingSize = 2, ReduceOnly = false });
         if (kind == "level.drift") f.Stop(o => o with { TriggerPrice = 80 });
         Assert.True((await f.Evaluate()).Incomplete);
         f.Advance(60); await f.Evaluate();
@@ -522,8 +524,13 @@ internal sealed class DiscrepancyMemoryStore : IMonitorDiscrepancyStore
     public bool Complete = true, AssignmentLinksComplete = true;
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => Task.FromResult(id == Account.Id ? Account : null);
     public Task<Play?> PlayAsync(Guid id, CancellationToken ct) => Task.FromResult(Plays.SingleOrDefault(x => x.Id == id));
-    public Task<MonitorDiscrepancyFacts> LoadAsync(Guid id, CancellationToken ct) => Task.FromResult(new MonitorDiscrepancyFacts(
-        Plays, Links, Orders, Fills, Complete, Links, AssignmentLinksComplete));
+    public HashSet<string> TruncatedFillContracts = [];
+    public DateTimeOffset? RecentSince;
+    public Task<MonitorDiscrepancyFacts> LoadAsync(Guid id, DateTimeOffset recentSince, CancellationToken ct)
+    {
+        RecentSince = recentSince;
+        return Task.FromResult(new MonitorDiscrepancyFacts(Plays, Links, Orders, Fills, Complete, Links, AssignmentLinksComplete, TruncatedFillContracts));
+    }
     public Task<IReadOnlyList<PlayDiscrepancy>> RecordsAsync(Guid id, CancellationToken ct) => Task.FromResult<IReadOnlyList<PlayDiscrepancy>>(Rows.Where(x => x.AccountId == id).ToArray());
     public void Add(PlayDiscrepancy row) => Rows.Add(row);
     public Task LockAsync(Guid accountId, CancellationToken ct) => Task.CompletedTask;
