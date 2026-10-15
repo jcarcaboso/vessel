@@ -186,3 +186,15 @@ Realized result reuses Activity's complete internal operation summaries before i
 Shares retain an exact numerator/denominator ratio, because division can recur. A missing balance or nonpositive denominator yields null. Percentages round to two places only for display using integer arithmetic; the theme-token bar clamps its visual width to 0–100%, without changing the ratio or balance. Unknown and partial financial values keep coverage visible. While a narrower request loads, its amounts stay unknown rather than briefly displaying All totals. Failures clear summary amounts and offer Retry summary. The common reload generation rereads Summary.
 
 Recent activity applies the scoped account set before its latest-five display limit and uses account-scoped HTTP reads for individual accounts. Portfolio/Unassigned filtering does not expand Activity's bounded response or retained import history. Saved Plays uses the same enabled-account set for rows and tab counts. No new persistence, EF migration, packages, credential handling or venue network reads are involved.
+
+## October 15, 2026: Overview allocation
+
+The owner asked for pie charts showing what share of a portfolio each account represents, and then made the Allocation panel permanent between the metric tiles and Summary. It uses the account and portfolio data the common `/api/overview` read already returns; there is no new endpoint, persistence or migration.
+
+- **All:** one donut of each portfolio's share of the enabled-account total, with Unassigned as its own slice, beside one small donut per portfolio of its accounts' shares. Portfolios without enabled accounts have no card.
+- **Portfolio or Unassigned:** one donut of that group's accounts, with venue, exact balance and share.
+- **Account:** its group's donut with that account emphasized; an account folded into Other emphasizes Other.
+
+Slices use each enabled account's `balanceUsd`. Disabled accounts are excluded. Accounts without a reported balance, and zero or negative balances, are not drawn and are listed below the chart instead of becoming zero slices. Shares divide by the sum of drawn positive balances. Sums use exact integer decimal arithmetic and percentages round only for display through the existing `balanceShare` helper; floating point only places the arcs. A group with more than six positive slices keeps its five largest and folds the rest into a neutral Other. Colours follow each entity's stable list order, not its size, and each donut colours its own entities.
+
+Slices and legend names select the corresponding Overview scope; the legend is the keyboard and text path for every value. Colours come from theme tokens `--series-1`…`--series-6` and `--series-other`, chosen per scheme in `appearance.ts` and checked for adjacent colour-vision separation on the card surface. Light slots below 3:1 on white always carry visible labels.

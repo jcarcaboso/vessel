@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Overview Allocation panel: donuts of each portfolio's share of the total and
+  each account's share of its portfolio, following the Overview scope.
+
 ## 0.1.0 - October 13, 2026
 
 First manual release of the self-hosted, single-owner Vessel application.
