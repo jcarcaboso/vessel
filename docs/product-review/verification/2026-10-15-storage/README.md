@@ -192,3 +192,52 @@ injected; pre-open symlink checks remain non-atomic. Use trusted private
 directories, keep writers stopped throughout export/import/cutover, and retain
 coordinated database backups alongside the export. Referenced image bytes alone
 are not a complete application or entire-bucket backup.
+
+## Additional independent pre-merge verification
+
+The owner requested another round with several Sol agents before merging.
+Three independent verifiers reviewed production commit `4776f2d` with disjoint
+runtime, fault-injection and operations/security scopes.
+
+- Runtime verifier reran the disposable RustFS/PostgreSQL check: **38 passed,
+  zero skipped**, including actual PNG/JPEG/WebP Local → S3 → Local → second
+  bucket → authenticated API retrieval. The full sanitized local regression
+  passed **1,698**, with **129 expected environment-dependent skips**. Both
+  real S3 integration cases ran in the preceding isolated suite. The verifier
+  confirmed no remaining containers, volumes, networks or temporary Compose
+  directory from its run.
+- A standalone .NET 10 harness against the actual built production assemblies
+  passed **29 fault-injection scenario groups**, separate from the ordinary
+  test counts. Portable-PDB checksums tied the relevant assemblies to the
+  reviewed source. It directly observed mode-0600 staging files and cleanup
+  after mid-stream cancellation/I/O failures; verified dry runs leave no
+  staging or destination artifacts; exercised local temporary-file cleanup,
+  create-only races, source-integrity failures and destination/readback
+  failures; and checked CLI argument/error-message safety.
+- Permission-denied destination reads, including a simulated AWS
+  `AccessDenied`/403 through the real adapter, issued zero PUT/DELETE calls.
+  Originals remained unchanged. No handling was weakened to reinterpret
+  authorization errors as missing keys.
+- GitHub CI on the same production commit passed **1,822 backend/PostgreSQL
+  tests**, with **5 opt-in skips**, plus operator-script, prototype, frontend
+  type/lint/test and production-build steps. The isolated real S3 suite above
+  supplies the storage integration omitted from ordinary CI.
+- Operations verifier passed **26 Python tests**, **12** synthetic Compose
+  configuration combinations, **2** mocked storage-verifier success/failure
+  cleanup paths and **8** mocked release-verifier environment combinations.
+  Its remaining minor documentation finding was corrected: the smaller
+  storage verifier does start disposable PostgreSQL for CLI tests, despite
+  not building an application image.
+
+This review identified one documentation correction: on AWS, destination-copy
+credentials additionally need bucket-scoped `s3:ListBucket`, even though the
+helper never issues LIST requests, so an absent key is reported as 404 rather
+than 403. The storage, backend and deployment guides now distinguish this
+offline-role requirement from the runtime API's object-only permissions.
+The requirement was checked against AWS's official GetObject permissions
+reference; no AWS account or owner credentials were used.
+
+Production code was unchanged by this pre-merge follow-up. Windows, real AWS
+operation, disk-full/flush/unlink failures and hard process/host termination
+were not exercised. The harness and all integration inputs were synthetic;
+the owner's database, evidence and configuration were not accessed.

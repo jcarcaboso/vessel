@@ -118,6 +118,11 @@ origin, without path/query/credentials), `VESSEL_S3_BUCKET`, `VESSEL_S3_REGION`,
 `VESSEL_S3_FORCE_PATH_STYLE=false` if the provider requires virtual-host addressing.
 Grant the API only `s3:GetObject`, `s3:PutObject` and `s3:DeleteObject` on that
 bucket's objects. Keep list/create/backup privileges with the operator.
+For offline **destination-copy** credentials on AWS S3, additionally grant
+`s3:ListBucket` on that destination bucket (not its object ARN). The helper
+does not list objects, but needs AWS to return 404 for an absent key rather
+than an indistinguishable 403 access failure. Use this separate operator role
+for copy commands; do not broaden the running API role.
 
 ```sh
 docker compose -f compose.yaml -f compose.storage-external.yaml up -d
@@ -604,7 +609,7 @@ database, pushes images or calls a registry login. Public image pulls are needed
 python3 scripts/verify-release.py
 # Retained local-folder deployment and restore:
 python3 scripts/verify-release.py --storage local
-# Smaller real-S3 protocol/authorization check (no database or app image build):
+# Isolated RustFS/PostgreSQL protocol and CLI check (no app image build):
 python3 scripts/verify-evidence-storage.py
 # Optional production browser CSP check, using an already available Playwright:
 python3 scripts/verify-release.py --browser-module /absolute/path/to/playwright

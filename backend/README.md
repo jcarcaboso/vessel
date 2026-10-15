@@ -111,6 +111,12 @@ switch the API only after successful verification. See the
 and Docker commands. These helpers copy referenced originals only, not the
 database or an entire bucket backup.
 
+For destination-copy credentials on AWS S3, grant GetObject/PutObject on the
+objects **and `s3:ListBucket` on the destination bucket**. The helper never
+lists objects, but AWS otherwise hides missing keys behind 403, which must
+remain a hard failure. Keep the extra permission on the offline copy role;
+normal API credentials do not need it.
+
 ## Explicit migrations
 
 The API does not create or migrate tables at startup. Set `ConnectionStrings__Vessel`, then run from `backend/`:

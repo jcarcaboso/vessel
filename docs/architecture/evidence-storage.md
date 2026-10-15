@@ -162,8 +162,15 @@ Both commands use the same read-only repeatable-read database transaction,
 exit codes and fail-closed rerun rules described above. Neither rewrites
 database records, changes saved configuration, deletes originals, creates
 buckets or starts the API. Export requires GetObject; upload requires
-GetObject/PutObject on the destination. Use a SELECT-capable database principal;
-listing, deletion and schema-changing permissions are not required.
+GetObject/PutObject on the destination. The helpers issue no bucket-listing
+requests, but **AWS S3 destination-copy credentials also need `s3:ListBucket`
+on the destination bucket**: without it, GET for an absent key returns 403
+rather than 404, and the helper correctly stops instead of treating an access
+failure as permission to write. Other providers may impose the same rule.
+Keep this bucket-scoped permission on separate one-shot copy credentials, not
+the runtime API role. Exporting existing keys needs only GetObject.
+Use a SELECT-capable database principal; deletion and schema-changing
+permissions are not required.
 Filesystem checks are pre-open checks, not atomic confinement. Both source and
 destination directories must be trusted/quiescent; prefer a read-only local
 source snapshot. Hash verification is point-in-time. No automatic sync,
@@ -209,3 +216,4 @@ Primary sources checked October 15, 2026:
 - [RustFS Compose configuration/health endpoints](https://github.com/rustfs/rustfs/blob/1.0.1/docker-compose.yml)
 - [AWS .NET S3 PutObjectRequest](https://docs.aws.amazon.com/sdkfornet/v4/apidocs/items/S3/TPutObjectRequest.html)
 - [S3 conditional writes](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html)
+- [S3 GetObject permissions and missing-key responses](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html)
