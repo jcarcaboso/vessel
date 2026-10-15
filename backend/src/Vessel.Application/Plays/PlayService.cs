@@ -164,6 +164,8 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
 
     public async Task DeleteAsync(Guid id, CancellationToken ct)
     {
+        // Evidence images are deleted once the Play removal commits, so this must be the outermost unit.
+        unitOfWork.RequireOutermost("Play deletion");
         var keys = await unitOfWork.ExecuteAsync(async () =>
         {
             var play = await Find(id, ct);

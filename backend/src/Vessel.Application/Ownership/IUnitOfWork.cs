@@ -18,4 +18,18 @@ public interface IUnitOfWork
 
     /// <summary>Persists intermediate changes inside the active boundary, without committing.</summary>
     Task SaveChangesAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// True while a unit of work or database transaction is running in this scope. Operations with side effects
+    /// outside the database (object storage) refuse to start then: a later rollback could not undo them.
+    /// </summary>
+    bool IsActive { get; }
+
+    /// <summary>Refuses, before any side effect, to run <paramref name="operation"/> inside an active unit.</summary>
+    void RequireOutermost(string operation)
+    {
+        if (IsActive)
+            throw new InvalidOperationException(
+                $"{operation} writes object storage outside the database and cannot run inside a unit of work or transaction.");
+    }
 }

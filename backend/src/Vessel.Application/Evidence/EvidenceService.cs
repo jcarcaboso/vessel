@@ -7,7 +7,8 @@ namespace Vessel.Application.Evidence;
 
 /// <summary>
 /// Evidence images of saved Plays. Bytes are written before metadata, so a failure leaves at most an
-/// unreferenced object, never a record without an image. Object storage I/O stays outside database transactions.
+/// unreferenced object, never a record without an image. Object storage I/O stays outside database transactions:
+/// upload and delete refuse to run inside an enclosing unit, whose rollback could not restore a deleted image.
 /// Drafts keep their images in the browser.
 /// </summary>
 public sealed class EvidenceService(IEvidenceMetadataStore store, IEvidenceObjectStore objects, EvidenceLimits limits,
@@ -21,6 +22,7 @@ public sealed class EvidenceService(IEvidenceMetadataStore store, IEvidenceObjec
 
     public async Task<EvidenceDto> UploadAsync(Guid playId, Stream content, string? note, string? source, string? markup, CancellationToken ct)
     {
+        unitOfWork.RequireOutermost("Evidence upload");
         var play = await store.PlayAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
         var kind = source switch
         {
@@ -85,6 +87,8 @@ public sealed class EvidenceService(IEvidenceMetadataStore store, IEvidenceObjec
 
     public async Task DeleteAsync(Guid id, CancellationToken ct)
     {
+        // The image is deleted once the record removal commits, so this must be the outermost unit.
+        unitOfWork.RequireOutermost("Evidence deletion");
         var evidence = await unitOfWork.ExecuteAsync(async () =>
         {
             var found = await store.FindAsync(id, ct) ?? throw new ProblemException(404, "Evidence not found.");

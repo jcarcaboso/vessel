@@ -151,6 +151,9 @@ public sealed class UnitOfWork(VesselDbContext db, ILogger<UnitOfWork>? logger =
 
     public Task SaveChangesAsync(CancellationToken cancellationToken) => SaveChangesAsync(PlayConflict, cancellationToken);
 
+    // Any running unit on this scope counts, as does a transaction the unit does not own.
+    public bool IsActive => Volatile.Read(ref active) is not null || db.Database.CurrentTransaction is not null;
+
     /// <summary>Flushes inside the active unit; <paramref name="conflict"/> words a Play version conflict for this area.</summary>
     internal Task SaveChangesAsync(string conflict, CancellationToken cancellationToken) => ParticipateAsync(async () =>
     {
