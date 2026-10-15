@@ -76,3 +76,58 @@ The browser steps above were exercised manually through T3's native automation;
 the JSON and screenshot record that run, not a standalone browser-test script.
 Deployment still requires a newly built/published API image with the S3 adapter;
 old published images are not upgraded by editing Compose.
+
+## Compatibility clarification and local-to-S3 copy follow-up
+
+Later on October 15, the owner clarified that **no storage configuration must
+retain the original Local default**. S3 is an explicit opt-in; the RustFS Compose
+example deliberately selects it. Invalid explicit S3 configuration and outages
+still fail rather than silently writing to Local.
+
+Added the offline `evidence-copy-to-s3 --source /absolute/root [--apply]` API
+command. It defaults to a dry run, reads evidence metadata in a read-only
+repeatable-read transaction and verifies source/downloaded size and SHA-256.
+It never deletes local originals, rewrites metadata/notes/markup, runs schema
+migrations or saves a provider change.
+
+The automated `S3EvidenceCopyTests` test ran the **actual API executable as a
+subprocess**, using a disposable PostgreSQL schema, private RustFS bucket and
+the same valid PNG/JPEG/WebP bytes/hashes recorded above:
+
+1. Seeded synthetic evidence metadata/notes/markup and an original local folder.
+2. Dry-run succeeded and left the bucket empty.
+3. Applied the copy; every downloaded S3 object and authenticated API image
+   response matched the original bytes. Anonymous reads still returned 401.
+4. Repeated the command: all three objects verified and skipped.
+5. Introduced a same-size destination hash mismatch: command failed without
+   overwriting it. Removed one local source: command failed without changing
+   database records or the other local/destination originals.
+6. Verified all metadata/notes/markup and retained original bytes were unchanged.
+   Removed the disposable containers, volumes, schema and test files afterward.
+
+Both the ordinary and hostile-caller-environment runs passed **31 real S3
+tests**, including the CLI scenario. Hostile inputs included synthetic database
+connection aliases, S3 endpoint/profile paths, host content root and Compose
+profiles; neither run contacted those destinations. The CLI subprocess uses an
+explicit environment allowlist and has a finite timeout.
+
+Independent Sol backend review found no actionable security/integrity/default
+issues and independently passed **27 focused tests** before the final additional
+trailing-separator case. Independent Sol operations review found no actionable
+deployment/docs/isolation issues, passed **26 Python tests**, and checked the
+base/Local/external Compose configurations and source-volume mapping.
+
+Final full backend regression: **1,674 passed, 129 opt-in/environment-dependent
+tests skipped**. One intermediate run returned a disposed-host error in the
+invalid venue-host startup assertion instead of its expected validation text;
+the focused reproduction (23 tests) and final full run passed. The API keeps its
+original synchronous host entrypoint; only the explicit CLI branch waits for the
+asynchronous copy operation.
+The backend Sol reviewer also inspected the final path-normalization and
+synchronous-entrypoint deltas and found no new issues; no causal claim is made
+about the intermediate startup assertion.
+
+Operational limits remain explicit: stop all writers through cutover and use
+a trusted, quiescent source/read-only snapshot. Filesystem checks are not atomic
+confinement. Conditional-upload races fail closed; rerun to verify/skip the
+winner. Keep the originals and coordinated backups after verification.

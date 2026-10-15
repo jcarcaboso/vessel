@@ -53,11 +53,12 @@ pnpm install --frozen-lockfile
 
 Configure private values in the ignored root `.env` as described in [development setup](docs/development.md).
 
-Saved images default to private S3-compatible storage (RustFS recommended).
-Configure a pre-created bucket and server-only credentials, or explicitly set
-`Vessel__Evidence__Storage__Provider=Local` for local-folder development.
-The [deployment examples](deploy/README.md) provision private RustFS by default;
-[existing-image cutover](docs/architecture/evidence-storage.md) is explicit.
+Saved images default to the original local folder when nothing is configured.
+Opt into private S3-compatible storage with `Vessel__Evidence__Storage__Provider=S3`
+and a pre-created bucket plus server-only credentials (RustFS recommended).
+The [deployment examples](deploy/README.md) explicitly select and provision RustFS;
+an [offline copy-and-verify command](docs/architecture/evidence-storage.md#existing-local-folder-installation-explicit-cutover)
+helps migrate existing images without deleting local originals or changing configuration.
 
 Then start development:
 

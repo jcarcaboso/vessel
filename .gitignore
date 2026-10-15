@@ -15,5 +15,5 @@ frontend/dist/
 __pycache__/
 *.pyc
 
-# Optional local evidence storage
+# Default local evidence storage
 backend/src/Vessel.Api/data/

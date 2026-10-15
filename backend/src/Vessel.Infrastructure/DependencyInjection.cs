@@ -123,7 +123,8 @@ public static class DependencyInjection
 
     private static VenueHostOptions Hosts(IServiceProvider sp) => sp.GetRequiredService<IOptions<VenueHostOptions>>().Value;
 
-    private static void AddEvidenceStorage(IServiceCollection services, IConfiguration config)
+    /// <summary>Shared by the API and explicit offline evidence-copy command.</summary>
+    public static void AddEvidenceStorage(IServiceCollection services, IConfiguration config)
     {
         services.AddOptions<EvidenceSettings>().Bind(config.GetSection(EvidenceSettings.Section))
             .ValidateOnStart();

@@ -23,6 +23,8 @@ Install Docker Engine with Docker Compose 2.24.4 or newer on a Linux amd64 host,
 `uuidgen` and Python 3. Provide persistent disk space for PostgreSQL and evidence
 images in private RustFS S3-compatible storage, plus a DNS name for remote TLS use.
 RustFS 1.0.1 is the default; local folders and external S3 remain configurable.
+This Compose example deliberately sets `Provider=S3`. The API itself remains
+backward-compatible: no storage settings means `Local`, not an automatic S3 choice.
 The optional TLS overlay supplies Caddy.
 The optional credential-key helper needs a source checkout.
 
@@ -134,8 +136,8 @@ docker compose -f compose.yaml -f compose.storage-local.yaml up -d
 
 This selects `Local`, omits RustFS/initialization and retains the original
 `evidence:/var/lib/vessel/evidence` volume. S3 credentials are not needed. Keep the
-same Compose project name to reuse existing data. Outside Docker, select
-`Vessel__Evidence__Storage__Provider=Local` and optionally
+same Compose project name to reuse existing data. Outside Docker, no provider
+setting is needed for Local; optionally set
 `Vessel__Evidence__Storage__Local__RootPath`.
 
 Include your selected storage overlay on **every** Compose command, together
@@ -148,6 +150,49 @@ before switching; see [the cutover checklist](../docs/architecture/evidence-stor
 No database migration is needed. These changes require a newly built/published
 API image containing the S3 adapter; API images without this adapter support
 only local storage. Do not apply the new Compose default to an old image.
+
+### Copy existing local images to S3
+
+This is an explicit offline file copy, **not a schema migration or automatic
+startup task**. Keep the same Compose project name, take coordinated backups and
+select a newly built API image containing the copy command. Stop all web/API
+writers; PostgreSQL must remain available. Add your usual TLS/key overlays to the
+commands as appropriate.
+
+For the bundled RustFS destination, provision it without starting API/web:
+
+```sh
+docker compose -f compose.yaml -f compose.storage-local.yaml stop web api
+docker compose -f compose.yaml up -d --wait rustfs
+docker compose -f compose.yaml run --rm --no-deps storage-init
+```
+
+For external S3, provision the private bucket separately and configure its
+`VESSEL_S3_*` settings instead of starting RustFS. Then run against the **original
+local volume**, which the local overlay mounts at the unchanged path:
+
+```sh
+# Dry run: checks every database-referenced original; does not upload.
+docker compose -f compose.yaml -f compose.storage-local.yaml run --rm --no-deps \
+  api evidence-copy-to-s3 --source /var/lib/vessel/evidence
+
+# Only after a successful dry run and reviewing the reported count/byte total:
+docker compose -f compose.yaml -f compose.storage-local.yaml run --rm --no-deps \
+  api evidence-copy-to-s3 --source /var/lib/vessel/evidence --apply
+```
+
+`--no-deps` prevents this operation from running the schema migrator or starting
+other services. The command temporarily targets S3 while the local overlay keeps
+the normal API on Local. It verifies each source against database size/SHA-256,
+uses create-only uploads, downloads/verifies the result and skips matching
+objects on reruns. It never deletes originals, changes notes/markup/database
+records or saves a provider switch. Different destination contents stop the run.
+After any failure, resolve it and rerun; do not cut over on partial success.
+
+Rerun the dry run to verify all objects already match. Then explicitly remove the
+local overlay (use the external overlay for external S3) and restart API/web.
+Keep the original volume and backups until authenticated image reads, notes/markup
+and a new upload are verified. See the [complete cutover and rollback checklist](../docs/architecture/evidence-storage.md#existing-local-folder-installation-explicit-cutover).
 
 ## Optional Lighter credential storage
 

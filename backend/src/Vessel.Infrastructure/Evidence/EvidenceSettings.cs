@@ -14,7 +14,7 @@ public sealed class EvidenceSettings
 
 public sealed class EvidenceStorageSettings
 {
-    public string Provider { get; set; } = EvidenceSettings.S3Provider;
+    public string Provider { get; set; } = EvidenceSettings.LocalProvider;
     public LocalEvidenceStorageSettings Local { get; set; } = new();
     public S3EvidenceStorageSettings S3 { get; set; } = new();
 }

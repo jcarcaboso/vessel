@@ -359,10 +359,10 @@ public sealed class EvidenceApiTests : IDisposable
     }
 
     [Fact]
-    public void Default_settings_use_s3_and_retain_the_local_option()
+    public void Default_settings_use_the_legacy_local_folder()
     {
         var defaults = new EvidenceSettings();
-        Assert.Equal(("S3", "data/evidence", 10L * 1024 * 1024, 50),
+        Assert.Equal(("Local", "data/evidence", 10L * 1024 * 1024, 50),
             (defaults.Storage.Provider, defaults.Storage.Local.RootPath, defaults.MaxUploadBytes, defaults.MaxPerPlay));
     }
 }

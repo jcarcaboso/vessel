@@ -1,7 +1,8 @@
 # Evidence object storage
 
-October 15, 2026 — owner requested S3-compatible storage by default, recommending
-RustFS for self-hosting while retaining the local-folder option.
+October 15, 2026 — owner requested S3-compatible storage and recommends RustFS
+for self-hosting. The subsequent compatibility clarification keeps `Local` when
+nothing is configured; deployments deliberately opt into S3.
 
 ## Scope and guarantees
 
@@ -11,7 +12,9 @@ and ownership remain in PostgreSQL. Draft images remain in browser memory.
 Credential key-ring files are **not** evidence: keep them on their separate
 server-only secret mount, never in the object bucket or database.
 
-- `S3` is the configuration default; `Local` is an explicit opt-in. Unknown
+- `Local` is the backward-compatible configuration default at the original
+  `data/evidence` root. `Provider=S3` explicitly opts into S3; credentials alone
+  do not select it. Unknown
   providers or incomplete active-provider settings fail startup without printing
   values. There is no silent fallback, dual-write, bucket creation at API startup
   or automatic movement of existing images.
@@ -32,7 +35,7 @@ server-only secret mount, never in the object bucket or database.
   are unchanged. Failed cleanup can leave an orphan; automatic orphan cleanup
   is still not implemented.
 
-See `backend/README.md` for configuration keys. `deploy/compose.yaml` defaults to
+See `backend/README.md` for configuration keys. `deploy/compose.yaml` explicitly selects
 private RustFS **1.0.1**, with its console disabled and no published storage ports.
 A separate one-shot AWS CLI service creates the private bucket before API
 startup. RustFS and PostgreSQL have separate persistent volumes. External S3
@@ -50,33 +53,53 @@ endpoints; do not disable certificate validation.
 
 ## Existing local-folder installation: explicit cutover
 
-**Updating the default alone does not move any files.** Initially keep
-`compose.storage-local.yaml` on every Compose command (or set provider `Local`
-outside Compose). It mounts the original `evidence` volume under the original
-path. Preserve the Compose project name so it is the same volume.
+**Nothing moves automatically.** An unconfigured API continues using the old
+local root. For the S3-oriented Compose example, initially keep
+`compose.storage-local.yaml` on every Compose command: it mounts the original
+`evidence` volume under the original path. Preserve the Compose project name so
+it is the same volume.
 
 1. Stop web/API writers. Back up the database, the complete local evidence root,
    operator settings and the separate credential ring. Keep the originals.
-2. Provision an **empty private** S3 bucket. Copy the contents of the evidence
-   root to the bucket root, preserving the complete relative paths exactly.
-   Do not add an `evidence/` prefix or substitute original client filenames.
-   With an S3 client configured via a private credential file/environment:
+2. Provision a **private** S3 bucket, preferably empty. Configure the destination
+   `Vessel__Evidence__Storage__S3__*` and `ConnectionStrings__Vessel` in the
+   one-shot command's server environment. The active API may remain `Local`;
+   the command targets S3 without persisting that choice. It does not load the
+   repository `.env` automatically. Use a newly built API containing this command.
+3. Dry-run the offline copy using the **absolute original evidence root**, not
+   RustFS's internal `/data` directory:
 
    ```sh
-   aws --endpoint-url https://YOUR_S3_ORIGIN s3 cp /private/evidence-root/ \
-     s3://YOUR_EMPTY_BUCKET/ --recursive --no-follow-symlinks
+   dotnet Vessel.Api.dll evidence-copy-to-s3 --source /private/evidence-root
    ```
 
-   Do not run this against a nonempty bucket; a generic S3 copy can overwrite.
-   Use S3 listing/GetObject permissions only for the migration/verification tool,
-   not as a reason to widen the runtime principal.
-3. Verify every database-referenced object exists with the recorded size and
-   SHA-256 (download/read back and hash; an S3 ETag is **not** a SHA-256 checksum).
-   Check file count and full byte totals too. Do not discard originals on a
-   successful copy exit code alone.
-4. Configure S3 and start API/web. Check authenticated image reads, notes/markup
+   The database is read in a **read-only repeatable-read transaction**, across
+   all owners as an offline administrator operation. Every referenced file must
+   exist and match its recorded size/SHA-256. Existing destination objects must
+   match too. No files are uploaded during a dry run. Inspect the reported image
+   count/byte total against the backed-up installation before proceeding.
+4. Apply, then rerun the dry run:
+
+   ```sh
+   dotnet Vessel.Api.dll evidence-copy-to-s3 --source /private/evidence-root --apply
+   dotnet Vessel.Api.dll evidence-copy-to-s3 --source /private/evidence-root
+   ```
+
+   This preserves complete relative `owner/play/image.ext` keys and downloads
+   each newly copied object to verify its size and SHA-256, not its ETag.
+   A repeat run verifies/skips identical objects; a different existing object
+   stops the run and is **never overwritten**. Missing files, source corruption,
+   symlinks/reparse points (including ancestors), invalid keys and S3 failures
+   stop it. Unreferenced/orphan files are deliberately not copied.
+
+   Exit 0 means the complete read succeeded, 2 is invalid configuration/usage,
+   1 is an operation/integrity failure, and 130 is cancellation. A failed or
+   interrupted run may leave copies, but never deletes originals or rolls back
+   by deleting destination objects. Resolve the failure and rerun; **do not
+   switch providers after a failure**.
+5. Explicitly configure the API's `Provider=S3` and start API/web. Check authenticated image reads, notes/markup
    and a new upload/delete. No schema migration or key rewrite is needed.
-5. Keep the old root and the coordinated backup until cutover is verified. After
+6. Keep the old root and the coordinated backup until cutover is verified. After
    new uploads, switching back to `Local` requires copying those new objects
    back, or restoring the matching pre-cutover database/storage pair; changing
    only the provider would hide those files.
@@ -87,10 +110,21 @@ RustFS's `/data` layout as ordinary image files; use the S3 API to migrate bytes
 An offline full-volume RustFS backup is for restoring the same storage engine,
 not copying into `Local` or another vendor.
 
+The command never rewrites database records, changes the saved provider,
+deletes local files, creates buckets or starts the API. Use GetObject/PutObject
+permissions for its dedicated destination credentials and a SELECT-capable
+database principal; listing, deletion and schema-changing permissions are not
+required. Prefer a read-only source mount/snapshot where available. The S3
+provider must support atomic conditional PUTs.
+Run against a trusted, quiescent source (preferably a read-only snapshot).
+Symlink checks are pre-open checks, not atomic filesystem confinement. Keep
+all writers stopped until cutover completes; hash verification is point-in-time.
+
 ## Verification and primary references
 
-- Unit tests cover configuration, safe validation, conditional writes, key
-  rejection, stream ownership and missing-object/error distinctions.
+- Unit tests cover legacy Local defaults, explicit S3 selection, safe validation,
+  conditional writes, key rejection, stream ownership and missing-object/error
+  distinctions, plus offline dry-run/copy/resume, integrity failures and symlinks.
 - `python3 scripts/verify-evidence-storage.py` creates an isolated RustFS
   container, random credentials and test buckets. It checks the actual SDK
   protocol, concurrent no-overwrite writes, cancellation, private reads, missing
@@ -101,7 +135,7 @@ not copying into `Local` or another vendor.
   a fresh-volume offline restore; `--storage local` exercises the retained folder
   deployment/restore instead.
 
-Verified October 15: 1,646 backend tests passed (128 opt-in/environment-dependent
+Initial S3 implementation verification on October 15: 1,646 backend tests passed (128 opt-in/environment-dependent
 tests skipped), all 22 S3 checks passed against disposable RustFS, and 24 Python
 tests passed. Both S3 and local release runs passed 104 checks each, including
 HTTP/TLS and fresh-volume database/image/markup/key-ring restores. The S3 check

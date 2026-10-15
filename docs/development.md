@@ -9,12 +9,14 @@ The application lives in `frontend/` and `backend/`. Overview, portfolio/account
 - .NET SDK **10.0.302**, pinned in `global.json` with patch roll-forward.
 - Docker with Compose for the local PostgreSQL service.
 
-Evidence storage now defaults to S3 (RustFS recommended). The root `.env.example`
-has server-only endpoint/bucket/credential settings; provision a private bucket
-before uploading. For a local-folder development setup, set
-`Vessel__Evidence__Storage__Provider=Local` in the ignored root `.env`.
+Evidence storage keeps the backward-compatible Local default at `data/evidence`
+relative to the API content root; no storage configuration or credentials are
+needed for local development. To opt into S3 (RustFS recommended), uncomment
+`Vessel__Evidence__Storage__Provider=S3` and the server-only endpoint/bucket/credential
+settings in the ignored root `.env`, and provision a private bucket first.
 `scripts/dev.py` passes these settings to the API, never Vite. Existing images
-are **not** moved automatically; see [storage/cutover](architecture/evidence-storage.md)
+are **not** moved automatically; see the offline copy-and-verify command in
+[storage/cutover](architecture/evidence-storage.md)
 and [RustFS deployment](../deploy/README.md).
 
 Always use pnpm for JavaScript/TypeScript work. There is one workspace and one root `pnpm-lock.yaml`, not npm or yarn lockfiles. The npm registry may still be the upstream package source; that does not mean npm is the package manager.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real RustFS + S3 tests in a disposable Compose project. Never reads the owner's .env/storage."""
+"""RustFS/PostgreSQL S3 tests in a disposable Compose project. Never reads the owner's .env/storage."""
 import json
 import os
 from pathlib import Path
@@ -18,15 +18,18 @@ def main():
         path = Path(directory)
         project = "vessel-storage-check-" + secrets.token_hex(5)
         access, secret = secrets.token_hex(16), secrets.token_hex(32)
+        postgres_password = secrets.token_hex(32)
         for file in ("compose.yaml", "compose.storage-local.yaml", "compose.storage-external.yaml"):
             shutil.copyfile(ROOT / "deploy" / file, path / file)
         (path / ".env").write_text(
-            f"POSTGRES_PASSWORD={secrets.token_hex(32)}\nVessel__Auth__Token={secrets.token_hex(32)}\n"
+            f"POSTGRES_PASSWORD={postgres_password}\nVessel__Auth__Token={secrets.token_hex(32)}\n"
             f"Vessel__Auth__OwnerId={uuid.uuid4()}\nVESSEL_S3_ACCESS_KEY_ID={access}\nVESSEL_S3_SECRET_ACCESS_KEY={secret}\n")
         (path / ".env").chmod(0o600)
         (path / "test.yaml").write_text("""services:
   rustfs:
     ports: ["127.0.0.1::9000"]
+  postgres:
+    ports: ["127.0.0.1::5432"]
 networks:
   default:
     ipam: !reset {}
@@ -43,13 +46,20 @@ networks:
                 result = subprocess.run([*base, "-f", str(path / overlay), "config", "--services"], check=True,
                                         capture_output=True, text=True, env={**compose_env, "VESSEL_S3_ACCESS_KEY_ID": "", "VESSEL_S3_SECRET_ACCESS_KEY": ""})
                 assert "rustfs" not in result.stdout and "storage-init" not in result.stdout
-            subprocess.run([*compose, "up", "-d", "--wait", "rustfs"], check=True, env=compose_env)
+            subprocess.run([*compose, "up", "-d", "--wait", "rustfs", "postgres"], check=True, env=compose_env)
             subprocess.run([*compose, "run", "--rm", "storage-init"], check=True, env=compose_env)
             # Repeating initialization must not erase existing storage.
             subprocess.run([*compose, "run", "--rm", "storage-init"], check=True, env=compose_env)
             address = subprocess.check_output([*compose, "port", "rustfs", "9000"], text=True, env=compose_env).strip()
+            postgres_address = subprocess.check_output(
+                [*compose, "port", "postgres", "5432"], text=True, env=compose_env).strip()
+            postgres_host, postgres_port = postgres_address.rsplit(":", 1)
+            assert postgres_host == "127.0.0.1" and postgres_port.isdecimal()
             env = {**compose_env, "VESSEL_TEST_S3_ENDPOINT": "http://" + address,
-                   "VESSEL_TEST_S3_ACCESS_KEY": access, "VESSEL_TEST_S3_SECRET_KEY": secret}
+                   "VESSEL_TEST_S3_ACCESS_KEY": access, "VESSEL_TEST_S3_SECRET_KEY": secret,
+                   "Vessel_TEST_POSTGRES": (
+                       f"Host={postgres_host};Port={postgres_port};Database=vessel;"
+                       f"Username=vessel;Password={postgres_password}")}
             subprocess.run([os.environ.get("DOTNET", "dotnet"), "test", str(ROOT / "backend/Vessel.slnx"),
                             "--filter", "FullyQualifiedName~S3", "--verbosity", "minimal"], env=env, check=True)
         finally:

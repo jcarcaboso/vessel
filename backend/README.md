@@ -68,7 +68,7 @@ Saved Plays can hold images (`GET/POST /api/plays/{playId}/evidence`, `GET /api/
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `Vessel__Evidence__Storage__Provider` | `S3` | `S3` (RustFS or another compatible service) or `Local`. Unknown providers fail startup. |
+| `Vessel__Evidence__Storage__Provider` | `Local` | Backward-compatible local folder unless explicitly set to `S3` (RustFS or another compatible service). Unknown providers fail startup. |
 | `Vessel__Evidence__Storage__S3__Endpoint` | `http://localhost:9000` | Server-side S3 origin; use HTTPS outside the private Docker network/loopback. No credentials, paths or queries in the URL. |
 | `Vessel__Evidence__Storage__S3__Bucket` | `vessel-evidence` | Private, pre-created bucket. |
 | `Vessel__Evidence__Storage__S3__Region` | `us-east-1` | S3 signing region. |
@@ -79,8 +79,27 @@ Saved Plays can hold images (`GET/POST /api/plays/{playId}/evidence`, `GET /api/
 | `Vessel__Evidence__MaxPerPlay` | `50` | Images per Play. |
 
 Back up the object store (or local directory) with the database; a database backup alone does not preserve images.
+S3 credentials alone do not select S3. An explicitly selected S3 provider with incomplete configuration
+fails startup; outages never redirect reads or writes to the local folder.
 See [evidence storage](../docs/architecture/evidence-storage.md) for guarantees and copying existing objects,
 and [deployment](../deploy/README.md) for private RustFS, external S3 and local-folder configurations.
+
+The API binary also supplies an explicit offline copy command (not a schema migration):
+
+```sh
+dotnet Vessel.Api.dll evidence-copy-to-s3 --source /absolute/local/evidence/root
+dotnet Vessel.Api.dll evidence-copy-to-s3 --source /absolute/local/evidence/root --apply
+```
+
+Run from a compatible published API installation, with `ConnectionStrings__Vessel`
+and the destination `Vessel__Evidence__Storage__S3__*` configured in its server
+environment. The command does not load the repository `.env` automatically. Stop
+writers and take coordinated backups first. The first command is a read-only dry
+run; the second copies database-referenced originals and downloads/verifies their
+size and SHA-256. Matching destination objects are skipped; differing objects
+are never overwritten. Local originals, metadata, notes/markup and active-provider
+settings are never changed. Switch the API to S3 only after successful verification;
+see the linked cutover checklist and Docker commands.
 
 ## Explicit migrations
 

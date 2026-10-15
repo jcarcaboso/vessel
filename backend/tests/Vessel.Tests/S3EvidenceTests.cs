@@ -15,6 +15,86 @@ namespace Vessel.Tests;
 
 public sealed class S3EvidenceTests
 {
+    [Theory]
+    [InlineData(null, false, false)]
+    [InlineData("legacy/evidence", false, false)]
+    [InlineData(null, true, false)]
+    [InlineData(null, false, true)]
+    public async Task Default_configuration_keeps_local_storage(string? localRoot, bool s3Credentials, bool apiDefaults)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "vessel-default-evidence-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { ContentRootPath = root });
+        builder.Configuration.Sources.Clear();
+        if (apiDefaults)
+            builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.json"));
+        var settings = new Dictionary<string, string?>();
+        if (localRoot is not null)
+            settings["Vessel:Evidence:Storage:Local:RootPath"] = localRoot;
+        if (s3Credentials)
+        {
+            settings["Vessel:Evidence:Storage:S3:AccessKeyId"] = "synthetic-access";
+            settings["Vessel:Evidence:Storage:S3:SecretAccessKey"] = "synthetic-secret";
+        }
+        builder.Configuration.AddInMemoryCollection(settings);
+        builder.Services.AddVesselInfrastructure(builder.Configuration);
+        using var host = builder.Build();
+        try
+        {
+            await host.StartAsync();
+            var options = host.Services.GetRequiredService<IOptions<EvidenceSettings>>().Value;
+            Assert.Equal("Local", options.Storage.Provider);
+            Assert.Equal(localRoot ?? "data/evidence", options.Storage.Local.RootPath);
+            var store = Assert.IsType<LocalEvidenceObjectStore>(host.Services.GetRequiredService<IEvidenceObjectStore>());
+            const string key = "owner/play/item.png";
+            using var content = new MemoryStream(EvidenceFixtures.Png);
+            await store.PutAsync(key, content, default);
+            Assert.Equal(EvidenceFixtures.Png, await File.ReadAllBytesAsync(Path.Combine(root, localRoot ?? "data/evidence", key)));
+            await host.StopAsync();
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Explicit_s3_without_credentials_fails_startup_instead_of_using_local()
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Configuration.Sources.Clear();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Vessel:Evidence:Storage:Provider"] = "S3"
+        });
+        builder.Services.AddVesselInfrastructure(builder.Configuration);
+        using var host = builder.Build();
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+        Assert.Contains("AccessKeyId and SecretAccessKey are required", error.Message);
+        Assert.Throws<OptionsValidationException>(() => host.Services.GetRequiredService<IEvidenceObjectStore>());
+    }
+
+    [Fact]
+    public async Task Explicit_s3_outage_propagates_without_falling_back_to_local()
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Configuration.Sources.Clear();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Vessel:Evidence:Storage:Provider"] = "S3",
+            ["Vessel:Evidence:Storage:S3:AccessKeyId"] = "synthetic-access",
+            ["Vessel:Evidence:Storage:S3:SecretAccessKey"] = "synthetic-secret"
+        });
+        builder.Services.AddVesselInfrastructure(builder.Configuration);
+        using var client = new StubS3 { Failure = new AmazonS3Exception("synthetic outage") { StatusCode = HttpStatusCode.ServiceUnavailable } };
+        builder.Services.AddSingleton<IAmazonS3>(client);
+        using var host = builder.Build();
+        await host.StartAsync();
+        var store = Assert.IsType<S3EvidenceObjectStore>(host.Services.GetRequiredService<IEvidenceObjectStore>());
+        Assert.Same(client.Failure, await Assert.ThrowsAsync<AmazonS3Exception>(() => store.OpenReadAsync("owner/play/item.png", default)));
+        await host.StopAsync();
+    }
+
     [Fact]
     public async Task Adapter_preserves_create_only_keys_cancellation_and_stream_ownership()
     {
