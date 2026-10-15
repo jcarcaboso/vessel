@@ -8,7 +8,7 @@ export const discrepancyFixture: MonitorDiscrepancy = {
 }
 export const monitorFixture: AccountMonitor = {
   accountId: accountFixture.id, state: 'live', lastAttemptAtUtc: '2026-10-14T10:00:00Z', lastSuccessAtUtc: '2026-10-14T10:00:00Z',
-  nextRunAtUtc: '2026-10-14T10:10:00Z', manualState: 'idle', nextManualAllowedAtUtc: null, error: null, workerOnline: true, discrepancies: [],
+  nextRunAtUtc: '2026-10-14T10:10:00Z', manualState: 'idle', runTrigger: null, nextManualAllowedAtUtc: null, error: null, workerOnline: true, discrepancies: [],
 }
 export const monitorSummaryFixture: MonitorSummary = { workerOnline: true, heartbeatAtUtc: '2026-10-14T10:00:00Z', accounts: [monitorFixture] }
 export const monitorEventFixture: MonitorEvent = {

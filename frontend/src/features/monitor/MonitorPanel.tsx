@@ -12,27 +12,46 @@ export function MonitorBadge({ monitor }: { monitor?: AccountMonitor | null }) {
     ? <span className="monitor-badge" title={monitor.error ?? undefined}>{labels[monitor.state]}</span> : null
 }
 
+function checkLabel(monitor: AccountMonitor, busy: boolean, remaining: number) {
+  // Scheduled runs and owner refreshes share admission with Check; do not present them as the owner's Check.
+  if (monitor.manualState !== 'idle' && monitor.runTrigger === 'scheduled') return 'Scheduled check running'
+  if (monitor.manualState !== 'idle' && monitor.runTrigger === 'refresh') return 'Account refresh running'
+  if (busy || monitor.manualState === 'running') return 'Checking…'
+  if (monitor.manualState === 'pending') return 'Check pending…'
+  return remaining ? `Check in ${remaining}s` : 'Check'
+}
+
+function CheckButton({ until, monitor, busy, blocked, onCheck }: {
+  until: number; monitor: AccountMonitor; busy: boolean; blocked: boolean; onCheck: () => void
+}) {
+  const [now, setNow] = useState(() => Date.now())
+  const counting = until > now
+  // Tick only while a countdown is showing; an idle panel keeps no timer.
+  useEffect(() => {
+    if (!counting) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [counting])
+  const remaining = Math.max(0, Math.ceil((until - now) / 1000))
+  const running = busy || monitor.manualState !== 'idle'
+  return <Button size="sm" variant="outline" disabled={running || remaining > 0 || blocked} aria-busy={running} onClick={onCheck}>
+    <RefreshCw size={13} className={running ? 'is-spinning' : ''} />{checkLabel(monitor, busy, remaining)}
+  </Button>
+}
+
 export function MonitorPanel({ monitor, busy, error, retryAtUtc, statusUnavailable = false, onCheck, onManageCredential }: {
   monitor: AccountMonitor; busy: boolean; error: string | null; retryAtUtc?: string | undefined
   onCheck: () => void; onManageCredential?: (() => void) | undefined
   statusUnavailable?: boolean
 }) {
-  const [now, setNow] = useState(() => Date.now())
   const until = Math.max(Date.parse(monitor.nextManualAllowedAtUtc ?? '') || 0, Date.parse(retryAtUtc ?? '') || 0)
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
-  const remaining = Math.max(0, Math.ceil((until - now) / 1000))
-  const running = busy || monitor.manualState !== 'idle'
   return <section className="monitor-panel" aria-label="Background monitor">
     <div className="monitor-heading">
       <div><strong>{labels[monitor.state]}</strong>
         <p className="muted">Last successful check {time(monitor.lastSuccessAtUtc)} · next scheduled {time(monitor.nextRunAtUtc)}</p>
       </div>
-      <Button size="sm" variant="outline" disabled={running || remaining > 0 || statusUnavailable} aria-busy={running} onClick={onCheck}>
-        <RefreshCw size={13} className={running ? 'is-spinning' : ''} />{running ? monitor.manualState === 'pending' ? 'Check pending…' : 'Checking…' : remaining ? `Check in ${remaining}s` : 'Check'}
-      </Button>
+      {/* A new cooldown remounts the button so its countdown starts from the current time. */}
+      <CheckButton key={until} until={until} monitor={monitor} busy={busy} blocked={statusUnavailable} onCheck={onCheck} />
     </div>
     {!monitor.workerOnline && <p className="monitor-warning">Worker offline. Scheduled checks and requested runs may be delayed.</p>}
     {monitor.state === 'stale' && <p className="monitor-warning">Fills may be missing. Last attempt {time(monitor.lastAttemptAtUtc)}.</p>}
@@ -40,7 +59,7 @@ export function MonitorPanel({ monitor, busy, error, retryAtUtc, statusUnavailab
     {monitor.error && <p className="monitor-warning">{monitor.error}</p>}
     {monitor.state === 'credential-error' && (onManageCredential
       ? <Button size="sm" variant="outline" onClick={onManageCredential}>Manage account credential</Button>
-      : <a href="#accounts">Manage account credential</a>)}
+      : <p className="monitor-warning">Update the read-only credential from this account's Manage account dialog.</p>)}
     {error && <p className="error" role="alert">{error}</p>}
     {statusUnavailable && <p className="monitor-warning">Check is blocked until stored monitor status can be refreshed.</p>}
   </section>
@@ -73,7 +92,7 @@ export function MonitorDiscrepancies({ discrepancies, busy, onDismiss }: {
       {item.state === 'open' && <div className="monitor-dismiss">
         <label><span className="sr-only">Dismissal note for {item.kind} {item.contractId}</span>
           <input maxLength={500} placeholder="Optional dismissal note" value={notes[item.id] ?? ''}
-            disabled={busy || pending !== null} onChange={event => setNotes({ ...notes, [item.id]: event.target.value })} /></label>
+            disabled={busy || pending !== null} onChange={event => { const value = event.target.value; setNotes(current => ({ ...current, [item.id]: value })) }} /></label>
         <Button size="sm" variant="outline" disabled={busy || pending !== null} onClick={() => { void dismiss(item.id) }}>
           {pending === item.id ? 'Dismissing…' : 'Dismiss'}</Button>
       </div>}

@@ -32,7 +32,7 @@ describe('monitor contract', () => {
   })
   it('uses authenticated no-store reads and a body-free account run request, not execution/check', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(json(monitorSummaryFixture)).mockResolvedValueOnce(json(monitorFixture))
-      .mockResolvedValueOnce(json({ requestId: 'run-1', monitor: { ...monitorFixture, manualState: 'pending' } }, 202))
+      .mockResolvedValueOnce(json({ requestId: 'run-1', monitor: { ...monitorFixture, manualState: 'pending', runTrigger: 'owner' } }, 202))
     vi.stubGlobal('fetch', fetcher)
     const api = createWorkspaceApi('private-token')
     const signal = new AbortController().signal

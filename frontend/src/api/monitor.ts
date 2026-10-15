@@ -23,6 +23,8 @@ export interface AccountMonitor {
   lastSuccessAtUtc: string | null
   nextRunAtUtc: string | null
   manualState: 'idle' | 'pending' | 'running'
+  /** Who started pending or running work: an owner Check, an owner account refresh or the scheduler. Null when idle. */
+  runTrigger: 'owner' | 'refresh' | 'scheduled' | null
   nextManualAllowedAtUtc: string | null
   error: string | null
   workerOnline: boolean
@@ -74,7 +76,9 @@ export const isMonitorDiscrepancy = (v: unknown): v is MonitorDiscrepancy => obj
 export const isAccountMonitor = (v: unknown): v is AccountMonitor => object(v) && id(v.accountId) &&
   ['live', 'stale', 'degraded', 'credential-error', 'idle'].includes(v.state as string) &&
   nullableDate(v.lastAttemptAtUtc) && nullableDate(v.lastSuccessAtUtc) && nullableDate(v.nextRunAtUtc) &&
-  ['idle', 'pending', 'running'].includes(v.manualState as string) && nullableDate(v.nextManualAllowedAtUtc) &&
+  ['idle', 'pending', 'running'].includes(v.manualState as string) &&
+  (v.manualState === 'idle' ? v.runTrigger === null : ['owner', 'refresh', 'scheduled'].includes(v.runTrigger as string)) &&
+  nullableDate(v.nextManualAllowedAtUtc) &&
   (v.error === null || text(v.error, 2000)) && typeof v.workerOnline === 'boolean' &&
   Array.isArray(v.discrepancies) && v.discrepancies.every(d => isMonitorDiscrepancy(d) && d.accountId === v.accountId)
 
