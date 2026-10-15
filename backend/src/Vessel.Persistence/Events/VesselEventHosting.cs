@@ -16,18 +16,18 @@ using Wolverine.Runtime;
 
 namespace Vessel.Persistence.Events;
 
-public sealed record PlayEventHostIdentity(string Role, string Schema, Guid OwnerId);
+public sealed record VesselEventHostIdentity(string Role, string Schema, Guid OwnerId);
 
-public static class PlayEventHosting
+public static class VesselEventHosting
 {
     public const string EventExchange = "vessel.events";
     public const string MonitorCommandQueue = "vessel.monitor.commands";
 
-    public static IHostApplicationBuilder ConfigurePlayEventTransport(this IHostApplicationBuilder builder,
+    public static IHostApplicationBuilder ConfigureVesselEventTransport(this IHostApplicationBuilder builder,
         IConfiguration config, string role, Action<WolverineOptions>? configure = null)
     {
         if (role is not ("api" or "worker")) throw new ArgumentException("Event host role must be api or worker.");
-        var settings = config.GetSection(PlayEventSettings.Section).Get<PlayEventSettings>() ?? new();
+        var settings = config.GetSection(VesselEventSettings.Section).Get<VesselEventSettings>() ?? new();
         Validate(settings);
         if (!Uri.TryCreate(settings.RabbitMqUri, UriKind.Absolute, out var amqp) || amqp.Scheme is not ("amqp" or "amqps"))
             throw new InvalidOperationException("Vessel:Events:RabbitMqUri must configure the broker.");
@@ -36,8 +36,8 @@ public static class PlayEventHosting
         var ownerId = config.GetValue<Guid?>("Vessel:Auth:OwnerId") ?? Guid.Parse("11111111-1111-1111-1111-111111111111");
         if (ownerId == Guid.Empty) throw new InvalidOperationException("The event owner is not configured.");
         var schema = role == "api" ? settings.ApiStorageSchema : settings.WorkerStorageSchema;
-        builder.Services.AddSingleton(new PlayEventHostIdentity(role, schema, ownerId));
-        builder.Services.AddPlayEvents(config);
+        builder.Services.AddSingleton(new VesselEventHostIdentity(role, schema, ownerId));
+        builder.Services.AddVesselEvents(config);
         builder.UseWolverine(options =>
         {
             options.ServiceName = $"vessel-{role}";
@@ -53,7 +53,7 @@ public static class PlayEventHosting
                 channel.PublisherConfirmationsEnabled = true;
                 channel.PublisherConfirmationTrackingEnabled = true;
             });
-            options.PublishMessage<PlayEvent>().ToRabbitTopics(EventExchange, exchange =>
+            options.PublishMessage<VesselEvent>().ToRabbitTopics(EventExchange, exchange =>
             {
                 foreach (var consumer in settings.DurableConsumers.Distinct(StringComparer.Ordinal))
                     exchange.BindTopic("#").ToQueue($"vessel.events.{consumer}");
@@ -61,7 +61,7 @@ public static class PlayEventHosting
             options.PublishMessage<MonitorAccountCommand>().ToRabbitQueue(MonitorCommandQueue).UseDurableOutbox();
             if (role == "worker")
             {
-                options.Discovery.IncludeType<PlayEventReceiptHandler>();
+                options.Discovery.IncludeType<VesselEventReceiptHandler>();
                 options.ListenToRabbitQueue("vessel.events.monitor").UseDurableInbox().MaximumParallelMessages(4);
                 options.ListenToRabbitQueue(MonitorCommandQueue).UseDurableInbox().MaximumParallelMessages(4);
             }
@@ -70,35 +70,35 @@ public static class PlayEventHosting
         return builder;
     }
 
-    public static IServiceCollection AddPlayEvents(this IServiceCollection services, IConfiguration config)
+    public static IServiceCollection AddVesselEvents(this IServiceCollection services, IConfiguration config)
     {
-        services.AddOptions<PlayEventSettings>().Bind(config.GetSection(PlayEventSettings.Section))
+        services.AddOptions<VesselEventSettings>().Bind(config.GetSection(VesselEventSettings.Section))
             .Configure(s => s.MonitorInterval = config.GetValue<TimeSpan?>("Vessel:Monitor:Interval") ?? TimeSpan.FromMinutes(10))
             .Validate(s => s.MonitorInterval >= TimeSpan.FromMinutes(1) && s.MonitorInterval <= TimeSpan.FromMinutes(60),
                 "Vessel:Monitor:Interval must be between 1 and 60 minutes.")
             .Validate(s => s.RetentionDays is >= 1 and <= 36500 && s.CatchupSeconds is >= 1 and <= 60,
                 "Event retention and catch-up settings are invalid.")
             .Validate(s => ValidConsumers(s.DurableConsumers), "Durable event consumers are invalid.").ValidateOnStart();
-        services.AddOptions<PlayEventSettings>()
-            .Validate(s => PlayEventSettings.ValidSchema(s.ApiStorageSchema) &&
-                PlayEventSettings.ValidSchema(s.WorkerStorageSchema) && s.ApiStorageSchema != s.WorkerStorageSchema,
+        services.AddOptions<VesselEventSettings>()
+            .Validate(s => VesselEventSettings.ValidSchema(s.ApiStorageSchema) &&
+                VesselEventSettings.ValidSchema(s.WorkerStorageSchema) && s.ApiStorageSchema != s.WorkerStorageSchema,
                 "Event API and worker storage schemas must be distinct safe PostgreSQL identifiers.");
-        services.TryAddScoped<PlayEventMutationCapture>();
-        services.TryAddScoped<IPlayEventOutbox, WolverinePlayEventOutbox>();
-        services.TryAddScoped<PlayEventStore>();
-        services.TryAddScoped<IPlayEventSink>(sp => sp.GetRequiredService<PlayEventStore>());
-        services.TryAddScoped<IPlayEventReader, PlayEventHistory>();
-        services.TryAddScoped<IMonitorCommandSink>(sp => sp.GetRequiredService<PlayEventStore>());
-        services.TryAddEnumerable(ServiceDescriptor.Scoped<IUnitOfWorkParticipant, PlayEventUnitOfWorkParticipant>());
-        services.TryAddScoped<PlayEventRetention>();
-        services.TryAddScoped<PlayEventRecovery>();
+        services.TryAddScoped<VesselEventMutationCapture>();
+        services.TryAddScoped<IVesselEventOutbox, WolverineVesselEventOutbox>();
+        services.TryAddScoped<VesselEventStore>();
+        services.TryAddScoped<IVesselEventSink>(sp => sp.GetRequiredService<VesselEventStore>());
+        services.TryAddScoped<IVesselEventReader, VesselEventHistory>();
+        services.TryAddScoped<IMonitorCommandSink>(sp => sp.GetRequiredService<VesselEventStore>());
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IUnitOfWorkParticipant, VesselEventUnitOfWorkParticipant>());
+        services.TryAddScoped<VesselEventRetention>();
+        services.TryAddScoped<VesselEventRecovery>();
         // Attaches to the existing context registration. No separate context/outbox mappings or EF upgrade.
         services.ConfigureDbContext<VesselDbContext>((sp, options) =>
-            options.AddInterceptors(sp.GetRequiredService<PlayEventMutationCapture>()));
+            options.AddInterceptors(sp.GetRequiredService<VesselEventMutationCapture>()));
         return services;
     }
 
-    public static async Task ProvisionPlayEventTransportAsync(this IHost host, CancellationToken cancellationToken = default)
+    public static async Task ProvisionVesselEventTransportAsync(this IHost host, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         // Provision api and worker schemas separately by building each role; no EF migrations run here.
@@ -109,17 +109,17 @@ public static class PlayEventHosting
         consumers.Contains("monitor", StringComparer.Ordinal) && consumers.Distinct(StringComparer.Ordinal).Count() == consumers.Length &&
         consumers.All(c => c.Length is >= 1 and <= 64 && c.All(ch => char.IsAsciiLetterLower(ch) || char.IsAsciiDigit(ch) || ch == '-'));
 
-    private static void Validate(PlayEventSettings settings)
+    private static void Validate(VesselEventSettings settings)
     {
         if (settings.RetentionDays is < 1 or > 36500 || settings.CatchupSeconds is < 1 or > 60 ||
-            !ValidConsumers(settings.DurableConsumers) || !PlayEventSettings.ValidSchema(settings.ApiStorageSchema) ||
-            !PlayEventSettings.ValidSchema(settings.WorkerStorageSchema) || settings.ApiStorageSchema == settings.WorkerStorageSchema)
-            throw new InvalidOperationException("Invalid Play event settings.");
+            !ValidConsumers(settings.DurableConsumers) || !VesselEventSettings.ValidSchema(settings.ApiStorageSchema) ||
+            !VesselEventSettings.ValidSchema(settings.WorkerStorageSchema) || settings.ApiStorageSchema == settings.WorkerStorageSchema)
+            throw new InvalidOperationException("Invalid event settings.");
     }
 }
 
 // Resolve the same scoped sink as Application uses. UoW construction does not resolve its DbContext twice.
-internal sealed class PlayEventUnitOfWorkParticipant(PlayEventStore store) : IUnitOfWorkParticipant
+internal sealed class VesselEventUnitOfWorkParticipant(VesselEventStore store) : IUnitOfWorkParticipant
 {
     public Task BeforeCommitAsync(CancellationToken ct) => store.BeforeCommitAsync(ct);
     public Task AfterCommitAsync(CancellationToken ct) => store.AfterCommitAsync(ct);

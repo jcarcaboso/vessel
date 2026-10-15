@@ -14,17 +14,17 @@ using Vessel.Persistence.Events;
 
 namespace Vessel.Tests;
 
-public sealed class PlayEventPostgresTheoryAttribute : TheoryAttribute
+public sealed class VesselEventPostgresTheoryAttribute : TheoryAttribute
 {
-    public PlayEventPostgresTheoryAttribute() => Skip = new PlayEventPostgresFactAttribute().Skip;
+    public VesselEventPostgresTheoryAttribute() => Skip = new VesselEventPostgresFactAttribute().Skip;
 }
 
-public sealed class PlayEventParticipationTests
+public sealed class VesselEventParticipationTests
 {
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Completed_beforecommit_hook_cannot_reenter_during_next_hook()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -54,13 +54,13 @@ public sealed class PlayEventParticipationTests
         Assert.Equal(0, committed);
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Completed_nested_callback_cannot_append_event_during_sibling()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var store = new PlayEventStore(db, new(), new Outbox(), Options.Create(new PlayEventSettings()), NullLogger<PlayEventStore>.Instance);
+        var store = new VesselEventStore(db, new(), new Outbox(), Options.Create(new VesselEventSettings()), NullLogger<VesselEventStore>.Instance);
         var work = new UnitOfWork(db, [store]);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<Exception>? late = null;
@@ -72,7 +72,7 @@ public sealed class PlayEventParticipationTests
                 late = Task.Run(async () =>
                 {
                     await gate.Task;
-                    return await Record.ExceptionAsync(() => store.AppendAsync(new PlayEventDraft("monitor.state-changed", Guid.NewGuid(), "stale-callback", "info", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, new(), new("owner"), JsonSerializer.SerializeToElement(new { current = "live" })), default));
+                    return await Record.ExceptionAsync(() => store.AppendAsync(new VesselEventDraft("monitor.state-changed", Guid.NewGuid(), "stale-callback", "info", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, new(), new("owner"), JsonSerializer.SerializeToElement(new { current = "live" })), default));
                 });
                 return Task.FromResult(true);
             }, default);
@@ -84,18 +84,18 @@ public sealed class PlayEventParticipationTests
         Assert.Equal(0, events);
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Original_callback_cannot_commit_unobserved_play_transition_during_event_staging()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
-        var capture = new PlayEventMutationCapture();
+        var capture = new VesselEventMutationCapture();
         await using var db = new VesselDbContext(new DbContextOptionsBuilder<VesselDbContext>().UseNpgsql(database.ConnectionString).AddInterceptors(capture).Options, new CoreOwner(owner));
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<Exception>? late = null;
         Exception? admissionError = null;
         var outbox = new Outbox { OnStage = async () => { gate.TrySetResult(); admissionError = await late!; } };
-        var store = new PlayEventStore(db, capture, outbox, Options.Create(new PlayEventSettings()), NullLogger<PlayEventStore>.Instance);
+        var store = new VesselEventStore(db, capture, outbox, Options.Create(new VesselEventSettings()), NullLogger<VesselEventStore>.Instance);
         var work = new UnitOfWork(db, [store]);
         var account = new Account(Guid.NewGuid(), owner, "manual", "Original");
         var play = TestPlays.Create(account, new("manual", "BTC"));
@@ -103,7 +103,7 @@ public sealed class PlayEventParticipationTests
         var outer = await Record.ExceptionAsync(() => work.ExecuteAsync(async () =>
         {
             db.Accounts.Add(account); db.Plays.Add(play);
-            await store.AppendAsync(new PlayEventDraft("monitor.state-changed", Guid.NewGuid(), "staging-yield", "info", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, new(), new("owner"), JsonSerializer.SerializeToElement(new { current = "live" })), default);
+            await store.AppendAsync(new VesselEventDraft("monitor.state-changed", Guid.NewGuid(), "staging-yield", "info", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, new(), new("owner"), JsonSerializer.SerializeToElement(new { current = "live" })), default);
             late = Task.Run(async () =>
             {
                 await gate.Task;
@@ -126,16 +126,16 @@ public sealed class PlayEventParticipationTests
         Assert.Empty(events);
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Raw_transaction_or_another_context_cannot_authorize_event_writes_or_run_metadata()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
         await using var other = database.Context(owner);
         var store = Store(db);
         var otherStore = Store(other);
-        async Task RejectAll(PlayEventStore target)
+        async Task RejectAll(VesselEventStore target)
         {
             await Assert.ThrowsAsync<InvalidOperationException>(() => target.AppendAsync(Draft("rejected"), default));
             await Assert.ThrowsAsync<InvalidOperationException>(() => target.EnsureMonitoringBaselineAsync(Guid.NewGuid(), default));
@@ -166,12 +166,12 @@ public sealed class PlayEventParticipationTests
         Assert.Equal("admitted", Assert.Single((await store.ReadAsync(0, 200, default)).Events).DedupKey);
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Raw_save_cannot_seed_captured_lifecycle_changes_for_a_later_unit_of_work()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
-        var capture = new PlayEventMutationCapture();
+        var capture = new VesselEventMutationCapture();
         await using var db = Context(database, owner, capture);
         var store = Store(db, capture);
         var work = new UnitOfWork(db, [store]);
@@ -195,10 +195,10 @@ public sealed class PlayEventParticipationTests
         Assert.Equal(PlayStatus.Draft, (await db.Plays.SingleAsync()).Status);
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Evidence_upload_with_event_capture_keeps_object_io_outside_database_transaction()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic");
         var play = TestPlays.Create(account, new("manual", "BTC"));
@@ -207,7 +207,7 @@ public sealed class PlayEventParticipationTests
             seed.Accounts.Add(account); seed.Plays.Add(play);
             await seed.SaveChangesAsync();
         }
-        await using var db = Context(database, owner, new PlayEventMutationCapture());
+        await using var db = Context(database, owner, new VesselEventMutationCapture());
         var objects = new EvidenceObjects(db);
         // The production service writes the object first, then a short unit of work owns the metadata transaction.
         var work = new UnitOfWork(db);
@@ -224,19 +224,19 @@ public sealed class PlayEventParticipationTests
         Assert.Equal("Synthetic evidence", saved.Note);
         Assert.Equal(saved.ObjectKey, Assert.Single(objects.Memory.Objects).Key);
         Assert.Equal(EvidenceFixtures.Png, objects.Memory.Objects[saved.ObjectKey]);
-        Assert.Empty((await new PlayEventHistory(db).ReadAsync(0, 200, default)).Events);
+        Assert.Empty((await new VesselEventHistory(db).ReadAsync(0, 200, default)).Events);
     }
 
-    [PlayEventPostgresTheory]
+    [VesselEventPostgresTheory]
     [InlineData("nested")]
     [InlineData("hook")]
     [InlineData("committed")]
     [InlineData("rolled-back")]
     public async Task Closed_callback_cannot_change_run_metadata_in_active_or_later_transaction(string origin)
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
-        var capture = new PlayEventMutationCapture();
+        var capture = new VesselEventMutationCapture();
         await using var db = Context(database, owner, capture);
         var store = Store(db, capture);
         var gate = Signal();
@@ -306,14 +306,14 @@ public sealed class PlayEventParticipationTests
         Assert.Equal("owner", next.Source.Trigger);
     }
 
-    [PlayEventPostgresTheory]
+    [VesselEventPostgresTheory]
     [InlineData("append")]
     [InlineData("run")]
     [InlineData("baseline")]
     [InlineData("command")]
     public async Task Event_admission_during_final_save_poisons_transaction_even_when_rejection_is_swallowed(string action)
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         var gate = new SaveGate();
         await using var db = Context(database, owner, gate);
@@ -339,10 +339,10 @@ public sealed class PlayEventParticipationTests
         Assert.Empty(db.ChangeTracker.Entries());
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Rollback_closes_inherited_event_and_run_metadata_admission_before_database_rollback_yields()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         var gate = new RollbackGate();
         await using var db = Context(database, owner, gate);
@@ -368,12 +368,12 @@ public sealed class PlayEventParticipationTests
         Assert.Equal("next", Assert.Single((await store.ReadAsync(0, 200, default)).Events).DedupKey);
     }
 
-    [PlayEventPostgresTheory]
+    [VesselEventPostgresTheory]
     [InlineData("baseline")]
     [InlineData("command")]
     public async Task Unawaited_async_event_write_closes_its_lease_and_cannot_escape_rollback(string action)
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         var account = new Account(Guid.NewGuid(), owner, "manual", "Existing");
         await using (var seed = database.Context(owner))
@@ -401,10 +401,10 @@ public sealed class PlayEventParticipationTests
         Assert.Empty((await store.ReadAsync(0, 200, default)).Events);
         await using var outside = database.Context(owner);
         Assert.Equal(0, await outside.Database.SqlQueryRaw<int>(
-            "SELECT count(*)::int AS \"Value\" FROM play_event_baselines").SingleAsync());
+            "SELECT count(*)::int AS \"Value\" FROM event_baselines").SingleAsync());
     }
 
-    private static Task Attempt(PlayEventStore store, string action, Guid owner, Guid account)
+    private static Task Attempt(VesselEventStore store, string action, Guid owner, Guid account)
     {
         if (action == "run")
         {
@@ -420,11 +420,11 @@ public sealed class PlayEventParticipationTests
         };
     }
 
-    private static PlayEventDraft Draft(string key) => new("monitor.state-changed", Guid.CreateVersion7(), key,
+    private static VesselEventDraft Draft(string key) => new("monitor.state-changed", Guid.CreateVersion7(), key,
         "info", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, new(), new("owner"),
         JsonSerializer.SerializeToElement(new { current = "live" }));
-    private static PlayEventStore Store(VesselDbContext db, PlayEventMutationCapture? capture = null) =>
-        new(db, capture ?? new(), new Outbox(), Options.Create(new PlayEventSettings()), NullLogger<PlayEventStore>.Instance);
+    private static VesselEventStore Store(VesselDbContext db, VesselEventMutationCapture? capture = null) =>
+        new(db, capture ?? new(), new Outbox(), Options.Create(new VesselEventSettings()), NullLogger<VesselEventStore>.Instance);
     private static VesselDbContext Context(CoreDatabase database, Guid owner, params IInterceptor[] interceptors) =>
         new(new DbContextOptionsBuilder<VesselDbContext>().UseNpgsql(database.ConnectionString)
             .AddInterceptors(interceptors).Options, new CoreOwner(owner));
@@ -492,10 +492,10 @@ public sealed class PlayEventParticipationTests
         public Task AfterCommitAsync(CancellationToken ct) => Task.CompletedTask;
         public Task RollbackAsync(CancellationToken ct) => Task.CompletedTask;
     }
-    private sealed class Outbox : IPlayEventOutbox
+    private sealed class Outbox : IVesselEventOutbox
     {
         public Func<Task> OnStage { get; init; } = () => Task.CompletedTask;
-        public async Task<IReadOnlyList<EventEnvelopeReference>> StageAsync(PlayEvent message, CancellationToken ct) { await OnStage(); return []; }
+        public async Task<IReadOnlyList<EventEnvelopeReference>> StageAsync(VesselEvent message, CancellationToken ct) { await OnStage(); return []; }
         public Task StageAsync(MonitorAccountCommand command, CancellationToken ct) => Task.CompletedTask;
         public Task FlushAsync(CancellationToken ct) => Task.CompletedTask;
         public void Reset() { }

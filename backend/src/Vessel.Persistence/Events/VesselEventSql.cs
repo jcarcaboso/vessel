@@ -5,7 +5,7 @@ using Npgsql;
 
 namespace Vessel.Persistence.Events;
 
-internal static class PlayEventSql
+internal static class VesselEventSql
 {
     internal static DbCommand TransactionCommand(VesselDbContext db, string sql, params (string Name, object? Value)[] parameters)
     {

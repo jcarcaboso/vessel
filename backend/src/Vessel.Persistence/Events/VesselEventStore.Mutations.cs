@@ -9,7 +9,7 @@ using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence.Events;
 
-public sealed partial class PlayEventStore
+public sealed partial class VesselEventStore
 {
     private async Task CaptureMutationsAsync(CancellationToken ct)
     {
@@ -39,8 +39,8 @@ public sealed partial class PlayEventStore
         {
             var account = await db.Accounts.SingleAsync(a => a.Id == link.AccountId, ct);
             var play = await db.Plays.SingleAsync(p => p.Id == link.PlayId, ct);
-            var subject = new PlayEventSubject(link.AccountId, account.VenueId, play.ContractId, link.PlayId, link.EntryId, link.LevelId);
-            var source = new PlayEventSource(link.Source == OrderLinkSource.Owner ? "owner" : trigger, [link.OrderId]);
+            var subject = new VesselEventSubject(link.AccountId, account.VenueId, play.ContractId, link.PlayId, link.EntryId, link.LevelId);
+            var source = new VesselEventSource(link.Source == OrderLinkSource.Owner ? "owner" : trigger, [link.OrderId]);
             var data = JsonSerializer.SerializeToElement(new
             {
                 linkId = link.LinkId, previous = link.Previous, current = link.Current,
@@ -102,8 +102,8 @@ public sealed partial class PlayEventStore
     private async Task CaptureFillsAsync(Guid accountId, string orderId, DateTimeOffset detected, CancellationToken ct)
     {
         DateTimeOffset baseline;
-        await using (var command = PlayEventSql.TransactionCommand(db, """
-            SELECT started_at FROM play_event_baselines WHERE owner_id=@owner AND account_id=@account
+        await using (var command = VesselEventSql.TransactionCommand(db, """
+            SELECT started_at FROM event_baselines WHERE owner_id=@owner AND account_id=@account
             """, ("owner", db.CurrentOwnerId), ("account", accountId)))
         {
             if (await command.ExecuteScalarAsync(ct) is not DateTime value) return;
@@ -121,8 +121,8 @@ public sealed partial class PlayEventStore
         var newlyClaimed = new List<ImportedFill>();
         foreach (var fill in fills)
         {
-            await using var claim = PlayEventSql.TransactionCommand(db, """
-                INSERT INTO play_event_fills(owner_id,account_id,contract_id,source_fill_id)
+            await using var claim = VesselEventSql.TransactionCommand(db, """
+                INSERT INTO event_fills(owner_id,account_id,contract_id,source_fill_id)
                 VALUES(@owner,@account,@contract,@fill) ON CONFLICT DO NOTHING RETURNING source_fill_id
                 """, ("owner", db.CurrentOwnerId), ("account", accountId), ("contract", fill.ContractId),
                 ("fill", fill.SourceFillId));
@@ -137,14 +137,14 @@ public sealed partial class PlayEventStore
         var order = await db.Orders.SingleOrDefaultAsync(o => o.AccountId == accountId && o.OrderId == orderId, ct);
         var account = await db.Accounts.SingleAsync(a => a.Id == accountId, ct);
         var counted = fills.Where(f => !ExecutionIntegrity.Contradicts(link.Role, side, f)).ToList();
-        var cumulative = PlayEventValues.Sum(counted.Select(f => f.Quantity));
+        var cumulative = VesselEventValues.Sum(counted.Select(f => f.Quantity));
         var occurred = newlyClaimed.Max(f => f.OccurredAtUtc);
         var data = JsonSerializer.SerializeToElement(new
         {
             role = link.Role.ToString().ToLowerInvariant(), side = newlyClaimed[0].Side,
-            filledQuantity = PlayEventValues.Sum(newlyClaimed.Select(f => f.Quantity)), cumulativeQuantity = cumulative,
-            remainingQuantity = order is null ? null : PlayEventValues.Exact(order.RemainingSize),
-            averagePrice = PlayEventValues.AveragePrice(counted.Select(f => (f.Price, f.Quantity))),
+            filledQuantity = VesselEventValues.Sum(newlyClaimed.Select(f => f.Quantity)), cumulativeQuantity = cumulative,
+            remainingQuantity = order is null ? null : VesselEventValues.Exact(order.RemainingSize),
+            averagePrice = VesselEventValues.AveragePrice(counted.Select(f => (f.Price, f.Quantity))),
             sourceFillCount = newlyClaimed.Count, sourceFillIdsComplete = newlyClaimed.Count <= 200,
             // A venue's "filled" status alone does not prove all executions are retained.
             complete = order is not null && order.Status == "filled" && !ExecutionIntegrity.MissingExecutions(order, counted)
@@ -173,12 +173,12 @@ public sealed partial class PlayEventStore
         var basis = counted.Select(f => f.Fill.PnlBasis).Distinct(StringComparer.Ordinal).ToList();
         return JsonSerializer.SerializeToElement(new
         {
-            enteredQuantity = PlayEventValues.Sum(counted.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill.Quantity)),
-            exitedQuantity = PlayEventValues.Sum(counted.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill.Quantity)),
-            closedPnlUsd = PlayEventValues.Sum(counted.Select(f => f.Fill.ClosedPnlUsd)),
+            enteredQuantity = VesselEventValues.Sum(counted.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill.Quantity)),
+            exitedQuantity = VesselEventValues.Sum(counted.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill.Quantity)),
+            closedPnlUsd = VesselEventValues.Sum(counted.Select(f => f.Fill.ClosedPnlUsd)),
             closedPnlBasis = basis.Count == 1 ? basis[0] : basis.Count == 0 ? ExecutionFacts.PnlGross : "mixed",
             fees = counted.GroupBy(f => f.Fill.FeeToken).OrderBy(g => g.Key, StringComparer.Ordinal)
-                .Select(g => new { token = g.Key, amount = PlayEventValues.Sum(g.Select(f => f.Fill.Fee)) }).ToArray()
+                .Select(g => new { token = g.Key, amount = VesselEventValues.Sum(g.Select(f => f.Fill.Fee)) }).ToArray()
         }, Json);
     }
 

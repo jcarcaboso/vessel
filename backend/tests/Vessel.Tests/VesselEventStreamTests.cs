@@ -11,7 +11,7 @@ using Vessel.Persistence.Events;
 
 namespace Vessel.Tests;
 
-public sealed class PlayEventStreamTests
+public sealed class VesselEventStreamTests
 {
     [Fact]
     public async Task Stream_bounds_four_sessions_per_owner_and_releases_all_on_disconnect()
@@ -44,8 +44,8 @@ public sealed class PlayEventStreamTests
         using var body = new MemoryStream();
         var context = Context(body, cancellation.Token);
         var read = new FixedReader(new([], "9007199254740993", true));
-        var stream = PlayEventEndpoints.StreamAsync("999", read, owner,
-            Options.Create(new PlayEventSettings()), Options.Create(new JsonOptions()), context);
+        var stream = VesselEventEndpoints.StreamAsync("999", read, owner,
+            Options.Create(new VesselEventSettings()), Options.Create(new JsonOptions()), context);
         Assert.False(stream.IsCompleted);
         var text = Encoding.UTF8.GetString(body.ToArray());
         Assert.Contains("event: status\ndata: {\"state\":\"reset\",\"nextSequence\":\"9007199254740993\"}", text);
@@ -74,12 +74,12 @@ public sealed class PlayEventStreamTests
         using var cancellation = new CancellationTokenSource();
         using var body = new MemoryStream();
         var at = DateTimeOffset.UtcNow;
-        var message = new PlayEvent(Guid.CreateVersion7(), "monitor.state-changed", 1, owner.OwnerId, "1",
+        var message = new VesselEvent(Guid.CreateVersion7(), "monitor.state-changed", 1, owner.OwnerId, "1",
             Guid.CreateVersion7(), "first", "info", at, at, "timely", "current", null, new(), new("monitor"),
             JsonSerializer.SerializeToElement(new { current = "live" }));
         var context = Context(body, cancellation.Token);
-        var stream = PlayEventEndpoints.StreamAsync("0", new FixedReader(new([message], "1", false)), owner,
-            Options.Create(new PlayEventSettings()), Options.Create(new JsonOptions()), context);
+        var stream = VesselEventEndpoints.StreamAsync("0", new FixedReader(new([message], "1", false)), owner,
+            Options.Create(new VesselEventSettings()), Options.Create(new JsonOptions()), context);
         var text = Encoding.UTF8.GetString(body.ToArray());
         Assert.StartsWith("event: status\ndata: {\"state\":\"ready\",\"nextSequence\":\"0\"}", text);
         Assert.Contains("event: event\ndata: {\"id\":", text);
@@ -88,8 +88,8 @@ public sealed class PlayEventStreamTests
         await stream;
     }
 
-    private static Task Open(CoreOwner owner, IPlayEventReader reader, CancellationToken ct) =>
-        PlayEventEndpoints.StreamAsync("0", reader, owner, Options.Create(new PlayEventSettings()),
+    private static Task Open(CoreOwner owner, IVesselEventReader reader, CancellationToken ct) =>
+        VesselEventEndpoints.StreamAsync("0", reader, owner, Options.Create(new VesselEventSettings()),
             Options.Create(new JsonOptions()), Context(new MemoryStream(), ct));
     private static DefaultHttpContext Context(Stream body, CancellationToken ct)
     {
@@ -97,14 +97,14 @@ public sealed class PlayEventStreamTests
         context.Response.Body = body;
         return context;
     }
-    private sealed class FixedReader(PlayEventPage? initial = null) : IPlayEventReader
+    private sealed class FixedReader(VesselEventPage? initial = null) : IVesselEventReader
     {
-        public Task<PlayEventPage> ReadAsync(long after, int limit, CancellationToken ct) =>
+        public Task<VesselEventPage> ReadAsync(long after, int limit, CancellationToken ct) =>
             Task.FromResult(initial ?? new([], after.ToString(System.Globalization.CultureInfo.InvariantCulture), false));
     }
-    private sealed class FailingReader : IPlayEventReader
+    private sealed class FailingReader : IVesselEventReader
     {
-        public Task<PlayEventPage> ReadAsync(long after, int limit, CancellationToken ct) =>
+        public Task<VesselEventPage> ReadAsync(long after, int limit, CancellationToken ct) =>
             throw new InvalidOperationException("Synthetic database outage.");
     }
 }

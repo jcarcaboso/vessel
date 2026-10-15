@@ -15,16 +15,16 @@ using Vessel.Persistence.Events;
 
 namespace Vessel.Tests;
 
-public sealed class PlayEventPostgresFactAttribute : FactAttribute
+public sealed class VesselEventPostgresFactAttribute : FactAttribute
 {
-    public PlayEventPostgresFactAttribute()
+    public VesselEventPostgresFactAttribute()
     {
         var connection = Environment.GetEnvironmentVariable("Vessel_TEST_POSTGRES");
         if (string.IsNullOrWhiteSpace(connection)) Skip = "Requires an explicit disposable Vessel_TEST_POSTGRES database.";
     }
 }
 
-public sealed class PlayEventTests
+public sealed class VesselEventTests
 {
     [Theory]
     [InlineData(10)]
@@ -33,14 +33,14 @@ public sealed class PlayEventTests
     public void Lateness_is_strictly_over_twice_the_configured_monitor_interval(int minutes)
     {
         var services = new ServiceCollection();
-        services.AddPlayEvents(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        services.AddVesselEvents(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Vessel:Monitor:Interval"] = TimeSpan.FromMinutes(minutes).ToString(),
             // There is only one interval setting, even if an Events value was also supplied.
             ["Vessel:Events:MonitorInterval"] = "00:01:00"
         }).Build());
         using var provider = services.BuildServiceProvider();
-        var settings = provider.GetRequiredService<IOptions<PlayEventSettings>>().Value;
+        var settings = provider.GetRequiredService<IOptions<VesselEventSettings>>().Value;
         var occurred = DateTimeOffset.Parse("2026-10-15T12:00:00Z");
         Assert.Equal(TimeSpan.FromMinutes(minutes), settings.MonitorInterval);
         Assert.Equal("timely", settings.Timeliness(occurred, occurred.AddMinutes(minutes)));
@@ -48,14 +48,14 @@ public sealed class PlayEventTests
         Assert.Equal("late", settings.Timeliness(occurred, occurred.AddMinutes(minutes * 2).AddTicks(1)));
     }
 
-    private static PlayEventDraft Draft(string key = "test", DateTimeOffset? detected = null) => new(
+    private static VesselEventDraft Draft(string key = "test", DateTimeOffset? detected = null) => new(
         "monitor.state-changed", Guid.CreateVersion7(), key, "info", detected ?? DateTimeOffset.UtcNow,
         detected ?? DateTimeOffset.UtcNow, new(), new("owner"), JsonSerializer.SerializeToElement(new { price = "001.2300" }));
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Missing_live_receipt_retries_but_pruned_terminal_duplicate_is_acknowledged()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         await using var scope = new EventScope(database, owner);
         await scope.ExecuteAsync(async () =>
@@ -69,29 +69,29 @@ public sealed class PlayEventTests
         services.AddDbContext<VesselDbContext>(o => o.UseNpgsql(database.ConnectionString));
         await using var provider = services.BuildServiceProvider();
         var scopes = provider.GetRequiredService<IServiceScopeFactory>();
-        var host = new PlayEventHostIdentity("worker", "wolverine_worker", owner);
+        var host = new VesselEventHostIdentity("worker", "wolverine_worker", owner);
         await scope.Db.Database.ExecuteSqlRawAsync("DELETE FROM event_deliveries");
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            PlayEventReceiptHandler.Handle(message, scopes, host, default));
+            VesselEventReceiptHandler.Handle(message, scopes, host, default));
         Assert.Equal("The durable monitor event receipt is missing.", error.Message);
-        var retention = new PlayEventRetention(scope.Db, scope, Options.Create(new PlayEventSettings()));
+        var retention = new VesselEventRetention(scope.Db, scope, Options.Create(new VesselEventSettings()));
         Assert.Equal(0, await retention.PruneAsync(10, default));
         await scope.Db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO event_deliveries(owner_id,event_id,consumer,state) VALUES({owner},{message.Id},'monitor','delivered')
             """);
         Assert.Equal(1, await retention.PruneAsync(10, default));
         Assert.Empty((await scope.Store.ReadAsync(0, 10, default)).Events);
-        await PlayEventReceiptHandler.Handle(message, scopes, host, default);
+        await VesselEventReceiptHandler.Handle(message, scopes, host, default);
     }
 
     [Fact]
     public void Every_v1_type_has_a_string_cursor_and_exact_string_payload_contract()
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-        foreach (var type in PlayEventValues.Types)
+        foreach (var type in VesselEventValues.Types)
         {
             var draft = Draft() with { Type = type };
-            var message = new PlayEvent(Guid.CreateVersion7(), type, 1, Guid.NewGuid(), "9007199254740993",
+            var message = new VesselEvent(Guid.CreateVersion7(), type, 1, Guid.NewGuid(), "9007199254740993",
                 draft.RunId, draft.DedupKey, draft.Severity, draft.OccurredAt, draft.DetectedAt, draft.Timeliness,
                 draft.Relevance, null, draft.Subject, draft.Source, draft.Data);
             using var json = JsonDocument.Parse(JsonSerializer.Serialize(message, options));
@@ -101,17 +101,17 @@ public sealed class PlayEventTests
             Assert.Equal(7, message.Id.Version);
             Assert.Equal(type, json.RootElement.GetProperty("type").GetString());
         }
-        Assert.Equal("0.5", PlayEventValues.Exact(0.5000m));
-        Assert.Equal("158456325028528675187087900670", PlayEventValues.Sum([decimal.MaxValue, decimal.MaxValue]));
-        Assert.Equal("10.5", PlayEventValues.AveragePrice([(10m, 1m), (11m, 1m)]));
-        Assert.False(PlayEventValues.TrySequence("-1", out _));
-        Assert.False(PlayEventValues.TrySequence("1.0", out _));
+        Assert.Equal("0.5", VesselEventValues.Exact(0.5000m));
+        Assert.Equal("158456325028528675187087900670", VesselEventValues.Sum([decimal.MaxValue, decimal.MaxValue]));
+        Assert.Equal("10.5", VesselEventValues.AveragePrice([(10m, 1m), (11m, 1m)]));
+        Assert.False(VesselEventValues.TrySequence("-1", out _));
+        Assert.False(VesselEventValues.TrySequence("1.0", out _));
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Owner_cursor_is_commit_ordered_not_a_nontransactional_sequence()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         var firstGate = new CommitGate();
         var secondGate = new CommitGate();
@@ -146,10 +146,10 @@ public sealed class PlayEventTests
         Assert.True((await reader.Store.ReadAsync(999, 200, default)).ResetRequired);
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Rollback_removes_event_dedup_cursor_and_buffered_sends_and_flush_errors_do_not_fail_commit()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         await using var scope = new EventScope(database, owner);
         scope.Outbox.FailStage = true;
@@ -170,10 +170,10 @@ public sealed class PlayEventTests
         Assert.Single((await scope.Store.ReadAsync(0, 200, default)).Events);
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Intermediate_status_saves_are_captured_once_and_rolled_back_mutations_do_not_replay()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic");
         await using var scope = new EventScope(database, owner);
@@ -208,10 +208,10 @@ public sealed class PlayEventTests
         Assert.Equal(PlayStatus.Paused, (await scope.Db.Plays.SingleAsync()).Status);
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Durable_baseline_and_fill_identity_prevent_pre_watch_reread_and_relink_replay()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
@@ -257,14 +257,14 @@ public sealed class PlayEventTests
         Assert.Single((await scope.Store.ReadAsync(0, 200, default)).Events, e => e.Type == "execution.filled");
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Retention_protects_pending_consumer_work_and_keeps_dedup_after_terminal_pruning()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         await using var scope = new EventScope(database, owner);
         await scope.ExecuteAsync(async () => { await scope.Store.AppendAsync(Draft("old", DateTimeOffset.UtcNow.AddDays(-100)), default); return true; }, default);
-        var retention = new PlayEventRetention(scope.Db, scope, Options.Create(new PlayEventSettings()));
+        var retention = new VesselEventRetention(scope.Db, scope, Options.Create(new VesselEventSettings()));
         Assert.Equal(0, await retention.PruneAsync(100, default));
         await scope.ExecuteAsync(async () =>
         {
@@ -280,10 +280,10 @@ public sealed class PlayEventTests
         Assert.Equal("2", Assert.Single((await scope.Store.ReadAsync(1, 200, default)).Events).Sequence);
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Manual_fact_corrections_do_not_masquerade_as_venue_fill_events()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         await using var scope = new EventScope(database, owner);
         await scope.ExecuteAsync(() =>
@@ -308,10 +308,10 @@ public sealed class PlayEventTests
         Assert.Empty((await scope.Store.ReadAsync(0, 200, default)).Events);
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Read_path_resolves_without_any_broker_runtime_and_foreign_subject_writes_roll_back()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         var foreign = Guid.NewGuid();
         var foreignAccount = new Account(Guid.NewGuid(), foreign, "manual", "Foreign");
@@ -328,11 +328,11 @@ public sealed class PlayEventTests
         services.AddLogging();
         services.AddSingleton<IJournalOwnerContext>(new CoreOwner(owner));
         services.AddVesselPersistence(config);
-        services.AddPlayEvents(config); // No Wolverine host/runtime or broker connection.
+        services.AddVesselEvents(config); // No Wolverine host/runtime or broker connection.
         await using var provider = services.BuildServiceProvider();
         await using var reading = provider.CreateAsyncScope();
-        var reader = reading.ServiceProvider.GetRequiredService<IPlayEventReader>();
-        Assert.IsType<PlayEventHistory>(reader);
+        var reader = reading.ServiceProvider.GetRequiredService<IVesselEventReader>();
+        Assert.IsType<VesselEventHistory>(reader);
         Assert.Empty((await reader.ReadAsync(0, 200, default)).Events);
         await using var scope = new EventScope(database, owner);
         var rejected = await Assert.ThrowsAsync<Vessel.Application.Common.ProblemException>(() =>
@@ -345,10 +345,10 @@ public sealed class PlayEventTests
         Assert.Empty((await reader.ReadAsync(0, 200, default)).Events);
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Late_open_superseded_by_close_carries_exact_closed_data_and_paused_warning()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         await using var scope = new EventScope(database, owner);
         await scope.ExecuteAsync(async () =>
@@ -374,12 +374,12 @@ public sealed class PlayEventTests
         Assert.Equal("gross", closed.Data.GetProperty("closedPnlBasis").GetString());
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Delayed_venue_open_and_close_in_one_run_use_first_entry_and_final_settling_exit()
     {
         foreach (var interval in new[] { 20, 30 })
         {
-            await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+            await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
             var owner = Guid.NewGuid();
             var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             var first = now.AddMinutes(-interval * 4);
@@ -424,10 +424,10 @@ public sealed class PlayEventTests
         }
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Partial_entry_uses_known_source_time_but_incomplete_settlement_keeps_mutation_time()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         var first = now.AddHours(-2);
@@ -461,10 +461,10 @@ public sealed class PlayEventTests
         Assert.Equal("timely", closed.Timeliness);
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Manual_lifecycle_keeps_action_time_not_backdated_manual_execution_time()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         await using var scope = new EventScope(database, owner);
@@ -527,13 +527,13 @@ public sealed class PlayEventTests
         Fee = 0, FeeToken = "USDC", ClosedPnlUsd = 0, OccurredAtUtc = now, OrderId = "order", TransactionHash = "synthetic"
     };
 
-    private sealed class FakeOutbox : IPlayEventOutbox
+    private sealed class FakeOutbox : IVesselEventOutbox
     {
-        public List<PlayEvent> Staged { get; } = [];
+        public List<VesselEvent> Staged { get; } = [];
         public int Flushes { get; private set; }
         public bool FailFlush { get; set; }
         public bool FailStage { get; set; }
-        public Task<IReadOnlyList<EventEnvelopeReference>> StageAsync(PlayEvent message, CancellationToken ct)
+        public Task<IReadOnlyList<EventEnvelopeReference>> StageAsync(VesselEvent message, CancellationToken ct)
         {
             Staged.Add(message);
             if (FailStage) throw new InvalidOperationException("Synthetic staging failure.");
@@ -549,15 +549,15 @@ public sealed class PlayEventTests
     {
         public VesselDbContext Db { get; }
         public FakeOutbox Outbox { get; } = new();
-        public PlayEventStore Store { get; }
+        public VesselEventStore Store { get; }
         private readonly UnitOfWork work;
-        public EventScope(CoreDatabase database, Guid owner, PlayEventSettings? settings = null,
+        public EventScope(CoreDatabase database, Guid owner, VesselEventSettings? settings = null,
             IUnitOfWorkParticipant? afterStage = null)
         {
-            var capture = new PlayEventMutationCapture();
+            var capture = new VesselEventMutationCapture();
             Db = new(new DbContextOptionsBuilder<VesselDbContext>().UseNpgsql(database.ConnectionString)
                 .AddInterceptors(capture).Options, new CoreOwner(owner));
-            Store = new(Db, capture, Outbox, Options.Create(settings ?? new PlayEventSettings()), NullLogger<PlayEventStore>.Instance);
+            Store = new(Db, capture, Outbox, Options.Create(settings ?? new VesselEventSettings()), NullLogger<VesselEventStore>.Instance);
             work = new(Db, afterStage is null ? [Store] : [Store, afterStage]);
         }
         public Task<T> ExecuteAsync<T>(Func<Task<T>> operation, CancellationToken ct) => work.ExecuteAsync(operation, ct);

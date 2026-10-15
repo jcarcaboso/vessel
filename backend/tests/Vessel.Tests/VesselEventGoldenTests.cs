@@ -3,7 +3,7 @@ using Vessel.Application.Events;
 
 namespace Vessel.Tests;
 
-public sealed class PlayEventGoldenTests
+public sealed class VesselEventGoldenTests
 {
     public static TheoryData<string, string> VersionOnePayloads => new()
     {
@@ -25,7 +25,7 @@ public sealed class PlayEventGoldenTests
     {
         using var payload = JsonDocument.Parse(data);
         var at = DateTimeOffset.Parse("2026-10-14T03:20:41+00:00", System.Globalization.CultureInfo.InvariantCulture);
-        var message = new PlayEvent(Guid.Parse("0192f0c4-1234-7000-8000-000000000001"), type, 1,
+        var message = new VesselEvent(Guid.Parse("0192f0c4-1234-7000-8000-000000000001"), type, 1,
             Guid.Parse("11111111-1111-1111-1111-111111111111"), "9007199254740993",
             Guid.Parse("0192f0c4-1234-7000-8000-000000000002"), "stable-source-key", "info",
             at, at, "timely", "current", null, new(), new("monitor", ["order-1"], ["fill-1"]), payload.RootElement.Clone());
@@ -34,7 +34,7 @@ public sealed class PlayEventGoldenTests
             (type == "credential.expiring" ? """{"expiresAtUtc":"2026-10-28T00:00:00\u002B00:00"}""" : data) + "}";
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         Assert.Equal(expected, JsonSerializer.Serialize(message, options));
-        Assert.Equal(message.Id, JsonSerializer.Deserialize<PlayEvent>(expected, options)!.Id);
-        Assert.Contains(type, PlayEventValues.Types);
+        Assert.Equal(message.Id, JsonSerializer.Deserialize<VesselEvent>(expected, options)!.Id);
+        Assert.Contains(type, VesselEventValues.Types);
     }
 }

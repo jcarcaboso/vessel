@@ -180,7 +180,7 @@ public sealed class ApiTests
         public List<string> Logs { get; } = [];
         protected override IHost CreateHost(IHostBuilder builder)
         {
-            PlayEventTestHosting.ConfigureBootstrap(builder);
+            VesselEventTestHosting.ConfigureBootstrap(builder);
             return base.CreateHost(builder);
         }
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -195,7 +195,7 @@ public sealed class ApiTests
                 ["ConnectionStrings:Vessel"] = null
             }));
             builder.ConfigureLogging(logging => logging.AddProvider(new CaptureLoggerProvider(Logs)));
-            builder.ConfigureServices(PlayEventTestHosting.ConfigureServices);
+            builder.ConfigureServices(VesselEventTestHosting.ConfigureServices);
         }
     }
 

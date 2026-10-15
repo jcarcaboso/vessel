@@ -1,6 +1,6 @@
 namespace Vessel.Persistence.Events;
 
-public sealed class PlayEventSettings
+public sealed class VesselEventSettings
 {
     public const string Section = "Vessel:Events";
     public int RetentionDays { get; set; } = 90;

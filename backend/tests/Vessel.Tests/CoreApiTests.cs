@@ -19,7 +19,7 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
     public const string Token = "core-tests-only-token-not-a-real-secret";
     protected override IHost CreateHost(IHostBuilder builder)
     {
-        PlayEventTestHosting.ConfigureBootstrap(builder);
+        VesselEventTestHosting.ConfigureBootstrap(builder);
         // Production validation runs before ConfigureAppConfiguration on a minimal host.
         // Supply synthetic bootstrap settings early; never change the process environment.
         if (environment != "Development")
@@ -43,7 +43,7 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
         }.Concat(settings ?? []).GroupBy(pair => pair.Key).ToDictionary(group => group.Key, group => group.Last().Value)));
         builder.ConfigureServices(services =>
         {
-            PlayEventTestHosting.ConfigureServices(services);
+            VesselEventTestHosting.ConfigureServices(services);
             if (store is not null)
             {
                 services.AddSingleton(store);

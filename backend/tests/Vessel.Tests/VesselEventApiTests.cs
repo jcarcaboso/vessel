@@ -7,7 +7,7 @@ using Vessel.Domain.Accounts;
 
 namespace Vessel.Tests;
 
-public sealed class PlayEventApiTests
+public sealed class VesselEventApiTests
 {
     [Theory]
     [InlineData("/api/events")]
@@ -19,7 +19,7 @@ public sealed class PlayEventApiTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(route)).StatusCode);
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Manual_API_status_changes_emit_lifecycle_events_once_without_fill_events()
     {
         await using var database = await CoreDatabase.CreateAsync();
@@ -51,7 +51,7 @@ public sealed class PlayEventApiTests
 
         var read = await client.GetAsync("/api/events?after=0&limit=200");
         Assert.True(read.Headers.CacheControl?.NoStore);
-        var page = (await read.Content.ReadFromJsonAsync<PlayEventPage>())!;
+        var page = (await read.Content.ReadFromJsonAsync<VesselEventPage>())!;
         Assert.Equal(["1", "2"], page.Events.Select(e => e.Sequence));
         Assert.All(page.Events, e =>
         {
@@ -61,13 +61,13 @@ public sealed class PlayEventApiTests
             Assert.Equal("owner", e.Source.Trigger);
         });
         Assert.Equal(["planned", "paused"], page.Events.Select(e => e.Data.GetProperty("current").GetString()));
-        Assert.Empty((await client.GetFromJsonAsync<PlayEventPage>("/api/events?after=2"))!.Events);
+        Assert.Empty((await client.GetFromJsonAsync<VesselEventPage>("/api/events?after=2"))!.Events);
         using var json = JsonDocument.Parse(await client.GetStringAsync("/api/events"));
         Assert.Equal(JsonValueKind.String, json.RootElement.GetProperty("events")[0].GetProperty("sequence").ValueKind);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/events?after=-1")).StatusCode);
 
         await using var foreign = new CoreApiFactory(Guid.NewGuid(), connection: database.ConnectionString);
         using var other = foreign.AuthorizedClient();
-        Assert.Empty((await other.GetFromJsonAsync<PlayEventPage>("/api/events"))!.Events);
+        Assert.Empty((await other.GetFromJsonAsync<VesselEventPage>("/api/events"))!.Events);
     }
 }

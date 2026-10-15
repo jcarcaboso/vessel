@@ -6,12 +6,12 @@ using Vessel.Persistence;
 
 namespace Vessel.Tests;
 
-public sealed class PlayEventUnitOfWorkTests
+public sealed class VesselEventUnitOfWorkTests
 {
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Beforecommit_can_save_without_recursion_and_aftercommit_failure_is_not_a_failed_operation()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
         var probe = new Probe();
@@ -38,10 +38,10 @@ public sealed class PlayEventUnitOfWorkTests
         Assert.Null(logs.Exception);
     }
 
-    [PlayEventPostgresFact]
+    [VesselEventPostgresFact]
     public async Task Failed_beforecommit_rolls_back_saved_mutations_and_clears_participants_without_dispatch()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
         var probe = new Probe();

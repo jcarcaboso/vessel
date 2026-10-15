@@ -6,7 +6,7 @@ using Vessel.Domain.Workspace;
 namespace Vessel.Persistence.Events;
 
 /// <summary>Capture writes before EF accepts their original values, including intermediate saves.</summary>
-public sealed class PlayEventMutationCapture : SaveChangesInterceptor
+public sealed class VesselEventMutationCapture : SaveChangesInterceptor
 {
     internal List<PlayStatusChange> StatusChanges { get; } = [];
     internal List<LinkMutation> Links { get; } = [];
@@ -32,7 +32,7 @@ public sealed class PlayEventMutationCapture : SaveChangesInterceptor
         // Require the event boundary only when a mutation is actually going to be captured.
         foreach (var entry in db.ChangeTracker.Entries<PlayStatusChange>().Where(e => e.State == EntityState.Added))
         {
-            PlayEventSql.RequireTransaction(db);
+            VesselEventSql.RequireTransaction(db);
             if (entry.Entity.OwnerId != db.CurrentOwnerId) throw new UnauthorizedAccessException();
             if (StatusChanges.All(x => x.Id != entry.Entity.Id)) StatusChanges.Add(entry.Entity);
         }
@@ -46,14 +46,14 @@ public sealed class PlayEventMutationCapture : SaveChangesInterceptor
             var current = entry.State == EntityState.Deleted ? "unlinked" : link.State.ToString().ToLowerInvariant();
             if (entry.State == EntityState.Modified && previous == current &&
                 entry.OriginalValues.GetValue<OrderLinkSource>(nameof(link.Source)) == link.Source) continue;
-            PlayEventSql.RequireTransaction(db);
+            VesselEventSql.RequireTransaction(db);
             Links.Add(new(Guid.CreateVersion7(), link.Id, link.AccountId, link.PlayId, link.OrderId, link.Role,
                 link.EntryId, link.LevelId, previous, current, link.Source, link.UpdatedAtUtc));
             FillOrders.Add((link.AccountId, link.OrderId));
         }
         foreach (var entry in db.ChangeTracker.Entries<ImportedFill>().Where(e => e.State == EntityState.Added))
         {
-            PlayEventSql.RequireTransaction(db);
+            VesselEventSql.RequireTransaction(db);
             if (entry.Entity.OwnerId != db.CurrentOwnerId) throw new UnauthorizedAccessException();
             FillOrders.Add((entry.Entity.AccountId, entry.Entity.OrderId));
         }

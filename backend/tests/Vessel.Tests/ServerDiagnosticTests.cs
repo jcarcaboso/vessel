@@ -174,7 +174,7 @@ public sealed class ServerDiagnosticTests
         public CaptureLoggerProvider Logs { get; } = new();
         protected override IHost CreateHost(IHostBuilder builder)
         {
-            PlayEventTestHosting.ConfigureBootstrap(builder);
+            VesselEventTestHosting.ConfigureBootstrap(builder);
             return base.CreateHost(builder);
         }
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -190,7 +190,7 @@ public sealed class ServerDiagnosticTests
             builder.ConfigureLogging(logging => logging.ClearProviders().SetMinimumLevel(LogLevel.Error).AddProvider(Logs));
             builder.ConfigureServices(services =>
             {
-                PlayEventTestHosting.ConfigureServices(services);
+                VesselEventTestHosting.ConfigureServices(services);
                 if (error is not null)
                 {
                     services.AddSingleton<IWorkspaceStore>(new ThrowingStore(error));

@@ -6,20 +6,20 @@ using Wolverine.Runtime;
 
 namespace Vessel.Persistence.Events;
 
-public sealed class WolverinePlayEventOutbox(VesselDbContext db, IWolverineRuntime runtime, PlayEventHostIdentity host)
-    : IPlayEventOutbox
+public sealed class WolverineVesselEventOutbox(VesselDbContext db, IWolverineRuntime runtime, VesselEventHostIdentity host)
+    : IVesselEventOutbox
 {
     private DbContextOutbox<VesselDbContext>? current;
 
     private DbContextOutbox<VesselDbContext> Outbox()
     {
-        PlayEventSql.RequireTransaction(db);
+        VesselEventSql.RequireTransaction(db);
         // Fresh per outer transaction. Never reuse a rolled-back message context in the same request scope.
         return current ??= new DbContextOutbox<VesselDbContext>(runtime, db, []);
     }
 
-    public Task<IReadOnlyList<EventEnvelopeReference>> StageAsync(PlayEvent message, CancellationToken cancellationToken) =>
-        PlayEventSql.ParticipateAsync<IReadOnlyList<EventEnvelopeReference>>(db, async () =>
+    public Task<IReadOnlyList<EventEnvelopeReference>> StageAsync(VesselEvent message, CancellationToken cancellationToken) =>
+        VesselEventSql.ParticipateAsync<IReadOnlyList<EventEnvelopeReference>>(db, async () =>
     {
         cancellationToken.ThrowIfCancellationRequested();
         var outbox = Outbox();
@@ -31,7 +31,7 @@ public sealed class WolverinePlayEventOutbox(VesselDbContext db, IWolverineRunti
     }, cancellationToken);
 
     public Task StageAsync(MonitorAccountCommand command, CancellationToken cancellationToken) =>
-        PlayEventSql.ParticipateAsync(db, async () =>
+        VesselEventSql.ParticipateAsync(db, async () =>
     {
         cancellationToken.ThrowIfCancellationRequested();
         await Outbox().SendAsync(command);

@@ -14,23 +14,23 @@ using Vessel.Persistence.Events;
 
 namespace Vessel.Tests;
 
-public sealed class PlayEventRabbitFactAttribute : FactAttribute
+public sealed class VesselEventRabbitFactAttribute : FactAttribute
 {
-    public PlayEventRabbitFactAttribute()
+    public VesselEventRabbitFactAttribute()
     {
-        if (new PlayEventPostgresFactAttribute().Skip is { } reason) { Skip = reason; return; }
+        if (new VesselEventPostgresFactAttribute().Skip is { } reason) { Skip = reason; return; }
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("Vessel_TEST_EVENT_RABBIT")))
             Skip = "Requires an explicit disposable Vessel_TEST_EVENT_RABBIT broker.";
     }
 }
 
 [Collection("Monitor transport")]
-public sealed class PlayEventTransportTests
+public sealed class VesselEventTransportTests
 {
-    [PlayEventRabbitFact]
+    [VesselEventRabbitFact]
     public async Task Actual_EF_transaction_contains_event_and_outbox_before_outer_commit_then_delivers_once_by_business_id()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_PlayEvents");
+        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
         var owner = Guid.NewGuid();
         var apiSchema = "events_api_" + Guid.NewGuid().ToString("N");
         var workerSchema = "events_worker_" + Guid.NewGuid().ToString("N");
@@ -46,13 +46,13 @@ public sealed class PlayEventTransportTests
         using var worker = Host(config, "worker", owner);
         try
         {
-            await api.ProvisionPlayEventTransportAsync();
-            await worker.ProvisionPlayEventTransportAsync();
+            await api.ProvisionVesselEventTransportAsync();
+            await worker.ProvisionVesselEventTransportAsync();
             await api.StartAsync();
             await using var scope = api.Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<VesselDbContext>();
-            var sink = scope.ServiceProvider.GetRequiredService<PlayEventStore>();
-            var draft = new PlayEventDraft("monitor.state-changed", Guid.CreateVersion7(), "transport-test", "info",
+            var sink = scope.ServiceProvider.GetRequiredService<VesselEventStore>();
+            var draft = new VesselEventDraft("monitor.state-changed", Guid.CreateVersion7(), "transport-test", "info",
                 DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, new(), new("owner"),
                 JsonSerializer.SerializeToElement(new { previous = "idle", current = "live" }));
             var rollback = true;
@@ -60,14 +60,14 @@ public sealed class PlayEventTransportTests
             var verifyCommit = new CommitProbe { After = async () =>
             {
                 // Runs before the event participant's flush, but after the real UoW commit.
-                Assert.Equal(1, await Count(database.ConnectionString, "SELECT count(*) FROM play_events"));
+                Assert.Equal(1, await Count(database.ConnectionString, "SELECT count(*) FROM events"));
                 Assert.Equal(1, await Count(database.ConnectionString, $"SELECT count(*) FROM {apiSchema}.wolverine_outgoing_envelopes"));
             }};
             var verifyStage = new CommitProbe { Before = async () =>
             {
                 Assert.Equal(1, await CountInTransaction(db, apiSchema));
                 Assert.Equal(0, await Count(database.ConnectionString, $"SELECT count(*) FROM {apiSchema}.wolverine_outgoing_envelopes"));
-                Assert.Equal(duplicate ? 1 : 0, await Count(database.ConnectionString, "SELECT count(*) FROM play_events"));
+                Assert.Equal(duplicate ? 1 : 0, await Count(database.ConnectionString, "SELECT count(*) FROM events"));
                 if (rollback) throw new InvalidOperationException("Synthetic rollback after durable staging.");
             }};
             var work = new UnitOfWork(db, [verifyCommit, sink, verifyStage]);
@@ -93,7 +93,7 @@ public sealed class PlayEventTransportTests
             Assert.Equal(1, await Count(database.ConnectionString,
                 "SELECT attempts FROM event_deliveries WHERE consumer='monitor'"));
             // Republish with a new transport envelope and the SAME business EventId.
-            var outbox = scope.ServiceProvider.GetRequiredService<IPlayEventOutbox>();
+            var outbox = scope.ServiceProvider.GetRequiredService<IVesselEventOutbox>();
             duplicate = true;
             await work.ExecuteAsync(async () =>
             {
@@ -128,7 +128,7 @@ public sealed class PlayEventTransportTests
         builder.Logging.ClearProviders();
         builder.Services.AddSingleton<IJournalOwnerContext>(new CoreOwner(owner));
         builder.Services.AddVesselPersistence(builder.Configuration);
-        builder.ConfigurePlayEventTransport(builder.Configuration, role,
+        builder.ConfigureVesselEventTransport(builder.Configuration, role,
             options => { if (role == "worker") options.Discovery.IncludeType<TestMonitorCommandHandler>(); });
         return builder.Build();
     }

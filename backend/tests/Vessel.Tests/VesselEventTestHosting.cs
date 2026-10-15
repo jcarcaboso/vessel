@@ -8,7 +8,7 @@ using Wolverine;
 
 namespace Vessel.Tests;
 
-internal static class PlayEventTestHosting
+internal static class VesselEventTestHosting
 {
     public static void ConfigureBootstrap(IHostBuilder builder) =>
         builder.ConfigureHostConfiguration(config => config.AddInMemoryCollection(new Dictionary<string, string?>
@@ -23,14 +23,14 @@ internal static class PlayEventTestHosting
     {
         services.DisableAllExternalWolverineTransports();
         services.DisableAllWolverineMessagePersistence();
-        services.Replace(ServiceDescriptor.Scoped<IPlayEventOutbox, NonTransportOutbox>());
+        services.Replace(ServiceDescriptor.Scoped<IVesselEventOutbox, NonTransportOutbox>());
     }
 
     // Retains real mutation capture, event history and pending business receipts. Only network publication
-    // is replaced. PlayEventTransportTests exercise the actual broker/outbox and durable acknowledgement.
-    private sealed class NonTransportOutbox : IPlayEventOutbox
+    // is replaced. VesselEventTransportTests exercise the actual broker/outbox and durable acknowledgement.
+    private sealed class NonTransportOutbox : IVesselEventOutbox
     {
-        public Task<IReadOnlyList<EventEnvelopeReference>> StageAsync(PlayEvent message, CancellationToken ct) =>
+        public Task<IReadOnlyList<EventEnvelopeReference>> StageAsync(VesselEvent message, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<EventEnvelopeReference>>([]);
         public Task StageAsync(MonitorAccountCommand command, CancellationToken ct) => Task.CompletedTask;
         public Task FlushAsync(CancellationToken ct) => Task.CompletedTask;

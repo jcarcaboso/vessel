@@ -16,7 +16,7 @@ if (!builder.Environment.IsDevelopment()) ProductionConfiguration.Validate(build
 builder.Services.AddVesselInfrastructure(builder.Configuration);
 builder.Services.AddVesselPersistence(builder.Configuration);
 builder.Services.AddVesselApplication();
-builder.ConfigurePlayEventTransport(builder.Configuration, "api");
+builder.ConfigureVesselEventTransport(builder.Configuration, "api");
 builder.Services.AddOpenApi();
 builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
 builder.Services.AddResponseCompression(options =>
@@ -109,7 +109,7 @@ app.MapEvidence();
 app.MapPlays();
 app.MapSizing();
 app.MapReview();
-app.MapPlayEvents();
+app.MapVesselEvents();
 if (app.Environment.IsDevelopment()) app.MapOpenApi().RequireAuthorization();
 
 app.Run();

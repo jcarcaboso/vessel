@@ -11,17 +11,17 @@ using Vessel.Persistence.Events;
 
 namespace Vessel.Api;
 
-public static class PlayEventEndpoints
+public static class VesselEventEndpoints
 {
     private static readonly ConcurrentDictionary<Guid, int> Streams = new();
 
-    public static IEndpointRouteBuilder MapPlayEvents(this IEndpointRouteBuilder endpoints)
+    public static IEndpointRouteBuilder MapVesselEvents(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/api/events").RequireAuthorization();
-        group.MapGet("", async (string? after, int? limit, IPlayEventReader reader, HttpContext context, CancellationToken ct) =>
+        group.MapGet("", async (string? after, int? limit, IVesselEventReader reader, HttpContext context, CancellationToken ct) =>
         {
             NoStore(context);
-            if (!PlayEventValues.TrySequence(after, out var sequence))
+            if (!VesselEventValues.TrySequence(after, out var sequence))
                 throw new ProblemException(400, "Invalid event sequence.");
             return Results.Ok(await reader.ReadAsync(sequence, limit ?? 100, ct));
         });
@@ -29,11 +29,11 @@ public static class PlayEventEndpoints
         return endpoints;
     }
 
-    public static async Task StreamAsync(string? after, IPlayEventReader reader, IJournalOwnerContext owner,
-        IOptions<PlayEventSettings> settings, IOptions<JsonOptions> json, HttpContext context)
+    public static async Task StreamAsync(string? after, IVesselEventReader reader, IJournalOwnerContext owner,
+        IOptions<VesselEventSettings> settings, IOptions<JsonOptions> json, HttpContext context)
     {
         NoStore(context);
-        if (!PlayEventValues.TrySequence(after, out var sequence))
+        if (!VesselEventValues.TrySequence(after, out var sequence))
             throw new ProblemException(400, "Invalid event sequence.");
         if (!TryAcquire(owner.OwnerId))
         {
