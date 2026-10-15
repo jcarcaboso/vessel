@@ -1,0 +1,148 @@
+name: Release
+
+# Pushing an annotated vX.Y.Z tag that is on main runs the foundation checks and
+# release verification, publishes skorcius/vessel:api-X.Y.Z and web-X.Y.Z, moves
+# both latest tags and creates the GitHub Release from docs/releases/vX.Y.Z.md.
+# Pull requests that touch release packaging run the same verification and a
+# publish rehearsal against a throwaway local registry, never Docker Hub.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  # Re-run a release from its tag: choose the tag under "Use workflow from".
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/checks.yml
+      - .dockerignore
+      - backend/Dockerfile
+      - frontend/Dockerfile
+      - deploy/**
+      - '!deploy/README.md'
+      - docs/releases/**
+      - scripts/release.py
+      - scripts/verify-release.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  source:
+    name: Release source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Require an annotated tag on main
+        if: github.event_name != 'pull_request'
+        run: |
+          if [ "$GITHUB_REF_TYPE" != tag ]; then
+            echo "::error::Run the release from a vX.Y.Z tag, not $GITHUB_REF."
+            exit 1
+          fi
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME" "+refs/heads/main:refs/remotes/origin/main"
+          if [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != tag ]; then
+            echo "::error::$GITHUB_REF_NAME is a lightweight tag. Create release tags with git tag -a."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME is not on main. Merge the release before tagging it."
+            exit 1
+          fi
+      - name: Versions, changelog and release notes
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            python3 scripts/release.py check
+          else
+            python3 scripts/release.py check --tag "$GITHUB_REF_NAME"
+          fi
+
+  checks:
+    name: Foundation checks
+    needs: source
+    if: github.event_name != 'pull_request'
+    uses: ./.github/workflows/checks.yml
+
+  verify:
+    name: Release verification (${{ matrix.storage }})
+    needs: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      matrix:
+        storage: [s3, local]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Isolated images, transport, restore
+        run: python3 scripts/verify-release.py --storage "${{ matrix.storage }}"
+
+  rehearsal:
+    name: Publish rehearsal (local registry)
+    needs: source
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    steps:
+      - uses: actions/checkout@v5
+      - name: Publish, then publish again as a re-run
+        run: |
+          python3 scripts/release.py publish --image localhost:5000/vessel --revision "$GITHUB_SHA"
+          python3 scripts/release.py publish --image localhost:5000/vessel --revision "$GITHUB_SHA"
+
+  publish:
+    name: Publish images
+    needs: [source, checks, verify]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: docker-hub
+      url: https://hub.docker.com/r/skorcius/vessel/tags
+    concurrency:
+      group: docker-hub-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - name: Log in to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || 'skorcius' }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::error::Set the DOCKERHUB_TOKEN secret on the docker-hub environment, then re-run this job."
+            exit 1
+          fi
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+      - name: Build, push and verify both images, then move latest
+        run: python3 scripts/release.py publish --revision "$GITHUB_SHA"
+      - name: Log out
+        if: always()
+        run: docker logout
+
+  github-release:
+    name: GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Create or update the release from its notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          notes="docs/releases/$GITHUB_REF_NAME.md"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --title "Vessel $GITHUB_REF_NAME" --notes-file "$notes"
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "Vessel $GITHUB_REF_NAME" --notes-file "$notes"
+          fi

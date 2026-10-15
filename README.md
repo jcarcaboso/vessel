@@ -4,7 +4,7 @@ A trading diary for recording decisions, executions, and reflection.
 
 ## Deploy with Docker
 
-See the [Docker deployment guide](deploy/README.md) for the v0.1.1 API and web
+See the [Docker deployment guide](deploy/README.md) for the v0.1.2 API and web
 images, Compose setup, explicit migrations, opt-in Caddy TLS, credential keys,
 backups and isolated restores.
 Both images use `skorcius/vessel` with `api-` and `web-` tags.

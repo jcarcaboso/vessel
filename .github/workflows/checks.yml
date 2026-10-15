@@ -2,7 +2,10 @@ name: Foundation checks
 
 on:
   push:
+    # Tags run these checks through the Release workflow instead.
+    branches: ['**']
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read

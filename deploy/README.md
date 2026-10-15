@@ -1,21 +1,18 @@
 # Deploy with Docker
 
-Vessel v0.1.1 is a self-hosted, single-owner trading diary. These examples use the
+Vessel v0.1.2 is a self-hosted, single-owner trading diary. These examples use the
 API and web images in one Docker Hub repository:
 
-- `skorcius/vessel:api-0.1.1` and `skorcius/vessel:api-latest`
-- `skorcius/vessel:web-0.1.1` and `skorcius/vessel:web-latest`
+- `skorcius/vessel:api-0.1.2` and `skorcius/vessel:api-latest`
+- `skorcius/vessel:web-0.1.2` and `skorcius/vessel:web-latest`
 
-Use versioned tags for deployments. The `latest` tags move when the owner
-publishes another release. Packaging does not publish any image automatically.
+Use versioned tags for deployments. The `latest` tags move with each release.
 This release targets Linux amd64.
 
-For subsequent releases, follow the repository-local
-[`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md). Publication
-to Docker Hub remains manual: delivering a release includes the agent pushing
-and verifying both versioned images, then both moving latest tags. Only explicit
-prepare-only, local-only or no-push requests leave images unpublished. Publishing
-never upgrades an installation.
+Releases are published by the repository's Release workflow when an annotated
+`vX.Y.Z` tag is pushed on `main`; see the
+[`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md) and the
+[release notes](../docs/releases/). Publishing never upgrades an installation.
 
 ## Requirements
 
@@ -458,6 +455,18 @@ unchanged and compresses static assets only.
 
 ## Upgrade
 
+### From v0.1.1 to v0.1.2
+
+There is no migration. With no storage settings the API keeps its original
+local evidence folder, but the example `compose.yaml` now selects private
+RustFS. If you take the new file and keep images locally, add
+`-f compose.storage-local.yaml` to every Compose command; without it the stack
+uses RustFS, where your existing images are not present. To move them to S3,
+follow [Copy existing local images to S3](#copy-existing-local-images-to-s3)
+first. Do not use the S3 default with an API image older than v0.1.2. The
+PostgreSQL health check now probes TCP, so first-time starts no longer let the
+migration service connect before the database is ready.
+
 ### From v0.1.0 to v0.1.1
 
 This upgrade includes migration `20261013190344_DiaryCompletion`, which adds
@@ -661,11 +670,11 @@ From the repository root, with no populated secret files in the build context:
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.1.1 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.1.1 .
+  --build-arg VERSION=0.1.2 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.1.2 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.1.1 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.1.1 .
+  --build-arg VERSION=0.1.2 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.1.2 .
 ```
 
 The API build pins SDK `10.0.302` to match the repository's `global.json`. The

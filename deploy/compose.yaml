@@ -47,14 +47,16 @@ services:
     volumes:
       - postgres:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vessel -d vessel"]
+      # TCP, not the socket: on first start the image's temporary init server
+      # accepts socket connections briefly, which let migrate start too early.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U vessel -d vessel"]
       interval: 5s
       timeout: 5s
       retries: 12
     restart: unless-stopped
 
   migrate:
-    image: skorcius/vessel:api-${VESSEL_VERSION:-0.1.1}
+    image: skorcius/vessel:api-${VESSEL_VERSION:-0.1.2}
     entrypoint: ["/app/migrate"]
     environment:
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
@@ -66,7 +68,7 @@ services:
     restart: "no"
 
   api:
-    image: skorcius/vessel:api-${VESSEL_VERSION:-0.1.1}
+    image: skorcius/vessel:api-${VESSEL_VERSION:-0.1.2}
     environment:
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       Vessel__Auth__Token: ${Vessel__Auth__Token:?Set a generated token of at least 32 characters}
@@ -90,7 +92,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: skorcius/vessel:web-${VESSEL_VERSION:-0.1.1}
+    image: skorcius/vessel:web-${VESSEL_VERSION:-0.1.2}
     environment:
       VESSEL_API_UPSTREAM: ${VESSEL_API_UPSTREAM:-http://api:8080}
       VESSEL_TRUSTED_PROXY: ${VESSEL_TRUSTED_PROXY:-}
