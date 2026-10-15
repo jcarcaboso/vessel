@@ -481,7 +481,8 @@ internal sealed class DiscrepancyFixture
     public void AddOrder(string id, OrderLinkRole role, decimal quantity, decimal price)
     {
         Store.Links.Add(new(Play, id, role, "e", role == OrderLinkRole.Stop ? "s" : "t", OrderLinkState.Linked, OrderLinkSource.Owner, Clock.Now.AddMinutes(-15)));
-        VenueOrders.Add(new(id, "BTC", "sell", "Trigger", price, price, true, false, quantity, quantity, Clock.Now.AddMinutes(-15), VenueOrderStatus.Open, "open", Clock.Now));
+        VenueOrders.Add(new(id, "BTC", "sell", role == OrderLinkRole.Stop ? "Stop Market" : "Take Profit Market", price, price, true, false,
+            quantity, quantity, Clock.Now.AddMinutes(-15), VenueOrderStatus.Open, "open", Clock.Now));
     }
     public void Fill(string id, string order, decimal quantity, DateTimeOffset at, string side = "buy", string effect = ExecutionFacts.Open) => Store.Fills.Add(new()
     {
