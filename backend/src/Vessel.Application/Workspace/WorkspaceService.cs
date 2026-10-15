@@ -326,14 +326,20 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
                 throw new ProblemException(400, $"Only {OrList(venues.Descriptors.Where(d => d.Capabilities.Sync).Select(d => d.Name), "and")} accounts can be refreshed.");
             if (account.SourceId is null) throw new ProblemException(400, "A source identity is required before refresh.");
             if (venues.Reader(account.VenueId) is not { } reader) throw new ProblemException(503, "Venue reader is unavailable.");
-            PerpetualVenueReadResult result;
+            PerpetualVenueReadResult? result = null;
             try
             {
+                // Adapters may participate here (credential reads, refusal marks). A participant failure poisons the
+                // unit, so the handler below only classifies the venue failure; the record is written after it.
                 result = await reader.ReadAsync(account, ct);
                 if (!result.Fills.All(VenueFactChecks.Valid))
                     throw new VenueReadException("The venue adapter returned fills outside Vessel's execution vocabulary.");
             }
             catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
+            {
+                result = null;
+            }
+            if (result is null)
             {
                 account.RecordSyncFailure();
                 await store.SaveAsync(ct);

@@ -41,13 +41,15 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         if (account.SourceId is null) throw new ProblemException(400, "A source identity is required before refresh.");
         if (venues.Orders(account.VenueId) is not { } reader)
             return "Order history was not refreshed because the venue order reader is unavailable.";
+        // The credential read participates in the unit of work, so it stays outside the catch-and-continue block below.
+        if (await CredentialReasonAsync(account, usableOnly: false, ct) is { } reason)
+        {
+            ct.ThrowIfCancellationRequested();
+            return $"Order history was not refreshed. {reason}";
+        }
         VenueOrderReadResult read;
         try
         {
-            var reason = await CredentialReasonAsync(account, usableOnly: false, ct);
-            ct.ThrowIfCancellationRequested();
-            if (reason is not null)
-                return $"Order history was not refreshed. {reason}";
             read = await reader.ReadOrdersAsync(account, ct);
             if (!read.Orders.All(VenueFactChecks.Valid))
                 throw new VenueReadException("The venue adapter returned orders outside Vessel's execution vocabulary.");
