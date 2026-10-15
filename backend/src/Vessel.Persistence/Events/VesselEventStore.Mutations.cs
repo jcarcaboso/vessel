@@ -11,32 +11,12 @@ namespace Vessel.Persistence.Events;
 
 public sealed partial class VesselEventStore
 {
-    /// <summary>Drafts for this unit's captured mutations.</summary>
+    /// <summary>Drafts for this unit's captured mutations in causal order: link changes, then the fills they
+    /// claim, then the status changes those facts caused.</summary>
     private async Task<List<VesselEventDraft>> CaptureMutationsAsync(CancellationToken ct)
     {
         var drafts = new List<VesselEventDraft>();
         var detected = DateTimeOffset.UtcNow;
-        foreach (var change in mutations.StatusChanges)
-        {
-            var play = await db.Plays.SingleOrDefaultAsync(p => p.Id == change.PlayId, ct);
-            if (play is null) continue;
-            var type = change.To == PlayStatus.Open && change.From is PlayStatus.Planned or PlayStatus.Paused
-                ? "play.opened" : change.From == PlayStatus.Open && change.To == PlayStatus.Closed
-                    ? "play.closed" : "play.status-changed";
-            var key = type == "play.opened" ? $"play:{play.Id}:opened" : type == "play.closed"
-                ? $"play:{play.Id}:closed" : $"status-change:{change.Id}";
-            var account = await db.Accounts.SingleAsync(a => a.Id == play.AccountId, ct);
-            var occurred = await LifecycleSourceTimeAsync(play, change, ct);
-            var data = type == "play.closed" ? await ClosedDataAsync(play, ct) : VesselEventJson.Element(new
-            {
-                previous = change.From.ToString().ToLowerInvariant(), current = change.To.ToString().ToLowerInvariant(),
-                source = change.Source.ToString().ToLowerInvariant(), reason = change.Reason?.ToString().ToLowerInvariant()
-            });
-            drafts.Add(new(type, runId, key, change.From == PlayStatus.Paused && change.To == PlayStatus.Open
-                ? "warning" : "info", occurred, detected,
-                new(play.AccountId, account.VenueId, play.ContractId, play.Id), new(trigger), data,
-                Timeliness(occurred, detected), play.Status == change.To ? "current" : "superseded"));
-        }
         foreach (var link in mutations.Links)
         {
             var account = await db.Accounts.SingleAsync(a => a.Id == link.AccountId, ct);
@@ -61,6 +41,27 @@ public sealed partial class VesselEventStore
         foreach (var affected in mutations.FillOrders.OrderBy(x => x.AccountId).ThenBy(x => x.OrderId, StringComparer.Ordinal))
             if (await CaptureFillsAsync(affected.AccountId, affected.OrderId, detected, ct) is { } filled)
                 drafts.Add(filled);
+        foreach (var change in mutations.StatusChanges)
+        {
+            var play = await db.Plays.SingleOrDefaultAsync(p => p.Id == change.PlayId, ct);
+            if (play is null) continue;
+            var type = change.To == PlayStatus.Open && change.From is PlayStatus.Planned or PlayStatus.Paused
+                ? "play.opened" : change.From == PlayStatus.Open && change.To == PlayStatus.Closed
+                    ? "play.closed" : "play.status-changed";
+            var key = type == "play.opened" ? $"play:{play.Id}:opened" : type == "play.closed"
+                ? $"play:{play.Id}:closed" : $"status-change:{change.Id}";
+            var account = await db.Accounts.SingleAsync(a => a.Id == play.AccountId, ct);
+            var occurred = await LifecycleSourceTimeAsync(play, change, ct);
+            var data = type == "play.closed" ? await ClosedDataAsync(play, ct) : VesselEventJson.Element(new
+            {
+                previous = change.From.ToString().ToLowerInvariant(), current = change.To.ToString().ToLowerInvariant(),
+                source = change.Source.ToString().ToLowerInvariant(), reason = change.Reason?.ToString().ToLowerInvariant()
+            });
+            drafts.Add(new(type, runId, key, change.From == PlayStatus.Paused && change.To == PlayStatus.Open
+                ? "warning" : "info", occurred, detected,
+                new(play.AccountId, account.VenueId, play.ContractId, play.Id), new(trigger), data,
+                Timeliness(occurred, detected), play.Status == change.To ? "current" : "superseded"));
+        }
         return drafts;
     }
 

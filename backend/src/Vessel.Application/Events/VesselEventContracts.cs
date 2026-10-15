@@ -1,22 +1,14 @@
 using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Vessel.Domain.Numerics;
 
 namespace Vessel.Application.Events;
 
-public sealed record VesselEventSubject(
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? AccountId = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? VenueId = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ContractId = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? PlayId = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? EntryId = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? LevelId = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? DiscrepancyId = null);
-public sealed record VesselEventSource(string Trigger,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string[]? OrderIds = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string[]? FillIds = null);
+// Every optional field is written as an explicit null. One serializer policy serves storage, broker and API.
+public sealed record VesselEventSubject(Guid? AccountId = null, string? VenueId = null, string? ContractId = null,
+    Guid? PlayId = null, string? EntryId = null, string? LevelId = null, Guid? DiscrepancyId = null);
+public sealed record VesselEventSource(string Trigger, string[]? OrderIds = null, string[]? FillIds = null);
 
 public sealed record VesselEventDraft(string Type, Guid RunId, string DedupKey, string Severity,
     DateTimeOffset OccurredAt, DateTimeOffset DetectedAt, VesselEventSubject Subject, VesselEventSource Source,

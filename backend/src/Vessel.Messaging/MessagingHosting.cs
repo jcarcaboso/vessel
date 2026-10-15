@@ -108,5 +108,11 @@ public static class MessagingHosting
         options.UseRuntimeCompilation();
         options.CodeGeneration.TypeLoadMode = TypeLoadMode.Dynamic;
         options.Discovery.DisableConventionalDiscovery();
+        // The event serialization policy on the wire too: web casing and explicit nulls.
+        options.UseSystemTextJsonForSerialization(json =>
+        {
+            json.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+            json.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never;
+        });
     }
 }

@@ -284,6 +284,34 @@ public sealed class EventSubscriptionTests
         Assert.True((await history.ReadAsync(page.NextCursor, 10, default)).ResetRequired);
     }
 
+    // B4: one serializer policy; optional fields are explicit nulls in storage, not omitted.
+    [VesselEventPostgresFact]
+    public async Task Stored_payloads_and_data_keep_explicit_nulls()
+    {
+        await using var runtime = await Runtime.CreateAsync();
+        await using (var scope = runtime.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<VesselDbContext>();
+            await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().ExecuteAsync(async () =>
+            {
+                var account = new Account(Guid.NewGuid(), runtime.Owner, "manual", "Synthetic");
+                var play = TestPlays.Create(account, new("manual", "BTC"));
+                db.Accounts.Add(account); db.Plays.Add(play);
+                var planned = play.MarkPlanned(DateTimeOffset.UtcNow);
+                db.StatusChanges.Add(planned.Change); db.PlanRevisions.Add(planned.Revision);
+                await db.SaveChangesAsync();
+                db.StatusChanges.Add(play.Pause(DateTimeOffset.UtcNow));
+                return true;
+            }, default);
+        }
+        var raw = await runtime.ScalarAsync<string>("SELECT payload::text FROM events ORDER BY sequence DESC LIMIT 1");
+        using var stored = JsonDocument.Parse(raw!);
+        Assert.Equal(JsonValueKind.Null, stored.RootElement.GetProperty("expiresAt").ValueKind);
+        Assert.Equal(JsonValueKind.Null, stored.RootElement.GetProperty("subject").GetProperty("discrepancyId").ValueKind);
+        Assert.Equal(JsonValueKind.Null, stored.RootElement.GetProperty("source").GetProperty("fillIds").ValueKind);
+        Assert.Equal(JsonValueKind.Null, stored.RootElement.GetProperty("data").GetProperty("reason").ValueKind);
+    }
+
     // B3: no array options remain whose defaults a configured list would be appended to; maps bind exactly.
     [Fact]
     public void Messaging_and_event_settings_bind_exactly()
