@@ -1,0 +1,39 @@
+{
+  "status": "passed",
+  "sourceCommit": "2712e9632cef65a612008ad2d55d328e7b0ad429",
+  "browser": "151.0.7922.137",
+  "errors": [],
+  "blocked": [],
+  "intercepted": {
+    "candles": 4,
+    "market-context": 4,
+    "instruments": 4,
+    "check": 4
+  },
+  "shots": [
+    {
+      "file": "graphite-desktop-selected-markup.png",
+      "stroke": "#8fb8ff",
+      "token": "#8fb8ff",
+      "overflow": false
+    },
+    {
+      "file": "graphite-mobile-selected-markup.png",
+      "stroke": "#8fb8ff",
+      "token": "#8fb8ff",
+      "overflow": false
+    },
+    {
+      "file": "paper-desktop-selected-markup.png",
+      "stroke": "#2f6fde",
+      "token": "#2f6fde",
+      "overflow": false
+    },
+    {
+      "file": "paper-mobile-selected-markup.png",
+      "stroke": "#2f6fde",
+      "token": "#2f6fde",
+      "overflow": false
+    }
+  ]
+}

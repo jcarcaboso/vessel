@@ -2,7 +2,7 @@ import { emptyFilters, filterOperations, type Filters } from './activity-filters
 import { useEffect, useRef, useState } from 'react'
 import type { ActivityDocument } from '@/api/activity'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { errorMessage } from '@/api/errors'
 import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
 import { OperationsTable } from './OperationsTable'
@@ -31,7 +31,7 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
     api.activity(accountId, controller.signal).then(document => {
       if (active) setState({ key, api, document, error: null, receivedAt: Date.now() })
     }).catch(cause => {
-      if (active) setState({ key, api, document: null, receivedAt: Date.now(), error: cause instanceof ApiError ? cause.message : 'Operations could not be loaded.' })
+      if (active) setState({ key, api, document: null, receivedAt: Date.now(), error: errorMessage(cause, 'Operations could not be loaded.') })
     })
     return () => { active = false; controller.abort() }
   }, [api, accountId, key])

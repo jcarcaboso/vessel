@@ -1,0 +1,31 @@
+{
+  "sourceCommit": "b54bba08ded5681aaaefc350131cb2e3b073fab7",
+  "scope": "Synthetic module throw and focused skip-link probes, separate from the clean 76-state matrix",
+  "shots": [
+    "graphite-desktop-skip-link.png",
+    "graphite-desktop-page-boundary.png",
+    "graphite-mobile-skip-link.png",
+    "graphite-mobile-page-boundary.png",
+    "paper-desktop-skip-link.png",
+    "paper-desktop-page-boundary.png",
+    "paper-mobile-skip-link.png",
+    "paper-mobile-page-boundary.png"
+  ],
+  "checks": [
+    "graphite-desktop: skip focuses main without route change",
+    "graphite-desktop: boundary hides injected message",
+    "graphite-desktop: retry and navigation recover",
+    "graphite-mobile: skip focuses main without route change",
+    "graphite-mobile: boundary hides injected message",
+    "graphite-mobile: retry and navigation recover",
+    "paper-desktop: skip focuses main without route change",
+    "paper-desktop: boundary hides injected message",
+    "paper-desktop: retry and navigation recover",
+    "paper-mobile: skip focuses main without route change",
+    "paper-mobile: boundary hides injected message",
+    "paper-mobile: retry and navigation recover"
+  ],
+  "expectedInjectedErrors": [],
+  "errors": [],
+  "blocked": []
+}

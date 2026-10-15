@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createChart, type IChartApi, type ISeriesPrimitive, type SeriesAttachedParameter, type Time } from 'lightweight-charts'
 import { createLightweightAdapter } from './lightweight'
 import type { ChartAdapter, ChartCallbacks, PriceOverlay } from './types'
-import { testFrames } from './testFrames'
+import { testFrames } from '@/test/testFrames'
 
 vi.unmock('./lightweight')
 vi.mock('lightweight-charts', async importOriginal => ({

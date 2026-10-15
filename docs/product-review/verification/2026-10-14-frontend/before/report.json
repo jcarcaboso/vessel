@@ -1,0 +1,449 @@
+{
+  "label": "before",
+  "base": "http://127.0.0.1:53729",
+  "frozen": "2026-10-14T16:30:00.000Z",
+  "shots": [
+    {
+      "file": "graphite-desktop-overview.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "overview",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-desktop-plays-list.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "plays-list",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-desktop-plays-editor.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "plays-editor",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-desktop-plays-manual.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "plays-manual",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-desktop-review.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "review",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-desktop-portfolios.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "portfolios",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-desktop-accounts.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "accounts",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-desktop-account-detail.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "account-detail",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-desktop-activity.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "activity",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-desktop-settings.png",
+      "theme": "graphite",
+      "viewport": "desktop",
+      "page": "settings",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-mobile-overview.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "overview",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-mobile-plays-list.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "plays-list",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-mobile-plays-editor.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "plays-editor",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-mobile-plays-manual.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "plays-manual",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-mobile-review.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "review",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-mobile-portfolios.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "portfolios",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-mobile-accounts.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "accounts",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-mobile-account-detail.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "account-detail",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-mobile-activity.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "activity",
+      "overflow": 0
+    },
+    {
+      "file": "graphite-mobile-settings.png",
+      "theme": "graphite",
+      "viewport": "mobile",
+      "page": "settings",
+      "overflow": 0
+    },
+    {
+      "file": "paper-desktop-overview.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "overview",
+      "overflow": 0
+    },
+    {
+      "file": "paper-desktop-plays-list.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "plays-list",
+      "overflow": 0
+    },
+    {
+      "file": "paper-desktop-plays-editor.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "plays-editor",
+      "overflow": 0
+    },
+    {
+      "file": "paper-desktop-plays-manual.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "plays-manual",
+      "overflow": 0
+    },
+    {
+      "file": "paper-desktop-review.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "review",
+      "overflow": 0
+    },
+    {
+      "file": "paper-desktop-portfolios.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "portfolios",
+      "overflow": 0
+    },
+    {
+      "file": "paper-desktop-accounts.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "accounts",
+      "overflow": 0
+    },
+    {
+      "file": "paper-desktop-account-detail.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "account-detail",
+      "overflow": 0
+    },
+    {
+      "file": "paper-desktop-activity.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "activity",
+      "overflow": 0
+    },
+    {
+      "file": "paper-desktop-settings.png",
+      "theme": "paper",
+      "viewport": "desktop",
+      "page": "settings",
+      "overflow": 0
+    },
+    {
+      "file": "paper-mobile-overview.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "overview",
+      "overflow": 0
+    },
+    {
+      "file": "paper-mobile-plays-list.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "plays-list",
+      "overflow": 0
+    },
+    {
+      "file": "paper-mobile-plays-editor.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "plays-editor",
+      "overflow": 0
+    },
+    {
+      "file": "paper-mobile-plays-manual.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "plays-manual",
+      "overflow": 0
+    },
+    {
+      "file": "paper-mobile-review.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "review",
+      "overflow": 0
+    },
+    {
+      "file": "paper-mobile-portfolios.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "portfolios",
+      "overflow": 0
+    },
+    {
+      "file": "paper-mobile-accounts.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "accounts",
+      "overflow": 0
+    },
+    {
+      "file": "paper-mobile-account-detail.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "account-detail",
+      "overflow": 0
+    },
+    {
+      "file": "paper-mobile-activity.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "activity",
+      "overflow": 0
+    },
+    {
+      "file": "paper-mobile-settings.png",
+      "theme": "paper",
+      "viewport": "mobile",
+      "page": "settings",
+      "overflow": 0
+    }
+  ],
+  "geometry": {
+    "graphite/desktop": {
+      "capital-context": {
+        "x": 274,
+        "y": 365,
+        "width": 1128,
+        "height": 61
+      },
+      "workspace": {
+        "x": 272,
+        "y": 498,
+        "width": 1132,
+        "height": 940
+      },
+      "chart-panel": {
+        "x": 272,
+        "y": 498,
+        "width": 808,
+        "height": 603
+      },
+      "journal-panel": {
+        "x": 272,
+        "y": 1118,
+        "width": 808,
+        "height": 320
+      },
+      "position-panel": {
+        "x": 1097,
+        "y": 498,
+        "width": 307,
+        "height": 940
+      },
+      "summary-panel": {
+        "x": 272,
+        "y": 1458,
+        "width": 1132,
+        "height": 360
+      }
+    },
+    "graphite/mobile": {
+      "capital-context": {
+        "x": 18,
+        "y": 686,
+        "width": 354,
+        "height": 216
+      },
+      "workspace": {
+        "x": 16,
+        "y": 990,
+        "width": 358,
+        "height": 2316
+      },
+      "chart-panel": {
+        "x": 16,
+        "y": 990,
+        "width": 358,
+        "height": 964
+      },
+      "journal-panel": {
+        "x": 16,
+        "y": 1968,
+        "width": 358,
+        "height": 440
+      },
+      "position-panel": {
+        "x": 16,
+        "y": 2422,
+        "width": 358,
+        "height": 885
+      },
+      "summary-panel": {
+        "x": 16,
+        "y": 3327,
+        "width": 358,
+        "height": 631
+      }
+    },
+    "paper/desktop": {
+      "capital-context": {
+        "x": 274,
+        "y": 365,
+        "width": 1128,
+        "height": 61
+      },
+      "workspace": {
+        "x": 272,
+        "y": 498,
+        "width": 1132,
+        "height": 940
+      },
+      "chart-panel": {
+        "x": 272,
+        "y": 498,
+        "width": 808,
+        "height": 603
+      },
+      "journal-panel": {
+        "x": 272,
+        "y": 1118,
+        "width": 808,
+        "height": 320
+      },
+      "position-panel": {
+        "x": 1097,
+        "y": 498,
+        "width": 307,
+        "height": 940
+      },
+      "summary-panel": {
+        "x": 272,
+        "y": 1458,
+        "width": 1132,
+        "height": 360
+      }
+    },
+    "paper/mobile": {
+      "capital-context": {
+        "x": 18,
+        "y": 686,
+        "width": 354,
+        "height": 216
+      },
+      "workspace": {
+        "x": 16,
+        "y": 990,
+        "width": 358,
+        "height": 2316
+      },
+      "chart-panel": {
+        "x": 16,
+        "y": 990,
+        "width": 358,
+        "height": 964
+      },
+      "journal-panel": {
+        "x": 16,
+        "y": 1968,
+        "width": 358,
+        "height": 440
+      },
+      "position-panel": {
+        "x": 16,
+        "y": 2422,
+        "width": 358,
+        "height": 885
+      },
+      "summary-panel": {
+        "x": 16,
+        "y": 3327,
+        "width": 358,
+        "height": 631
+      }
+    }
+  },
+  "errors": [],
+  "blocked": [],
+  "intercepted": {
+    "candles": 4,
+    "market-context": 4,
+    "instruments": 4,
+    "check": 4
+  }
+}

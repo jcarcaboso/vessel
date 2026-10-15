@@ -1,9 +1,10 @@
+import type { ManagementEvent } from './management-events'
 import { useState } from 'react'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { VenuesProvider } from '@/api/venues'
 import { render } from '@/test/render'
 import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
@@ -27,7 +28,7 @@ function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     discoverAccounts: vi.fn().mockResolvedValue(discoveryFixture), ...overrides }
 }
 function Panel({ api, records = accounts, changed = vi.fn(), reload = vi.fn() }: {
-  api: WorkspaceApi; records?: BrokerAccount[]; changed?: (message: string) => void; reload?: () => void
+  api: WorkspaceApi; records?: BrokerAccount[]; changed?: (event: ManagementEvent) => void; reload?: () => void
 }) {
   const [filters, setFilters] = useState(emptyAccountFilters)
   const [portfolioFilter, setPortfolioFilter] = useState('')
@@ -74,7 +75,7 @@ describe('Portfolio membership', () => {
     await waitFor(() => expect(api.moveAccounts).toHaveBeenCalledTimes(2))
     expect(api.moveAccounts).toHaveBeenNthCalledWith(1, [otherAccount.id], portfolioFixture.id, expected([otherAccount]))
     expect(api.moveAccounts).toHaveBeenNthCalledWith(2, [accountFixture.id], null, expected([accountFixture]))
-    expect(changed).toHaveBeenCalledWith('Portfolio updated.')
+    expect(changed).toHaveBeenCalledWith({ kind: 'portfolio-updated', id: portfolioFixture.id, message: 'Portfolio updated.' })
   })
   it('rejects tab A removal after tab B moves the displayed A rev1 account to B rev2', async () => {
     let current = { ...accountFixture }
@@ -225,7 +226,7 @@ describe('Portfolio membership', () => {
     await userEvent.selectOptions(screen.getByLabelText('Move to'), otherPortfolio.id)
     await userEvent.click(screen.getByRole('button', { name: 'Move' }))
     await waitFor(() => expect(api.moveAccounts).toHaveBeenCalledExactlyOnceWith([accountFixture.id, otherAccount.id], otherPortfolio.id, expected(accounts)))
-    expect(changed).toHaveBeenCalledWith('2 accounts moved to the portfolio.')
+    expect(changed).toHaveBeenCalledWith({ kind: 'accounts-moved', ids: [accountFixture.id, otherAccount.id], message: '2 accounts moved to the portfolio.' })
     expect(screen.queryByRole('form', { name: 'Move selected accounts' })).not.toBeInTheDocument()
   })
   it('bulk unlinks to a literal null target', async () => {

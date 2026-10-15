@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react'
-import { candleIntervals, type CandleInterval } from '@/api/workspace'
+import { useSyncExternalStore } from 'react'
+import { candleIntervals, type CandleInterval } from '@/api/candles'
 import { isDrawingKind } from '@/components/chart/drawingTools'
 import type { DrawingKind } from '@/components/chart/drawings'
 import { defaultIndicators, migrateLegacyIndicators, normalizeIndicators, type IndicatorSettings } from '@/components/chart/indicators'
@@ -33,9 +33,13 @@ export const defaultChartPreferences: ChartPreferences = {
 const isInterval = (value: unknown): value is CandleInterval => candleIntervals.includes(value as CandleInterval)
 const ordered = (intervals: Iterable<CandleInterval>) => candleIntervals.filter(interval => new Set(intervals).has(interval))
 
+const readStorage = () => {
+  try { return localStorage.getItem(storageKey) } catch { return null }
+}
+
 export function readChartPreferences(): ChartPreferences {
   try {
-    const stored: unknown = JSON.parse(localStorage.getItem(storageKey) ?? 'null')
+    const stored: unknown = JSON.parse(readStorage() ?? 'null')
     if (typeof stored !== 'object' || stored === null) return defaultChartPreferences
     const { interval, favorites, magnet, live, drawingFavorites, toolChoice, indicators, schemaVersion: version } = stored as Record<string, unknown>
     const preferences: ChartPreferences = {
@@ -57,14 +61,30 @@ export function readChartPreferences(): ChartPreferences {
   }
 }
 
+let current: ChartPreferences | undefined
+let storedText: string | null
+const listeners = new Set<() => void>()
+const snapshot = () => {
+  // Re-read browser changes when the first chart mounts, without replacing active charts' shared snapshot.
+  if (!current || (!listeners.size && readStorage() !== storedText)) {
+    current = readChartPreferences()
+    storedText = readStorage()
+  }
+  return current
+}
+const subscribe = (listener: () => void) => {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
+function update(patch: Partial<ChartPreferences>) {
+  const previous = snapshot()
+  current = { ...previous, ...patch, favorites: ordered(patch.favorites ?? previous.favorites) }
+  saveChartPreferences(current)
+  storedText = readStorage()
+  for (const listener of listeners) listener()
+}
+
 export function useChartPreferences() {
-  const [preferences, setPreferences] = useState(readChartPreferences)
-  const update = useCallback((patch: Partial<ChartPreferences>) => {
-    setPreferences(current => {
-      const next = { ...current, ...patch, favorites: ordered(patch.favorites ?? current.favorites) }
-      saveChartPreferences(next)
-      return next
-    })
-  }, [])
-  return [preferences, update] as const
+  return [useSyncExternalStore(subscribe, snapshot), update] as const
 }

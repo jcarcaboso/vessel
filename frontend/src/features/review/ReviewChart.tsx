@@ -1,6 +1,8 @@
 import { useId, useState } from 'react'
 import type { ReviewDocument } from '@/api/review'
-import { decimalLess, reviewDate, reviewMoney, tone } from './format'
+import { reviewDate, reviewMoney } from '@/lib/format'
+import { decimalLess } from '@/lib/decimal'
+import { tone } from './format'
 
 export function ReviewChart({ report }: { report: ReviewDocument }) {
   const [mode, setMode] = useState<'cumulative' | 'daily' | 'drawdown'>('cumulative')
@@ -25,7 +27,7 @@ export function ReviewChart({ report }: { report: ReviewDocument }) {
   return <section className="pr-panel pr-chart">
     <header className="pr-panel-heading">
       <h2>{mode === 'drawdown' ? `${bucketLabel}-closing drawdown` : mode === 'daily' ? `${bucketLabel} P&L` : 'Cumulative P&L'}</h2>
-      <div className="pr-segmented" aria-label="Chart view">
+      <div className="pr-segmented" role="group" aria-label="Chart view">
         {(['cumulative', 'daily', 'drawdown'] as const).map(view => <button key={view} aria-pressed={mode === view} onClick={() => { setMode(view); setHovered(null) }}>{view === 'cumulative' ? 'P&L' : view === 'daily' ? bucketLabel : 'Drawdown'}</button>)}
       </div>
     </header>

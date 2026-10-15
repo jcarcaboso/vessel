@@ -1,4 +1,4 @@
-import { ApiError } from './system'
+import { ApiError } from './errors'
 
 /** Only the development build allows plaintext LAN entry. The API enforces its own environment. */
 export function credentialTransportAllowed(

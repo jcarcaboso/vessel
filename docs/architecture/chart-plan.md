@@ -233,6 +233,21 @@ Verified: backend 553 tests including real PostgreSQL (migration, owner filter, 
 
 The owner clarified that moving a percentage stop or target on the chart must switch it to **price units**, rather than retain a percentage representation. Chart drags now store the actual dragged price with the existing five-significant-figure precision, preserving the exit ID, share and sibling levels. Explicitly changing the price in the chart popover does the same; changing only its share leaves its unit/value unchanged. Undo restores both the previous unit and value; redo restores the price. Later leverage or entry-price changes do not move the chart-chosen price. Existing wrong-side plan validation applies instead of silently clamping a drag at the entry. Unmoved percentage levels retain their leveraged-return meaning. No persisted-plan migration is needed.
 
+### Chart price precision, October 14
+
+The frontend architecture review fixes the popover's S7 rounding defect.
+An explicitly typed valid price stays exactly as entered, including its decimal
+places. A price edit changes a percentage exit to price units; opening the
+popover or changing only its share leaves the original unit and value intact.
+
+Generated prices, including stops and targets added through the popover, use
+the instrument's `priceStep`. The existing five-significant-figure rule is the
+fallback when no tick is available. `PlayChart` passes the tick to `LevelEditor`
+and `addChartExit`; typed prices do not pass through that formatter. This
+follows the typed-versus-chart-generated distinction in
+[venue-instruments.md](venue-instruments.md). No API or persisted-plan change
+is involved.
+
 ### Image markup, October 2
 
 The owner asked to draw over evidence images and keep the marked version, with a switch between original and marked (marked by default).

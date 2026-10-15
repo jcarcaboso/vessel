@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createDraft, createEntry } from './draft'
 import { savedPlayFixture } from '@/test/workspace-fixture'
-import { createPlaysSession, draftFromSaved, hasDraftContent, observedPlayVersion, savedState, startNewPlay } from './saved'
-import { createWorkspaceApi } from '@/api/workspace'
+import { createPlaysSession, draftFromSaved, hasDraftContent, loadSavedPlay, observedPlayVersion, savedState, startNewPlay } from './saved'
+import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 
 describe('Unsaved draft protection', () => {
   it('starts a blank editor from a clean session without retaining the saved Play', () => {
@@ -50,5 +50,33 @@ describe('Unsaved draft protection', () => {
     { entries: [{ ...createEntry(0), stops: [] }] },
   ])('protects plan-only edits %#', change => {
     expect(hasDraftContent({ ...createDraft(), ...change })).toBe(true)
+  })
+})
+
+
+describe('saved-Play observation cancellation', () => {
+  it('passes the same signal to the Play, evidence and image reads', async () => {
+    const controller = new AbortController()
+    const item = { id: 'image', source: 'upload', note: '', markup: null, name: 'image.png',
+      contentType: 'image/png', byteLength: 3, createdAtUtc: '2026-10-14T12:00:00Z' }
+    const methods = { play: vi.fn().mockResolvedValue(savedPlayFixture), evidence: vi.fn().mockResolvedValue([item]),
+      evidenceImage: vi.fn().mockResolvedValue(new Blob(['png'], { type: 'image/png' })) }
+    await loadSavedPlay(methods as unknown as WorkspaceApi, savedPlayFixture.summary.id, controller.signal)
+    expect(methods.play).toHaveBeenCalledWith(savedPlayFixture.summary.id, controller.signal)
+    expect(methods.evidence).toHaveBeenCalledWith(savedPlayFixture.summary.id, controller.signal)
+    expect(methods.evidenceImage).toHaveBeenCalledWith('image', controller.signal)
+  })
+
+  it('does not start image reads when an aborted API ignores cancellation and returns late', async () => {
+    const controller = new AbortController()
+    let finish!: (value: typeof savedPlayFixture) => void
+    const methods = { play: vi.fn(() => new Promise(resolve => { finish = resolve })),
+      evidence: vi.fn().mockResolvedValue([{ id: 'image' }]), evidenceImage: vi.fn() }
+    const result = loadSavedPlay(methods as unknown as WorkspaceApi, savedPlayFixture.summary.id, controller.signal)
+    const rejected = expect(result).rejects.toMatchObject({ name: 'AbortError' })
+    controller.abort()
+    finish(savedPlayFixture)
+    await rejected
+    expect(methods.evidenceImage).not.toHaveBeenCalled()
   })
 })

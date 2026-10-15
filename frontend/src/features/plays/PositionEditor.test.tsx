@@ -1,9 +1,15 @@
-import { useState } from 'react'
+import { useState, type ComponentProps } from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createDraft, createEntry, type PlayDraft } from './draft'
-import { PositionEditor } from './PositionEditor'
+import { PositionEditor as Editor } from './PositionEditor'
+import { useLeverageChange } from './useLeverageChange'
+
+function PositionEditor(props: Omit<ComponentProps<typeof Editor>, 'onLeverageChange'>) {
+  const change = useLeverageChange(props.draft, props.onChange, props.units)
+  return <><Editor {...props} onLeverageChange={change.request} />{change.dialog}</>
+}
 
 function renderEditor(entryCount = 2) {
   const initial = createDraft()

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Portfolio, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 
 const newPortfolio = 'new-portfolio'
 

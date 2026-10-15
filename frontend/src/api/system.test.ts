@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ApiError, getSystem } from './system'
+import { ApiError } from './errors'
+import { getSystem } from './system'
 import { systemFixture } from '@/test/system-fixture'
 import { indexVenue } from '@/test/account-access-fixture'
 

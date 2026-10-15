@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { CandleInterval, VenueCandle, WorkspaceApi } from '@/api/workspace'
+import type { CandleInterval } from '@/api/candles'
+import type { VenueCandle, WorkspaceApi } from '@/api/workspace'
 import { candleCache, type CandleCache, type CandleEntry } from './candleCache'
 export { mergeCandles, upsertCandle, toChartCandle } from './candleCache'
 export type { CandleState } from './candleCache'

@@ -1,0 +1,67 @@
+branch: fe-review/sol-robinhood-sync
+original: 7b8d67bbc146e6b274ced986806b17001091e2c8
+upstream: 87ca53fcc9c0109f242422c0d4adc30cef4820a8
+merge head: 87ca53fcc9c0109f242422c0d4adc30cef4820a8
+backend tracked files checked: 268 byte mismatches: []
+backend indexed differences to upstream: []
+upstream changed non-frontend files: 63 byte mismatches: []
+non-frontend uncommitted edits: []
+package/lockfile differences to original: []
+sensitive lifetimes unchanged from original:
+  frontend/src/features/workspace/ApplicationShell.tsx True
+  frontend/src/features/plays/usePlayExecution.ts True
+  frontend/src/features/plays/EvidencePanel.tsx True
+  frontend/src/features/plays/LevelEditor.tsx True
+  frontend/src/features/plays/levels.ts True
+  frontend/src/features/plays/saved.ts True
+  frontend/src/components/PageErrorBoundary.tsx True
+  frontend/src/features/market/candleCache.ts True
+  frontend/src/api/request.ts True
+upstream frontend inventory:
+  frontend/src/api/system.test.ts reconciled/moved prior PR39 edits
+  frontend/src/api/system.ts reconciled/moved prior PR39 edits
+  frontend/src/api/venues.test.tsx reconciled/moved prior PR39 edits
+  frontend/src/api/venues.ts reconciled/moved prior PR39 edits
+  frontend/src/assets/venues/hyperliquid.svg upstream-exact 
+  frontend/src/assets/venues/lighter-rh.svg upstream-exact 
+  frontend/src/assets/venues/lighter.svg upstream-exact 
+  frontend/src/assets/venues/risex.svg upstream-exact 
+  frontend/src/components/venues/VenueBadge.test.tsx reconciled/moved 
+  frontend/src/components/venues/VenueBadge.tsx upstream-exact 
+  frontend/src/components/venues/venue-badge.css upstream-exact 
+  frontend/src/components/venues/venue-logos.ts reconciled/moved 
+  frontend/src/features/plays/ManualExecutionPanel.test.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/plays/ManualExecutionPanel.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/plays/PlayWorkspace.test.tsx upstream-exact 
+  frontend/src/features/plays/PlayWorkspace.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/plays/PlaysDiary.test.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/plays/PlaysPage.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/plays/plays-workspace.css reconciled/moved prior PR39 edits
+  frontend/src/features/plays/stablecoins.test.ts upstream-exact 
+  frontend/src/features/plays/stablecoins.ts upstream-exact 
+  frontend/src/features/review/ReviewPage.test.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/review/ReviewPage.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/workspace/AccountDetail.test.tsx upstream-exact 
+  frontend/src/features/workspace/AccountDetail.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/workspace/AccountImport.test.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/workspace/AccountRows.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/workspace/AccountsPanel.test.tsx upstream-exact 
+  frontend/src/features/workspace/AccountsPanel.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/workspace/ApplicationShell.test.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/workspace/ApplicationShell.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/workspace/CreateDialogs.test.tsx upstream-exact 
+  frontend/src/features/workspace/CreateDialogs.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/workspace/ManageDialogs.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/workspace/OverviewSummary.test.tsx upstream-exact 
+  frontend/src/features/workspace/OverviewSummary.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/workspace/PortfolioAccounts.tsx upstream-exact 
+  frontend/src/features/workspace/PortfolioMembership.test.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/workspace/WalletAccountImport.tsx reconciled/moved prior PR39 edits
+  frontend/src/features/workspace/accounts.css upstream-exact 
+  frontend/src/features/workspace/application-shell.css reconciled/moved prior PR39 edits
+  frontend/src/features/workspace/format.test.ts reconciled/moved 
+  frontend/src/features/workspace/format.ts reconciled/moved 
+  frontend/src/features/workspace/overview-summary.css upstream-exact 
+  frontend/src/test/account-access-fixture.ts upstream-exact 
+  frontend/src/test/system-fixture.ts upstream-exact 
+PASS: backend bytes and indexed tree match upstream; all upstream non-frontend additions retained exactly.

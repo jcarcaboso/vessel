@@ -12,6 +12,24 @@ function Trigger({ input, label }: { input: NotificationInput; label: string }) 
 afterEach(() => vi.useRealTimers())
 
 describe('popup notifications', () => {
+  it('mounts both live regions before notifications and preserves them through replacement and dismissal', async () => {
+    const { container } = render(<NotificationProvider><Trigger label="first" input={{ message: 'First' }} />
+      <Trigger label="error" input={{ tone: 'error', message: 'Failure' }} /></NotificationProvider>)
+    const regions = [...container.querySelectorAll('[aria-live]')]
+    expect(regions.filter(region => region.getAttribute('aria-live') === 'polite')).toHaveLength(4)
+    expect(regions.filter(region => region.getAttribute('aria-live') === 'assertive')).toHaveLength(4)
+    for (const region of regions) expect(region).toBeEmptyDOMElement()
+    await userEvent.click(screen.getByRole('button', { name: 'first' }))
+    await userEvent.click(screen.getByRole('button', { name: 'error' }))
+    expect(screen.getByRole('status').closest('[aria-live]')).toHaveAttribute('aria-live', 'polite')
+    expect(screen.getByRole('alert').closest('[aria-live]')).toHaveAttribute('aria-live', 'assertive')
+    const dismiss = screen.getAllByRole('button', { name: 'Dismiss notification' })
+    await userEvent.click(dismiss[0]!)
+    await userEvent.click(dismiss[1]!)
+    expect([...container.querySelectorAll('[aria-live]')]).toEqual(regions)
+    for (const region of regions) expect(region).toBeEmptyDOMElement()
+  })
+
   it('stacks notifications, replaces one with the same key and closes on dismiss', async () => {
     const user = userEvent.setup()
     render(<NotificationProvider>

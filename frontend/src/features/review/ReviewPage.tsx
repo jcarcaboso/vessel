@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, Check, ChevronDown, ChevronRight, Info, RefreshCw, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import type { WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { errorMessage } from '@/api/errors'
 import { defaultReviewQuery, reviewPeriods, type ReviewDocument, type ReviewGroup, type ReviewGroupBy, type ReviewQuery } from '@/api/review'
 import { useVenues } from '@/api/venues'
 import { VenueBadge } from '@/components/venues/VenueBadge'
 import { ReviewChart } from './ReviewChart'
 import { ReviewExclusions } from './ReviewExclusions'
-import { negative, reviewDate, reviewMoney, reviewMultiple, reviewPercent, tone } from './format'
+import { reviewDate, reviewMoney, reviewMultiple, reviewPercent } from '@/lib/format'
+import { negative, tone } from './format'
 import './review.css'
 
 const definitions = [
@@ -33,7 +34,7 @@ function useReport(api: WorkspaceApi, query: ReviewQuery, generation: number) {
       if (active) setLoaded({ api, query, generation, value, error: null })
     }).catch(error => {
       if (active) setLoaded(previous => ({ api, query, generation, value: previous?.api === api ? previous.value : null,
-        error: error instanceof ApiError ? error.message : 'The review could not be loaded.' }))
+        error: errorMessage(error, 'The review could not be loaded.') }))
     })
     return () => { active = false; controller.abort() }
   }, [api, query, generation])
@@ -61,7 +62,7 @@ function ReviewPlays({ api, initialQuery, onOpenPlay }: {
     openingRequest.current = controller
     setOpening(id); setOpenError(null)
     try { await onOpenPlay(id, controller.signal) }
-    catch (cause) { if (!controller.signal.aborted) setOpenError(cause instanceof ApiError ? cause.message : 'The Play could not be opened.') }
+    catch (cause) { if (!controller.signal.aborted) setOpenError(errorMessage(cause, 'The Play could not be opened.')) }
     finally { if (!controller.signal.aborted) setOpening(null) }
   }
   return <>
@@ -124,7 +125,7 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay }: {
     {loading && <div className="pr-loading" role="status">Loading review…</div>}
     {error && <div className="pr-empty" role="alert"><p>{error}</p><button className="pr-outline-button" onClick={() => setReload(n => n + 1)}>Retry review</button></div>}
     {report && stats && <>
-      <section className="pr-periods" aria-label="Performance period">{reviewPeriods.map(item => {
+      <section className="pr-periods" role="group" aria-label="Performance period">{reviewPeriods.map(item => {
         const period = report.periods.find(p => p.id === item.id)!
         return <button key={item.id} aria-pressed={query.period === item.id} aria-label={item.label} onClick={() => setQuery(previous => ({ ...previous, period: item.id }))}><span>{item.label}{query.period === item.id && <span className="pr-period-selected"><Check size={12} />Selected</span>}</span><strong className={tone(period.net)}>{reviewMoney(period.net, true)}</strong><small>{period.count} Plays</small></button>
       })}</section>
@@ -146,7 +147,7 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay }: {
         <button onClick={() => setQuery(previous => ({ ...previous, instrument: best.id }))}><span className="pr-insight-icon positive"><ArrowUpRight size={18} /></span><span><small>HIGHEST ASSET P&L</small><strong>{best.name}<b className={tone(best.metrics.net)}>{reviewMoney(best.metrics.net, true)}</b></strong></span><span className="pr-insight-count">{best.metrics.count} Plays<ChevronRight size={14} /></span></button>
         <button onClick={() => setQuery(previous => ({ ...previous, instrument: worst.id }))}><span className="pr-insight-icon negative"><ArrowDownRight size={18} /></span><span><small>LOWEST ASSET P&L</small><strong>{worst.name}<b className={tone(worst.metrics.net)}>{reviewMoney(worst.metrics.net, true)}</b></strong></span><span className="pr-insight-count">{worst.metrics.count} Plays<ChevronRight size={14} /></span></button>
       </div>}
-      <section className="pr-panel pr-breakdown"><header className="pr-panel-heading"><h2>Breakdown</h2><div className="pr-segmented" aria-label="Break down results by">{(['portfolios', 'accounts', 'assets'] as const).map(item => <button key={item} aria-pressed={group === item} onClick={() => setGroup(item)}>{item[0]!.toUpperCase() + item.slice(1)}</button>)}</div></header>
+      <section className="pr-panel pr-breakdown"><header className="pr-panel-heading"><h2>Breakdown</h2><div className="pr-segmented" role="group" aria-label="Break down results by">{(['portfolios', 'accounts', 'assets'] as const).map(item => <button key={item} aria-pressed={group === item} onClick={() => setGroup(item)}>{item[0]!.toUpperCase() + item.slice(1)}</button>)}</div></header>
         <div className="pr-table-scroll"><table className="pr-breakdown-table"><caption className="sr-only">{group} ranked by net closed-play P&L</caption><thead><tr><th>{group === 'portfolios' ? 'Portfolio' : group === 'accounts' ? 'Account' : 'Asset'}</th><th>Plays</th><th>Batting avg.</th><th>Avg. gain / loss</th><th>Profit factor</th><th>Net P&L</th><th><span className="sr-only">Inspect</span></th></tr></thead><tbody>
           {groups.map((row, index) => <tr key={row.id}><th scope="row"><button onClick={() => inspect(row.id, row.name)}><span className="pr-rank">{String(index + 1).padStart(2, '0')}</span><span><strong>{row.name}</strong><small>{groupDetail(row)}{row.metrics.count < 20 ? ' · Small sample' : ''}</small></span></button></th><td>{row.metrics.count}<small>{row.metrics.wins}W · {row.metrics.losses}L · {row.metrics.scratches}S</small></td><td>{reviewPercent(row.metrics.batting, true)}</td><td>{reviewMultiple(row.metrics.payoff)}</td><td>{reviewMultiple(row.metrics.profitFactor)}</td><td className={tone(row.metrics.net)}><strong>{reviewMoney(row.metrics.net, true)}</strong><i className="pr-pnl-bar"><b style={{ width: `${Math.abs(Number(row.metrics.net)) / Math.max(...groups.map(g => Math.abs(Number(g.metrics.net))), 1) * 100}%`, background: Number(row.metrics.net) >= 0 ? 'var(--pr-green)' : 'var(--pr-red)' }} /></i></td><td><button className="pr-row-open" aria-label={`Inspect ${row.name}`} onClick={() => inspect(row.id, row.name)}><ChevronRight size={16} /></button></td></tr>)}
           {!groups.length && <tr><td colSpan={7}><div className="pr-empty"><BarChart3 size={25} /><strong>No scored closed Plays</strong><p>Try a wider period or check the execution coverage below.</p>{filtered && <button className="pr-outline-button" onClick={() => setQuery(defaultReviewQuery)}>Reset view</button>}</div></td></tr>}

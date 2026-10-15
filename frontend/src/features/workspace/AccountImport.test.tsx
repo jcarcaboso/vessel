@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { VenuesProvider } from '@/api/venues'
 import { credentialFixture, discoveryFixture, indexAccount, indexVenue } from '@/test/account-access-fixture'
 import { portfolioFixture } from '@/test/workspace-fixture'
@@ -41,6 +41,47 @@ async function selectMain() {
 }
 
 describe('Wallet account import', () => {
+  it.each(['close', 'unmount', 'API replacement'] as const)('aborts wallet discovery on %s and ignores a late result', async action => {
+    let resolve!: (value: typeof discoveryFixture) => void
+    const api = client({ discoverAccounts: vi.fn().mockImplementation(() => new Promise(accept => { resolve = accept })) })
+    const view = render(<Fixture api={api} />)
+    await userEvent.type(screen.getByLabelText('Public wallet address'), discoveryFixture.address)
+    await userEvent.click(screen.getByRole('button', { name: 'Find wallet' }))
+    const signal = vi.mocked(api.discoverAccounts).mock.calls[0]![2]!
+    expect(signal.aborted).toBe(false)
+    if (action === 'close') {
+      await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Open import' }))
+    } else if (action === 'unmount') view.unmount()
+    else view.rerender(<Fixture api={client()} />)
+    expect(signal.aborted).toBe(true)
+    await act(async () => resolve(discoveryFixture))
+    expect(screen.queryByRole('heading', { name: 'Choose accounts' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    if (action !== 'unmount') expect(screen.getByLabelText('Public wallet address')).toHaveValue('')
+  })
+
+  it.each(['close', 'unmount', 'API replacement'] as const)('aborts token-backed name discovery on %s and ignores a late error', async action => {
+    let reject!: (reason: Error) => void
+    const api = client({ discoverAccounts: vi.fn().mockResolvedValueOnce(discoveryFixture)
+      .mockImplementationOnce(() => new Promise((_accept, fail) => { reject = fail })) })
+    const view = render(<Fixture api={api} />)
+    await discover()
+    await userEvent.type(screen.getByLabelText('Read-only token'), 'ro:test-only')
+    await userEvent.click(screen.getByRole('button', { name: 'Load Lighter names' }))
+    const signal = vi.mocked(api.discoverAccounts).mock.calls[1]![2]!
+    expect(screen.getByLabelText('Read-only token')).toHaveValue('')
+    if (action === 'close') {
+      await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Open import' }))
+    } else if (action === 'unmount') view.unmount()
+    else view.rerender(<Fixture api={client()} />)
+    expect(signal.aborted).toBe(true)
+    await act(async () => reject(new Error('private upstream credential')))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText(/private upstream|Could not load venue names/)).not.toBeInTheDocument()
+  })
+
   it('shows collateral and available balance separately, including zero and exact signed values', async () => {
     const api = client({ discoverAccounts: vi.fn().mockResolvedValue({ ...discoveryFixture, accounts: [
       { ...discoveryFixture.accounts[0], collateralUsd: '400.123456789', availableBalanceUsd: '-12.5000' },
@@ -63,7 +104,7 @@ describe('Wallet account import', () => {
     await userEvent.type(screen.getByLabelText('Read-only token'), 'ro:test-only')
     await userEvent.click(screen.getByRole('button', { name: 'Load Lighter names' }))
     await screen.findByText('Swing / ETH')
-    expect(api.discoverAccounts).toHaveBeenLastCalledWith('lighter', discoveryFixture.address, undefined, 'ro:test-only')
+    expect(api.discoverAccounts).toHaveBeenLastCalledWith('lighter', discoveryFixture.address, expect.any(AbortSignal), 'ro:test-only')
     expect(screen.getByLabelText('Read-only token')).toHaveValue('')
     expect(api.saveAccountCredential).not.toHaveBeenCalled()
     expect(api.createAccount).not.toHaveBeenCalled()
@@ -99,7 +140,7 @@ describe('Wallet account import', () => {
     const api = client()
     render(<Fixture api={api} />)
     await discover()
-    expect(api.discoverAccounts).toHaveBeenCalledWith('lighter', discoveryFixture.address)
+    expect(api.discoverAccounts).toHaveBeenCalledWith('lighter', discoveryFixture.address, expect.any(AbortSignal))
     expect(screen.getByText('Balance unavailable')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Import selected' })).toBeDisabled()
     await selectMain()

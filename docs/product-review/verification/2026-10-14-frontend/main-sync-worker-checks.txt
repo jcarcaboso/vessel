@@ -1,0 +1,91 @@
+Vessel frontend main-sync checks
+Worktree: /tmp/vessel-fe-review/wt/sol-main-sync
+Branch: fe-review/sol-main-sync
+Start: 2026-10-14T21:50:15Z
+Base tip: 695a0f7f6b3e4dba5cf633375c934f9c6207da3f
+Merged upstream: 4f3d3d110753def455cac0caabeee1ffe0828d20
+Node: v24.21.0
+pnpm: 12.8.1
+
+=== pnpm install --frozen-lockfile ===
+Scope: all 2 workspace projects
+✓ Lockfile passes supply-chain policies (verified 10d ago)
+Lockfile is up to date, resolution step is skipped
+Packages are hard linked from the content-addressable store to the virtual store.
+  Content-addressable store is at: /home/ops/.local/share/pnpm/store/v11
+  Virtual store is at:             node_modules/.pnpm
+Packages: +326
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 326, reused 326, downloaded 0, added 326, done
+Done in 697ms using pnpm v12.8.1
+
+=== pnpm --filter vessel-frontend typecheck ===
+$ tsc --noEmit
+=== typecheck exit: 0 ===
+
+=== pnpm --filter vessel-frontend lint ===
+$ eslint . --max-warnings 0
+=== lint exit: 0 ===
+
+=== pnpm --filter vessel-frontend test ===
+$ vitest run
+
+ RUN  v5.0.3 /tmp/vessel-fe-review/wt/sol-main-sync/frontend
+
+
+ Test Files  78 passed (78)
+      Tests  1587 passed (1587)
+   Start at  21:51:06
+   Duration  55.42s (tests 62%, environment 22%, import 6%, setup 5%, transform 4%)
+
+    Isolate  78 workers spawned · ~1.23s startup each (spawn + environment, per file)
+             at least ~12.48s faster with isolate: false — reuses workers across files instead of one per file
+
+=== test exit: 0 ===
+
+=== pnpm --filter vessel-frontend build ===
+$ tsc --noEmit && vite build
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 2135 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                              0.79 kB │ gzip:   0.48 kB
+dist/assets/inter-vietnamese-wght-normal-CBcvBZtf.woff2     10.25 kB
+dist/assets/inter-greek-ext-wght-normal-DlzME5K_.woff2      11.23 kB
+dist/assets/inter-cyrillic-wght-normal-DqGufNeO.woff2       18.74 kB
+dist/assets/inter-greek-wght-normal-CkhJZR-_.woff2          18.99 kB
+dist/assets/inter-cyrillic-ext-wght-normal-BOeWTOD4.woff2   25.96 kB
+dist/assets/inter-latin-wght-normal-Dx4kXJAl.woff2          48.25 kB
+dist/assets/inter-latin-ext-wght-normal-DO1Apj_S.woff2      85.06 kB
+dist/assets/index-gtwR5zdi.css                             179.18 kB │ gzip:  30.73 kB
+dist/assets/lightweight-Cl4j661y.js                        200.62 kB │ gzip:  65.65 kB
+dist/assets/index-C_vXl5_r.js                              807.75 kB │ gzip: 243.39 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 929ms
+=== build exit: 0 ===
+
+=== merge audit and final result ===
+Tip: 92d4a102d3d41249c2d0550320b0644d615275ce
+Parents: 695a0f7f6b3e4dba5cf633375c934f9c6207da3f 4f3d3d110753def455cac0caabeee1ffe0828d20
+Upstream: 4f3d3d110753def455cac0caabeee1ffe0828d20
+Backend HEAD tree: b0e31a3133295f9aad51c061a4ba529c89d4ad94
+Backend upstream tree: b0e31a3133295f9aad51c061a4ba529c89d4ad94
+PASS: backend tree exactly equals origin/main. No backend file was manually edited.
+PASS: working tree clean.
+PASS: merged diff has no whitespace errors.
+Resolved conflicts:
+  frontend/src/api/activity.ts
+  frontend/src/features/workspace/OperationsTable.tsx
+  frontend/src/features/workspace/activity-format.ts
+Full merge audit: all 15 changed paths match the upstream change list. Backend, contract, tests, NativeSelect, filters and CSS match exact upstream bytes. Remaining deltas retain existing shared guards, imported fill types, safe errors and shared decimal/format helpers. Upstream row/text selection, notice, price-return and net-PnL behavior preserved. No Plays, shell or appearance worker files changed.
+Regressions: inherited upstream exact-string/null gross PnL guard cases, before-fee/net-fee display, row keyboard/click behavior, direction-adjusted return precision, partial filtering and UTC dates all pass. Existing architecture tests pass. No additional regression or followup commit needed.
+Checks: frozen-lockfile install PASS; typecheck PASS; lint PASS; test PASS (78 files, 1587 tests); build PASS.
+Bundle: index JS 807.75 kB / gzip 243.39 kB; lightweight JS 200.62 kB / gzip 65.65 kB; CSS 179.18 kB / gzip 30.73 kB. Existing >500 kB chunk warning remains.
+Scope: no .env or owner data read; no venue calls, backend runtime, migrations, delegation, push, PR creation or integration into parent.
+Finished: 2026-10-14T21:52:44Z

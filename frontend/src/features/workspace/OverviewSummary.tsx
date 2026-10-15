@@ -3,11 +3,12 @@ import type { Overview, WorkspaceApi } from '@/api/workspace'
 import type { OverviewQuery, OverviewSummaryDocument, SummaryAmount } from '@/api/overview-summary'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
-import { failure } from '@/features/plays/saved'
+import { errorMessage } from '@/api/errors'
+import { decimalSign } from '@/lib/decimal'
 import { PortfolioIcon } from './PortfolioIcon'
 import { VenueLogo } from '@/components/venues/VenueBadge'
 import { balanceShare } from './overview-share'
-import { money } from './format'
+import { money } from '@/lib/format'
 import './overview-summary.css'
 
 function Coverage({ value, operations = false }: { value: SummaryAmount; operations?: boolean }) {
@@ -18,7 +19,10 @@ function Coverage({ value, operations = false }: { value: SummaryAmount; operati
     {c.reasons.length > 0 && <span className="overview-coverage-limit"> · limited coverage</span>}
   </small>
 }
-const signClass = (value: string | null) => value === null || /^-?0(?:\.0+)?$/.test(value) ? '' : value.startsWith('-') ? 'overview-negative' : 'overview-positive'
+const signClass = (value: string | null) => {
+  const sign = decimalSign(value)
+  return sign === 0 ? '' : sign < 0 ? 'overview-negative' : 'overview-positive'
+}
 export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallback, accountCount }: {
   api: WorkspaceApi; query: OverviewQuery; onQuery: (query: OverviewQuery) => void; reloadGeneration: number; fallback: Overview; accountCount: number
 }) {
@@ -30,7 +34,7 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
     const controller = new AbortController()
     api.overviewSummary(query, controller.signal).then(document => {
       if (!controller.signal.aborted) setState({ api, key, document })
-    }).catch(cause => { if (!controller.signal.aborted) setState({ api, key, error: failure(cause) }) })
+    }).catch(cause => { if (!controller.signal.aborted) setState({ api, key, error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
     return () => controller.abort()
   }, [api, key, query])
   const current = state?.api === api && state.key === key ? state : null

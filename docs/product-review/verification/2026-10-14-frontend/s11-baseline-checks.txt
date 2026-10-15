@@ -1,0 +1,78 @@
+Baseline SHA: d287fbbadd8ea9fee118abc67bf54b31229f38be
+Branch: fe-review/sol-unsaved-work
+v24.21.0
+12.8.1
+zsh:1: no such file or directory: /usr/bin/time
+Scope: all 2 workspace projects
+✓ Lockfile passes supply-chain policies (verified 10d ago)
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages are hard linked from the content-addressable store to the virtual store.
+  Content-addressable store is at: /home/ops/.local/share/pnpm/store/v11
+  Virtual store is at:             node_modules/.pnpm
+Packages: +326
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 326, reused 326, downloaded 0, added 326, done
+Done in 1.6s using pnpm v12.8.1
+pnpm install --frozen-lockfile --offline  0.26s user 0.33s system 34% cpu 1.721 total
+
+BASELINE typecheck
+$ tsc --noEmit
+pnpm --filter vessel-frontend "$check"  11.35s user 0.47s system 171% cpu 6.878 total
+
+BASELINE lint
+$ eslint . --max-warnings 0
+pnpm --filter vessel-frontend "$check"  17.10s user 0.76s system 193% cpu 9.248 total
+
+BASELINE test
+$ vitest run
+
+ RUN  v5.0.3 /tmp/vessel-fe-review/wt/sol-unsaved-work/frontend
+
+
+ Test Files  90 passed (90)
+      Tests  1702 passed (1702)
+   Start at  22:24:31
+   Duration  44.99s (tests 55%, environment 28%, import 7%, setup 6%, transform 3%)
+
+Environment  jsdom was created 90 times · 81.26s total, 28% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+
+pnpm --filter vessel-frontend "$check"  231.70s user 18.17s system 547% cpu 45.626 total
+
+BASELINE build
+$ tsc --noEmit && vite build
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 2145 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                              0.87 kB │ gzip:   0.51 kB
+dist/assets/inter-vietnamese-wght-normal-CBcvBZtf.woff2     10.25 kB
+dist/assets/inter-greek-ext-wght-normal-DlzME5K_.woff2      11.23 kB
+dist/assets/inter-cyrillic-wght-normal-DqGufNeO.woff2       18.74 kB
+dist/assets/inter-greek-wght-normal-CkhJZR-_.woff2          18.99 kB
+dist/assets/inter-cyrillic-ext-wght-normal-BOeWTOD4.woff2   25.96 kB
+dist/assets/inter-latin-wght-normal-Dx4kXJAl.woff2          48.25 kB
+dist/assets/inter-latin-ext-wght-normal-DO1Apj_S.woff2      85.06 kB
+dist/assets/SettingsPage-DZZtynlx.css                        6.41 kB │ gzip:   1.70 kB
+dist/assets/ReviewPage-CSnuDNGf.css                         18.16 kB │ gzip:   4.03 kB
+dist/assets/PlaysPage-DmffgjON.css                          73.93 kB │ gzip:  12.04 kB
+dist/assets/index-5j8bYsSu.css                              74.98 kB │ gzip:  14.48 kB
+dist/assets/sliders-horizontal-CqB7hEVb.js                   0.74 kB │ gzip:   0.40 kB
+dist/assets/triangle-alert-CZwBSKj3.js                       0.80 kB │ gzip:   0.43 kB
+dist/assets/SettingsPage-BUcK9a_R.js                        13.74 kB │ gzip:   4.35 kB
+dist/assets/ReviewPage-B_MS8z3d.js                          29.88 kB │ gzip:   8.23 kB
+dist/assets/check-zjSo1yBB.js                               46.31 kB │ gzip:  15.93 kB
+dist/assets/lightweight-CBU5zrC9.js                        200.64 kB │ gzip:  65.66 kB
+dist/assets/PlaysPage-B1UI82NV.js                          207.29 kB │ gzip:  63.33 kB
+dist/assets/index-flibzVV9.js                              519.02 kB │ gzip: 159.85 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 822ms
+pnpm --filter vessel-frontend "$check"  14.46s user 1.42s system 174% cpu 9.116 total

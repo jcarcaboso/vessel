@@ -2,10 +2,12 @@ import {
   Anchor, Bitcoin, Briefcase, ChartCandlestick, ChartColumn, ChartLine, Coins, Compass, Crown, Flame, Folder, Gem,
   Hourglass, Landmark, Mountain, PiggyBank, Rocket, Shield, Sprout, Target, Timer, TrendingUp, Wallet, Zap, type LucideIcon,
 } from 'lucide-react'
+import { defaultPortfolioIcon, isPortfolioIconKey, type PortfolioIconKey } from '@/api/portfolio-icons'
 
 /**
- * The icons an owner can choose for a portfolio, in picker order. The server accepts only these keys;
- * keep them in step with `PortfolioIcons` in `backend/src/Vessel.Domain/Workspace/Portfolio.cs`.
+ * The label and drawn icon for each portfolio icon key. The keys come from `@/api/portfolio-icons`,
+ * which must match `PortfolioIcons` in `backend/src/Vessel.Domain/Workspace/Portfolio.cs`; the type check
+ * below fails when a key has no icon here or an icon has no key.
  */
 export const portfolioIcons = {
   folder: { label: 'Folder', icon: Folder },
@@ -32,14 +34,7 @@ export const portfolioIcons = {
   mountain: { label: 'Mountain', icon: Mountain },
   sprout: { label: 'Sprout', icon: Sprout },
   crown: { label: 'Crown', icon: Crown },
-} as const satisfies Record<string, { label: string; icon: LucideIcon }>
-
-export type PortfolioIconKey = keyof typeof portfolioIcons
-export const defaultPortfolioIcon: PortfolioIconKey = 'folder'
-export const portfolioIconKeys = Object.keys(portfolioIcons) as PortfolioIconKey[]
-
-export const isPortfolioIconKey = (key: unknown): key is PortfolioIconKey =>
-  typeof key === 'string' && Object.hasOwn(portfolioIcons, key)
+} as const satisfies Record<PortfolioIconKey, { label: string; icon: LucideIcon }>
 
 /** A stored key this browser does not know (or an older server without icons) shows the default folder. */
 export const portfolioIconKey = (key: string | undefined): PortfolioIconKey => isPortfolioIconKey(key) ? key : defaultPortfolioIcon

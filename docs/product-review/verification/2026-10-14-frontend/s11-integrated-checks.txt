@@ -1,0 +1,50 @@
+Integrated source: 42fae7e; frozen-lockfile reinstall, rolldown 1.2.11
+12.8.1
+$ tsc --noEmit
+$ eslint . --max-warnings 0
+$ vitest run
+
+ RUN  v5.0.3 /home/ops/.local/share/t3/worktrees/vessel/t3-frontend-architecture-review/frontend
+
+
+ Test Files  91 passed (91)
+      Tests  1744 passed (1744)
+   Start at  22:56:17
+   Duration  47.02s (tests 59%, environment 25%, import 6%, setup 5%, transform 4%)
+
+    Isolate  91 workers spawned · ~995ms startup each (spawn + environment, per file)
+             at least ~11.94s faster with isolate: false — reuses workers across files instead of one per file
+
+$ tsc --noEmit && vite build
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 2145 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                              0.87 kB │ gzip:   0.52 kB
+dist/assets/inter-vietnamese-wght-normal-CBcvBZtf.woff2     10.25 kB
+dist/assets/inter-greek-ext-wght-normal-DlzME5K_.woff2      11.23 kB
+dist/assets/inter-cyrillic-wght-normal-DqGufNeO.woff2       18.74 kB
+dist/assets/inter-greek-wght-normal-CkhJZR-_.woff2          18.99 kB
+dist/assets/inter-cyrillic-ext-wght-normal-BOeWTOD4.woff2   25.96 kB
+dist/assets/inter-latin-wght-normal-Dx4kXJAl.woff2          48.25 kB
+dist/assets/inter-latin-ext-wght-normal-DO1Apj_S.woff2      85.06 kB
+dist/assets/SettingsPage-DZZtynlx.css                        6.41 kB │ gzip:   1.70 kB
+dist/assets/ReviewPage-CSnuDNGf.css                         18.16 kB │ gzip:   4.03 kB
+dist/assets/PlaysPage-DmffgjON.css                          73.93 kB │ gzip:  12.04 kB
+dist/assets/index-5j8bYsSu.css                              74.98 kB │ gzip:  14.48 kB
+dist/assets/sliders-horizontal-CqB7hEVb.js                   0.74 kB │ gzip:   0.40 kB
+dist/assets/triangle-alert-CZwBSKj3.js                       0.80 kB │ gzip:   0.43 kB
+dist/assets/SettingsPage-ZGBjGipD.js                        13.74 kB │ gzip:   4.35 kB
+dist/assets/ReviewPage-B8bHJDoO.js                          29.88 kB │ gzip:   8.23 kB
+dist/assets/check-zjSo1yBB.js                               46.31 kB │ gzip:  15.93 kB
+dist/assets/lightweight-DxQZkG5P.js                        200.64 kB │ gzip:  65.66 kB
+dist/assets/PlaysPage-hhsXgMHI.js                          207.29 kB │ gzip:  63.33 kB
+dist/assets/index-VM3PHKTn.js                              519.97 kB │ gzip: 160.10 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 812ms

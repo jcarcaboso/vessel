@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { ArrowRightToLine, Camera, ChartNoAxesCombined, ChartSpline, Layers, Maximize2, OctagonX, RefreshCw, Star, Target } from 'lucide-react'
 import { Popover } from 'radix-ui'
-import { candleIntervals, type CandleInterval, type WorkspaceApi } from '@/api/workspace'
+import { candleIntervals, type CandleInterval } from '@/api/candles'
+import type { WorkspaceApi } from '@/api/workspace'
 import { CandleChart, type CandleChartControl } from '@/components/chart/CandleChart'
 import { ChartHeader, type ChartStat } from '@/components/chart/ChartHeader'
 import { ChartIconButton, ChartToolbar, ChartToolbarDivider } from '@/components/chart/ChartToolbar'
@@ -266,7 +267,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   const editedRef = levelEdit ? parseOverlayId(levelEdit.id) : null
   const editedIndex = editedRef ? entries.findIndex(entry => entry.id === editedRef.entryId) : -1
   const levelEditor = levelEdit && editedIndex >= 0 && editable ? <LevelEditor key={levelEdit.id} entries={entries} entry={entries[editedIndex]!}
-    overlayId={levelEdit.id} anchor={levelEdit.anchor} direction={direction} leverage={leverage} onApply={applyEntry}
+    overlayId={levelEdit.id} anchor={levelEdit.anchor} direction={direction} leverage={leverage} priceStep={priceStep} onApply={applyEntry}
     onClose={() => setLevelEdit(null)} /> : null
   const drawingProps = {
     drawings, selectedDrawingId: editor.selectedId, tool: editor.tool, magnet: preferences.magnet,

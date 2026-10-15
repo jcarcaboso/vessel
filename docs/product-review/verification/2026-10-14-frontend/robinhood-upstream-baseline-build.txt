@@ -1,0 +1,42 @@
+Scope: all 2 workspace projects
+✓ Lockfile passes supply-chain policies (verified 10d ago)
+Lockfile is up to date, resolution step is skipped
+Done in 219ms using pnpm v12.8.1
+$ tsc --noEmit && vite build
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 2134 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                              0.79 kB │ gzip:   0.49 kB
+dist/assets/inter-vietnamese-wght-normal-CBcvBZtf.woff2     10.25 kB
+dist/assets/inter-greek-ext-wght-normal-DlzME5K_.woff2      11.23 kB
+dist/assets/inter-cyrillic-wght-normal-DqGufNeO.woff2       18.74 kB
+dist/assets/inter-greek-wght-normal-CkhJZR-_.woff2          18.99 kB
+dist/assets/inter-cyrillic-ext-wght-normal-BOeWTOD4.woff2   25.96 kB
+dist/assets/inter-latin-wght-normal-Dx4kXJAl.woff2          48.25 kB
+dist/assets/inter-latin-ext-wght-normal-DO1Apj_S.woff2      85.06 kB
+dist/assets/index-_frup_lx.css                             183.47 kB │ gzip:  31.46 kB
+dist/assets/lightweight-BMnYA3kc.js                        200.62 kB │ gzip:  65.65 kB
+dist/assets/index-49Zl8C8h.js                              814.73 kB │ gzip: 245.60 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 693ms
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Vessel.Domain -> /tmp/vessel-fe-review/main-baseline/backend/src/Vessel.Domain/bin/Release/net10.0/Vessel.Domain.dll
+  Vessel.Application -> /tmp/vessel-fe-review/main-baseline/backend/src/Vessel.Application/bin/Release/net10.0/Vessel.Application.dll
+  Vessel.Persistence -> /tmp/vessel-fe-review/main-baseline/backend/src/Vessel.Persistence/bin/Release/net10.0/Vessel.Persistence.dll
+  Vessel.Infrastructure -> /tmp/vessel-fe-review/main-baseline/backend/src/Vessel.Infrastructure/bin/Release/net10.0/Vessel.Infrastructure.dll
+  Vessel.Api -> /tmp/vessel-fe-review/main-baseline/backend/src/Vessel.Api/bin/Release/net10.0/Vessel.Api.dll
+  Vessel.Tests -> /tmp/vessel-fe-review/main-baseline/backend/tests/Vessel.Tests/bin/Release/net10.0/Vessel.Tests.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:09.27

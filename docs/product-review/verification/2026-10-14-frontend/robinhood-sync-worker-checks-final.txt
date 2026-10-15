@@ -1,0 +1,63 @@
+2026-10-14T23:33:18Z
+/tmp/vessel-fe-review/wt/sol-robinhood-sync
+fe-review/sol-robinhood-sync
+7b8d67bbc146e6b274ced986806b17001091e2c8
+87ca53fcc9c0109f242422c0d4adc30cef4820a8
+eeabb8a68ade581b5802b166854410960dcec4f1
+v24.21.0
+12.8.1
+===== pnpm --filter vessel-frontend typecheck =====
+$ tsc --noEmit
+===== pnpm --filter vessel-frontend lint =====
+$ eslint . --max-warnings 0
+===== pnpm --filter vessel-frontend test =====
+$ vitest run
+
+ RUN  v5.0.3 /tmp/vessel-fe-review/wt/sol-robinhood-sync/frontend
+
+
+ Test Files  95 passed (95)
+      Tests  1775 passed (1775)
+   Start at  23:33:34
+   Duration  37.30s (tests 60%, environment 26%, import 6%, setup 5%, transform 3%)
+
+Environment  jsdom was created 95 times · 62.42s total, 26% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+
+===== pnpm --filter vessel-frontend build =====
+$ tsc --noEmit && vite build
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 2155 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                              0.95 kB │ gzip:   0.53 kB
+dist/assets/inter-vietnamese-wght-normal-CBcvBZtf.woff2     10.25 kB
+dist/assets/inter-greek-ext-wght-normal-DlzME5K_.woff2      11.23 kB
+dist/assets/inter-cyrillic-wght-normal-DqGufNeO.woff2       18.74 kB
+dist/assets/inter-greek-wght-normal-CkhJZR-_.woff2          18.99 kB
+dist/assets/inter-cyrillic-ext-wght-normal-BOeWTOD4.woff2   25.96 kB
+dist/assets/inter-latin-wght-normal-Dx4kXJAl.woff2          48.25 kB
+dist/assets/inter-latin-ext-wght-normal-DO1Apj_S.woff2      85.06 kB
+dist/assets/VenueBadge-Dvc4KJ9G.css                          0.94 kB │ gzip:   0.40 kB
+dist/assets/SettingsPage-DZZtynlx.css                        6.41 kB │ gzip:   1.70 kB
+dist/assets/ReviewPage-CSnuDNGf.css                         18.16 kB │ gzip:   4.03 kB
+dist/assets/PlaysPage-BYiLQoB4.css                          74.10 kB │ gzip:  12.07 kB
+dist/assets/index-DNl23u5H.css                              78.22 kB │ gzip:  14.99 kB
+dist/assets/sliders-horizontal-D88xEtt8.js                   0.75 kB │ gzip:   0.40 kB
+dist/assets/triangle-alert-xApYaNS3.js                       0.80 kB │ gzip:   0.43 kB
+dist/assets/SettingsPage-LF2dToFm.js                        13.75 kB │ gzip:   4.36 kB
+dist/assets/ReviewPage-DHQAu2FK.js                          30.20 kB │ gzip:   8.38 kB
+dist/assets/VenueBadge-0V9QAkgQ.js                          55.42 kB │ gzip:  19.43 kB
+dist/assets/lightweight-D2NuH4wU.js                        200.64 kB │ gzip:  65.66 kB
+dist/assets/PlaysPage-C5HtQkh_.js                          207.45 kB │ gzip:  63.44 kB
+dist/assets/index-SOMmiHXz.js                              516.22 kB │ gzip: 158.71 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 568ms
+PASS: full frontend check sequence

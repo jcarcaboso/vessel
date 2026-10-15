@@ -1,7 +1,8 @@
+import { manualVenueId } from '@/api/system'
 import { useState, type FormEvent } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { accountIndex } from '@/api/account-access'
-import { ApiError } from '@/api/system'
+import { ApiError, errorMessage } from '@/api/errors'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,7 +14,7 @@ import { PortfolioAccounts } from './PortfolioAccounts'
 import { PortfolioDestination } from './PortfolioDestination'
 import { usePortfolioDestination } from './usePortfolioDestination'
 import { PortfolioIconPicker } from './PortfolioIcon'
-import { defaultPortfolioIcon, type PortfolioIconKey } from './portfolio-icons'
+import { defaultPortfolioIcon, type PortfolioIconKey } from '@/api/portfolio-icons'
 
 export function CreatePortfolioDialog({ open, onOpenChange, api, accounts = [], portfolios = [], onCreated }: {
   open: boolean; onOpenChange: (open: boolean) => void; api: WorkspaceApi; accounts?: BrokerAccount[]; portfolios?: Portfolio[]; onCreated: () => void
@@ -37,7 +38,7 @@ export function CreatePortfolioDialog({ open, onOpenChange, api, accounts = [], 
       else await api.createPortfolio(name.trim(), icon)
       setSelected([]); setName(''); setIcon(defaultPortfolioIcon); onOpenChange(false); onCreated()
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Could not create this portfolio.')
+      setError(errorMessage(cause, 'Could not create this portfolio.'))
       if (cause instanceof ApiError && (cause.status === 409 || cause.status === 412)) {
         setSelected([]); onCreated()
         setError('Account settings changed elsewhere. No portfolio was created or accounts moved. Review the reloaded accounts and select them again before retrying.')
@@ -75,7 +76,7 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
   const choices = venues.creatable()
   const [venueChoice, setVenue] = useState('')
   // The first venue that can read an account, until the owner chooses.
-  const venue = choices.some(v => v.id === venueChoice) ? venueChoice : (choices.find(v => v.id !== 'manual') ?? choices[0])?.id ?? 'manual'
+  const venue = choices.some(v => v.id === venueChoice) ? venueChoice : (choices.find(v => !venues.isManual(v.id)) ?? choices[0])?.id ?? manualVenueId
   const venueInfo = venues.find(venue)
   const needsAddress = venueInfo?.source === 'evm-address'
   const needsIndex = venueInfo?.source === 'account-index'
@@ -92,7 +93,7 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
     if (needsIndex && accounts.some(a => a.venueId === venue && (a.sourceId ?? a.address) === address.trim())) {
       setError('This account is already imported. Manage or re-enable the existing account.'); return
     }
-    if (venue === 'manual' && manualValue.trim() && !/^\d+(\.\d+)?$/.test(manualValue.trim())) { setError('Use a nonnegative balance, or leave it unavailable.'); return }
+    if (venues.isManual(venue) && manualValue.trim() && !/^\d+(\.\d+)?$/.test(manualValue.trim())) { setError('Use a nonnegative balance, or leave it unavailable.'); return }
     setPending(true)
     let portfolioCreated = false
     try {
@@ -102,7 +103,7 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
         ...(needsAddress ? { address: address.trim().toLowerCase() } : needsIndex ? { sourceId: address.trim() } : manualValue.trim() ? { manualAccountValueUsd: manualValue.trim() } : {}),
       })
       setName(''); setAddress(''); setManualValue(''); onOpenChange(false); onCreated()
-    } catch (cause) { setError((portfolioCreated ? 'The new portfolio was created and kept. Retry adding the account into it; a duplicate portfolio will not be created. ' : '') + (cause instanceof ApiError ? cause.message : 'Could not create this account.')) }
+    } catch (cause) { setError((portfolioCreated ? 'The new portfolio was created and kept. Retry adding the account into it; a duplicate portfolio will not be created. ' : '') + (errorMessage(cause, 'Could not create this account.'))) }
     finally { setPending(false) }
   }
   return <Dialog open={open} onOpenChange={next => { if (!pending) { onOpenChange(next); setError(null) } }}>
@@ -112,11 +113,11 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
         <legend>Venue</legend>
         <div className="venue-picker-grid">{choices.map(v => <label key={v.id} className="venue-card">
           <input type="radio" className="sr-only" name="account-venue" value={v.id} checked={venue === v.id}
-            aria-label={v.id === 'manual' ? 'Manual account' : `${v.name} · read-only perps`}
+            aria-label={venues.isManual(v.id) ? 'Manual account' : `${v.name} · read-only perps`}
             onChange={() => { setVenue(v.id); setAddress(''); setError(null) }} />
           <VenueLogo venueId={v.id} size="lg" />
-          <span><strong>{v.id === 'manual' ? 'Manual account' : v.name}</strong>
-            <small>{v.id === 'manual' ? 'Your own record' : `Read-only perps${v.quoteAsset ? ` · ${v.quoteAsset}` : ''}`}</small></span>
+          <span><strong>{venues.isManual(v.id) ? 'Manual account' : v.name}</strong>
+            <small>{venues.isManual(v.id) ? 'Your own record' : `Read-only perps${v.quoteAsset ? ` · ${v.quoteAsset}` : ''}`}</small></span>
         </label>)}</div>
       </fieldset>
       {canDiscover ? <WalletAccountImport key={venue} venueId={venue} api={api} portfolios={portfolios} accounts={accounts}

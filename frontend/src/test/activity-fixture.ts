@@ -1,5 +1,5 @@
 import type { ActivityDocument, ActivityOperation } from '@/api/activity'
-import type { ImportedFill } from '@/api/workspace'
+import type { ImportedFill } from '@/api/fills'
 import { accountFixture } from './workspace-fixture'
 
 export const activityFillFixture: ImportedFill = {

@@ -1,0 +1,1179 @@
+{
+  "sourceCommit": "e1a019abd44c478e6c08a45343b3ef9d3dda1409",
+  "scope": "configured palette contrast, not a complete rendered accessibility audit",
+  "themes": [
+    {
+      "id": "graphite",
+      "scheme": "dark",
+      "checks": [
+        {
+          "label": "Text on background",
+          "ratio": 16.08201325502371,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on panels",
+          "ratio": 14.83465965234349,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on insets",
+          "ratio": 13.571506776841188,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on fields",
+          "ratio": 15.695606879185565,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on background",
+          "ratio": 8.950879334708235,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on panels",
+          "ratio": 8.2566309586962,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on insets",
+          "ratio": 7.55358907018271,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on fields",
+          "ratio": 8.73581441780744,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on background",
+          "ratio": 11.68845454675181,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on panels",
+          "ratio": 10.781874278631433,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on insets",
+          "ratio": 9.863811052542783,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on fields",
+          "ratio": 11.407613255991873,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on background",
+          "ratio": 10.642247688147645,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on panels",
+          "ratio": 9.816813348309662,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on insets",
+          "ratio": 8.980923863832825,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on fields",
+          "ratio": 10.386543859607121,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on background",
+          "ratio": 13.066919497795155,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on panels",
+          "ratio": 12.05342268909083,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on insets",
+          "ratio": 11.027088692478742,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on fields",
+          "ratio": 12.752957500224074,
+          "minimum": 4.5
+        },
+        {
+          "label": "Primary button",
+          "ratio": 11.539243979961329,
+          "minimum": 4.5
+        },
+        {
+          "label": "Focus ring on panels",
+          "ratio": 10.413671165042235,
+          "minimum": 3
+        }
+      ]
+    },
+    {
+      "id": "carbon",
+      "scheme": "dark",
+      "checks": [
+        {
+          "label": "Text on background",
+          "ratio": 16.700744422179977,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on panels",
+          "ratio": 15.53632759615751,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on insets",
+          "ratio": 14.374634333424698,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on fields",
+          "ratio": 16.176051211873677,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on background",
+          "ratio": 9.453783160477567,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on panels",
+          "ratio": 8.794642232184081,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on insets",
+          "ratio": 8.137043030182154,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on fields",
+          "ratio": 9.15677030221103,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on background",
+          "ratio": 12.185449923732728,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on panels",
+          "ratio": 11.335850494799217,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on insets",
+          "ratio": 10.488238273336304,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on fields",
+          "ratio": 11.802615321999722,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on background",
+          "ratio": 11.094758144559103,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on panels",
+          "ratio": 10.321204419192403,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on insets",
+          "ratio": 9.549460030896334,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on fields",
+          "ratio": 10.746190193258114,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on background",
+          "ratio": 13.622527474522132,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on panels",
+          "ratio": 12.672731477211947,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on insets",
+          "ratio": 11.725157046486105,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on fields",
+          "ratio": 13.194543697727122,
+          "minimum": 4.5
+        },
+        {
+          "label": "Primary button",
+          "ratio": 16.176051211873677,
+          "minimum": 4.5
+        },
+        {
+          "label": "Focus ring on panels",
+          "ratio": 13.242690183570218,
+          "minimum": 3
+        }
+      ]
+    },
+    {
+      "id": "midnight",
+      "scheme": "dark",
+      "checks": [
+        {
+          "label": "Text on background",
+          "ratio": 16.94708400830484,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on panels",
+          "ratio": 15.068644099033433,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on insets",
+          "ratio": 13.219095223201426,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on fields",
+          "ratio": 16.16285799951757,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on background",
+          "ratio": 9.784233365296016,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on panels",
+          "ratio": 8.699734437575453,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on insets",
+          "ratio": 7.631915465722053,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on fields",
+          "ratio": 9.33146814165346,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on background",
+          "ratio": 11.77549559341566,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on panels",
+          "ratio": 10.470282209019738,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on insets",
+          "ratio": 9.185143442580992,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on fields",
+          "ratio": 11.230584745850907,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on background",
+          "ratio": 10.721497889611598,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on panels",
+          "ratio": 9.53311117286751,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on insets",
+          "ratio": 8.36300224089734,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on fields",
+          "ratio": 10.225360766902408,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on background",
+          "ratio": 13.164225633966634,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on panels",
+          "ratio": 11.705083353596827,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on insets",
+          "ratio": 10.268383169035854,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on fields",
+          "ratio": 12.55505132866186,
+          "minimum": 4.5
+        },
+        {
+          "label": "Primary button",
+          "ratio": 8.864373600170934,
+          "minimum": 4.5
+        },
+        {
+          "label": "Focus ring on panels",
+          "ratio": 8.480526520425592,
+          "minimum": 3
+        }
+      ]
+    },
+    {
+      "id": "forest",
+      "scheme": "dark",
+      "checks": [
+        {
+          "label": "Text on background",
+          "ratio": 15.909978519553158,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on panels",
+          "ratio": 14.07414935025013,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on insets",
+          "ratio": 11.871572523488199,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on fields",
+          "ratio": 15.14338591704526,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on background",
+          "ratio": 9.955957259560595,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on panels",
+          "ratio": 8.80715390178278,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on insets",
+          "ratio": 7.428851553907814,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on fields",
+          "ratio": 9.476248052116716,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on background",
+          "ratio": 11.449380770068457,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on panels",
+          "ratio": 10.128253456017301,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on insets",
+          "ratio": 8.543201613619544,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on fields",
+          "ratio": 10.897713739792843,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on background",
+          "ratio": 10.424572858936612,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on panels",
+          "ratio": 9.221696632017734,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on insets",
+          "ratio": 7.7785191582225,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on fields",
+          "ratio": 9.922284283993276,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on background",
+          "ratio": 12.799650819848047,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on panels",
+          "ratio": 11.322717818141491,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on insets",
+          "ratio": 9.55073464093017,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on fields",
+          "ratio": 12.182923548901657,
+          "minimum": 4.5
+        },
+        {
+          "label": "Primary button",
+          "ratio": 10.084213190364057,
+          "minimum": 4.5
+        },
+        {
+          "label": "Focus ring on panels",
+          "ratio": 10.13062507964891,
+          "minimum": 3
+        }
+      ]
+    },
+    {
+      "id": "petrol",
+      "scheme": "dark",
+      "checks": [
+        {
+          "label": "Text on background",
+          "ratio": 16.171087016536987,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on panels",
+          "ratio": 13.965324497847746,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on insets",
+          "ratio": 11.734750498466711,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on fields",
+          "ratio": 15.244068682524482,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on background",
+          "ratio": 10.565580401678032,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on panels",
+          "ratio": 9.124418084365253,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on insets",
+          "ratio": 7.6670448782071094,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on fields",
+          "ratio": 9.959901467922826,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on background",
+          "ratio": 11.42614583453957,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on panels",
+          "ratio": 9.867600995276078,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on insets",
+          "ratio": 8.291524891944475,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on fields",
+          "ratio": 10.771134414164,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on background",
+          "ratio": 10.40341762939557,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on panels",
+          "ratio": 8.984374577452003,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on insets",
+          "ratio": 7.54936944482849,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on fields",
+          "ratio": 9.807034784570343,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on background",
+          "ratio": 12.773675697912289,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on panels",
+          "ratio": 11.031325597913858,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on insets",
+          "ratio": 9.269376703621766,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on fields",
+          "ratio": 12.04141623059353,
+          "minimum": 4.5
+        },
+        {
+          "label": "Primary button",
+          "ratio": 11.756527066066653,
+          "minimum": 4.5
+        },
+        {
+          "label": "Focus ring on panels",
+          "ratio": 10.770334276541792,
+          "minimum": 3
+        }
+      ]
+    },
+    {
+      "id": "espresso",
+      "scheme": "dark",
+      "checks": [
+        {
+          "label": "Text on background",
+          "ratio": 16.032833986932026,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on panels",
+          "ratio": 14.300992591368253,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on insets",
+          "ratio": 12.486570742681028,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on fields",
+          "ratio": 15.580145959556761,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on background",
+          "ratio": 10.274730257513008,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on panels",
+          "ratio": 9.164870129059343,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on insets",
+          "ratio": 8.002087860884265,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on fields",
+          "ratio": 9.984622633628321,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on background",
+          "ratio": 11.416353427262903,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on panels",
+          "ratio": 10.18317696776514,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on insets",
+          "ratio": 8.891198200465196,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on fields",
+          "ratio": 11.094012004840714,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on background",
+          "ratio": 10.394501718118791,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on panels",
+          "ratio": 9.271704065728105,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on insets",
+          "ratio": 8.095367365744561,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on fields",
+          "ratio": 10.101012339874165,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on background",
+          "ratio": 12.76272843392097,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on panels",
+          "ratio": 11.384118673461979,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on insets",
+          "ratio": 9.939771820108257,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on fields",
+          "ratio": 12.402372032589366,
+          "minimum": 4.5
+        },
+        {
+          "label": "Primary button",
+          "ratio": 11.641290679424335,
+          "minimum": 4.5
+        },
+        {
+          "label": "Focus ring on panels",
+          "ratio": 11.641290679424335,
+          "minimum": 3
+        }
+      ]
+    },
+    {
+      "id": "aubergine",
+      "scheme": "dark",
+      "checks": [
+        {
+          "label": "Text on background",
+          "ratio": 15.66768557770495,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on panels",
+          "ratio": 14.042216787789238,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on insets",
+          "ratio": 12.210604329593444,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on fields",
+          "ratio": 15.016198371545329,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on background",
+          "ratio": 9.913542574450972,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on panels",
+          "ratio": 8.885046440012259,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on insets",
+          "ratio": 7.726115339808332,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on fields",
+          "ratio": 9.501321757091452,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on background",
+          "ratio": 11.408249550203942,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on panels",
+          "ratio": 10.224682679433052,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on insets",
+          "ratio": 8.891014608375109,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on fields",
+          "ratio": 10.933876447056514,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on background",
+          "ratio": 10.387123200578188,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on panels",
+          "ratio": 9.309494695984311,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on insets",
+          "ratio": 8.095200206562954,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on fields",
+          "ratio": 9.95521014996081,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on background",
+          "ratio": 12.75366883508984,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on panels",
+          "ratio": 11.430519315299955,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on insets",
+          "ratio": 9.939566576288211,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on fields",
+          "ratio": 12.223351065024225,
+          "minimum": 4.5
+        },
+        {
+          "label": "Primary button",
+          "ratio": 9.743188506761847,
+          "minimum": 4.5
+        },
+        {
+          "label": "Focus ring on panels",
+          "ratio": 9.111225213666813,
+          "minimum": 3
+        }
+      ]
+    },
+    {
+      "id": "paper",
+      "scheme": "light",
+      "checks": [
+        {
+          "label": "Text on background",
+          "ratio": 16.025523273592047,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on panels",
+          "ratio": 17.636329048159052,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on insets",
+          "ratio": 15.182820602251086,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on fields",
+          "ratio": 17.636329048159052,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on background",
+          "ratio": 6.425034290146342,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on panels",
+          "ratio": 7.070846733189206,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on insets",
+          "ratio": 6.087173649509053,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on fields",
+          "ratio": 7.070846733189206,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on background",
+          "ratio": 4.9927948338443855,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on panels",
+          "ratio": 5.494645700882076,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on insets",
+          "ratio": 4.730248552384028,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on fields",
+          "ratio": 5.494645700882076,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on background",
+          "ratio": 5.773181512279737,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on panels",
+          "ratio": 6.35347296104185,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on insets",
+          "ratio": 5.469598571524761,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on fields",
+          "ratio": 6.35347296104185,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on background",
+          "ratio": 5.90190628147803,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on panels",
+          "ratio": 6.495136502847718,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on insets",
+          "ratio": 5.591554344477552,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on fields",
+          "ratio": 6.495136502847718,
+          "minimum": 4.5
+        },
+        {
+          "label": "Primary button",
+          "ratio": 14.536753944428726,
+          "minimum": 4.5
+        },
+        {
+          "label": "Focus ring on panels",
+          "ratio": 6.160732132578806,
+          "minimum": 3
+        }
+      ]
+    },
+    {
+      "id": "daylight",
+      "scheme": "light",
+      "checks": [
+        {
+          "label": "Text on background",
+          "ratio": 15.356025406356823,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on panels",
+          "ratio": 16.951724883462475,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on insets",
+          "ratio": 14.404092573181174,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on fields",
+          "ratio": 17.284276169330184,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on background",
+          "ratio": 6.644130126713159,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on panels",
+          "ratio": 7.3345454320062355,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on insets",
+          "ratio": 6.232254954059985,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on fields",
+          "ratio": 7.478431233093553,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on background",
+          "ratio": 4.955039042456283,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on panels",
+          "ratio": 5.469934856956074,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on insets",
+          "ratio": 4.647872036062249,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on fields",
+          "ratio": 5.577241569564887,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on background",
+          "ratio": 5.767241247556229,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on panels",
+          "ratio": 6.366535895718117,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on insets",
+          "ratio": 5.409725148493187,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on fields",
+          "ratio": 6.491431722732716,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on background",
+          "ratio": 6.000413076398487,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on panels",
+          "ratio": 6.6239374425709565,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on insets",
+          "ratio": 5.628442461028466,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on fields",
+          "ratio": 6.753882856927181,
+          "minimum": 4.5
+        },
+        {
+          "label": "Primary button",
+          "ratio": 7.153355004447441,
+          "minimum": 4.5
+        },
+        {
+          "label": "Focus ring on panels",
+          "ratio": 7.015723704085651,
+          "minimum": 3
+        }
+      ]
+    },
+    {
+      "id": "sand",
+      "scheme": "light",
+      "checks": [
+        {
+          "label": "Text on background",
+          "ratio": 13.40634557224006,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on panels",
+          "ratio": 15.094603918032496,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on insets",
+          "ratio": 12.494520847801718,
+          "minimum": 4.5
+        },
+        {
+          "label": "Text on fields",
+          "ratio": 15.10370006739331,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on background",
+          "ratio": 6.371513890774381,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on panels",
+          "ratio": 7.173877327064271,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on insets",
+          "ratio": 5.93815911363509,
+          "minimum": 4.5
+        },
+        {
+          "label": "Secondary text on fields",
+          "ratio": 7.178200372572288,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on background",
+          "ratio": 5.316630284404191,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on panels",
+          "ratio": 5.986152444695515,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on insets",
+          "ratio": 4.955022796525049,
+          "minimum": 4.5
+        },
+        {
+          "label": "Positive on fields",
+          "ratio": 5.989759756091643,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on background",
+          "ratio": 5.971156197154727,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on panels",
+          "ratio": 6.723102671274466,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on insets",
+          "ratio": 5.5650315135330475,
+          "minimum": 4.5
+        },
+        {
+          "label": "Negative on fields",
+          "ratio": 6.72715407576299,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on background",
+          "ratio": 5.864224702308774,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on panels",
+          "ratio": 6.60270531523398,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on insets",
+          "ratio": 5.465372901539196,
+          "minimum": 4.5
+        },
+        {
+          "label": "Warning on fields",
+          "ratio": 6.606684167150794,
+          "minimum": 4.5
+        },
+        {
+          "label": "Primary button",
+          "ratio": 7.655988047755121,
+          "minimum": 4.5
+        },
+        {
+          "label": "Focus ring on panels",
+          "ratio": 5.755516216282629,
+          "minimum": 3
+        }
+      ]
+    }
+  ],
+  "generated": [
+    {
+      "scheme": "dark",
+      "palettes": 500,
+      "minimumContrastMargin": 0.2716222386245537
+    },
+    {
+      "scheme": "light",
+      "palettes": 500,
+      "minimumContrastMargin": 0.0020931207076184677
+    }
+  ],
+  "failures": []
+}

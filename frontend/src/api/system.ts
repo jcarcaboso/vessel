@@ -1,5 +1,10 @@
-import { candleIntervals, type CandleInterval } from './workspace'
-import { isVenueLogoKey, type VenueLogoKey } from '@/components/venues/venue-logos'
+import { candleIntervals, type CandleInterval } from './candles'
+import { ApiError } from './errors'
+import { isGuid, isRecord } from './guards'
+import { createApiCall } from './request'
+import { isVenueLogoKey, type VenueLogoKey } from './venue-logos'
+
+export const manualVenueId = 'manual'
 
 export interface VenueCapabilities {
   sync: boolean; instruments: boolean; orders: boolean; candles: boolean
@@ -35,19 +40,6 @@ export interface SystemInfo {
   marketScope: 'perpetuals'
   allowsConcurrentPlays: true
   venues: VenueInfo[]
-}
-
-export type ApiErrorKind = 'missing-token' | 'unauthorized' | 'unavailable' | 'invalid-response' | 'http'
-
-export class ApiError extends Error {
-  constructor(public readonly kind: ApiErrorKind, message: string, public readonly status?: number) {
-    super(message)
-    this.name = 'ApiError'
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }
 
 const capabilityNames = ['sync', 'instruments', 'orders', 'candles', 'marketContext', 'stream', 'stablecoinWallet']
@@ -89,48 +81,36 @@ function isSystemInfo(value: unknown): value is SystemInfo {
   const ids = venues.map(venue => isRecord(venue) ? venue.id : null)
   return value.application === 'Vessel' && ['foundation', 'core'].includes(String(value.stage)) &&
     value.marketScope === 'perpetuals' && value.allowsConcurrentPlays === true &&
-    typeof value.owner.id === 'string' && /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(value.owner.id) &&
+    isGuid(value.owner.id) &&
     typeof value.owner.displayName === 'string' && value.owner.displayName.trim().length > 0 &&
-    venues.every(isVenue) && new Set(ids).size === ids.length && ids.includes('manual')
+    venues.every(isVenue) && new Set(ids).size === ids.length && ids.includes(manualVenueId)
 }
 
 /** Token stays in the caller's runtime memory; never put it in an environment variable or URL. */
 export async function getSystem(token: string): Promise<SystemInfo> {
-  if (!token.trim()) throw new ApiError('missing-token', 'Enter your Vessel API token.')
-  let response: Response
-  try {
-    response = await fetch('/api/system', {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token.trim()}`, Accept: 'application/json' },
-      credentials: 'omit',
-      cache: 'no-store',
-      redirect: 'error',
-      signal: AbortSignal.timeout(8_000),
-    })
-  } catch {
-    throw new ApiError('unavailable', 'Vessel API is unavailable. Check that the API is running and the proxy target is correct.')
-  }
-  if (response.status === 401 || response.status === 403) {
-    throw new ApiError('unauthorized', 'The API rejected this token. Check the configured server token and try again.', response.status)
-  }
-  if (response.status === 429) {
-    throw new ApiError('unauthorized', 'Too many wrong tokens from this device. Check the configured server token; wrong tokens are refused for a few minutes.', response.status)
-  }
-  if (response.status >= 500) {
-    throw new ApiError('unavailable', 'Vessel API is unavailable. Check the server configuration and try again.', response.status)
-  }
-  if (!response.ok) throw new ApiError('http', `The API request failed with HTTP ${response.status}.`, response.status)
-  let body: unknown
-  try {
-    body = await response.json()
-  } catch {
-    throw new ApiError('invalid-response', 'The API returned an invalid system response.')
-  }
-  if (!isSystemInfo(body)) throw new ApiError('invalid-response', 'The API returned an incompatible system contract.')
+  const body = await createApiCall(token)('/api/system', {
+    timeout: 8_000, validate: isSystemInfo,
+    unavailable: 'Vessel API is unavailable. Check that the API is running and the proxy target is correct.',
+    invalidJson: 'The API returned an invalid system response.',
+    noContent: 'The API returned an invalid system response.',
+    invalidData: 'The API returned an incompatible system contract.',
+    httpError: response => {
+      if (response.status === 401 || response.status === 403) {
+        return new ApiError('unauthorized', 'The API rejected this token. Check the configured server token and try again.', response.status)
+      }
+      if (response.status === 429) {
+        return new ApiError('unauthorized', 'Too many wrong tokens from this device. Check the configured server token; wrong tokens are refused for a few minutes.', response.status)
+      }
+      if (response.status >= 500) {
+        return new ApiError('unavailable', 'Vessel API is unavailable. Check the server configuration and try again.', response.status)
+      }
+      return new ApiError('http', `The API request failed with HTTP ${response.status}.`, response.status)
+    },
+  })
   return { ...body, venues: body.venues.map(withKnownLogo) }
 }
 
-/** An unknown, malformed or missing logo is not an incompatible contract: the venue keeps working with the generic icon. */
+/** Unknown or malformed logo keys keep the venue usable with a generic icon. */
 function withKnownLogo(venue: VenueInfo): VenueInfo {
   const { logo, ...rest } = venue as VenueInfo & { logo?: unknown }
   return isVenueLogoKey(logo) ? { ...rest, logo } : rest

@@ -32,21 +32,19 @@ type IconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-label
 export const ChartIconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function ChartIconButton(
   { label, icon, pressed, disabledReason, description, tooltipSide = 'bottom', className, disabled, ...props }, ref) {
   const detail = disabled && disabledReason ? disabledReason : description
-  return <Tooltip.Provider delayDuration={250} skipDelayDuration={400}>
-    <Tooltip.Root>
-      <Tooltip.Trigger asChild>
-        <span className="chart-icon-tip">
-          <button ref={ref} type="button" className={['chart-icon-button', className].filter(Boolean).join(' ')}
-            aria-label={label} aria-pressed={pressed} disabled={disabled} {...props}>{icon}</button>
-        </span>
-      </Tooltip.Trigger>
-      <Tooltip.Portal>
-        <Tooltip.Content className="chart-tooltip" side={tooltipSide} sideOffset={6} collisionPadding={8}>
-          <strong>{label}</strong>{detail && <span>{detail}</span>}
-        </Tooltip.Content>
-      </Tooltip.Portal>
-    </Tooltip.Root>
-  </Tooltip.Provider>
+  return <Tooltip.Root>
+    <Tooltip.Trigger asChild>
+      <span className="chart-icon-tip">
+        <button ref={ref} type="button" className={['chart-icon-button', className].filter(Boolean).join(' ')}
+          aria-label={label} aria-pressed={pressed} disabled={disabled} {...props}>{icon}</button>
+      </span>
+    </Tooltip.Trigger>
+    <Tooltip.Portal>
+      <Tooltip.Content className="chart-tooltip" side={tooltipSide} sideOffset={6} collisionPadding={8}>
+        <strong>{label}</strong>{detail && <span>{detail}</span>}
+      </Tooltip.Content>
+    </Tooltip.Portal>
+  </Tooltip.Root>
 })
 
 export interface ChartMenuOption<T extends string> {

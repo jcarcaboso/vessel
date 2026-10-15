@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MarketContext, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError, errorMessage } from '@/api/errors'
 import { candleCache } from './candleCache'
 
 /**
@@ -9,40 +9,42 @@ import { candleCache } from './candleCache'
  */
 export function useMarketContext(api: WorkspaceApi, accountId: string, instrument: string, enabled = true) {
   const key = `${accountId}|${instrument}`
-  const [state, setState] = useState<{ key: string; context: MarketContext | null; error: string | null }>({ key, context: null, error: null })
+  const scope = useMemo(() => ({ api, accountId, instrument, enabled }), [api, accountId, instrument, enabled])
+  const [state, setState] = useState<{ scope: typeof scope; context: MarketContext | null; error: string | null }>({ scope, context: null, error: null })
   const controller = useRef<AbortController | null>(null)
-  if (state.key !== key) setState({ key, context: null, error: null })
+  const active = useRef<typeof scope | null>(null)
+
+  /** Replaces the statistics with a streamed or REST observation unless a newer one is already shown. */
+  const apply = useCallback((context: MarketContext) => {
+    if (!enabled || active.current !== scope || context.instrument !== instrument) return
+    setState(previous => previous.scope === scope && previous.context &&
+      Date.parse(previous.context.observedAt) > Date.parse(context.observedAt) ? previous : { scope, context, error: null })
+  }, [enabled, instrument, scope])
 
   const load = useCallback(() => {
+    if (!enabled || active.current !== scope) return
     controller.current?.abort()
-    if (!enabled) return
     const abort = new AbortController()
     controller.current = abort
     api.marketContext(accountId, instrument, abort.signal).then(context => {
-      if (!abort.signal.aborted) setState({ key, context, error: null })
+      if (!abort.signal.aborted) apply(context)
     }, (error: unknown) => {
       if (abort.signal.aborted) return
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) candleCache(api).invalidate()
       if (error instanceof ApiError && (error.status === 404 || error.status === 409)) candleCache(api).invalidate(accountId)
-      if (!abort.signal.aborted) setState(previous => ({ key, context: previous.key === key ? previous.context : null,
-        error: error instanceof ApiError ? error.message : 'Market statistics could not be loaded.' }))
+      if (!abort.signal.aborted) setState(previous => ({ scope, context: previous.scope === scope ? previous.context : null,
+        error: errorMessage(error, 'Market statistics could not be loaded.') }))
     })
-  }, [api, accountId, instrument, key, enabled])
-
-  /** Replaces the statistics with a streamed observation unless a newer one is already shown. */
-  const apply = useCallback((context: MarketContext) => {
-    if (context.instrument !== instrument) return
-    setState(previous => previous.key === key && previous.context &&
-      Date.parse(previous.context.observedAt) > Date.parse(context.observedAt) ? previous : { key, context, error: null })
-  }, [instrument, key])
+  }, [api, accountId, instrument, enabled, scope, apply])
 
   useEffect(() => {
+    active.current = scope
     const unsubscribe = candleCache(api).onInvalidate(accountId, () => controller.current?.abort())
     load()
-    return () => { unsubscribe(); controller.current?.abort() }
-  }, [load, api, accountId])
+    return () => { active.current = null; unsubscribe(); controller.current?.abort() }
+  }, [load, api, accountId, scope])
 
-  return { ...(state.key === key ? state : { context: null, error: null }), refresh: load, apply }
+  return { key, context: state.scope === scope ? state.context : null, error: state.scope === scope ? state.error : null, refresh: load, apply }
 }
 
 const decimals = (value: string) => value.split('.')[1]?.length ?? 0

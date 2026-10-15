@@ -1,0 +1,9 @@
+
+ RUN  v5.0.3 /tmp/vessel-fe-review/wt/sol-robinhood-sync/frontend
+
+
+ Test Files  18 passed (18)
+      Tests  328 passed (328)
+   Start at  23:32:18
+   Duration  26.07s (tests 72%, environment 14%, transform 5%, import 5%, setup 3%)
+

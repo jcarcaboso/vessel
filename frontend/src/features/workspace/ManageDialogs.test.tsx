@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
 
@@ -33,7 +33,7 @@ describe('Management dialogs', () => {
     expect(within(icons).getByRole('radio', { name: 'Rocket' })).toBeChecked()
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
     await waitFor(() => expect(api.updatePortfolio).toHaveBeenCalledWith(portfolioFixture.id, { name: 'Swing trading', icon: 'rocket' }))
-    expect(changed).toHaveBeenCalledWith('Portfolio updated.')
+    expect(changed).toHaveBeenCalledWith({ kind: 'portfolio-updated', id: portfolioFixture.id, message: 'Portfolio updated.' })
   })
   it('keeps an icon this browser does not know when only the name changes', async () => {
     const api = client()
@@ -54,8 +54,8 @@ describe('Management dialogs', () => {
     await waitFor(() => expect(api.updatePortfolio).toHaveBeenCalledWith(portfolioFixture.id, { name: 'Swing trading', icon: 'folder' }))
   })
   it('requires a second explicit portfolio-delete confirmation and explains retained accounts', async () => {
-    const api = client()
-    render(<ManagePortfolioDialog portfolio={portfolioFixture} api={api} onClose={vi.fn()} onChanged={vi.fn()} />)
+    const api = client(), changed = vi.fn()
+    render(<ManagePortfolioDialog portfolio={portfolioFixture} api={api} onClose={vi.fn()} onChanged={changed} />)
     await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
     expect(api.deletePortfolio).not.toHaveBeenCalled()
     expect(screen.getByText(/account records, imported executions, snapshots and plays are kept/)).toBeInTheDocument()
@@ -64,6 +64,7 @@ describe('Management dialogs', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
     await userEvent.click(screen.getByRole('button', { name: 'Delete portfolio' }))
     await waitFor(() => expect(api.deletePortfolio).toHaveBeenCalledWith(portfolioFixture.id))
+    expect(changed).toHaveBeenCalledWith({ kind: 'portfolio-deleted', id: portfolioFixture.id, message: 'Portfolio deleted. Its accounts are now available in All accounts.' })
   })
   it('saves rename, unlink and disable in a single settings request', async () => {
     const api = client(), close = vi.fn()
@@ -102,6 +103,14 @@ describe('Management dialogs', () => {
       expectedRevision: 1,
     }))
   })
+  it('reports permanent account deletion by kind and ID, separately from its message', async () => {
+    const api = client(), changed = vi.fn()
+    render(<ManageAccountDialog account={accountFixture} portfolios={[portfolioFixture]} api={api} onClose={vi.fn()} onChanged={changed} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Delete account' }))
+    await waitFor(() => expect(changed).toHaveBeenCalledWith({ kind: 'account-deleted', id: accountFixture.id, message: 'Account and its retained imported records deleted.' }))
+  })
+
   it('requires permanent-delete confirmation and retains dialog on a linked-play conflict', async () => {
     const api = client({ deleteAccount: vi.fn().mockRejectedValue(new ApiError('http', 'Account has linked plays. Disable it instead.', 409)) })
     const close = vi.fn()

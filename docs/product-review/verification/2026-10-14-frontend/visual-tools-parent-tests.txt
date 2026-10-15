@@ -1,0 +1,75 @@
+✔ matrix preserves 40 pages and adds 36 controls across both themes and viewports (2.244408ms)
+✔ capture rejects missing capture (0.796029ms)
+✔ capture rejects duplicate capture (0.734042ms)
+✔ capture rejects unexpected capture (0.386378ms)
+✔ capture rejects console error (0.213896ms)
+✔ capture rejects page/readiness error (0.175454ms)
+✔ capture rejects external request (0.208858ms)
+✔ capture rejects overflow (0.21787ms)
+✔ comparison accepts complete extended or retained legacy matrices (7.46086ms)
+✔ comparison fails a missing image in input 0 (3.617551ms)
+✔ comparison fails an empty image in input 0 (3.197743ms)
+✔ comparison fails an empty folder in input 0 (3.116457ms)
+✔ comparison fails a missing image in input 1 (3.34528ms)
+✔ comparison fails an empty image in input 1 (3.364681ms)
+✔ comparison fails an empty folder in input 1 (3.29427ms)
+✔ comparison fails missing directory and extra after image (3.712648ms)
+✔ comparison rejects a failed or incomplete report, not just files (4.724905ms)
+✔ metrics distinguish exact equality, below-threshold changes and summed alpha differences (0.489318ms)
+✔ exact delta 24 is not identical even with zero tolerance changes (0.345807ms)
+✔ dimension changes are never labeled identical; invalid buffers fail (0.147674ms)
+✔ CLI rejects nonexistent/empty inputs before requiring Playwright (36.546922ms)
+✔ fixture import performs no config or database reads; diagnostic PNG is deterministic (172.500083ms)
+✔ fixture supplement reuses normalized server marks and refuses altered evidence (225.38405ms)
+✔ actual browser decoder rejects corrupt PNG inputs (1506.363532ms)
+graphite-desktop-account-detail.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-accounts.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-activity.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-overview.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-plays-editor.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-plays-list.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-plays-manual.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-portfolios.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-review.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-desktop-settings.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-account-detail.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-accounts.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-activity.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-overview.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-plays-editor.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-plays-list.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-plays-manual.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-portfolios.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-review.png: exact 100.000% changed; tolerance >24: 0.000% changed
+graphite-mobile-settings.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-account-detail.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-accounts.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-activity.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-overview.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-plays-editor.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-plays-list.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-plays-manual.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-portfolios.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-review.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-desktop-settings.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-account-detail.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-accounts.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-activity.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-overview.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-plays-editor.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-plays-list.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-plays-manual.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-portfolios.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-review.png: exact 100.000% changed; tolerance >24: 0.000% changed
+paper-mobile-settings.png: exact 100.000% changed; tolerance >24: 0.000% changed
+✔ actual browser comparison reports low-delta differences and emits exact diff images (1224.751622ms)
+✔ comparison rejects a missing report and a legacy/extended matrix mismatch (22.5237ms)
+✔ CLI refuses to overwrite an input folder (55.895495ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3352.976366

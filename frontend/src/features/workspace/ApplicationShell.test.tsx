@@ -2,13 +2,13 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { systemFixture } from '@/test/system-fixture'
 import { reviewFixture } from '@/test/review-fixture'
 import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, playApiStubs, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { ApplicationShell } from './ApplicationShell'
 import { activityFixture, operationFixture } from '@/test/activity-fixture'
-import { retrospectiveFixture, retrospectiveSavedFixture } from './retrospective.fixtures'
+import { retrospectiveFixture, retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
@@ -207,7 +207,7 @@ describe('Main application shell', () => {
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api()} />)
     await screen.findByText('Start with your accounts.')
     await userEvent.click(screen.getByRole('button', { name: 'New play' }))
-    expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('')
+    expect(await screen.findByRole('textbox', { name: 'Play title' })).toHaveValue('')
     await userEvent.click(screen.getByRole('button', { name: 'Add entry' }))
     await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
     await userEvent.click(screen.getByRole('button', { name: 'New play' }))
@@ -271,7 +271,7 @@ describe('Main application shell', () => {
     expect(client.updateAccount).toHaveBeenLastCalledWith(accountFixture.id, expect.objectContaining({ expectedRevision: 3, isEnabled: true }))
     await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
     await userEvent.click(screen.getByRole('button', { name: 'New play' }))
-    await userEvent.selectOptions(screen.getByLabelText('Account'), accountFixture.id)
+    await userEvent.selectOptions(await screen.findByLabelText('Account'), accountFixture.id)
     expect(screen.getByTestId('capital-context')).toHaveTextContent('Second balance$1,250.12')
   })
   it('resets a portfolio filter whose portfolio disappeared on reload', async () => {
@@ -690,6 +690,11 @@ describe('Main application shell', () => {
     await screen.findByRole('alert')
     await userEvent.click(screen.getByRole('link', { name: 'Settings' }))
     expect(await screen.findByRole('heading', { name: 'Private session' })).toBeInTheDocument()
+    const capabilities = screen.getByRole('heading', { name: 'Venue capabilities' }).closest('section')!
+    expect(within(capabilities).getByText('Lighter · Robinhood')).toBeInTheDocument()
+    expect(capabilities.querySelector('[data-logo="lighter-rh"] img')).not.toBeNull()
+    expect(capabilities.querySelector('[data-logo="manual"] svg')).not.toBeNull()
+    expect(capabilities.querySelector('[data-logo="generic"] svg')).not.toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Disconnect session' }))
     expect(disconnect).toHaveBeenCalledOnce()
   })

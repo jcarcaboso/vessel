@@ -1,10 +1,11 @@
+import { errorMessage } from '@/api/errors'
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
 import type { SavedPlay } from '@/api/plays'
 import type { ManualExecutionCorrection, ManualExecutions } from '@/api/diary'
 import { Button } from '@/components/ui/button'
 import { emptyManualDraft, hasManualDraft, manualCorrectionDraft, manualRequest, type ManualExecutionDraft } from './manual'
-import { failure, type SavedState } from './saved'
+import type { SavedState } from './saved'
 import type { DraftEntry } from './draft'
 import { nominalStablecoins } from './stablecoins'
 
@@ -55,12 +56,12 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
     return true
   }, [api])
   useEffect(() => {
-    if (!playId || !api.manualExecutions) return
+    if (!playId) return
     const controller = new AbortController()
     api.manualExecutions(playId, controller.signal).then(result => {
       if (controller.signal.aborted) return
       acceptLedger(result)
-    }).catch(cause => { if (!controller.signal.aborted) setError(failure(cause)) })
+    }).catch(cause => { if (!controller.signal.aborted) setError(errorMessage(cause, 'The change could not be completed. Try again.')) })
     return () => controller.abort()
   }, [api, playId, reload, version, acceptLedger])
 
@@ -68,7 +69,6 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
   const canAdd = !!summary && ['planned', 'open'].includes(summary.status)
   const canCorrect = !!summary && ['open', 'closed'].includes(summary.status)
   const permitted = enabled && !dirty && (form.executionId ? canCorrect : canAdd)
-  const available = !!(api.manualExecutions && api.addManualExecution && api.correctManualExecution)
   const change = (patch: Partial<ManualExecutionDraft>) => {
     if (submission.current || pending) return
     const { attempt: _attempt, ...current } = form
@@ -78,7 +78,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
   }
   async function submit(event: FormEvent) {
     event.preventDefault()
-    if (!saved || !permitted || !available || pending || submission.current) return
+    if (!saved || !permitted || pending || submission.current) return
     const request = manualRequest(form, saved.summary.version, saved.summary.direction, entries.map(entry => entry.id))
     if ('error' in request) { setError(request.error); return }
     const finish = onBegin()
@@ -89,8 +89,8 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
     setBusy(true); setError(null)
     try {
       const result = form.executionId
-        ? await api.correctManualExecution!(saved.summary.id, form.executionId, request.input as ManualExecutionCorrection)
-        : await api.addManualExecution!(saved.summary.id, request.input)
+        ? await api.correctManualExecution(saved.summary.id, form.executionId, request.input as ManualExecutionCorrection)
+        : await api.addManualExecution(saved.summary.id, request.input)
       if (latest.current.api !== api || latest.current.playId !== saved.summary.id) return
       // The shell guards these callbacks by Play identity and mount lifetime.
       // Closing a journal tab must not lose the successful result or leave its input queued.
@@ -98,7 +98,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
       // An older replay still confirms this frozen request succeeded, but cannot supply current totals.
       onChange(emptyManualDraft())
     } catch (cause) {
-      if (alive.current && latest.current.api === api) setError(failure(cause))
+      if (alive.current && latest.current.api === api) setError(errorMessage(cause, 'The change could not be completed. Try again.'))
     } finally {
       // Page actions must unlock even if the Execution tab was closed during the request.
       finish()
@@ -118,9 +118,8 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
     {!enabled ? <p role="status">This account is unavailable or disabled. Manual execution changes are blocked.</p>
       : !saved || summary?.status === 'draft' ? <p role="status">Save the Play, then plan it before recording an execution.</p>
       : summary?.status === 'paused' || summary?.status === 'cancelled' ? <p role="status">Recording requires a Planned or Open Play. Closed Plays allow corrections only.</p> : null}
-    {!available && <p role="status">Manual execution API is unavailable.</p>}
     {dirty && <p role="status">Save the Play changes before changing executions.</p>}
-    {saved && available && <Button type="button" size="sm" variant="outline" disabled={pending}
+    {saved && <Button type="button" size="sm" variant="outline" disabled={pending}
       onClick={() => { setError(null); setReload(value => value + 1) }}>Reload manual ledger</Button>}
     {error && <p className="error" role="alert">{error} After a version conflict, reload the ledger and review the facts before editing and resubmitting.</p>}
     {ledger && <>
@@ -150,7 +149,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
         </li>)}</ol>
       </details>
     </>}
-    {available && (canAdd || hasManualDraft(form)) && <form onSubmit={event => { void submit(event) }} noValidate aria-label={form.executionId ? 'Correct manual execution' : 'Record manual execution'}>
+    {(canAdd || hasManualDraft(form)) && <form onSubmit={event => { void submit(event) }} noValidate aria-label={form.executionId ? 'Correct manual execution' : 'Record manual execution'}>
       <fieldset disabled={!permitted || pending}><legend>{form.executionId ? 'Correct execution' : 'Record execution'}</legend>
         <div className="manual-fields">
           <label htmlFor={`${id}-role`}>Role<select id={`${id}-role`} value={form.role} disabled={!!form.executionId}

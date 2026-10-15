@@ -1,0 +1,26 @@
+{
+  "databaseContainer": "vessel-fe-review-20261014",
+  "databaseName": "vesselfe",
+  "apiBind": "127.0.0.1:47305",
+  "processes": [
+    {
+      "pid": 2048997,
+      "proxyEnvironment": {
+        "HTTP_PROXY": "http://127.0.0.1:9",
+        "HTTPS_PROXY": "http://127.0.0.1:9",
+        "ALL_PROXY": "http://127.0.0.1:9",
+        "NO_PROXY": "127.0.0.1,localhost"
+      }
+    },
+    {
+      "pid": 2049110,
+      "proxyEnvironment": {
+        "HTTP_PROXY": "http://127.0.0.1:9",
+        "HTTPS_PROXY": "http://127.0.0.1:9",
+        "ALL_PROXY": "http://127.0.0.1:9",
+        "NO_PROXY": "127.0.0.1,localhost"
+      }
+    }
+  ],
+  "guard": "HTTP(S) requests use unreachable loopback proxy; browser separately rejects external origins and intercepts venue-touching routes. This is not a network namespace firewall."
+}

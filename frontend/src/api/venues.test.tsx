@@ -2,10 +2,20 @@ import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { VenuesProvider, Venues, useVenues } from './venues'
 import { systemFixture } from '@/test/system-fixture'
+import { manualVenueId } from './system'
 
 const venues = new Venues(systemFixture.venues)
 
 describe('Venues', () => {
+  it('identifies the manual descriptor by its reserved ID, not its name or capabilities', () => {
+    expect(venues.isManual(manualVenueId)).toBe(true)
+    expect(venues.isManual('hyperliquid')).toBe(false)
+    expect(venues.isManual('unknown-venue')).toBe(false)
+    const renamed = new Venues(systemFixture.venues.map(venue => ({ ...venue, name: 'Manual' })))
+    expect(renamed.creatable().map(venue => venue.id)).toEqual(['hyperliquid', 'lighter-rh', manualVenueId])
+    expect(renamed.isManual('hyperliquid')).toBe(false)
+  })
+
   it('names venues and falls back to the ID for unknown ones', () => {
     expect(venues.name('hyperliquid')).toBe('Hyperliquid')
     expect(venues.name('manual')).toBe('Manual')
@@ -38,6 +48,13 @@ describe('Venues', () => {
     expect(venues.quote('hyperliquid')).toBe('USDC')
     expect(venues.quote('lighter-rh')).toBe('USDG')
     expect(venues.quote('manual')).toBeNull()
+  })
+
+  it('labels venue values with the descriptor quote and keeps the USD fallback', () => {
+    expect(venues.valueUnit('hyperliquid')).toBe('USDC')
+    expect(venues.valueUnit('lighter-rh')).toBe('USDG')
+    expect(venues.valueUnit(manualVenueId)).toBe('USD')
+    expect(venues.valueUnit('unknown-venue')).toBe('USD')
   })
 
   it('builds a trade link only for venue instruments with a safe contract ID', () => {

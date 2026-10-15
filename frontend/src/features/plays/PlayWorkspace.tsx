@@ -11,8 +11,8 @@ import { captureFileName, createEvidence, evidenceLimits } from './evidence'
 import { DirectionToggle } from './DirectionToggle'
 import { InstrumentPicker } from './InstrumentPicker'
 import { pairLabel, useInstrumentCatalog } from './instruments'
-import { keepPercentLevelPrices, leverageOf, percentLevels } from './levels'
-import { LeverageChangeDialog } from './LeverageChangeDialog'
+import { leverageOf } from './levels'
+import { useLeverageChange } from './useLeverageChange'
 import { defaultSizeUnits, estimatedLiquidation, playBudget, type SizeUnits } from './sizing'
 import { planSuggestions } from './suggestions'
 import { SuggestionsPanel } from './Suggestions'
@@ -120,17 +120,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
 
   // Suggestions sit in their own panel above the workspace; the fields only carry a marker.
   const leverage = leverageOf(draft.leverage)
-  // An accepted leverage applies like a preset: with percent levels it first asks how they follow.
-  const [pendingLeverage, setPendingLeverage] = useState<number | null>(null)
-  function acceptLeverage(next: number) {
-    if (percentLevels(draft.entries).length) setPendingLeverage(next)
-    else onChange({ ...draft, leverage: String(next) })
-  }
-  function finishLeverage(keep?: 'prices' | 'percentages') {
-    if (keep && pendingLeverage !== null) onChange({ ...draft, leverage: String(pendingLeverage),
-      entries: keep === 'prices' ? keepPercentLevelPrices(draft.entries, leverage, pendingLeverage) : draft.entries })
-    setPendingLeverage(null)
-  }
+  const leverageChange = useLeverageChange(draft, onChange, units)
   const balance = account?.balanceUsd != null && Number(account.balanceUsd) > 0 ? Number(account.balanceUsd) : null
   const available = account?.availableStablecoinNominalUsd ?? null
   const suggestions = sizing && !readOnly ? planSuggestions({ draft, leverage, maxLeverage, maintenanceMargin, priceStep, sizing, units, balance,
@@ -214,9 +204,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
     <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} retrospective={retrospective} />
     {suggestions && sizing && onRiskChange && <SuggestionsPanel plan={suggestions} sizing={sizing} draft={draft} leverage={leverage} units={units}
       onSize={size => onChange({ ...draft, size })} onLevel={acceptLevel} onRiskChange={onRiskChange}
-      onLeverage={acceptLeverage} />}
-    {pendingLeverage !== null && <LeverageChangeDialog draft={draft} from={leverage} to={pendingLeverage} units={units}
-      onKeepPrices={() => finishLeverage('prices')} onKeepPercentages={() => finishLeverage('percentages')} onCancel={() => finishLeverage()} />}
+      onLeverage={next => leverageChange.request(String(next))} />}
+    {leverageChange.dialog}
     <div className="workspace" data-testid="workspace">
       <div ref={leftColumn} className="left-column" data-testid="left-column">
         <ChartPanel entries={retrospective ? [] : draft.entries} selectedId={selectedId} onSelect={id => {
@@ -241,8 +230,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       {retrospective ? <section className="panel retrospective-position" aria-label="No original plan"><h2>No original plan</h2>
         <p>This completed operation was recorded retrospectively. Execution facts and review are kept without invented sizing, leverage, entries or risk.</p></section>
         : readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
-        <PositionEditor draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} units={units} availableBudget={available} checkBudget={false} />
-      </fieldset> : <PositionEditor draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId}
+        <PositionEditor onLeverageChange={leverageChange.request} draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} units={units} availableBudget={available} checkBudget={false} />
+      </fieldset> : <PositionEditor onLeverageChange={leverageChange.request} draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId}
         maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} instrumentName={instrumentName} units={units} availableBudget={available} checkBudget={status === 'draft'}
         marks={marks} />}
     </div>

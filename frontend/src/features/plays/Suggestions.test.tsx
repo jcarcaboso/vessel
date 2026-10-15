@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { render, renderHook, screen, waitFor, within } from '@testing-library/react'
+import { renderHook, screen, waitFor, within } from '@testing-library/react'
+import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { SizingDocument } from '@/api/sizing'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import type { WorkspaceApi } from '@/api/workspace'
 import { accountFixture, portfolioFixture, sizingFixture } from '@/test/workspace-fixture'
 import { createDraft, createExit, type DraftExit, type PlayDraft } from './draft'
@@ -131,7 +132,7 @@ describe('suggestions panel', () => {
     expect(screen.getByTestId('size-suggestion')).toHaveTextContent('833.33 quote units')
   })
 
-  it('asks about percent levels before a suggested leverage applies', async () => {
+  it.each(['prices', 'percentages'] as const)('asks once about percent levels before a suggested leverage applies, keeping %s', async keep => {
     const user = userEvent.setup()
     const onDraft = vi.fn<(draft: PlayDraft) => void>()
     render(<Workspace initial={plan({}, exit('95'), exit('20', 'percent'))} available="1000" onDraft={onDraft} />)
@@ -140,9 +141,10 @@ describe('suggestions panel', () => {
     const dialog = await screen.findByRole('dialog')
     expect(onDraft).not.toHaveBeenCalled()
     // Keeping prices rescales the 20% target at 1× to 60% at 3×.
-    await user.click(within(dialog).getByRole('button', { name: 'Keep prices' }))
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    await user.click(within(dialog).getByRole('button', { name: keep === 'prices' ? 'Keep prices' : 'Keep % and move the levels' }))
     expect(onDraft.mock.lastCall?.[0]).toMatchObject({ leverage: '3' })
-    expect(onDraft.mock.lastCall?.[0].entries[0]!.targets[0]).toMatchObject({ unit: 'percent', value: '60' })
+    expect(onDraft.mock.lastCall?.[0].entries[0]!.targets[0]).toMatchObject({ unit: 'percent', value: keep === 'prices' ? '60' : '20' })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })

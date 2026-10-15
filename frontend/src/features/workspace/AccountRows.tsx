@@ -3,7 +3,7 @@ import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { VenueLogo } from '@/components/venues/VenueBadge'
 import { ArrowUpRight, Pencil, RefreshCw } from 'lucide-react'
-import { accountStatus, accountStatusTone, money, shortSource, time } from './format'
+import { accountStatus, accountStatusTone, money, shortSource, time } from '@/lib/format'
 import './accounts.css'
 
 export function AccountRows({ accounts, portfolioNames, refreshing, selection, onDetail, onSync, onManage }: {

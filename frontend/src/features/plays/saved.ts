@@ -1,11 +1,10 @@
 import type { WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { emptyStructuredReview, hasStructuredReview, type PlanEntry, type PlayFields, type PlayPlan, type PlaySummary, type SavedEvidence, type SavedPlay } from '@/api/plays'
 import { isChartDrawing, type ChartDrawing } from '@/components/chart/drawings'
 import { createDraft, createEvidenceId, type DraftEvidence, type PlayDraft } from './draft'
 import { hasManualDraft, type ManualExecutionDraft } from './manual'
 
-export const failure = (cause: unknown) => cause instanceof ApiError ? cause.message : 'The change could not be completed. Try again.'
 
 /** What was last saved, to tell unsaved edits and plan changes (which need a reason) apart. */
 export interface SavedState {
@@ -35,8 +34,11 @@ export function observedPlayVersion(session: PlaysSession, api: WorkspaceApi) {
 
 /** A new editor must never replace unsaved work, including changes to a saved Play. */
 export function startNewPlay(session: PlaysSession): PlaysSession {
-  const unsaved = (session.saved ? isDirty(session.draft, session.saved) : hasDraftContent(session.draft)) || hasManualDraft(session.manual)
-  return { ...(unsaved ? session : createPlaysSession()), view: 'editor' }
+  return { ...(hasUnsavedPlayWork(session) ? session : createPlaysSession()), view: 'editor' }
+}
+
+export function hasUnsavedPlayWork(session: PlaysSession) {
+  return (session.saved ? isDirty(session.draft, session.saved) : hasDraftContent(session.draft)) || hasManualDraft(session.manual)
 }
 
 export function hasDraftContent(draft: PlayDraft) {
@@ -117,8 +119,10 @@ export function draftEvidenceFromSaved(item: SavedEvidence, image: Blob): DraftE
 /** Loads a saved Play with its evidence images. */
 export async function loadSavedPlay(api: WorkspaceApi, id: string, signal?: AbortSignal) {
   const [play, items] = await Promise.all([api.play(id, signal), api.evidence(id, signal)])
+  signal?.throwIfAborted()
   if (play.summary.id !== id) throw new ApiError('invalid-response', 'The API returned a different Play. Your current work was kept.')
   const evidence = await Promise.all(items.map(async item => draftEvidenceFromSaved(item, await api.evidenceImage(item.id, signal))))
+  signal?.throwIfAborted()
   const draft = draftFromSaved(play, evidence)
   return { draft, saved: savedState(play, draft) }
 }

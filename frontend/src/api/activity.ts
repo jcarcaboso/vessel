@@ -1,4 +1,5 @@
-import type { ImportedFill } from './workspace'
+import { isImportedFill, type ImportedFill } from './fills'
+import { isCount, isFilledText, isGuid, isIsoTimestamp, isListOf, isNonNegativeDecimal, isNullOr, isPlainDecimal, isRecord } from './guards'
 
 export interface OperationFill {
   /** The untouched retained fact. Allocation fields describe only this operation's share. */
@@ -46,39 +47,36 @@ export interface ActivityDocument {
   coverage: { accountId: string; contractId: string | null; notice: string }[]
   scopeNote: string
 }
-const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
-const text = (v: unknown, max = 2000): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
-const guid = (v: unknown): v is string => text(v) && /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(v)
-const decimal = (v: unknown): v is string => text(v, 160) && /^-?\d+(\.\d+)?$/.test(v)
-const unsigned = (v: unknown) => decimal(v) && !v.startsWith('-')
-const nullableDecimal = (v: unknown) => v === null || unsigned(v)
-const date = (v: unknown): v is string => text(v, 64) && /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(v) && Number.isFinite(Date.parse(v))
-const count = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
-const notices = (v: unknown): v is string[] => Array.isArray(v) && v.length <= 100 && v.every(n => text(n))
+/** Activity allows longer decimal strings than most endpoints. */
+const decimalLength = 160
 
-export function isActivityDocument(value: unknown, isFill: (value: unknown) => value is ImportedFill): value is ActivityDocument {
-  if (!object(value) || !Array.isArray(value.operations) || value.operations.length > 500 ||
-    !count(value.totalOperationCount) || !count(value.retainedFillCount) || !count(value.omittedOperationCount) ||
-    value.totalOperationCount !== value.operations.length + value.omittedOperationCount || !text(value.scopeNote, 4000) ||
-    !Array.isArray(value.coverage) || !value.coverage.every(c => object(c) && guid(c.accountId) &&
-      (c.contractId === null || text(c.contractId, 128)) && text(c.notice))) return false
+/** `{account GUID}:long` or `:short`, as Activity and retrospective previews identify an operation. */
+export const isOperationId = (v: unknown): v is string =>
+  isFilledText(v, 48) && /^[\da-f-]{36}:(long|short)$/.test(v) && isGuid(v.slice(0, 36))
+
+export function isActivityDocument(value: unknown): value is ActivityDocument {
+  if (!isRecord(value) || !Array.isArray(value.operations) || value.operations.length > 500 ||
+    !isCount(value.totalOperationCount) || !isCount(value.retainedFillCount) || !isCount(value.omittedOperationCount) ||
+    value.totalOperationCount !== value.operations.length + value.omittedOperationCount || !isFilledText(value.scopeNote, 4000) ||
+    !Array.isArray(value.coverage) || !value.coverage.every(c => isRecord(c) && isGuid(c.accountId) &&
+      isNullOr(c.contractId, x => isFilledText(x, 128)) && isFilledText(c.notice, 2000))) return false
   let fillRows = 0
   for (const op of value.operations) {
-    if (!object(op) || !text(op.id, 48) || !/^[\da-f-]{36}:(long|short)$/.test(op.id) || !guid(op.id.slice(0, 36)) ||
-      !guid(op.accountId) || !text(op.contractId, 128) || !['long', 'short', null].includes(op.direction as string | null) ||
-      !['open', 'closed', 'incomplete'].includes(String(op.status)) || !date(op.lastOccurredAtUtc) ||
-      !(op.openedAtUtc === null || date(op.openedAtUtc)) || !(op.closedAtUtc === null || date(op.closedAtUtc)) ||
-      !['quantity', 'totalEnteredQuantity', 'totalExitedQuantity', 'openQuantity', 'averageEntryPrice', 'averageExitPrice'].every(k => nullableDecimal(op[k])) ||
-      !['entryOrderCount', 'exitOrderCount', 'fillCount', 'omittedFillCount'].every(k => count(op[k])) ||
-      !decimal(op.reportedClosedPnlUsd) || !(op.grossClosedPnlUsd === null || decimal(op.grossClosedPnlUsd)) ||
-      !decimal(op.stablecoinFeesNominalUsd) || !(op.netResultUsd === null || decimal(op.netResultUsd)) ||
-      !['gross', 'net-of-fee', 'mixed'].includes(String(op.pnlBasis)) || !(op.playId === null || guid(op.playId)) ||
-      !['linked', 'unassigned', 'mixed'].includes(String(op.playAssociation)) || !notices(op.coverage) ||
-      !Array.isArray(op.otherFees) || !op.otherFees.every(f => object(f) && text(f.token, 64) && decimal(f.amount)) ||
+    if (!isRecord(op) || !isOperationId(op.id) ||
+      !isGuid(op.accountId) || !isFilledText(op.contractId, 128) || !['long', 'short', null].includes(op.direction as string | null) ||
+      !['open', 'closed', 'incomplete'].includes(String(op.status)) || !isIsoTimestamp(op.lastOccurredAtUtc) ||
+      !isNullOr(op.openedAtUtc, isIsoTimestamp) || !isNullOr(op.closedAtUtc, isIsoTimestamp) ||
+      !['quantity', 'totalEnteredQuantity', 'totalExitedQuantity', 'openQuantity', 'averageEntryPrice', 'averageExitPrice'].every(k => isNullOr(op[k], x => isNonNegativeDecimal(x, decimalLength))) ||
+      !['entryOrderCount', 'exitOrderCount', 'fillCount', 'omittedFillCount'].every(k => isCount(op[k])) ||
+      !isPlainDecimal(op.reportedClosedPnlUsd, decimalLength) || !isNullOr(op.grossClosedPnlUsd, x => isPlainDecimal(x, decimalLength)) ||
+      !isPlainDecimal(op.stablecoinFeesNominalUsd, decimalLength) || !isNullOr(op.netResultUsd, x => isPlainDecimal(x, decimalLength)) ||
+      !['gross', 'net-of-fee', 'mixed'].includes(String(op.pnlBasis)) || !isNullOr(op.playId, isGuid) ||
+      !['linked', 'unassigned', 'mixed'].includes(String(op.playAssociation)) || !isListOf(op.coverage, n => isFilledText(n, 2000), 100) ||
+      !Array.isArray(op.otherFees) || !op.otherFees.every(f => isRecord(f) && isFilledText(f.token, 64) && isPlainDecimal(f.amount, decimalLength)) ||
       !Array.isArray(op.fills) || op.fills.length > 200 || (op.fillCount as number) !== op.fills.length + (op.omittedFillCount as number) ||
       (op.fillCount as number) === 0 || (op.entryOrderCount as number) > (op.fillCount as number) || (op.exitOrderCount as number) > (op.fillCount as number) ||
-      op.fills.some(f => !object(f) || !isFill(f.fill) || f.fill.accountId !== op.accountId || f.fill.contractId !== op.contractId ||
-        !['entry', 'exit', 'unknown'].includes(String(f.role)) || !decimal(f.quantity) || f.role !== 'unknown' && !unsigned(f.quantity) || !decimal(f.fee) || !decimal(f.closedPnlUsd)) ||
+      op.fills.some(f => !isRecord(f) || !isImportedFill(f.fill) || f.fill.accountId !== op.accountId || f.fill.contractId !== op.contractId ||
+        !['entry', 'exit', 'unknown'].includes(String(f.role)) || !isPlainDecimal(f.quantity, decimalLength) || f.role !== 'unknown' && !isNonNegativeDecimal(f.quantity, decimalLength) || !isPlainDecimal(f.fee, decimalLength) || !isPlainDecimal(f.closedPnlUsd, decimalLength)) ||
       (op.playAssociation === 'linked') !== (op.playId !== null)) return false
     if (op.status === 'incomplete') {
       if (!op.coverage.length) return false

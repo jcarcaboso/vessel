@@ -57,7 +57,8 @@ function InstrumentSearch({ id, choices, value, selected, disabled, loading, onS
   loading: boolean
   onSelect: (contractId: string) => void
 }) {
-  const listId = `${id}-list`
+  const listId = `${id.replace(/[^a-zA-Z0-9_-]/g, '')}-list`
+  const optionId = (contractId: string) => `${listId}-option-${Array.from(contractId, character => character.codePointAt(0)!.toString(16)).join('-')}`
   const display = selected ? pairLabel(selected) : value
   const [query, setQuery] = useState<string | null>(null)
   const [active, setActive] = useState(0)
@@ -88,7 +89,7 @@ function InstrumentSearch({ id, choices, value, selected, disabled, loading, onS
 
   return <div className="instrument-search" data-open={open}>
     <Input id={id} role="combobox" aria-label="Perpetual instrument" aria-expanded={open} aria-controls={listId}
-      aria-autocomplete="list" aria-activedescendant={open && highlighted ? `${listId}-${highlighted.contractId}` : undefined}
+      aria-autocomplete="list" aria-activedescendant={open && highlighted ? optionId(highlighted.contractId) : undefined}
       autoComplete="off" spellCheck={false} disabled={disabled} aria-busy={loading}
       placeholder={loading ? 'Loading venue instruments…' : choices.length ? 'Search, e.g. BTC' : 'Catalogue unavailable'}
       value={open ? query : display}
@@ -98,7 +99,7 @@ function InstrumentSearch({ id, choices, value, selected, disabled, loading, onS
       onChange={event => { setQuery(event.target.value); setActive(0) }}
       onBlur={close} onKeyDown={onKeyDown} />
     {open && <ul id={listId} role="listbox" aria-label="Perpetual instruments" className="instrument-options">
-      {results.map(instrument => <li key={instrument.contractId} id={`${listId}-${instrument.contractId}`} role="option"
+      {results.map(instrument => <li key={instrument.contractId} id={optionId(instrument.contractId)} role="option"
         aria-selected={instrument === highlighted} data-current={instrument.contractId === value}
         // Pointer down keeps focus in the input, so blur does not close the list before the click lands.
         onPointerDown={event => event.preventDefault()} onClick={() => choose(instrument)}>

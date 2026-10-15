@@ -18,6 +18,7 @@ This repository contains the approved Graphite prototype and the React/Vite/Type
 - [First visual direction](docs/design/concept-01.md)
 - [Approved baseline and implementation handoff](docs/design/approved-baseline.md)
 - [Prototype scope and LAN operation](docs/prototype.md)
+- [Frontend guide for newcomers](docs/architecture/frontend-guide.md) and [frontend review and improvement backlog](docs/architecture/frontend-review.md)
 - [Backend guide for newcomers](docs/architecture/backend-guide.md) and [backend review and improvement backlog](docs/architecture/backend-review.md)
 - [Stack and architecture discussion draft](docs/architecture/proposal.md)
 - [Runtime and persistence research](docs/architecture/runtime-persistence-research.md)

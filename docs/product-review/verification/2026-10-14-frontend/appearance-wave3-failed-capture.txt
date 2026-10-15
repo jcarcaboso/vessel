@@ -1,0 +1,8 @@
+Browser/network/render errors before capture
++ actual - expected
+
++ [
++   'graphite/desktop: request failed /api/plays: net::ERR_ABORTED'
++ ]
+- []
+

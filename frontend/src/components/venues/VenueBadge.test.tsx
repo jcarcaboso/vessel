@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { screen } from '@testing-library/react'
 import { render } from '@/test/render'
 import { VenueBadge, VenueLogo } from './VenueBadge'
-import { isVenueLogoKey, venueLogoKeys, venueLogos } from './venue-logos'
+import { isVenueLogoKey, venueLogoKeys } from '@/api/venue-logos'
+import { venueLogos } from './venue-logos'
 
 describe('VenueBadge', () => {
   it('shows the bundled logo next to the descriptor name, with a decorative image', () => {

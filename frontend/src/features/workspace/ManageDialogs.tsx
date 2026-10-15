@@ -1,6 +1,7 @@
+import type { ManagementEvent } from './management-events'
 import { useState, type FormEvent } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError, errorMessage } from '@/api/errors'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -10,16 +11,15 @@ import { VenueBadge } from '@/components/venues/VenueBadge'
 import { AccountCredential } from './AccountCredential'
 import { PortfolioAccounts } from './PortfolioAccounts'
 import { PortfolioIconPicker } from './PortfolioIcon'
-import { defaultPortfolioIcon, type PortfolioIconKey } from './portfolio-icons'
+import { defaultPortfolioIcon, type PortfolioIconKey } from '@/api/portfolio-icons'
 
 const noAccounts: BrokerAccount[] = []
 const noPortfolios: Portfolio[] = []
 
-const failure = (cause: unknown) => cause instanceof ApiError ? cause.message : 'The change could not be confirmed. Reload current settings before retrying.'
 
 export function ManagePortfolioDialog({ portfolio, accounts = noAccounts, portfolios = noPortfolios, focusAccounts = false, api, onClose, onChanged, onStale }: {
   portfolio: Portfolio; accounts?: BrokerAccount[]; portfolios?: Portfolio[]; focusAccounts?: boolean; api: WorkspaceApi
-  onClose: () => void; onChanged: (message: string) => void; onStale?: () => void
+  onClose: () => void; onChanged: (event: ManagementEvent) => void; onStale?: () => void
 }) {
   const [baseline, setBaseline] = useState(accounts.filter(a => a.portfolioId === portfolio.id).map(a => a.id))
   const [selected, setSelected] = useState(baseline)
@@ -57,9 +57,9 @@ export function ManagePortfolioDialog({ portfolio, accounts = noAccounts, portfo
       const expected = (ids: string[]) => ids.map(accountId => ({ accountId, settingsRevision: membershipRevisions[accountId]! }))
       if (added.length) await api.moveAccounts(added, portfolio.id, expected(added))
       if (removed.length) await api.moveAccounts(removed, null, expected(removed))
-      onChanged('Portfolio updated.'); onClose()
+      onChanged({ kind: 'portfolio-updated', id: portfolio.id, message: 'Portfolio updated.' }); onClose()
     } catch (cause) {
-      setError('Some changes may have saved. Reload accounts before retrying. ' + failure(cause)); setNeedsReload(true); onStale?.()
+      setError('Some changes may have saved. Reload accounts before retrying. ' + errorMessage(cause, 'The change could not be confirmed. Reload current settings before retrying.')); setNeedsReload(true); onStale?.()
       if (cause instanceof ApiError && (cause.status === 409 || cause.status === 412)) {
         setError('Account settings changed elsewhere. The conflicting membership request moved no accounts. Earlier changes may have saved. Reload accounts and review before retrying.')
         try { await readAccounts() }
@@ -79,15 +79,15 @@ export function ManagePortfolioDialog({ portfolio, accounts = noAccounts, portfo
     setPending(true); setError(null)
     try {
       await readAccounts(); setNeedsReload(false); onStale?.()
-    } catch (cause) { setError(failure(cause)) }
+    } catch (cause) { setError(errorMessage(cause, 'The change could not be confirmed. Reload current settings before retrying.')) }
     finally { setPending(false) }
   }
   async function remove() {
     setPending(true); setError(null)
     try {
       await api.deletePortfolio(portfolio.id)
-      onChanged('Portfolio deleted. Its accounts are now available in All accounts.'); onClose()
-    } catch (cause) { setError(failure(cause)) }
+      onChanged({ kind: 'portfolio-deleted', id: portfolio.id, message: 'Portfolio deleted. Its accounts are now available in All accounts.' }); onClose()
+    } catch (cause) { setError(errorMessage(cause, 'The change could not be confirmed. Reload current settings before retrying.')) }
     finally { setPending(false) }
   }
   return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>
@@ -113,7 +113,7 @@ export function ManagePortfolioDialog({ portfolio, accounts = noAccounts, portfo
 
 export function ManageAccountDialog({ account, portfolios, api, onClose, onChanged, onStale }: {
   account: BrokerAccount; portfolios: Portfolio[]; api: WorkspaceApi
-  onClose: () => void; onChanged: (message: string) => void; onStale?: () => void
+  onClose: () => void; onChanged: (event: ManagementEvent) => void; onStale?: () => void
 }) {
   const venues = useVenues()
   const [credentialPending, setCredentialPending] = useState(false)
@@ -136,7 +136,7 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
       setReloadedPortfolios({ source: portfolios, options: currentPortfolios })
       setName(current.name); setPortfolioId(current.portfolioId ?? '')
       setEnabled(current.isEnabled !== false); setRevision(current.settingsRevision); setConflict(false)
-    } catch (cause) { setError(failure(cause)) }
+    } catch (cause) { setError(errorMessage(cause, 'The change could not be confirmed. Reload current settings before retrying.')) }
     finally { setPending(false) }
   }
   async function save(event: FormEvent) {
@@ -147,10 +147,10 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
     setPending(true)
     try {
       await api.updateAccount(account.id, { name: name.trim(), portfolioId: portfolioId || null, isEnabled: enabled, expectedRevision: revision })
-      onChanged(enabled ? 'Account settings saved.' : 'Account disabled. Its retained imports are hidden until enabled again.')
+      onChanged({ kind: 'account-updated', id: account.id, message: enabled ? 'Account settings saved.' : 'Account disabled. Its retained imports are hidden until enabled again.' })
       onClose()
     } catch (cause) {
-      setError(failure(cause))
+      setError(errorMessage(cause, 'The change could not be confirmed. Reload current settings before retrying.'))
       // Refresh the shell too, so reopening this dialog does not reuse the stale revision.
       if (cause instanceof ApiError && (cause.status === 409 || cause.status === 412)) { setConflict(true); onStale?.() }
     }
@@ -159,8 +159,8 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
   async function remove() {
     setPending(true); setError(null)
     try {
-      await api.deleteAccount(account.id); onChanged('Account and its retained imported records deleted.'); onClose()
-    } catch (cause) { setError(failure(cause)) }
+      await api.deleteAccount(account.id); onChanged({ kind: 'account-deleted', id: account.id, message: 'Account and its retained imported records deleted.' }); onClose()
+    } catch (cause) { setError(errorMessage(cause, 'The change could not be confirmed. Reload current settings before retrying.')) }
     finally { setPending(false) }
   }
   return <Dialog open onOpenChange={next => { if (!next && !pending && !credentialPending) onClose() }}>

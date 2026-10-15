@@ -5,7 +5,7 @@ import { ChevronDown, ChevronRight, Inbox } from 'lucide-react'
 import { ActivityTable } from './ActivityTable'
 import { OperationDirection } from './OperationDirection'
 import { duration, operationDates, operationPriceReturn, operationStatus, resultSign } from './activity-format'
-import { amount, money } from './format'
+import { amount, money } from '@/lib/format'
 import './activity-operations.css'
 
 function Result({ value }: { value: string | null }) {

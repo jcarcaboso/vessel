@@ -1,4 +1,5 @@
 import { NotebookPen, type LucideIcon } from 'lucide-react'
+import type { VenueLogoKey } from '@/api/venue-logos'
 import hyperliquidLogo from '@/assets/venues/hyperliquid.svg'
 import lighterLogo from '@/assets/venues/lighter.svg'
 import lighterRobinhoodLogo from '@/assets/venues/lighter-rh.svg'
@@ -17,10 +18,4 @@ export const venueLogos = {
   'lighter-rh': { label: 'Lighter on Robinhood Chain', src: lighterRobinhoodLogo },
   risex: { label: 'RISEx', src: risexLogo },
   manual: { label: 'Manual', icon: NotebookPen },
-} as const satisfies Record<string, VenueLogo>
-
-export type VenueLogoKey = keyof typeof venueLogos
-export const venueLogoKeys = Object.keys(venueLogos) as VenueLogoKey[]
-
-export const isVenueLogoKey = (key: unknown): key is VenueLogoKey =>
-  typeof key === 'string' && Object.hasOwn(venueLogos, key)
+} as const satisfies Record<VenueLogoKey, VenueLogo>

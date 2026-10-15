@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { DrawingController, type DrawingSpace } from './drawingController'
 import type { ChartDrawing } from './drawings'
 import { FrameEdit, roundedLevelPrice } from './frameEdit'
-import { testFrames } from './testFrames'
+import { testFrames } from '@/test/testFrames'
 import { useChartHistory } from './useChartHistory'
 import { useDrawingEditor } from './useDrawingEditor'
 

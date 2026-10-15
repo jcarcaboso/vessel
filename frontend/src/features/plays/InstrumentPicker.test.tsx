@@ -4,7 +4,7 @@ import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type BrokerAccount, type InstrumentCatalog, type WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { accountFixture, instrumentCatalogFixture } from '@/test/workspace-fixture'
 import { InstrumentPicker } from './InstrumentPicker'
 import { instrumentLabel, searchInstruments, useInstrumentCatalog } from './instruments'
@@ -33,6 +33,23 @@ function deferred() {
 }
 
 describe('Venue instrument picker', () => {
+  it('uses stable unique safe IDs for punctuation and Unicode contract IDs while preserving keyboard selection', async () => {
+    const client = api(), user = userEvent.setup(), onChange = vi.fn()
+    const contracts = ['A B', 'A/B', 'A_B', 'BTC:USD#1', '日本']
+    client.instruments.mockResolvedValue({ ...instrumentCatalogFixture,
+      instruments: contracts.map(contractId => ({ ...instrumentCatalogFixture.instruments[0]!, contractId })) })
+    render(<Harness client={client} onChange={onChange} />)
+    await waitFor(() => expect(field()).toBeEnabled())
+    await user.click(field())
+    const ids = screen.getAllByRole('option').map(option => option.id)
+    expect(new Set(ids).size).toBe(contracts.length)
+    for (const id of ids) expect(id).toMatch(/^[a-zA-Z0-9_-]+$/)
+    expect(document.getElementById(field().getAttribute('aria-activedescendant')!)).toBe(screen.getAllByRole('option')[0])
+    await user.keyboard('{ArrowDown}{Enter}')
+    expect(onChange).toHaveBeenLastCalledWith('A/B', 'venue')
+    await user.click(field())
+    expect(screen.getAllByRole('option').map(option => option.id)).toEqual(ids)
+  })
   it('searches exact venue contracts as pairs without defaulting to a sample instrument', async () => {
     const client = api(), onChange = vi.fn()
     const user = userEvent.setup()
@@ -58,7 +75,7 @@ describe('Venue instrument picker', () => {
     await user.click(field())
     await user.keyboard('{ArrowDown}')
     expect(screen.getByRole('option', { selected: true })).toHaveTextContent('1000PEPE/USDC')
-    expect(field()).toHaveAttribute('aria-activedescendant', expect.stringContaining('1000PEPE'))
+    expect(field()).toHaveAttribute('aria-activedescendant', screen.getByRole('option', { selected: true }).id)
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
     expect(onChange).not.toHaveBeenCalled()

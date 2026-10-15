@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type MarketStreamEvent, type WorkspaceApi } from '@/api/workspace'
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { candleCache, clearCandleCache, evictAccountCandles } from './candleCache'
 import { useLiveMarket } from './useLiveMarket'
 

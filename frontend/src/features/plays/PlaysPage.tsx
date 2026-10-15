@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { errorMessage } from '@/api/errors'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { statusLabels, type PlayStatus, type PlaySummary, type SavedPlay, type StatusRequest } from '@/api/plays'
 import { Button } from '@/components/ui/button'
@@ -20,7 +21,7 @@ import { formatMoney, marginOverBudget } from './sizing'
 import { leverageOf } from './levels'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
 import {
-  createPlaysSession, draftFromSaved, failure, fieldsFromDraft, hasDraftContent, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
+  createPlaysSession, draftFromSaved, fieldsFromDraft, hasDraftContent, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
   observedPlayVersion, startNewPlay, syncEvidence,
   type PlaysSession, type SavedState,
 } from './saved'
@@ -29,6 +30,7 @@ import {
 const ended: PlayStatus[] = ['closed', 'cancelled']
 const filters = [['active', 'In progress'], ['ended', 'Closed and cancelled'], ['pending', 'Pending review'], ['reviewed', 'Reviewed'], ['all', 'All']] as const
 type Filter = typeof filters[number][0]
+type DialogKind = null | 'revision' | 'cancel' | 'delete' | 'history'
 type WorkKind = 'save' | 'status' | 'open' | 'delete' | 'manual'
 
 export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef }: {
@@ -114,7 +116,22 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     }
     return true
   }, [api, update])
-  const [dialog, setDialog] = useState<null | 'revision' | 'cancel' | 'delete' | 'history'>(null)
+  const [dialog, setDialogState] = useState<DialogKind>(null)
+  // An async action may outlive the render, or the dialog that started it.
+  const currentDialog = useRef({ kind: null as DialogKind })
+  const setDialog = (kind: DialogKind) => {
+    currentDialog.current = { kind }
+    setDialogState(kind)
+    setDialogError(null)
+  }
+  const closeDialog = (intended: { kind: DialogKind }) => {
+    if (currentDialog.current === intended) setDialog(null)
+  }
+  const actionError = (cause: unknown, intended: { kind: DialogKind }) => {
+    const message = errorMessage(cause, 'The change could not be completed. Try again.')
+    if (currentDialog.current === intended && intended.kind && intended.kind !== 'history') setDialogError(message)
+    else setError(message)
+  }
   const [dialogError, setDialogError] = useState<string | null>(null)
 
   const { draft, saved } = session
@@ -131,15 +148,16 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   useEffect(() => {
     const state = latest.current.saved
     if (!visible || !venueStatus || !state || venueStatus === state.summary.status) return
-    let active = true
-    api.play(state.summary.id).then(play => {
-      if (active) acceptStoredPlay(play)
-    }).catch(cause => { if (active) setError(failure(cause)) })
-    return () => { active = false }
-  }, [visible, api, venueStatus, acceptStoredPlay, setError])
+    const controller = new AbortController()
+    api.play(state.summary.id, controller.signal).then(play => {
+      if (!controller.signal.aborted) acceptStoredPlay(play)
+    }).catch(cause => { if (!controller.signal.aborted) setError(errorMessage(cause, 'The change could not be completed. Try again.')) })
+    return () => controller.abort()
+  }, [visible, api, saved?.summary.id, saved?.summary.status, venueStatus, acceptStoredPlay, setError])
   // The server keeps the direction once an entry has filled: it decides which side closes the position.
   const filled = venueStatus !== undefined && !!tracking.execution?.links.some(link => link.role === 'entry' && link.fills.length > 0)
-  const dirty = saved ? isDirty(draft, saved) : hasDraftContent(draft)
+  const dirty = useMemo(() => saved ? isDirty(draft, saved) : hasDraftContent(draft), [draft, saved])
+  const changedPlan = useMemo(() => !!saved && planChanged(draft, saved), [draft, saved])
   const unsaved = dirty || hasManualDraft(session.manual)
   // A blocked save says why until the plan is fixed.
   const status = saved?.summary.status ?? 'draft'
@@ -177,6 +195,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   /** The caller owns the shared work guard, including a save followed by planning. */
   async function saveDraft(reason?: string): Promise<SavedState | null> {
     const started = epoch.current
+    const intendedDialog = currentDialog.current
     const { draft: sent, saved: before } = latest.current
     if (!sent.accountId) { setError('Choose an account before saving.'); return null }
     if (planBlocked()) return null
@@ -209,18 +228,18 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         observedPlay: { api, id: play.summary.id, accountId: play.summary.accountId, version: play.summary.version, conflict: false },
         draft: current === sent ? stored : { ...current, evidence: mergeSavedEvidence(current.evidence, synced.evidence) },
       })
-      if (synced.error) setError(`The play was saved, but an image did not sync: ${failure(synced.error)} Save again to retry.`)
-      setDialog(null)
+      if (synced.error) setError(`The play was saved, but an image did not sync: ${errorMessage(synced.error, 'The change could not be completed. Try again.')} Save again to retry.`)
+      closeDialog(intendedDialog)
       return next
     } catch (cause) {
       if (started !== epoch.current) return null
-      if (dialog === 'revision') setDialogError(failure(cause))
-      else setError(failure(cause))
+      actionError(cause, intendedDialog)
       return null
     }
   }
 
   async function changeStatus(request: StatusRequest) {
+    const intendedDialog = currentDialog.current
     const finish = beginWork('status')
     if (!finish) return
     const started = epoch.current
@@ -237,11 +256,10 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       const play = await api.changePlayStatus(state.summary.id, state.summary.version, request)
       if (started !== epoch.current) return
       acceptStoredPlay(play)
-      setDialog(null)
+      closeDialog(intendedDialog)
     } catch (cause) {
       if (started !== epoch.current) return
-      if (dialog === 'cancel') setDialogError(failure(cause))
-      else setError(failure(cause))
+      actionError(cause, intendedDialog)
     } finally {
       finish()
     }
@@ -260,7 +278,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       update({ ...createPlaysSession(), manual: emptyManualDraft() })
     } catch (cause) {
       if (started !== epoch.current) return
-      setDialogError(failure(cause))
+      setDialogError(errorMessage(cause, 'The change could not be completed. Try again.'))
     } finally {
       finish()
     }
@@ -296,9 +314,10 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       setNavigationError(null)
       return true
     } catch (cause) {
-      if (started === epoch.current && !controller.signal.aborted) { setError(failure(cause)); setNavigationError(failure(cause)) }
+      if (started === epoch.current && !controller.signal.aborted) { setError(errorMessage(cause, 'The change could not be completed. Try again.')); setNavigationError(errorMessage(cause, 'The change could not be completed. Try again.')) }
       return false
     } finally {
+      controller.abort()
       finish()
     }
   }
@@ -348,7 +367,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const saving = busy === 'save'
   const locked = status !== 'draft'
   const readOnly = ended.includes(status)
-  const needsReason = !!saved && locked && !readOnly && planChanged(draft, saved)
+  const needsReason = !!saved && locked && !readOnly && changedPlan
   const statusBlocked = dirty ? 'Save your changes first' : undefined
   const pending = busy !== null
 
@@ -424,13 +443,19 @@ function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onD
   const [filter, setFilter] = useState<Filter>('active')
   const [result, setResult] = useState<{ plays: PlaySummary[] } | { error: string } | null>(null)
   const [generation, setGeneration] = useState(0)
-  // Shared work settles even when a lost response or older replay leaves the version unchanged.
+  // The first mount loads the list, even if a retained save is running. Subsequent work
+  // reloads only on completion, including lost responses that leave the version unchanged.
+  const [previousBusy, setPreviousBusy] = useState(busy)
+  if (previousBusy !== busy) {
+    setPreviousBusy(busy)
+    if (!busy) setGeneration(current => current + 1)
+  }
   useEffect(() => {
     const controller = new AbortController()
     api.plays(controller.signal).then(plays => { if (!controller.signal.aborted) setResult({ plays }) })
-      .catch(cause => { if (!controller.signal.aborted) setResult({ error: failure(cause) }) })
+      .catch(cause => { if (!controller.signal.aborted) setResult({ error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
     return () => controller.abort()
-  }, [api, generation, busy])
+  }, [api, generation])
   const plays = result && 'plays' in result ? result.plays : []
   const shown = plays.filter(play => {
     if (filter === 'all') return true

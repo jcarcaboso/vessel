@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { candleCache } from '@/features/market/candleCache'
+import { onApiEvent, type ApiEvent } from './events'
 import { createWorkspaceApi } from './workspace'
 import { accountFixture, candleSeriesFixture, emptyOverview, marketContextFixture, portfolioFixture, sizingFixture } from '@/test/workspace-fixture'
 
@@ -473,6 +474,43 @@ describe('candle cache API boundaries', () => {
     response({}, 401)
     await expect(api.overview()).rejects.toThrow()
     expect(cache.entries.size).toBe(0)
+  })
+})
+
+describe('Client events', () => {
+  function listen(api: ReturnType<typeof createWorkspaceApi>) {
+    const events: ApiEvent[] = []
+    return { events, stop: onApiEvent(api, event => events.push(event)) }
+  }
+  it.each([401, 403])('reports a rejected token (%s) from JSON, Play and stream requests to that client only', async status => {
+    const api = createWorkspaceApi('token'), other = createWorkspaceApi('token')
+    const { events } = listen(api), { events: otherEvents } = listen(other)
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(new Response('{}', { status }))))
+    await expect(api.overview()).rejects.toMatchObject({ kind: 'unauthorized' })
+    await expect(api.plays()).rejects.toMatchObject({ kind: 'unauthorized' })
+    await expect(api.marketStream(accountFixture.id, { instrument: 'BTC', interval: '1h' }, new AbortController().signal, vi.fn()))
+      .rejects.toMatchObject({ kind: 'unauthorized' })
+    expect(events).toEqual([{ type: 'unauthorized' }, { type: 'unauthorized' }, { type: 'unauthorized' }])
+    expect(otherEvents).toEqual([])
+  })
+  it('reports a removed account only after a disabling update or a delete succeeds', async () => {
+    const api = createWorkspaceApi('token')
+    const { events, stop } = listen(api)
+    const settings = { name: accountFixture.name, portfolioId: null, isEnabled: true, expectedRevision: 1 }
+    response({ ...accountFixture, isEnabled: true })
+    await api.updateAccount(accountFixture.id, settings)
+    expect(events).toEqual([])
+    response({ ...accountFixture, isEnabled: false })
+    await api.updateAccount(accountFixture.id, { ...settings, isEnabled: false })
+    response({ detail: 'This account has linked plays.' }, 409)
+    await expect(api.deleteAccount(accountFixture.id)).rejects.toMatchObject({ status: 409 })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
+    await api.deleteAccount(accountFixture.id)
+    expect(events).toEqual([{ type: 'account-removed', accountId: accountFixture.id }, { type: 'account-removed', accountId: accountFixture.id }])
+    stop()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
+    await api.deleteAccount(accountFixture.id)
+    expect(events).toHaveLength(2)
   })
 })
 

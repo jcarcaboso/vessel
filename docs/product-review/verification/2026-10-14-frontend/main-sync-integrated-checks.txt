@@ -1,0 +1,39 @@
+$ tsc --noEmit
+$ eslint . --max-warnings 0
+$ vitest run
+
+ RUN  v5.0.3 /home/ops/.local/share/t3/worktrees/vessel/t3-frontend-architecture-review/frontend
+
+
+ Test Files  83 passed (83)
+      Tests  1677 passed (1677)
+   Start at  22:07:01
+   Duration  38.26s (tests 62%, environment 25%, import 5%, setup 5%, transform 3%)
+
+    Isolate  83 workers spawned · ~861ms startup each (spawn + environment, per file)
+             at least ~9.35s faster with isolate: false — reuses workers across files instead of one per file
+
+$ tsc --noEmit && vite build
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 2137 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                              0.79 kB │ gzip:   0.49 kB
+dist/assets/inter-vietnamese-wght-normal-CBcvBZtf.woff2     10.25 kB
+dist/assets/inter-greek-ext-wght-normal-DlzME5K_.woff2      11.23 kB
+dist/assets/inter-cyrillic-wght-normal-DqGufNeO.woff2       18.74 kB
+dist/assets/inter-greek-wght-normal-CkhJZR-_.woff2          18.99 kB
+dist/assets/inter-cyrillic-ext-wght-normal-BOeWTOD4.woff2   25.96 kB
+dist/assets/inter-latin-wght-normal-Dx4kXJAl.woff2          48.25 kB
+dist/assets/inter-latin-ext-wght-normal-DO1Apj_S.woff2      85.06 kB
+dist/assets/index--Qxw8Q01.css                             173.21 kB │ gzip:  29.74 kB
+dist/assets/lightweight-HhKB-3S9.js                        200.61 kB │ gzip:  65.63 kB
+dist/assets/index-DeDX6_vk.js                              809.20 kB │ gzip: 244.15 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 754ms

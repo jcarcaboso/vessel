@@ -1,0 +1,77 @@
+Shell wave 3 native module fallback repair
+Worktree: /tmp/vessel-fe-review/wt/sol-wave3-shell
+Branch: fe-review/sol-wave3-shell
+Starting HEAD: 665a36f21823f6d9a9d9d5f1d183da18b63e4c26
+UTC start: 2026-10-14T22:12:36Z
+
+===== pnpm --filter vessel-frontend typecheck =====
+$ tsc --noEmit
+
+===== typecheck exit status: 0 =====
+
+===== pnpm --filter vessel-frontend lint =====
+$ eslint . --max-warnings 0
+
+===== lint exit status: 0 =====
+
+===== pnpm --filter vessel-frontend test =====
+$ vitest run
+
+ RUN  v5.0.3 /tmp/vessel-fe-review/wt/sol-wave3-shell/frontend
+
+
+ Test Files  85 passed (85)
+      Tests  1591 passed (1591)
+   Start at  22:12:52
+   Duration  34.43s (tests 60%, environment 26%, import 6%, setup 5%, transform 3%)
+
+Environment  jsdom was created 85 times · 58.01s total, 26% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+
+
+===== test exit status: 0 =====
+
+===== pnpm --filter vessel-frontend build =====
+$ tsc --noEmit && vite build
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 2141 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                              0.87 kB │ gzip:   0.51 kB
+dist/assets/inter-vietnamese-wght-normal-CBcvBZtf.woff2     10.25 kB
+dist/assets/inter-greek-ext-wght-normal-DlzME5K_.woff2      11.23 kB
+dist/assets/inter-cyrillic-wght-normal-DqGufNeO.woff2       18.74 kB
+dist/assets/inter-greek-wght-normal-CkhJZR-_.woff2          18.99 kB
+dist/assets/inter-cyrillic-ext-wght-normal-BOeWTOD4.woff2   25.96 kB
+dist/assets/inter-latin-wght-normal-Dx4kXJAl.woff2          48.25 kB
+dist/assets/inter-latin-ext-wght-normal-DO1Apj_S.woff2      85.06 kB
+dist/assets/SettingsPage-DZZtynlx.css                        6.41 kB │ gzip:   1.70 kB
+dist/assets/ReviewPage-CSnuDNGf.css                         18.16 kB │ gzip:   4.03 kB
+dist/assets/index-Cqy8aFQK.css                              73.71 kB │ gzip:  14.26 kB
+dist/assets/PlaysPage-yEqWGraN.css                          78.99 kB │ gzip:  12.81 kB
+dist/assets/sliders-horizontal-CqB7hEVb.js                   0.74 kB │ gzip:   0.40 kB
+dist/assets/triangle-alert-CZwBSKj3.js                       0.80 kB │ gzip:   0.43 kB
+dist/assets/SettingsPage-K9EXOC-E.js                        13.74 kB │ gzip:   4.35 kB
+dist/assets/ReviewPage-IwBsugj3.js                          29.88 kB │ gzip:   8.23 kB
+dist/assets/check-zjSo1yBB.js                               46.31 kB │ gzip:  15.93 kB
+dist/assets/lightweight-DQ7lzB_N.js                        200.64 kB │ gzip:  65.66 kB
+dist/assets/PlaysPage-CAmaYLEN.js                          205.80 kB │ gzip:  62.69 kB
+dist/assets/index-B0bJea-6.js                              516.16 kB │ gzip: 158.89 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 585ms
+
+===== build exit status: 0 =====
+diff check exit status: 0
+UTC finish: 2026-10-14T22:13:34Z
+OVERALL EXIT STATUS: 0
+
+Native browser evidence: /tmp/vessel-fe-review/logs/shell-wave3-native-browser-evidence.json
+
+Committed repair HEAD: f02bd15697466694448dd9c47730749260987865

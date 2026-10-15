@@ -1,0 +1,586 @@
+[
+  {
+    "file": "graphite-desktop-account-detail.png",
+    "before": [
+      1440,
+      1813
+    ],
+    "after": [
+      1440,
+      1813
+    ],
+    "changed": 40866,
+    "ratio": 0.015653153153153153,
+    "rows": [
+      36,
+      1669
+    ]
+  },
+  {
+    "file": "graphite-desktop-accounts.png",
+    "before": [
+      1440,
+      900
+    ],
+    "after": [
+      1440,
+      900
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-desktop-activity.png",
+    "before": [
+      1440,
+      1032
+    ],
+    "after": [
+      1440,
+      1032
+    ],
+    "changed": 40694,
+    "ratio": 0.027383451765719206,
+    "rows": [
+      36,
+      942
+    ]
+  },
+  {
+    "file": "graphite-desktop-overview.png",
+    "before": [
+      1440,
+      1986
+    ],
+    "after": [
+      1440,
+      1986
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-desktop-plays-editor.png",
+    "before": [
+      1440,
+      1838
+    ],
+    "after": [
+      1440,
+      1838
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-desktop-plays-list.png",
+    "before": [
+      1440,
+      900
+    ],
+    "after": [
+      1440,
+      900
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-desktop-plays-manual.png",
+    "before": [
+      1440,
+      1801
+    ],
+    "after": [
+      1440,
+      1801
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-desktop-portfolios.png",
+    "before": [
+      1440,
+      900
+    ],
+    "after": [
+      1440,
+      900
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-desktop-review.png",
+    "before": [
+      1440,
+      1354
+    ],
+    "after": [
+      1440,
+      1354
+    ],
+    "changed": 187,
+    "ratio": 0.00009590924011160348,
+    "rows": [
+      365,
+      372
+    ]
+  },
+  {
+    "file": "graphite-desktop-settings.png",
+    "before": [
+      1440,
+      2147
+    ],
+    "after": [
+      1440,
+      2147
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-mobile-account-detail.png",
+    "before": [
+      390,
+      2392
+    ],
+    "after": [
+      390,
+      2392
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-mobile-accounts.png",
+    "before": [
+      390,
+      1128
+    ],
+    "after": [
+      390,
+      1128
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-mobile-activity.png",
+    "before": [
+      390,
+      1628
+    ],
+    "after": [
+      390,
+      1628
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-mobile-overview.png",
+    "before": [
+      390,
+      3517
+    ],
+    "after": [
+      390,
+      3517
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-mobile-plays-editor.png",
+    "before": [
+      390,
+      3974
+    ],
+    "after": [
+      390,
+      3974
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-mobile-plays-list.png",
+    "before": [
+      390,
+      907
+    ],
+    "after": [
+      390,
+      907
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-mobile-plays-manual.png",
+    "before": [
+      390,
+      3270
+    ],
+    "after": [
+      390,
+      3270
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-mobile-portfolios.png",
+    "before": [
+      390,
+      927
+    ],
+    "after": [
+      390,
+      927
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "graphite-mobile-review.png",
+    "before": [
+      390,
+      1922
+    ],
+    "after": [
+      390,
+      1922
+    ],
+    "changed": 41,
+    "ratio": 0.000054697297153072387,
+    "rows": [
+      586,
+      593
+    ]
+  },
+  {
+    "file": "graphite-mobile-settings.png",
+    "before": [
+      390,
+      3903
+    ],
+    "after": [
+      390,
+      3903
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-desktop-account-detail.png",
+    "before": [
+      1440,
+      1813
+    ],
+    "after": [
+      1440,
+      1813
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-desktop-accounts.png",
+    "before": [
+      1440,
+      900
+    ],
+    "after": [
+      1440,
+      900
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-desktop-activity.png",
+    "before": [
+      1440,
+      1032
+    ],
+    "after": [
+      1440,
+      1032
+    ],
+    "changed": 7154,
+    "ratio": 0.004814007321274763,
+    "rows": [
+      76,
+      913
+    ]
+  },
+  {
+    "file": "paper-desktop-overview.png",
+    "before": [
+      1440,
+      1986
+    ],
+    "after": [
+      1440,
+      1986
+    ],
+    "changed": 7191,
+    "ratio": 0.0025144763343403825,
+    "rows": [
+      76,
+      1850
+    ]
+  },
+  {
+    "file": "paper-desktop-plays-editor.png",
+    "before": [
+      1440,
+      1838
+    ],
+    "after": [
+      1440,
+      1838
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-desktop-plays-list.png",
+    "before": [
+      1440,
+      900
+    ],
+    "after": [
+      1440,
+      900
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-desktop-plays-manual.png",
+    "before": [
+      1440,
+      1801
+    ],
+    "after": [
+      1440,
+      1801
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-desktop-portfolios.png",
+    "before": [
+      1440,
+      900
+    ],
+    "after": [
+      1440,
+      900
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-desktop-review.png",
+    "before": [
+      1440,
+      1354
+    ],
+    "after": [
+      1440,
+      1354
+    ],
+    "changed": 40,
+    "ratio": 0.000020515345478417856,
+    "rows": [
+      365,
+      372
+    ]
+  },
+  {
+    "file": "paper-desktop-settings.png",
+    "before": [
+      1440,
+      2147
+    ],
+    "after": [
+      1440,
+      2147
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-mobile-account-detail.png",
+    "before": [
+      390,
+      2392
+    ],
+    "after": [
+      390,
+      2392
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-mobile-accounts.png",
+    "before": [
+      390,
+      1128
+    ],
+    "after": [
+      390,
+      1128
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-mobile-activity.png",
+    "before": [
+      390,
+      1628
+    ],
+    "after": [
+      390,
+      1628
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-mobile-overview.png",
+    "before": [
+      390,
+      3517
+    ],
+    "after": [
+      390,
+      3517
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-mobile-plays-editor.png",
+    "before": [
+      390,
+      3974
+    ],
+    "after": [
+      390,
+      3974
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-mobile-plays-list.png",
+    "before": [
+      390,
+      907
+    ],
+    "after": [
+      390,
+      907
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-mobile-plays-manual.png",
+    "before": [
+      390,
+      3270
+    ],
+    "after": [
+      390,
+      3270
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-mobile-portfolios.png",
+    "before": [
+      390,
+      927
+    ],
+    "after": [
+      390,
+      927
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  },
+  {
+    "file": "paper-mobile-review.png",
+    "before": [
+      390,
+      1922
+    ],
+    "after": [
+      390,
+      1922
+    ],
+    "changed": 40,
+    "ratio": 0.000053363216734704765,
+    "rows": [
+      586,
+      593
+    ]
+  },
+  {
+    "file": "paper-mobile-settings.png",
+    "before": [
+      390,
+      3903
+    ],
+    "after": [
+      390,
+      3903
+    ],
+    "changed": 0,
+    "ratio": 0,
+    "rows": null
+  }
+]

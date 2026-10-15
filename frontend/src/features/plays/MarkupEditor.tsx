@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from 'react'
 import { Check, Eraser, Highlighter, MousePointer2, MoveUpRight, Pencil, Redo2, Square, Trash2, Type, Undo2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { markupLimits, type ImageMarkup, type MarkupPoint, type MarkupShape } from '@/api/markup'
 import {
-  clampPoint, hitShape, markupColors, markupDataUrl, markupId, markupLimits, moveShape, strokeWidth, textSize,
-  type ImageMarkup, type MarkupPoint, type MarkupShape, type MarkupSize, type MarkupTool,
+  clampPoint, hitShape, markupColors, markupDataUrl, markupId, moveShape, strokeWidth, textSize, type MarkupSize, type MarkupTool,
 } from './markup'
 
 const tools: Array<[MarkupTool, string, ReactNode]> = [

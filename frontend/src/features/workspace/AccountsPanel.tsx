@@ -1,10 +1,11 @@
+import type { ManagementEvent } from './management-events'
 import { useState, type ReactNode, type FormEvent } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ChevronDown, Wallet } from 'lucide-react'
-import { ApiError } from '@/api/system'
+import { ApiError, errorMessage } from '@/api/errors'
 import { PortfolioDestination } from './PortfolioDestination'
 import { usePortfolioDestination } from './usePortfolioDestination'
 import { AccountRows } from './AccountRows'
@@ -14,7 +15,7 @@ import { emptyAccountFilters, type AccountFilters } from './account-filters'
 
 export function AccountsPanel({ accounts, portfolios, portfolioFilter, onPortfolioFilter, refreshing, filters, onFiltersChange,
   refreshAction, api, onChanged, onReload, onDetail, onSync, onManage, onAdd }: {
-  api: WorkspaceApi; onChanged: (message: string) => void; onReload: () => void
+  api: WorkspaceApi; onChanged: (event: ManagementEvent) => void; onReload: () => void
   accounts: BrokerAccount[]; portfolios: Portfolio[]; portfolioFilter: string
   onPortfolioFilter: (value: string) => void; refreshing: string | null; refreshAction: ReactNode
   filters: AccountFilters; onFiltersChange: (filters: AccountFilters) => void
@@ -46,13 +47,13 @@ export function AccountsPanel({ accounts, portfolios, portfolioFilter, onPortfol
     try {
       const target = await destination.resolve(); portfolioCreated = target.created
       await api.moveAccounts(selected, target.portfolioId, selectedAccounts.map(a => ({ accountId: a.id, settingsRevision: a.settingsRevision! })))
-      choose([]); onChanged(`${selected.length} account${selected.length === 1 ? '' : 's'} moved${target.portfolioId ? ' to the portfolio' : ' to Unassigned'}.`)
+      choose([]); onChanged({ kind: 'accounts-moved', ids: selected, message: `${selected.length} account${selected.length === 1 ? '' : 's'} moved${target.portfolioId ? ' to the portfolio' : ' to Unassigned'}.` })
     } catch (cause) {
       const conflict = cause instanceof ApiError && (cause.status === 409 || cause.status === 412)
       if (conflict) choose([])
       setError((portfolioCreated ? 'The new portfolio was created and kept. Retry the move into it; a duplicate portfolio will not be created. ' : '') +
         (conflict ? 'Account settings changed elsewhere. No accounts were moved. Reload and review the rows, then select them again before retrying.' :
-          cause instanceof ApiError ? cause.message : 'The move was not confirmed. Reload before retrying.'))
+          errorMessage(cause, 'The move was not confirmed. Reload before retrying.')))
       onReload()
     } finally { setPending(false) }
   }

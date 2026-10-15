@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import type { CandleInterval, MarketContext, VenueCandle, WorkspaceApi } from '@/api/workspace'
+import type { CandleInterval } from '@/api/candles'
+import type { MarketContext, VenueCandle, WorkspaceApi } from '@/api/workspace'
 
-import { ApiError } from '@/api/system'
+import { ApiError } from '@/api/errors'
 import { candleCache } from './candleCache'
 
 export type LiveMarketState = 'off' | 'connecting' | 'live' | 'reconnecting' | 'polling' | 'stale'

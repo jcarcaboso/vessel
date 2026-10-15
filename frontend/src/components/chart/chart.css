@@ -32,7 +32,7 @@
 .chart-menu-trigger svg { color: var(--muted-foreground); }
 .chart-swatch { width: 10px; height: 3px; border-radius: 1px; background: var(--swatch); flex-shrink: 0; }
 
-.chart-popover { z-index: 60; min-width: 200px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; color: var(--foreground); background: var(--card); box-shadow: 0 12px 34px #0007; }
+.chart-popover { z-index: 60; min-width: 200px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; color: var(--foreground); background: var(--card); box-shadow: 0 12px 34px color-mix(in srgb, var(--shadow-color) 46.6667%, transparent); }
 .chart-popover ul { display: grid; gap: 1px; max-height: min(420px, 60dvh); overflow-y: auto; }
 .chart-popover li { display: flex; align-items: center; gap: 4px; }
 .chart-popover p { padding: 2px 6px 8px; color: var(--muted-foreground); font-size: 10px; }
@@ -64,7 +64,7 @@
 
 .chart-drawing-bar { position: absolute; top: 8px; left: 50%; z-index: 3; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 24px);
   padding: 4px 6px 4px 10px; border: 1px solid var(--border); border-radius: 7px; color: var(--foreground); background: color-mix(in srgb, var(--card) 94%, transparent);
-  box-shadow: 0 6px 20px #0006; font-size: 11px; transform: translateX(-50%); }
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--shadow-color) 40%, transparent); font-size: 11px; transform: translateX(-50%); }
 .chart-drawing-bar[role="status"] { padding: 6px 10px; color: var(--muted-foreground); }
 .chart-drawing-bar span { white-space: nowrap; }
 .chart-drawing-bar input { width: 180px; min-width: 0; height: 26px; padding: 3px 7px; border: 1px solid var(--border); border-radius: 4px; color: var(--foreground); background: var(--field); font: inherit; }
@@ -113,7 +113,7 @@
 }
 
 .chart-icon-tip { display: inline-flex; }
-.chart-tooltip { z-index: 70; display: grid; gap: 2px; max-width: 240px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--foreground); background: var(--popover, var(--card)); box-shadow: 0 8px 24px #0006; font-size: 11px; line-height: 1.4; }
+.chart-tooltip { z-index: 70; display: grid; gap: 2px; max-width: 240px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--foreground); background: var(--popover, var(--card)); box-shadow: 0 8px 24px color-mix(in srgb, var(--shadow-color) 40%, transparent); font-size: 11px; line-height: 1.4; }
 .chart-tooltip strong { font-weight: 600; }
 .chart-tooltip span { color: var(--muted-foreground); font-size: 10px; }
 /* A hint while a tool is active never blocks clicks on the chart beneath it. */
@@ -129,7 +129,7 @@
 .chart-tool-flyout li .chart-popover-choice { flex: 1; gap: 9px; }
 .chart-tool-favorite { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 5px; color: var(--muted-foreground); background: transparent; cursor: pointer; }
 .chart-tool-favorite:hover { color: var(--foreground); background: var(--accent); }
-.chart-tool-favorite[aria-pressed="true"] { color: #e3b341; }
+.chart-tool-favorite[aria-pressed="true"] { color: var(--warning); }
 .chart-favorite-tools { display: flex; align-items: center; gap: 2px; }
 
 /* Actions that remove something read red. */

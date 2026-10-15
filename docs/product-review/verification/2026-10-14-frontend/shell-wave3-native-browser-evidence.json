@@ -1,0 +1,58 @@
+{
+  "baseCommit": "665a36f21823f6d9a9d9d5f1d183da18b63e4c26",
+  "browser": "Chromium 154.0.0.0 via T3 collaborative preview",
+  "isolation": "Fresh loopback-only probe servers on ports 48663 and 48664; synthetic API fixtures, no upstream proxy, no owner env, DB or venue calls. Existing parent captures were not modified.",
+  "bareNativeImport": {
+    "cacheControl": "no-store",
+    "firstModuleRequestStatus": 503,
+    "sameUrlImportAttemptsBeforeOrdinaryFetch": 2,
+    "moduleRequestsBeforeOrdinaryFetch": 1,
+    "ordinaryFetchAfterFailureStatus": 200,
+    "sameUrlImportAfterHealthyFetch": "rejected without another module request",
+    "evaluationImportAttempts": 2,
+    "evaluationModuleRequests": 1,
+    "evaluationExecutions": 1
+  },
+  "builtApp503": {
+    "firstReviewChunkStatus": 503,
+    "safeDistinctLoadFallback": true,
+    "misleadingTryAgainAbsent": true,
+    "shellAndAuthenticationRetained": true,
+    "noAutomaticReload": true,
+    "ordinaryFetchOfReviewChunkAfterFailureStatus": 200,
+    "unsavedTitleAfterReturningToPlays": "Native failure retained title",
+    "chunkRequestsAfterRouteRevisit": 2,
+    "chunkRequestCountIncludesOneOrdinaryFetch": true,
+    "explicitReloadAndReconnectLoadsRealReview": true,
+    "realReviewChartViewGroupPresent": true,
+    "persistentAuthOrDraftStorageKeys": []
+  },
+  "builtAppEvaluationFailure": {
+    "reviewChunkStatus": 200,
+    "injectedModuleThrowsDuringEvaluation": true,
+    "chunkRequests": 1,
+    "safeDistinctLoadFallback": true,
+    "privateErrorDetailsAbsentFromUI": true,
+    "misleadingTryAgainAbsent": true,
+    "shellPresent": true,
+    "horizontalOverflowAt1280px": false
+  },
+  "builtAppMissingDeploymentChunk": {
+    "reviewChunkStatus": 404,
+    "chunkRequests": 1,
+    "safeDistinctLoadFallback": true,
+    "appUpdateMentionedAsPossibleCauseOnly": true,
+    "misleadingTryAgainAbsent": true,
+    "shellPresent": true,
+    "horizontalOverflowAt1280px": false,
+    "horizontalOverflowAt390px": false,
+    "reloadButtonBoundsAt390px": {
+      "left": 31,
+      "right": 131.5,
+      "top": 214.75,
+      "bottom": 250.75
+    }
+  },
+  "limitation": "This repair does not implement or claim same-document recovery of rejected native module URLs. It keeps shell state, exposes an honest load/init fallback, and leaves reload explicit with the unsaved-work warning. Render exceptions still offer Try again. The parent's success-on-Try-again native import probe is intentionally not claimed as passing.",
+  "repairCommit": "f02bd15697466694448dd9c47730749260987865"
+}
