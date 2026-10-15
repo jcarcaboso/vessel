@@ -74,6 +74,14 @@ public sealed class WorkspaceStore(VesselDbContext db, UnitOfWork unitOfWork) : 
         await db.Fills.Where(f => f.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Orders.Where(o => o.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Snapshots.Where(s => s.AccountId == account.Id).ExecuteDeleteAsync(ct);
+        // Event identities whose subject is this account go with it; their receipts cascade. A removed
+        // sequence is a permanent hole that subscribers count as settled.
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            DELETE FROM events WHERE owner_id={account.OwnerId} AND account_id={account.Id};
+            DELETE FROM event_dedup WHERE owner_id={account.OwnerId} AND account_id={account.Id};
+            DELETE FROM event_baselines WHERE owner_id={account.OwnerId} AND account_id={account.Id};
+            DELETE FROM event_fills WHERE owner_id={account.OwnerId} AND account_id={account.Id};
+            """, ct);
         // Bulk deletes do not update EF's tracker. Detach only this account's deleted
         // facts so a context that previously refreshed it cannot sever required FKs.
         foreach (var entry in db.ChangeTracker.Entries().ToList())

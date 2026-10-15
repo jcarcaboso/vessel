@@ -284,6 +284,62 @@ public sealed class EventSubscriptionTests
         Assert.True((await history.ReadAsync(page.NextCursor, 10, default)).ResetRequired);
     }
 
+    // B9: account deletion removes that account's baselines, fill identities, events, dedup rows and receipts.
+    [VesselEventPostgresFact]
+    public async Task Account_deletion_removes_its_event_identities_and_receipts()
+    {
+        await using var runtime = await Runtime.CreateAsync();
+        var all = await runtime.RegisterNewAsync("all");
+        var account = new Account(Guid.NewGuid(), runtime.Owner, "hyperliquid", "Deleted");
+        var kept = new Account(Guid.NewGuid(), runtime.Owner, "hyperliquid", "Kept");
+        await using (var seed = runtime.Database.Context(runtime.Owner))
+        {
+            seed.Accounts.AddRange(account, kept);
+            seed.Fills.Add(new()
+            {
+                Id = Guid.NewGuid(), OwnerId = runtime.Owner, AccountId = account.Id, ContractId = "BTC", SourceFillId = "f1",
+                Side = "buy", Direction = "Open Long", PositionEffect = "open", Price = 100, Quantity = 0.5m,
+                Fee = 0, FeeToken = "USDC", ClosedPnlUsd = 0, OccurredAtUtc = DateTimeOffset.UtcNow, OrderId = "o1", TransactionHash = "synthetic"
+            });
+            await seed.SaveChangesAsync();
+        }
+        await using (var scope = runtime.Scope())
+        {
+            var sink = scope.ServiceProvider.GetRequiredService<IVesselEventSink>();
+            await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().ExecuteAsync(async () =>
+            {
+                await sink.EnsureMonitoringBaselineAsync(account.Id, default);
+                await sink.EnsureMonitoringBaselineAsync(kept.Id, default);
+                return true;
+            }, default);
+        }
+        var deleted = await runtime.AppendAsync(Draft("deleted") with { Subject = new(account.Id) });
+        var survivor = await runtime.AppendAsync(Draft("kept") with { Subject = new(kept.Id) });
+        await runtime.DispatchAsync(all, deleted.Id);
+        await runtime.DispatchAsync(all, survivor.Id);
+        await using (var scope = runtime.Scope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<VesselDbContext>();
+            var work = scope.ServiceProvider.GetRequiredService<UnitOfWork>();
+            await work.ExecuteAsync(async () =>
+            {
+                await new WorkspaceStore(db, work).DeleteAccountAsync(await db.Accounts.SingleAsync(a => a.Id == account.Id), default);
+                return true;
+            }, default);
+        }
+        Assert.Equal(0, await runtime.CountAsync($"""
+            SELECT (SELECT count(*) FROM event_baselines WHERE account_id='{account.Id}') +
+                   (SELECT count(*) FROM event_fills WHERE account_id='{account.Id}') +
+                   (SELECT count(*) FROM events WHERE account_id='{account.Id}') +
+                   (SELECT count(*) FROM event_dedup WHERE account_id='{account.Id}') +
+                   (SELECT count(*) FROM event_receipts WHERE event_id='{deleted.Id}')
+            """));
+        Assert.Equal(("delivered", 1), await runtime.ReceiptAsync(all, survivor.Id));
+        Assert.Equal(1, await runtime.CountAsync($"SELECT count(*) FROM event_baselines WHERE account_id='{kept.Id}'"));
+        // The removed sequence is a permanent hole that the low-water mark passes.
+        Assert.Equal(2, (await runtime.CatchUpAsync(all)).LowWaterMark);
+    }
+
     // B4: one serializer policy; optional fields are explicit nulls in storage, not omitted.
     [VesselEventPostgresFact]
     public async Task Stored_payloads_and_data_keep_explicit_nulls()
