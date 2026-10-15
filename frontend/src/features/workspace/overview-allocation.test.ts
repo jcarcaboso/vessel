@@ -32,8 +32,20 @@ describe('overview allocation', () => {
     const [group] = portfolioAllocations(accounts, [portfolio('p', 'Many')])
     expect(group!.slices).toHaveLength(6)
     expect(group!.slices.at(-1)).toMatchObject({ name: 'Other (2)', balanceUsd: '30', slot: null, scope: null })
-    // x2 is the first kept account in stable order, so it keeps slot 1 although it is the smallest kept slice.
-    expect(group!.slices.find(s => s.id === 'x2')!.slot).toBe(1)
+    // Kept accounts among the first six keep their position's slot; x6 takes the slot x0 left free in Other.
+    const slots = (list: BrokerAccount[]) => Object.fromEntries(portfolioAllocations(list, [portfolio('p', 'Many')])[0]!.slices.map(s => [s.id, s.slot]))
+    expect(slots(accounts)).toMatchObject({ x2: 3, x3: 4, x4: 5, x5: 6, x6: 1 })
+    // A balance change that reorders and refolds the slices does not repaint the accounts that stay drawn.
+    accounts[6] = account('x6', 'p', '1')
+    expect(slots(accounts)).toMatchObject({ x1: 2, x2: 3, x3: 4, x4: 5, x5: 6 })
+    expect(group!.shares).toMatchObject({ x0: '3.57%', x1: '7.14%' })
+  })
+
+  it('keeps each entity on its slot when balances change', () => {
+    const [before] = portfolioAllocations([account('a', 'p', '100'), account('b', 'p', '50'), account('c', 'p', '10')], [portfolio('p', 'P')])
+    const [after] = portfolioAllocations([account('a', 'p', '1'), account('b', 'p', null), account('c', 'p', '900')], [portfolio('p', 'P')])
+    expect(before!.slices.map(s => [s.id, s.slot])).toEqual([['a', 1], ['b', 2], ['c', 3]])
+    expect(after!.slices.map(s => [s.id, s.slot])).toEqual([['c', 3], ['a', 1]])
   })
 
   it('does not draw zero or negative balances', () => {

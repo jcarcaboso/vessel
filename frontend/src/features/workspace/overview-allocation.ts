@@ -22,6 +22,8 @@ export interface Allocation {
   slices: AllocationSlice[]
   /** Enabled accounts without a reported balance, and groups with zero or negative balance. Neither is drawn. */
   missingCount: number; notDrawn: { name: string; balanceUsd: string }[]
+  /** Display share of every drawn part by ID, including those folded into Other. */
+  shares: Record<string, string>
 }
 
 const scale = 28
@@ -42,7 +44,11 @@ export const sumDecimals = (values: string[]) => text(values.reduce((sum, v) => 
 
 interface Part { id: string; name: string; balanceUsd: string | null; accountCount: number; scope: string; venueId?: string | undefined; icon?: string | undefined }
 
-/** Folds parts into a pie. Colours follow each entity's stable order, never its size, so a filter does not repaint survivors. */
+/**
+ * Folds parts into a pie. A part's colour comes from its position in the stable part order, never its size, so balance
+ * changes do not repaint it. Only when more than six parts exist can a part beyond the sixth take a slot left free by
+ * a folded or undrawn one.
+ */
 function allocate(id: string, name: string, scope: string, parts: Part[], icon?: string | undefined): Allocation {
   const valued = parts.filter((p): p is Part & { balanceUsd: string } => p.balanceUsd !== null)
   const missingCount = parts.filter(p => p.balanceUsd === null).reduce((n, p) => n + p.accountCount, 0)
@@ -51,7 +57,7 @@ function allocate(id: string, name: string, scope: string, parts: Part[], icon?:
   const totalUsd = valued.length ? sumDecimals(valued.map(p => p.balanceUsd)) : null
   const accountCount = parts.reduce((n, p) => n + p.accountCount, 0)
   const drawnTotal = positive.reduce((sum, p) => sum + units(p.balanceUsd), 0n)
-  if (!positive.length || drawnTotal <= 0n) return { id, name, icon, scope, totalUsd, accountCount, slices: [], missingCount, notDrawn }
+  if (!positive.length || drawnTotal <= 0n) return { id, name, icon, scope, totalUsd, accountCount, slices: [], missingCount, notDrawn, shares: {} }
   const bySize = [...positive].sort((a, b) => units(b.balanceUsd) > units(a.balanceUsd) ? 1 : units(b.balanceUsd) < units(a.balanceUsd) ? -1 : 0)
   const kept = positive.length > allocationSlots ? new Set(bySize.slice(0, allocationSlots - 1)) : new Set(positive)
   const rest = bySize.filter(p => !kept.has(p))
@@ -61,11 +67,15 @@ function allocate(id: string, name: string, scope: string, parts: Part[], icon?:
     share: balanceShare({ numerator: p.balanceUsd, denominator }).label,
     fraction: Number(units(p.balanceUsd) * 1_000_000n / drawnTotal) / 1_000_000,
   })
-  const ordered = positive.filter(p => kept.has(p))
-  const slots = new Map(ordered.map((p, i) => [p, i + 1]))
+  const order = new Map(parts.map((p, i) => [p, i]))
+  const slots = new Map<Part, number>()
+  for (const p of kept) if (order.get(p)! < allocationSlots) slots.set(p, order.get(p)! + 1)
+  const free = Array.from({ length: allocationSlots }, (_, i) => i + 1).filter(n => ![...slots.values()].includes(n))
+  for (const p of positive) if (kept.has(p) && !slots.has(p)) slots.set(p, free.shift()!)
+  const shares = Object.fromEntries(positive.map(p => [p.id, balanceShare({ numerator: p.balanceUsd, denominator }).label]))
   const slices = bySize.filter(p => kept.has(p)).map(p => slice(p, slots.get(p)!, p.scope, { venueId: p.venueId, icon: p.icon }))
   if (rest.length) slices.push(slice({ id: `${id}:other`, name: `Other (${rest.length})`, balanceUsd: sumDecimals(rest.map(p => p.balanceUsd)) }, null, null, { members: rest.map(p => p.id) }))
-  return { id, name, icon, scope, totalUsd, accountCount, slices, missingCount, notDrawn }
+  return { id, name, icon, scope, totalUsd, accountCount, slices, missingCount, notDrawn, shares }
 }
 
 const accountPart = (a: BrokerAccount): Part => ({ id: a.id, name: a.name, balanceUsd: a.balanceUsd ?? null, accountCount: 1, scope: `account:${a.id}`, venueId: a.venueId })

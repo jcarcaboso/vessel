@@ -45,6 +45,16 @@ describe('Overview allocation', () => {
     expect(within(legend).getByText('Beta').closest('li')).not.toHaveClass('allocation-dim')
   })
 
+  it('drops focus emphasis when the scope changes, so the newly selected account is emphasized', () => {
+    const { rerender } = render(<OverviewAllocation accounts={accounts} portfolios={portfolios} scope="portfolio:p1" onScope={() => {}} />)
+    fireEvent.focus(screen.getByRole('button', { name: 'Show allocation for Alpha' }))
+    rerender(<OverviewAllocation accounts={accounts} portfolios={portfolios} scope="account:Alpha" onScope={() => {}} />)
+    rerender(<OverviewAllocation accounts={accounts} portfolios={portfolios} scope="account:Beta" onScope={() => {}} />)
+    const legend = screen.getByRole('list', { name: 'Swing shares' })
+    expect(within(legend).getByText('Beta').closest('li')).toHaveClass('allocation-active')
+    expect(within(legend).getByRole('button', { name: 'Show allocation for Alpha' }).closest('li')).toHaveClass('allocation-dim')
+  })
+
   it('folds a seventh account into Other and highlights Other for an account inside it', () => {
     const many = ['70', '60', '50', '40', '30', '20', '10'].map((v, i) => account(`a${i}`, 'p1', v))
     render(<OverviewAllocation accounts={many} portfolios={portfolios} scope="account:a6" onScope={() => {}} />)
@@ -52,6 +62,16 @@ describe('Overview allocation', () => {
     expect(within(legend).getAllByRole('listitem')).toHaveLength(6)
     expect(within(legend).getByText('Other (2)').closest('li')).not.toHaveClass('allocation-dim')
     expect(within(legend).getByText('a0').closest('li')).toHaveClass('allocation-dim')
+  })
+
+  it('gives every portfolio its share of the total even when the total chart folds it into Other', () => {
+    const many = Array.from({ length: 7 }, (_, i) => portfolio(`q${i}`, `P${i}`))
+    const list = many.map((p, i) => account(`acc${i}`, p.id, String((i + 1) * 10)))
+    const { rerender } = render(<OverviewAllocation accounts={list} portfolios={many} scope="all" onScope={() => {}} />)
+    expect(within(screen.getByRole('article', { name: 'P0' })).getByText('3.57% of total')).toBeInTheDocument()
+    expect(screen.getByText('Other (2)')).toBeInTheDocument()
+    rerender(<OverviewAllocation accounts={list} portfolios={many} scope="portfolio:q0" onScope={() => {}} />)
+    expect(screen.getByRole('heading', { name: /^P0\s*·\s*3\.57% of total$/ })).toBeInTheDocument()
   })
 
   it('renders nothing without enabled accounts', () => {

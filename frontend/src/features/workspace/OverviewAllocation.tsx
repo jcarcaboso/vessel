@@ -53,7 +53,7 @@ function Donut({ allocation, size, focus, emphasis, onScope }: {
       </div>
     </div>
     <ul className={`allocation-legend${withVenue ? ' with-venue' : ''}`} aria-label={`${allocation.name} shares`}>
-      {allocation.slices.map(s => <li key={s.id} className={active !== null && active !== s.id ? 'allocation-dim' : undefined}
+      {allocation.slices.map(s => <li key={s.id} className={active === s.id ? 'allocation-active' : active !== null ? 'allocation-dim' : undefined}
         onMouseEnter={() => setHover(s.id)} onMouseLeave={() => setHover(null)}>
         <span className="allocation-swatch" style={{ background: fill(s) }} aria-hidden="true" />
         {s.scope && s.scope !== focus ? <button className="allocation-name" onFocus={() => setHover(s.id)} onBlur={() => setHover(null)}
@@ -79,6 +79,7 @@ function AllocationNotes({ allocation }: { allocation: Allocation }) {
 export function OverviewAllocation({ accounts, portfolios, scope, onScope }: {
   accounts: BrokerAccount[]; portfolios: Portfolio[]; scope: string; onScope: (scope: string) => void
 }) {
+  // Donuts are keyed by scope so transient hover or focus emphasis never outlives a scope change.
   const groups = portfolioAllocations(accounts, portfolios)
   if (!groups.length) return null
   const empty = (a: Allocation) => !a.slices.length
@@ -89,21 +90,21 @@ export function OverviewAllocation({ accounts, portfolios, scope, onScope }: {
   if (scope === 'all') {
     body = <div className="allocation-overview">
       <section aria-labelledby="allocation-portfolios"><h3 id="allocation-portfolios">Portfolios</h3>
-        {empty(total) ? <EmptyPie allocation={total} /> : <Donut allocation={total} size="lg" focus={scope} onScope={onScope} />}</section>
+        {empty(total) ? <EmptyPie allocation={total} /> : <Donut key={scope} allocation={total} size="lg" focus={scope} onScope={onScope} />}</section>
       <section aria-labelledby="allocation-accounts"><h3 id="allocation-accounts">Accounts by portfolio</h3>
         <div className="allocation-multiples">{groups.map(g => <article key={g.id} className="allocation-card" aria-label={g.name}>
           <header><button className="allocation-card-name" onClick={() => onScope(g.scope)} aria-label={`Show allocation for ${g.name}`}>
-            <PortfolioIcon icon={g.icon} size={15} />{g.name}</button>
-            <span>{total.slices.find(s => s.id === g.id)?.share ?? '—'} of total</span></header>
-          {empty(g) ? <EmptyPie allocation={g} /> : <Donut allocation={g} size="sm" focus={scope} onScope={onScope} />}
+            <PortfolioIcon icon={g.icon} size={15} /><span title={g.name}>{g.name}</span></button>
+            <span>{total.shares[g.id] ?? '—'} of total</span></header>
+          {empty(g) ? <EmptyPie allocation={g} /> : <Donut key={scope} allocation={g} size="sm" focus={scope} onScope={onScope} />}
         </article>)}</div>
       </section>
     </div>
   } else if (group) {
-    const share = total.slices.find(s => s.id === group.id)?.share
+    const share = total.shares[group.id]
     body = <section aria-labelledby="allocation-single">
       <h3 id="allocation-single">{group.name}{share && <small> · {share} of total</small>}</h3>
-      {empty(group) ? <EmptyPie allocation={group} /> : <Donut allocation={group} size="lg" focus={scope} emphasis={account?.id} onScope={onScope} />}
+      {empty(group) ? <EmptyPie allocation={group} /> : <Donut key={scope} allocation={group} size="lg" focus={scope} emphasis={account?.id} onScope={onScope} />}
     </section>
   } else return null
   return <section className="shell-panel overview-allocation" aria-label="Balance allocation">
