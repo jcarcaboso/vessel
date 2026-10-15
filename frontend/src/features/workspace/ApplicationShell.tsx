@@ -275,6 +275,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
         </div></section>}
         {error && <div className="workspace-alert" role="alert"><CircleHelp size={17} /><span>{error}</span><Button variant="ghost" size="sm" onClick={reload}>Try again</Button></div>}
         {monitor.error && <div className="workspace-alert" role="status">{monitor.error} Stored data remains available; no venue check was requested.</div>}
+        {monitor.notice && <div className="workspace-alert" role="status">{monitor.notice}</div>}
         {monitor.summary && !monitor.summary.workerOnline && monitor.summary.accounts.some(item => item.state !== 'idle' || item.manualState !== 'idle' || item.discrepancies.some(issue => issue.state === 'open')) && <div className="workspace-alert monitor-offline" role="status">
           Worker offline. Background Play checks are delayed. Last heartbeat {monitor.summary.heartbeatAtUtc ? new Date(monitor.summary.heartbeatAtUtc).toLocaleString() : 'not recorded'}. Stored executions may be out of date.
         </div>}
@@ -285,7 +286,10 @@ function Shell({ system, disconnect, api }: ShellProps) {
           <PageErrorBoundary resetKey={page} key={playsLifetime.generation}>
             <Suspense fallback={<PageLoading />}>
               <PlaysPage workRef={playsLifetime.work} active={page === 'plays' && disconnectedApi !== api} accounts={accounts} portfolios={portfolios}
-                reloadGeneration={reloadKey} accountMonitors={monitor.summary?.accounts ?? []}
+                reloadGeneration={reloadKey} accountMonitors={monitor.summary?.accounts ?? []} onManageAccount={id => {
+                  const account = accounts.find(item => item.id === id)
+                  if (account) manageAccount(account)
+                }}
                 api={api} session={playsSession} onSession={acceptPlaysSession} onReload={reload} loading={loading}
                 requestedPlayId={requestedPlay?.api === api ? requestedPlay.id : null} onRequestedPlayHandled={() => setRequestedPlay(null)}
                 list={playsList} onList={setPlaysList} />

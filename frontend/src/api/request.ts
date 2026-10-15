@@ -28,10 +28,12 @@ async function httpError(response: Response, options: RequestOptions): Promise<A
   }
   let detail = response.status === 502 && options.badGateway ? options.badGateway :
     response.status === 429 && options.tooMany ? options.tooMany : 'The request could not be completed.'
-  if ([400, 409, 413, 415].includes(response.status)) {
+  // A caller's own 429 text wins; otherwise the API's bounded ProblemDetails explain the admission limit.
+  if ([400, 409, 413, 415].includes(response.status) || response.status === 429 && !options.tooMany) {
     try {
       const problem: unknown = await response.json()
-      if (isRecord(problem) && isText(problem.detail, 500)) detail = problem.detail
+      if (isRecord(problem) && isText(problem.detail, 500) && problem.detail.trim()) detail = problem.detail
+      else if (response.status === 429 && isRecord(problem) && isText(problem.title, 500) && problem.title.trim()) detail = problem.title
     } catch { /* Keep the safe default for non-JSON proxy responses. */ }
   }
   const wait = response.status === 429 && options.retryAfter ? response.headers.get('Retry-After') : null

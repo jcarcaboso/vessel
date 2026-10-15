@@ -73,7 +73,11 @@ describe('Main application shell', () => {
     await userEvent.clear(title)
     await userEvent.type(title, 'Keep local revision')
     vi.mocked(client.play).mockResolvedValue(stored)
-    act(() => emit({ type: 'event', event: monitorEventFixture }))
+    // The server opens every stream with a status naming the head; only later events reload.
+    act(() => {
+      emit({ type: 'status', status: { state: 'reset', nextSequence: '1' } })
+      emit({ type: 'event', event: monitorEventFixture })
+    })
     await screen.findByText(/The saved Play changed elsewhere/)
     expect(title).toHaveValue('Keep local revision')
     expect(client.overview).toHaveBeenCalledTimes(2)
