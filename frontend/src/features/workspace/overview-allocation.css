@@ -28,6 +28,9 @@
 .allocation-sm .allocation-center { padding: 0 22%; }
 .allocation-sm .allocation-center strong { font-size: 13px; }
 .allocation-center small { font-size: 10px; color: var(--muted-foreground); line-height: 1.3; overflow-wrap: anywhere; }
+/* The legend and slice title keep the full name; the centre shows at most two lines (one in small donuts). */
+.allocation-center small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; max-width: 100%; }
+.allocation-sm .allocation-center small { -webkit-line-clamp: 1; line-clamp: 1; }
 .allocation-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; width: 100%; font-size: 12px; }
 .allocation-legend li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 5px 6px; border-radius: var(--radius); }
 .allocation-legend li.allocation-active { background: var(--accent); }
