@@ -17,6 +17,9 @@ public static class MonitorRegistration
         services.AddSingleton(options);
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<IMonitorStore, MonitorStore>();
+        services.AddScoped<IMonitorDiscrepancyStore, MonitorDiscrepancyStore>();
+        services.AddScoped<MonitorDiscrepancyService>();
+        services.AddScoped<IMonitorEvaluator>(sp => sp.GetRequiredService<MonitorDiscrepancyService>());
         services.AddScoped<IMonitorImporter>(sp => sp.GetRequiredService<PlayExecutionService>());
         services.TryAddSingleton<IMonitorRunLog, MonitorRunLog>();
         services.AddScoped<MonitorCoordinator>();

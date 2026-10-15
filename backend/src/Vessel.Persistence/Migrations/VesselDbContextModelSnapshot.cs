@@ -393,6 +393,109 @@ namespace Vessel.Persistence.Migrations
                     b.ToTable("monitor_venue_budgets", (string)null);
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Monitoring.PlayDiscrepancy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ConfirmedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ContractId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Details")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTimeOffset?>("DismissedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.PrimitiveCollection<Guid[]>("InvolvedPlayIds")
+                        .IsRequired()
+                        .HasColumnType("uuid[]");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("LastObservedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("NativeContractId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTimeOffset>("OpenedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PendingFingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset?>("PendingSinceUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ResolvedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Severity")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("SubjectKey")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "PlayId");
+
+                    b.HasIndex("OwnerId", "AccountId", "Kind", "SubjectKey")
+                        .IsUnique();
+
+                    b.ToTable("play_discrepancies", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_discrepancy_severity", "\"Severity\" IN ('info','warning','critical')");
+
+                            t.HasCheckConstraint("CK_discrepancy_state", "\"State\" IN ('candidate','open','resolved','dismissed')");
+                        });
+                });
+
             modelBuilder.Entity("Vessel.Domain.Plays.DiaryRequest", b =>
                 {
                     b.Property<Guid>("OwnerId")
@@ -1220,6 +1323,22 @@ namespace Vessel.Persistence.Migrations
                         .HasPrincipalKey("OwnerId", "Id")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Monitoring.PlayDiscrepancy", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Vessel.Domain.Plays.Play", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "PlayId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("Vessel.Domain.Plays.ManualExecution", b =>

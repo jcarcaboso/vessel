@@ -16,6 +16,18 @@ public static class MonitorEndpoints
             try { return Results.Accepted(value: await monitor.RequestAsync(id, ct)); }
             catch (MonitorAdmissionException ex) { return Busy(context, ex); }
         });
+        api.MapPost("/accounts/{id:guid}/discrepancies/{discrepancyId:guid}/dismiss",
+            async (Guid id, Guid discrepancyId, DismissMonitorDiscrepancyRequest request, MonitorDiscrepancyService service, CancellationToken ct) =>
+        {
+            await service.DismissAsync(id, null, discrepancyId, request.Note, ct);
+            return Results.NoContent();
+        });
+        api.MapPost("/plays/{id:guid}/discrepancies/{discrepancyId:guid}/dismiss",
+            async (Guid id, Guid discrepancyId, DismissMonitorDiscrepancyRequest request, MonitorDiscrepancyService service, CancellationToken ct) =>
+        {
+            await service.DismissPlayAsync(id, discrepancyId, request.Note, ct);
+            return Results.NoContent();
+        });
     }
 
     public static IResult Busy(HttpContext context, MonitorAdmissionException error)
