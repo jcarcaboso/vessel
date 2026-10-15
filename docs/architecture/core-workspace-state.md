@@ -16,6 +16,12 @@ The default frontend opens a Graphite application shell with Overview, Portfolio
 
 The shell lives in `frontend/src/features/workspace/`. Plays now mounts the draft workspace from `frontend/src/features/plays/`. Overview remains the default page.
 
+### October 15, 2026 Overview allocation
+
+`frontend/src/features/workspace/OverviewAllocation.tsx`, `overview-allocation.ts` and `overview-allocation.css` add the Allocation panel between the metric tiles and Summary, following the [allocation contract](core-workspace-contract.md#october-15-2026-overview-allocation). `OverviewSummary` takes a `beforeSummary` slot so the tiles stay first. Theme tokens `--series-*` are added in `styles.css` and `appearance.ts`. No backend, API contract, persistence or migration changed.
+
+Unit tests cover exact sums, missing/disabled/non-positive balances, folding into Other and stable colour slots; component tests cover the three scope views, emphasis, Other emphasis and scope selection. Two Sol (Codex) reviews found no blocker. Their verified findings were fixed with regressions: legend text no longer dims below contrast, long names no longer widen the panel at 320px, colour slots stay with the entity across balance changes, portfolios folded into Other keep their own share, and stale focus emphasis resets on scope change. A second round fixed wrapping in Not drawn notes, venue labels overlapping balances near 800px with the sidebar, and one-letter account names in small cards at 320px; a browser geometry check over four scopes at nine widths (320–1512px) found no overlap, overflow or names under 56px. A third round clamped the donut centre label after a 198-character focused name overflowed the figure; a focus check of every legend button at 320, 801 and 1512px keeps the centre inside the figure. The owner reviewed the panel on the LAN against an isolated synthetic `postgres:18-alpine` database seeded with manual accounts; the owner's database was not used.
+
 ### October 13, 2026 Overview summary
 
 The verification follow-up restricts Activity reads to the summary's resolved enabled-account set for every scope. Portfolio and Unassigned requests no longer reconstruct unrelated accounts' history. The store filters accounts by owner, enabled status and the supplied IDs before loading fills, snapshots and order links. Empty scopes skip Activity reads, and empty sets issue no store queries. Included accounts retain their complete history and identical per-account aggregation; `/api/activity` keeps its existing all-account and single-account behaviour.

@@ -38,6 +38,14 @@
   --positive: #a9d6b6;
   --negative: #f2b3ac;
   --warning: #edd49e;
+  /* Categorical series for part-to-whole charts, validated for adjacent slices on dark cards; Other stays neutral. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #9085e9;
+  --series-other: #6b7380;
   --shadow-color: #000000;
   --radius: 0.4375rem;
 }

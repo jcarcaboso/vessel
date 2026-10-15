@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { Overview, WorkspaceApi } from '@/api/workspace'
 import type { OverviewQuery, OverviewSummaryDocument, SummaryAmount } from '@/api/overview-summary'
 import { useVenues } from '@/api/venues'
@@ -23,8 +23,10 @@ const signClass = (value: string | null) => {
   const sign = decimalSign(value)
   return sign === 0 ? '' : sign < 0 ? 'overview-negative' : 'overview-positive'
 }
-export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallback, accountCount }: {
+/** `beforeSummary` renders between the metric tiles and the Summary table. */
+export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallback, accountCount, beforeSummary }: {
   api: WorkspaceApi; query: OverviewQuery; onQuery: (query: OverviewQuery) => void; reloadGeneration: number; fallback: Overview; accountCount: number
+  beforeSummary?: ReactNode
 }) {
   const venues = useVenues()
   const [retry, setRetry] = useState(0)
@@ -51,6 +53,7 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
       <div className="shell-panel metric"><span>Perpetual positions</span><strong>{totals?.openPositionCount ?? (loadingAll ? fallback.totals.openPositionCount : '—')}</strong><small className={signClass(totals?.unrealizedPnl.amountUsd ?? null)}>{money(totals?.unrealizedPnl.amountUsd ?? null)} unrealized</small>{totals && <Coverage value={totals.unrealizedPnl} />}<small>From latest retained snapshots</small></div>
       <div className="shell-panel metric"><span>Imported executions</span><strong>{totals?.importedFillCount ?? (loadingAll ? fallback.totals.importedFillCount : '—')}</strong><small>Retained facts in this scope</small></div>
     </section>
+    {beforeSummary}
     <section className="shell-panel overview-summary" aria-label="Overview summary">
       <header className="shell-panel-heading"><div><h2>Summary</h2><p>Reported balances and closed operation results</p></div><div className="overview-summary-controls">
         <div className="overview-group-toggle" role="group" aria-label="Summary grouping">{(['portfolio', 'account'] as const).map(group => <Button key={group} variant={query.groupBy === group ? 'secondary' : 'ghost'} size="sm" aria-pressed={query.groupBy === group} onClick={() => onQuery({ ...query, groupBy: group })}>By {group}</Button>)}</div>

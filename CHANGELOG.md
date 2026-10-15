@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Overview Allocation panel: donuts of each portfolio's share of the total and
+  each account's share of its portfolio, following the Overview scope.
+
 ## 0.1.1 - October 15, 2026
 
 ### Added

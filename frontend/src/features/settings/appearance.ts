@@ -120,6 +120,13 @@ export function resolveTheme(appearance: Appearance): ResolvedTheme {
   }
 }
 
+// Categorical series in a fixed order, validated for adjacent slices on each scheme's cards (CVD and contrast).
+// Light slots below 3:1 on white are always shown with their labels. Other is a neutral step of the theme.
+const seriesColors = {
+  dark: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#9085e9'],
+  light: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#4a3aa7'],
+} as const
+
 /** CSS custom properties for a resolved theme; component styles only read these tokens. */
 export function themeTokens({ theme, colors, radius, candleUpEdge, candleDownEdge }: ResolvedTheme): Record<string, string> {
   return {
@@ -153,6 +160,8 @@ export function themeTokens({ theme, colors, radius, candleUpEdge, candleDownEdg
     '--chart-candle-up-edge': candleUpEdge,
     '--chart-candle-down': colors.candleDown,
     '--chart-candle-down-edge': candleDownEdge,
+    ...Object.fromEntries(seriesColors[theme.scheme].map((color, i) => [`--series-${i + 1}`, color])),
+    '--series-other': mix(colors.mutedForeground, colors.card, 0.55),
     '--radius': `${radius / 16}rem`,
   }
 }

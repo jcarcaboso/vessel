@@ -9,6 +9,7 @@ import { OverviewScope } from './OverviewScope'
 import { overviewAccounts } from './overview-scope'
 import { OverviewSummary } from './OverviewSummary'
 import { OverviewPlays } from './OverviewPlays'
+import { OverviewAllocation } from './OverviewAllocation'
 
 export function OverviewPage({ data, api, overviewQuery, setOverviewQuery, reloadKey, refreshAllAction, refreshing,
   onAddAccount, onCreatePortfolio, onAccounts, onActivity, viewAccount, sync, manageAccount, browsePlays, viewPlay, reload }: {
@@ -28,7 +29,9 @@ export function OverviewPage({ data, api, overviewQuery, setOverviewQuery, reloa
     <OverviewScope scope={overviewQuery.scope} onScope={scope => setOverviewQuery(query => ({ ...query, scope }))}
       accounts={accounts} portfolios={portfolios} />
     <OverviewSummary api={api} query={overviewQuery} onQuery={setOverviewQuery} reloadGeneration={reloadKey}
-      fallback={data} accountCount={scopedAccounts.length} />
+      fallback={data} accountCount={scopedAccounts.length}
+      beforeSummary={<OverviewAllocation accounts={accounts} portfolios={portfolios} scope={overviewQuery.scope}
+        onScope={scope => setOverviewQuery(query => ({ ...query, scope }))} />} />
     {!accounts.length ? <section className="shell-panel workspace-start">
       <span className="start-icon"><Wallet size={26} /></span>
       <div className="eyebrow">SET UP YOUR DIARY</div>
