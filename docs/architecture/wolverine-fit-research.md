@@ -18,6 +18,8 @@ These are integration requirements, not authorization to build the monitor. The 
 
 After reviewing W0 on October 14, the owner chose a bounded application-level unit of work before Wolverine integration. It will centralize saves, transaction completion and later post-commit dispatch rather than attach hooks to individual stores. The spike tested the existing store-owned transactions, not that refactor; its regression tests must preserve the proved transaction guarantees. See the revised delivery steps in [the monitor plan](play-monitor-plan.md).
 
+October 15 note: the owner then replaced the delivery design with topics and subscriptions (see [the monitor plan](play-monitor-plan.md#topics-subscriptions-and-delivery)). Publishers publish each event once to `vessel.events`; each subscriber owns a quorum queue, a dead-letter queue, a registration and per-event receipts in PostgreSQL, and recovers missed events from the database with its own catch-up sweep. There are no publisher-written delivery rows and no republish sweep. Wolverine and RabbitMQ code moves into one `Vessel.Messaging` adapter. The W0 evidence below still holds; where this report speaks of consumers, per-consumer delivery claims or business republishing, read subscriptions, subscription receipts and subscriber catch-up. Predeclared topology remains required, but with catch-up an unbound topic delays delivery instead of losing it.
+
 ## Versions and license
 
 NuGet's flat-container indexes and downloaded package `.nuspec` files were checked directly, then rechecked before finishing. The latest stable versions for `WolverineFx`, `WolverineFx.EntityFrameworkCore`, `WolverineFx.Postgresql`, `WolverineFx.RabbitMQ` and `WolverineFx.RuntimeCompilation` were all **6.50.0**. NuGet records the core publication at **2026-10-14 01:49:08 UTC**, and its companion packages around the same time. This is a same-day release, not a previously validated Vessel dependency. All five packages identify source commit `55a46250e9ffd99badab1ae032d334b73e2cbe56`. [NuGet index][nuget-index], [registration][nuget-registration], [core package metadata][nuget-core], [EF package metadata][nuget-ef], [PostgreSQL metadata][nuget-pg], [RabbitMQ metadata][nuget-rabbit], [compiler metadata][nuget-compiler].
@@ -140,8 +142,8 @@ The handler accepts only configured owners, opens a fresh DI scope, sets its sco
 - Separate business EventId dedupe from inbox-envelope dedupe. Do not claim exactly-once external notifications.
 - Missing storage fails fast in current 6.50.0, but full schema drift does not. Explicit setup and upgrade validation are still needed.
 - Envelope mapping is not EF migration ownership. Keep explicit Wolverine schema setup in the one-shot migration path.
-- Queue/binding existence is part of loss prevention. Quorum plus publisher confirms alone does not cover an unbound topic.
-- Database backup consistency and business republishing remain useful plan directions, but restoration after broker-volume loss and event replay/retention were **not** proved by W0.
+- Queue/binding existence is part of loss prevention. Quorum plus publisher confirms alone does not cover an unbound topic. (Since October 15, subscriber catch-up from PostgreSQL covers that case; topology is still provisioned explicitly.)
+- Database backup consistency and business republishing remain useful plan directions, but restoration after broker-volume loss and event replay/retention were **not** proved by W0. (Since October 15, recovery is subscriber-side catch-up rather than republishing.)
 
 ## Reproduction and scope
 
