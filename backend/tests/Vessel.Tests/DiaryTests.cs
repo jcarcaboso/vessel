@@ -214,7 +214,7 @@ public sealed class DiaryPostgresTests
         await using var verify = database.Context(owner);
         Assert.Empty(await verify.Fills.ToListAsync()); Assert.Empty(await verify.Orders.ToListAsync());
         Assert.Empty((await ActivityTestSupport.Activity(verify).PageAsync(null)).Operations);
-        var report = await new ReviewService(new ReviewStore(verify, new SizingStore(verify)), TimeProvider.System).GetAsync(new(Period: "all"), default);
+        var report = await new ReviewService(new ReviewStore(verify, new SizingStore(verify, TestUnitOfWork.For(verify))), TimeProvider.System).GetAsync(new(Period: "all"), default);
         Assert.Equal(1, report.Metrics.Count);
         Assert.Equal(("manual", "planned", "-0.4"), (report.Plays[0].ExecutionSource, report.Plays[0].Origin, report.Plays[0].Net));
     }
@@ -646,7 +646,7 @@ public sealed class DiaryPostgresTests
             seed.Orders.AddRange(Order(account, "e", "buy", 2), Order(account, "x", "sell", 1)); await seed.SaveChangesAsync();
         }
         await using var reading = database.Context(owner);
-        var service = new ReviewService(new ReviewStore(reading, new SizingStore(reading)), TimeProvider.System);
+        var service = new ReviewService(new ReviewStore(reading, new SizingStore(reading, TestUnitOfWork.For(reading))), TimeProvider.System);
         var report = await service.GetAsync(new(Period: "all"), default);
         var excluded = await service.ExclusionsAsync(new(Period: "all"), default);
         Assert.Equal(report.Coverage.IncompleteExecutions, excluded.Total);

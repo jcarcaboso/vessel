@@ -321,7 +321,7 @@ public sealed class ReviewTests
         }
         await using (var db = database.Context(f.Owner))
         {
-            var service = new ReviewService(new ReviewStore(db, new SizingStore(db)), new ReviewClock());
+            var service = new ReviewService(new ReviewStore(db, new SizingStore(db, TestUnitOfWork.For(db))), new ReviewClock());
             var report = await service.GetAsync(new(), default);
             Assert.Equal(("10", 1, 1), (report.Metrics.Net, report.Options.Accounts.Count, report.Coverage.UnassignedFills));
             Assert.Equal(0, (await service.GetAsync(new(Instrument: "BTC"), default)).Coverage.UnassignedFills);
@@ -330,7 +330,7 @@ public sealed class ReviewTests
         }
         await using (var db = database.Context(foreign.Owner))
         {
-            var report = await new ReviewService(new ReviewStore(db, new SizingStore(db)), new ReviewClock()).GetAsync(new(), default);
+            var report = await new ReviewService(new ReviewStore(db, new SizingStore(db, TestUnitOfWork.For(db))), new ReviewClock()).GetAsync(new(), default);
             Assert.Equal(("99", 0), (report.Metrics.Net, report.Coverage.UnassignedFills));
         }
         await using (var db = database.Context(f.Owner))
@@ -345,7 +345,7 @@ public sealed class ReviewTests
             var known = Order(owned.Fills[0].Fill.OrderId, 2);
             db.Orders.Add(known);
             await db.SaveChangesAsync();
-            var service = new ReviewService(new ReviewStore(db, new SizingStore(db)), new ReviewClock());
+            var service = new ReviewService(new ReviewStore(db, new SizingStore(db, TestUnitOfWork.For(db))), new ReviewClock());
             var partial = await service.GetAsync(new(), default);
             Assert.Equal((0, 1), (partial.Metrics.Count, partial.Coverage.IncompleteExecutions));
             known.OriginalSize = 1;

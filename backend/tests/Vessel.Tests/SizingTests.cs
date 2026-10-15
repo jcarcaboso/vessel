@@ -131,7 +131,7 @@ public sealed class SizingServiceTests
     private static readonly DateTimeOffset Planned = DateTimeOffset.Parse("2026-10-01T10:00:00Z");
     private readonly Guid owner = Guid.NewGuid();
     private readonly MemorySizingStore store = new();
-    private SizingService Service => new(store, new CoreOwner(owner), TimeProvider.System);
+    private SizingService Service => new(store, new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.None);
 
     private static PlayPlanDocument Plan(string leverage = "3", params PlanEntry[] entries) => new("long", "margin", "250", leverage, null,
         entries.Length > 0 ? entries : [Entry("entry-1", "100", "100", new PlanExit("stop-1", "price", "95", "100"))],
@@ -310,7 +310,7 @@ public sealed class SizingPostgresTests
         var workspace = new WorkspaceService(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.For(db));
         var plays = new PlayService(new PlayStore(db, TestUnitOfWork.For(db)), new MemoryObjectStore(), TimeProvider.System, TestUnitOfWork.For(db));
         var execution = new Vessel.Application.Plays.Execution.PlayExecutionService(new PlayStore(db, TestUnitOfWork.For(db)), new ExecutionStore(db, TestUnitOfWork.For(db)), workspace, TestVenues.With(orders), TimeProvider.System, TestUnitOfWork.For(db));
-        var sizing = new SizingService(new SizingStore(db), new CoreOwner(owner), TimeProvider.System);
+        var sizing = new SizingService(new SizingStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.For(db));
         var account = await workspace.CreateAccountAsync(new(null, "Venue", "hyperliquid", "0x" + Guid.NewGuid().ToString("N") + "00000000"), default);
 
         var play = await plays.CreateAsync(new CreatePlayRequest(account.Id, "BTC", "venue", "Breakout", TestPlays.Plan()), default);
@@ -326,11 +326,11 @@ public sealed class SizingPostgresTests
 
         Assert.Equal("2.5", (await sizing.UpdateSettingsAsync(new("2.5"), default)).Settings.RiskPercent);
         await using (var again = database.Context(owner))
-            Assert.Equal("2.5", (await new SizingService(new SizingStore(again), new CoreOwner(owner), TimeProvider.System).GetAsync(default)).Settings.RiskPercent);
+            Assert.Equal("2.5", (await new SizingService(new SizingStore(again, TestUnitOfWork.For(again)), new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.For(again)).GetAsync(default)).Settings.RiskPercent);
 
         await using (var other = database.Context(Guid.NewGuid()))
         {
-            var foreign = await new SizingService(new SizingStore(other), new CoreOwner(Guid.NewGuid()), TimeProvider.System).GetAsync(default);
+            var foreign = await new SizingService(new SizingStore(other, TestUnitOfWork.For(other)), new CoreOwner(Guid.NewGuid()), TimeProvider.System, TestUnitOfWork.For(other)).GetAsync(default);
             Assert.Equal((0, "1.25"), (foreign.Record.ClosedPlays, foreign.Settings.RiskPercent));
         }
 

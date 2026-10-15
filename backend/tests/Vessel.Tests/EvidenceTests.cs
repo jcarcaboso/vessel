@@ -93,7 +93,7 @@ public sealed class EvidenceTests : IDisposable
     }
 
     private EvidenceService Service(EvidenceLimits? limits = null) =>
-        new(store, objects, limits ?? EvidenceLimits.Default, new CoreOwner(owner), TimeProvider.System);
+        new(store, objects, limits ?? EvidenceLimits.Default, new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.None);
 
     private static async Task<ProblemException> Rejects(Func<Task> action) => await Assert.ThrowsAsync<ProblemException>(action);
 
@@ -251,6 +251,7 @@ public sealed class EvidenceApiTests : IDisposable
         configure: services =>
         {
             services.AddSingleton<IEvidenceMetadataStore>(store);
+            services.AddSingleton<Vessel.Application.Ownership.IUnitOfWork>(TestUnitOfWork.None);
             if (memoryObjects) services.AddSingleton<IEvidenceObjectStore>(objects);
         });
 
@@ -395,7 +396,7 @@ public sealed class EvidencePostgresTests
         }
         await using (var db = database.Context(owner))
         {
-            var stored = await new Vessel.Persistence.EvidenceStore(db).ListAsync(play.Id, default);
+            var stored = await new Vessel.Persistence.EvidenceStore(db, TestUnitOfWork.For(db)).ListAsync(play.Id, default);
             Assert.Equal(("Note", EvidenceSource.Capture, 12L), (Assert.Single(stored).Note, stored[0].Source, stored[0].SizeBytes));
             db.Plays.Remove(await db.Plays.SingleAsync());
             var restrict = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
@@ -404,7 +405,7 @@ public sealed class EvidencePostgresTests
         await using (var db = database.Context(other))
         {
             Assert.Empty(await db.Evidence.ToListAsync());
-            Assert.Null(await new Vessel.Persistence.EvidenceStore(db).FindAsync(evidence.Id, default));
+            Assert.Null(await new Vessel.Persistence.EvidenceStore(db, TestUnitOfWork.For(db)).FindAsync(evidence.Id, default));
             var stolen = await db.Evidence.IgnoreQueryFilters().SingleAsync();
             stolen.UpdateNote("Changed", DateTimeOffset.UtcNow);
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() => db.SaveChangesAsync());
@@ -441,7 +442,8 @@ public sealed class EvidenceLimitPostgresTests
             var tracked = await db.Plays.SingleAsync();
             var evidence = new PlayEvidence(Guid.NewGuid(), tracked, $"{owner:N}/{play.Id:N}/{i}.png", "image/png", 12,
                 new string('a', 64), EvidenceSource.Upload, "", DateTimeOffset.UtcNow);
-            return await new Vessel.Persistence.EvidenceStore(db).AddAsync(evidence, 3, default);
+            var work = TestUnitOfWork.For(db);
+            return await work.ExecuteAsync(() => new Vessel.Persistence.EvidenceStore(db, work).AddAsync(evidence, 3, default), default);
         }));
         Assert.Equal(3, results.Count(added => added));
         await using (var db = database.Context(owner))
@@ -504,7 +506,7 @@ public sealed class EvidenceMarkupTests
         var objects = new MemoryObjectStore();
         var play = EvidenceFixtures.PlayFor(owner);
         store.Plays.Add(play);
-        var service = new EvidenceService(store, objects, EvidenceLimits.Default, new CoreOwner(owner), TimeProvider.System);
+        var service = new EvidenceService(store, objects, EvidenceLimits.Default, new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.None);
         var created = await service.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", "capture",
             """{"width":800,"height":600,"shapes":[{"id":"a","kind":"box","color":"#ff5c5c","width":3,"from":{"x":1,"y":1},"to":{"x":9,"y":9},"text":"x"}]}""", default);
         Assert.Equal("box", Assert.Single(created.Markup!.Shapes).Kind);
@@ -531,6 +533,7 @@ public sealed class EvidenceMarkupTests
         await using var factory = new CoreApiFactory(owner, configure: services =>
         {
             services.AddSingleton<IEvidenceMetadataStore>(store);
+            services.AddSingleton<Vessel.Application.Ownership.IUnitOfWork>(TestUnitOfWork.None);
             services.AddSingleton<IEvidenceObjectStore>(objects);
         });
         using var client = factory.AuthorizedClient();

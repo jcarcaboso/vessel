@@ -7,7 +7,7 @@ using Vessel.Domain.Sizing;
 
 namespace Vessel.Persistence;
 
-public sealed class SizingStore(VesselDbContext db) : ISizingStore
+public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISizingStore
 {
     public Task<SizingSettings?> SettingsAsync(CancellationToken ct) => db.SizingSettings.SingleOrDefaultAsync(ct);
 
@@ -41,6 +41,6 @@ public sealed class SizingStore(VesselDbContext db) : ISizingStore
         return new(play, revisions, ledger.Projection, [], true, ledger.FeesComplete);
     }
 
-    public void Add(SizingSettings settings) => db.SizingSettings.Add(settings);
-    public Task SaveAsync(CancellationToken ct) => db.SaveChangesAsync(ct);
+    public void Add(SizingSettings settings) { unitOfWork.RequireActive(); db.SizingSettings.Add(settings); }
+    public Task SaveAsync(CancellationToken ct) => unitOfWork.SaveChangesAsync(ct);
 }

@@ -408,7 +408,7 @@ public sealed class DiaryArithmeticRegressionTests
         public List<ClosedPlayFacts> Closed => sizing.Closed;
         public DiaryService Service => new(Plays, this, this, new VenueRegistry([VenueDescriptor.Manual], [], [], [], [], [], [], []), new ReviewClock(), TestUnitOfWork.None);
         public ReviewService Review => new(this, new ReviewClock());
-        public SizingService Sizing => new(sizing, new CoreOwner(Account.OwnerId), new ReviewClock());
+        public SizingService Sizing => new(sizing, new CoreOwner(Account.OwnerId), new ReviewClock(), TestUnitOfWork.None);
 
         public DiaryArithmeticFixture(string venue = "manual", string direction = "long", PlayPlanDocument? plan = null)
         {
