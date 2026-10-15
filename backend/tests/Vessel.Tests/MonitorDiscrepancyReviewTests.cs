@@ -255,4 +255,24 @@ public sealed class MonitorDiscrepancyReviewPostgresTests
             return true;
         }, default);
     }
+
+    [PostgresFact] // Rule d
+    public async Task Resting_terminal_entry_keeps_the_account_eligible_until_absent()
+    {
+        await using var database = await DiscrepancyDatabase.Create();
+        var f = new DiscrepancyFixture();
+        f.Store.Links.RemoveAll(x => x.Role != OrderLinkRole.Entry);
+        f.Play.MarkClosed("fixture", f.Clock.Now.AddMinutes(-1));
+        await database.Seed(f);
+        await using var scope = database.Scope(f);
+        var store = new MonitorStore(scope.Db, scope.Work);
+        Assert.True(await store.EligibleAsync(f.Account.Id, default));
+        await scope.Work.ExecuteAsync(async () =>
+        {
+            await store.ResolveExitsAsync(f.Account.Id, new([], f.Clock.Now, "Fresh absence", OpenOrdersComplete: true), default);
+            await scope.Work.SaveChangesAsync(default);
+            return true;
+        }, default);
+        Assert.False(await store.EligibleAsync(f.Account.Id, default));
+    }
 }
