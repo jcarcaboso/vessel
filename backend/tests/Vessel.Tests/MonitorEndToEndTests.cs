@@ -219,10 +219,13 @@ public sealed class MonitorEndToEndTests
         var previous = await fixture.MonitorAsync();
         fixture.Clock.Set(previous.NextManualAllowedAtUtc!.Value);
         JsonElement accepted, running, summary;
+        // No worker may claim the run before the accepted (pending) response is captured.
+        await fixture.StopWorkerAsync();
+        using (var response = await client.PostAsync($"/api/accounts/{fixture.AccountId}/monitor/run", null))
+            accepted = await Read(response);
         using (var gate = fixture.Venue.BlockNextRead())
         {
-            using (var response = await client.PostAsync($"/api/accounts/{fixture.AccountId}/monitor/run", null))
-                accepted = await Read(response);
+            await fixture.StartWorkerAsync();
             await gate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
             using (var response = await client.GetAsync($"/api/accounts/{fixture.AccountId}/monitor")) running = await Read(response);
             using (var response = await client.GetAsync("/api/monitor")) summary = await Read(response);
@@ -488,6 +491,17 @@ public sealed class MonitorEndToEndTests
             var current = await MonitorAsync();
             Assert.Equal(Clock.GetUtcNow(), current.LastSuccessAtUtc);
             Assert.Equal("live", current.State);
+        }
+        public async Task StopWorkerAsync()
+        {
+            await worker!.StopAsync();
+            worker.Dispose();
+            worker = null;
+        }
+        public async Task StartWorkerAsync()
+        {
+            worker = BuildWorker();
+            await worker.StartAsync();
         }
         public async Task RestartWorkerWhenDueAsync()
         {
