@@ -123,7 +123,7 @@ public sealed class MonitorDiscrepancyRound3Tests
         Assert.Equal("open", row.State);
     }
 
-    [Fact] // Finding 3: an unconfirmed candidate becomes visible and dismissable without a phantom event.
+    [Fact] // Finding 3: an unconfirmed candidate becomes visible and dismissable.
     public async Task Unobservable_candidate_becomes_visible_and_dismissable()
     {
         var f = Untracked();
@@ -137,7 +137,8 @@ public sealed class MonitorDiscrepancyRound3Tests
         Assert.Equal("unverifiable", dto.Outcome);
         await f.Service.DismissAsync(f.Account.Id, null, row.Id, "venue retired the market", default);
         Assert.Equal("dismissed", row.State);
-        Assert.Empty(f.Events.Items);
+        // Announced as unverifiable, so its dismissal is published like any other.
+        Assert.Equal(["discrepancy.unverifiable", "discrepancy.resolved"], f.Events.Items.Select(x => x.Type).ToArray());
     }
 
     [Fact] // Finding 3: the lifetime is configurable.

@@ -39,9 +39,11 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
             {
                 // Structural unknowns are undecidable by design: they neither confirm nor resolve, but are not missing evidence.
                 if (finding.Present is not null) scan.Incomplete = true;
-                if (row is not null) Unobservable(row);
+                if (row is not null) await Unobservable(row);
                 continue;
             }
+            // A fresh decision ends an unverifiable outcome. A candidate announced as unverifiable stays public for its end.
+            var announced = row?.State == "candidate" && row.UnverifiableAtUtc is not null;
             if (row is not null) row.UnverifiableAtUtc = null;
             if (row is null)
             {
@@ -82,7 +84,7 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
             {
                 // Complete fresh clearance resolves immediately. A terminal exit watch can stop after this
                 // read, so requiring another run would leave its orphan warning permanently open.
-                var publish = row.State == "open";
+                var publish = row.State == "open" || announced;
                 row.SettleConfirmation();
                 row.InvolvedPlayIds = finding.PlayIds;
                 row.Details = json;
@@ -100,6 +102,14 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
             {
                 row.PendingFingerprint = pending;
                 row.PendingSinceUtc = finding.At;
+            }
+            if (row.State == "candidate")
+            {
+                // A candidate's evidence is its baseline: if it later becomes unverifiable and is dismissed,
+                // unchanged evidence returning must stay dismissed.
+                row.InvolvedPlayIds = finding.PlayIds;
+                row.Details = json;
+                row.Fingerprint = fingerprint;
             }
             var deadline = row.PendingSinceUtc!.Value + ConfirmationDelay;
             if (finding.At < deadline)
@@ -123,21 +133,44 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
         foreach (var row in records.Values.Where(x => !seen.Contains((x.Kind, x.SubjectKey))))
         {
             // A missing subject (e.g. retired catalogue identity) is not proof that a condition cleared.
-            Unobservable(row);
+            await Unobservable(row);
             if (row.UnverifiableAtUtc is null && (row.State is "open" or "dismissed" or "candidate" || row.AwaitsConfirmation))
                 scan.Incomplete = true;
         }
         return new(next, scan.Incomplete, scan.Incomplete ? "Some discrepancy checks lack fresh, complete or consistent evidence." : null);
 
-        // Bounded lifetime: a subject unobservable for too long leaves a visible unverifiable record, not a resolution,
-        // and stops holding the account. A resolved record only drops its outstanding re-confirmation.
-        void Unobservable(PlayDiscrepancy row)
+        Task Unobservable(PlayDiscrepancy row)
         {
             row.InterruptConfirmation();
-            if (row.UnverifiableAtUtc is not null || now - row.LastObservedAtUtc < options.UnobservableLifetime) return;
-            if (row.State == "resolved") row.SettleConfirmation();
-            else row.UnverifiableAtUtc = now;
+            return ExpireAsync(row, observation.RunId, observation.Account.VenueId, observation.Trigger, now, ct);
         }
+    }
+
+    /// <summary>
+    /// Ages the account's records when a check failed before any observation (called under the account fence), so
+    /// continuously failing reads cannot hold the account forever. Nothing is decided, resolved or interrupted.
+    /// </summary>
+    public async Task ExpireAsync(Vessel.Domain.Accounts.Account account, Guid runId, string trigger, CancellationToken ct)
+    {
+        if (account.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
+        var now = clock.GetUtcNow();
+        foreach (var row in await store.RecordsAsync(account.Id, ct))
+            await ExpireAsync(row, runId, account.VenueId, trigger, now, ct);
+    }
+
+    /// <summary>
+    /// Bounded lifetime: outstanding work on a subject unobservable for too long ends with a persistent, visible
+    /// unverifiable outcome, never a resolution, and stops holding the account. A resolved record keeps its historical
+    /// resolution; only its pending recurrence becomes unverifiable. Plain resolved history is untouched.
+    /// </summary>
+    private async Task ExpireAsync(PlayDiscrepancy row, Guid run, string venue, string trigger, DateTimeOffset now, CancellationToken ct)
+    {
+        if (row.UnverifiableAtUtc is not null || row.State == "resolved" && !row.AwaitsConfirmation ||
+            now - row.LastObservedAtUtc < options.UnobservableLifetime) return;
+        row.UnverifiableAtUtc = now;
+        row.PendingSinceUtc = null;
+        row.Revision++;
+        await Publish(row, run, venue, trigger, "unverifiable", now, ct);
     }
 
     private static bool Visible(PlayDiscrepancy x) => x.ConfirmedAtUtc is not null && x.State != "candidate" || x.UnverifiableAtUtc is not null;
@@ -170,16 +203,15 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
                 (playId is null || x.PlayId == playId || x.InvolvedPlayIds.Contains(playId.Value)))
                 ?? throw new ProblemException(404, "Discrepancy not found.");
             if (row.State == "dismissed") return true;
-            // An unverifiable candidate was never opened: it can be dismissed, but there is no opened event to resolve.
-            var opened = row.State == "open";
-            if (!opened && !(row.State == "candidate" && row.UnverifiableAtUtc is not null))
+            // An unverifiable candidate was announced by discrepancy.unverifiable, so its dismissal is published like any other.
+            if (row.State != "open" && !(row.State == "candidate" && row.UnverifiableAtUtc is not null))
                 throw new ProblemException(409, "Only open or unverifiable discrepancies can be dismissed.");
             row.State = "dismissed";
             row.DismissedAtUtc = clock.GetUtcNow();
             row.Note = note;
             row.SettleConfirmation();
             row.Revision++;
-            if (opened) await Publish(row, Guid.NewGuid(), account.VenueId, "owner", "dismissed", row.DismissedAtUtc.Value, ct);
+            await Publish(row, Guid.NewGuid(), account.VenueId, "owner", "dismissed", row.DismissedAtUtc.Value, ct);
             return true;
         }, ct);
 
@@ -195,12 +227,20 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
         return account;
     }
 
+    /// <summary>
+    /// One event per transition, deduplicated by revision. <c>discrepancy.unverifiable</c> means verification ended
+    /// without a decision; the record is neither resolved nor checked any more.
+    /// </summary>
     private Task Publish(PlayDiscrepancy row, Guid run, string venue, string trigger, string transition, DateTimeOffset now, CancellationToken ct) =>
-        events.AppendAsync(new(transition == "opened" ? "discrepancy.opened" : "discrepancy.resolved", run,
-            $"discrepancy:{row.Id}:{row.Revision}:{transition}", transition == "opened" ? row.Severity : "info", now, now,
+        events.AppendAsync(new(transition switch { "opened" => "discrepancy.opened", "unverifiable" => "discrepancy.unverifiable", _ => "discrepancy.resolved" }, run,
+            $"discrepancy:{row.Id}:{row.Revision}:{transition}", transition switch { "opened" => row.Severity, "unverifiable" => "warning", _ => "info" }, now, now,
             new(AccountId: row.AccountId, VenueId: venue, ContractId: row.ContractId, PlayId: row.PlayId, DiscrepancyId: row.Id),
-            new(trigger == "owner" ? "owner" : "monitor"), JsonSerializer.SerializeToElement(new { kind = row.Kind, state = row.State, resolution = transition == "opened" ? null : transition,
-                fingerprint = row.Fingerprint, details = JsonSerializer.Deserialize<JsonElement>(row.Details), note = row.Note })), ct);
+            new(trigger == "owner" ? "owner" : "monitor"), transition == "unverifiable"
+                ? JsonSerializer.SerializeToElement(new { kind = row.Kind, state = row.State, outcome = "unverifiable",
+                    lastObservedAtUtc = row.LastObservedAtUtc, unverifiableAtUtc = row.UnverifiableAtUtc,
+                    fingerprint = row.Fingerprint, details = JsonSerializer.Deserialize<JsonElement>(row.Details) })
+                : JsonSerializer.SerializeToElement(new { kind = row.Kind, state = row.State, resolution = transition == "opened" ? null : transition,
+                    fingerprint = row.Fingerprint, details = JsonSerializer.Deserialize<JsonElement>(row.Details), note = row.Note })), ct);
 
     private static MonitorDiscrepancyDto Dto(PlayDiscrepancy row) => new(row.Id, row.AccountId, row.PlayId, row.ContractId,
         row.Kind, row.Severity, row.State, row.OpenedAtUtc, row.ConfirmedAtUtc, row.ResolvedAtUtc, row.DismissedAtUtc,

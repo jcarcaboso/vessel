@@ -411,6 +411,8 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 await unitOfWork.SaveChangesAsync(ct);
                 row.Complete(now, options.ManualCooldown, options.NextDelay(row.ConsecutiveFailures + 1, Random.Shared.NextDouble()),
                     false, credentialError: credential, error: error);
+                // Failed reads still age discrepancy work, so they cannot hold the account eligible forever.
+                if (evaluator is not null) await evaluator.ExpireAsync(account, lease.RequestId, lease.Trigger, ct);
                 if (!await store.EligibleAsync(account.Id, now, ct)) row.Idle();
             }
             await ApplyVenueBudgetAsync(account.VenueId, row, ct);
