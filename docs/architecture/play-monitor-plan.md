@@ -34,7 +34,7 @@ Settled on October 15, after review of the stack and before any of it merged:
 - **Notification Hub boundary.** A future single `notifications` subscription owns per-owner rules and hands work to per-provider queues. Only the boundary is fixed here; it has its own plan. See [Notification Hub](#notification-hub-future).
 - **Messaging is one adapter, features are modules.** Wolverine and RabbitMQ code leaves `Vessel.Persistence` for one messaging infrastructure project. Feature modules (monitor now, notifications later) register their own topology, handlers and hosted services. The worker image runs the modules named in `Vessel:Worker:Modules`, so modules can scale as separate services. See [Modules and hosts](#modules-and-hosts).
 - **Neutral event names.** Events already cover monitor and credential changes, so `PlayEvent` becomes `VesselEvent` and the tables lose their `play_` prefix. Type strings do not change.
-- **Contract corrections.** Optional fields serialize as explicit `null`; events within one transaction are sequenced in causal order; account deletion removes that account's event identities. The catalogue's dedup keys now match the code, and `monitor.run-completed` is added. See [Event contract](#event-contract).
+- **Contract corrections.** Optional fields serialize as explicit `null`; events within one transaction are sequenced in causal order; account deletion removes that account's event identities. The catalogue's dedup keys now match the code, except that monitor state moves to a persisted `StateRevision`; `monitor.run-completed` is added. See [Event contract](#event-contract).
 - **Delivery contract tightened** after an independent review: inline listeners with receipt-driven settlement, one dispatcher for live delivery and catch-up, an explicit watermark and retention protocol, immutable filters, a mandatory epoch rotation on restore, and starting defaults. See [Topics, subscriptions and delivery](#topics-subscriptions-and-delivery).
 - **Review corrections** to the unit of work, worker and discrepancy rules are recorded in [Review corrections, October 15](#review-corrections-october-15).
 - **Migrations change in place.** Nothing in the stack is merged or deployed, so its migrations are edited in place instead of adding rename migrations. Any development database that applied the branch migrations must be recreated.
@@ -200,7 +200,7 @@ Publishers write no per-subscriber rows. The earlier `event_deliveries` and `pla
 - **Eligible accounts:** enabled; venue with the `Sync` and `Orders` capabilities; a source identity; and at least one Planned, Paused or Open venue Play, or a Closed or Cancelled Play with linked exits or entries that may still be resting. Keep checking those orders at the normal interval until fresh evidence confirms they are no longer resting, even if the owner dismisses their warning. This lets `protection.orphaned` and `entry.orphaned` be detected and cleared after the last active Play closes. A required credential that is missing or unusable suspends venue reads and leaves a visible `credential-error`, rather than making the account disappear from monitoring.
 - **Exit and entry-orphan watches:** a watch resolves when a read reports that specific order in a terminal state (filled, cancelled, rejected), whether or not the read covers the whole open-order book. Concluding that the order is gone from its absence still needs a complete open-order read. A watch lasts at most 7 days (configurable). After that it ends with a persistent, visible `unverifiable` outcome: it never resolves the orphan discrepancy or claims the order is gone.
 - **`monitor_accounts`:** one row per account holding:
-  - state, interval and `next_run_at`;
+  - state, its `StateRevision`, interval and `next_run_at`;
   - lease holder and `lease_until`;
   - last attempt, last success and consecutive failures;
   - a safe error text;
@@ -343,15 +343,15 @@ Discrepancies are evaluated on the current state, so a problem that resolved its
 | `execution.link-changed` | An owner or the matcher links, confirms, unlinks or dismisses a link; data carries previous/current state | info | Stable link-change identity allocated with the mutation |
 | `discrepancy.opened` | A confirmed discrepancy opens or re-opens; data carries its kind and details. Updates to an open record emit nothing. | per kind | `discrepancy:{id}:{revision}:opened` |
 | `discrepancy.resolved` | Cleared or dismissed | info | `discrepancy:{id}:{revision}:resolved` |
-| `monitor.state-changed` | An account moves between monitor states | warning when leaving `live`, info when returning | `monitor:{accountId}:{generation}:{state}` |
+| `monitor.state-changed` | An account moves between persisted monitor states | warning when leaving `live`, info when returning | `monitor:{accountId}:{stateRevision}:{state}` |
 | `monitor.run-completed` | An owner-requested run completes | info | `monitor-run:{accountId}:{requestId}` |
 | `credential.expiring` | A read-only token expires within 14 days | warning | `credential:{accountId}:{credentialRevision}:expiring` |
 
-A state transition outside a monitor run (for example on account disable) needs its own persisted identity for the `{generation}` part, never a value recomputed at read time.
+`monitor_accounts.StateRevision` is the persisted identity of monitor state. It is incremented under the account and monitor lock whenever the state changes (run outcomes, account disable, credential changes), and is separate from the lease `Generation`. `runId` keeps the request or action identity. No identity is generated while serving reads: the API-derived `offline` and `stale` are projections, not events, unless a writer persists the transition.
 
 Versioning:
 - Adding optional fields keeps the version.
-- Removing or renaming a field, or changing its meaning, creates the next version. Producers write it only once every subscription accepts it.
+- Removing or renaming a field, or changing its meaning, creates the next version. A breaking version needs a coordinated deployment or a subscriber upcaster; producers never inspect subscription registrations or supported versions.
 - Each type has a golden JSON contract test, driven by the real producer code rather than hand-built samples.
 
 Payload and ordering rules (October 15):
@@ -387,10 +387,13 @@ Settled by the owner on October 15. The model is Azure Service Bus topics and su
 ### One dispatcher
 
 Live delivery and catch-up use the same dispatcher. In one transaction it:
-1. acquires and locks the receipt for (owner, subscription, event), creating it if absent;
-2. checks the owner, that the event exists and is at or above the logical retention floor, the subscription's responsibility, terminal state, expiry, retry deadline and attempts;
-3. runs the handler's database-only effects;
-4. settles the receipt.
+1. validates the owner, then looks the event up by (owner, event ID). It never trusts the sequence or payload in the message: a retained event's database sequence and payload are used, including the floor check. An absent event with an owner-scoped `event_dedup` row is known history that was pruned; with neither it is unknown;
+2. acquires and locks the receipt for (owner, subscription, event), creating it if absent;
+3. checks the subscription's responsibility, terminal state, expiry, retry deadline and remaining attempts;
+4. runs the handler's database-only effects;
+5. settles the receipt.
+
+Invariant: an event and its dedup identity are created atomically. Ordinary event deletion is only retention pruning, which keeps the dedup identity; account deletion removes both.
 
 Subscription handlers in this stack are database-only. The Notification Hub later enqueues provider work transactionally; nothing sends externally while holding the receipt lock.
 
@@ -403,26 +406,30 @@ Event-subscription and command listeners use Wolverine's inline listener mode, n
 | Success | Effects and terminal receipt commit together | Ack after commit |
 | Retryable failure | Effects roll back; the receipt durably records the attempt, `pending` and `next_attempt_at` | Ack: catch-up owns the retry |
 | Terminal failure (attempt cap, unsupported version) | Receipt commits `failed` | Dead-letter, for diagnosis |
-| Invalid owner, unknown event | No effects, no receipt | Dead-letter, logged by IDs |
-| Already settled, not responsible, below the floor | No effects | Ack |
+| Invalid owner | No effects, no receipt | Dead-letter, logged by IDs |
+| Unknown event: no retained event and no dedup identity | No effects, no receipt | Dead-letter for diagnosis, whatever sequence the message claims |
+| Known historical: pruned, or retained below the floor | No effects; not recorded as handled | Ack as non-deliverable |
+| Already settled, or not responsible | No effects | Ack |
 
 Commands have no event receipts. For `RunAccountMonitor`, the pending request in `monitor_accounts` and its request ID are the durable hand-off and dedup: the listener acks once the command is validated against that work. Venue polling belongs to the scheduler and run executor, not the listener.
 
 ### Dead-letter queues
 
-Dead-letter queues are diagnostic transport artifacts, not authoritative work. Receipt state controls retries. Broker redrive from a dead-letter queue never reopens a terminal receipt. An explicit, bounded admin command retries or resets retained `failed` receipts and preserves their attempt history.
+Dead-letter queues are diagnostic transport artifacts, not authoritative work. Receipt state controls retries. Broker redrive from a dead-letter queue never reopens a terminal receipt. An explicit, bounded admin command returns retained `failed` receipts to `pending` with a bounded additional retry budget. Historical attempts are preserved, and the low-water mark is never rewound.
 
 ### Catch-up
 
 Recovery is subscriber-side; there is no producer-side republish loop.
-- A bounded sweep per subscription (every 30 s, batch 100) dispatches committed events after its low-water mark that match its filter, were detected more than 30 s ago and have no terminal receipt or a due retry.
-- Retries share one attempt cap (12) across live delivery and catch-up, backing off from 1 minute, doubling to 1 hour, with ±20% jitter. An event past its `expiresAt` settles `expired`.
+- Discovery and retry work are separate. Each bounded pass per subscription (every 30 s, batch 100) does both through the same dispatcher:
+  - **discovery:** committed events after its low-water mark that match its filter, were detected more than 30 s ago and have no receipt yet;
+  - **retry work:** due `pending` receipts at any sequence, including admin retries behind the low-water mark, always joined to their retained events.
+- Retries share one attempt cap (12) across live delivery and catch-up, backing off from 1 minute, doubling to 1 hour, with ±20% jitter. An admin retry adds its own bounded budget on top. An event past its `expiresAt` settles `expired`.
 - The sweep covers a lost broker, an unroutable publish, a dead-lettered or acked-for-retry message and a subscriber that was down.
 
 ### Watermarks and retention
 
 - **Low-water mark.** Advancement captures a committed high-water sequence, then moves the mark monotonically (under the subscription lock or compare-and-set) across a bounded prefix in which every sequence is settled: an event outside the filter, a terminal receipt, or a legitimate hole such as an account deletion. Sequences are commit-ordered, so a hole below the high-water mark never fills later.
-- **Retention decisions** are serialized per owner. Retention deletes only a contiguous prefix of events, all older than `RetentionDays` and none above the lowest low-water mark of the active subscriptions.
+- **Retention decisions** are serialized per owner. Retention deletes only a contiguous prefix of events, all older than `RetentionDays` and none above the lowest low-water mark of the active subscriptions, and none with a `pending` receipt (pending delivery work is not silently deleted).
 - **Floor publication** is a short transaction: it revalidates registrations and watermarks, marks a subscription whose mark falls behind the retention window `lagging` and records its explicit gap, and raises the floor atomically. It never holds the owner cursor lock while scanning. Physical deletion below the floor follows in repeatable set-based batches, receipts included. Every delivery path respects the logical floor.
 - A lagging subscription stops holding retention; its gap is visible in health. Deregistering a subscription releases it.
 - Dedup and baseline identities survive pruning.
@@ -509,7 +516,7 @@ Review of the stack found these defects; the owner accepted the corrections. Eac
 - a stream epoch on the browser cursor, rotated by `rotate-event-epoch` in the restore procedure;
 - inline listeners and the settlement table, one dispatcher, immutable filters, insert-only provisioning;
 - owner-mismatched messages dead-lettered and logged, not silently acknowledged;
-- catalogue dedup keys aligned with the code (`discrepancy:{id}:{revision}:…`, `monitor:{accountId}:{generation}:{state}`, `credential:{accountId}:{credentialRevision}:expiring`);
+- catalogue dedup keys aligned with the code (`discrepancy:{id}:{revision}:…`, `credential:{accountId}:{credentialRevision}:expiring`); monitor state keys are covered under #45;
 - the no-op `monitor` event consumer removed; tests use a verification subscription.
 
 **#45 worker** ([Scheduling](#scheduling-and-the-unit-of-work), [Health and visibility](#health-and-visibility)):
@@ -518,6 +525,7 @@ Review of the stack found these defects; the owner accepted the corrections. Eac
 - heartbeat and health reflect a productive scheduling pass; logs include exception type names only;
 - refresh outcomes leave check backoff, `stale` and the due time alone; a refresh refused with 429 is never replayed by the worker; superseded runs are not failures; the manual cooldown does not gate scheduled claims and is at most the interval;
 - modules selected by `Vessel:Worker:Modules`;
+- a persisted `StateRevision` on `monitor_accounts`, incremented on every state change under the account and monitor lock, keys `monitor.state-changed` (`monitor:{accountId}:{stateRevision}:{state}`) instead of the lease generation; reads never create identities;
 - upgrades and backups stop web, api and worker.
 
 **#46 discrepancies** ([Discrepancies](#discrepancies)):
@@ -632,7 +640,9 @@ The owner wants alerts when price reaches a Play's drawings (lines, levels, rang
   - a delayed commit cannot be skipped by the cursor reader or a subscription's low-water mark; an expired cursor, a cursor ahead of the database or one from another epoch requests a reset;
   - events within a transaction follow causal order, and optional fields serialize as `null`;
   - a subscription registered later is not responsible for earlier events; re-provisioning never resets its start or progress, and a changed filter is rejected;
-  - live delivery and catch-up race on one receipt without double effects; catch-up processes only matching, unsettled events past the grace period, backs off, ends `failed` at the shared cap and `expired` past `expiresAt`; an admin retry preserves attempt history;
+  - live delivery and catch-up race on one receipt without double effects; catch-up processes only matching, unsettled events past the grace period, backs off, ends `failed` at the shared cap and `expired` past `expiresAt`; an admin retry after the low-water mark has advanced is processed as retry work without rewinding the mark, preserves attempt history and survives a crash before dispatch;
+  - a message with an unknown event ID dead-letters even when it claims a below-floor sequence; a known pruned ID acks without trusting its claimed sequence; a retained event is dispatched with its database sequence;
+  - repeated monitor state cycles without a lease claim produce distinct `monitor.state-changed` events; a retry or re-read of an unchanged state produces none;
   - the low-water mark advances monotonically over non-matching events, terminal receipts and account-deletion holes, never past an unsettled event;
   - retention deletes only a contiguous prefix below the lowest active low-water mark, records gaps for lagging subscriptions in the floor transaction, repeats physical deletion safely, never serves events below the floor and does not hold the cursor lock while scanning;
   - account deletion removes that account's baselines, fill identities, events, dedup rows and receipts;
