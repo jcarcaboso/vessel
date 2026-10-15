@@ -7,7 +7,7 @@ COPY frontend/ frontend/
 RUN pnpm --filter vessel-frontend build
 
 FROM nginxinc/nginx-unprivileged:alpine
-ARG VERSION=0.1.0
+ARG VERSION=0.1.1
 ARG REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/jcarcaboso/vessel" \
       org.opencontainers.image.version="${VERSION}" \

@@ -40,6 +40,8 @@ October 11, 2026: the owner asked for faster chart loading and smoother chart wo
 
 October 13, 2026: first manual release packaging targets v0.1.0 on Linux amd64. API and web images share `skorcius/vessel` with `api-0.1.0`/`web-0.1.0` and moving `api-latest`/`web-latest` tags. Follow `deploy/README.md` and its Compose example for explicit one-shot migrations, private PostgreSQL/evidence volumes, HTTPS and optional mode-600 credential-key mounts. The API never migrates at startup. The default Compose API trusts only the pinned web IP with one hop; nginx overwrites forwarded claims. The opt-in Caddy TLS overlay unpublishes web and trusts only Caddy's pinned IP. Explicit API trust replaces loopback defaults. Host-local gateway trust is a weaker documented opt-in that permits local-process spoofing. Static CSP/headers, restricted API compression and isolated backup/restore checks are in `scripts/verify-release.py`. Never bake secrets into images or expose plain HTTP to the internet. Publication remains the owner's manual step.
 
+October 15, 2026: releases remain manual to the Docker Hub repository `skorcius/vessel`. Use the repository-local `vessel-release` skill at `.agents/skills/vessel-release/SKILL.md` for subsequent version bumps, checks, annotated Git tags and API/web image preparation or explicitly requested publication. Do not add automated publishing or create a GitHub Release unless requested. Preparing a release does not authorize deployment or changes to the owner's database.
+
 ## Project tracking
 
 October 13, 2026: the owner authorized all P1 diary must-haves from the product
