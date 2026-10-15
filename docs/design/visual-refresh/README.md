@@ -77,12 +77,14 @@ After reviewing the preview, the owner asked for:
   one "About these numbers" disclosure holding API notices verbatim. Required notices stay visible: the plaintext-HTTP
   token warning, "never enter a private key", manual-ledger limits, sizing reasoning and "not advice", nominal USD,
   incomplete coverage, destructive-action consequences and validation.
-- **Allocation donut**: clicking the selected slice or legend item steps back one level; the centre label no longer
-  gets text-selected.
+- **Allocation donut**: the back arrow always returns to All accounts ("Back to all accounts"), and clicking the
+  selected slice or legend item again deselects it to the same place; there is no remembered path. The scope and
+  Result period selects opt out of browser form restoration (`autocomplete="off"`) so a load always shows the real
+  scope, All. The centre label no longer gets text-selected.
 
 ## Verification
 
-- TypeScript, ESLint (0 warnings) and all 1,898 frontend tests pass; the production build emits the contour texture
+- TypeScript, ESLint (0 warnings) and all 1,897 frontend tests pass; the production build emits the contour texture
   as a hashed same-origin asset, allowed by the existing `img-src 'self'` CSP.
 - Headless Chromium at widths 320, 390, 550, 768, 850, 1001, 1024, 1100, 1280 and 1440 showed no horizontal page
   overflow on any page; the Play editor was also checked at 1100.

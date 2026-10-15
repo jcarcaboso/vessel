@@ -134,6 +134,7 @@ describe('Overview scope', () => {
       const select = screen.getByLabelText('Overview scope')
       expect(select).toBe(screen.getByRole('combobox', { name: 'Overview scope' }))
       expect(select).toHaveValue('unassigned')
+      expect(select).toHaveAttribute('autocomplete', 'off')
       expect(select.nextElementSibling).toHaveAttribute('aria-hidden', 'true')
     })
     it('returns the whole Overview to all accounts and keeps select, metrics and Allocation together', async () => {
@@ -145,7 +146,7 @@ describe('Overview scope', () => {
       expect(screen.queryByRole('button', { name: 'View all accounts' })).not.toBeInTheDocument()
       fireEvent.change(scope, { target: { value: portfolioScope } })
       await waitFor(() => expect(within(metrics).getByText('$10.00')).toBeInTheDocument())
-      expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Back to all accounts' })).toBeInTheDocument()
       fireEvent.click(screen.getByRole('button', { name: 'View all accounts' }))
       expect(scope).toHaveValue('all')
       expect(scope).toHaveFocus()
@@ -158,23 +159,44 @@ describe('Overview scope', () => {
   })
   describe('Allocation back arrow with the scope select', () => {
     const portfolioScope = `portfolio:${portfolioFixture.id}`
+    const backName = 'Back to all accounts'
     const metricTotal = (text: string) => waitFor(() => expect(within(screen.getByRole('region', { name: 'Scoped overview totals' })).getByText(text)).toBeInTheDocument())
+    const second = { ...main, id: 'cccccccc-cccc-dddd-eeee-ffffffffffff', name: 'Second main', balanceUsd: '5' }
+    it('shows all accounts when the Overview first loads, with no back arrow or View all', async () => {
+      render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client()} />)
+      await screen.findByRole('table', { name: 'Overview summary by portfolio' })
+      expect(screen.getByLabelText('Overview scope')).toHaveValue('all')
+      expect(screen.getByRole('option', { name: 'All accounts' })).toHaveProperty('selected', true)
+      expect(screen.queryByRole('button', { name: backName })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'View all accounts' })).not.toBeInTheDocument()
+      expect(screen.getByRole('img', { name: /^All accounts balance shares/ })).toBeInTheDocument()
+    })
+    it('stops the browser restoring the scope and period selects, which would show a stale option without telling React', async () => {
+      render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client()} />)
+      await screen.findByRole('table', { name: 'Overview summary by portfolio' })
+      expect(screen.getByLabelText('Overview scope')).toHaveAttribute('autocomplete', 'off')
+      expect(screen.getByLabelText('Result period')).toHaveAttribute('autocomplete', 'off')
+    })
     it.each([
-      ['portfolio', portfolioScope, '$10.00', 'Back to all portfolios', 'all', '$30.00'],
-      ['unassigned', 'unassigned', '$20.00', 'Back to all portfolios', 'all', '$30.00'],
-    ])('a %s scope goes back to all accounts with every section following the select', async (_name, from, fromTotal, arrow, to, toTotal) => {
+      ['portfolio', portfolioScope, '$10.00'],
+      ['unassigned', 'unassigned', '$20.00'],
+      ['account', `account:${main.id}`, '$10.00'],
+    ])('a %s scope goes back to all accounts, always named the same, with every section following the select', async (_name, from, fromTotal) => {
       const api = client()
       render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
       await screen.findByRole('table', { name: 'Overview summary by portfolio' })
       const scope = screen.getByLabelText('Overview scope')
       fireEvent.change(scope, { target: { value: from } })
       await metricTotal(fromTotal)
-      fireEvent.click(screen.getByRole('button', { name: arrow }))
-      expect(scope).toHaveValue(to)
-      await metricTotal(toTotal)
-      await waitFor(() => expect(api.overviewSummary).toHaveBeenLastCalledWith(expect.objectContaining({ scope: to }), expect.any(AbortSignal)))
+      const back = screen.getByRole('button', { name: backName })
+      expect(back).toHaveAttribute('title', backName)
+      fireEvent.click(back)
+      expect(scope).toHaveValue('all')
+      await metricTotal('$30.00')
+      await waitFor(() => expect(api.overviewSummary).toHaveBeenLastCalledWith(expect.objectContaining({ scope: 'all' }), expect.any(AbortSignal)))
+      expect(screen.queryByRole('button', { name: /^Back to/ })).not.toBeInTheDocument()
     })
-    it('returns an account opened from a one-account donut on All to All, by slice again or by arrow, with the select following', async () => {
+    it('returns an account opened from a one-account donut on All to All by slice again or by arrow, with the select following', async () => {
       const api = client()
       render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
       await screen.findByRole('table', { name: 'Overview summary by portfolio' })
@@ -183,20 +205,16 @@ describe('Overview scope', () => {
       fireEvent.click(slice())
       expect(scope).toHaveValue(`account:${other.id}`)
       await metricTotal('$20.00')
-      expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: backName })).toBeInTheDocument()
       fireEvent.click(slice())
       expect(scope).toHaveValue('all')
       await metricTotal('$30.00')
       fireEvent.click(slice())
-      fireEvent.click(screen.getByRole('button', { name: 'Back to all portfolios' }))
+      fireEvent.click(screen.getByRole('button', { name: backName }))
       expect(scope).toHaveValue('all')
       await waitFor(() => expect(api.overviewSummary).toHaveBeenLastCalledWith(expect.objectContaining({ scope: 'all' }), expect.any(AbortSignal)))
-      // Picking the same account from the select leaves no origin; Unassigned holds only that account, so Back skips it too.
-      fireEvent.change(scope, { target: { value: `account:${other.id}` } })
-      fireEvent.click(await screen.findByRole('button', { name: 'Back to all portfolios' }))
-      expect(scope).toHaveValue('all')
     })
-    it('skips a group that looks like its only account: Unassigned from the select or its card, then the account, then back', async () => {
+    it('returns a lone Unassigned account to All when Unassigned came from the select or its card', async () => {
       const api = client()
       render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
       await screen.findByRole('table', { name: 'Overview summary by portfolio' })
@@ -206,20 +224,18 @@ describe('Overview scope', () => {
       await metricTotal('$20.00')
       fireEvent.click(slice())
       expect(scope).toHaveValue(`account:${other.id}`)
-      expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toHaveAttribute('title', 'Back to all portfolios')
       fireEvent.click(slice())
       expect(scope).toHaveValue('all')
       await metricTotal('$30.00')
       fireEvent.click(within(screen.getByRole('article', { name: 'Unassigned' })).getByRole('button', { name: 'Show allocation for Unassigned' }))
       expect(scope).toHaveValue('unassigned')
       fireEvent.click(slice())
-      fireEvent.click(screen.getByRole('button', { name: 'Back to all portfolios' }))
+      fireEvent.click(screen.getByRole('button', { name: backName }))
       expect(scope).toHaveValue('all')
       await waitFor(() => expect(api.overviewSummary).toHaveBeenLastCalledWith(expect.objectContaining({ scope: 'all' }), expect.any(AbortSignal)))
     })
-    it('keeps the group level when a portfolio has several accounts', async () => {
+    it('goes back to all after choosing one account and then another of a portfolio picked in the select', async () => {
       const api = client()
-      const second = { ...main, id: 'cccccccc-cccc-dddd-eeee-ffffffffffff', name: 'Second main', balanceUsd: '5' }
       api.overview.mockResolvedValue({ ...overview, accounts: [main, second, other] })
       render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
       await screen.findByRole('table', { name: 'Overview summary by portfolio' })
@@ -227,30 +243,26 @@ describe('Overview scope', () => {
       fireEvent.change(scope, { target: { value: portfolioScope } })
       fireEvent.click(await screen.findByText('Main account: $10.00 · 66.67%'))
       expect(scope).toHaveValue(`account:${main.id}`)
-      expect(screen.getByRole('button', { name: `Back to ${portfolioFixture.name}` })).toBeInTheDocument()
-      fireEvent.click(screen.getByRole('button', { name: `Back to ${portfolioFixture.name}` }))
-      expect(scope).toHaveValue(portfolioScope)
+      fireEvent.click(screen.getByRole('button', { name: 'Show allocation for Second main' }))
+      expect(scope).toHaveValue(`account:${second.id}`)
+      await waitFor(() => expect(api.overviewSummary).toHaveBeenLastCalledWith(expect.objectContaining({ scope: `account:${second.id}` }), expect.any(AbortSignal)))
+      fireEvent.click(screen.getByRole('button', { name: backName }))
+      expect(scope).toHaveValue('all')
+      await waitFor(() => expect(api.overviewSummary).toHaveBeenLastCalledWith(expect.objectContaining({ scope: 'all' }), expect.any(AbortSignal)))
     })
-    it('steps a single account back to all, since its portfolio and Unassigned look the same, keeping the select in step', async () => {
+    it('deselects an account of a multi-account portfolio to all, not to the portfolio, by slice or legend item', async () => {
       const api = client()
+      api.overview.mockResolvedValue({ ...overview, accounts: [main, second, other] })
       render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
       await screen.findByRole('table', { name: 'Overview summary by portfolio' })
       const scope = screen.getByLabelText('Overview scope')
       fireEvent.change(scope, { target: { value: `account:${main.id}` } })
-      await metricTotal('$10.00')
-      fireEvent.click(screen.getByRole('button', { name: 'Back to all portfolios' }))
+      fireEvent.click(screen.getByText('Main account: $10.00 · 66.67%'))
       expect(scope).toHaveValue('all')
-      await metricTotal('$30.00')
-      fireEvent.change(scope, { target: { value: `account:${other.id}` } })
-      await metricTotal('$20.00')
-      fireEvent.click(screen.getByRole('button', { name: 'Back to all portfolios' }))
+      fireEvent.change(scope, { target: { value: `account:${second.id}` } })
+      fireEvent.click(screen.getByRole('button', { name: 'Show allocation for Second main' }))
       expect(scope).toHaveValue('all')
-      await metricTotal('$30.00')
-      // A portfolio or Unassigned selected from the select still steps back to all.
-      fireEvent.change(scope, { target: { value: portfolioScope } })
-      await waitFor(() => expect(api.overviewSummary).toHaveBeenLastCalledWith(expect.objectContaining({ scope: portfolioScope }), expect.any(AbortSignal)))
-      fireEvent.click(screen.getByRole('button', { name: 'Back to all portfolios' }))
-      expect(scope).toHaveValue('all')
+      await waitFor(() => expect(api.overviewSummary).toHaveBeenLastCalledWith(expect.objectContaining({ scope: 'all' }), expect.any(AbortSignal)))
     })
   })
 })

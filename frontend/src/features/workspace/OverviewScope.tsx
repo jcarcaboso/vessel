@@ -11,7 +11,8 @@ export function OverviewScope({ scope, onScope, accounts, portfolios }: {
   const select = useRef<HTMLSelectElement>(null)
   return <div className="overview-scope">
     <label htmlFor={id}>Overview scope</label>
-    <NativeSelect id={id} ref={select} value={scope} onChange={e => onScope(e.target.value)}>
+    {/* autoComplete off: a browser restoring form state could show a stale option here without telling React. */}
+    <NativeSelect id={id} ref={select} value={scope} autoComplete="off" onChange={e => onScope(e.target.value)}>
       <option value="all">All accounts</option>
       <optgroup label="Portfolios">{portfolios.map(p => <option key={p.id} value={`portfolio:${p.id}`}>{p.name}</option>)}
         {enabled.some(a => a.portfolioId === null) && <option value="unassigned">Unassigned</option>}</optgroup>

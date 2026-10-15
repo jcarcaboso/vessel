@@ -9,14 +9,7 @@ import { portfolioAllocations, totalAllocation, type Allocation, type Allocation
 import './overview-allocation.css'
 
 const tau = Math.PI * 2
-/** Depth of a scope: all accounts, one portfolio or Unassigned, one account. */
-const depth = (scope: string) => scope === 'all' ? 0 : scope.startsWith('account:') ? 2 : 1
-/** The trail after moving from one scope to another: going down remembers where it left, going up forgets back to the target. */
-function nextOrigins(origins: string[], from: string, to: string) {
-  if (depth(to) > depth(from)) return [...origins, from]
-  if (depth(to) < depth(from)) return origins.slice(0, Math.max(0, origins.lastIndexOf(to)))
-  return origins
-}
+const backLabel = 'Back to all accounts'
 const point = (r: number, angle: number) => `${(r * Math.sin(angle)).toFixed(3)} ${(-r * Math.cos(angle)).toFixed(3)}`
 function arc(outer: number, inner: number, start: number, end: number) {
   // A whole ring cannot be one SVG arc; split it into two halves.
@@ -29,18 +22,18 @@ const compactMoney = (value: string | null) => value === null ? '—' : new Intl
 const fill = (slice: AllocationSlice) => slice.slot === null ? 'var(--series-other)' : `var(--series-${slice.slot})`
 
 /**
- * A donut of part-to-whole balance shares. Hovering or focusing a slice or legend row emphasizes it. `selected` is the
- * account the Overview is scoped to and `back` the scope the back arrow returns to: activating the selected part again
- * goes there instead of re-selecting it, and any other part with a scope selects it.
+ * A donut of part-to-whole balance shares. Hovering or focusing a slice or legend row emphasizes it. `selectedId` is the
+ * account the Overview is scoped to: activating that part again deselects it, going back to all accounts, and any other
+ * part with a scope selects it.
  */
-function Donut({ allocation, size, selected, onScope }: {
-  allocation: Allocation; size: 'lg' | 'sm'; selected?: { id: string; back: string } | undefined; onScope: (scope: string) => void
+function Donut({ allocation, size, selectedId, onScope }: {
+  allocation: Allocation; size: 'lg' | 'sm'; selectedId?: string | undefined; onScope: (scope: string) => void
 }) {
   const venues = useVenues()
   const [hover, setHover] = useState<string | null>(null)
   // A selected account folded into Other selects Other.
-  const emphasized = selected ? allocation.slices.find(s => s.id === selected.id || s.members?.includes(selected.id))?.id ?? null : null
-  const target = (s: AllocationSlice) => s.id === emphasized && selected ? selected.back : s.scope
+  const emphasized = selectedId ? allocation.slices.find(s => s.id === selectedId || s.members?.includes(selectedId))?.id ?? null : null
+  const target = (s: AllocationSlice) => s.id === emphasized ? 'all' : s.scope
   const active = hover ?? emphasized
   const radius = size === 'lg' ? 84 : 52, inner = radius * 0.64
   const current = allocation.slices.find(s => s.id === active)
@@ -96,12 +89,6 @@ function AllocationNotes({ allocation }: { allocation: Allocation }) {
 export function OverviewAllocation({ accounts, portfolios, scope, onScope }: {
   accounts: BrokerAccount[]; portfolios: Portfolio[]; scope: string; onScope: (scope: string) => void
 }) {
-  // Where each step down came from, so Back returns to the view the owner left: All -> account from a small donut goes back
-  // to All, not to the account's group. The trail belongs to the scope it ends at; any other change of scope (the select,
-  // View all, a Summary row, a reload that drops the scope) drops it and Back then goes one level up.
-  const [trail, setTrail] = useState<{ scope: string; origins: string[] }>({ scope, origins: [] })
-  if (trail.scope !== scope) setTrail({ scope, origins: [] })
-  const origins = trail.scope === scope ? trail.origins : []
   // The panel body is replaced on every scope change, so a focused control would vanish with it and focus would fall back to
   // the page. Controls tagged `data-focus` name the entity they stand for; after a change made from inside the panel, focus
   // returns to the control for the same entity in the new view, or to the back arrow, so keyboard use continues where it was.
@@ -110,7 +97,6 @@ export function OverviewAllocation({ accounts, portfolios, scope, onScope }: {
   const go = (to: string, leaving?: string) => {
     const key = leaving ?? (document.activeElement as HTMLElement | null)?.dataset.focus
     restore.current = key && panel.current?.contains(document.activeElement) ? [key, 'back'] : null
-    setTrail({ scope: to, origins: nextOrigins(origins, scope, to) })
     onScope(to)
   }
   useLayoutEffect(() => {
@@ -143,21 +129,13 @@ export function OverviewAllocation({ accounts, portfolios, scope, onScope }: {
     </div>
   } else if (group) {
     const share = total.shares[group.id]
-    // Back goes to where the selection was made from. Without a recorded origin it goes one level up: to all portfolios from
-    // a portfolio or Unassigned, to the account's group from an account. A group whose only drawn slice is the selected
-    // account looks exactly like that account, so Back skips it and goes where the group itself would: its origin, else All.
-    const target = origins.at(-1) ?? (account ? group.scope : 'all')
-    const sameView = !!account && target === group.scope && group.slices.length === 1 && group.slices[0]!.id === account.id
-    const origin = sameView ? (origins.at(-1) === group.scope ? origins.at(-2) : undefined) ?? 'all' : target
-    const destination = origin === 'all' || groups.some(g => g.scope === origin) ? origin : account ? group.scope : 'all'
-    const back = { scope: destination, label: destination === 'all' ? 'Back to all portfolios' : `Back to ${groups.find(g => g.scope === destination)!.name}` }
     body = <section aria-labelledby="allocation-single">
       <div className="allocation-heading">
-        <button type="button" className="icon-button allocation-back" data-focus="back" aria-label={back.label} title={back.label} onClick={() => go(back.scope, scope)}>
+        <button type="button" className="icon-button allocation-back" data-focus="back" aria-label={backLabel} title={backLabel} onClick={() => go('all', scope)}>
           <ArrowLeft size={14} aria-hidden="true" /></button>
         <h3 id="allocation-single">{group.name}{share && <small> · {share} of total</small>}</h3>
       </div>
-      {empty(group) ? <EmptyPie allocation={group} /> : <Donut key={scope} allocation={group} size="lg" selected={account && { id: account.id, back: back.scope }} onScope={go} />}
+      {empty(group) ? <EmptyPie allocation={group} /> : <Donut key={scope} allocation={group} size="lg" selectedId={account?.id} onScope={go} />}
     </section>
   } else return null
   return <section ref={panel} className="shell-panel overview-allocation" aria-label="Balance allocation">

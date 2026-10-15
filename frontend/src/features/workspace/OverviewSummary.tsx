@@ -60,7 +60,7 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
     <section className="shell-panel overview-summary" aria-label="Overview summary">
       <header className="shell-panel-heading"><h2>Summary</h2><div className="overview-summary-controls">
         <div className="overview-group-toggle" role="group" aria-label="Summary grouping">{(['portfolio', 'account'] as const).map(group => <Button key={group} variant={query.groupBy === group ? 'secondary' : 'ghost'} size="sm" aria-pressed={query.groupBy === group} onClick={() => onQuery({ ...query, groupBy: group })}>By {group}</Button>)}</div>
-        <label>Result period<NativeSelect value={query.period} onChange={e => onQuery({ ...query, period: e.target.value as OverviewQuery['period'] })}><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="all">All retained history</option></NativeSelect></label>
+        <label>Result period<NativeSelect value={query.period} autoComplete="off" onChange={e => onQuery({ ...query, period: e.target.value as OverviewQuery['period'] })}><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="all">All retained history</option></NativeSelect></label>
       </div></header>
       {!current && <div className="workspace-loading" role="status">Loading summary…</div>}
       {current?.error && <div className="workspace-alert" role="alert">{current.error}<Button variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>Retry summary</Button></div>}

@@ -77,285 +77,175 @@ describe('Overview allocation', () => {
     expect(screen.getByRole('heading', { name: /^P0\s*·\s*3\.57% of total$/ })).toBeInTheDocument()
   })
 
-  describe('stepping back by activating the selected part again', () => {
+  describe('going back to all accounts', () => {
     const withUnassigned = [...accounts.filter(a => a.id !== 'Delta'), account('Delta', null, '50'), account('Eps', null, '150')]
+    // Unassigned holds only Solo (a one-slice donut, like a lone sandbox account); Core holds only Gamma.
+    const solo = [...accounts.filter(a => a.id !== 'Delta'), account('Solo', null, '50')]
+    const backName = 'Back to all accounts'
     /** Keeps the scope in state like the Overview page, so a click is followed by the real next render. */
-    function Harness({ initial, list = accounts, outside = [] }: { initial: string; list?: BrokerAccount[]; outside?: string[] }) {
+    function Harness({ initial, list = accounts }: { initial: string; list?: BrokerAccount[] }) {
       const [scope, setScope] = useState(initial)
-      // Changes made elsewhere on the page, such as the scope select, View all or a Summary row.
       return <><output aria-label="scope">{scope}</output>
-        {outside.map(o => <button key={o} onClick={() => setScope(o)}>Elsewhere {o}</button>)}
         <OverviewAllocation accounts={list} portfolios={portfolios} scope={scope} onScope={setScope} /></>
     }
     const scopeOf = () => screen.getByLabelText('scope').textContent
     const legendButton = (name: string) => screen.getByRole('button', { name: `Show allocation for ${name}` })
+    const slice = (title: string) => screen.getByText(title)
 
-    it('returns an account to its portfolio when its slice is clicked again, and selects another account in one click', () => {
-      render(<Harness initial="account:Beta" />)
-      const slice = () => screen.getByText('Beta: $100.00 · 25.00%')
-      expect(slice().parentElement).toHaveAttribute('data-scope', 'portfolio:p1')
-      fireEvent.click(slice())
-      expect(scopeOf()).toBe('portfolio:p1')
-      expect(screen.getByRole('heading', { name: /^Swing\s*·\s*40\.00% of total$/ })).toBeInTheDocument()
-      fireEvent.click(screen.getByText('Alpha: $300.00 · 75.00%'))
-      expect(scopeOf()).toBe('account:Alpha')
-      fireEvent.click(screen.getByText('Alpha: $300.00 · 75.00%'))
-      expect(scopeOf()).toBe('portfolio:p1')
-      // Choosing the other account while one is selected moves the selection instead of clearing it.
-      fireEvent.click(slice())
-      expect(scopeOf()).toBe('account:Beta')
-      fireEvent.click(screen.getByText('Alpha: $300.00 · 75.00%'))
-      expect(scopeOf()).toBe('account:Alpha')
+    it('offers no back arrow while all accounts are shown', () => {
+      render(<Harness initial="all" />)
+      expect(screen.queryByRole('button', { name: /^Back to/ })).not.toBeInTheDocument()
     })
 
-    it('returns an unassigned account to Unassigned', () => {
-      render(<Harness initial="account:Eps" list={withUnassigned} />)
-      fireEvent.click(screen.getByText('Eps: $150.00 · 75.00%'))
-      expect(scopeOf()).toBe('unassigned')
-      expect(screen.getByRole('heading', { name: /^Unassigned\s*·\s*/ })).toBeInTheDocument()
-    })
-
-    it('returns a selected portfolio, or Unassigned, to all accounts with the back arrow beside the heading', () => {
-      const { unmount } = render(<Harness initial="portfolio:p1" />)
-      // The heading is plain text again: no button inside it, and the arrow before it carries the destination.
-      const heading = screen.getByRole('heading', { name: /^Swing\s*·\s*40\.00% of total$/ })
-      expect(within(heading).queryByRole('button')).not.toBeInTheDocument()
-      const back = screen.getByRole('button', { name: 'Back to all portfolios' })
-      expect(back).toHaveAttribute('title', 'Back to all portfolios')
+    it.each([
+      ['a portfolio', 'portfolio:p1', accounts, /^Swing/],
+      ['Unassigned', 'unassigned', withUnassigned, /^Unassigned/],
+      ['an account of a portfolio with several accounts', 'account:Beta', accounts, /^Swing/],
+      ['the only account of a portfolio', 'account:Gamma', accounts, /^Core/],
+      ['an unassigned account', 'account:Eps', withUnassigned, /^Unassigned/],
+    ])('returns %s to all accounts with the back arrow beside the heading', (_name, initial, list, heading) => {
+      render(<Harness initial={initial} list={list} />)
+      // The heading is plain text, and the arrow before it always names the same destination.
+      const title = screen.getByRole('heading', { name: heading })
+      expect(within(title).queryByRole('button')).not.toBeInTheDocument()
+      const back = screen.getByRole('button', { name: backName })
+      expect(back).toHaveAttribute('title', backName)
       expect(back).not.toHaveAttribute('aria-pressed')
-      expect(heading.previousElementSibling).toBe(back)
+      expect(title.previousElementSibling).toBe(back)
+      expect(screen.queryByRole('button', { name: /^Back to (?!all accounts$)/ })).not.toBeInTheDocument()
       fireEvent.click(back)
       expect(scopeOf()).toBe('all')
       expect(screen.getByRole('img', { name: /^All accounts balance shares/ })).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /^Back to/ })).not.toBeInTheDocument()
-      unmount()
-      render(<Harness initial="unassigned" list={withUnassigned} />)
-      expect(within(screen.getByRole('heading', { name: /^Unassigned/ })).queryByRole('button')).not.toBeInTheDocument()
-      fireEvent.click(screen.getByRole('button', { name: 'Back to all portfolios' }))
+    })
+
+    it('deselects an account to all accounts when its slice is clicked again, and moves the selection in one click', () => {
+      render(<Harness initial="account:Beta" />)
+      const beta = () => slice('Beta: $100.00 · 25.00%'), alpha = () => slice('Alpha: $300.00 · 75.00%')
+      expect(beta().parentElement).toHaveAttribute('data-scope', 'all')
+      expect(alpha().parentElement).toHaveAttribute('data-scope', 'account:Alpha')
+      fireEvent.click(beta())
+      expect(scopeOf()).toBe('all')
+      // Choosing an account selects it; choosing the other one while it is selected moves the selection instead of clearing it.
+      fireEvent.click(alpha())
+      expect(scopeOf()).toBe('account:Alpha')
+      fireEvent.click(beta())
+      expect(scopeOf()).toBe('account:Beta')
+      fireEvent.click(beta())
       expect(scopeOf()).toBe('all')
     })
 
-    it('returns an account to its portfolio, or to Unassigned, with the back arrow', () => {
-      const { unmount } = render(<Harness initial="account:Beta" />)
-      expect(within(screen.getByRole('heading', { name: /^Swing/ })).queryByRole('button')).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: 'Back to all portfolios' })).not.toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Back to Swing' })).toHaveAttribute('title', 'Back to Swing')
-      fireEvent.click(screen.getByRole('button', { name: 'Back to Swing' }))
-      expect(scopeOf()).toBe('portfolio:p1')
-      fireEvent.click(screen.getByRole('button', { name: 'Back to all portfolios' }))
-      expect(scopeOf()).toBe('all')
-      unmount()
+    it('deselects an unassigned account to all accounts, not to Unassigned', () => {
       render(<Harness initial="account:Eps" list={withUnassigned} />)
-      fireEvent.click(screen.getByRole('button', { name: 'Back to Unassigned' }))
-      expect(scopeOf()).toBe('unassigned')
-    })
-
-    describe('going back to where the selection was made', () => {
-      // Every group has two accounts except Solo's, which is a one-slice donut like the owner's Unassigned group.
-      const solo = [...accounts.filter(a => a.id !== 'Delta'), account('Solo', null, '50')]
-      const soloSlice = () => screen.getByText('Solo: $50.00 · 100.00%')
-
-      it('returns to all accounts when a single-account group was opened from its small donut, by slice or by arrow', () => {
-        render(<Harness initial="all" list={solo} />)
-        fireEvent.click(soloSlice())
-        expect(scopeOf()).toBe('account:Solo')
-        expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toHaveAttribute('title', 'Back to all portfolios')
-        // The same slice again goes back to where the owner came from, not to the account's own group.
-        fireEvent.click(soloSlice())
-        expect(scopeOf()).toBe('all')
-        fireEvent.click(soloSlice())
-        expect(scopeOf()).toBe('account:Solo')
-        fireEvent.click(screen.getByRole('button', { name: 'Back to all portfolios' }))
-        expect(scopeOf()).toBe('all')
-        expect(screen.queryByRole('button', { name: /^Back to/ })).not.toBeInTheDocument()
-      })
-
-      it('returns to all accounts from an account chosen in a small donut with several accounts', () => {
-        render(<Harness initial="all" />)
-        const swing = within(screen.getByRole('article', { name: 'Swing' }))
-        fireEvent.click(swing.getByText('Alpha: $300.00 · 75.00%'))
-        expect(scopeOf()).toBe('account:Alpha')
-        expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toBeInTheDocument()
-        expect(screen.queryByRole('button', { name: 'Back to Swing' })).not.toBeInTheDocument()
-        fireEvent.click(screen.getByText('Alpha: $300.00 · 75.00%'))
-        expect(scopeOf()).toBe('all')
-      })
-
-      it('returns an account chosen from a selected portfolio to that portfolio, then that portfolio to all accounts', () => {
-        render(<Harness initial="all" />)
-        fireEvent.click(within(screen.getByRole('list', { name: 'All accounts shares' })).getByRole('button', { name: 'Show allocation for Swing' }))
-        fireEvent.click(legendButton('Beta'))
-        expect(scopeOf()).toBe('account:Beta')
-        expect(screen.getByRole('button', { name: 'Back to Swing' })).toHaveAttribute('title', 'Back to Swing')
-        fireEvent.click(screen.getByRole('button', { name: 'Back to Swing' }))
-        expect(scopeOf()).toBe('portfolio:p1')
-        fireEvent.click(screen.getByRole('button', { name: 'Back to all portfolios' }))
-        expect(scopeOf()).toBe('all')
-      })
-
-      it('returns an account chosen under a portfolio that was itself picked outside the panel to that portfolio', () => {
-        render(<Harness initial="portfolio:p1" />)
-        fireEvent.click(legendButton('Alpha'))
-        expect(scopeOf()).toBe('account:Alpha')
-        fireEvent.click(screen.getByText('Alpha: $300.00 · 75.00%'))
-        expect(scopeOf()).toBe('portfolio:p1')
-        expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toBeInTheDocument()
-      })
-
-      it('keeps the origin while the selection moves from one account to its neighbour', () => {
-        render(<Harness initial="all" />)
-        fireEvent.click(within(screen.getByRole('article', { name: 'Swing' })).getByText('Alpha: $300.00 · 75.00%'))
-        fireEvent.click(legendButton('Beta'))
-        expect(scopeOf()).toBe('account:Beta')
-        expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toBeInTheDocument()
-        fireEvent.click(screen.getByText('Beta: $100.00 · 25.00%'))
-        expect(scopeOf()).toBe('all')
-      })
-
-      it('goes one level up when the account was picked outside the panel', () => {
-        render(<Harness initial="account:Beta" />)
-        expect(screen.getByRole('button', { name: 'Back to Swing' })).toBeInTheDocument()
-        fireEvent.click(screen.getByRole('button', { name: 'Back to Swing' }))
-        expect(scopeOf()).toBe('portfolio:p1')
-        expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toBeInTheDocument()
-      })
-
-      it('forgets the origin as soon as the scope is changed outside the panel, even when it returns to the same account', () => {
-        render(<Harness initial="all" list={withUnassigned} outside={['portfolio:p2', 'account:Eps']} />)
-        fireEvent.click(within(screen.getByRole('article', { name: 'Unassigned' })).getByText('Eps: $150.00 · 75.00%'))
-        expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toBeInTheDocument()
-        fireEvent.click(screen.getByRole('button', { name: 'Elsewhere portfolio:p2' }))
-        fireEvent.click(screen.getByRole('button', { name: 'Elsewhere account:Eps' }))
-        expect(scopeOf()).toBe('account:Eps')
-        expect(screen.getByRole('button', { name: 'Back to Unassigned' })).toBeInTheDocument()
-        fireEvent.click(screen.getByText('Eps: $150.00 · 75.00%'))
-        expect(scopeOf()).toBe('unassigned')
-      })
-    })
-
-    describe('skipping a group that looks exactly like its only account', () => {
-      // Unassigned holds only Solo, Core only Gamma (accounts above), so their group and account views are identical.
-      const solo = [...accounts.filter(a => a.id !== 'Delta'), account('Solo', null, '50')]
-      const soloSlice = () => screen.getByText('Solo: $50.00 · 100.00%')
-
-      it('goes from the account straight back to all when Unassigned was entered from the select', () => {
-        render(<Harness initial="unassigned" list={solo} />)
-        fireEvent.click(soloSlice())
-        expect(scopeOf()).toBe('account:Solo')
-        expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toHaveAttribute('title', 'Back to all portfolios')
-        fireEvent.click(soloSlice())
-        expect(scopeOf()).toBe('all')
-        expect(screen.queryByRole('button', { name: /^Back to/ })).not.toBeInTheDocument()
-      })
-
-      it('goes straight back to all by arrow when Unassigned was entered from its card heading', () => {
-        render(<Harness initial="all" list={solo} />)
-        fireEvent.click(within(screen.getByRole('article', { name: 'Unassigned' })).getByRole('button', { name: 'Show allocation for Unassigned' }))
-        expect(scopeOf()).toBe('unassigned')
-        fireEvent.click(soloSlice())
-        expect(scopeOf()).toBe('account:Solo')
-        fireEvent.click(screen.getByRole('button', { name: 'Back to all portfolios' }))
-        expect(scopeOf()).toBe('all')
-        // Going down again repeats the same path.
-        fireEvent.click(within(screen.getByRole('article', { name: 'Unassigned' })).getByRole('button', { name: 'Show allocation for Unassigned' }))
-        fireEvent.click(soloSlice())
-        fireEvent.click(soloSlice())
-        expect(scopeOf()).toBe('all')
-      })
-
-      it('does the same through the total legend, and when the account was picked outside the panel', () => {
-        render(<Harness initial="all" list={solo} outside={['account:Solo']} />)
-        fireEvent.click(within(screen.getByRole('list', { name: 'All accounts shares' })).getByRole('button', { name: 'Show allocation for Unassigned' }))
-        fireEvent.click(soloSlice())
-        fireEvent.click(soloSlice())
-        expect(scopeOf()).toBe('all')
-        fireEvent.click(screen.getByRole('button', { name: 'Elsewhere account:Solo' }))
-        expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toBeInTheDocument()
-        fireEvent.click(screen.getByRole('button', { name: 'Back to all portfolios' }))
-        expect(scopeOf()).toBe('all')
-      })
-
-      it('applies to any portfolio with one drawn account, from every entry point', () => {
-        const { unmount } = render(<Harness initial="portfolio:p2" />)
-        expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toBeInTheDocument()
-        fireEvent.click(screen.getByText('Gamma: $600.00 · 100.00%'))
-        expect(scopeOf()).toBe('account:Gamma')
-        fireEvent.click(screen.getByText('Gamma: $600.00 · 100.00%'))
-        expect(scopeOf()).toBe('all')
-        unmount()
-        render(<Harness initial="all" />)
-        fireEvent.click(within(screen.getByRole('article', { name: 'Core' })).getByText('Gamma: $600.00 · 100.00%'))
-        expect(scopeOf()).toBe('account:Gamma')
-        fireEvent.click(screen.getByRole('button', { name: 'Back to all portfolios' }))
-        expect(scopeOf()).toBe('all')
-      })
-
-      it('also skips a group where the account is the only one drawn, since its view is the same', () => {
-        const partly = [account('Alpha', 'p1', '300'), account('Zed', 'p1', null)]
-        render(<Harness initial="portfolio:p1" list={partly} />)
-        fireEvent.click(screen.getByRole('button', { name: 'Show allocation for Alpha' }))
-        expect(scopeOf()).toBe('account:Alpha')
-        fireEvent.click(screen.getByRole('button', { name: 'Show allocation for Alpha' }))
-        expect(scopeOf()).toBe('all')
-      })
-
-      it('keeps the group level for groups with several drawn accounts and for an undrawn selected account', () => {
-        const { unmount } = render(<Harness initial="unassigned" list={withUnassigned} />)
-        fireEvent.click(screen.getByText('Eps: $150.00 · 75.00%'))
-        expect(screen.getByRole('button', { name: 'Back to Unassigned' })).toBeInTheDocument()
-        fireEvent.click(screen.getByText('Eps: $150.00 · 75.00%'))
-        expect(scopeOf()).toBe('unassigned')
-        unmount()
-        // Zed has no balance, so its view differs from the group's drawn slice and Back keeps the group.
-        const partly = [account('Alpha', 'p1', '300'), account('Zed', 'p1', null)]
-        render(<Harness initial="account:Zed" list={partly} />)
-        fireEvent.click(screen.getByRole('button', { name: 'Back to Swing' }))
-        expect(scopeOf()).toBe('portfolio:p1')
-      })
-
-      it('keeps focus on a control that exists in the all view after skipping the group', async () => {
-        const user = userEvent.setup()
-        render(<Harness initial="unassigned" list={solo} />)
-        within(screen.getByRole('list', { name: 'Unassigned shares' })).getByRole('button', { name: 'Show allocation for Solo' }).focus()
-        await user.keyboard('{Enter}')
-        expect(scopeOf()).toBe('account:Solo')
-        await user.keyboard('{Enter}')
-        expect(scopeOf()).toBe('all')
-        expect(within(screen.getByRole('article', { name: 'Unassigned' })).getByRole('button', { name: 'Show allocation for Solo' })).toHaveFocus()
-      })
-    })
-
-    it('keeps the back arrow when the group has nothing to draw', () => {
-      render(<Harness initial="unassigned" />)
-      expect(screen.getByText('No positive balance')).toBeInTheDocument()
-      fireEvent.click(screen.getByRole('button', { name: 'Back to all portfolios' }))
+      fireEvent.click(slice('Eps: $150.00 · 75.00%'))
       expect(scopeOf()).toBe('all')
     })
 
-    it('toggles through legend buttons that report their state', () => {
-      render(<Harness initial="all" />)
-      const total = screen.getByRole('list', { name: 'All accounts shares' })
-      expect(within(total).getByRole('button', { name: 'Show allocation for Swing' })).toHaveAttribute('aria-pressed', 'false')
-      fireEvent.click(within(total).getByRole('button', { name: 'Show allocation for Swing' }))
-      expect(scopeOf()).toBe('portfolio:p1')
+    it('deselects through the selected legend item, which reports its state', () => {
+      render(<Harness initial="portfolio:p1" />)
+      expect(legendButton('Beta')).toHaveAttribute('aria-pressed', 'false')
       fireEvent.click(legendButton('Beta'))
       expect(scopeOf()).toBe('account:Beta')
       expect(legendButton('Beta')).toHaveAttribute('aria-pressed', 'true')
       expect(legendButton('Alpha')).toHaveAttribute('aria-pressed', 'false')
       fireEvent.click(legendButton('Beta'))
-      expect(scopeOf()).toBe('portfolio:p1')
+      expect(scopeOf()).toBe('all')
       expect(legendButton('Beta')).toHaveAttribute('aria-pressed', 'false')
-      // The same button selects it again, so the toggle can be repeated.
+      // The same item selects it again, so the toggle can be repeated.
       fireEvent.click(legendButton('Beta'))
       expect(scopeOf()).toBe('account:Beta')
     })
 
-    it('toggles from the keyboard with Enter and Space', async () => {
+    it('goes back to all accounts, not to the portfolio, after choosing accounts one after another in a portfolio picked in the select', () => {
+      render(<Harness initial="portfolio:p1" />)
+      fireEvent.click(legendButton('Alpha'))
+      expect(scopeOf()).toBe('account:Alpha')
+      fireEvent.click(legendButton('Beta'))
+      expect(scopeOf()).toBe('account:Beta')
+      expect(screen.getByRole('button', { name: backName })).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: backName }))
+      expect(scopeOf()).toBe('all')
+    })
+
+    it('goes back to all accounts however the selection was reached from the all view', () => {
+      render(<Harness initial="all" />)
+      // Portfolio from the total legend, then an account in it.
+      fireEvent.click(within(screen.getByRole('list', { name: 'All accounts shares' })).getByRole('button', { name: 'Show allocation for Swing' }))
+      fireEvent.click(legendButton('Beta'))
+      expect(scopeOf()).toBe('account:Beta')
+      fireEvent.click(screen.getByRole('button', { name: backName }))
+      expect(scopeOf()).toBe('all')
+      // An account straight from its small donut, then a neighbour of the same portfolio.
+      fireEvent.click(within(screen.getByRole('article', { name: 'Swing' })).getByText('Alpha: $300.00 · 75.00%'))
+      expect(scopeOf()).toBe('account:Alpha')
+      fireEvent.click(legendButton('Beta'))
+      fireEvent.click(screen.getByRole('button', { name: backName }))
+      expect(scopeOf()).toBe('all')
+      // A portfolio from its card heading.
+      fireEvent.click(within(screen.getByRole('article', { name: 'Core' })).getByRole('button', { name: 'Show allocation for Core' }))
+      expect(scopeOf()).toBe('portfolio:p2')
+      fireEvent.click(screen.getByRole('button', { name: backName }))
+      expect(scopeOf()).toBe('all')
+    })
+
+    it('returns a lone Unassigned account to all accounts whether Unassigned came from the select or its card, by slice or arrow', () => {
+      const soloSlice = () => slice('Solo: $50.00 · 100.00%')
+      const { unmount } = render(<Harness initial="unassigned" list={solo} />)
+      fireEvent.click(soloSlice())
+      expect(scopeOf()).toBe('account:Solo')
+      expect(screen.getByRole('button', { name: backName })).toBeInTheDocument()
+      fireEvent.click(soloSlice())
+      expect(scopeOf()).toBe('all')
+      unmount()
+      render(<Harness initial="all" list={solo} />)
+      for (const route of ['slice', 'arrow']) {
+        fireEvent.click(within(screen.getByRole('article', { name: 'Unassigned' })).getByRole('button', { name: 'Show allocation for Unassigned' }))
+        expect(scopeOf()).toBe('unassigned')
+        fireEvent.click(soloSlice())
+        expect(scopeOf()).toBe('account:Solo')
+        if (route === 'slice') fireEvent.click(soloSlice()); else fireEvent.click(screen.getByRole('button', { name: backName }))
+        expect(scopeOf()).toBe('all')
+      }
+    })
+
+    it('behaves the same for any portfolio with one drawn account', () => {
+      render(<Harness initial="portfolio:p2" />)
+      fireEvent.click(slice('Gamma: $600.00 · 100.00%'))
+      expect(scopeOf()).toBe('account:Gamma')
+      fireEvent.click(slice('Gamma: $600.00 · 100.00%'))
+      expect(scopeOf()).toBe('all')
+    })
+
+    it('goes straight back to all accounts from an undrawn account selected beside a drawn one', () => {
+      const partly = [account('Alpha', 'p1', '300'), account('Zed', 'p1', null)]
+      render(<Harness initial="account:Zed" list={partly} />)
+      fireEvent.click(screen.getByRole('button', { name: backName }))
+      expect(scopeOf()).toBe('all')
+    })
+
+    it('keeps the back arrow when the group has nothing to draw', () => {
+      render(<Harness initial="unassigned" />)
+      expect(screen.getByText('No positive balance')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: backName }))
+      expect(scopeOf()).toBe('all')
+    })
+
+    it('lets a selected account folded into Other go back to all accounts through Other', () => {
+      const many = ['70', '60', '50', '40', '30', '20', '10'].map((v, i) => account(`a${i}`, 'p1', v))
+      render(<Harness initial="account:a6" list={many} />)
+      expect(screen.getByRole('button', { name: 'Show allocation for Other (2)' })).toHaveAttribute('aria-pressed', 'true')
+      fireEvent.click(screen.getByText(/^Other \(2\):/))
+      expect(scopeOf()).toBe('all')
+      // Without a selection Other is not an action: it holds several accounts and has no scope of its own.
+      expect(screen.queryByRole('button', { name: 'Show allocation for Other (2)' })).not.toBeInTheDocument()
+    })
+
+    it('deselects from the keyboard with Enter and Space, keeping focus on the entity\'s own control', async () => {
       const user = userEvent.setup()
       render(<Harness initial="account:Beta" />)
       legendButton('Beta').focus()
       await user.keyboard('{Enter}')
-      expect(scopeOf()).toBe('portfolio:p1')
+      expect(scopeOf()).toBe('all')
       // The donut is rebuilt on every scope change, but focus stays on the entity's own control.
       expect(legendButton('Beta')).toHaveFocus()
       legendButton('Alpha').focus()
@@ -363,11 +253,8 @@ describe('Overview allocation', () => {
       expect(scopeOf()).toBe('account:Alpha')
       expect(legendButton('Alpha')).toHaveFocus()
       await user.keyboard(' ')
-      expect(scopeOf()).toBe('portfolio:p1')
-      expect(legendButton('Alpha')).toHaveFocus()
-      screen.getByRole('button', { name: 'Back to all portfolios' }).focus()
-      await user.keyboard('{Enter}')
       expect(scopeOf()).toBe('all')
+      expect(legendButton('Alpha')).toHaveFocus()
     })
 
     describe('focus after a change made from inside the panel', () => {
@@ -378,7 +265,7 @@ describe('Overview allocation', () => {
         within(total).getByRole('button', { name: 'Show allocation for Swing' }).focus()
         await user.keyboard('{Enter}')
         expect(scopeOf()).toBe('portfolio:p1')
-        expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toHaveFocus()
+        expect(screen.getByRole('button', { name: backName })).toHaveFocus()
         await user.keyboard('{Enter}')
         expect(scopeOf()).toBe('all')
         expect(within(screen.getByRole('list', { name: 'All accounts shares' })).getByRole('button', { name: 'Show allocation for Swing' })).toHaveFocus()
@@ -391,20 +278,27 @@ describe('Overview allocation', () => {
         card.focus()
         await user.keyboard('{Enter}')
         expect(scopeOf()).toBe('portfolio:p2')
-        expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toHaveFocus()
+        expect(screen.getByRole('button', { name: backName })).toHaveFocus()
       })
 
-      it('keeps focus on the arrow while climbing from an account to its portfolio and then to all', async () => {
+      it('lands the arrow on the control of the account it leaves in the all view', async () => {
         const user = userEvent.setup()
         render(<Harness initial="account:Beta" />)
-        screen.getByRole('button', { name: 'Back to Swing' }).focus()
-        await user.keyboard('{Enter}')
-        expect(scopeOf()).toBe('portfolio:p1')
-        // The arrow stays in the same place with its new destination, so Enter can be repeated.
-        expect(screen.getByRole('button', { name: 'Back to all portfolios' })).toHaveFocus()
+        screen.getByRole('button', { name: backName }).focus()
         await user.keyboard('{Enter}')
         expect(scopeOf()).toBe('all')
-        expect(within(screen.getByRole('list', { name: 'All accounts shares' })).getByRole('button', { name: 'Show allocation for Swing' })).toHaveFocus()
+        expect(legendButton('Beta')).toHaveFocus()
+      })
+
+      it('keeps focus on a control that exists in the all view after deselecting the only account of Unassigned', async () => {
+        const user = userEvent.setup()
+        render(<Harness initial="unassigned" list={solo} />)
+        within(screen.getByRole('list', { name: 'Unassigned shares' })).getByRole('button', { name: 'Show allocation for Solo' }).focus()
+        await user.keyboard('{Enter}')
+        expect(scopeOf()).toBe('account:Solo')
+        await user.keyboard('{Enter}')
+        expect(scopeOf()).toBe('all')
+        expect(within(screen.getByRole('article', { name: 'Unassigned' })).getByRole('button', { name: 'Show allocation for Solo' })).toHaveFocus()
       })
 
       it('returns focus to the portfolio card when the portfolio has no slice in the total', async () => {
@@ -412,7 +306,7 @@ describe('Overview allocation', () => {
         // Empty has no positive balance, so it is not a slice of the total and only its card offers a control.
         const none = [account('Solo', 'p3', null), account('Big', 'p1', '10')]
         render(<Harness initial="portfolio:p3" list={none} />)
-        screen.getByRole('button', { name: 'Back to all portfolios' }).focus()
+        screen.getByRole('button', { name: backName }).focus()
         await user.keyboard('{Enter}')
         expect(scopeOf()).toBe('all')
         expect(within(screen.getByRole('article', { name: 'Empty' })).getByRole('button', { name: 'Show allocation for Empty' })).toHaveFocus()
@@ -422,22 +316,11 @@ describe('Overview allocation', () => {
         const panel = (scope: string) => <><button>Elsewhere</button><OverviewAllocation accounts={accounts} portfolios={portfolios} scope={scope} onScope={() => {}} /></>
         const { rerender } = render(panel('portfolio:p1'))
         // The parent ignores this activation, leaving a pending restore; focus then moves to another control.
-        fireEvent.click(screen.getByRole('button', { name: 'Back to all portfolios' }))
+        fireEvent.click(screen.getByRole('button', { name: backName }))
         screen.getByRole('button', { name: 'Elsewhere' }).focus()
         rerender(panel('all'))
         expect(screen.getByRole('button', { name: 'Elsewhere' })).toHaveFocus()
       })
-    })
-
-    it('lets a selected account folded into Other step back through Other', () => {
-      const many = ['70', '60', '50', '40', '30', '20', '10'].map((v, i) => account(`a${i}`, 'p1', v))
-      render(<Harness initial="account:a6" list={many} />)
-      const other = screen.getByRole('button', { name: 'Show allocation for Other (2)' })
-      expect(other).toHaveAttribute('aria-pressed', 'true')
-      fireEvent.click(screen.getByText(/^Other \(2\):/))
-      expect(scopeOf()).toBe('portfolio:p1')
-      // Without a selection Other is not an action: it holds several accounts and has no scope of its own.
-      expect(screen.queryByRole('button', { name: 'Show allocation for Other (2)' })).not.toBeInTheDocument()
     })
   })
 
