@@ -127,6 +127,48 @@ public sealed class MonitorDiscrepancyRound2Tests
 
 public sealed class MonitorDiscrepancyRound2PostgresTests
 {
+    [PostgresFact] // Finding 1
+    public async Task Cancelled_plays_entry_filling_after_cancellation_still_gets_its_confirmation_run()
+    {
+        await using var database = await DiscrepancyDatabase.Create();
+        var f = new DiscrepancyFixture { Position = 1 };
+        f.Account.Configure(null, "0x" + Guid.NewGuid().ToString("N") + "00000000", null);
+        f.Store.Plays.Clear(); f.Store.Links.Clear(); f.Store.Orders.Clear(); f.Store.Fills.Clear(); f.VenueOrders.Clear();
+        var plan = new PlayPlanDocument("long", "quantity", "1", "1", null,
+            [new("e", "Entry", "#ffffff", "100", "100", [new("s", "price", "90", "100")], [new("t", "price", "120", "100")])], new("", "", "", ""));
+        var play = new Play(Guid.NewGuid(), f.Account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
+            PlayDocuments.Serialize(plan), f.Clock.Now.AddHours(-1));
+        play.MarkPlanned(f.Clock.Now.AddMinutes(-30));
+        f.Store.Plays.Add(play);
+        f.Store.Links.Add(new(play, "late-entry", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-25)));
+        play.Cancel(CancelReason.ChangedMind, null, f.Clock.Now.AddMinutes(-10));
+        await database.Seed(f);
+        // The entry filled after cancellation: its watch resolves, but the venue now holds untracked exposure.
+        f.VenueOrders.Add(new("late-entry", "BTC", "buy", "Limit", 100, null, false, false, 1, 0, f.Clock.Now.AddMinutes(-25),
+            VenueOrderStatus.Filled, "filled", f.Clock.Now.AddMinutes(-2)));
+        await using var scope = database.Scope(f);
+        var monitor = new MonitorStore(scope.Db, scope.Work);
+        var coordinator = new MonitorCoordinator(monitor, new WorkspaceStore(scope.Db, scope.Work), new NoImporter(),
+            TestVenues.With(new FixedReader(f), new FixedOrders(f)), new NoCredentials(), scope.Work, scope.Events, new NoCommands(),
+            new CoreOwner(f.Account.OwnerId), new MonitorOptions(), f.Clock, scope.Service);
+        var request = await coordinator.RequestAsync(f.Account.Id, default);
+        var lease = (await monitor.ClaimAsync(f.Account.Id, request.RequestId, "worker", f.Clock.Now, default))!;
+        Assert.True(await coordinator.RunAsync(lease, default));
+        Assert.NotNull(await scope.Db.Set<MonitorExitWatch>().SingleAsync(x => x.ResolvedAtUtc != null));
+        Assert.Equal("candidate", (await scope.Db.Set<PlayDiscrepancy>().SingleAsync(x => x.Kind == "position.excess")).State);
+        Assert.NotNull((await monitor.FindAsync(f.Account.Id, default))!.NextRunAtUtc);
+
+        f.Advance(61);
+        var confirmation = Assert.Single(await monitor.ClaimDueAsync("scheduler", f.Clock.Now, 2, default));
+        Assert.True(await coordinator.RunAsync(confirmation, default));
+        var opened = (await scope.Events.ReadAsync(0, 100, default)).Events.Where(x => x.Type == "discrepancy.opened").ToArray();
+        Assert.Equal("position.excess", Assert.Single(opened).Data.GetProperty("kind").GetString());
+
+        // The open warning keeps Check available until fresh evidence clears it.
+        f.Advance(61);
+        await coordinator.RequestAsync(f.Account.Id, default);
+    }
+
     [PostgresFact] // Event contract after pruning: dedup keys are retained and never reused.
     public async Task Revisioned_dedup_keys_survive_event_pruning()
     {
