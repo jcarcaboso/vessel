@@ -6,6 +6,7 @@ using Vessel.Application.Common;
 using Vessel.Domain.Common;
 using Vessel.Infrastructure;
 using Vessel.Persistence;
+using Vessel.Persistence.Events;
 
 if (args.FirstOrDefault() is "evidence-copy-to-s3" or "evidence-copy-to-local")
     return EvidenceCopyCommand.RunAsync(args[1..], Console.Out, toLocal: args[0] == "evidence-copy-to-local").GetAwaiter().GetResult();
@@ -15,6 +16,7 @@ if (!builder.Environment.IsDevelopment()) ProductionConfiguration.Validate(build
 builder.Services.AddVesselInfrastructure(builder.Configuration);
 builder.Services.AddVesselPersistence(builder.Configuration);
 builder.Services.AddVesselApplication();
+builder.ConfigurePlayEventTransport(builder.Configuration, "api");
 builder.Services.AddOpenApi();
 builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
 builder.Services.AddResponseCompression(options =>
@@ -107,6 +109,7 @@ app.MapEvidence();
 app.MapPlays();
 app.MapSizing();
 app.MapReview();
+app.MapPlayEvents();
 if (app.Environment.IsDevelopment()) app.MapOpenApi().RequireAuthorization();
 
 app.Run();

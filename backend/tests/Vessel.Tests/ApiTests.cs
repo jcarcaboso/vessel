@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting;
 
 namespace Vessel.Tests;
 
@@ -177,6 +178,11 @@ public sealed class ApiTests
         : WebApplicationFactory<Program>
     {
         public List<string> Logs { get; } = [];
+        protected override IHost CreateHost(IHostBuilder builder)
+        {
+            PlayEventTestHosting.ConfigureBootstrap(builder);
+            return base.CreateHost(builder);
+        }
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
@@ -189,6 +195,7 @@ public sealed class ApiTests
                 ["ConnectionStrings:Vessel"] = null
             }));
             builder.ConfigureLogging(logging => logging.AddProvider(new CaptureLoggerProvider(Logs)));
+            builder.ConfigureServices(PlayEventTestHosting.ConfigureServices);
         }
     }
 

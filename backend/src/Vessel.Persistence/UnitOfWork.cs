@@ -13,18 +13,35 @@ namespace Vessel.Persistence;
 /// when the caller catches it. Each flow is tracked by an <see cref="AsyncLocal{T}"/> participation, so a stale,
 /// dangling or parallel callback is rejected instead of writing through a finished or shared transaction.
 /// </summary>
-public sealed class UnitOfWork(VesselDbContext db, ILogger<UnitOfWork>? logger = null) : IUnitOfWork
+public sealed class UnitOfWork(VesselDbContext db, IEnumerable<IUnitOfWorkParticipant>? participants = null,
+    ILogger<UnitOfWork>? logger = null) : IUnitOfWork
 {
     public const string PlayConflict = "This Play changed elsewhere. Reload it before saving again.";
     public const string ExecutionConflict = "This Play changed elsewhere. Reload it and check the venue again.";
     /// <summary>Exception data key holding a rollback error that followed, and must not replace, the original failure.</summary>
     public const string RollbackErrorKey = "Vessel.UnitOfWork.RollbackError";
 
+    private readonly IUnitOfWorkParticipant[] participants = participants?.ToArray() ?? [];
+    private static readonly AsyncLocal<UnitOfWork?> boundary = new();
     private readonly AsyncLocal<Participation?> current = new();
     private Participation? active;
     private Exception? failure;
     // A dangling participant or an unknown connection state: this scope can never start another unit.
     private bool unusable;
+    private VesselDbContext Context => db;
+
+    // Infrastructure writers join this exact boundary without a constructor cycle through participants.
+    // An EF transaction alone conveys no authority, and copied ExecutionContexts retain closed callbacks.
+    internal static UnitOfWork ForCurrentContext(VesselDbContext context)
+    {
+        var work = boundary.Value;
+        if (work is null || !ReferenceEquals(work.Context, context))
+            throw new InvalidOperationException("The current unit of work does not own this context.");
+        // Child admission/overlap is checked by ParticipateAsync so an overlapping attempt
+        // poisons its own live transaction, but a closed callback cannot poison a later one.
+        work.RequireActiveParticipation();
+        return work;
+    }
 
     public async Task<T> ExecuteAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken)
     {
@@ -42,8 +59,11 @@ public sealed class UnitOfWork(VesselDbContext db, ILogger<UnitOfWork>? logger =
                 return result;
             }, cancellationToken);
         current.Value = root;
+        var previousBoundary = boundary.Value;
+        boundary.Value = this;
         failure = null;
         IDbContextTransaction? transaction = null;
+        var committed = false;
         try
         {
             if (db.Database.CurrentTransaction is not null)
@@ -54,17 +74,35 @@ public sealed class UnitOfWork(VesselDbContext db, ILogger<UnitOfWork>? logger =
             RequireAwaited(root);
             await SaveChangesAsync(cancellationToken);
             RequireActive();
-            // Closes admission; it fails if a participant slipped in while the final save was running.
+            foreach (var participant in participants)
+            {
+                // Central SaveChanges remains available here without recursively invoking participants.
+                await ParticipateAsync(async () =>
+                {
+                    await participant.BeforeCommitAsync(cancellationToken);
+                    return true;
+                }, cancellationToken);
+                RequireAwaited(root);
+                RequireActive();
+            }
+            // Closes admission; it fails if a participant slipped in while the final save or a hook was running.
             if (!root.StartCompletion()) throw Dangling();
-            // A participant rejected during the final save records its failure after the check above.
+            // A participant rejected during the final save or a hook records its failure after the check above.
             if (failure is not null)
                 throw new InvalidOperationException("A failed participant requires the unit of work to roll back.", failure);
             cancellationToken.ThrowIfCancellationRequested();
             // Past this point the outcome is decided; a late cancellation must not abandon the commit halfway.
             await transaction.CommitAsync(CancellationToken.None);
+            committed = true;
+            // The rollback catch cannot observe postcommit failures. Durable recovery owns failed sends.
+            foreach (var participant in participants)
+            {
+                try { await participant.AfterCommitAsync(CancellationToken.None); }
+                catch { Warn("A postcommit participant failed; the committed operation remains successful."); }
+            }
             return result;
         }
-        catch (Exception error)
+        catch (Exception error) when (!committed)
         {
             // Stop inherited callbacks before rollback yields, not only after disposal.
             unusable |= root.Close();
@@ -86,10 +124,18 @@ public sealed class UnitOfWork(VesselDbContext db, ILogger<UnitOfWork>? logger =
             {
                 unusable |= root.Close();
                 current.Value = null;
+                boundary.Value = previousBoundary;
                 active = null;
                 failure = null;
             }
         }
+    }
+
+    private void Warn(string message)
+    {
+        // Never log exception text, connection strings or event bodies, or turn logging failure into a retry.
+        try { logger?.LogWarning("{UnitOfWorkNotice}", message); }
+        catch { }
     }
 
     // Lock wrappers and store writes participate but cannot start, commit or roll back a transaction.
@@ -134,8 +180,7 @@ public sealed class UnitOfWork(VesselDbContext db, ILogger<UnitOfWork>? logger =
         }
     }
 
-    /// <summary>Throws unless the calling flow is the running, unfailed participant of the active unit.</summary>
-    internal void RequireActive()
+    private void RequireActiveParticipation()
     {
         var root = active;
         if (unusable || root is null || current.Value is not { } participant || participant.Completing ||
@@ -145,7 +190,12 @@ public sealed class UnitOfWork(VesselDbContext db, ILogger<UnitOfWork>? logger =
             throw new InvalidOperationException("A failed participant requires the unit of work to roll back.", failure);
         if (root.Completing)
             throw new InvalidOperationException("The unit of work is completing; new participants are not allowed.");
-        if (participant.ChildRunning)
+    }
+
+    internal void RequireActive()
+    {
+        RequireActiveParticipation();
+        if (current.Value!.ChildRunning)
             throw new InvalidOperationException("Concurrent use of a scoped unit of work is not supported.");
     }
 
@@ -193,7 +243,15 @@ public sealed class UnitOfWork(VesselDbContext db, ILogger<UnitOfWork>? logger =
             original.Data[RollbackErrorKey] = error;
             logger?.LogError(error, "Rolling back a failed unit of work failed; the original error is reported.");
         }
-        finally { db.ChangeTracker.Clear(); }
+        finally
+        {
+            db.ChangeTracker.Clear();
+            foreach (var participant in participants)
+            {
+                try { await participant.RollbackAsync(CancellationToken.None); }
+                catch { Warn("A unit-of-work rollback participant could not clear its state."); unusable = true; }
+            }
+        }
     }
 
     private void RequireAwaited(Participation participant)

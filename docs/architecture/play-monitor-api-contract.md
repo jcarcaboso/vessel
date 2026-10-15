@@ -1,0 +1,102 @@
+# Play monitor API implementation contract
+
+October 14, 2026. Shared contract for the authorized backend/frontend workers. Implements the [monitor plan](play-monitor-plan.md), not notification delivery. Existing Play/execution DTO fields and approved layout remain intact.
+
+All routes are authenticated and owner-scoped. Responses use `Cache-Control: no-store`. Times are ISO UTC or null. Decimal values in event/discrepancy details are strings. Sequence cursors are decimal strings, avoiding JavaScript integer precision limits.
+
+## Monitor state
+
+`GET /api/monitor` returns:
+
+```ts
+interface MonitorSummary {
+  workerOnline: boolean
+  heartbeatAtUtc: string | null
+  accounts: AccountMonitor[] // bounded to 200, enabled accounts eligible for monitoring
+}
+interface AccountMonitor {
+  accountId: string
+  state: 'live' | 'stale' | 'degraded' | 'credential-error' | 'idle'
+  lastAttemptAtUtc: string | null
+  lastSuccessAtUtc: string | null
+  nextRunAtUtc: string | null
+  manualState: 'idle' | 'pending' | 'running'
+  nextManualAllowedAtUtc: string | null
+  error: string | null // safe server-authored text, never venue payloads or credentials
+  workerOnline: boolean
+  discrepancies: MonitorDiscrepancy[]
+}
+```
+
+`GET /api/accounts/{id}/monitor` returns `AccountMonitor`; foreign/missing accounts return 404. The summary endpoint avoids a separate state request per account row. Offline is a system condition rather than a mutually exclusive account state.
+
+`POST /api/accounts/{id}/monitor/run`, with no body, returns 202:
+
+```ts
+interface MonitorRunAccepted {
+  requestId: string
+  monitor: AccountMonitor
+}
+```
+
+Busy/cooling requests return 429 with `Retry-After`; ineligible accounts return 409. The button counts down from server timestamps, disables during pending/running and does not create runs on page load. Scheduled and manual runs share admission. A failed attempt also starts the configured cooldown.
+
+## Events
+
+`GET /api/events?after={sequence}&limit={1..200}` returns:
+
+```ts
+interface MonitorEventPage {
+  events: MonitorEvent[]
+  nextSequence: string
+  resetRequired: boolean
+}
+interface MonitorEvent {
+  id: string
+  type: string
+  version: number
+  ownerId: string
+  sequence: string
+  runId: string
+  dedupKey: string
+  severity: 'info' | 'warning' | 'critical'
+  occurredAt: string
+  detectedAt: string
+  timeliness: 'timely' | 'late'
+  relevance: 'current' | 'superseded'
+  expiresAt: string | null
+  subject: { accountId?: string; venueId?: string; contractId?: string; playId?: string; entryId?: string; levelId?: string; discrepancyId?: string }
+  source: { trigger: string; orderIds?: string[]; fillIds?: string[] }
+  data: Record<string, unknown>
+}
+```
+
+`GET /api/events/stream?after={sequence}` uses authenticated fetch SSE through the existing decoder. `event` frames contain `MonitorEvent`. `status` frames contain `{ state: 'ready' | 'reset', nextSequence: string }`; reset requires reloading stored state, not replaying historical popups. Keepalive comments need no UI action. Limit to four streams per owner and cancel when the API connection changes/disconnects. One shell subscription serves the browser; broker messages are wake-up hints, not the source of ordered catch-up.
+
+The UI reloads stored state on relevant events and polls stored state every 60 seconds when disconnected from the stream. These reads do not contact venues. No event/financial-data browser persistence is introduced.
+
+## Execution and discrepancies
+
+`GET /api/plays/{id}/execution` adds `monitor: AccountMonitor | null` and `discrepancies: MonitorDiscrepancy[]`. Keep all existing fields, including P1 execution issues. An untracked/manual/retrospective Play may have null monitor. The old `execution/check` route no longer directly reads venues once the worker layer is active.
+
+```ts
+interface MonitorDiscrepancy {
+  id: string
+  accountId: string
+  playId: string | null
+  contractId: string
+  kind: string
+  severity: 'info' | 'warning' | 'critical'
+  state: 'open' | 'resolved' | 'dismissed'
+  openedAtUtc: string
+  confirmedAtUtc: string | null
+  resolvedAtUtc: string | null
+  dismissedAtUtc: string | null
+  note: string | null
+  details: Record<string, unknown>
+}
+```
+
+`POST /api/plays/{id}/discrepancies/{discrepancyId}/dismiss` accepts `{ note?: string | null }` and returns 204. An instrument-level discrepancy may be dismissed from an involved Play after server validation. `POST /api/accounts/{id}/discrepancies/{discrepancyId}/dismiss` supports the account-detail view and returns 204. Notes are bounded plain text. Dismissal does not stop monitoring or change executions.
+
+Render monitor state within the existing Execution area, exceptional account badges and an offline shell banner. Preserve component theme tokens and accessible controls. No toast/notification system or new layout is included.
