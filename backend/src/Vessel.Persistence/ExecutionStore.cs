@@ -64,11 +64,11 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
             row.StatusAtUtc = order.StatusAtUtc.ToUniversalTime();
             row.ObservedAtUtc = observedAt.ToUniversalTime();
         }
-        await unitOfWork.SaveChangesAsync(ct);
+        await unitOfWork.SaveChangesAsync(UnitOfWork.ExecutionConflict, ct);
         return true;
     }, ct);
 
-    public Task SaveAsync(CancellationToken ct) => unitOfWork.SaveChangesAsync(ct);
+    public Task SaveAsync(CancellationToken ct) => unitOfWork.SaveChangesAsync(UnitOfWork.ExecutionConflict, ct);
 
     public Task<T> WithAccountLockAsync<T>(Guid accountId, Func<Task<T>> action, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {

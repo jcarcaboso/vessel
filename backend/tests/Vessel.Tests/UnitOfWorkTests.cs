@@ -3,12 +3,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Vessel.Application.Credentials;
 using Vessel.Application.Ownership;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Evidence;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
@@ -502,6 +504,203 @@ public sealed class UnitOfWorkTests
         Assert.Empty(await verify.Accounts.ToListAsync());
     }
 
+    // A3: nested units flush before returning, so the outer unit reads what a nested service just created.
+    [PostgresFact]
+    public async Task Nested_create_is_visible_to_the_same_outer_unit_of_work()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using var db = database.Context(owner);
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic");
+        db.Accounts.Add(account);
+        await db.SaveChangesAsync();
+        var work = TestUnitOfWork.For(db);
+        var plays = new PlayService(new PlayStore(db, work), new MemoryObjectStore(), TimeProvider.System, work);
+        var read = await work.ExecuteAsync(async () =>
+        {
+            var created = await plays.CreateAsync(new CreatePlayRequest(account.Id, "BTC", "manual", "Nested", TestPlays.Plan()), default);
+            return await plays.GetAsync(created.Summary.Id, default);
+        }, default);
+        Assert.Equal("Nested", read.Summary.Title);
+    }
+
+    // A4: once the last cancellation check passes, the commit itself is not abandoned halfway.
+    [PostgresFact]
+    public async Task Commit_runs_without_the_callers_cancellation_token()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var transactions = new Transactions();
+        await using var db = Context(database, owner, transactions);
+        var work = TestUnitOfWork.For(db);
+        using var cancellation = new CancellationTokenSource();
+        await work.ExecuteAsync(() =>
+        {
+            db.Accounts.Add(Account(owner));
+            return Task.FromResult(true);
+        }, cancellation.Token);
+        Assert.Equal(1, transactions.Commits);
+        Assert.False(transactions.CancellableCommit);
+        await using var verify = database.Context(owner);
+        Assert.Single(await verify.Accounts.ToListAsync());
+    }
+
+    // A4: a failed rollback must not replace the error that caused it.
+    [PostgresFact]
+    public async Task Rollback_failure_keeps_the_original_error_and_retires_the_scope()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using var db = Context(database, owner, new FailingRollback());
+        var work = TestUnitOfWork.For(db);
+        var original = new InvalidOperationException("Deliberate application failure.");
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => work.ExecuteAsync<bool>(async () =>
+        {
+            db.Accounts.Add(Account(owner));
+            await work.SaveChangesAsync(default);
+            throw original;
+        }, default));
+        Assert.Same(original, thrown);
+        Assert.IsType<TimeoutException>(thrown.Data[UnitOfWork.RollbackErrorKey]);
+        Assert.Empty(db.ChangeTracker.Entries());
+        var retired = await Assert.ThrowsAsync<InvalidOperationException>(() => work.ExecuteAsync(() => Task.FromResult(true), default));
+        Assert.Contains("new scope", retired.Message);
+        await using var verify = database.Context(owner);
+        Assert.Empty(await verify.Accounts.ToListAsync());
+    }
+
+    // Execution writes keep their own conflict wording rather than the generic Play message.
+    [PostgresFact]
+    public async Task Execution_conflicts_ask_to_check_the_venue_again()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using (var seed = database.Context(owner))
+        {
+            var account = Account(owner);
+            seed.Accounts.Add(account);
+            seed.Plays.Add(TestPlays.Create(account, new("hyperliquid", "BTC")));
+            await seed.SaveChangesAsync();
+        }
+        await using var db = database.Context(owner);
+        var work = TestUnitOfWork.For(db);
+        var executions = new ExecutionStore(db, work);
+        var conflict = await Assert.ThrowsAsync<Vessel.Application.Common.ProblemException>(() => work.ExecuteAsync(async () =>
+        {
+            var play = await db.Plays.SingleAsync();
+            db.Entry(play).Property(p => p.Title).CurrentValue = "Changed here";
+            await using (var elsewhere = database.Context(owner))
+                await elsewhere.Plays.ExecuteUpdateAsync(set => set.SetProperty(p => p.Version, p => p.Version + 1));
+            await executions.SaveAsync(default);
+            return true;
+        }, default));
+        Assert.Equal((409, UnitOfWork.ExecutionConflict), (conflict.StatusCode, conflict.Message));
+    }
+
+    // A1: adapters participate (credential read and refusal mark) before failing at the venue. The handled
+    // venue failure is recorded together with the refusal and reported as a venue error, not a server error.
+    [PostgresFact]
+    public async Task Handled_venue_failure_after_participating_credential_calls_is_recorded()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var account = SecurityFixture.Account(owner);
+        await using (var seed = database.Context(owner)) { seed.Accounts.Add(account); await seed.SaveChangesAsync(); }
+        await using var db = database.Context(owner);
+        var work = TestUnitOfWork.For(db);
+        var store = new WorkspaceStore(db, work);
+        using var vault = SecurityFixture.Vault();
+        await SecurityFixture.Service(owner, store, new AccountCredentialStore(db, work), vault, unitOfWork: work)
+            .PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
+        var reader = new RefusedThenFailingReader(new AccountCredentialReader(store, new AccountCredentialStore(db, work),
+            new CoreOwner(owner), vault, SecurityFixture.Clock, work));
+        var service = new WorkspaceService(store, new CoreOwner(owner), SecurityFixture.Registry(reader), work);
+        var error = await Assert.ThrowsAsync<Vessel.Application.Common.ProblemException>(() => service.SyncAsync(account.Id, default));
+        Assert.Equal(502, error.StatusCode);
+        Assert.True(reader.Opened);
+        await using var verify = database.Context(owner);
+        var stored = await verify.Accounts.SingleAsync();
+        Assert.Equal(("error", "The venue refresh failed. Try again later."), (stored.SyncStatus, stored.LastSyncError));
+        Assert.Equal(AccountCredentialReader.RefusedError, (await verify.AccountCredentials.SingleAsync()).LastError);
+        // The scope stays usable for the next request on it.
+        await work.ExecuteAsync(() => Task.FromResult(true), default);
+    }
+
+    // A2: evidence and sizing writes join the unit of work like the other stores; none opens its own transaction.
+    [PostgresFact]
+    public async Task Evidence_and_sizing_writes_require_and_roll_back_with_the_unit_of_work()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var account = Account(owner);
+        var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
+        await using (var seed = database.Context(owner))
+        {
+            seed.Accounts.Add(account);
+            seed.Plays.Add(play);
+            await seed.SaveChangesAsync();
+        }
+        await using var db = database.Context(owner);
+        var work = TestUnitOfWork.For(db);
+        var evidence = new EvidenceStore(db, work);
+        var sizing = new Vessel.Application.Sizing.SizingService(new SizingStore(db, work), new CoreOwner(owner), TimeProvider.System, work);
+        PlayEvidence Image() => new(Guid.NewGuid(), db.Plays.Single(), $"{owner:N}/{play.Id:N}/{Guid.NewGuid():N}.png", "image/png", 12,
+            new string('a', 64), EvidenceSource.Upload, "", DateTimeOffset.UtcNow);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => evidence.AddAsync(Image(), 3, default));
+        Assert.Throws<InvalidOperationException>(() => new SizingStore(db, work).Add(new(owner, 2m, DateTimeOffset.UtcNow)));
+        Assert.Null(db.Database.CurrentTransaction);
+        db.ChangeTracker.Clear();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => work.ExecuteAsync<bool>(async () =>
+        {
+            Assert.True(await evidence.AddAsync(Image(), 3, default));
+            await sizing.UpdateSettingsAsync(new("2"), default);
+            Assert.Equal(1, await db.Evidence.CountAsync());
+            throw new InvalidOperationException("Roll back the outer operation.");
+        }, default));
+        await using var verify = database.Context(owner);
+        Assert.Empty(await verify.Evidence.ToListAsync());
+        Assert.Empty(await verify.SizingSettings.ToListAsync());
+    }
+
+    // A5: the database-free double enforces the same participation rules as UnitOfWork.
+    [Fact]
+    public async Task Memory_unit_of_work_rejects_commit_after_a_caught_nested_failure()
+    {
+        var saves = 0;
+        var work = TestUnitOfWork.Saving(_ => { saves++; return Task.CompletedTask; });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => work.ExecuteAsync(async () =>
+        {
+            try { await work.ExecuteAsync<bool>(() => throw new InvalidOperationException("participant"), default); }
+            catch (InvalidOperationException) { }
+            return true;
+        }, default));
+        Assert.Equal(0, saves);
+        await work.ExecuteAsync(() => Task.FromResult(true), default);
+        Assert.Equal(1, saves);
+    }
+
+    [Fact]
+    public async Task Memory_unit_of_work_requires_an_active_unit_and_flushes_nested_units()
+    {
+        var saves = 0;
+        var work = TestUnitOfWork.Saving(_ => { saves++; return Task.CompletedTask; });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => work.SaveChangesAsync(default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => TestUnitOfWork.None.SaveChangesAsync(default));
+        var seen = await work.ExecuteAsync(async () =>
+        {
+            await work.ExecuteAsync(() => Task.FromResult(true), default);
+            return saves;
+        }, default);
+        Assert.Equal((1, 2), (seen, saves));
+        var failing = TestUnitOfWork.Saving(_ => throw new IOException("Save failed."));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => failing.ExecuteAsync(async () =>
+        {
+            try { await failing.SaveChangesAsync(default); }
+            catch (IOException) { }
+            return true;
+        }, default));
+    }
+
     private static Account Account(Guid owner)
     {
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
@@ -552,10 +751,39 @@ public sealed class UnitOfWorkTests
         }
     }
 
+    private sealed class FailingRollback : DbTransactionInterceptor
+    {
+        public override ValueTask<InterceptionResult> TransactionRollingBackAsync(DbTransaction transaction,
+            TransactionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default) =>
+            throw new TimeoutException("The rollback could not reach the database.");
+    }
+
+    private sealed class RefusedThenFailingReader(IAccountCredentialReader credentials) : IPerpetualVenueReader
+    {
+        public string VenueId => SecurityFixture.Venue.Id;
+        public bool Opened { get; private set; }
+        public Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<VenueInstrument>>([]);
+        public Task<PerpetualVenueReadResult> ReadAsync(string source, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Use the Account overload.");
+        public async Task<PerpetualVenueReadResult> ReadAsync(Account account, CancellationToken cancellationToken)
+        {
+            Opened = await credentials.ReadAsync(account.Id, cancellationToken) == SecurityFixture.Token;
+            await credentials.MarkRefusedAsync(account.Id, cancellationToken);
+            throw new VenueReadException("The venue refused the request.");
+        }
+    }
+
     private sealed class Transactions : DbTransactionInterceptor
     {
         public int Starts, Commits, Rollbacks;
-        public bool CancelledRollback;
+        public bool CancelledRollback, CancellableCommit;
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(DbTransaction transaction,
+            TransactionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
+        {
+            CancellableCommit |= cancellationToken.CanBeCanceled;
+            return ValueTask.FromResult(result);
+        }
         public override ValueTask<DbTransaction> TransactionStartedAsync(DbConnection connection, TransactionEndEventData eventData,
             DbTransaction result, CancellationToken cancellationToken = default)
         {

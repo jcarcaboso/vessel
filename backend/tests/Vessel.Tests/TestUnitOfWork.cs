@@ -12,17 +12,76 @@ internal static class TestUnitOfWork
     public static IUnitOfWork None { get; } = new MemoryUnitOfWork();
     public static IUnitOfWork Saving(Func<CancellationToken, Task> save) => new MemoryUnitOfWork(save);
 
+    /// <summary>
+    /// The database-free double keeps <see cref="UnitOfWork"/>'s rules: saves need an active unit, nested units
+    /// participate and flush, and a caught participant failure still fails the outer unit before it saves.
+    /// State is per async flow, so the shared <see cref="None"/> instance is safe across parallel tests.
+    /// </summary>
     private sealed class MemoryUnitOfWork(Func<CancellationToken, Task>? save = null) : IUnitOfWork
     {
+        private readonly AsyncLocal<Unit?> current = new();
+
         public async Task<T> ExecuteAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken)
         {
+            if (current.Value is { } outer)
+            {
+                outer.RequireActive();
+                try
+                {
+                    var nested = await operation();
+                    await SaveChangesAsync(cancellationToken);
+                    return nested;
+                }
+                catch (Exception error)
+                {
+                    outer.Failure ??= error;
+                    throw;
+                }
+            }
             cancellationToken.ThrowIfCancellationRequested();
-            var result = await operation();
-            await SaveChangesAsync(cancellationToken);
-            return result;
+            var unit = new Unit();
+            current.Value = unit;
+            try
+            {
+                var result = await operation();
+                unit.RequireActive();
+                await SaveChangesAsync(cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                return result;
+            }
+            finally
+            {
+                unit.Completed = true;
+                current.Value = null;
+            }
         }
 
-        public Task SaveChangesAsync(CancellationToken cancellationToken) =>
-            save?.Invoke(cancellationToken) ?? Task.CompletedTask;
+        public async Task SaveChangesAsync(CancellationToken cancellationToken)
+        {
+            var unit = current.Value ?? throw new InvalidOperationException("An active unit of work is required.");
+            unit.RequireActive();
+            try
+            {
+                if (save is not null) await save(cancellationToken);
+            }
+            catch (Exception error)
+            {
+                unit.Failure ??= error;
+                throw;
+            }
+        }
+
+        private sealed class Unit
+        {
+            public Exception? Failure { get; set; }
+            public bool Completed { get; set; }
+
+            public void RequireActive()
+            {
+                if (Completed) throw new InvalidOperationException("An active unit of work is required.");
+                if (Failure is not null)
+                    throw new InvalidOperationException("A failed participant requires the unit of work to roll back.", Failure);
+            }
+        }
     }
 }

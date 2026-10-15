@@ -240,6 +240,10 @@ public sealed class DraftMovePostgresTests
                 Update(first, second.Summary.AccountId, "Tentative", "Tentative review"), default);
             Assert.Equal(second.Summary.AccountId, result.Summary.AccountId);
             Assert.Equal("Tentative review", result.Review);
+            // The nested update reached the database inside the outer transaction, not only the change tracker.
+            var written = await moving.Plays.AsNoTracking().SingleAsync(p => p.Id == first.Summary.Id);
+            Assert.Equal((second.Summary.AccountId, "Tentative", result.Summary.Version), (written.AccountId, written.Title, written.Version));
+            Assert.Equal(3, await moving.ReviewRevisions.CountAsync());
             await AssertUnchanged(database, owner, first);
             throw new InvalidOperationException("Roll back the outer operation.");
         }, default));
