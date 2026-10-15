@@ -79,7 +79,7 @@ public sealed class VesselEventParticipationTests
             await work.ExecuteAsync(async () => { gate.SetResult(); admissionError = await late!; return true; }, default);
             return true;
         }, default);
-        var events = (await store.ReadAsync(0, 200, default)).Events.Count;
+        var events = (await EventReads.ReadAsync(db, 0, 200, default)).Events.Count;
         Assert.True(admissionError is InvalidOperationException, $"Completed nested event admission: error={admissionError?.GetType().Name ?? "none"}; committed events={events}");
         Assert.Equal(0, events);
     }
@@ -119,7 +119,7 @@ public sealed class VesselEventParticipationTests
         }, default));
         await using var outside = database.Context(owner);
         var statuses = await outside.Plays.Select(p => p.Status).ToListAsync();
-        var events = (await store.ReadAsync(0, 200, default)).Events;
+        var events = (await EventReads.ReadAsync(db, 0, 200, default)).Events;
         Assert.True(admissionError is InvalidOperationException, $"Completed operation admitted during event hook: error={admissionError?.GetType().Name ?? "none"}; committed statuses={string.Join(",", statuses)}; status event count={events.Count(e => e.Type == "play.status-changed")}");
         Assert.IsType<InvalidOperationException>(outer);
         Assert.Empty(statuses);
@@ -142,7 +142,7 @@ public sealed class VesselEventParticipationTests
             await Assert.ThrowsAsync<InvalidOperationException>(() => target.EnqueueAsync(
                 new(Guid.NewGuid(), Guid.NewGuid(), owner, "manual"), default));
             await Assert.ThrowsAsync<InvalidOperationException>(() => target.BeforeCommitAsync(default));
-            Assert.Throws<InvalidOperationException>(() => target.SetRun(Guid.NewGuid(), "monitor"));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => target.SetRunAsync(Guid.NewGuid(), "monitor", default));
         }
 
         await RejectAll(store);
@@ -163,7 +163,7 @@ public sealed class VesselEventParticipationTests
             }, default);
             await otherTransaction.RollbackAsync();
         }
-        Assert.Equal("admitted", Assert.Single((await store.ReadAsync(0, 200, default)).Events).DedupKey);
+        Assert.Equal("admitted", Assert.Single((await EventReads.ReadAsync(db, 0, 200, default)).Events).DedupKey);
     }
 
     [VesselEventPostgresFact]
@@ -191,7 +191,7 @@ public sealed class VesselEventParticipationTests
         }
         db.ChangeTracker.Clear();
         await work.ExecuteAsync(() => Task.FromResult(true), default);
-        Assert.Empty((await store.ReadAsync(0, 200, default)).Events);
+        Assert.Empty((await EventReads.ReadAsync(db, 0, 200, default)).Events);
         Assert.Equal(PlayStatus.Draft, (await db.Plays.SingleAsync()).Status);
     }
 
@@ -224,7 +224,7 @@ public sealed class VesselEventParticipationTests
         Assert.Equal("Synthetic evidence", saved.Note);
         Assert.Equal(saved.ObjectKey, Assert.Single(objects.Memory.Objects).Key);
         Assert.Equal(EvidenceFixtures.Png, objects.Memory.Objects[saved.ObjectKey]);
-        Assert.Empty((await new VesselEventHistory(db).ReadAsync(0, 200, default)).Events);
+        Assert.Empty((await EventReads.ReadAsync(db, 0, 200, default)).Events);
     }
 
     [VesselEventPostgresTheory]
@@ -247,7 +247,7 @@ public sealed class VesselEventParticipationTests
         void StartLate() => late = Task.Run(async () =>
         {
             await gate.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            return Record.Exception(() => store.SetRun(staleRun, "monitor"));
+            return await Record.ExceptionAsync(() => store.SetRunAsync(staleRun, "monitor", default));
         });
         async Task ReleaseLate()
         {
@@ -279,7 +279,7 @@ public sealed class VesselEventParticipationTests
         var play = TestPlays.Create(account, new("manual", "BTC"));
         await work.ExecuteAsync(async () =>
         {
-            store.SetRun(validRun, "monitor");
+            await store.SetRunAsync(validRun, "monitor", default);
             if (origin == "nested")
                 await work.ExecuteAsync(() => { StartLate(); return Task.FromResult(true); }, default);
             if (origin != "hook")
@@ -290,7 +290,7 @@ public sealed class VesselEventParticipationTests
             return true;
         }, default);
         Assert.IsType<InvalidOperationException>(admissionError);
-        var message = Assert.Single((await store.ReadAsync(0, 200, default)).Events);
+        var message = Assert.Single((await EventReads.ReadAsync(db, 0, 200, default)).Events);
         Assert.Equal(validRun, message.RunId);
         Assert.Equal("monitor", message.Source.Trigger);
 
@@ -300,7 +300,7 @@ public sealed class VesselEventParticipationTests
             db.StatusChanges.Add(play.Pause(DateTimeOffset.UtcNow));
             return Task.FromResult(true);
         }, default);
-        var next = Assert.Single((await store.ReadAsync(1, 200, default)).Events);
+        var next = Assert.Single((await EventReads.ReadAsync(db, 1, 200, default)).Events);
         Assert.NotEqual(staleRun, next.RunId);
         Assert.NotEqual(validRun, next.RunId);
         Assert.Equal("owner", next.Source.Trigger);
@@ -335,7 +335,7 @@ public sealed class VesselEventParticipationTests
         Assert.IsType<InvalidOperationException>(await late!.WaitAsync(TimeSpan.FromSeconds(10)));
         await using var outside = database.Context(owner);
         Assert.Empty(await outside.Accounts.ToListAsync());
-        Assert.Empty((await store.ReadAsync(0, 200, default)).Events);
+        Assert.Empty((await EventReads.ReadAsync(db, 0, 200, default)).Events);
         Assert.Empty(db.ChangeTracker.Entries());
     }
 
@@ -357,7 +357,7 @@ public sealed class VesselEventParticipationTests
                 try
                 {
                     await Assert.ThrowsAsync<InvalidOperationException>(() => store.AppendAsync(Draft("after-rollback"), default));
-                    Assert.Throws<InvalidOperationException>(() => store.SetRun(Guid.CreateVersion7(), "monitor"));
+                    await Assert.ThrowsAsync<InvalidOperationException>(() => store.SetRunAsync(Guid.CreateVersion7(), "monitor", default));
                 }
                 finally { gate.Release.TrySetResult(); }
             });
@@ -365,7 +365,7 @@ public sealed class VesselEventParticipationTests
         }, default));
         await late!.WaitAsync(TimeSpan.FromSeconds(10));
         await work.ExecuteAsync(async () => { await store.AppendAsync(Draft("next"), default); return true; }, default);
-        Assert.Equal("next", Assert.Single((await store.ReadAsync(0, 200, default)).Events).DedupKey);
+        Assert.Equal("next", Assert.Single((await EventReads.ReadAsync(db, 0, 200, default)).Events).DedupKey);
     }
 
     [VesselEventPostgresTheory]
@@ -398,7 +398,7 @@ public sealed class VesselEventParticipationTests
         finally { gate.Release.TrySetResult(); }
         Assert.NotNull(await Record.ExceptionAsync(() => dangling!.WaitAsync(TimeSpan.FromSeconds(10))));
         await Assert.ThrowsAsync<InvalidOperationException>(() => work.ExecuteAsync(() => Task.FromResult(true), default));
-        Assert.Empty((await store.ReadAsync(0, 200, default)).Events);
+        Assert.Empty((await EventReads.ReadAsync(db, 0, 200, default)).Events);
         await using var outside = database.Context(owner);
         Assert.Equal(0, await outside.Database.SqlQueryRaw<int>(
             "SELECT count(*)::int AS \"Value\" FROM event_baselines").SingleAsync());
@@ -406,13 +406,9 @@ public sealed class VesselEventParticipationTests
 
     private static Task Attempt(VesselEventStore store, string action, Guid owner, Guid account)
     {
-        if (action == "run")
-        {
-            store.SetRun(Guid.CreateVersion7(), "monitor");
-            return Task.CompletedTask;
-        }
         return action switch
         {
+            "run" => store.SetRunAsync(Guid.CreateVersion7(), "monitor", default),
             "append" => store.AppendAsync(Draft("concurrent"), default),
             "baseline" => store.EnsureMonitoringBaselineAsync(account, default),
             "command" => store.EnqueueAsync(new(Guid.CreateVersion7(), account, owner, "manual"), default),
@@ -495,7 +491,7 @@ public sealed class VesselEventParticipationTests
     private sealed class Outbox : IVesselEventOutbox
     {
         public Func<Task> OnStage { get; init; } = () => Task.CompletedTask;
-        public async Task<IReadOnlyList<EventEnvelopeReference>> StageAsync(VesselEvent message, CancellationToken ct) { await OnStage(); return []; }
+        public async Task StageAsync(VesselEvent message, CancellationToken ct) => await OnStage();
         public Task StageAsync(MonitorAccountCommand command, CancellationToken ct) => Task.CompletedTask;
         public Task FlushAsync(CancellationToken ct) => Task.CompletedTask;
         public void Reset() { }

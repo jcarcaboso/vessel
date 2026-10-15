@@ -3,6 +3,7 @@
     <ProjectReference Include="../Vessel.Application/Vessel.Application.csproj" />
     <ProjectReference Include="../Vessel.Persistence/Vessel.Persistence.csproj" />
     <ProjectReference Include="../Vessel.Infrastructure/Vessel.Infrastructure.csproj" />
+    <ProjectReference Include="../Vessel.Messaging/Vessel.Messaging.csproj" />
   </ItemGroup>
   <ItemGroup><PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" /></ItemGroup>
   <ItemGroup><PackageReference Include="Microsoft.OpenApi" Version="2.12.2" /></ItemGroup>

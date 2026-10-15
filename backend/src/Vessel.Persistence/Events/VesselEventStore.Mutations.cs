@@ -11,8 +11,10 @@ namespace Vessel.Persistence.Events;
 
 public sealed partial class VesselEventStore
 {
-    private async Task CaptureMutationsAsync(CancellationToken ct)
+    /// <summary>Drafts for this unit's captured mutations.</summary>
+    private async Task<List<VesselEventDraft>> CaptureMutationsAsync(CancellationToken ct)
     {
+        var drafts = new List<VesselEventDraft>();
         var detected = DateTimeOffset.UtcNow;
         foreach (var change in mutations.StatusChanges)
         {
@@ -25,15 +27,15 @@ public sealed partial class VesselEventStore
                 ? $"play:{play.Id}:closed" : $"status-change:{change.Id}";
             var account = await db.Accounts.SingleAsync(a => a.Id == play.AccountId, ct);
             var occurred = await LifecycleSourceTimeAsync(play, change, ct);
-            var data = type == "play.closed" ? await ClosedDataAsync(play, ct) : JsonSerializer.SerializeToElement(new
+            var data = type == "play.closed" ? await ClosedDataAsync(play, ct) : VesselEventJson.Element(new
             {
                 previous = change.From.ToString().ToLowerInvariant(), current = change.To.ToString().ToLowerInvariant(),
                 source = change.Source.ToString().ToLowerInvariant(), reason = change.Reason?.ToString().ToLowerInvariant()
-            }, Json);
-            await AppendAsync(new(type, runId, key, change.From == PlayStatus.Paused && change.To == PlayStatus.Open
+            });
+            drafts.Add(new(type, runId, key, change.From == PlayStatus.Paused && change.To == PlayStatus.Open
                 ? "warning" : "info", occurred, detected,
                 new(play.AccountId, account.VenueId, play.ContractId, play.Id), new(trigger), data,
-                Timeliness(occurred, detected), play.Status == change.To ? "current" : "superseded"), ct);
+                Timeliness(occurred, detected), play.Status == change.To ? "current" : "superseded"));
         }
         foreach (var link in mutations.Links)
         {
@@ -41,23 +43,25 @@ public sealed partial class VesselEventStore
             var play = await db.Plays.SingleAsync(p => p.Id == link.PlayId, ct);
             var subject = new VesselEventSubject(link.AccountId, account.VenueId, play.ContractId, link.PlayId, link.EntryId, link.LevelId);
             var source = new VesselEventSource(link.Source == OrderLinkSource.Owner ? "owner" : trigger, [link.OrderId]);
-            var data = JsonSerializer.SerializeToElement(new
+            var data = VesselEventJson.Element(new
             {
                 linkId = link.LinkId, previous = link.Previous, current = link.Current,
                 role = link.Role.ToString().ToLowerInvariant(), source = link.Source.ToString().ToLowerInvariant()
-            }, Json);
+            });
             var finalState = await db.OrderLinks.Where(l => l.Id == link.LinkId).Select(l => (OrderLinkState?)l.State)
                 .SingleOrDefaultAsync(ct);
             var relevance = (finalState?.ToString().ToLowerInvariant() ?? "unlinked") == link.Current ? "current" : "superseded";
             if (link.Current == "suggested")
-                await AppendAsync(new("link.needs-confirmation", runId, $"link:{link.LinkId}:suggested", "warning",
-                    link.OccurredAt, detected, subject, source, data, Timeliness(link.OccurredAt, detected), relevance), ct);
+                drafts.Add(new("link.needs-confirmation", runId, $"link:{link.LinkId}:suggested", "warning",
+                    link.OccurredAt, detected, subject, source, data, Timeliness(link.OccurredAt, detected), relevance));
             else
-                await AppendAsync(new("execution.link-changed", runId, $"link-change:{link.ChangeId}", "info",
-                    link.OccurredAt, detected, subject, source, data, Timeliness(link.OccurredAt, detected), relevance), ct);
+                drafts.Add(new("execution.link-changed", runId, $"link-change:{link.ChangeId}", "info",
+                    link.OccurredAt, detected, subject, source, data, Timeliness(link.OccurredAt, detected), relevance));
         }
         foreach (var affected in mutations.FillOrders.OrderBy(x => x.AccountId).ThenBy(x => x.OrderId, StringComparer.Ordinal))
-            await CaptureFillsAsync(affected.AccountId, affected.OrderId, detected, ct);
+            if (await CaptureFillsAsync(affected.AccountId, affected.OrderId, detected, ct) is { } filled)
+                drafts.Add(filled);
+        return drafts;
     }
 
     private async Task<DateTimeOffset> LifecycleSourceTimeAsync(Play play, PlayStatusChange change, CancellationToken ct)
@@ -99,25 +103,25 @@ public sealed partial class VesselEventStore
         return occurred <= fallback ? occurred : fallback;
     }
 
-    private async Task CaptureFillsAsync(Guid accountId, string orderId, DateTimeOffset detected, CancellationToken ct)
+    private async Task<VesselEventDraft?> CaptureFillsAsync(Guid accountId, string orderId, DateTimeOffset detected, CancellationToken ct)
     {
         DateTimeOffset baseline;
         await using (var command = VesselEventSql.TransactionCommand(db, """
             SELECT started_at FROM event_baselines WHERE owner_id=@owner AND account_id=@account
             """, ("owner", db.CurrentOwnerId), ("account", accountId)))
         {
-            if (await command.ExecuteScalarAsync(ct) is not DateTime value) return;
+            if (await command.ExecuteScalarAsync(ct) is not DateTime value) return null;
             baseline = new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc));
         }
         var link = await db.OrderLinks.SingleOrDefaultAsync(l => l.AccountId == accountId &&
             l.OrderId == orderId && l.State == OrderLinkState.Linked, ct);
-        if (link is null) return;
+        if (link is null) return null;
         var play = await db.Plays.SingleAsync(p => p.Id == link.PlayId, ct);
         // Retrospective creation links history, not a new watched execution.
         var historical = play.Origin == PlayOrigin.Retrospective;
         var fills = await db.Fills.Where(f => f.AccountId == accountId && f.OrderId == orderId &&
             f.ContractId == play.ContractId).OrderBy(f => f.OccurredAtUtc).ThenBy(f => f.SourceFillId).ToListAsync(ct);
-        if (fills.Count == 0) return;
+        if (fills.Count == 0) return null;
         var newlyClaimed = new List<ImportedFill>();
         foreach (var fill in fills)
         {
@@ -129,17 +133,17 @@ public sealed partial class VesselEventStore
             if (await claim.ExecuteScalarAsync(ct) is not null && !historical && fill.OccurredAtUtc >= baseline)
                 newlyClaimed.Add(fill);
         }
-        if (newlyClaimed.Count == 0) return;
+        if (newlyClaimed.Count == 0) return null;
         // Integrity rules match the existing lifecycle, not the venue's raw side vocabulary.
         var side = ExecutionIntegrity.EntrySide(PlayDocuments.Read(play.Plan));
         newlyClaimed.RemoveAll(f => ExecutionIntegrity.Contradicts(link.Role, side, f));
-        if (newlyClaimed.Count == 0) return;
+        if (newlyClaimed.Count == 0) return null;
         var order = await db.Orders.SingleOrDefaultAsync(o => o.AccountId == accountId && o.OrderId == orderId, ct);
         var account = await db.Accounts.SingleAsync(a => a.Id == accountId, ct);
         var counted = fills.Where(f => !ExecutionIntegrity.Contradicts(link.Role, side, f)).ToList();
         var cumulative = VesselEventValues.Sum(counted.Select(f => f.Quantity));
         var occurred = newlyClaimed.Max(f => f.OccurredAtUtc);
-        var data = JsonSerializer.SerializeToElement(new
+        var data = VesselEventJson.Element(new
         {
             role = link.Role.ToString().ToLowerInvariant(), side = newlyClaimed[0].Side,
             filledQuantity = VesselEventValues.Sum(newlyClaimed.Select(f => f.Quantity)), cumulativeQuantity = cumulative,
@@ -148,12 +152,12 @@ public sealed partial class VesselEventStore
             sourceFillCount = newlyClaimed.Count, sourceFillIdsComplete = newlyClaimed.Count <= 200,
             // A venue's "filled" status alone does not prove all executions are retained.
             complete = order is not null && order.Status == "filled" && !ExecutionIntegrity.MissingExecutions(order, counted)
-        }, Json);
-        await AppendAsync(new("execution.filled", runId, $"order:{accountId}:{orderId}:filled:{cumulative}",
+        });
+        return new("execution.filled", runId, $"order:{accountId}:{orderId}:filled:{cumulative}",
             link.Role == OrderLinkRole.Stop ? "warning" : "info", occurred, detected,
             new(accountId, account.VenueId, play.ContractId, play.Id, link.EntryId, link.LevelId),
             new(trigger, [orderId], newlyClaimed.Take(200).Select(f => f.SourceFillId).ToArray()), data,
-            Timeliness(occurred, detected), play.Status is PlayStatus.Closed or PlayStatus.Cancelled ? "superseded" : "current"), ct);
+            Timeliness(occurred, detected), play.Status is PlayStatus.Closed or PlayStatus.Cancelled ? "superseded" : "current");
     }
 
     private async Task<JsonElement> ClosedDataAsync(Play play, CancellationToken ct)
@@ -171,7 +175,7 @@ public sealed partial class VesselEventStore
         var counted = facts.Where(f => !ExecutionIntegrity.Contradicts(f.Role,
             ExecutionIntegrity.EntrySide(PlayDocuments.Read(play.Plan)), f.Fill)).ToList();
         var basis = counted.Select(f => f.Fill.PnlBasis).Distinct(StringComparer.Ordinal).ToList();
-        return JsonSerializer.SerializeToElement(new
+        return VesselEventJson.Element(new
         {
             enteredQuantity = VesselEventValues.Sum(counted.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill.Quantity)),
             exitedQuantity = VesselEventValues.Sum(counted.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill.Quantity)),
@@ -179,7 +183,7 @@ public sealed partial class VesselEventStore
             closedPnlBasis = basis.Count == 1 ? basis[0] : basis.Count == 0 ? ExecutionFacts.PnlGross : "mixed",
             fees = counted.GroupBy(f => f.Fill.FeeToken).OrderBy(g => g.Key, StringComparer.Ordinal)
                 .Select(g => new { token = g.Key, amount = VesselEventValues.Sum(g.Select(f => f.Fill.Fee)) }).ToArray()
-        }, Json);
+        });
     }
 
     private string Timeliness(DateTimeOffset occurred, DateTimeOffset detected) =>

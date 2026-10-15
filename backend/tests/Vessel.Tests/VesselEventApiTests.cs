@@ -61,7 +61,9 @@ public sealed class VesselEventApiTests
             Assert.Equal("owner", e.Source.Trigger);
         });
         Assert.Equal(["planned", "paused"], page.Events.Select(e => e.Data.GetProperty("current").GetString()));
-        Assert.Empty((await client.GetFromJsonAsync<VesselEventPage>("/api/events?after=2"))!.Events);
+        Assert.Empty((await client.GetFromJsonAsync<VesselEventPage>($"/api/events?after={page.NextCursor}"))!.Events);
+        // A bare sequence predates stream epochs: the client must reload rather than trust it.
+        Assert.True((await client.GetFromJsonAsync<VesselEventPage>("/api/events?after=2"))!.ResetRequired);
         using var json = JsonDocument.Parse(await client.GetStringAsync("/api/events"));
         Assert.Equal(JsonValueKind.String, json.RootElement.GetProperty("events")[0].GetProperty("sequence").ValueKind);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/events?after=-1")).StatusCode);

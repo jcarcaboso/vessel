@@ -6,17 +6,20 @@ using Vessel.Application.Common;
 using Vessel.Domain.Common;
 using Vessel.Infrastructure;
 using Vessel.Persistence;
-using Vessel.Persistence.Events;
+using Vessel.Messaging;
 
 if (args.FirstOrDefault() is "evidence-copy-to-s3" or "evidence-copy-to-local")
     return EvidenceCopyCommand.RunAsync(args[1..], Console.Out, toLocal: args[0] == "evidence-copy-to-local").GetAwaiter().GetResult();
+if (args.FirstOrDefault() is { } command && MessagingCommands.Names.Contains(command))
+    return MessagingCommands.RunAsync(args, Console.Out).GetAwaiter().GetResult();
 
 var builder = WebApplication.CreateBuilder(args);
 if (!builder.Environment.IsDevelopment()) ProductionConfiguration.Validate(builder.Configuration);
 builder.Services.AddVesselInfrastructure(builder.Configuration);
 builder.Services.AddVesselPersistence(builder.Configuration);
 builder.Services.AddVesselApplication();
-builder.ConfigureVesselEventTransport(builder.Configuration, "api");
+// The API publishes events and module commands; it runs no module and never provisions at startup.
+builder.AddVesselMessaging(MessagingHosting.ApiDeployment);
 builder.Services.AddOpenApi();
 builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
 builder.Services.AddResponseCompression(options =>

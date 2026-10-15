@@ -43,12 +43,13 @@ public sealed class VesselEventStreamTests
         using var cancellation = new CancellationTokenSource();
         using var body = new MemoryStream();
         var context = Context(body, cancellation.Token);
-        var read = new FixedReader(new([], "9007199254740993", true));
-        var stream = VesselEventEndpoints.StreamAsync("999", read, owner,
+        var epoch = Guid.NewGuid().ToString("N");
+        var read = new FixedReader(new([], epoch + ".9007199254740993", true));
+        var stream = VesselEventEndpoints.StreamAsync(Guid.NewGuid().ToString("N") + ".999", read, owner,
             Options.Create(new VesselEventSettings()), Options.Create(new JsonOptions()), context);
         Assert.False(stream.IsCompleted);
         var text = Encoding.UTF8.GetString(body.ToArray());
-        Assert.Contains("event: status\ndata: {\"state\":\"reset\",\"nextSequence\":\"9007199254740993\"}", text);
+        Assert.Contains("event: status\ndata: {\"state\":\"reset\",\"nextCursor\":\"" + epoch + ".9007199254740993\"}", text);
         Assert.DoesNotContain("event: event", text);
         Assert.Equal("no-store", context.Response.Headers.CacheControl);
         Assert.Equal("text/event-stream; charset=utf-8", context.Response.ContentType);
@@ -78,11 +79,13 @@ public sealed class VesselEventStreamTests
             Guid.CreateVersion7(), "first", "info", at, at, "timely", "current", null, new(), new("monitor"),
             JsonSerializer.SerializeToElement(new { current = "live" }));
         var context = Context(body, cancellation.Token);
-        var stream = VesselEventEndpoints.StreamAsync("0", new FixedReader(new([message], "1", false)), owner,
+        var epoch = Guid.NewGuid().ToString("N");
+        var stream = VesselEventEndpoints.StreamAsync("0", new FixedReader(new([message], epoch + ".1", false)), owner,
             Options.Create(new VesselEventSettings()), Options.Create(new JsonOptions()), context);
         var text = Encoding.UTF8.GetString(body.ToArray());
-        Assert.StartsWith("event: status\ndata: {\"state\":\"ready\",\"nextSequence\":\"0\"}", text);
-        Assert.Contains("event: event\ndata: {\"id\":", text);
+        // Ready normalizes the accepted cursor with the stream epoch; each event frame carries its resume id.
+        Assert.StartsWith("event: status\ndata: {\"state\":\"ready\",\"nextCursor\":\"" + epoch + ".0\"}", text);
+        Assert.Contains("event: event\nid: " + epoch + ".1\ndata: {\"id\":", text);
         Assert.Contains("\"sequence\":\"1\"", text);
         await cancellation.CancelAsync();
         await stream;
@@ -99,12 +102,12 @@ public sealed class VesselEventStreamTests
     }
     private sealed class FixedReader(VesselEventPage? initial = null) : IVesselEventReader
     {
-        public Task<VesselEventPage> ReadAsync(long after, int limit, CancellationToken ct) =>
-            Task.FromResult(initial ?? new([], after.ToString(System.Globalization.CultureInfo.InvariantCulture), false));
+        public Task<VesselEventPage> ReadAsync(string? after, int limit, CancellationToken ct) =>
+            Task.FromResult(initial ?? new([], after ?? "0", false));
     }
     private sealed class FailingReader : IVesselEventReader
     {
-        public Task<VesselEventPage> ReadAsync(long after, int limit, CancellationToken ct) =>
+        public Task<VesselEventPage> ReadAsync(string? after, int limit, CancellationToken ct) =>
             throw new InvalidOperationException("Synthetic database outage.");
     }
 }

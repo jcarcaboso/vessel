@@ -1,6 +1,6 @@
 using System.Globalization;
-using System.Text.Json;
 using System.Numerics;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Vessel.Domain.Numerics;
 
@@ -27,21 +27,49 @@ public sealed record VesselEvent(Guid Id, string Type, int Version, Guid OwnerId
     string DedupKey, string Severity, DateTimeOffset OccurredAt, DateTimeOffset DetectedAt,
     string Timeliness, string Relevance, DateTimeOffset? ExpiresAt, VesselEventSubject Subject,
     VesselEventSource Source, JsonElement Data);
-public sealed record VesselEventPage(IReadOnlyList<VesselEvent> Events, string NextSequence, bool ResetRequired);
+
+/// <summary>A bounded page. <paramref name="NextCursor"/> carries the stream epoch with the sequence.</summary>
+public sealed record VesselEventPage(IReadOnlyList<VesselEvent> Events, string NextCursor, bool ResetRequired);
 
 public interface IVesselEventSink
 {
     /// <summary>Buffer an actual mutation in the active unit of work, not a re-read observation.</summary>
     Task AppendAsync(VesselEventDraft draft, CancellationToken cancellationToken);
-    /// <summary>Set the identity of the monitor run for automatically captured mutations.</summary>
-    void SetRun(Guid runId, string trigger);
+    /// <summary>Set the identity of the run or owner action for events captured in the active unit of work.</summary>
+    Task SetRunAsync(Guid runId, string trigger, CancellationToken cancellationToken);
     /// <summary>Call and commit before the first venue read; already imported fills are historical.</summary>
     Task EnsureMonitoringBaselineAsync(Guid accountId, CancellationToken cancellationToken);
 }
 
 public interface IVesselEventReader
 {
-    Task<VesselEventPage> ReadAsync(long after, int limit, CancellationToken cancellationToken);
+    /// <summary>Committed events after <paramref name="cursor"/>; another epoch, a pruned or a future cursor resets.</summary>
+    Task<VesselEventPage> ReadAsync(string? cursor, int limit, CancellationToken cancellationToken);
+}
+
+/// <summary>Browser cursor: <c>{epoch}.{sequence}</c>, or <c>0</c> for the start of a stream not yet seen.</summary>
+public readonly record struct VesselEventCursor(Guid? Epoch, long Sequence)
+{
+    public static bool TryParse(string? value, out VesselEventCursor cursor)
+    {
+        cursor = default;
+        if (string.IsNullOrEmpty(value) || value == "0") return true;
+        var dot = value.IndexOf('.');
+        if (dot != 32 || !Guid.TryParseExact(value[..dot], "N", out var epoch) || epoch == Guid.Empty ||
+            !long.TryParse(value[(dot + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var sequence))
+        {
+            // A bare sequence predates epochs; it parses so the reader can answer with a reset.
+            if (!long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var legacy)) return false;
+            cursor = new(null, legacy);
+            return true;
+        }
+        cursor = new(epoch, sequence);
+        return true;
+    }
+
+    public static string Format(Guid? epoch, long sequence) => epoch is { } value
+        ? value.ToString("N") + "." + sequence.ToString(CultureInfo.InvariantCulture)
+        : sequence.ToString(CultureInfo.InvariantCulture);
 }
 
 public static class VesselEventValues
@@ -57,12 +85,10 @@ public static class VesselEventValues
             (sum, row) => sum + ExactAmount.From(row.Price).Units * ExactAmount.From(row.Quantity).Units);
         return ExactAmount.Average(notional, quantity);
     }
-    public static bool TrySequence(string? value, out long sequence) =>
-        long.TryParse(value ?? "0", NumberStyles.None, CultureInfo.InvariantCulture, out sequence) && sequence >= 0;
     public static readonly string[] Types =
     [
         "play.opened", "play.closed", "play.status-changed", "execution.filled", "link.needs-confirmation",
         "execution.link-changed", "discrepancy.opened", "discrepancy.resolved", "monitor.state-changed",
-        "credential.expiring"
+        "monitor.run-completed", "credential.expiring"
     ];
 }

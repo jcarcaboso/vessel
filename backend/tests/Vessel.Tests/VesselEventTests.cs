@@ -52,38 +52,6 @@ public sealed class VesselEventTests
         "monitor.state-changed", Guid.CreateVersion7(), key, "info", detected ?? DateTimeOffset.UtcNow,
         detected ?? DateTimeOffset.UtcNow, new(), new("owner"), JsonSerializer.SerializeToElement(new { price = "001.2300" }));
 
-    [VesselEventPostgresFact]
-    public async Task Missing_live_receipt_retries_but_pruned_terminal_duplicate_is_acknowledged()
-    {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
-        var owner = Guid.NewGuid();
-        await using var scope = new EventScope(database, owner);
-        await scope.ExecuteAsync(async () =>
-        {
-            await scope.Store.AppendAsync(Draft(detected: DateTimeOffset.UtcNow.AddDays(-100)), default);
-            return true;
-        }, default);
-        var message = Assert.Single((await scope.Store.ReadAsync(0, 10, default)).Events);
-        var services = new ServiceCollection();
-        services.AddSingleton<IJournalOwnerContext>(new CoreOwner(owner));
-        services.AddDbContext<VesselDbContext>(o => o.UseNpgsql(database.ConnectionString));
-        await using var provider = services.BuildServiceProvider();
-        var scopes = provider.GetRequiredService<IServiceScopeFactory>();
-        var host = new VesselEventHostIdentity("worker", "wolverine_worker", owner);
-        await scope.Db.Database.ExecuteSqlRawAsync("DELETE FROM event_deliveries");
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            VesselEventReceiptHandler.Handle(message, scopes, host, default));
-        Assert.Equal("The durable monitor event receipt is missing.", error.Message);
-        var retention = new VesselEventRetention(scope.Db, scope, Options.Create(new VesselEventSettings()));
-        Assert.Equal(0, await retention.PruneAsync(10, default));
-        await scope.Db.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO event_deliveries(owner_id,event_id,consumer,state) VALUES({owner},{message.Id},'monitor','delivered')
-            """);
-        Assert.Equal(1, await retention.PruneAsync(10, default));
-        Assert.Empty((await scope.Store.ReadAsync(0, 10, default)).Events);
-        await VesselEventReceiptHandler.Handle(message, scopes, host, default);
-    }
-
     [Fact]
     public void Every_v1_type_has_a_string_cursor_and_exact_string_payload_contract()
     {
@@ -104,8 +72,12 @@ public sealed class VesselEventTests
         Assert.Equal("0.5", VesselEventValues.Exact(0.5000m));
         Assert.Equal("158456325028528675187087900670", VesselEventValues.Sum([decimal.MaxValue, decimal.MaxValue]));
         Assert.Equal("10.5", VesselEventValues.AveragePrice([(10m, 1m), (11m, 1m)]));
-        Assert.False(VesselEventValues.TrySequence("-1", out _));
-        Assert.False(VesselEventValues.TrySequence("1.0", out _));
+        Assert.False(VesselEventCursor.TryParse("-1", out _));
+        Assert.False(VesselEventCursor.TryParse("1.0", out _));
+        var epoch = Guid.NewGuid();
+        Assert.True(VesselEventCursor.TryParse(VesselEventCursor.Format(epoch, 9007199254740993), out var cursor));
+        Assert.Equal(new VesselEventCursor(epoch, 9007199254740993), cursor);
+        Assert.True(VesselEventCursor.TryParse("0", out var start) && start == default);
     }
 
     [VesselEventPostgresFact]
@@ -123,14 +95,14 @@ public sealed class VesselEventTests
         var commit2 = second.ExecuteAsync(async () => { await second.Store.AppendAsync(Draft("second"), default); return true; }, default);
         try
         {
-            Assert.Empty((await reader.Store.ReadAsync(0, 200, default)).Events);
+            Assert.Empty((await EventReads.ReadAsync(reader.Db, 0, 200, default)).Events);
             await Task.Delay(150);
             Assert.False(commit2.IsCompleted);
             Assert.False(secondGate.Entered.Task.IsCompleted);
             firstGate.Release.TrySetResult();
             await commit1.WaitAsync(TimeSpan.FromSeconds(10));
             await secondGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            Assert.Equal("1", Assert.Single((await reader.Store.ReadAsync(0, 200, default)).Events).Sequence);
+            Assert.Equal("1", Assert.Single((await EventReads.ReadAsync(reader.Db, 0, 200, default)).Events).Sequence);
         }
         finally
         {
@@ -138,12 +110,12 @@ public sealed class VesselEventTests
             secondGate.Release.TrySetResult();
             await Task.WhenAll(commit1, commit2).WaitAsync(TimeSpan.FromSeconds(10));
         }
-        var page = await reader.Store.ReadAsync(1, 200, default);
+        var page = await EventReads.ReadAsync(reader.Db, 1, 200, default);
         Assert.Equal("2", Assert.Single(page.Events).Sequence);
         Assert.Equal("second", page.Events[0].DedupKey);
         await using var foreign = new EventScope(database, Guid.NewGuid());
-        Assert.Empty((await foreign.Store.ReadAsync(0, 200, default)).Events);
-        Assert.True((await reader.Store.ReadAsync(999, 200, default)).ResetRequired);
+        Assert.Empty((await EventReads.ReadAsync(foreign.Db, 0, 200, default)).Events);
+        Assert.True((await EventReads.ReadAsync(reader.Db, 999, 200, default)).ResetRequired);
     }
 
     [VesselEventPostgresFact]
@@ -160,14 +132,14 @@ public sealed class VesselEventTests
         }, default));
         Assert.Equal(0, scope.Outbox.Flushes);
         Assert.Empty(scope.Outbox.Staged);
-        Assert.Empty((await scope.Store.ReadAsync(0, 200, default)).Events);
+        Assert.Empty((await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events);
         scope.Outbox.FailStage = false;
         scope.Outbox.FailFlush = true;
         await scope.ExecuteAsync(async () => { await scope.Store.AppendAsync(Draft("rollback"), default); return true; }, default);
-        var message = Assert.Single((await scope.Store.ReadAsync(0, 200, default)).Events);
+        var message = Assert.Single((await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events);
         Assert.Equal("1", message.Sequence);
         await scope.ExecuteAsync(async () => { await scope.Store.AppendAsync(Draft("rollback"), default); return true; }, default);
-        Assert.Single((await scope.Store.ReadAsync(0, 200, default)).Events);
+        Assert.Single((await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events);
     }
 
     [VesselEventPostgresFact]
@@ -190,7 +162,7 @@ public sealed class VesselEventTests
             await scope.Db.SaveChangesAsync();
             return true;
         }, default);
-        var page = await scope.Store.ReadAsync(0, 200, default);
+        var page = await EventReads.ReadAsync(scope.Db, 0, 200, default);
         Assert.Equal(2, page.Events.Count);
         Assert.Equal(["planned", "paused"], page.Events.Select(e => e.Data.GetProperty("current").GetString()!).ToArray());
         var savedPlay = await scope.Db.Plays.SingleAsync();
@@ -204,7 +176,7 @@ public sealed class VesselEventTests
 #pragma warning restore CS0162
         }, default));
         await scope.ExecuteAsync(() => Task.FromResult(true), default);
-        Assert.Equal(2, (await scope.Store.ReadAsync(0, 200, default)).Events.Count);
+        Assert.Equal(2, (await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events.Count);
         Assert.Equal(PlayStatus.Paused, (await scope.Db.Plays.SingleAsync()).Status);
     }
 
@@ -238,13 +210,13 @@ public sealed class VesselEventTests
             scope.Db.OrderLinks.Add(link);
             return true;
         }, default);
-        Assert.DoesNotContain((await scope.Store.ReadAsync(0, 200, default)).Events, e => e.Type == "execution.filled");
+        Assert.DoesNotContain((await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events, e => e.Type == "execution.filled");
         await scope.ExecuteAsync(() =>
         {
             scope.Db.Fills.Add(Fill(owner, account.Id, "new", DateTimeOffset.UtcNow));
             return Task.FromResult(true);
         }, default);
-        var emitted = Assert.Single((await scope.Store.ReadAsync(0, 200, default)).Events, e => e.Type == "execution.filled");
+        var emitted = Assert.Single((await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events, e => e.Type == "execution.filled");
         Assert.Equal(["new"], emitted.Source.FillIds!);
         Assert.EndsWith(":filled:1", emitted.DedupKey);
         await scope.ExecuteAsync(() => { scope.Db.OrderLinks.Remove(link!); return Task.FromResult(true); }, default);
@@ -254,30 +226,7 @@ public sealed class VesselEventTests
                 OrderLinkState.Linked, OrderLinkSource.Owner, DateTimeOffset.UtcNow));
             return true;
         }, default);
-        Assert.Single((await scope.Store.ReadAsync(0, 200, default)).Events, e => e.Type == "execution.filled");
-    }
-
-    [VesselEventPostgresFact]
-    public async Task Retention_protects_pending_consumer_work_and_keeps_dedup_after_terminal_pruning()
-    {
-        await using var database = await CoreDatabase.CreateAsync("20261014180000_VesselEvents");
-        var owner = Guid.NewGuid();
-        await using var scope = new EventScope(database, owner);
-        await scope.ExecuteAsync(async () => { await scope.Store.AppendAsync(Draft("old", DateTimeOffset.UtcNow.AddDays(-100)), default); return true; }, default);
-        var retention = new VesselEventRetention(scope.Db, scope, Options.Create(new VesselEventSettings()));
-        Assert.Equal(0, await retention.PruneAsync(100, default));
-        await scope.ExecuteAsync(async () =>
-        {
-            await scope.Db.Database.ExecuteSqlInterpolatedAsync($"UPDATE event_deliveries SET state='delivered' WHERE owner_id={owner}");
-            return true;
-        }, default);
-        Assert.Equal(1, await retention.PruneAsync(100, default));
-        var page = await scope.Store.ReadAsync(0, 200, default);
-        Assert.True(page.ResetRequired); Assert.Equal("1", page.NextSequence);
-        await scope.ExecuteAsync(async () => { await scope.Store.AppendAsync(Draft("old"), default); return true; }, default);
-        Assert.Empty((await scope.Store.ReadAsync(1, 200, default)).Events);
-        await scope.ExecuteAsync(async () => { await scope.Store.AppendAsync(Draft("new"), default); return true; }, default);
-        Assert.Equal("2", Assert.Single((await scope.Store.ReadAsync(1, 200, default)).Events).Sequence);
+        Assert.Single((await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events, e => e.Type == "execution.filled");
     }
 
     [VesselEventPostgresFact]
@@ -305,7 +254,7 @@ public sealed class VesselEventTests
             fact.Price = "124.00";
             return true;
         }, default);
-        Assert.Empty((await scope.Store.ReadAsync(0, 200, default)).Events);
+        Assert.Empty((await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events);
     }
 
     [VesselEventPostgresFact]
@@ -333,7 +282,7 @@ public sealed class VesselEventTests
         await using var reading = provider.CreateAsyncScope();
         var reader = reading.ServiceProvider.GetRequiredService<IVesselEventReader>();
         Assert.IsType<VesselEventHistory>(reader);
-        Assert.Empty((await reader.ReadAsync(0, 200, default)).Events);
+        Assert.Empty((await reader.ReadAsync("0", 200, default)).Events);
         await using var scope = new EventScope(database, owner);
         var rejected = await Assert.ThrowsAsync<Vessel.Application.Common.ProblemException>(() =>
             scope.ExecuteAsync(async () =>
@@ -342,7 +291,7 @@ public sealed class VesselEventTests
                 return true;
             }, default));
         Assert.Equal(404, rejected.StatusCode);
-        Assert.Empty((await reader.ReadAsync(0, 200, default)).Events);
+        Assert.Empty((await reader.ReadAsync("0", 200, default)).Events);
     }
 
     [VesselEventPostgresFact]
@@ -364,7 +313,7 @@ public sealed class VesselEventTests
             scope.Db.StatusChanges.Add(play.MarkClosed("Synthetic close", DateTimeOffset.UtcNow.AddMinutes(-30)));
             return true;
         }, default);
-        var page = await scope.Store.ReadAsync(0, 200, default);
+        var page = await EventReads.ReadAsync(scope.Db, 0, 200, default);
         var opened = Assert.Single(page.Events, e => e.Type == "play.opened");
         Assert.Equal(("warning", "late", "superseded"), (opened.Severity, opened.Timeliness, opened.Relevance));
         var closed = Assert.Single(page.Events, e => e.Type == "play.closed");
@@ -388,7 +337,7 @@ public sealed class VesselEventTests
             await using var scope = new EventScope(database, owner, new() { MonitorInterval = TimeSpan.FromMinutes(interval) });
             await scope.ExecuteAsync(async () =>
             {
-                scope.Store.SetRun(run, "monitor");
+                await scope.Store.SetRunAsync(run, "monitor", default);
                 var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
                 var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
                 scope.Db.Accounts.Add(account); scope.Db.Plays.Add(play);
@@ -409,7 +358,7 @@ public sealed class VesselEventTests
                 scope.Db.StatusChanges.Add(play.MarkClosed("Delayed settlement", now));
                 return true;
             }, default);
-            var events = (await scope.Store.ReadAsync(0, 200, default)).Events;
+            var events = (await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events;
             var opened = Assert.Single(events, e => e.Type == "play.opened");
             var closed = Assert.Single(events, e => e.Type == "play.closed");
             Assert.Equal(first, opened.OccurredAt);
@@ -454,7 +403,7 @@ public sealed class VesselEventTests
             scope.Db.StatusChanges.Add(play.MarkClosed("Synthetic mutation with missing source facts", now));
             return true;
         }, default);
-        var events = (await scope.Store.ReadAsync(0, 200, default)).Events;
+        var events = (await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events;
         Assert.Equal(first, Assert.Single(events, e => e.Type == "play.opened").OccurredAt);
         var closed = Assert.Single(events, e => e.Type == "play.closed");
         Assert.Equal(now, closed.OccurredAt);
@@ -486,7 +435,7 @@ public sealed class VesselEventTests
             scope.Db.StatusChanges.Add(play.RecordManualClose(now.AddHours(-1), now));
             return Task.FromResult(true);
         }, default);
-        var events = (await scope.Store.ReadAsync(0, 200, default)).Events;
+        var events = (await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events;
         var lifecycle = events.Where(e => e.Type is "play.opened" or "play.closed").ToList();
         Assert.Equal(2, lifecycle.Count);
         Assert.All(lifecycle, e =>
@@ -533,11 +482,11 @@ public sealed class VesselEventTests
         public int Flushes { get; private set; }
         public bool FailFlush { get; set; }
         public bool FailStage { get; set; }
-        public Task<IReadOnlyList<EventEnvelopeReference>> StageAsync(VesselEvent message, CancellationToken ct)
+        public Task StageAsync(VesselEvent message, CancellationToken ct)
         {
             Staged.Add(message);
             if (FailStage) throw new InvalidOperationException("Synthetic staging failure.");
-            return Task.FromResult<IReadOnlyList<EventEnvelopeReference>>([]);
+            return Task.CompletedTask;
         }
         public Task StageAsync(MonitorAccountCommand command, CancellationToken ct) => Task.CompletedTask;
         public Task FlushAsync(CancellationToken ct)
