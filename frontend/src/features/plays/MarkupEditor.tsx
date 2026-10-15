@@ -14,6 +14,11 @@ const tools: Array<[MarkupTool, string, ReactNode]> = [
   ['box', 'Box', <Square key="box" size={15} aria-hidden="true" />],
   ['text', 'Text', <Type key="text" size={15} aria-hidden="true" />],
 ]
+/** How each tool is used, shown as the tool's tooltip instead of a hint line under the image. */
+const toolHints: Partial<Record<MarkupTool, string>> = {
+  select: 'Select and move: drag a mark to move it, double-click text to edit it, Delete removes it',
+  text: 'Text: click where it should start, type, then press Enter',
+}
 const colorNames: Record<(typeof markupColors)[number], string> = {
   '#ff5c5c': 'Red', '#ffd23f': 'Yellow', '#4ade80': 'Green', '#60a5fa': 'Blue', '#ffffff': 'White', '#111111': 'Black',
 }
@@ -194,7 +199,7 @@ export function MarkupEditor({ imageUrl, alt, markup, onChange, onDone }: {
   return <div className="markup-editor" onKeyDown={onKeyDown}>
     <div className="markup-toolbar" role="toolbar" aria-label="Markup tools">
       <div className="markup-group">
-        {tools.map(([id, label, icon]) => <button key={id} type="button" className="markup-button" aria-label={label} title={label}
+        {tools.map(([id, label, icon]) => <button key={id} type="button" className="markup-button" aria-label={label} title={toolHints[id] ?? label}
           aria-pressed={tool === id} onClick={() => { setTool(id); if (id !== 'select') setSelectedId(null) }}>{icon}</button>)}
       </div>
       <div className="markup-group" role="group" aria-label="Colour">
@@ -231,6 +236,5 @@ export function MarkupEditor({ imageUrl, alt, markup, onChange, onDone }: {
           }} onBlur={() => commitText()} />}
       </div>
     </div>
-    <p className="markup-hint">{tool === 'text' ? 'Click where the text should start, type, then press Enter.' : tool === 'select' ? 'Drag a mark to move it. Double-click text to edit it. Delete removes the selected mark.' : 'Drag on the image to draw.'} The original image is kept.</p>
   </div>
 }

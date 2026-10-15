@@ -103,8 +103,10 @@ invented from executed activity. The summary retains peak size and shows
 Remaining only above zero; cumulative entered/exited values and reporting-basis
 notes move into the drill-down. Entry and exit have separate columns; the exit
 colour follows the direction-adjusted price return. Times are shortened in UTC,
-with full timestamps in a tooltip. Activity uses the shared `NativeSelect` for
-consistent arrow placement, padding and native keyboard behaviour.
+with full timestamps in a tooltip. Every dropdown in the app uses the shared
+`NativeSelect` (`components/ui/native-select`) for one chevron, one right inset,
+text kept clear of it and native keyboard behaviour; density `compact` (32px) and
+`bare` (borderless field bars) keep the same arrow.
 
 ## Nominal stablecoin fees (October 14, 2026)
 

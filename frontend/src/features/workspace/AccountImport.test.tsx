@@ -93,7 +93,7 @@ describe('Wallet account import', () => {
     expect(screen.getByText('Available · -$12.50')).toHaveAttribute('title', '-12.5000')
     expect(screen.getByText('Collateral · $0.00')).toBeInTheDocument()
     expect(screen.getByText('Available · Unavailable')).toBeInTheDocument()
-    expect(screen.getByText(/not total equity/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'About these balances' })).toHaveAccessibleDescription(/not total equity/)
   })
   it('loads venue names before selection, clears the token and imports with the venue name', async () => {
     const api = client({ discoverAccounts: vi.fn().mockResolvedValueOnce(discoveryFixture).mockResolvedValueOnce({
@@ -111,7 +111,7 @@ describe('Wallet account import', () => {
     await userEvent.click(screen.getByRole('checkbox', { name: /Swing \/ ETH/ }))
     expect(screen.getByLabelText('Account name · 9223372036854775807')).toHaveValue('Swing / ETH')
     await userEvent.click(screen.getByRole('button', { name: 'Import selected (1)' }))
-    await screen.findByText(/Imported. Public reads/)
+    await screen.findByText('Imported.')
     expect(api.createAccount).toHaveBeenCalledWith(expect.objectContaining({ sourceId: '9223372036854775807', name: 'Swing / ETH' }))
     expect(api.sync).not.toHaveBeenCalled()
   })
@@ -148,7 +148,7 @@ describe('Wallet account import', () => {
     await userEvent.clear(name); await userEvent.type(name, 'Long-term')
     await userEvent.selectOptions(screen.getByLabelText(/Portfolio/), portfolioFixture.id)
     await userEvent.click(screen.getByRole('button', { name: 'Import selected (1)' }))
-    await screen.findByText(/Imported. Public reads are available/)
+    await screen.findByText('Imported.')
     expect(api.createAccount).toHaveBeenCalledExactlyOnceWith({
       venueId: 'lighter', sourceId: '9007199254740993', name: 'Long-term', portfolioId: portfolioFixture.id,
     })
@@ -167,7 +167,8 @@ describe('Wallet account import', () => {
     await discover()
     expect(screen.getAllByRole('checkbox')).toHaveLength(2)
     screen.getAllByRole('checkbox').forEach(box => expect(box).toBeDisabled())
-    expect(screen.getAllByText(/Already imported · Disabled/)).toHaveLength(2)
+    // Already-imported rows carry a badge instead of a sentence.
+    expect(screen.getAllByText('Already imported · Disabled', { selector: '.workspace-badge' })).toHaveLength(2)
     expect(screen.getByRole('button', { name: 'Import selected' })).toBeDisabled()
     expect(api.createAccount).not.toHaveBeenCalled()
   })
@@ -228,7 +229,7 @@ describe('Wallet account import', () => {
     await userEvent.click(screen.getByRole('checkbox', { name: /Subaccount 1/ }))
     await userEvent.click(screen.getByRole('button', { name: 'Import selected (2)' }))
     await screen.findByText(/Import not confirmed. Find wallet again/)
-    await screen.findByText(/Imported. Public reads are available/)
+    await screen.findByText('Imported.')
     expect(screen.getAllByRole('checkbox').every(box => (box as HTMLInputElement).disabled)).toBe(true)
     expect(api.createAccount).toHaveBeenCalledTimes(2)
   })
@@ -282,7 +283,7 @@ describe('Wallet account import', () => {
     expect(screen.getByLabelText('Read-only token')).toBeDisabled()
     expect(screen.getByText(/Use HTTPS before entering/)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Import selected (1)' }))
-    await screen.findByText(/Imported. Public reads are available/)
+    await screen.findByText('Imported.')
     expect(api.saveAccountCredential).not.toHaveBeenCalled()
   })
   it('allows importing with a read-only token on LAN HTTP in development', async () => {

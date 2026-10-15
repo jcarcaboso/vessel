@@ -1,3 +1,4 @@
+import { X } from 'lucide-react'
 import { useState } from 'react'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
 import { useVenues } from '@/api/venues'
@@ -19,15 +20,20 @@ function arc(outer: number, inner: number, start: number, end: number) {
 const compactMoney = (value: string | null) => value === null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }).format(value as Intl.StringNumericLiteral)
 const fill = (slice: AllocationSlice) => slice.slot === null ? 'var(--series-other)' : `var(--series-${slice.slot})`
 
-/** A donut of part-to-whole balance shares. Hovering or focusing a slice or legend row emphasizes it. */
-function Donut({ allocation, size, focus, emphasis, onScope }: {
-  allocation: Allocation; size: 'lg' | 'sm'; focus: string | null; emphasis?: string | undefined; onScope: (scope: string) => void
+/**
+ * A donut of part-to-whole balance shares. Hovering or focusing a slice or legend row emphasizes it. `selected` is the
+ * account the Overview is scoped to and `back` the scope one level up: activating the selected part again clears the
+ * selection instead of re-selecting it, and any other part with a scope selects it.
+ */
+function Donut({ allocation, size, selected, onScope }: {
+  allocation: Allocation; size: 'lg' | 'sm'; selected?: { id: string; back: string } | undefined; onScope: (scope: string) => void
 }) {
   const venues = useVenues()
   const [hover, setHover] = useState<string | null>(null)
-  // An emphasized account folded into Other highlights Other.
-  const emphasized = emphasis && (allocation.slices.find(s => s.id === emphasis || s.members?.includes(emphasis))?.id ?? null)
-  const active = hover ?? emphasized ?? null
+  // A selected account folded into Other selects Other.
+  const emphasized = selected ? allocation.slices.find(s => s.id === selected.id || s.members?.includes(selected.id))?.id ?? null : null
+  const target = (s: AllocationSlice) => s.id === emphasized && selected ? selected.back : s.scope
+  const active = hover ?? emphasized
   const radius = size === 'lg' ? 84 : 52, inner = radius * 0.64
   const current = allocation.slices.find(s => s.id === active)
   const withVenue = size === 'lg' && allocation.slices.some(s => s.venueId)
@@ -38,11 +44,11 @@ function Donut({ allocation, size, focus, emphasis, onScope }: {
       <svg viewBox={`${-radius - 4} ${-radius - 4} ${radius * 2 + 8} ${radius * 2 + 8}`} role="img" aria-label={`${allocation.name} balance shares: ${label}`}>
         {allocation.slices.map((s, i) => {
           const start = ends[i - 1] ?? 0, angle = ends[i]!
-          const dimmed = active !== null && active !== s.id
+          const dimmed = active !== null && active !== s.id, to = target(s)
           return <path key={s.id} d={arc(active === s.id ? radius + 3 : radius, inner, start, angle)} fill={fill(s)}
-            className={dimmed ? 'allocation-dim' : undefined} data-scope={s.scope ?? undefined}
+            className={dimmed ? 'allocation-dim' : undefined} data-scope={to ?? undefined}
             onMouseEnter={() => setHover(s.id)} onMouseLeave={() => setHover(null)}
-            onClick={s.scope && s.scope !== focus ? () => onScope(s.scope!) : undefined}>
+            onClick={to ? () => onScope(to) : undefined}>
             <title>{`${s.name}: ${money(s.balanceUsd)} · ${s.share}`}</title>
           </path>
         })}
@@ -53,15 +59,18 @@ function Donut({ allocation, size, focus, emphasis, onScope }: {
       </div>
     </div>
     <ul className={`allocation-legend${withVenue ? ' with-venue' : ''}`} aria-label={`${allocation.name} shares`}>
-      {allocation.slices.map(s => <li key={s.id} className={active === s.id ? 'allocation-active' : active !== null ? 'allocation-dim' : undefined}
-        onMouseEnter={() => setHover(s.id)} onMouseLeave={() => setHover(null)}>
-        <span className="allocation-swatch" style={{ background: fill(s) }} aria-hidden="true" />
-        {s.scope && s.scope !== focus ? <button className="allocation-name" onFocus={() => setHover(s.id)} onBlur={() => setHover(null)}
-          onClick={() => onScope(s.scope!)} aria-label={`Show allocation for ${s.name}`} title={s.name}>{s.name}</button> : <span className="allocation-name" title={s.name}>{s.name}</span>}
-        {withVenue && <span className="allocation-venue" title={s.venueId ? venues.name(s.venueId) : undefined}>{s.venueId && <><VenueLogo venueId={s.venueId} size="sm" /><span>{venues.name(s.venueId)}</span></>}</span>}
-        <span className="allocation-money">{money(s.balanceUsd)}</span>
-        <strong className="allocation-share">{s.share}</strong>
-      </li>)}
+      {allocation.slices.map(s => {
+        const to = target(s)
+        return <li key={s.id} className={active === s.id ? 'allocation-active' : active !== null ? 'allocation-dim' : undefined}
+          onMouseEnter={() => setHover(s.id)} onMouseLeave={() => setHover(null)}>
+          <span className="allocation-swatch" style={{ background: fill(s) }} aria-hidden="true" />
+          {to ? <button className="allocation-name" onFocus={() => setHover(s.id)} onBlur={() => setHover(null)} aria-pressed={s.id === emphasized}
+            onClick={() => onScope(to)} aria-label={`Show allocation for ${s.name}`} title={s.name}>{s.name}</button> : <span className="allocation-name" title={s.name}>{s.name}</span>}
+          {withVenue && <span className="allocation-venue" title={s.venueId ? venues.name(s.venueId) : undefined}>{s.venueId && <><VenueLogo venueId={s.venueId} size="sm" /><span>{venues.name(s.venueId)}</span></>}</span>}
+          <span className="allocation-money">{money(s.balanceUsd)}</span>
+          <strong className="allocation-share">{s.share}</strong>
+        </li>
+      })}
     </ul>
     <AllocationNotes allocation={allocation} />
   </div>
@@ -90,21 +99,22 @@ export function OverviewAllocation({ accounts, portfolios, scope, onScope }: {
   if (scope === 'all') {
     body = <div className="allocation-overview">
       <section aria-labelledby="allocation-portfolios"><h3 id="allocation-portfolios">Portfolios</h3>
-        {empty(total) ? <EmptyPie allocation={total} /> : <Donut key={scope} allocation={total} size="lg" focus={scope} onScope={onScope} />}</section>
+        {empty(total) ? <EmptyPie allocation={total} /> : <Donut key={scope} allocation={total} size="lg" onScope={onScope} />}</section>
       <section aria-labelledby="allocation-accounts"><h3 id="allocation-accounts">Accounts by portfolio</h3>
         <div className="allocation-multiples">{groups.map(g => <article key={g.id} className="allocation-card" aria-label={g.name}>
           <header><button className="allocation-card-name" onClick={() => onScope(g.scope)} aria-label={`Show allocation for ${g.name}`}>
             <PortfolioIcon icon={g.icon} size={15} /><span title={g.name}>{g.name}</span></button>
             <span>{total.shares[g.id] ?? '—'} of total</span></header>
-          {empty(g) ? <EmptyPie allocation={g} /> : <Donut key={scope} allocation={g} size="sm" focus={scope} onScope={onScope} />}
+          {empty(g) ? <EmptyPie allocation={g} /> : <Donut key={scope} allocation={g} size="sm" onScope={onScope} />}
         </article>)}</div>
       </section>
     </div>
   } else if (group) {
     const share = total.shares[group.id]
     body = <section aria-labelledby="allocation-single">
-      <h3 id="allocation-single">{group.name}{share && <small> · {share} of total</small>}</h3>
-      {empty(group) ? <EmptyPie allocation={group} /> : <Donut key={scope} allocation={group} size="lg" focus={scope} emphasis={account?.id} onScope={onScope} />}
+      <h3 id="allocation-single">{account ? group.name : <button className="allocation-clear" aria-pressed="true" title={`Clear ${group.name} scope`}
+        onClick={() => onScope('all')}>{group.name}<X size={12} aria-hidden="true" /></button>}{share && <small> · {share} of total</small>}</h3>
+      {empty(group) ? <EmptyPie allocation={group} /> : <Donut key={scope} allocation={group} size="lg" selected={account && { id: account.id, back: group.scope }} onScope={onScope} />}
     </section>
   } else return null
   return <section className="shell-panel overview-allocation" aria-label="Balance allocation">

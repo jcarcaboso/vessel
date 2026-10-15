@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-/* One app typeface; Inter is self-hosted from @fontsource-variable/inter. */
+/* One app typeface; Inter is self-hosted from @fontsource-variable/inter with its optical-size axis, so titles and
+   large figures use the Display cut automatically. */
 :root { --app-font: 'Inter Variable', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; }
 
 @custom-variant dark (&:is(.dark *));
@@ -28,7 +29,7 @@
   --destructive-foreground: #11161d;
   --border: #394350;
   --input: #394350;
-  --ring: #b9c9e4;
+  --ring: #9ab5f2;
   --field: #111419;
   --sidebar: #13161a;
   --chart-candle-up: #e9edf2;
@@ -48,6 +49,54 @@
   --series-other: #6b7380;
   --shadow-color: #000000;
   --radius: 0.4375rem;
+}
+
+/* Vessel design language. Everything below derives from the theme tokens above, so every built-in, saved and
+   customized theme follows it; themes still only choose colours and radius. */
+:root {
+  /* Type scale: nothing smaller than 11px. Figures use tabular, open digits. */
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 26px;
+  --text-display: 34px;
+  --figures: 'tnum' 1, 'cv11' 1, 'ss01' 1;
+  --tracking-display: -0.022em;
+  --tracking-title: -0.012em;
+  --tracking-label: 0.08em;
+
+  /* The signature light: each theme's accent-and-focus colour, used sparingly for identity and selection. */
+  --brand: var(--ring);
+  --brand-ink: color-mix(in srgb, var(--ring) 78%, var(--foreground));
+  --brand-wash: color-mix(in srgb, var(--ring) 9%, transparent);
+  --brand-glow: color-mix(in srgb, var(--ring) 22%, transparent);
+  --brand-line: color-mix(in srgb, var(--ring) 38%, var(--border));
+
+  /* Depth over lines: quieter dividers, sunken fields, panels lit from above. */
+  --line: color-mix(in srgb, var(--border) 60%, var(--card));
+  --line-strong: var(--border);
+  --surface-sunken: color-mix(in srgb, var(--background) 55%, var(--card));
+  --surface-hover: color-mix(in srgb, var(--accent) 55%, var(--card));
+  --sheen: rgb(255 255 255 / 0.045);
+  --button-sheen: rgb(255 255 255 / 0.3);
+  --elevation-1: inset 0 1px 0 var(--sheen), 0 1px 2px color-mix(in srgb, var(--shadow-color) 22%, transparent);
+  --elevation-2: inset 0 1px 0 var(--sheen), 0 1px 2px color-mix(in srgb, var(--shadow-color) 18%, transparent), 0 12px 32px -18px color-mix(in srgb, var(--shadow-color) 55%, transparent);
+  --elevation-3: 0 0 0 1px var(--line), 0 24px 64px -16px color-mix(in srgb, var(--shadow-color) 60%, transparent), 0 8px 20px -8px color-mix(in srgb, var(--shadow-color) 35%, transparent);
+  --radius-panel: calc(var(--radius) + 4px);
+  --radius-control: max(4px, calc(var(--radius) - 1px));
+  --ease-out: cubic-bezier(.2, .75, .25, 1);
+  --contours: url('./assets/brand/contours.svg');
+}
+/* Light themes use a white sheen and softer shadows of their own ink. */
+:root[data-scheme="light"] {
+  --sheen: rgb(255 255 255 / 0.85);
+  --elevation-1: inset 0 1px 0 var(--sheen), 0 1px 2px color-mix(in srgb, var(--shadow-color) 7%, transparent);
+  --elevation-2: inset 0 1px 0 var(--sheen), 0 1px 2px color-mix(in srgb, var(--shadow-color) 6%, transparent), 0 12px 28px -18px color-mix(in srgb, var(--shadow-color) 22%, transparent);
+  --elevation-3: 0 0 0 1px var(--line), 0 24px 64px -16px color-mix(in srgb, var(--shadow-color) 24%, transparent), 0 8px 20px -8px color-mix(in srgb, var(--shadow-color) 12%, transparent);
+  --line: color-mix(in srgb, var(--border) 72%, var(--card));
 }
 
 @theme inline {
@@ -78,31 +127,36 @@
 
 @layer base {
   * { border-color: var(--border); box-sizing: border-box; }
-  body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--app-font); font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: antialiased; font-size: 14px; line-height: 1.5; }
+  html { background: var(--background); }
+  body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--app-font); font-feature-settings: 'cv11', 'ss01'; font-optical-sizing: auto; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; font-size: var(--text-md); line-height: 1.55; }
+  ::selection { background: color-mix(in srgb, var(--ring) 34%, transparent); color: var(--foreground); }
   h1, h2, p { margin: 0; }
-  h1 { font-size: clamp(22px, 3vw, 30px); font-weight: 600; }
-  h2 { font-size: 15px; font-weight: 600; }
+  h1 { font-size: clamp(24px, 3vw, var(--text-display)); font-weight: 620; letter-spacing: var(--tracking-display); line-height: 1.15; }
+  h2 { font-size: var(--text-lg); font-weight: 600; letter-spacing: var(--tracking-title); }
   p, dt { color: var(--muted-foreground); }
   button, input, textarea, select { font: inherit; }
   button, select { cursor: pointer; }
   button:disabled { cursor: default; }
   :is(button, input, textarea, select, [tabindex]):focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
-  select, textarea { width: 100%; background: var(--field); color: var(--foreground); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; }
+  select, textarea { width: 100%; background: var(--field); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--radius-control); padding: 8px 10px; transition: border-color .15s var(--ease-out), box-shadow .15s var(--ease-out); }
+  :is(select, textarea, input[data-slot="input"]):hover:not(:disabled):not(:focus-visible) { border-color: color-mix(in srgb, var(--foreground) 24%, var(--border)); }
   textarea { resize: vertical; }
   input[data-slot="input"] { background: var(--field); }
   small { color: var(--muted-foreground); }
   label { display: grid; gap: 6px; }
   dl { margin: 0; }
   dd { margin: 3px 0 0; font-variant-numeric: tabular-nums; }
+  /* Quiet scrollbars that follow the theme. */
+  * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--border) 80%, transparent) transparent; }
 }
 
 @layer components {
 
-  .eyebrow { font-size: 11px; letter-spacing: .13em; margin-bottom: 6px; }
-  .badge { font-size: 11px; color: var(--primary); background: var(--secondary); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; white-space: nowrap; }
+  .eyebrow { font-size: var(--text-2xs); font-weight: 550; letter-spacing: var(--tracking-label); text-transform: uppercase; margin-bottom: 6px; }
+  .badge { font-size: var(--text-2xs); color: var(--primary); background: var(--secondary); border: 1px solid var(--border); border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
 
-  .panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; }
-  .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-panel); box-shadow: var(--elevation-2); min-width: 0; }
+  .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
   .panel-heading p { font-size: 12px; }
   .capital-context { display: flex; align-items: center; justify-content: space-between; padding: 16px; margin-bottom: 16px; gap: 20px; }
   .capital-context dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 34px; }
@@ -142,10 +196,25 @@
 
   .muted { color: var(--muted-foreground); font-size: 12px; }
   .error { color: var(--negative); }
-  .connection-page { min-height: 100dvh; display: grid; place-items: center; padding: 20px; }
-  .connection-card { max-width: 460px; padding: 28px; }
-  .connection-card form { display: grid; gap: 12px; margin: 24px 0; }
-  .connection-card h1 { margin-bottom: 10px; }
+  /* The first screen: a lit chart table with the depth contours behind a single card. */
+  .connection-page {
+    position: relative; isolation: isolate; min-height: 100dvh; display: grid; place-items: center; padding: 20px; overflow: hidden;
+    background: radial-gradient(60% 50% at 50% 38%, var(--brand-wash), transparent 70%), var(--background);
+  }
+  .connection-page::before {
+    content: ''; position: absolute; inset: -10%; z-index: -1; pointer-events: none; background: var(--brand); opacity: .12;
+    mask-image: var(--contours), radial-gradient(closest-side, #000 30%, transparent);
+    mask-size: max(1300px, 110vw) auto, 100% 100%; mask-position: center, center; mask-repeat: no-repeat; mask-composite: intersect;
+  }
+  .connection-card { width: 100%; max-width: 440px; padding: 32px; background: color-mix(in srgb, var(--card) 88%, transparent); backdrop-filter: blur(12px); box-shadow: var(--elevation-3); }
+  .connection-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 30px; color: var(--foreground); font-size: 24px; font-weight: 650; letter-spacing: -.04em; line-height: 1; }
+  .connection-brand small { display: block; margin-top: 5px; font-size: var(--text-xs); font-weight: 450; letter-spacing: 0; color: var(--muted-foreground); }
+  .connection-brand .shell-monogram { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 13px; color: var(--brand); background: radial-gradient(circle at 30% 18%, var(--brand-glow), transparent 68%), var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--brand-line), var(--elevation-1); }
+  .connection-card h1 { margin-bottom: 8px; font-size: 28px; }
+  .connection-card form { display: grid; gap: 10px; margin: 26px 0 0; }
+  .connection-card form label { font-size: var(--text-sm); font-weight: 500; }
+  .connection-label { display: flex; align-items: center; gap: 6px; }
+  .connection-card form button[type="submit"] { height: 40px; margin-top: 6px; font-size: var(--text-md); }
 }
 
 @media (max-width: 850px) {

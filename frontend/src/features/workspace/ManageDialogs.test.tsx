@@ -58,7 +58,7 @@ describe('Management dialogs', () => {
     render(<ManagePortfolioDialog portfolio={portfolioFixture} api={api} onClose={vi.fn()} onChanged={changed} />)
     await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
     expect(api.deletePortfolio).not.toHaveBeenCalled()
-    expect(screen.getByText(/account records, imported executions, snapshots and plays are kept/)).toBeInTheDocument()
+    expect(screen.getByText(/accounts, executions, snapshots and plays are kept; the accounts become Unassigned/)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Keep portfolio' }))
     expect(api.deletePortfolio).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: 'Delete' }))

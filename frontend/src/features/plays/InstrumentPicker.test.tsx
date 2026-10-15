@@ -65,7 +65,8 @@ describe('Venue instrument picker', () => {
     expect(onChange).toHaveBeenLastCalledWith('1000PEPE', 'venue')
     expect(field()).toHaveValue('1000PEPE/USDC')
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
-    expect(screen.getByText(/Max 10×/)).toHaveAttribute('title', 'Venue maximum leverage for this contract. The leverage control is limited to it.')
+    // The leverage control shows the venue maximum; the picker does not repeat it.
+    expect(screen.queryByText(/Max 10×/)).not.toBeInTheDocument()
   })
   it('moves through matches with the arrow keys and restores the choice on Escape', async () => {
     const client = api(), onChange = vi.fn()
@@ -125,7 +126,7 @@ describe('Venue instrument picker', () => {
     const input = screen.getByRole('textbox', { name: 'Perpetual instrument' })
     await userEvent.type(input, 'Custom contract')
     expect(input).toHaveValue('Custom contract')
-    expect(screen.getByText(/Manual label/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'About manual instruments' })).toHaveAccessibleDescription('Manual label, not venue-validated.')
   })
   it('does not read a venue for manual or disabled accounts', () => {
     const client = api()

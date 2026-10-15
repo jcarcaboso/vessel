@@ -86,6 +86,23 @@ describe('Main application shell', () => {
     expect(within(screen.getByRole('group', { name: 'Filter by venue' })).getByRole('button', { name: 'Hyperliquid' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('combobox', { name: 'Filter by status' })).toHaveValue('error')
   })
+  it('retains the Accounts grouping across detail and page navigation', async () => {
+    const account = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'1'.repeat(40)}`, sourceId: `0x${'1'.repeat(40)}` }
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api({
+      overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [account] }),
+    })} />)
+    await screen.findByRole('button', { name: 'View Main account' })
+    await userEvent.click(screen.getByRole('link', { name: 'Accounts' }))
+    await userEvent.click(within(screen.getByRole('group', { name: 'Group by' })).getByRole('button', { name: 'Address' }))
+    expect(screen.getByRole('rowgroup', { name: '0x1111…1111' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'View Main account' }))
+    await userEvent.click(screen.getByRole('button', { name: 'All accounts' }))
+    expect(screen.getByRole('rowgroup', { name: '0x1111…1111' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Accounts' }))
+    expect(within(screen.getByRole('group', { name: 'Group by' })).getByRole('button', { name: 'Address' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('rowgroup', { name: '0x1111…1111' })).toBeInTheDocument()
+  })
   it('retains Activity filters across page navigation', async () => {
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api({
       overview: vi.fn().mockResolvedValue(overviewFixture),
@@ -120,11 +137,11 @@ describe('Main application shell', () => {
     const row = (await screen.findByRole('button', { name: 'View Main account' })).closest('tr')!
     expect(row).toHaveTextContent(`Available balance ${display}`)
     await userEvent.click(screen.getByRole('button', { name: 'View Main account' }))
-    await screen.findByText('Latest snapshot')
+    await screen.findByText('No positions in the latest snapshot')
     const available = screen.getByText('Available balance').closest('.metric')!
     expect(available).toHaveTextContent(display)
-    expect(available).toHaveTextContent(note)
-    if (source === 'margin') expect(available).toHaveTextContent('Perps withdrawable — · separate field')
+    expect(within(available as HTMLElement).getByRole('button', { name: note })).toBeInTheDocument()
+    if (source === 'margin') expect(available).toHaveTextContent('Perps withdrawable —')
   })
   it('shows portfolio available balance with enabled-account coverage, not the equity subtotal', async () => {
     const portfolio = { ...portfolioFixture, availableBalanceUsd: '131.89', availableBalanceAccountCount: 1,
@@ -132,7 +149,9 @@ describe('Main application shell', () => {
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api({ overview: vi.fn().mockResolvedValue({ ...overviewFixture, portfolios: [portfolio] }) })} />)
     await screen.findByRole('button', { name: 'View Main account' })
     await userEvent.click(screen.getByRole('link', { name: 'Portfolios' }))
-    expect(await screen.findByRole('button', { name: 'Open Swing trading' })).toHaveTextContent('Available balance $131.89 · 1 of 2 enabled · partial')
+    const tile = (await screen.findByRole('button', { name: 'Open Swing trading' })).closest('article')!
+    expect(within(tile).getByRole('button', { name: 'Open Swing trading' })).toHaveTextContent('Available balance $131.89')
+    expect(within(tile).getByRole('button', { name: 'Availability coverage 1 of 2 enabled accounts' })).toHaveTextContent('1/2')
   })
   it('shows combined total and available balances with coverage, and rereads after refresh', async () => {
     const refreshed = { ...overviewFixture, totals: { ...overviewFixture.totals, totalBalanceUsd: '240', availableBalanceUsd: '95',
@@ -146,9 +165,9 @@ describe('Main application shell', () => {
     const total = (await screen.findByText('Total balance')).closest('.metric')!
     const available = screen.getByText('Available balance').closest('.metric')!
     expect(total).toHaveTextContent('$210.00')
-    expect(total).toHaveTextContent('3 of 3 enabled accounts · complete')
+    expect(within(total as HTMLElement).queryByRole('button', { name: /coverage/ })).not.toBeInTheDocument()
     expect(available).toHaveTextContent('$80.00')
-    expect(available).toHaveTextContent('2 of 3 enabled accounts · partial')
+    expect(within(available as HTMLElement).getByRole('button', { name: 'Availability coverage 2 of 3 enabled accounts' })).toHaveTextContent('2/3')
     await userEvent.click(screen.getByRole('button', { name: 'Refresh Main account' }))
     await waitFor(() => expect(total).toHaveTextContent('$240.00'))
     expect(available).toHaveTextContent('$95.00')
@@ -262,7 +281,8 @@ describe('Main application shell', () => {
     await waitFor(() => expect(client.overview).toHaveBeenCalledTimes(3))
     expect(screen.getByRole('row', { name: /Main account/ })).toHaveTextContent('Disabled')
     await userEvent.click(screen.getByRole('link', { name: 'Portfolios' }))
-    expect(screen.getByRole('button', { name: 'Open Second' })).toHaveTextContent('Enabled account balances unavailable')
+    expect(within(screen.getByRole('button', { name: 'Open Second' }).closest('article')!).getByRole('button', { name: 'Balance coverage unavailable' }))
+      .toHaveAccessibleDescription(/Enabled account balances are unavailable\./)
     await userEvent.click(screen.getByRole('button', { name: 'Open Second' }))
     await userEvent.click(screen.getByRole('button', { name: 'Manage Main account' }))
     await userEvent.click(screen.getByLabelText('Account enabled'))
@@ -294,8 +314,9 @@ describe('Main application shell', () => {
     await userEvent.click(screen.getByRole('link', { name: 'Portfolios' }))
     const tile = await screen.findByRole('button', { name: `Open ${portfolioFixture.name}` })
     expect(within(tile).getByText('$750.00')).toBeInTheDocument()
-    expect(within(tile).getByText('All enabled account balances recorded')).toBeInTheDocument()
-    expect(within(tile).getByText('Perps/manual value $0.00')).toBeInTheDocument()
+    // Complete coverage shows no pill, and the perps-only subtotal is not shown beside the balance.
+    expect(within(tile.closest('article')!).queryByRole('button', { name: /^Balance coverage/ })).not.toBeInTheDocument()
+    expect(within(tile).queryByText(/\$0\.00/)).not.toBeInTheDocument()
   })
   it('opens contributing Plays from Review through the existing saved editor', async () => {
     const client = api({ review: vi.fn().mockResolvedValue(reviewFixture), play: vi.fn().mockResolvedValue(savedPlayFixture) })
@@ -561,7 +582,7 @@ describe('Main application shell', () => {
     await screen.findByText(/No saved plays yet/)
     expect(screen.queryByText('BTC reclaim at support')).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'New play' }))
-    await screen.findByText(/No enabled accounts yet/)
+    await screen.findByRole('option', { name: 'No enabled accounts' })
     expect(screen.getByRole('heading', { level: 1, name: 'Plays' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('')
     expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByText('Draft', { selector: '.badge' })).toBeInTheDocument()
@@ -584,7 +605,7 @@ describe('Main application shell', () => {
     const client = api()
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
     await screen.findByText('Start with your accounts.')
-    expect(screen.getByText(/Portfolios are optional groups/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create an optional portfolio' })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Add your first account' }))
     await userEvent.type(screen.getByLabelText('Account name'), 'Unassigned manual')
     await userEvent.click(screen.getByRole('radio', { name: 'Manual account' }))
@@ -821,9 +842,10 @@ describe('Main application shell', () => {
     expect(screen.getByText('Available token units')).toBeInTheDocument()
     expect(screen.getByText('10.123456')).toBeInTheDocument()
     expect(screen.getByText('Wallet funds, not guaranteed trading margin.')).toBeInTheDocument()
-    expect(screen.getByText(/^Separate Hyperliquid perpetuals equity: \$0\.00\./)).toBeInTheDocument()
-    expect(screen.getByText('Wallet total minus held · nominal')).toBeInTheDocument()
-    expect(screen.getByText('Perps withdrawable $0.00 · separate field')).toBeInTheDocument()
+    // Perps equity stays a separate labelled figure, never summed with the wallet.
+    expect(screen.getByText('Wallet stablecoins available').closest('.metric')).toHaveTextContent('Perps equity $0.00')
+    expect(screen.getByRole('button', { name: 'Wallet total minus held · nominal' })).toHaveTextContent(/^wallet$/)
+    expect(screen.getByText('Perps withdrawable $0.00')).toBeInTheDocument()
   })
   it('names an unreported withdrawable amount and shows no wallet note for a venue without a wallet', async () => {
     const venue = { ...systemFixture.venues[0]!, id: 'risex', name: 'RISEx', tradeUrlTemplate: 'https://www.rise.trade/trade/{instrument}',
@@ -839,7 +861,7 @@ describe('Main application shell', () => {
     })
     render(<ApplicationShell system={system} disconnect={vi.fn()} api={client} />)
     await userEvent.click(await screen.findByRole('button', { name: 'View Main account' }))
-    expect(await screen.findByText('Not reported by this venue')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Not reported by this venue' })).toBeInTheDocument()
     expect(screen.getByText('Account value · reported')).toBeInTheDocument()
     expect(screen.queryByText(/perpetuals equity:/)).not.toBeInTheDocument()
     expect(screen.queryByText(/risex-perps-account/)).not.toBeInTheDocument()

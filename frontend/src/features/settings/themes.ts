@@ -60,7 +60,7 @@ const light = (id: string, name: string, description: string, colors: Omit<Theme
 export const themes: readonly Theme[] = [
   dark('graphite', 'Graphite', 'Neutral charcoal with silver actions. The approved default.', {
     background: '#0f1114', card: '#171a1f', secondary: '#1e2229', accent: '#242932', field: '#111419',
-    foreground: '#e9edf2', mutedForeground: '#abb3c0', border: '#394350', primary: '#c5cfdd', primaryForeground: '#11161d', ring: '#b9c9e4',
+    foreground: '#e9edf2', mutedForeground: '#abb3c0', border: '#394350', primary: '#c5cfdd', primaryForeground: '#11161d', ring: '#9ab5f2',
   }, 7),
   dark('carbon', 'Carbon', 'Near-black surfaces, crisp white actions and almost-square corners.', {
     background: '#090b0d', card: '#111519', secondary: '#181d22', accent: '#20272e', field: '#0c1014',

@@ -2,17 +2,20 @@ import { useId, useMemo, useState, type KeyboardEvent } from 'react'
 import type { VenueInstrument } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { InfoTip } from '@/components/ui/info-tip'
 import type { PlayDraft } from './draft'
 import { pairLabel, searchInstruments, type InstrumentCatalogState } from './instruments'
 
 /** Tags for non-crypto perpetuals, so a stock or commodity is never mistaken for a token. */
 const categoryLabels: Record<string, string> = { stocks: 'Stock', commodity: 'Commodity', index_etf: 'Index/ETF' }
 
-export function InstrumentPicker({ catalog: state, value, source, onChange }: {
+export function InstrumentPicker({ catalog: state, value, source, onChange, manualNote = 'Manual label, not venue-validated.' }: {
   catalog: InstrumentCatalogState
   value: string
   source: PlayDraft['instrumentSource']
   onChange: (value: string, source: PlayDraft['instrumentSource']) => void
+  /** What a manual label means, shown from an info icon beside the field label. */
+  manualNote?: string | undefined
 }) {
   const id = useId()
   const { accountId, catalog, error, loading } = state
@@ -28,6 +31,7 @@ export function InstrumentPicker({ catalog: state, value, source, onChange }: {
   return <div className="plays-instrument-field">
     <div className="plays-field-heading">
       <label htmlFor={`${id}-instrument`}>Instrument</label>
+      {manual && <InfoTip label="About manual instruments">{manualNote}</InfoTip>}
       {sourceSwitch && <span className="instrument-actions">{sourceSwitch}</span>}
     </div>
     {manual ? <Input id={`${id}-instrument`} aria-label="Perpetual instrument" value={value}
@@ -36,10 +40,8 @@ export function InstrumentPicker({ catalog: state, value, source, onChange }: {
         disabled={loading || !choices.length} loading={loading} onSelect={contract => onChange(contract, 'venue')} />}
     <div className="instrument-feedback">
       {error && <p role="alert">{error}</p>}
-      {manual ? <p>Manual label, not venue-validated.</p> :
-        catalog && <p>{!choices.length && 'No selectable perpetual contracts.'}
-          {selected && <abbr title="Venue maximum leverage for this contract. The leverage control is limited to it.">Max {selected.maxLeverage}×</abbr>}
-          {value && !selected && <span> · {value} is not in the current catalogue</span>}</p>}
+      {!manual && catalog && (!choices.length || value && !selected) && <p>{!choices.length && 'No selectable perpetual contracts.'}
+        {value && !selected && <span>{choices.length ? '' : ' · '}{value} is not in the current catalogue</span>}</p>}
       {accountId !== null && error && <div className="instrument-actions">
         <Button type="button" variant="ghost" size="sm" onClick={state.retry}>Retry instruments</Button>
       </div>}

@@ -8,6 +8,7 @@ import { ApiError, errorMessage } from '@/api/errors'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { InfoTip } from '@/components/ui/info-tip'
 import { VenueBadge } from '@/components/venues/VenueBadge'
 import { ReadOnlyTokenInput } from './AccountCredential'
 import { money } from '@/lib/format'
@@ -86,7 +87,7 @@ function WalletImportSession({ venueId, api, portfolios, accounts, onCreated, on
           ? edited : a.name]
       })))
       setDiscovery(next)
-      setNamesNotice('Venue names loaded where available. Unnamed accounts keep their index label. The token was not saved; re-enter it at import if you also want order access.')
+      setNamesNotice('Venue names loaded where available. The token was not saved; re-enter it at import for order access.')
     } catch (cause) {
       if (!currentDiscovery(controller)) return
       setError(credentialFailureMessage(cause, 'Could not load venue names. Check the read-only token’s wallet, scope and expiry.') +
@@ -121,7 +122,7 @@ function WalletImportSession({ venueId, api, portfolios, accounts, onCreated, on
           onCreated()
           continue
         }
-        let message = 'Imported. Public reads are available; add an optional token in Manage account for orders.'
+        let message = 'Imported.'
         if (submitted && credentialTransportAllowed()) {
           try {
             await api.saveAccountCredential(account.id, submitted)
@@ -148,11 +149,13 @@ function WalletImportSession({ venueId, api, portfolios, accounts, onCreated, on
         }} />
         <Button type="submit" variant="outline" disabled={pending}>{pending && !discovery ? 'Finding…' : 'Find wallet'}</Button>
       </div>
-      <p className="field-help">Find the main account and subaccounts, then choose which to import. No wallet signing or history refresh.</p>
     </form>
     {discovery && <form className="workspace-form" autoComplete="off" onSubmit={event => { void importSelected(event) }}>
-      <div className="import-heading"><h3>Choose accounts</h3><VenueBadge venueId={venueId} size="xs" /><span className="muted">{discovery.accounts.length} found</span></div>
-      {discovery.accounts.length === 0 && <p className="credential-notice" role="status">No accounts were found for this wallet. Check the address or try another wallet.</p>}
+      <div className="import-heading"><h3>Choose accounts</h3><VenueBadge venueId={venueId} size="xs" />
+        {discovery.accounts.some(a => a.collateralUsd != null || a.availableBalanceUsd != null) && <InfoTip label="About these balances">
+          Venue-reported collateral and available balance in USD, not total equity. Balances are a snapshot from discovery.</InfoTip>}
+        <span className="muted">{discovery.accounts.length} found</span></div>
+      {discovery.accounts.length === 0 && <p className="credential-notice" role="status">No accounts were found for this wallet.</p>}
       <div className="discovered-accounts">
         {discovery.accounts.map(candidate => {
           const record = existing(candidate)
@@ -172,7 +175,8 @@ function WalletImportSession({ venueId, api, portfolios, accounts, onCreated, on
                 </> : candidate.accountValueUsd === null ? 'Balance unavailable' : <>Account value · {money(candidate.accountValueUsd)}</>}
               </span>
             </label>
-            {alreadyAdded && <p className="field-help">Already imported{disabled ? ' · Disabled' : ''}. {disabled ? 'Re-enable in Manage account.' : 'Manage the existing account instead.'}</p>}
+            {alreadyAdded && <span className={`workspace-badge discovered-badge${disabled ? ' warning-badge' : ''}`}
+              title={disabled ? 'Re-enable in Manage account.' : 'Manage the existing account instead.'}>Already imported{disabled ? ' · Disabled' : ''}</span>}
             {checked && !result && <div className="workspace-form">
               <label htmlFor={`import-name-${candidate.sourceId}`}>Account name · {candidate.sourceId}</label>
               <Input id={`import-name-${candidate.sourceId}`} value={names[candidate.sourceId] ?? ''} maxLength={200}
@@ -183,27 +187,24 @@ function WalletImportSession({ venueId, api, portfolios, accounts, onCreated, on
         })}
       </div>
       {discovery.notice && <p className="field-help">{discovery.notice}</p>}
-      {discovery.accounts.some(a => a.collateralUsd != null || a.availableBalanceUsd != null) &&
-        <p className="field-help">Venue-reported collateral and available balance in USD, not total equity. Balances are a snapshot from discovery.</p>}
       {(importable.length > 0 || Object.values(results).some(result => !result.account)) && <>
         <PortfolioDestination destination={destination} inputId="import-portfolio" label="Portfolio · optional · selected accounts" disabled={pending} />
       </>}
-        {discovery.accounts.length > 0 && Object.keys(results).length === 0 && venues.can(venueId, 'readOnlyCredential') && <section className="credential-panel" aria-label="Optional order access">
-          <h3>Venue names &amp; order access <span className="optional">optional</span></h3>
-          <p className="field-help">Public discovery does not include account names. Use an all-scope read-only token from the main account to load {venues.name(venueId)} names before selecting. A single-scope token loads only its account name.</p>
+        {discovery.accounts.length > 0 && Object.keys(results).length === 0 && venues.can(venueId, 'readOnlyCredential') && <details className="credential-panel credential-disclosure" aria-label="Optional order access">
+          <summary><h3>Venue names &amp; order access <span className="optional">optional</span></h3></summary>
+          <p className="field-help">Public discovery has no account names: an all-scope read-only token from the main account loads them; a single-scope token loads only its own.</p>
           {importable.length > 0 && <p className="field-help">{importable.length === 1
             ? 'Choose single scope for this account, or all scope from the main account.'
-            : 'For multiple selected accounts, create an all-scope token from the main account.'} Each account is verified separately. Skip this to import public reads only.</p>}
+            : 'For multiple selected accounts, create an all-scope token from the main account.'}</p>}
           <ReadOnlyTokenInput venueId={venueId} value={token} onChange={setToken} disabled={pending} />
           <Button type="button" variant="outline" disabled={pending || !token || !credentialTransportAllowed()}
             onClick={() => { void loadNames() }}>{loadingNames ? 'Loading names…' : `Load ${venues.name(venueId)} names`}</Button>
           {namesNotice && <p className="field-help" role="status">{namesNotice}</p>}
-        </section>}
+        </details>}
       <div className="credential-actions">
         <Button type="button" variant="outline" disabled={pending} onClick={() => { discoveryRequest.current?.abort(); setToken(''); onClose() }}>Done</Button>
-        <Button type="submit" disabled={pending || importable.length === 0}>{pending && !loadingNames ? 'Importing…' : `Import selected${importable.length ? ` (${importable.length})` : ''}`}</Button>
+        <Button type="submit" disabled={pending || importable.length === 0} title="Creates account records only; Refresh account later reads current state and bounded recent fills">{pending && !loadingNames ? 'Importing…' : `Import selected${importable.length ? ` (${importable.length})` : ''}`}</Button>
       </div>
-      <p className="field-help">Import creates account records only. Open an account and choose Refresh account for current state and bounded recent fills, not full history.</p>
     </form>}
     {error && <p className="error" role="alert">{error}</p>}
   </div>

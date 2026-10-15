@@ -2,12 +2,12 @@ import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import { act, screen, waitFor, within } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { pickInstrument } from '@/test/instrument'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
 import type { PlayExecution, PlayFields, PlayHistory, PlayStatus, PlaySummary, SavedEvidence, SavedPlay, StatusRequest } from '@/api/plays'
 import { ApiError } from '@/api/errors'
-import { accountFixture, idleMarketStream, instrumentCatalogFixture, portfolioFixture } from '@/test/workspace-fixture'
+import { accountFixture, idleMarketStream, instrumentCatalogFixture, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { PlaysPage } from './PlaysPage'
 import { createDraft } from './draft'
@@ -159,7 +159,8 @@ describe('saved plays', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Save revision' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(server.api.updatePlay.mock.lastCall![1]).toMatchObject({ revisionReason: 'Stop under the new swing low', expectedVersion: 2 })
-    expect(screen.getByRole('status')).toHaveTextContent('Revision 2')
+    // The revision is a pill beside the status, not a banner.
+    expect(screen.getByText('Revision 2', { selector: '.badge' })).toHaveAttribute('title', 'Saved plan changes ask for a reason')
 
     // A title change alone is saved without a reason.
     await user.type(screen.getByRole('textbox', { name: 'Play title' }), ' v2')
@@ -188,7 +189,7 @@ describe('saved plays', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Cancel play' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(server.api.changePlayStatus.mock.lastCall![2]).toEqual({ status: 'cancelled', reason: 'missed', note: 'Price ran away' })
-    expect(screen.getByRole('status')).toHaveTextContent('Cancelled. Review and images can change.')
+    expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByText('Cancelled', { selector: '.badge' })).toBeInTheDocument()
     expect(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toBeDisabled()
     await user.click(screen.getByRole('tab', { name: 'Thesis' }))
@@ -227,6 +228,29 @@ describe('saved plays', () => {
     await user.click(await screen.findByRole('button', { name: 'Open First' }))
     expect(await screen.findByRole('textbox', { name: 'Play title' })).toHaveValue('First')
     expect(screen.getByRole('button', { name: /Saved/ })).toBeDisabled()
+  })
+
+  it('shows each saved play with a ticker chip, the venue logo and the account, described together for assistive technology', async () => {
+    const server = fakeServer()
+    const account = { ...accountFixture, venueId: 'hyperliquid' }
+    const venuePlay: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, title: 'Reclaim', venueId: 'hyperliquid', instrument: 'ETH', instrumentSource: 'venue' } }
+    const manualPlay: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, id: ids(77), title: 'Manual idea', venueId: 'manual', instrument: 'GDX', instrumentSource: 'manual' } }
+    const orphan: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, id: ids(78), title: 'Orphan', accountId: ids(99), instrument: '' } }
+    for (const play of [venuePlay, manualPlay, orphan]) server.plays.set(play.summary.id, play)
+    render(<Page api={client(server)} accounts={[account]} />)
+    const row = await screen.findByRole('button', { name: 'Open Reclaim' })
+    expect(row.querySelector('.play-asset-base')).toHaveTextContent('ETH')
+    expect(row.querySelector('.play-asset-quote')).toHaveTextContent('/USDC')
+    expect(within(row).getByRole('img', { name: 'Hyperliquid' })).toHaveAttribute('title', 'Hyperliquid')
+    expect(within(row).getByText('Main account')).toBeInTheDocument()
+    expect(within(row).queryByText('Hyperliquid')).not.toBeInTheDocument()
+    expect(row).toHaveAccessibleDescription(/^ETH\/USDC.*Main account$/)
+    const manual = screen.getByRole('button', { name: 'Open Manual idea' })
+    expect(manual.querySelector('.play-asset')).toHaveTextContent(/^GDX$/)
+    expect(within(manual).getByRole('img', { name: 'Manual' })).toBeInTheDocument()
+    const unknown = screen.getByRole('button', { name: 'Open Orphan' })
+    expect(within(unknown).getByText('No instrument')).toBeInTheDocument()
+    expect(within(unknown).getByText('Unknown account')).toBeInTheDocument()
   })
 
   it('deletes only drafts', async () => {
@@ -356,6 +380,134 @@ describe('saved plays', () => {
     const link = screen.getByRole('link', { name: 'Open BTC/USDC on Hyperliquid' })
     expect(link).toHaveAttribute('href', 'https://app.hyperliquid.xyz/trade/BTC')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+})
+
+describe('default play title', () => {
+  // Only the clock is faked, so the page and user-event keep their real timers.
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(2026, 9, 15, 12)) })
+  afterEach(() => { vi.useRealTimers() })
+
+  const startDraft = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(await screen.findByRole('button', { name: 'New play' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
+    await user.type(screen.getByRole('textbox', { name: 'Perpetual instrument' }), 'BTC-PERP')
+  }
+  const titleBox = () => screen.getByRole('textbox', { name: 'Play title' })
+  const save = () => screen.getByRole('button', { name: /^Save$/ })
+  /** A create whose response arrives only when released, so edits can happen while the save is pending. */
+  function heldCreate(server: ReturnType<typeof fakeServer>) {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const createPlay = vi.fn(async (...args: Parameters<typeof server.api.createPlay>) => {
+      const play = await server.api.createPlay(...args)
+      await gate
+      return play
+    })
+    return { createPlay, release }
+  }
+
+  it('names a play saved without a title by its asset, direction and date, then shows it everywhere', async () => {
+    const server = fakeServer()
+    const user = userEvent.setup()
+    render(<Page api={client(server)} />)
+    await startDraft(user)
+    // The input previews what an empty title will become, and follows the direction.
+    expect(titleBox()).toHaveAttribute('placeholder', 'BTC-PERP Long · 15 Oct 2026')
+    await user.click(within(screen.getByRole('group', { name: 'Direction' })).getByRole('button', { name: /Short/ }))
+    expect(titleBox()).toHaveAttribute('placeholder', 'BTC-PERP Short · 15 Oct 2026')
+    await user.click(save())
+    await waitFor(() => expect(server.api.createPlay).toHaveBeenCalledOnce())
+    expect(server.api.createPlay.mock.calls[0]![0]).toMatchObject({ title: 'BTC-PERP Short · 15 Oct 2026' })
+    await waitFor(() => expect(titleBox()).toHaveValue('BTC-PERP Short · 15 Oct 2026'))
+    // The generated name is the saved name, so nothing is left to save.
+    expect(screen.getByRole('button', { name: /Saved/ })).toBeDisabled()
+
+    // A later save of a cleared title is named again, with the day of that save.
+    vi.setSystemTime(new Date(2026, 9, 16, 12))
+    await user.clear(titleBox())
+    await user.click(save())
+    await waitFor(() => expect(server.api.updatePlay).toHaveBeenCalledOnce())
+    expect(server.api.updatePlay.mock.lastCall![1]).toMatchObject({ title: 'BTC-PERP Short · 16 Oct 2026' })
+    await waitFor(() => expect(titleBox()).toHaveValue('BTC-PERP Short · 16 Oct 2026'))
+
+    await user.click(screen.getByRole('button', { name: 'All plays' }))
+    expect(await screen.findByRole('button', { name: 'Open BTC-PERP Short · 16 Oct 2026' })).toBeInTheDocument()
+    expect(screen.queryByText('Untitled play')).not.toBeInTheDocument()
+  })
+
+  it('never replaces a name the owner typed, on the first or a later save', async () => {
+    const server = fakeServer()
+    const user = userEvent.setup()
+    render(<Page api={client(server)} />)
+    await startDraft(user)
+    await user.type(titleBox(), 'Range reclaim')
+    await user.click(save())
+    await waitFor(() => expect(server.api.createPlay).toHaveBeenCalledOnce())
+    expect(server.api.createPlay.mock.calls[0]![0]).toMatchObject({ title: 'Range reclaim' })
+    await user.type(titleBox(), ' v2')
+    await user.click(save())
+    await waitFor(() => expect(server.api.updatePlay).toHaveBeenCalledOnce())
+    expect(server.api.updatePlay.mock.lastCall![1]).toMatchObject({ title: 'Range reclaim v2' })
+    expect(titleBox()).toHaveValue('Range reclaim v2')
+  })
+
+  it('names a title that was only spaces, and shows the name after other edits made while saving', async () => {
+    const server = fakeServer()
+    const { createPlay, release } = heldCreate(server)
+    const user = userEvent.setup()
+    render(<Page api={client(server, { createPlay })} />)
+    await startDraft(user)
+    await user.type(titleBox(), '   ')
+    await user.click(save())
+    await waitFor(() => expect(createPlay).toHaveBeenCalledOnce())
+    expect(createPlay.mock.calls[0]![0]).toMatchObject({ title: 'BTC-PERP Long · 15 Oct 2026' })
+    // The owner changes the plan, not the title, before the response arrives.
+    await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
+    release()
+    await waitFor(() => expect(titleBox()).toHaveValue('BTC-PERP Long · 15 Oct 2026'))
+    // The price edit is still unsaved; the title is not what makes the play dirty.
+    await waitFor(() => expect(save()).toBeEnabled())
+    await user.click(save())
+    await waitFor(() => expect(server.api.updatePlay).toHaveBeenCalledOnce())
+    expect(server.api.updatePlay.mock.lastCall![1]).toMatchObject({ title: 'BTC-PERP Long · 15 Oct 2026' })
+    await waitFor(() => expect(screen.getByRole('button', { name: /Saved/ })).toBeDisabled())
+  })
+
+  it('keeps a name typed while a nameless save is pending, and saves it next', async () => {
+    const server = fakeServer()
+    const { createPlay, release } = heldCreate(server)
+    const user = userEvent.setup()
+    render(<Page api={client(server, { createPlay })} />)
+    await startDraft(user)
+    await user.click(save())
+    await waitFor(() => expect(createPlay).toHaveBeenCalledOnce())
+    await user.type(titleBox(), 'Mine')
+    release()
+    await waitFor(() => expect(save()).toBeEnabled())
+    expect(titleBox()).toHaveValue('Mine')
+    await user.click(save())
+    await waitFor(() => expect(server.api.updatePlay).toHaveBeenCalledOnce())
+    expect(server.api.updatePlay.mock.lastCall![1]).toMatchObject({ title: 'Mine' })
+  })
+
+  it('keeps the blank title of a cancelled play, which the API would reject changing, and its Untitled label', async () => {
+    const server = fakeServer()
+    const legacy: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, title: '', status: 'cancelled', planRevision: 1,
+      cancelReason: 'missed', plannedAtUtc: '2026-10-05T12:00:00Z', endedAtUtc: '2026-10-05T13:00:00Z' } }
+    server.plays.set(legacy.summary.id, legacy)
+    const user = userEvent.setup()
+    render(<Page api={client(server)} />)
+    await user.click(await screen.findByRole('button', { name: 'Closed and cancelled' }))
+    await user.click(await screen.findByRole('button', { name: 'Open Untitled play' }))
+    await screen.findByRole('textbox', { name: 'Play title' })
+    expect(titleBox()).toHaveAttribute('placeholder', 'Name this play')
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    await user.type(screen.getByRole('textbox', { name: 'Review' }), 'Late note')
+    await user.click(save())
+    await waitFor(() => expect(server.api.updatePlay).toHaveBeenCalledOnce())
+    expect(server.api.updatePlay.mock.lastCall![1]).toMatchObject({ title: '', review: 'Late note' })
+    expect(titleBox()).toHaveValue('')
   })
 })
 

@@ -1,59 +1,67 @@
 .overview-allocation { margin-bottom: 18px; }
 .overview-allocation h2 { display: flex; align-items: center; gap: 8px; }
-.allocation-body { padding: 4px 18px 18px; }
-.allocation-body h3 { margin: 0 0 12px; font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
-.allocation-body h3 small { font-size: 11px; }
+.allocation-body { padding: 16px 20px 20px; }
+.allocation-body h3 { margin: 0 0 12px; font-size: var(--text-2xs); font-weight: 550; letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); }
+.allocation-body h3 small { font-size: var(--text-2xs); text-transform: none; letter-spacing: 0; }
 .allocation-overview { display: grid; grid-template-columns: minmax(490px, 1fr) minmax(0, 1.4fr); gap: 28px; align-items: start; }
 .allocation-multiples { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; }
 /* Grid items may shrink below their content so long names truncate instead of widening the panel. */
 .allocation-overview > section, .allocation-card, .allocation-donut, .allocation-legend { min-width: 0; }
 .allocation-body h3 { overflow-wrap: anywhere; }
-.allocation-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; background: var(--background); }
-.allocation-card > header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 11px; color: var(--muted-foreground); }
-.allocation-card-name { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--foreground); font-size: 12px; font-weight: 500; text-align: left; }
+.allocation-card { border: 1px solid var(--line); border-radius: var(--radius-panel); padding: 14px; background: var(--surface-sunken); }
+.allocation-card > header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; font-size: var(--text-2xs); color: var(--muted-foreground); font-feature-settings: var(--figures); }
+.allocation-card-name { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--foreground); font-size: var(--text-sm); font-weight: 560; text-align: left; }
+.allocation-card-name > svg { color: var(--brand); }
 .allocation-card-name > svg { flex-shrink: 0; }
 .allocation-card-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .allocation-card > header > span { flex-shrink: 0; }
 .allocation-donut { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 18px; align-items: center; }
 .allocation-sm { gap: 14px; }
 .allocation-figure { position: relative; width: 184px; height: 184px; }
+/* Double-clicking a slice must not select the centre label's text. The legend stays selectable. */
+.allocation-figure { user-select: none; -webkit-user-select: none; }
 .allocation-sm .allocation-figure { width: 112px; height: 112px; }
 .allocation-figure svg { width: 100%; height: 100%; overflow: visible; }
 /* A 2px card-coloured gap separates adjacent slices. */
-.allocation-figure path { stroke: var(--card); stroke-width: 2; stroke-linejoin: round; transition: opacity 120ms ease; }
-.allocation-card .allocation-figure path { stroke: var(--background); }
+.allocation-figure path { stroke: var(--card); stroke-width: 2.5; stroke-linejoin: round; transition: opacity 120ms ease; }
+.allocation-card .allocation-figure path { stroke: var(--surface-sunken); }
 .allocation-figure path[data-scope] { cursor: pointer; }
 .allocation-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; padding: 0 30%; }
-.allocation-center strong { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--foreground); }
+.allocation-center strong { font-size: 17px; font-weight: 640; letter-spacing: var(--tracking-title); font-feature-settings: var(--figures); color: var(--foreground); }
 .allocation-sm .allocation-center { padding: 0 22%; }
 .allocation-sm .allocation-center strong { font-size: 13px; }
-.allocation-center small { font-size: 10px; color: var(--muted-foreground); line-height: 1.3; overflow-wrap: anywhere; }
+.allocation-center small { font-size: var(--text-2xs); color: var(--muted-foreground); line-height: 1.3; overflow-wrap: anywhere; }
 /* The legend and slice title keep the full name; the centre shows at most two lines (one in small donuts). */
 .allocation-center small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; max-width: 100%; }
 .allocation-sm .allocation-center small { -webkit-line-clamp: 1; line-clamp: 1; }
-.allocation-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; width: 100%; font-size: 12px; }
-.allocation-legend li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 5px 6px; border-radius: var(--radius); }
+.allocation-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; width: 100%; font-size: var(--text-sm); }
+.allocation-legend li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 6px 8px; border-radius: var(--radius-control); transition: background .14s var(--ease-out); }
 .allocation-legend li.allocation-active { background: var(--accent); }
 /* Fixed numeric columns keep amounts and shares aligned across rows. */
 .allocation-lg .allocation-legend li { grid-template-columns: 10px minmax(90px, 1fr) 96px 58px; }
 .allocation-lg .allocation-legend.with-venue li { grid-template-columns: 10px minmax(90px, 1fr) minmax(0, 110px) 96px 58px; }
 .allocation-lg .allocation-money { text-align: right; }
-.allocation-sm .allocation-legend { font-size: 11px; }
+.allocation-sm .allocation-legend { font-size: var(--text-xs); }
 .allocation-sm .allocation-legend .allocation-money { display: none; }
 .allocation-sm .allocation-legend li { grid-template-columns: 10px minmax(0, 1fr) auto; padding: 3px 6px; }
-.allocation-swatch { width: 10px; height: 10px; border-radius: 3px; transition: opacity 120ms ease; }
+.allocation-swatch { width: 10px; height: 10px; border-radius: 50%; transition: opacity 120ms ease; }
 .allocation-name { color: var(--foreground); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.allocation-venue { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; color: var(--muted-foreground); font-size: 11px; }
+.allocation-venue { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; color: var(--muted-foreground); font-size: var(--text-xs); }
 .allocation-venue > .venue-logo { flex-shrink: 0; }
 .allocation-venue > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.allocation-money { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.allocation-share { color: var(--foreground); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; min-width: 52px; }
+.allocation-money { color: var(--muted-foreground); font-feature-settings: var(--figures); font-variant-numeric: tabular-nums; }
+.allocation-share { color: var(--foreground); font-weight: 600; font-feature-settings: var(--figures); font-variant-numeric: tabular-nums; text-align: right; min-width: 52px; }
 /* Only marks dim; legend text keeps its full contrast. */
 .allocation-figure path.allocation-dim, .allocation-legend li.allocation-dim .allocation-swatch { opacity: 0.35; }
-.allocation-notes p, .allocation-empty p { margin: 6px 0 0; font-size: 11px; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.allocation-notes p, .allocation-empty p { margin: 6px 0 0; font-size: var(--text-xs); color: var(--muted-foreground); overflow-wrap: anywhere; }
 .allocation-donut > .allocation-notes { grid-column: 1 / -1; }
 .allocation-empty { min-height: 80px; display: flex; flex-direction: column; justify-content: center; }
-.allocation-name:focus-visible, .allocation-card-name:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* The scoped group's name clears the scope; it keeps the heading's look and shows a small close mark. */
+.allocation-clear { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; font: inherit; letter-spacing: inherit; text-transform: inherit; color: var(--foreground); text-align: left; border-radius: var(--radius-control); }
+.allocation-clear:hover { text-decoration: underline; text-underline-offset: 3px; }
+.allocation-clear > svg { flex-shrink: 0; color: var(--muted-foreground); }
+.allocation-name[aria-pressed="true"] { font-weight: 600; }
+.allocation-name:focus-visible, .allocation-card-name:focus-visible, .allocation-clear:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 @media (max-width: 1200px) { .allocation-overview { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 600px) { .allocation-multiples { grid-template-columns: minmax(0, 1fr); } }
 /* Legends follow the width of their own section or card, which the sidebar and grid change independently of the viewport. */

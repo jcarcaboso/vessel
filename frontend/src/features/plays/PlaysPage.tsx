@@ -6,11 +6,10 @@ import { Button } from '@/components/ui/button'
 import { useNotifications } from '@/components/notifications/notifications'
 import { preloadLightweightRenderer } from '@/components/chart/lazy'
 import { useVenues } from '@/api/venues'
-import { VenueBadge } from '@/components/venues/VenueBadge'
 import { ArrowLeft, History, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
 import type { PlayDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
-import { instrumentLabel } from './instruments'
+import { PlayIdentity } from './PlayIdentity'
 import { ExecutionPanel } from './ExecutionPanel'
 import { ManualExecutionPanel } from './ManualExecutionPanel'
 import { emptyManualDraft, hasManualDraft } from './manual'
@@ -21,7 +20,7 @@ import { formatMoney, marginOverBudget } from './sizing'
 import { leverageOf } from './levels'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
 import {
-  createPlaysSession, draftFromSaved, fieldsFromDraft, hasDraftContent, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
+  createPlaysSession, draftFromSaved, fieldsToSave, hasDraftContent, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
   observedPlayVersion, startNewPlay, syncEvidence,
   type PlaysSession, type SavedState,
 } from './saved'
@@ -201,7 +200,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     if (planBlocked()) return null
     setError(null); setDialogError(null)
     try {
-      const fields = fieldsFromDraft(sent)
+      const fields = fieldsToSave(sent, before?.summary.status)
       const play = before
         ? await api.updatePlay(before.summary.id, { ...fields, expectedVersion: before.summary.version, ...(reason ? { revisionReason: reason } : {}) })
         : await api.createPlay(fields)
@@ -222,11 +221,13 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       const state = savedState(play, stored)
       const next = { ...state, evidenceIds: [...state.evidenceIds, ...synced.pendingDeletes] }
       // Edits made while saving stay; only their evidence learns its server identity.
+      // A name the save generated reaches the heading too, unless the owner started typing one meanwhile.
       const current = latest.current.draft
+      const named = !sent.title.trim() && !current.title.trim() && play.summary.title ? { title: play.summary.title } : {}
       update({
         saved: next,
         observedPlay: { api, id: play.summary.id, accountId: play.summary.accountId, version: play.summary.version, conflict: false },
-        draft: current === sent ? stored : { ...current, evidence: mergeSavedEvidence(current.evidence, synced.evidence) },
+        draft: current === sent ? stored : { ...current, ...named, evidence: mergeSavedEvidence(current.evidence, synced.evidence) },
       })
       if (synced.error) setError(`The play was saved, but an image did not sync: ${errorMessage(synced.error, 'The change could not be completed. Try again.')} Save again to retry.`)
       closeDialog(intendedDialog)
@@ -397,17 +398,13 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         title={saved ? 'Delete this draft' : 'Nothing saved yet'} onClick={() => { setDialogError(null); setDialog('delete') }}><Trash2 size={14} />Delete</Button>}
   </div>
 
-  // One short line, only when it changes what the owner can do; the buttons and status badge say the rest.
-  const notice = !saved ? null
-    : retrospective ? 'Retrospective. No original plan or initial-risk R. Only review and images can change.'
-    : readOnly ? `${statusLabels[status]}. Review and images can change${manual && status === 'closed' ? '; manual facts can be corrected without reopening' : ''}.`
-    : dirty ? 'Unsaved changes.'
-    : locked ? `Revision ${saved.summary.planRevision}. Saved plan changes ask for a reason.` : null
+  // The status badge, a revision pill and the buttons say what the owner can do; no banner restates them.
+  const revision = saved && locked && !retrospective && saved.summary.planRevision > 1 ? saved.summary.planRevision : null
 
   return <>{requested}{conflict}
     <Button variant="ghost" size="sm" className="plays-back" onClick={() => update({ view: 'list' })}><ArrowLeft size={14} />All plays</Button>
     <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={draft} onChange={next => update({ draft: next })}
-      {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} {...(notice ? { notice } : {})} lockInstrument={locked}
+      {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} revision={revision} lockInstrument={locked}
       lockDirection={status === 'open' || filled} readOnly={readOnly} retrospective={retrospective}
       sizing={sizing.sizing} onRiskChange={sizing.updateRisk}
       execution={manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
@@ -439,7 +436,6 @@ function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onD
   onContinue: () => void
   onDiscard: () => void
 }) {
-  const venues = useVenues()
   const [filter, setFilter] = useState<Filter>('active')
   const [result, setResult] = useState<{ plays: PlaySummary[] } | { error: string } | null>(null)
   const [generation, setGeneration] = useState(0)
@@ -467,8 +463,7 @@ function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onD
 
   return <section className="plays-page plays-list-page" aria-label="Saved plays">
     <div className="plays-draft-heading">
-      <div className="page-heading-copy"><span className="eyebrow">A LITTLE INTENTION BEFORE THE TRADE</span>
-        <h1>Plays</h1><p>Each idea from plan to review. Planned plays keep every revision of the plan.</p></div>
+      <div className="page-heading-copy"><h1>Plays</h1></div>
       <div className="plays-heading-actions"><Button onClick={onNew} disabled={!!unsaved || busy}><Plus size={15} />New play</Button></div>
     </div>
     {unsaved && <div className="workspace-alert plays-unsaved" role="status"><span>Unsaved changes in <strong>{unsaved}</strong>. Save or discard them before opening another play.</span>
@@ -483,14 +478,14 @@ function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onD
       <Button variant="ghost" size="sm" onClick={() => { setResult(null); setGeneration(current => current + 1) }}>Try again</Button></div>}
     {result && 'plays' in result && (shown.length ? <ul className="plays-list">
       {shown.map(play => <li key={play.id}>
-        <button type="button" className="plays-list-item" disabled={!!unsaved || busy} onClick={() => onOpen(play.id)} aria-label={`Open ${play.title || 'Untitled play'}`}>
-          <span className="plays-list-title"><strong>{play.title || 'Untitled play'}</strong>{play.origin === 'retrospective' && <small>Retrospective · no original plan / R</small>}
-            <small>{play.instrument ? instrumentLabel(venues.quote(play.venueId), play.instrument, play.instrumentSource) : 'No instrument'} · <VenueBadge venueId={play.venueId} size="xs" /> · {accountName(play.accountId)}</small></span>
+        <button type="button" className="plays-list-item" disabled={!!unsaved || busy} onClick={() => onOpen(play.id)} aria-label={`Open ${play.title || 'Untitled play'}`} aria-describedby={`plays-list-identity-${play.id}`}>
+          <span className="plays-list-title"><span className="plays-list-heading"><strong>{play.title || 'Untitled play'}</strong>{play.origin === 'retrospective' && <span className="badge play-retrospective">Retrospective</span>}</span>
+            <PlayIdentity id={`plays-list-identity-${play.id}`} instrument={play.instrument} source={play.instrumentSource} venueId={play.venueId} accountName={accountName(play.accountId)} /></span>
           <span className={`direction-chip ${play.direction}`}>{play.direction === 'long' ? 'Long' : 'Short'}</span>
           <span className={`badge play-status-${play.status}`}>{statusLabels[play.status]}</span>
           <small className="plays-list-meta">{ended.includes(play.status) && (play.hasReview || play.reviewedAtUtc ? 'Reviewed · ' : 'Pending review · ')}{play.origin !== 'retrospective' && play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated {new Date(play.updatedAtUtc).toLocaleDateString()}</small>
         </button>
       </li>)}
-    </ul> : <div className="plays-list-empty"><p>{plays.length ? 'No plays in this view.' : 'No saved plays yet. Start one to write down the idea before the trade.'}</p></div>)}
+    </ul> : <div className="plays-list-empty"><p>{plays.length ? 'No plays in this view.' : 'No saved plays yet.'}</p></div>)}
   </section>
 }

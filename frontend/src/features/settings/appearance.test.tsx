@@ -135,7 +135,9 @@ describe('Appearance settings', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Reset Daylight' }))
     expect(token('--muted-foreground')).toBe('#46566c')
-    expect(screen.getByRole('status', { name: 'Readability' })).toHaveTextContent(/All \d+ readability checks pass/)
+    // Passing checks show nothing; the result is only announced.
+    expect(screen.getByRole('status', { name: 'Readability' })).not.toHaveClass('has-issues')
+    expect(within(screen.getByRole('status', { name: 'Readability' })).getByText(/All \d+ readability checks pass/)).toHaveClass('sr-only')
   })
 
   it('jumps to the theme builder and the customizer from the panel header', async () => {
@@ -232,7 +234,7 @@ describe('Random theme builder', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Randomize' }))
     expect(root.dataset.scheme).toBe('light')
     expect(screen.getByTestId('name')).toHaveTextContent('Random draft')
-    expect(screen.getByRole('status', { name: 'Readability' })).toHaveTextContent(/All \d+ readability checks pass/)
+    expect(screen.getByRole('status', { name: 'Readability' })).not.toHaveClass('has-issues')
 
     const name = screen.getByRole('textbox', { name: 'Theme name' })
     expect(name).not.toHaveValue('')

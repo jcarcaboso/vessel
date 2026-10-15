@@ -127,7 +127,15 @@ describe('Review venue names', () => {
     await user.click(screen.getByRole('button', { name: `${reviewFixture.metrics.count} Plays` }))
     const dialog = await screen.findByRole('dialog')
     await within(dialog).findByRole('table', { name: 'Contributing closed Plays' })
-    expect(within(dialog).getAllByText('Hyperliquid').length).toBeGreaterThan(0)
+    // The venue is a named logo beside the account, not repeated text.
+    const logos = within(dialog).getAllByRole('img', { name: 'Hyperliquid' })
+    expect(logos.length).toBeGreaterThan(0)
+    expect(logos[0]).toHaveAttribute('title', 'Hyperliquid')
+    expect(within(dialog).queryByText('Hyperliquid')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('hyperliquid')).not.toBeInTheDocument()
+    const first = reviewFixture.plays[0]!
+    const row = within(dialog).getByRole('button', { name: `Open Play ${first.title || first.instrument}` }).closest('th')!
+    expect(row.querySelector('.play-asset')).toHaveTextContent(first.instrument)
+    expect(row.querySelector('.play-account-name')).toHaveTextContent(first.accountName)
   })
 })

@@ -1,7 +1,28 @@
-.native-select { position: relative; display: block; min-width: 0; }
-.native-select > [data-slot="native-select"] { appearance: none; width: 100%; padding-inline-end: 32px; text-overflow: ellipsis; }
-.native-select > svg { position: absolute; inset-inline-end: 10px; top: 50%; transform: translateY(-50%); color: var(--muted-foreground); pointer-events: none; }
+/* One dropdown for the whole app: the same chevron, the same inset, the text kept clear of it, and the same
+   height as the Inputs and Buttons beside it. Page CSS may still colour a select; it must not move the arrow. */
+.native-select {
+  --select-height: 36px;
+  --select-pad-start: 12px;
+  --select-gutter: 34px;
+  --select-chevron-inset: 11px;
+  position: relative; display: block; min-width: 0; height: var(--select-height);
+}
+.native-select[data-density="compact"] { --select-height: 32px; --select-pad-start: 10px; --select-gutter: 30px; --select-chevron-inset: 9px; }
+.native-select[data-density="bare"] { --select-height: 28px; --select-pad-start: 0px; --select-gutter: 22px; --select-chevron-inset: 0px; }
+/* The doubled class outranks page-level `select` rules (several set their own padding) without !important. */
+.native-select.native-select > select[data-slot="native-select"] {
+  display: block; width: 100%; min-width: 0; height: var(--select-height); min-height: var(--select-height); margin: 0;
+  padding-block: 0; padding-inline: var(--select-pad-start) var(--select-gutter);
+  appearance: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.native-select > select:disabled { cursor: not-allowed; }
+.native-select > svg {
+  position: absolute; inset-block-start: 50%; inset-inline-end: var(--select-chevron-inset); width: 14px; height: 14px;
+  transform: translateY(-50%); color: var(--muted-foreground); pointer-events: none; transition: color .15s var(--ease-out);
+}
+.native-select:hover > svg, .native-select:focus-within > svg { color: var(--foreground); }
+.native-select:has(> select:disabled) > svg { opacity: .5; }
 @media (forced-colors: active) {
-  .native-select > [data-slot="native-select"] { appearance: auto; }
+  .native-select.native-select > select[data-slot="native-select"] { appearance: auto; }
   .native-select > svg { display: none; }
 }

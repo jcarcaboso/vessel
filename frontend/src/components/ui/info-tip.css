@@ -1,0 +1,21 @@
+/* A quiet info icon beside the label it explains, and the detail it opens. Theme tokens only. */
+.info-tip {
+  display: inline-grid; place-items: center; flex-shrink: 0; width: 18px; height: 18px; margin: -2px 0; padding: 0;
+  border: 0; border-radius: 50%; background: none; color: color-mix(in srgb, var(--muted-foreground) 82%, transparent);
+  vertical-align: middle; cursor: help; transition: color .15s var(--ease-out), background-color .15s var(--ease-out);
+}
+.info-tip svg { width: 13px; height: 13px; }
+.info-tip:hover, .info-tip[data-state$="open"] { color: var(--foreground); background: var(--surface-hover); }
+.info-tip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.info-tip-content {
+  z-index: 70; max-width: min(300px, calc(100vw - 24px)); padding: 8px 11px; border: 1px solid var(--line);
+  border-radius: var(--radius-control); background: var(--popover); color: var(--popover-foreground); box-shadow: var(--elevation-3);
+  font-size: var(--text-xs); font-weight: 450; letter-spacing: 0; line-height: 1.5; text-transform: none; white-space: normal; text-align: left;
+  overflow-wrap: anywhere;
+}
+.info-tip-trigger { cursor: help; font-family: inherit; }
+.info-tip-content > span { display: block; }
+.info-tip-content > span + span { margin-top: 3px; }
+/* The hidden description is pinned to its containing block's origin: left at its static place inside a wide,
+   horizontally scrolling table, an absolutely positioned box escapes the scroller and widens the page. */
+.info-tip-detail { top: 0; left: 0; }

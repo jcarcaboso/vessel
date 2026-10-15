@@ -290,7 +290,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
       onExpandedChange={setExpanded} onDialogClosed={() => expandButton.current?.focus({ preventScroll: true })} />
       : <>
         <ChartToolbar label="Chart controls" end={<>
-          <span className="chart-status"><span className="chart-source">{instrument ? `${instrumentName} · ${venue ? `${venue} · ` : ''}no market data provider` : 'No perpetual instrument selected'}</span></span>
+          <span className="chart-status"><span className="chart-source">{instrument ? `${instrumentName}${venue ? ` · ${venue}` : ''}` : 'No perpetual instrument selected'}</span></span>
           <ChartIconButton label="Capture chart" icon={<Camera size={15} aria-hidden="true" />} disabled disabledReason="Needs market data" />
           <ChartIconButton label="Expand chart" icon={<Maximize2 size={15} aria-hidden="true" />} disabled disabledReason="Needs market data" />
         </>} />
@@ -298,7 +298,6 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
           <span className="chart-placeholder-icon" aria-hidden="true"><ChartNoAxesCombined size={27} /></span>
           <strong>{instrument ? 'No market data for this instrument' : 'Choose an instrument'}</strong>
           <p>{instrument ? 'Manual accounts and labels have no candle provider yet. Planned levels stay in the editor.' : 'Select an exchange account and perpetual to load candles.'}</p>
-          <p>No candles, live prices or execution observations are shown.</p>
         </div>
       </>}
     {/* One entry is both the whole plan and the selection, so the view choice only appears with several. */}
@@ -314,7 +313,6 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
       </button>)}
       {average !== null && <span className="chart-legend-average"><i aria-hidden="true" />Average entry <strong>{formatDraggedPrice(average)}</strong></span>}
     </div>}
-    {entries.length === 0 && <p className="chart-legend muted">No planned entries.</p>}
   </section>
 }
 
