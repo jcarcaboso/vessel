@@ -760,6 +760,91 @@ public sealed class UnitOfWorkTests
         }
     }
 
+    // Round 3: every kind of enclosing transaction is refused before any storage call, not only EF's own.
+    [PostgresFact]
+    public async Task Image_storage_entry_points_refuse_ambient_enlisted_ef_and_unit_transactions()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var account = Account(owner);
+        var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
+        await using (var seed = database.Context(owner))
+        {
+            seed.Accounts.Add(account);
+            seed.Plays.Add(play);
+            await seed.SaveChangesAsync();
+        }
+        Guid kept;
+        var objects = new MemoryObjectStore();
+        await using (var db = database.Context(owner))
+        {
+            var work = TestUnitOfWork.For(db);
+            kept = (await new Vessel.Application.Evidence.EvidenceService(new EvidenceStore(db, work), objects,
+                Vessel.Application.Evidence.EvidenceLimits.Default, new CoreOwner(owner), TimeProvider.System, work)
+                .UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", "upload", null, default)).Id;
+        }
+        var stored = objects.Objects.ToDictionary();
+
+        async Task RefusedInside(string kind, Func<VesselDbContext, UnitOfWork, Func<Task>, Task> enclose)
+        {
+            await using var db = database.Context(owner);
+            var work = new UnitOfWork(db);
+            var recording = new TransactionRecordingObjectStore(db);
+            var evidence = new Vessel.Application.Evidence.EvidenceService(new EvidenceStore(db, work), recording,
+                Vessel.Application.Evidence.EvidenceLimits.Default, new CoreOwner(owner), TimeProvider.System, work);
+            var plays = new PlayService(new PlayStore(db, work), recording, TimeProvider.System, work);
+            var refused = 0;
+            await enclose(db, work, async () =>
+            {
+                Assert.True(work.IsActive, kind);
+                await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                    evidence.UploadAsync(play.Id, new MemoryStream(EvidenceFixtures.Png), "", "upload", null, default));
+                await Assert.ThrowsAsync<InvalidOperationException>(() => evidence.DeleteAsync(kept, default));
+                await Assert.ThrowsAsync<InvalidOperationException>(() => plays.DeleteAsync(play.Id, default));
+                refused = 3;
+            });
+            Assert.Equal(3, refused);
+            Assert.Empty(recording.Log);
+            Assert.False(work.IsActive, kind);
+        }
+
+        await RefusedInside("unit", async (_, work, body) =>
+            await Assert.ThrowsAsync<InvalidOperationException>(() => work.ExecuteAsync<bool>(async () =>
+            {
+                await body();
+                throw new InvalidOperationException("Roll back the outer operation.");
+            }, default)));
+        await RefusedInside("ef", async (db, _, body) =>
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync();
+            await body();
+            await transaction.RollbackAsync();
+        });
+        await RefusedInside("enlisted", async (db, _, body) =>
+        {
+            using var transaction = new System.Transactions.CommittableTransaction();
+            await db.Database.OpenConnectionAsync();
+            System.Transactions.TransactionsDatabaseFacadeExtensions.EnlistTransaction(db.Database, transaction);
+            Assert.Null(System.Transactions.Transaction.Current);
+            await body();
+            transaction.Rollback();
+            await db.Database.CloseConnectionAsync();
+        });
+        await RefusedInside("ambient", async (db, _, body) =>
+        {
+            using (new System.Transactions.TransactionScope(System.Transactions.TransactionScopeAsyncFlowOption.Enabled))
+            {
+                Assert.Null(System.Transactions.TransactionsDatabaseFacadeExtensions.GetEnlistedTransaction(db.Database));
+                await body();
+            }
+        });
+
+        Assert.Equal(stored.Keys, objects.Objects.Keys);
+        await using var verify = database.Context(owner);
+        Assert.Equal(kept, (await verify.Evidence.SingleAsync()).Id);
+        Assert.Single(await verify.Plays.ToListAsync());
+    }
+
     // Round 2: cancelled participants never run and still fail the outer unit, in the real unit and the double.
     [PostgresFact]
     public async Task Cancelled_participants_never_run_and_fail_the_unit()
