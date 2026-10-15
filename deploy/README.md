@@ -12,8 +12,10 @@ This release targets Linux amd64.
 
 For subsequent releases, follow the repository-local
 [`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md). Publication
-to Docker Hub remains manual; preparing a release does not publish its images
-or upgrade an installation.
+to Docker Hub remains manual: delivering a release includes the agent pushing
+and verifying both versioned images, then both moving latest tags. Only explicit
+prepare-only, local-only or no-push requests leave images unpublished. Publishing
+never upgrades an installation.
 
 ## Requirements
 

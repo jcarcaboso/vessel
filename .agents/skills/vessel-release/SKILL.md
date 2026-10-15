@@ -1,6 +1,6 @@
 ---
 name: vessel-release
-description: Prepare or manually publish a Vessel release with an annotated Git tag and Linux amd64 API/web images in skorcius/vessel on Docker Hub. Use for Vessel version bumps, release checks and publication, not live installation upgrades.
+description: Create and manually publish a Vessel release with an annotated Git tag and Linux amd64 API/web images in skorcius/vessel on Docker Hub, or prepare only when explicitly requested. Use for Vessel version bumps, release checks and publication, not live installation upgrades.
 ---
 
 # Vessel release
@@ -16,10 +16,14 @@ section of `docs/development.md` first.
 - One version produces Git tag `vX.Y.Z` and two Linux amd64 images,
   `skorcius/vessel:api-X.Y.Z` and `skorcius/vessel:web-X.Y.Z`. The moving tags are
   `api-latest` and `web-latest`.
-- Preparing a release does not authorize registry publication or deployment.
-  Keep images local and give the owner the push commands unless publication
-  was explicitly requested. Do not add CI publishing or create a GitHub Release
-  unless requested. A Git tag and a GitHub Release are separate things.
+- A request to create or deliver a release includes manually publishing its API
+  and web images, then updating both moving tags. "Manual" means the agent runs
+  Docker CLI commands instead of a CI publishing workflow. Do not stop at local
+  builds or hand the owner push commands as though publication were complete.
+- Honor explicit prepare-only, local-only or no-push instructions. Those requests
+  leave images unpublished. A release request does not authorize deployment,
+  automated publishing or a GitHub Release. A Git tag and a GitHub Release are
+  separate things.
 - Never apply migrations to the owner's database, load the development `.env`
   into release checks, or change running installations for a release.
 
@@ -41,6 +45,9 @@ section of `docs/development.md` first.
      `docs/development.md`
 4. Do not change dependencies, regenerate lockfiles unnecessarily or expand
    product scope. Use the root-pinned pnpm through Corepack if needed.
+5. When resuming an already prepared release, verify that its image revision
+   labels match its Git tag and reuse the verified artifacts. Do not silently
+   rebuild a different revision under the same version or move the Git tag.
 
 ## Verify
 
@@ -92,8 +99,9 @@ report the mismatch and obtain the owner's direction rather than moving the tag.
 
 Use the owner's existing registry authentication. Never ask for a registry
 password in chat, print credentials or store them in the repository. If
-authentication is missing, hand back the verified local images and commands.
-Only publish when the user has authorized it:
+authentication is missing, report publication as blocked, not completed.
+For a release request, execute these commands after verification rather than
+merely including them in a handoff:
 
 ```sh
 docker push "skorcius/vessel:api-$VERSION"
@@ -106,6 +114,9 @@ docker push skorcius/vessel:web-latest
 ```
 
 Record the returned digests and verify remote image architecture and metadata.
+Verify that each remote moving tag resolves to its corresponding versioned
+image. A release is published only after both versioned and both moving tags
+are verified in Docker Hub; local tags alone are not publication.
 If either versioned push fails, leave remote latest tags alone. If a latest push
 fails, report the partial publication rather than claiming success or deleting
 the successful images.
