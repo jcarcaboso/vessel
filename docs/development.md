@@ -31,20 +31,27 @@ The tool was installed locally through Corepack during setup. Use a current Core
 
 ## Release images
 
-Manual v0.1.0 builds target Linux amd64. From the repository root:
+Manual v0.1.1 builds target Linux amd64. From the repository root:
+
+Delivering a release includes running the manual image pushes below and
+verifying the remote tags. Do not stop at local builds unless the owner
+explicitly asks for preparation only or no push. No CI publishing is configured.
 
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.1.0 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.1.0 -t skorcius/vessel:api-latest .
+  --build-arg VERSION=0.1.1 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.1.1 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.1.0 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.1.0 -t skorcius/vessel:web-latest .
-# Owner publication only, after local verification and registry authentication:
-docker push skorcius/vessel:api-0.1.0
+  --build-arg VERSION=0.1.1 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.1.1 .
+# Manual publication, after local verification and registry authentication:
+docker push skorcius/vessel:api-0.1.1
+docker push skorcius/vessel:web-0.1.1
+# Only after both versioned pushes succeed:
+docker tag skorcius/vessel:api-0.1.1 skorcius/vessel:api-latest
+docker tag skorcius/vessel:web-0.1.1 skorcius/vessel:web-latest
 docker push skorcius/vessel:api-latest
-docker push skorcius/vessel:web-0.1.0
 docker push skorcius/vessel:web-latest
 ```
 

@@ -76,7 +76,8 @@ public sealed class ApiTests
         Assert.Equal(new[] { "application", "stage", "owner", "marketScope", "allowsConcurrentPlays", "venues", "version" },
             root.EnumerateObject().Select(x => x.Name));
         Assert.Equal("Vessel", root.GetProperty("application").GetString());
-        Assert.Equal("0.1.0", root.GetProperty("version").GetString());
+        var expectedVersion = typeof(ApiTests).Assembly.GetName().Version!.ToString(3);
+        Assert.Equal(expectedVersion, root.GetProperty("version").GetString());
         Assert.Equal("core", root.GetProperty("stage").GetString());
         Assert.Equal("perpetuals", root.GetProperty("marketScope").GetString());
         Assert.True(root.GetProperty("allowsConcurrentPlays").GetBoolean());

@@ -1,14 +1,21 @@
 # Deploy with Docker
 
-Vessel v0.1.0 is a self-hosted, single-owner trading diary. These examples use the
+Vessel v0.1.1 is a self-hosted, single-owner trading diary. These examples use the
 API and web images in one Docker Hub repository:
 
-- `skorcius/vessel:api-0.1.0` and `skorcius/vessel:api-latest`
-- `skorcius/vessel:web-0.1.0` and `skorcius/vessel:web-latest`
+- `skorcius/vessel:api-0.1.1` and `skorcius/vessel:api-latest`
+- `skorcius/vessel:web-0.1.1` and `skorcius/vessel:web-latest`
 
 Use versioned tags for deployments. The `latest` tags move when the owner
 publishes another release. Packaging does not publish any image automatically.
-The first release targets Linux amd64.
+This release targets Linux amd64.
+
+For subsequent releases, follow the repository-local
+[`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md). Publication
+to Docker Hub remains manual: delivering a release includes the agent pushing
+and verifying both versioned images, then both moving latest tags. Only explicit
+prepare-only, local-only or no-push requests leave images unpublished. Publishing
+never upgrades an installation.
 
 ## Requirements
 
@@ -282,6 +289,21 @@ unchanged and compresses static assets only.
 
 ## Upgrade
 
+### From v0.1.0 to v0.1.1
+
+This upgrade includes migration `20261013190344_DiaryCompletion`, which adds
+manual-execution records and correction history, retrospective Play provenance,
+and structured review with amendment history. Back up the database, evidence
+and credential key ring before upgrading. Keep web and API stopped while the
+explicit migration service runs. The application never migrates at startup.
+
+Venue and architecture changes introduce no additional migration. The new
+Lighter · Robinhood venue uses its own accounts and read-only tokens; existing
+Lighter accounts and tokens remain separate. Cross-venue supported-stablecoin
+totals use nominal 1:1 values, with no FX or depeg valuation.
+
+### Upgrade procedure
+
 Back up first, read the changelog, and set `VESSEL_VERSION` to the chosen release:
 
 ```sh
@@ -447,11 +469,11 @@ From the repository root, with no populated secret files in the build context:
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.1.0 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.1.0 -t skorcius/vessel:api-latest .
+  --build-arg VERSION=0.1.1 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.1.1 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.1.0 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.1.0 -t skorcius/vessel:web-latest .
+  --build-arg VERSION=0.1.1 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.1.1 .
 ```
 
 The API build pins SDK `10.0.302` to match the repository's `global.json`. The

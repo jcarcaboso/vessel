@@ -15,7 +15,7 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: skorcius/vessel:api-${VESSEL_VERSION:-0.1.0}
+    image: skorcius/vessel:api-${VESSEL_VERSION:-0.1.1}
     entrypoint: ["/app/migrate"]
     environment:
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
@@ -27,7 +27,7 @@ services:
     restart: "no"
 
   api:
-    image: skorcius/vessel:api-${VESSEL_VERSION:-0.1.0}
+    image: skorcius/vessel:api-${VESSEL_VERSION:-0.1.1}
     environment:
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       Vessel__Auth__Token: ${Vessel__Auth__Token:?Set a generated token of at least 32 characters}
@@ -44,7 +44,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: skorcius/vessel:web-${VESSEL_VERSION:-0.1.0}
+    image: skorcius/vessel:web-${VESSEL_VERSION:-0.1.1}
     environment:
       VESSEL_API_UPSTREAM: ${VESSEL_API_UPSTREAM:-http://api:8080}
       VESSEL_TRUSTED_PROXY: ${VESSEL_TRUSTED_PROXY:-}
