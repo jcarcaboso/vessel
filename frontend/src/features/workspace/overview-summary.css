@@ -1,4 +1,6 @@
 .overview-scope { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; color: var(--muted-foreground); font-size: var(--text-sm); white-space: nowrap; }
+/* View all is level with the select (36px), not with a small button. */
+.overview-scope > [data-slot="button"] { height: 36px; }
 .overview-scope select, .overview-summary-controls select { max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--field); color: var(--foreground); font-size: var(--text-sm); }
 .overview-scope .native-select { min-width: min(100%, 280px); }
 .overview-summary { margin-bottom: 18px; }
@@ -33,7 +35,10 @@
 .overview-realized-total > .coverage-badge { align-self: center; }
 .overview-realized-total > strong { font-size: var(--text-lg); font-weight: 620; letter-spacing: var(--tracking-title); font-feature-settings: var(--figures); }
 @media (max-width: 600px) {
-  .overview-scope { align-items: flex-start; flex-direction: column; gap: 6px; }
-  .overview-scope .native-select { width: 100%; }
+  /* The label sits above; the select takes the row and View all, when shown, sits beside it. */
+  .overview-scope { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; }
+  .overview-scope > label { grid-column: 1 / -1; }
+  .overview-scope .native-select { width: 100%; min-width: 0; }
+  .overview-scope .native-select:last-child { grid-column: 1 / -1; }
   .overview-summary .shell-panel-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
 }

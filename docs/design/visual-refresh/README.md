@@ -82,7 +82,7 @@ After reviewing the preview, the owner asked for:
 
 ## Verification
 
-- TypeScript, ESLint (0 warnings) and all 1,868 frontend tests pass; the production build emits the contour texture
+- TypeScript, ESLint (0 warnings) and all 1,898 frontend tests pass; the production build emits the contour texture
   as a hashed same-origin asset, allowed by the existing `img-src 'self'` CSP.
 - Headless Chromium at widths 320, 390, 550, 768, 850, 1001, 1024, 1100, 1280 and 1440 showed no horizontal page
   overflow on any page; the Play editor was also checked at 1100.

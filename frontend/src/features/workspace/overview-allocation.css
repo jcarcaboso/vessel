@@ -56,12 +56,12 @@
 .allocation-notes p, .allocation-empty p { margin: 6px 0 0; font-size: var(--text-xs); color: var(--muted-foreground); overflow-wrap: anywhere; }
 .allocation-donut > .allocation-notes { grid-column: 1 / -1; }
 .allocation-empty { min-height: 80px; display: flex; flex-direction: column; justify-content: center; }
-/* The scoped group's name clears the scope; it keeps the heading's look and shows a small close mark. */
-.allocation-clear { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; font: inherit; letter-spacing: inherit; text-transform: inherit; color: var(--foreground); text-align: left; border-radius: var(--radius-control); }
-.allocation-clear:hover { text-decoration: underline; text-underline-offset: 3px; }
-.allocation-clear > svg { flex-shrink: 0; color: var(--muted-foreground); }
+/* A scoped view opens with a small back arrow level with the uppercase heading; it uses the shared icon-button look. */
+.allocation-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.allocation-heading > h3 { flex: 1 1 auto; min-width: 0; margin: 0; }
+.icon-button.allocation-back { flex: none; width: 26px; height: 26px; }
 .allocation-name[aria-pressed="true"] { font-weight: 600; }
-.allocation-name:focus-visible, .allocation-card-name:focus-visible, .allocation-clear:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.allocation-name:focus-visible, .allocation-card-name:focus-visible, .allocation-back:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 @media (max-width: 1200px) { .allocation-overview { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 600px) { .allocation-multiples { grid-template-columns: minmax(0, 1fr); } }
 /* Legends follow the width of their own section or card, which the sidebar and grid change independently of the viewport. */
