@@ -44,12 +44,15 @@ function cleanSaved(withEvidence = false): PlaysSession {
 async function mount(api = client(), disconnect = vi.fn()) {
   const view = render(<ApplicationShell system={systemFixture} api={api} disconnect={disconnect} />, { onCaughtError: () => {} })
   await screen.findByText('Test Play editor: blank')
+  // The mock publishes its props in a passive effect, which can run a tick after its text appears.
+  await waitFor(() => expect(plays).toBeDefined())
   return { ...view, api, disconnect, user: userEvent.setup() }
 }
 const ownerButton = () => screen.getByRole('button', { name: `Disconnect ${systemFixture.owner.displayName}'s session` })
 const settingsButton = () => screen.getByRole('button', { name: 'Disconnect session' })
 
 beforeEach(() => {
+  plays = undefined as unknown as PlaysProps
   window.history.replaceState(null, '', '/#plays')
   Object.assign(faults, { review: '', mounts: 0, unmounts: 0 })
 })

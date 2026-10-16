@@ -1,22 +1,6 @@
-import { isGuid, isNullOr, isRecord, isText, isTimestamp } from './guards'
+import { isFilledText, isPositiveCount, isRecord as object, isText as text, isTimestamp } from './guards'
+import { isEventCursor, isEventSequence, type EventCursor } from './event-cursor'
 
-/** Server-recorded account monitor state. Reading it never contacts a venue. Times are ISO UTC or null. */
-export interface AccountMonitor {
-  accountId: string
-  state: 'live' | 'stale' | 'degraded' | 'credential-error' | 'idle'
-  lastAttemptAtUtc: string | null
-  lastSuccessAtUtc: string | null
-  nextRunAtUtc: string | null
-  /** Whether an on-demand check is waiting for or held by the background worker. */
-  manualState: 'idle' | 'pending' | 'running'
-  nextManualAllowedAtUtc: string | null
-  /** Safe server-authored text, never a venue payload. */
-  error: string | null
-  workerOnline: boolean
-  discrepancies: MonitorDiscrepancy[]
-}
-/** An accepted on-demand check: the worker runs it later; completion shows in the stored monitor state. */
-export interface MonitorRunAccepted { requestId: string; monitor: AccountMonitor }
 export interface MonitorDiscrepancy {
   id: string
   accountId: string
@@ -24,39 +8,132 @@ export interface MonitorDiscrepancy {
   contractId: string
   kind: string
   severity: 'info' | 'warning' | 'critical'
-  state: 'open' | 'resolved' | 'dismissed'
+  /** A candidate is only visible once announced as unverifiable. */
+  state: 'candidate' | 'open' | 'resolved' | 'dismissed'
   openedAtUtc: string
   confirmedAtUtc: string | null
   resolvedAtUtc: string | null
   dismissedAtUtc: string | null
   note: string | null
   details: Record<string, unknown>
+  /** `unverifiable`: the subject stayed unobservable beyond the monitor lifetime. Neither resolved nor still checked. */
+  outcome: 'unverifiable' | null
+  unverifiableAtUtc: string | null
 }
-/** A linked order of an ended Play, watched until the venue settles it. Unverifiable never claims the order is gone. */
+
+/** A terminal Play's linked exit or entry order, watched until the venue shows it is no longer resting. */
 export interface MonitorWatch {
   linkId: string
   playId: string
   orderId: string
   role: 'entry' | 'stop' | 'target' | 'exit'
+  /** `unverifiable` is persistent: the watch lifetime passed without proof, which never claims the order is gone. */
   state: 'watching' | 'resolved' | 'unverifiable'
   startedAtUtc: string
   endedAtUtc: string | null
 }
 
-const timeLength = 64
-const time = (v: unknown) => isTimestamp(v, timeLength)
-export const isMonitorDiscrepancy = (v: unknown): v is MonitorDiscrepancy => isRecord(v) && isGuid(v.id) && isGuid(v.accountId) &&
-  isNullOr(v.playId, isGuid) && isText(v.contractId, 128) && isText(v.kind, 64) &&
-  ['info', 'warning', 'critical'].includes(v.severity as string) && ['open', 'resolved', 'dismissed'].includes(v.state as string) &&
-  time(v.openedAtUtc) && isNullOr(v.confirmedAtUtc, time) && isNullOr(v.resolvedAtUtc, time) && isNullOr(v.dismissedAtUtc, time) &&
-  isNullOr(v.note, x => isText(x, 4000)) && isRecord(v.details)
-export const isAccountMonitor = (v: unknown): v is AccountMonitor => isRecord(v) && isGuid(v.accountId) &&
+export interface AccountMonitor {
+  accountId: string
+  state: 'live' | 'stale' | 'degraded' | 'credential-error' | 'idle'
+  lastAttemptAtUtc: string | null
+  lastSuccessAtUtc: string | null
+  nextRunAtUtc: string | null
+  manualState: 'idle' | 'pending' | 'running'
+  /** Who started pending or running work: an owner Check, an owner account refresh or the scheduler. Null when idle. */
+  runTrigger: 'owner' | 'refresh' | 'scheduled' | null
+  nextManualAllowedAtUtc: string | null
+  error: string | null
+  workerOnline: boolean
+  discrepancies: MonitorDiscrepancy[]
+}
+
+export interface MonitorSummary {
+  workerOnline: boolean
+  heartbeatAtUtc: string | null
+  accounts: AccountMonitor[]
+}
+
+export interface MonitorRunAccepted { requestId: string; monitor: AccountMonitor }
+export interface MonitorEvent {
+  id: string
+  type: string
+  version: number
+  ownerId: string
+  sequence: string
+  runId: string
+  dedupKey: string
+  severity: MonitorDiscrepancy['severity']
+  occurredAt: string
+  detectedAt: string
+  timeliness: 'timely' | 'late'
+  relevance: 'current' | 'superseded'
+  expiresAt: string | null
+  /** Every field is present; unknown ones are explicit nulls. */
+  subject: { accountId: string | null; venueId: string | null; contractId: string | null; playId: string | null
+    entryId: string | null; levelId: string | null; discrepancyId: string | null }
+  source: { trigger: string; orderIds: string[] | null; fillIds: string[] | null }
+  data: Record<string, unknown>
+}
+export interface MonitorEventPage { events: MonitorEvent[]; nextCursor: EventCursor; resetRequired: boolean }
+/** An event frame carries its resume cursor from the SSE `id:` line. */
+export type MonitorStreamEvent = { type: 'event'; event: MonitorEvent; cursor: EventCursor } |
+  { type: 'status'; status: { state: 'ready' | 'reset'; nextCursor: EventCursor } }
+
+const id = (v: unknown): v is string => isFilledText(v, 128)
+// Monitor timestamps are bounded UTC strings with up to seven fractional digits.
+const date = (v: unknown): v is string => isTimestamp(v, 64) &&
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|\+00:00)$/.test(v)
+const nullableDate = (v: unknown) => v === null || date(v)
+const subjectKeys = ['accountId', 'venueId', 'contractId', 'playId', 'entryId', 'levelId', 'discrepancyId'] as const
+const severity = (v: unknown) => ['info', 'warning', 'critical'].includes(v as string)
+
+export const isMonitorDiscrepancy = (v: unknown): v is MonitorDiscrepancy => object(v) &&
+  id(v.id) && id(v.accountId) && (v.playId === null || id(v.playId)) && id(v.contractId) && id(v.kind) &&
+  severity(v.severity) && ['candidate', 'open', 'resolved', 'dismissed'].includes(v.state as string) &&
+  date(v.openedAtUtc) && nullableDate(v.confirmedAtUtc) && nullableDate(v.resolvedAtUtc) && nullableDate(v.dismissedAtUtc) &&
+  (v.note === null || text(v.note, 2000)) && object(v.details) &&
+  // The outcome and its time come together; only an unverifiable record is visible as a candidate.
+  (v.outcome === null ? v.unverifiableAtUtc === null && v.state !== 'candidate' : v.outcome === 'unverifiable' && date(v.unverifiableAtUtc))
+
+export const isMonitorWatch = (v: unknown): v is MonitorWatch => object(v) && id(v.linkId) && id(v.playId) && id(v.orderId) &&
+  ['entry', 'stop', 'target', 'exit'].includes(v.role as string) && ['watching', 'resolved', 'unverifiable'].includes(v.state as string) && date(v.startedAtUtc) &&
+  (v.state === 'watching' ? v.endedAtUtc === null : nullableDate(v.endedAtUtc))
+
+export const isAccountMonitor = (v: unknown): v is AccountMonitor => object(v) && id(v.accountId) &&
   ['live', 'stale', 'degraded', 'credential-error', 'idle'].includes(v.state as string) &&
-  isNullOr(v.lastAttemptAtUtc, time) && isNullOr(v.lastSuccessAtUtc, time) && isNullOr(v.nextRunAtUtc, time) &&
-  ['idle', 'pending', 'running'].includes(v.manualState as string) && isNullOr(v.nextManualAllowedAtUtc, time) &&
-  isNullOr(v.error, x => isText(x, 1000)) && typeof v.workerOnline === 'boolean' &&
-  Array.isArray(v.discrepancies) && v.discrepancies.every(isMonitorDiscrepancy)
-export const isMonitorRunAccepted = (v: unknown): v is MonitorRunAccepted => isRecord(v) && isGuid(v.requestId) && isAccountMonitor(v.monitor)
-export const isMonitorWatch = (v: unknown): v is MonitorWatch => isRecord(v) && isGuid(v.linkId) && isGuid(v.playId) && isText(v.orderId, 128) &&
-  ['entry', 'stop', 'target', 'exit'].includes(v.role as string) && ['watching', 'resolved', 'unverifiable'].includes(v.state as string) &&
-  time(v.startedAtUtc) && isNullOr(v.endedAtUtc, time)
+  nullableDate(v.lastAttemptAtUtc) && nullableDate(v.lastSuccessAtUtc) && nullableDate(v.nextRunAtUtc) &&
+  ['idle', 'pending', 'running'].includes(v.manualState as string) &&
+  (v.manualState === 'idle' ? v.runTrigger === null : ['owner', 'refresh', 'scheduled'].includes(v.runTrigger as string)) &&
+  nullableDate(v.nextManualAllowedAtUtc) &&
+  (v.error === null || text(v.error, 2000)) && typeof v.workerOnline === 'boolean' &&
+  Array.isArray(v.discrepancies) && v.discrepancies.every(d => isMonitorDiscrepancy(d) && d.accountId === v.accountId)
+
+export const isMonitorSummary = (v: unknown): v is MonitorSummary => object(v) && typeof v.workerOnline === 'boolean' &&
+  nullableDate(v.heartbeatAtUtc) && Array.isArray(v.accounts) && v.accounts.length <= 200 && v.accounts.every(isAccountMonitor) &&
+  new Set(v.accounts.map(a => a.accountId)).size === v.accounts.length
+
+export const isMonitorRunAccepted = (v: unknown): v is MonitorRunAccepted => object(v) && id(v.requestId) && isAccountMonitor(v.monitor)
+export const isMonitorEvent = (v: unknown): v is MonitorEvent => object(v) &&
+  ['id', 'type', 'ownerId', 'runId'].every(key => id(v[key])) && text(v.dedupKey, 1024) && v.dedupKey.length > 0 &&
+  isPositiveCount(v.version) &&
+  isEventSequence(v.sequence) && severity(v.severity) && date(v.occurredAt) && date(v.detectedAt) && nullableDate(v.expiresAt) &&
+  ['timely', 'late'].includes(v.timeliness as string) && ['current', 'superseded'].includes(v.relevance as string) &&
+  object(v.subject) && Object.keys(v.subject).length === subjectKeys.length &&
+  subjectKeys.every(key => object(v.subject) && (v.subject[key] === null || id(v.subject[key]))) &&
+  object(v.source) && Object.keys(v.source).length === 3 && id(v.source.trigger) && ['orderIds', 'fillIds'].every(key => v.source && object(v.source) &&
+    (v.source[key] === null || Array.isArray(v.source[key]) && v.source[key].every(id))) && object(v.data)
+
+/** `id` is the frame's SSE `id:` line: an event's resume cursor. */
+export function monitorFrame(event: string, data: string, id?: string): MonitorStreamEvent | null {
+  let body: unknown
+  try { body = JSON.parse(data) } catch { return null }
+  if (event === 'event' && isMonitorEvent(body) && isEventCursor(id)) return { type: 'event', event: body, cursor: id }
+  if (event === 'status' && object(body) && (body.state === 'ready' || body.state === 'reset') && isEventCursor(body.nextCursor)) {
+    return { type: 'status', status: { state: body.state, nextCursor: body.nextCursor } }
+  }
+  return null
+}
+
+export const isMonitorEventPage = (v: unknown): v is MonitorEventPage => object(v) && Array.isArray(v.events) && v.events.length <= 200 &&
+  v.events.every(isMonitorEvent) && isEventCursor(v.nextCursor) && typeof v.resetRequired === 'boolean'

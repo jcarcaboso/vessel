@@ -45,6 +45,69 @@ public sealed class MonitorPostgresTests
     }
 
     [PostgresFact]
+    public async Task A_completed_owner_check_with_unchanged_state_emits_a_run_completed_event()
+    {
+        // Complete() returns ManualState to idle; the browser needs an event even when State is unchanged.
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        var play = new Play(Guid.NewGuid(), await db.Accounts.SingleAsync(), new PerpetualInstrument("hyperliquid", "BTC"),
+            InstrumentSource.Venue, "{}", clock.Now.AddMinutes(-2));
+        play.MarkPlanned(clock.Now.AddMinutes(-1));
+        db.Add(play);
+        await db.SaveChangesAsync();
+        var sink = new EventSink();
+        var coordinator = Coordinator(db, owner, new Reader(), sink, clock);
+        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        var first = await coordinator.RequestAsync(id, default);
+        Assert.Equal("pending", first.Monitor.ManualState);
+        Assert.True(await coordinator.RunAsync((await store.ClaimAsync(id, first.RequestId, "worker", clock.Now, default))!, default));
+        Assert.Equal("live", (await store.FindAsync(id, default))!.State);
+        clock.Now = clock.Now.AddMinutes(2);
+        await Task.Delay(20);
+        var second = await coordinator.RequestAsync(id, default);
+        Assert.Equal("pending", second.Monitor.ManualState);
+        Assert.Equal("owner", second.Monitor.RunTrigger);
+        Assert.True(await coordinator.RunAsync((await store.ClaimAsync(id, second.RequestId, "worker", clock.Now, default))!, default));
+        var row = (await store.FindAsync(id, default))!;
+        Assert.Equal("idle", row.ManualState);
+        Assert.Equal("live", row.State);
+        Assert.Null((await coordinator.AccountAsync(id, default)).RunTrigger);
+        // The browser needs some event for this run to leave "Check pending…" without waiting for the 60 s poll.
+        var completed = Assert.Single(sink.Drafts, d => d.RunId == second.RequestId);
+        Assert.Equal("monitor.run-completed", completed.Type);
+        Assert.Equal($"monitor-run:{id}:{second.RequestId}", completed.DedupKey);
+        Assert.Equal("info", completed.Severity);
+        Assert.Equal(id, completed.Subject.AccountId);
+        Assert.Equal("""{"trigger":"manual","outcome":"succeeded","state":"live"}""", completed.Data.GetRawText());
+        Assert.Contains(VesselEventValues.Types, type => type == completed.Type);
+    }
+
+    [PostgresFact]
+    public async Task Scheduled_runs_are_labelled_apart_from_owner_checks_and_do_not_emit_run_completed()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        var play = new Play(Guid.NewGuid(), await db.Accounts.SingleAsync(), new PerpetualInstrument("hyperliquid", "BTC"),
+            InstrumentSource.Venue, "{}", clock.Now.AddMinutes(-2));
+        play.MarkPlanned(clock.Now.AddMinutes(-1));
+        db.Add(play);
+        await db.SaveChangesAsync();
+        var sink = new EventSink();
+        var coordinator = Coordinator(db, owner, new Reader(), sink, clock);
+        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default);
+        var lease = Assert.Single(await store.ClaimDueAsync("scheduler", clock.Now, 2, default));
+        Assert.Equal("scheduled", (await coordinator.AccountAsync(id, default)).RunTrigger);
+        Assert.True(await coordinator.RunAsync(lease, default));
+        Assert.Null((await coordinator.AccountAsync(id, default)).RunTrigger);
+        Assert.DoesNotContain(sink.Drafts, d => d.Type == "monitor.run-completed");
+    }
+
+    [PostgresFact]
     public async Task Venue_retry_budget_survives_scopes_and_blocks_refresh_manual_scheduled_and_command_claims()
     {
         await using var database = await CoreDatabase.CreateAsync();
@@ -880,6 +943,27 @@ public sealed class MonitorPostgresTests
         Assert.Equal(("idle", "idle"), (row.ManualState, row.State));
         Assert.Null(row.LeaseHolder);
         Assert.False(row.Owns(lease.Generation, lease.WorkerId, clock.Now));
+    }
+
+    [PostgresFact]
+    public async Task Final_a_settled_owner_check_on_a_disabled_account_completes_as_superseded_once()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, clock.Now);
+        var sink = new EventSink();
+        var coordinator = Coordinator(db, owner, new Reader(), sink, clock);
+        var accepted = await coordinator.RequestAsync(id, default);
+        await DisableAsync(db);
+        await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default);
+        var completed = Assert.Single(sink.Drafts, d => d.Type == "monitor.run-completed");
+        Assert.Equal((accepted.RequestId, $"monitor-run:{id}:{accepted.RequestId}"), (completed.RunId, completed.DedupKey));
+        Assert.Equal("""{"trigger":"manual","outcome":"superseded","state":"idle"}""", completed.Data.GetRawText());
+        // A later pass finds nothing left to settle.
+        await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default);
+        Assert.Single(sink.Drafts, d => d.Type == "monitor.run-completed");
     }
 
     private static async Task DisableAsync(VesselDbContext db)

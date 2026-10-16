@@ -12,7 +12,7 @@ public sealed record MonitorDiscrepancyDto(Guid Id, Guid AccountId, Guid? PlayId
     DateTimeOffset? ResolvedAtUtc, DateTimeOffset? DismissedAtUtc, string? Note, JsonElement Details,
     string? Outcome = null, DateTimeOffset? UnverifiableAtUtc = null);
 public sealed record AccountMonitorDto(Guid AccountId, string State, DateTimeOffset? LastAttemptAtUtc,
-    DateTimeOffset? LastSuccessAtUtc, DateTimeOffset? NextRunAtUtc, string ManualState,
+    DateTimeOffset? LastSuccessAtUtc, DateTimeOffset? NextRunAtUtc, string ManualState, string? RunTrigger,
     DateTimeOffset? NextManualAllowedAtUtc, string? Error, bool WorkerOnline, IReadOnlyList<MonitorDiscrepancyDto> Discrepancies);
 public sealed record MonitorSummaryDto(bool WorkerOnline, DateTimeOffset? HeartbeatAtUtc, IReadOnlyList<AccountMonitorDto> Accounts);
 public sealed record MonitorRunAccepted(Guid RequestId, AccountMonitorDto Monitor);

@@ -352,11 +352,13 @@ Never generate a replacement for a lost existing ring. See
 
 ## Optional venue hosts
 
-The API reads each venue's host from `Vessel:Venues`. The defaults are the
-production hosts, so most installations set nothing. To point a venue at a
-different host, for example an egress proxy, add the matching variable to the
-`api` service's `environment` in your own Compose override file and include it
-on every Compose command. The example `compose.yaml` does not forward these
+The API and the worker read each venue's host from `Vessel:Venues`. The
+defaults are the production hosts, so most installations set nothing. To point
+a venue at a different host, for example an egress proxy, add the matching
+variable to both the `api` and the `worker` services' `environment` in your own
+Compose override file and include it on every Compose command. The worker makes
+all monitor reads, so setting it only on the API leaves monitoring on the
+default hosts. The example `compose.yaml` does not forward these
 from `.env`, and an empty value is invalid rather than a default.
 
 | Variable | Default |
@@ -369,7 +371,7 @@ from `.env`, and an empty value is invalid rather than a default.
 
 Base URLs must be `https://` origins with no path. Stream URLs must be `wss://`.
 Neither may contain user info, a query or a fragment. The API refuses to start
-with an invalid value and names only the key, never the value. A host receives
+with an invalid value, and so does the worker; both name only the key, never the value. A host receives
 the venue's read-only tokens, so configure only hosts you trust as much as the
 venue itself.
 
@@ -439,8 +441,12 @@ it. Check and account Refresh share admission and the two-account read limit.
 A Refresh never changes check backoff, monitor state or the scheduled check, and
 a refused or abandoned Refresh is never replayed by the worker.
 `Vessel:Monitor:WatchLifetime` (default `7.00:00:00`) bounds how long the linked
-exits of a closed or cancelled Play are watched; after it, a watch without proof
-ends as a persistent `unverifiable`, never as resolved.
+exits and entries of a closed or cancelled Play are watched; after it, a watch
+without proof ends as a persistent `unverifiable`, never as resolved.
+`Vessel:Monitor:UnobservableLifetime` (default `7.00:00:00`) bounds how long a
+discrepancy's subject may stay unobservable before the record becomes
+`unverifiable` and stops holding the account in monitoring. Both accept one hour
+to ninety days.
 Venue HTTP 429 `Retry-After` deadlines are retained in PostgreSQL per owner and
 venue. Check, Refresh and scheduled work respect the longest deadline across
 API and worker instances; a shorter later response cannot shorten it. A missing
@@ -476,14 +482,32 @@ archive.
 **first** start of an empty `rabbitmq` volume only; changing them in `.env` later
 does not change the broker. That user is what `migrate` needs to declare topology.
 Use URL-safe passwords (for example `openssl rand -hex 24`): Compose places them in
-an AMQP URI. To rotate the password, change it in the broker, then in `.env`, and
-recreate the services that connect:
+an AMQP URI.
+
+Rotate each broker user separately: change the password in RabbitMQ first, then the matching `.env` value, then recreate only the services that use that user. `rabbitmqctl` reads the new password from standard input, and the shell's `read -s` keeps it out of the terminal, shell history and process arguments. Compose reads `.env` itself; its values are not exported to your shell, so name the user explicitly.
+
+Administrator (`RABBITMQ_USER`, used by `migrate`, and by API and worker when no application user is configured):
 
 ```sh
-docker compose exec rabbitmq rabbitmqctl change_password "$RABBITMQ_USER" 'NEW-URL-SAFE-PASSWORD'
-# update RABBITMQ_PASSWORD (and RABBITMQ_APP_PASSWORD if used) in .env, then:
+read -rs NEW_PASSWORD   # a new URL-safe value, for example from: openssl rand -hex 24
+printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl change_password <administrator-user>
+unset NEW_PASSWORD
+# Edit RABBITMQ_PASSWORD in .env, then recreate what uses the administrator:
+docker compose up -d --force-recreate api worker   # only if RABBITMQ_APP_USER is not set
+docker compose run --rm migrate                    # confirms provisioning works with the new password
+```
+
+Application user (`RABBITMQ_APP_USER`, used by API and worker):
+
+```sh
+read -rs NEW_PASSWORD
+printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl change_password <application-user>
+unset NEW_PASSWORD
+# Edit RABBITMQ_APP_PASSWORD in .env, then:
 docker compose up -d --force-recreate api worker
 ```
+
+Recreate every other service that uses the same user too, for example additional worker services. Between the broker change and the recreation, the running hosts keep their existing connections; a reconnect with the old password fails until they are recreated, and their outboxes hold publications meanwhile.
 
 For least privilege, API and worker can use a separate, non-administrator
 application user limited to the `vessel.` names (hosts declare nothing at
@@ -492,7 +516,9 @@ The broker tests pass with exactly these permissions. Create it once and set `RA
 in `.env`; without them API and worker use the administrator:
 
 ```sh
-docker compose exec rabbitmq rabbitmqctl add_user vessel-app 'URL-SAFE-PASSWORD'
+read -rs NEW_PASSWORD   # the value you also put in RABBITMQ_APP_PASSWORD
+printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl add_user vessel-app
+unset NEW_PASSWORD
 # configure, write (commands are published through the default exchange), read
 docker compose exec rabbitmq rabbitmqctl set_permissions -p / vessel-app \
   '^vessel\..*' '^(vessel\..*|amq\.default)$' '^vessel\..*'
@@ -625,6 +651,30 @@ unchanged and compresses static assets only.
 
 ## Upgrade
 
+### From v0.1.3 to the account monitor release (unreleased)
+
+This upgrade adds two services and new required settings. Its migrations sort
+after v0.1.3's `PlayDirection`, so an older installation applies both in one
+migration run. Before it:
+
+- Add `RABBITMQ_USER` and `RABBITMQ_PASSWORD` (URL-safe) to `.env`, and keep
+  `Vessel__Auth__OwnerId` set: the worker and the provisioning step validate
+  every message against it. Optional: `VESSEL_RABBITMQ_MANAGEMENT_BIND`,
+  `VESSEL_MONITOR_*`, `RABBITMQ_APP_USER`/`RABBITMQ_APP_PASSWORD`.
+- Messaging settings are `Vessel__Messaging__*` (for example
+  `Vessel__Messaging__RabbitMqUri`, which Compose builds for you).
+- Migrations `20261016110000_VesselEvents`, `20261016110100_AccountMonitor`,
+  `20261016110200_MessagingDeployments`, `20261016110300_PlayDiscrepancies` and
+  `20261016110400_PlayDiscrepancyUnverifiable` add the event log, subscriptions
+  and receipts, monitor state, the deployment registrations and discrepancies.
+- `migrate` now also runs `provision-messaging` against the new `rabbitmq`
+  service, which must be healthy first; then `api` and the new `worker` start.
+- The restore procedure gains the mandatory `rotate-event-epoch` step below.
+
+Stop web, API and worker, back up, then follow the procedure below. A worker
+stopped during a run loses nothing: runs are idempotent and the next run repeats
+the work.
+
 ### From v0.1.2 to v0.1.3
 
 This upgrade includes migration `20261016104756_PlayDirection`, which adds a
@@ -659,27 +709,6 @@ Venue and architecture changes introduce no additional migration. The new
 Lighter · Robinhood venue uses its own accounts and read-only tokens; existing
 Lighter accounts and tokens remain separate. Cross-venue supported-stablecoin
 totals use nominal 1:1 values, with no FX or depeg valuation.
-
-### To the account monitor release
-
-This upgrade adds two services and new required settings. Before it:
-
-- Add `RABBITMQ_USER` and `RABBITMQ_PASSWORD` (URL-safe) to `.env`, and keep
-  `Vessel__Auth__OwnerId` set: the worker and the provisioning step validate
-  every message against it. Optional: `VESSEL_RABBITMQ_MANAGEMENT_BIND`,
-  `VESSEL_MONITOR_*`, `RABBITMQ_APP_USER`/`RABBITMQ_APP_PASSWORD`.
-- Messaging settings are `Vessel__Messaging__*` (for example
-  `Vessel__Messaging__RabbitMqUri`, which Compose builds for you).
-- Migrations `20261016110000_VesselEvents`, `20261016110100_AccountMonitor` and
-  `20261016110200_MessagingDeployments` add the event log, subscriptions and
-  receipts, monitor state and the deployment registrations.
-- `migrate` now also runs `provision-messaging` against the new `rabbitmq`
-  service, which must be healthy first; then `api` and the new `worker` start.
-- The restore procedure gains the mandatory `rotate-event-epoch` step below.
-
-Stop web, API and worker, back up, then follow the procedure below. A worker
-stopped during a run loses nothing: runs are idempotent and the next run repeats
-the work.
 
 ### Upgrade procedure
 
@@ -836,10 +865,55 @@ python3 scripts/verify-release.py --browser-module /absolute/path/to/playwright
 
 It checks HTTP and internal-CA TLS trust, spoofed scheme/address handling,
 compression, headers, unbuffered SSE via a local fixture, upload limits, unpublished
-web in TLS mode and a fresh-volume restore. The fixture replaces only the upstream
+web in TLS mode and a fresh-volume restore. For delivery it sets
+`Vessel__Messaging__Verification=true` on `migrate` and runs the `verification`
+subscription in a separate `verifier` worker (deployment `verification`), leaving
+the monitor worker's configuration as shipped: receipts prove live delivery, an
+outbox that holds the publication while RabbitMQ is stopped, delivery after the
+broker returns and after a restore without the broker volume; the subscription is
+deregistered at the end. The fixture replaces only the upstream
 for its nginx transport test, not production code. Cleanup runs on success/failure.
 The browser check uses synthetic API data and intercepts chart market reads, with
 no real venue call. Run frontend/.NET checks separately as in `docs/development.md`.
+
+### Full-stack end-to-end test
+
+```sh
+python3 scripts/e2e-full-stack.py               # build images, run, clean up
+python3 scripts/e2e-full-stack.py --skip-build  # reuse vessel-e2e:api/web from a --keep run
+python3 scripts/e2e-full-stack.py --keep        # leave the stack, temp directory and images for inspection
+```
+
+It builds the API and web images as `vessel-e2e:api`/`vessel-e2e:web` and runs the
+real Compose stack (PostgreSQL, RabbitMQ with the least-privilege application user,
+RustFS, migrate, API, monitor worker, a `verifier` worker for the `verification`
+subscription and web) on its own project, unused subnet and loopback ports, with
+generated secrets and a synthetic owner. Only Docker and Python are needed on the
+host: the fake venue's certificates are generated inside its pinned Python image. `scripts/e2e/fake_venue.py` is a
+deterministic Hyperliquid info-API fake on the Compose network. It serves TLS from
+a throwaway CA that only the API and worker containers trust (`SSL_CERT_FILE`), so
+the production `https`/`wss` host rules stay unchanged, and a loopback-only control
+port lets the harness place, fill and cancel orders, list markets and gate or fail
+reads between steps. The scenario drives the public API, the SSE stream through
+nginx and a Playwright browser that runs in the pinned
+`mcr.microsoft.com/playwright:v1.63.0-noble` image. `playwright-core` 1.63 is
+installed there with the repository's pinned pnpm (Corepack) into a temporary
+Docker volume, so only Docker and Python are needed; `--playwright-module` can
+point at an existing host package instead. The scenario covers
+explicit provisioning and topology, Refresh, automatic linking by a Check,
+fills opening and closing Plays, confirmed and dismissed discrepancies, closed-Play
+watches, orphaned entries, omitted executions, broker outage and broker volume
+loss, a worker killed mid-read with a second replica recovering after the lease,
+a disabled account with a pending Check, admin receipt retry, retention, and
+backup/restore with an epoch rotation that resets an old SSE cursor. It sets the
+shortest allowed interval, protection grace, lifetimes and retention (one minute,
+zero, one hour and one day) and a 15-second manual cooldown (zero is allowed, but a
+nonzero cooldown is needed to exercise the countdown and 429 responses) and
+shifts three timestamps in the synthetic database instead of waiting an hour or
+a day; the fixed five-minute lease is waited out. A run takes about twenty minutes
+and prints a pass/fail table; it exits non-zero on any failure. Screenshots and
+redacted logs go to a new temp artifacts directory (`--artifacts` to choose).
+It never reads the repository `.env`, uses the owner's database or pushes images.
 
 ## Logs and troubleshooting
 

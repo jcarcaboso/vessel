@@ -11,8 +11,6 @@ interface RequestOptions {
   notFound?: string
   badGateway?: string
   tooMany?: string
-  /** Appends the server's Retry-After wait, in whole seconds, to a 429 message. */
-  retryAfter?: boolean
   safeError?: string
   noContent?: string
   invalidJson?: string
@@ -28,19 +26,22 @@ async function httpError(response: Response, options: RequestOptions): Promise<A
   }
   let detail = response.status === 502 && options.badGateway ? options.badGateway :
     response.status === 429 && options.tooMany ? options.tooMany : 'The request could not be completed.'
-  if ([400, 409, 413, 415].includes(response.status)) {
+  // A caller's own 429 text wins; otherwise the API's bounded ProblemDetails explain the admission limit.
+  if ([400, 409, 413, 415].includes(response.status) || response.status === 429 && !options.tooMany) {
     try {
       const problem: unknown = await response.json()
-      if (isRecord(problem) && isText(problem.detail, 500)) detail = problem.detail
+      if (isRecord(problem) && isText(problem.detail, 500) && problem.detail.trim()) detail = problem.detail
+      else if (response.status === 429 && isRecord(problem) && isText(problem.title, 500) && problem.title.trim()) detail = problem.title
     } catch { /* Keep the safe default for non-JSON proxy responses. */ }
   }
-  const wait = response.status === 429 && options.retryAfter ? response.headers.get('Retry-After') : null
-  if (wait && /^\d{1,6}$/.test(wait) && Number(wait) > 0) detail += ` Try again in ${Number(wait)} ${Number(wait) === 1 ? 'second' : 'seconds'}.`
   if (response.status === 404) detail = options.notFound ?? 'This account or portfolio is no longer available.'
   if (response.status === 503) detail = 'The service is unavailable. Check the database and server configuration.'
   const reference = response.headers.get('X-Correlation-ID')
   if (response.status >= 500 && reference && /^[\da-f]{32}$/.test(reference)) detail += ` Reference: ${reference}`
-  return new ApiError('http', detail, response.status)
+  const retryAfter = response.headers.get('Retry-After')
+  const retryAt = retryAfter === null ? undefined : /^\d+$/.test(retryAfter) ? Date.now() + Number(retryAfter) * 1000 : Date.parse(retryAfter)
+  return new ApiError('http', detail, response.status,
+    retryAt !== undefined && Number.isFinite(retryAt) && Math.abs(retryAt) <= 8.64e15 ? new Date(retryAt).toISOString() : undefined)
 }
 
 /** The token stays in this session closure. JSON, images and stream headers share the same transport. */

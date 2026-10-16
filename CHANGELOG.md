@@ -2,6 +2,62 @@
 
 ## Unreleased
 
+### Added
+
+- Background Play monitor: a separate `worker` service (same API image,
+  `/app/worker`) checks accounts with active venue Plays or pending linked
+  orders every 10 minutes by default, imports fills and orders, links what
+  matches and moves Plays to Open or Closed without an open browser. Check
+  in the account detail or the Play's Execution tab requests an extra run
+  (202, with a server-enforced cooldown); account Refresh stays synchronous.
+- Discrepancies: missing, cancelled, short or excess stop protection, orphaned
+  stops, targets and entries after a Play ends, plan drift, venue positions
+  that disagree with open Plays and unlinked fills. They are flagged and
+  dismissable, never corrected; subjects that stay unobservable for 7 days
+  become `unverifiable`.
+- Events: every Play, execution, link, discrepancy and monitor change is
+  recorded in PostgreSQL in the same transaction and published once to a
+  RabbitMQ topic through a Wolverine outbox; subscriptions catch up from the
+  database. The browser follows them through an authenticated SSE stream with
+  an opaque `{epoch}.{sequence}` cursor and reloads stored state only.
+- Linked exits and entries of closed or cancelled Plays stay watched until the
+  venue shows they no longer rest, or end `unverifiable` after 7 days.
+
+### Changed
+
+- All database writes go through one unit of work; object-storage writes
+  refuse to run inside a database transaction.
+- `POST /api/plays/{id}/execution/check` no longer reads venues: it records the
+  same request as `POST /api/accounts/{id}/monitor/run` and answers 202.
+  Opening a Play or a browser timer never reads a venue.
+- Adapters report omitted executions (unverified fees, unreported PnL,
+  unrecognized contracts); a run with omissions is degraded and its fill-based
+  discrepancy checks are unknown.
+
+### Upgrade
+
+- New services: `rabbitmq` (set `RABBITMQ_USER` and `RABBITMQ_PASSWORD` in
+  `.env`; optional least-privilege `RABBITMQ_APP_USER`/`RABBITMQ_APP_PASSWORD`)
+  and `worker`. AMQP stays unpublished; the management page binds to loopback.
+- Migrations `20261016110000_VesselEvents`, `20261016110100_AccountMonitor`,
+  `20261016110200_MessagingDeployments`, `20261016110300_PlayDiscrepancies` and
+  `20261016110400_PlayDiscrepancyUnverifiable` apply after v0.1.3's
+  `PlayDirection`. `migrate` runs them, then `provision-messaging` against a
+  healthy `rabbitmq` (envelope storage, broker topology, subscriptions);
+  nothing migrates or provisions at API or worker startup.
+- Stop web, API and worker for upgrades and backups. Every database restore
+  must run `rotate-event-epoch` before provisioning and starting hosts.
+  See "From v0.1.3 to the account monitor release" in `deploy/README.md`.
+
+### Known limits
+
+- Checks are periodic (10 minutes by default), not real time; a price touch is
+  never a fill.
+- No notification channel exists yet; events are delivered to the browser
+  stream and recorded for a later Notification Hub.
+- Lighter Standard accounts exclude fee-bearing or unverified-fee fills, which
+  leaves those checks unknown.
+
 ## 0.1.3 - October 16, 2026
 
 Release notes: [docs/releases/v0.1.3.md](docs/releases/v0.1.3.md).

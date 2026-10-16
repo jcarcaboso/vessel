@@ -9,6 +9,7 @@ import { useNotifications } from '@/components/notifications/notifications'
 import { createPlaysSession, hasUnsavedPlayWork, startNewPlay, type PlaysSession } from '@/features/plays/saved'
 import { initialPlaysList } from '@/features/plays/plays-list'
 import type { PlayView } from '@/api/plays'
+import { useMonitorEvents } from './useMonitorEvents'
 import { AccountDetail } from './AccountDetail'
 import { ActivityOperations } from './ActivityOperations'
 import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
@@ -135,19 +136,22 @@ function Shell({ system, disconnect, api }: ShellProps) {
   const setNotice = useCallback((message: string) => { notify({ tone: 'success', message }) }, [notify])
   const [reloadKey, setReloadKey] = useState(0)
   const reload = useCallback(() => setReloadKey(key => key + 1), [])
+  const monitor = useMonitorEvents(api, disconnectedApi !== api, reload, reloadKey)
   // Derived from the request generation so Reload shows progress and a repeated
   // failure visibly clears and returns, without a synchronous effect render.
   const loading = loaded === null || loaded.api !== api || loaded.key !== reloadKey
-  const pending = loading && data === null
+  // Stored reads wait for the event head cursor, so the stream covers every change after them.
+  const pending = (loading && data === null) || !monitor.cursorReady
   const error = loading ? null : loadError
+  const cursorReady = monitor.cursorReady
   useEffect(() => {
-    if (disconnectedApi === api) return
+    if (disconnectedApi === api || !cursorReady) return
     const controller = new AbortController()
     let active = true
     api.overview(controller.signal).then(next => { if (active) { setData(next); setOverviewQuery(query => { const scope = resolveOverviewScope(query.scope, next.accounts, next.portfolios); return scope === query.scope ? query : { ...query, scope } }); setLoadError(null); setLoaded({ api, key: reloadKey }) } })
       .catch(cause => { if (active) { setLoadError(errorMessage(cause, 'The workspace could not be loaded.')); setLoaded({ api, key: reloadKey }) } })
     return () => { active = false; controller.abort() }
-  }, [api, reloadKey, disconnectedApi])
+  }, [api, reloadKey, disconnectedApi, cursorReady])
   useEffect(() => {
     if (!menuOpen) return
     const previousOverflow = document.body.style.overflow
@@ -272,13 +276,22 @@ function Shell({ system, disconnect, api }: ShellProps) {
           {page === 'overview' ? <OverviewActions disabled={pending || !data} onNewPlay={newPlay} onPortfolio={() => setPortfolioDialog(true)} onAccount={() => setAccountDialog(true)} /> : page === 'portfolios' ? <Button onClick={() => setPortfolioDialog(true)}><Plus size={15} />New portfolio</Button> : page !== 'settings' && page !== 'activity' && <Button onClick={() => setAccountDialog(true)} disabled={pending || !data}><Plus size={15} />Add account</Button>}
         </div></section>}
         {error && <div className="workspace-alert" role="alert"><CircleHelp size={17} /><span>{error}</span><Button variant="ghost" size="sm" onClick={reload}>Try again</Button></div>}
+        {monitor.error && <div className="workspace-alert" role="status">{monitor.error} Stored data remains available; no venue check was requested.</div>}
+        {monitor.notice && <div className="workspace-alert" role="status">{monitor.notice}</div>}
+        {monitor.summary && !monitor.summary.workerOnline && monitor.summary.accounts.some(item => item.state !== 'idle' || item.manualState !== 'idle' || item.discrepancies.some(issue => issue.state === 'open')) && <div className="workspace-alert monitor-offline" role="status">
+          Worker offline. Background Play checks are delayed. Last heartbeat {monitor.summary.heartbeatAtUtc ? new Date(monitor.summary.heartbeatAtUtc).toLocaleString() : 'not recorded'}. Stored executions may be out of date.
+        </div>}
         {pending && <div className="workspace-loading" role="status">Loading your workspace…</div>}
         {!pending && !data && !error && <div className="workspace-alert">No workspace data is available.</div>}
 
-        {playsLifetime.visited && <div hidden={page !== 'plays'}>
+        {playsLifetime.visited && cursorReady && <div hidden={page !== 'plays'}>
           <PageErrorBoundary resetKey={page} key={playsLifetime.generation}>
             <Suspense fallback={<PageLoading />}>
-              <PlaysPage workRef={playsLifetime.work} active={page === 'plays'} accounts={accounts} portfolios={portfolios}
+              <PlaysPage workRef={playsLifetime.work} active={page === 'plays' && disconnectedApi !== api} accounts={accounts} portfolios={portfolios}
+                reloadGeneration={reloadKey} accountMonitors={monitor.summary?.accounts ?? []} onManageAccount={id => {
+                  const account = accounts.find(item => item.id === id)
+                  if (account) manageAccount(account)
+                }}
                 api={api} session={playsSession} onSession={acceptPlaysSession} onReload={reload} loading={loading}
                 requestedPlayId={requestedPlay?.api === api ? requestedPlay.id : null} onRequestedPlayHandled={() => setRequestedPlay(null)}
                 list={playsList} onList={setPlaysList} />
@@ -286,9 +299,9 @@ function Shell({ system, disconnect, api }: ShellProps) {
           </PageErrorBoundary>
         </div>}
         <PageErrorBoundary key={page}><div className="page-settle">
-        {page === 'review' && <Suspense fallback={<PageLoading />}><ReviewPage api={api} reloadGeneration={reloadKey} onOpenPlay={viewPlay} /></Suspense>}
+        {page === 'review' && cursorReady && <Suspense fallback={<PageLoading />}><ReviewPage api={api} reloadGeneration={reloadKey} onOpenPlay={viewPlay} /></Suspense>}
 
-        {page === 'overview' && data && <OverviewPage data={data} api={api} overviewQuery={overviewQuery} setOverviewQuery={setOverviewQuery}
+        {page === 'overview' && data && <OverviewPage data={data} api={api} monitors={monitor.summary?.accounts ?? []} overviewQuery={overviewQuery} setOverviewQuery={setOverviewQuery}
           reloadKey={reloadKey} refreshAllAction={refreshAllAction} refreshing={refreshing} onAddAccount={() => setAccountDialog(true)}
           onCreatePortfolio={() => setPortfolioDialog(true)} onAccounts={() => navigate('accounts')} onActivity={() => navigate('activity')}
           viewAccount={viewAccount} sync={sync} manageAccount={manageAccount} browsePlays={browsePlays} viewPlay={viewPlay} reload={reload} />}
@@ -297,8 +310,8 @@ function Shell({ system, disconnect, api }: ShellProps) {
           onCreatePortfolio={() => setPortfolioDialog(true)} onOpen={id => { setPortfolioFilter(id); navigate('accounts') }}
           onManage={(id, focusAccounts) => { setFocusPortfolioAccounts(focusAccounts); setManagedPortfolioId(id) }} />}
 
-        {page === 'accounts' && data && (selectedAccount ? <AccountDetail key={selectedAccount.id} account={selectedAccount} api={api} refreshing={refreshing === selectedAccount.id} busy={refreshing !== null} reloadGeneration={reloadKey} onOpenPlay={viewPlay} onCreated={reload} onSync={id => { void sync(id) }} onManage={() => manageAccount(selectedAccount)} onBack={() => { setSelectedAccountId(null); window.scrollTo({ top: 0, left: 0, behavior: 'auto' }) }} /> :
-          <AccountsPanel api={api} onChanged={managementChanged} onReload={reload} filters={accountFilters} onFiltersChange={setAccountFilters} accounts={accounts} portfolios={portfolios} portfolioFilter={activePortfolioFilter} onPortfolioFilter={setPortfolioFilter}
+        {page === 'accounts' && data && (selectedAccount ? <AccountDetail key={selectedAccount.id} account={selectedAccount} api={api} monitor={monitor.summary?.accounts.find(item => item.accountId === selectedAccount.id) ?? null} refreshing={refreshing === selectedAccount.id} busy={refreshing !== null} reloadGeneration={reloadKey} onOpenPlay={viewPlay} onCreated={reload} onSync={id => { void sync(id) }} onManage={() => manageAccount(selectedAccount)} onBack={() => { setSelectedAccountId(null); window.scrollTo({ top: 0, left: 0, behavior: 'auto' }) }} /> :
+          <AccountsPanel monitors={monitor.summary?.accounts ?? []} api={api} onChanged={managementChanged} onReload={reload} filters={accountFilters} onFiltersChange={setAccountFilters} accounts={accounts} portfolios={portfolios} portfolioFilter={activePortfolioFilter} onPortfolioFilter={setPortfolioFilter}
             refreshing={refreshing} refreshAction={refreshAllAction} onDetail={viewAccount} onSync={id => { void sync(id) }} onManage={manageAccount} onAdd={() => setAccountDialog(true)} />)}
 
 

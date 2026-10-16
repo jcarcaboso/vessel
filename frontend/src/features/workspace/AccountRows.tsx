@@ -1,3 +1,5 @@
+import type { AccountMonitor } from '@/api/monitor'
+import { MonitorBadge } from '@/features/monitor/MonitorPanel'
 import type { BrokerAccount } from '@/api/workspace'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
@@ -33,8 +35,9 @@ function BalanceCell({ account }: { account: BrokerAccount }) {
  * `accounts` is every row shown, in order, and drives select-all. With `groups` the rows render as one table section per
  * group, each under its own header row; the groups must partition `accounts`.
  */
-export function AccountRows({ accounts, groups, portfolioNames, refreshing, selection, onDetail, onSync, onManage }: {
+export function AccountRows({ accounts, groups, portfolioNames, refreshing, selection, monitors = [], onDetail, onSync, onManage }: {
   accounts: BrokerAccount[]; groups?: AccountGroup[] | undefined; portfolioNames: Record<string, string>; refreshing: string | null
+  monitors?: AccountMonitor[]
   selection?: { selected: string[]; onChange: (ids: string[]) => void; disabled: boolean }
   onDetail: (id: string) => void; onSync: (id: string) => void; onManage: (account: BrokerAccount) => void
 }) {
@@ -48,7 +51,7 @@ export function AccountRows({ accounts, groups, portfolioNames, refreshing, sele
         onChange={event => selection.onChange(event.target.checked ? [...selection.selected, account.id] : selection.selected.filter(id => id !== account.id))} /></td>}
       <td><button disabled={selection?.disabled} className="account-row-name" onClick={() => onDetail(account.id)}>
         <VenueLogo venueId={account.venueId} size="md" />
-        <span><strong>{account.name}</strong><small className="account-row-meta"><span>{venues.name(account.venueId)}</span>
+        <span><strong>{account.name}</strong>{account.isEnabled !== false && <MonitorBadge monitor={monitors.find(item => item.accountId === account.id) ?? null} />}<small className="account-row-meta"><span>{venues.name(account.venueId)}</span>
           {source && <span className="account-source-id" title={source}>{shortSource(source)}</span>}</small></span>
       </button></td>
       <td><span className={`account-portfolio${portfolio ? '' : ' is-unassigned'}`}>{portfolio ?? 'Unassigned'}</span></td>

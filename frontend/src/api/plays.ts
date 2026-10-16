@@ -278,10 +278,10 @@ export interface PlayExecution {
   notice: string
   /** Why linked fills cannot settle the play: missing executions, contradicting fills, or exits before or beyond the entries. */
   issues: string[]
-  /** Stored monitor state of the play's account; null when the play is not monitored. Absent on older servers. */
-  monitor?: AccountMonitor | null
-  discrepancies?: MonitorDiscrepancy[]
-  watches?: MonitorWatch[]
+  monitor: AccountMonitor | null
+  discrepancies: MonitorDiscrepancy[]
+  /** Linked orders still watched after the Play ended; empty while it is active. */
+  watches: MonitorWatch[]
 }
 export interface LinkOrder { orderId: string; role: LinkRole; entryId?: string; levelId?: string }
 
@@ -308,6 +308,5 @@ export const isPlayExecution = (v: unknown): v is PlayExecution => isRecord(v) &
   Array.isArray(v.links) && v.links.every(orderLink) && Array.isArray(v.suggestions) && v.suggestions.every(orderLink) &&
   Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) && isText(v.notice, 1000) &&
   Array.isArray(v.issues) && v.issues.every(issue => isText(issue, 1000)) &&
-  (v.monitor === undefined || isNullOr(v.monitor, isAccountMonitor)) &&
-  (v.discrepancies === undefined || Array.isArray(v.discrepancies) && v.discrepancies.every(isMonitorDiscrepancy)) &&
-  (v.watches === undefined || Array.isArray(v.watches) && v.watches.every(isMonitorWatch))
+  (v.monitor === null || isAccountMonitor(v.monitor)) && Array.isArray(v.discrepancies) && v.discrepancies.every(isMonitorDiscrepancy) &&
+  Array.isArray(v.watches) && v.watches.every(w => isMonitorWatch(w) && w.playId === v.playId)

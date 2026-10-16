@@ -1,6 +1,8 @@
 import type { LinkOrder, PlayExecution, PlaySummary } from '@/api/plays'
 import { Button } from '@/components/ui/button'
-import { Link2, Link2Off, RefreshCw } from 'lucide-react'
+import { Link2, Link2Off } from 'lucide-react'
+import { MonitorDiscrepancies, MonitorPanel, MonitorWatches } from '@/features/monitor/MonitorPanel'
+import type { AccountMonitor } from '@/api/monitor'
 import type { DraftEntry } from './draft'
 import { describeOrder, fillSummary, levelName, levelOptions, orderFitsRole } from './execution'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -19,13 +21,20 @@ const pnlBasisNote = {
   mixed: 'Some fills report closed PnL before fees and some after.',
 } as const
 
-export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink }: {
+export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, onDismiss, onManageCredential }: {
   execution: PlayExecution | null
   error: string | null
   busy: boolean
   entries: readonly DraftEntry[]
   direction: 'long' | 'short'
   origin?: PlaySummary['origin']
+  monitor?: AccountMonitor | null
+  monitorBusy?: boolean
+  monitorError?: string | null
+  monitorUnavailable?: boolean
+  retryAtUtc?: string | undefined
+  onDismiss?: (id: string, note?: string) => Promise<void>
+  onManageCredential?: (() => void) | undefined
   onCheck: () => void
   onLink: (request: LinkOrder) => void
   onUnlink: (linkId: string) => void
@@ -36,16 +45,19 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   const retrospective = origin === 'retrospective'
   const editable = !retrospective && ['planned', 'paused', 'open'].includes(execution.status)
   const options = levelOptions(entries, execution.status === 'open')
+  const shownMonitor = monitor === undefined ? execution.monitor : monitor
   const { totals } = execution
   return <div className="execution-panel">
     <div className="execution-header">
       {!retrospective && <p className="muted" title={execution.tracked ? 'Orders link automatically by price and side; Vessel asks only when several plays could own one.' : undefined}>
         {execution.tracked ? execution.checkedAtUtc ? `Checked ${time(execution.checkedAtUtc)}` : 'Not checked yet'
           : execution.reason ?? 'Execution is not tracked for this play.'}</p>}
-      {execution.tracked && editable && <Button size="sm" variant="outline" onClick={onCheck} disabled={busy} aria-busy={busy}>
-        <RefreshCw size={13} className={busy ? 'is-spinning' : ''} />{busy ? 'Checking…' : 'Check venue'}</Button>}
     </div>
     {error && <p className="error" role="alert">{error}</p>}
+    {shownMonitor && <MonitorPanel monitor={shownMonitor} busy={busy || monitorBusy} error={monitorError}
+      retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} onManageCredential={onManageCredential} />}
+    {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} />}
+    <MonitorWatches watches={execution.watches} />
     <dl className="execution-totals">
       <div><dt>Entered</dt><dd>{totals.enteredQuantity}</dd></div>
       <div><dt>Exited</dt><dd>{totals.exitedQuantity}</dd></div>

@@ -1,6 +1,9 @@
 import { overviewSummaryPath, isOverviewSummary, type OverviewQuery, type OverviewSummaryDocument } from './overview-summary'
 import { activityFillsPath, activityPath, isActivityFills, isActivityPage, type ActivityFills, type ActivityPage, type ActivityQuery } from './activity'
-import { SseOverflowError, SseParser } from './sse'
+import { readSseStream, SseOverflowError, SseParser } from './sse'
+import { isRequestCursor } from './event-cursor'
+import { isAccountMonitor, isMonitorEventPage, isMonitorRunAccepted, isMonitorSummary, monitorFrame,
+  type AccountMonitor, type MonitorEventPage, type MonitorRunAccepted, type MonitorSummary, type MonitorStreamEvent } from './monitor'
 import { candleIntervals, type CandleInterval } from './candles'
 import { ApiError } from './errors'
 import { createApiCall } from './request'
@@ -28,7 +31,6 @@ import {
   type ManualExecutions, type ManualExecutionInput, type ManualExecutionCorrection,
 } from './diary'
 import type { ImageMarkup } from './markup'
-import { isMonitorRunAccepted, type MonitorRunAccepted } from './monitor'
 
 export interface Portfolio {
   id: string
@@ -220,6 +222,14 @@ export interface CreateAccount {
   manualAccountValueUsd?: string
 }
 export interface WorkspaceApi {
+  monitor(signal?: AbortSignal): Promise<MonitorSummary>
+  accountMonitor(id: string, signal?: AbortSignal): Promise<AccountMonitor>
+  runAccountMonitor(id: string, signal?: AbortSignal): Promise<MonitorRunAccepted>
+  /** Stored owner events after a cursor. A cursor outside the retained range returns a reset to the head. */
+  monitorEvents(after: string, limit: number, signal?: AbortSignal): Promise<MonitorEventPage>
+  monitorStream(after: string, signal: AbortSignal, onEvent: (event: MonitorStreamEvent) => void): Promise<void>
+  dismissPlayDiscrepancy(playId: string, discrepancyId: string, note?: string, signal?: AbortSignal): Promise<void>
+  dismissAccountDiscrepancy(accountId: string, discrepancyId: string, note?: string, signal?: AbortSignal): Promise<void>
   overviewSummary(query: OverviewQuery, signal?: AbortSignal): Promise<OverviewSummaryDocument>
   /** One page of position operations with the request's filters, scope and page size. */
   activity(query: ActivityQuery, signal?: AbortSignal): Promise<ActivityPage>
@@ -270,10 +280,8 @@ export interface WorkspaceApi {
   correctManualExecution(id: string, executionId: string, input: ManualExecutionCorrection, signal?: AbortSignal): Promise<ManualExecutions>
   deletePlay(id: string): Promise<void>
   playExecution(id: string, signal?: AbortSignal): Promise<PlayExecution>
-  /** Asks the background monitor to check the play's account. Accepted is not done: read `playExecution` for the outcome. */
-  checkPlayExecution(id: string, signal?: AbortSignal): Promise<MonitorRunAccepted>
-  linkOrder(id: string, link: LinkOrder): Promise<PlayExecution>
-  unlinkOrder(id: string, linkId: string): Promise<PlayExecution>
+  linkOrder(id: string, link: LinkOrder, signal?: AbortSignal): Promise<PlayExecution>
+  unlinkOrder(id: string, linkId: string, signal?: AbortSignal): Promise<PlayExecution>
   evidence(playId: string, signal?: AbortSignal): Promise<SavedEvidence[]>
   evidenceImage(id: string, signal?: AbortSignal): Promise<Blob>
   uploadEvidence(playId: string, image: Blob, fields: { source: 'capture' | 'upload'; note: string; markup: ImageMarkup | null; name: string }): Promise<SavedEvidence>
@@ -474,6 +482,49 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
   const none = (v: unknown): v is undefined => v === undefined
   const withSignal = (signal?: AbortSignal) => signal ? { signal } : {}
   const api: WorkspaceApi = {
+    monitor: signal => call('/api/monitor', { ...workspaceRequest, validate: isMonitorSummary, ...withSignal(signal) }),
+    accountMonitor: (id, signal) => call(`${accountPath(id)}/monitor`, { ...workspaceRequest,
+      validate: (v): v is AccountMonitor => isAccountMonitor(v) && v.accountId === id, ...withSignal(signal) }),
+    runAccountMonitor: (id, signal) => call(`${accountPath(id)}/monitor/run`, { ...workspaceRequest,
+      validate: (v): v is MonitorRunAccepted => isMonitorRunAccepted(v) && v.monitor.accountId === id, method: 'POST', ...withSignal(signal),
+      tooMany: 'A check is already running for this account or it was checked moments ago. Try again when the countdown ends.' }),
+    monitorEvents: (after, limit, signal) => {
+      if (!isRequestCursor(after) || !Number.isInteger(limit) || limit < 1 || limit > 200) {
+        return Promise.reject(new ApiError('invalid-response', 'The event cursor is invalid.'))
+      }
+      return call(`/api/events?${new URLSearchParams({ after, limit: String(limit) })}`, { ...workspaceRequest,
+        validate: isMonitorEventPage, unavailable: 'Monitor events are unavailable.', ...withSignal(signal) })
+    },
+    monitorStream: async (after, signal, onEvent) => {
+      if (!isRequestCursor(after)) throw new ApiError('invalid-response', 'The event cursor is invalid.')
+      if (signal.aborted) return
+      let response: Response
+      try {
+        response = await call(`/api/events/stream?${new URLSearchParams({ after })}`, {
+          ...workspaceRequest, signal, timeout: 25_000, accept: 'text/event-stream',
+          unavailable: 'The monitor event stream did not connect.', read: async response => response,
+        })
+      } catch (cause) {
+        if (signal.aborted) return
+        throw cause
+      }
+      if (!response.body || !/^text\/event-stream\b/i.test(response.headers.get('Content-Type') ?? '')) {
+        await response.body?.cancel().catch(() => undefined)
+        throw new ApiError('invalid-response', 'The API returned an invalid monitor stream.')
+      }
+      try {
+        await readSseStream(response.body, signal, ({ event, data, id }) => {
+          const frame = monitorFrame(event, data, id)
+          if (frame) onEvent(frame)
+        })
+      } catch {
+        if (!signal.aborted) throw new ApiError('unavailable', 'The monitor event stream was interrupted.')
+      }
+    },
+    dismissPlayDiscrepancy: (id, discrepancyId, note, signal) => call(`${playPath(id)}/discrepancies/${resourceId(discrepancyId)}/dismiss`,
+      { ...playRequest, validate: none, method: 'POST', body: JSON.stringify({ note: note ?? null }), ...withSignal(signal) }),
+    dismissAccountDiscrepancy: (id, discrepancyId, note, signal) => call(`${accountPath(id)}/discrepancies/${resourceId(discrepancyId)}/dismiss`,
+      { ...workspaceRequest, validate: none, method: 'POST', body: JSON.stringify({ note: note ?? null }), ...withSignal(signal) }),
     plays: (query, signal) => call(playListPath(query), { ...playRequest, validate: (v): v is PlayList => isPlayList(v, query), ...withSignal(signal) }),
     playCounts: (query, signal) => call(playCountsPath(query), { ...playRequest, validate: isPlayCounts, ...withSignal(signal) }),
     play: (id, signal) => call(playPath(id), { ...playRequest, validate: isSavedPlay, ...withSignal(signal) }),
@@ -493,12 +544,10 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     },
     deletePlay: id => call(playPath(id), { ...playRequest, validate: none, method: 'DELETE' }),
     playExecution: (id, signal) => call(`${playPath(id)}/execution`, { ...playRequest, validate: isPlayExecution, ...withSignal(signal) }),
-    checkPlayExecution: (id, signal) => call(`${playPath(id)}/execution/check`, { ...playRequest, validate: isMonitorRunAccepted, method: 'POST', ...withSignal(signal),
-      invalidData: 'The API returned an incompatible check response.', tooMany: 'This account check is running or cooling down.', retryAfter: true }),
-    linkOrder: (id, link) => call(`${playPath(id)}/execution/links`, { ...playRequest, validate: isPlayExecution, method: 'POST', body: JSON.stringify(link) }),
-    unlinkOrder: (id, linkId) => {
+    linkOrder: (id, link, signal) => call(`${playPath(id)}/execution/links`, { ...playRequest, validate: isPlayExecution, method: 'POST', body: JSON.stringify(link), ...withSignal(signal) }),
+    unlinkOrder: (id, linkId, signal) => {
       if (!isGuid(linkId)) return Promise.reject(new ApiError('invalid-response', 'The link identifier is invalid.'))
-      return call(`${playPath(id)}/execution/links/${linkId}`, { ...playRequest, validate: isPlayExecution, method: 'DELETE' })
+      return call(`${playPath(id)}/execution/links/${linkId}`, { ...playRequest, validate: isPlayExecution, method: 'DELETE', ...withSignal(signal) })
     },
     evidence: (playId, signal) => call(`${playPath(playId)}/evidence`, { ...playRequest, validate: (v): v is SavedEvidence[] => Array.isArray(v) && v.every(isSavedEvidence), ...withSignal(signal) }),
     evidenceImage: (id, signal) => call(`${evidencePath(id)}/content`, { ...playRequest, ...withSignal(signal),
