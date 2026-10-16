@@ -882,6 +882,33 @@ public sealed class MonitorPostgresTests
         db.ChangeTracker.Clear();
     }
 
+    [PostgresFact]
+    public async Task Final_a_historical_open_row_is_not_resting_evidence_but_a_current_book_open_is()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var now = DateTimeOffset.UtcNow;
+        await using var db = database.Context(owner);
+        var (play, _) = await SeedCancelledWithStopAsync(db, now);
+        var work = TestUnitOfWork.For(db); var store = new MonitorStore(db, work);
+        async Task<string> Observe(DateTimeOffset statusAt, DateTimeOffset observed, bool complete)
+        {
+            await work.ExecuteAsync(async () =>
+            {
+                await store.UpdateWatchesAsync(id, new([Stop(VenueOrderStatus.Open, statusAt)], observed, "History and book",
+                    OpenOrdersComplete: complete), observed, default);
+                return true;
+            }, default);
+            return Assert.Single(await store.WatchesAsync(play.Id, observed, default)).State;
+        }
+        // A history row last seen open before the cancellation, with the current book incomplete: still watching.
+        Assert.Equal("watching", await Observe(now.AddMinutes(-1), now.AddSeconds(1), complete: false));
+        // The current book lists it: watching.
+        Assert.Equal("watching", await Observe(now.AddSeconds(2), now.AddSeconds(2), complete: true));
+        // Only the historical row remains and the complete current book does not list the order: resolved.
+        Assert.Equal("resolved", await Observe(now.AddMinutes(-1), now.AddSeconds(3), complete: true));
+    }
+
     private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<MonitorRunLog>
     {
         public List<string> Messages { get; } = [];

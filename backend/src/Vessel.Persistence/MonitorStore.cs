@@ -254,7 +254,10 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
             if (orders is not null && orders.ObservedAtUtc > link.UpdatedAtUtc && !(ended >= orders.ObservedAtUtc))
             {
                 var current = orders.Orders.FirstOrDefault(o => o.OrderId == link.OrderId);
-                if (current?.Status == VenueOrderStatus.Open)
+                // Reads combine order history with the current book. Only a current-book row (observed with the read)
+                // establishes a resting order; a historical Open row is not evidence that it still rests.
+                var resting = current is { Status: VenueOrderStatus.Open } && current.StatusAtUtc == orders.ObservedAtUtc;
+                if (resting)
                 {
                     watch.EndedAtUtc = null;
                     watch.Outcome = null;
@@ -265,9 +268,9 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
                     watch.EndedAtUtc = orders.ObservedAtUtc;
                     watch.Outcome = MonitorWatchOutcomes.Terminal;
                 }
-                else if (current is null && orders.OpenOrdersComplete)
+                else if ((current is null || current.Status == VenueOrderStatus.Open) && orders.OpenOrdersComplete)
                 {
-                    // Absence proves nothing on an incomplete read.
+                    // Absent from a complete current book; absence proves nothing on an incomplete read.
                     watch.EndedAtUtc = orders.ObservedAtUtc;
                     watch.Outcome = MonitorWatchOutcomes.Absent;
                 }
