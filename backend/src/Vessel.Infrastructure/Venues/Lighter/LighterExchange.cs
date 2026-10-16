@@ -85,7 +85,7 @@ public sealed class LighterExchange
     // docs/architecture/lighter-state.md carries the detail. A test keeps every sentence combined below that limit.
     internal string HistoryNotice =>
         $"Incomplete {NoticeName} history: at most the latest {MaxTrades} perpetual executions, no backfill. " +
-        "Only fee-free executions with reported realized PnL are imported; liquidation, deleverage, settlement and self-trade records are not. " +
+        "Only fee-free executions with known realized PnL are imported; liquidation, deleverage, settlement and self-trade records are not. " +
         $"{Collateral} perpetual equity only, no spot wallets. Margin is the initial-margin requirement. Reported availability is not guaranteed withdrawal capacity.";
     internal string PageLimitNotice => $"The {PageCount}-page history limit was reached; older executions remain unimported.";
     internal string Unavailable => $"{Name} is unavailable or refused the read. Try again or verify the read-only token.";

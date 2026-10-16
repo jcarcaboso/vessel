@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Venues;
 using Vessel.Domain.Workspace;
@@ -99,7 +100,7 @@ public sealed class RisexAdapterTests
 
     private sealed class FixedTime(DateTimeOffset now) : TimeProvider { public override DateTimeOffset GetUtcNow() => now; }
 
-    private static (RisexReader Reader, Routes Routes) Reader(Dictionary<string, string>? extra = null)
+    private static (RisexReader Reader, Routes Routes) Reader(Dictionary<string, string>? extra = null, RisexCatalogueCache? cache = null)
     {
         var bodies = new Dictionary<string, string>
         {
@@ -109,7 +110,69 @@ public sealed class RisexAdapterTests
         foreach (var (path, body) in extra ?? []) bodies[path] = body;
         var routes = new Routes(bodies);
         var time = new FixedTime(Now);
-        return (new RisexReader(new HttpClient(routes) { BaseAddress = new Uri("https://api.rise.trade/") }, time, new RisexCatalogueCache(time)), routes);
+        return (new RisexReader(new HttpClient(routes) { BaseAddress = new Uri("https://api.rise.trade/") }, time, cache ?? new RisexCatalogueCache(time)), routes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Imports_refresh_a_warm_catalogue_before_filtering_new_market_facts(bool orders)
+    {
+        var cache = new RisexCatalogueCache(new FixedTime(Now));
+        var oldMarkets = JsonNode.Parse(Markets)!;
+        oldMarkets["data"]!["markets"]!.AsArray().RemoveAt(0); // BTC was not listed when the cache was filled.
+        await Reader(new() { ["/v1/markets"] = oldMarkets.ToJsonString() }, cache).Reader.ReadInstrumentsAsync(default);
+        var (reader, routes) = Reader(cache: cache);
+        if (orders)
+        {
+            var result = await reader.ReadOrdersAsync(Address, default);
+            Assert.Contains(result.Orders, o => o.OrderId == "0xorder1");
+            Assert.Contains(result.Orders, o => o.OrderId == "0xtpsl1");
+        }
+        else
+        {
+            var result = await reader.ReadAsync(Address, default);
+            Assert.Equal(4, result.Fills.Count);
+            Assert.Contains(result.Fills, f => f.SourceFillId == "0xopen");
+            Assert.Contains(result.Snapshot.Positions, p => p.VenueContractId == "1");
+        }
+        Assert.Single(routes.Requests, r => r == "GET /v1/markets");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Failed_import_catalogue_refresh_never_falls_back_to_stale_market_mapping(bool orders)
+    {
+        var cache = new RisexCatalogueCache(new FixedTime(Now));
+        await Reader(cache: cache).Reader.ReadInstrumentsAsync(default);
+        var (reader, routes) = Reader(new() { ["/v1/markets"] = "{}" }, cache);
+        await Assert.ThrowsAsync<VenueReadException>(async () =>
+        {
+            if (orders) await reader.ReadOrdersAsync(Address, default);
+            else await reader.ReadAsync(Address, default);
+        });
+        Assert.Equal(["GET /v1/markets"], routes.Requests);
+    }
+
+    [Theory]
+    [InlineData("fee", "missing")]
+    [InlineData("fee", "null")]
+    [InlineData("fee", "empty")]
+    [InlineData("realized_pnl", "missing")]
+    [InlineData("realized_pnl", "null")]
+    [InlineData("realized_pnl", "empty")]
+    public async Task Missing_execution_money_is_not_zeroed_even_on_an_opening_trade(string field, string value)
+    {
+        var history = JsonNode.Parse(Trades)!;
+        var trade = history["data"]!["trades"]![0]!.AsObject();
+        if (value == "missing") trade.Remove(field);
+        else trade[field] = value == "null" ? null : JsonValue.Create("");
+        var reader = Reader(new() { ["/v1/trade-history"] = history.ToJsonString() }).Reader;
+        var error = await Assert.ThrowsAsync<VenueReadException>(() => reader.ReadAsync(Address, default));
+        Assert.Equal(field == "realized_pnl"
+            ? "RISEx omitted realized PnL for an execution. Its net-of-fee result is unknown; this refresh was not imported."
+            : "RISEx returned an invalid or unsupported response.", error.Message);
     }
 
     [Theory]

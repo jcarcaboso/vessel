@@ -285,8 +285,136 @@ public sealed class LighterAdapterTests
         Assert.Equal(1, Fills(Change(Trade, "maker_fee", JsonValue.Create(100)), standard: true).Fees);
         Assert.Equal(1, Fills(Change(Trade, "maker_fee", JsonValue.Create(-1)), standard: true).Fees);
         Assert.Equal(1, Fills(Change(Trade, "integrator_maker_fee", JsonValue.Create(1)), standard: true).Fees);
-        Assert.Equal(1, Fills(Change(Trade, "maker_fee", null)).Fees);
+        Assert.Single(Fills(Change(Trade, "maker_fee", null)).Fills);
         Assert.Single(Fills(Change(Trade, "maker_fee", null), standard: true).Fills);
+    }
+
+    [Theory]
+    [InlineData(true, true, "0")]
+    [InlineData(true, false, "0")]
+    [InlineData(false, true, "0")]
+    [InlineData(false, false, "0")]
+    [InlineData(true, true, "-0.01")]
+    [InlineData(true, false, "-0.01")]
+    [InlineData(false, true, "0.01")]
+    [InlineData(false, false, "0.01")]
+    public void Omitted_opening_Pnl_is_zero_for_the_queried_side_and_role(bool ask, bool maker, string before)
+    {
+        foreach (var exchange in LighterExchange.All)
+        foreach (var absent in new[] { "missing", "null", "empty" })
+        {
+            var row = JsonNode.Parse(Trade)!.AsObject();
+            row["ask_account_id"] = ask ? long.Parse(Source) : 2;
+            row["bid_account_id"] = ask ? 2 : long.Parse(Source);
+            row["is_maker_ask"] = ask == maker;
+            row[(maker ? "maker" : "taker") + "_position_size_before"] = before;
+            // Only the other counterparty has a PnL and a fee.
+            row.Remove("maker_fee");
+            row.Remove("ask_account_pnl");
+            row[ask ? "bid_account_pnl" : "ask_account_pnl"] = "123.45";
+            row[(maker ? "taker" : "maker") + "_fee"] = 100;
+            if (absent != "missing") row[ask ? "ask_account_pnl" : "bid_account_pnl"] =
+                absent == "null" ? null : JsonValue.Create("");
+            var markets = LighterReader.ReadCatalogue(Json(Catalogue), exchange);
+            var page = LighterReader.ReadFills(Json(Trades(row.ToJsonString())), markets, Source, Now, false);
+            var fill = Assert.Single(page.Fills);
+            Assert.Equal(ExecutionFacts.Open, fill.PositionEffect);
+            Assert.Equal(0m, fill.ClosedPnlUsd);
+            Assert.Equal(0m, fill.Fee);
+            Assert.Equal(ExecutionFacts.FeeReported, fill.FeeBasis);
+            Assert.Equal(exchange.Collateral, fill.FeeToken);
+            Assert.Equal(0, page.MissingPnl);
+            Assert.Equal(0, page.Fees);
+            Assert.Equal(JsonValueKind.Null, Json(fill.RawJson).GetProperty("realized_pnl").ValueKind);
+        }
+    }
+
+    [Theory]
+    [InlineData(true, true, "0.01", "0.001")]
+    [InlineData(true, false, "0.01", "0.01")]
+    [InlineData(false, true, "-0.01", "0.001")]
+    [InlineData(false, false, "-0.01", "0.01")]
+    [InlineData(true, true, "0.01", "0.02")]
+    [InlineData(true, false, "0.01", "0.02")]
+    [InlineData(false, true, "-0.01", "0.02")]
+    [InlineData(false, false, "-0.01", "0.02")]
+    public void Missing_reduction_or_flip_Pnl_is_never_inferred(bool ask, bool maker, string before, string quantity)
+    {
+        foreach (var exchange in LighterExchange.All)
+        foreach (var absent in new[] { "missing", "null", "empty" })
+        {
+            var row = JsonNode.Parse(Trade)!.AsObject();
+            row["ask_account_id"] = ask ? long.Parse(Source) : 2;
+            row["bid_account_id"] = ask ? 2 : long.Parse(Source);
+            row["is_maker_ask"] = ask == maker;
+            row[(maker ? "maker" : "taker") + "_position_size_before"] = before;
+            row["size"] = quantity;
+            row.Remove("ask_account_pnl");
+            row[ask ? "bid_account_pnl" : "ask_account_pnl"] = "123.45";
+            if (absent != "missing") row[ask ? "ask_account_pnl" : "bid_account_pnl"] =
+                absent == "null" ? null : JsonValue.Create("");
+            var markets = LighterReader.ReadCatalogue(Json(Catalogue), exchange);
+            var page = LighterReader.ReadFills(Json(Trades(row.ToJsonString())), markets, Source, Now, false);
+            Assert.Empty(page.Fills);
+            Assert.Equal(1, page.MissingPnl);
+            Assert.Equal(0, page.Fees);
+        }
+    }
+
+    [Theory]
+    [InlineData("maker_fee", "null")]
+    [InlineData("integrator_maker_fee", "null")]
+    public void Null_zero_fee_fields_follow_the_official_client_convention(string key, string value)
+    {
+        var row = JsonNode.Parse(Trade)!.AsObject();
+        row[key] = JsonNode.Parse(value);
+        Assert.Equal(0m, Assert.Single(Fills(row.ToJsonString()).Fills).Fee);
+    }
+
+    [Theory]
+    [InlineData("maker_fee", "\"0\"")]
+    [InlineData("maker_fee", "true")]
+    [InlineData("integrator_maker_fee", "\"0\"")]
+    [InlineData("integrator_maker_fee", "true")]
+    public void Malformed_fees_do_not_become_zero(string key, string value) =>
+        Assert.Throws<VenueReadException>(() => Fills(Change(Trade, key, JsonNode.Parse(value))));
+
+    [Fact]
+    public async Task Public_history_retains_zero_omitted_executions_without_a_token_or_tier_lookup()
+    {
+        foreach (var exchange in LighterExchange.All)
+        {
+            var rows = Enumerable.Range(1, 30).Select(i =>
+            {
+                var row = JsonNode.Parse(Trade)!.AsObject();
+                row["trade_id"] = i;
+                row["trade_id_str"] = i.ToString();
+                row.Remove("maker_fee");
+                if (i <= 20)
+                {
+                    row["maker_position_size_before"] = "-0.01";
+                    row.Remove("ask_account_pnl");
+                }
+                else if (i == 30) row["size"] = "0.02";
+                return row.ToJsonString();
+            });
+            var handler = new Handler { Reply = request =>
+                request.RequestUri!.AbsolutePath.EndsWith("/trades", StringComparison.Ordinal)
+                    ? Response(Trades(string.Join(",", rows)))
+                    : request.RequestUri.AbsolutePath.EndsWith("/account", StringComparison.Ordinal)
+                        ? Response(Snapshot.Replace("USDC", exchange.Collateral, StringComparison.Ordinal)) : null };
+            var reader = new LighterReader(new HttpClient(new LighterAuthenticationHandler { InnerHandler = handler })
+                { BaseAddress = new Uri("https://fixture.invalid") }, new Clock(), new Credentials(null), exchange: exchange);
+            var result = await reader.ReadAsync(Source, default);
+            Assert.Equal(30, result.Fills.Count);
+            Assert.Equal(20, result.Fills.Count(f => f.PositionEffect == ExecutionFacts.Open && f.ClosedPnlUsd == 0m));
+            Assert.Equal(9, result.Fills.Count(f => f.PositionEffect == ExecutionFacts.Close && f.ClosedPnlUsd == 2.123400m));
+            Assert.Equal(1, result.Fills.Count(f => f.PositionEffect == ExecutionFacts.Flip && f.ClosedPnlUsd == 2.123400m));
+            Assert.All(result.Fills, f => Assert.Equal(0m, f.Fee));
+            Assert.DoesNotContain("omitted.", result.HistoryNotice);
+            Assert.DoesNotContain(handler.Requests, r => r.Url.Contains("accountLimits", StringComparison.Ordinal));
+            Assert.All(handler.Requests, r => Assert.Null(r.Token));
+        }
     }
 
     [Fact]

@@ -188,7 +188,7 @@ public sealed partial class LighterReader
 
     // The official Trade schema now explicitly calls ask/bid_account_pnl realized PnL for the queried account.
     // https://apidocs.lighter.xyz/reference/trades.md, verified 2026-10-07.
-    // Mainnet omits these fields on some public responses. Absence is NOT evidence of zero.
+    // Missing PnL is zero only for a verified non-reducing execution, never for a close or flip.
     internal static FillPage ReadFills(JsonElement root, Catalogue catalogue, string source, DateTimeOffset latest, bool standardTier)
     {
         var json = catalogue.Exchange.Json;
@@ -220,19 +220,22 @@ public sealed partial class LighterReader
             if (type is not ("trade" or "liquidation" or "deleverage" or "market-settlement")) throw json.Invalid();
 
             // Trade fee fields are rates, not fee amounts. Never apply the other counterparty's tier to this account.
-            // If a rate is absent and the tier has not been verified, the execution's fee is unknown.
+            // Both official web clients normalize absent/null protocol and integrator fee ticks to zero.
+            // See docs/architecture/lighter-import-investigation.md for the first-party evidence.
             // Standard TWAP and integrator fees must still pass the explicit per-execution checks.
-            var hasFee = row.TryGetProperty(role + "_fee", out var rate);
+            var hasFee = row.TryGetProperty(role + "_fee", out var rate) && rate.ValueKind != JsonValueKind.Null;
             var rateValue = hasFee ? json.Integer(rate) : 0;
-            var integratorRate = row.TryGetProperty("integrator_" + role + "_fee", out var integrator) ? json.Integer(integrator) : 0;
-            if (rateValue != 0 || integratorRate != 0 || (!hasFee && !standardTier) || type != "trade")
+            var integratorRate = row.TryGetProperty("integrator_" + role + "_fee", out var integrator) &&
+                integrator.ValueKind != JsonValueKind.Null ? json.Integer(integrator) : 0;
+            if (rateValue != 0 || integratorRate != 0 || type != "trade")
             {
                 fees++;
                 continue;
             }
             var pnlName = ask ? "ask_account_pnl" : "bid_account_pnl";
-            if (!row.TryGetProperty(pnlName, out var pnlValue)) { missingPnl++; continue; }
-            var pnl = json.Number(pnlValue);
+            var reportedPnl = json.OptionalAmount(row, pnlName);
+            if (reportedPnl is null && effect != ExecutionFacts.Open) { missingPnl++; continue; }
+            var pnl = reportedPnl ?? 0m;
             var id = ExactId(json, row, "trade_id", "trade_id_str");
             var orderId = ExactId(json, row, ask ? "ask_id" : "bid_id", ask ? "ask_id_str" : "bid_id_str");
             var at = json.Timestamp(json.Property(row, "timestamp"), latest.ToUnixTimeMilliseconds());
@@ -250,9 +253,11 @@ public sealed partial class LighterReader
             {
                 trade_id = id, market_id = marketId, type, ask_account_id = Identity(json, json.Property(row, "ask_account_id")),
                 bid_account_id = Identity(json, json.Property(row, "bid_account_id")), order_id = orderId,
-                size = Text(json, row, "size"), price = Text(json, row, "price"), realized_pnl = json.Text(pnlValue),
+                size = Text(json, row, "size"), price = Text(json, row, "price"),
+                realized_pnl = reportedPnl is not null ? Text(json, row, pnlName) : null,
                 timestamp = at.ToUnixTimeMilliseconds(), tx_hash = hash, account_role = role,
-                position_size_before = Text(json, row, role + "_position_size_before"), fee_rate = rateValue
+                position_size_before = Text(json, row, role + "_position_size_before"),
+                fee_rate = hasFee ? (int?)rateValue : null, integrator_fee_rate = integratorRate
             });
             fills.Add(new(id, market.Key, side, direction, price, quantity, 0, collateral, pnl, at, orderId, hash, raw,
                 effect, standardTier ? ExecutionFacts.FeeStandardAccountFree : ExecutionFacts.FeeReported,

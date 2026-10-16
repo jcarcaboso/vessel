@@ -146,7 +146,7 @@ Tasks R1.1 to R1.7 are done, with these differences from the plan:
 
 - **Shared adapter kit:** `Venues/Common/StrictJson` and `BoundedJsonHttp` were extracted from the Hyperliquid adapter. Hyperliquid now uses them with its own messages, and its tests pass unchanged.
 - **HTTP clients** are registered under RISEx-specific names. A typed client's default name is its interface, so sharing it would have mixed RISEx's base address into Hyperliquid's client. A test pins both.
-- **No request budget class.** A refresh makes four requests (catalogue, portfolio and up to two fill pages), well under 500 per 10 s. The catalogue is cached for one minute.
+- **No request budget class.** A refresh makes four requests (catalogue, portfolio and up to two fill pages), well under 500 per 10 s. The public catalogue is cached for one minute for instrument/chart reads; account and order imports force a fresh catalogue.
 - **Snapshot:** account value is `total_account_value`, margin used is `total_initial_margin`. The existing summary `free_collateral` is retained as `AvailableMarginUsd` following the October 12 correction below. RISEx reports no account-level withdrawable amount, so `WithdrawableUsd` stays unknown. Position sizes come signed from portfolio details.
 - **Fills:** the direction wording ("Open Long", "Close Short") is derived from side and position side, because RISEx sends none. The same side with PnL beyond the fee is `unknown`, as the effect rule above says. Closed PnL is `net-of-fee`, and fees are `reported` in USDC.
 - **Orders** come from `/v1/orders` (the latest 1,000 records, open ones included) and `/v1/orders/tpsl`. A TP/SL is a trigger order (`Stop Market` or `Take Profit Market`, whole-position at 10,000 bps). When one triggers, its fills belong to a new regular order, which links as an unplanned exit or by the owner; this is still to verify.
@@ -157,6 +157,22 @@ Tasks R1.1 to R1.7 are done, with these differences from the plan:
 - **Tests:** `RisexAdapterTests` (fixtures with a synthetic address) and the opt-in `RisexLiveTests` (set `Vessel_TEST_RISEX_ADDRESS`).
 
 Still open (R1.8, with the owner's own account): the meaning of same-side fills with extra PnL, TP/SL trigger linking, the units of `maintenance_margin_factor` and `unsettled_usdc`, and isolated-margin positions.
+
+### October 16, 2026 import catalogue correction
+
+Account and order imports previously reused the public catalogue for up to one
+minute. A newly listed market could therefore be absent from the cached map,
+silently excluding its positions, executions, regular orders and TP/SL orders.
+Both import paths now refresh the catalogue before mapping facts, matching
+Hyperliquid and Lighter. A failed refresh fails the read instead of falling back
+to stale metadata. Instrument/chart cache TTL and single-flight behavior remain
+unchanged. Synthetic regressions reproduce the loss with a warm catalogue and
+verify both import paths; this is not evidence of a missing live account trade.
+See the [cross-venue field audit](venue-import-field-audit.md) for fee/PnL handling.
+Missing/null/empty execution PnL now fails with an explicit safe unknown-result
+error, rather than the generic invalid-response error; its net-of-fee replacement
+is still unverified and is never assumed to be zero.
+No migration or production refresh is involved.
 
 ## October 12, 2026 free collateral follow-up
 

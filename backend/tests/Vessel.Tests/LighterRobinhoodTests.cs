@@ -112,7 +112,7 @@ public sealed class LighterRobinhoodTests
         Assert.Equal("lighter", mainnet.Descriptor.Logo);
         Assert.Equal(
             "Incomplete Lighter history: at most the latest 500 perpetual executions, no backfill. " +
-            "Only fee-free executions with reported realized PnL are imported; liquidation, deleverage, settlement and self-trade records are not. " +
+            "Only fee-free executions with known realized PnL are imported; liquidation, deleverage, settlement and self-trade records are not. " +
             "USDC perpetual equity only, no spot wallets. Margin is the initial-margin requirement. Reported availability is not guaranteed withdrawal capacity.",
             LighterReader.HistoryNotice);
         Assert.Equal("The five-page history limit was reached; older executions remain unimported.", LighterReader.PageLimitNotice);
