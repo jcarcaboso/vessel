@@ -170,16 +170,18 @@ nanosecond round trips, plus frontend payload and rendered funding checks.
 Database verification uses a separately created disposable PostgreSQL container;
 authenticated live-venue history was not queried.
 
-### Verified October 16, 2026
+### Verified October 16, 2026, after monitor and current-main integration
 
-- Backend Release build with pinned SDK `10.0.302`: **2,065 passed, 5 skipped,
+- Backend Release build with pinned SDK `10.0.302`: **2,551 passed, 16 skipped,
   0 failed**. Collections ran sequentially against disposable PostgreSQL 18;
-  the skipped checks require separate live-venue/S3/CLI opt-ins. Migration
+  the skipped checks require separate live-venue/S3/CLI/broker opt-ins. Migration
   application, model consistency and the Activity-selected retrospective
-  partition regression are included.
-- Frontend: **2,002 tests passed across 105 files**, run with
+  partition regression are included. Locked restore and the full solution
+  Release build passed with no warnings or errors.
+- Frontend: **2,086 tests passed across 112 files**, run with
   `pnpm --filter vessel-frontend test --maxWorkers=1 --testTimeout=60000`.
-  Typecheck, lint and production build also passed.
+  Typecheck, lint and production build also passed; the build retains its
+  non-blocking chunk-size advisory.
 - Synthetic browser checks covered Graphite and Paper, exact received/paid
   settlement tooltips, unassigned funding and the unverified total. At 390px,
   the operation table scrolls horizontally without overflowing the page.
@@ -189,8 +191,15 @@ authenticated live-venue history was not queried.
   remaining concrete blockers. Review found UUID-dependent interval ordering
   after same-time flips and browser timeouts that missed later order/tick reads.
   Regression tests failed before each fix; intervals now order by closing time
-  before UUID, and the full sync/check routes use the budgets documented above.
-- Operator-script regressions: **37 passed**. Prototype regressions:
+  before UUID, and refresh/asynchronous checks use the budgets documented above.
+- A subsequent Claude Opus 5.5 adversarial review found whole-second boundary
+  ambiguity, derived canonical-label conflicts and funding rate-limit propagation
+  issues. All were reproduced before fixing; the focused funding, Activity,
+  credential-race and rate-limit run then passed **319 tests**. Final read-only
+  Opus recheck at `fab76571517ad8e63becc3c4d908123da6eac59b` confirmed all
+  findings resolved, the fenced monitor integration intact and **no remaining
+  P1/P2 blockers**. The only subsequent repository edit records these results.
+- Operator-script regressions: **58 passed**. Prototype regressions:
   **76 passed**.
 - Broader verification exposed a method-metadata-dependent database-outage
   classifier. A typed missing-configuration exception now preserves generic
