@@ -14,6 +14,8 @@ public static class MonitorDiscrepancyModel
         {
             table.HasCheckConstraint("CK_discrepancy_state", "\"State\" IN ('candidate','open','resolved','dismissed')");
             table.HasCheckConstraint("CK_discrepancy_severity", "\"Severity\" IN ('info','warning','critical')");
+            table.HasCheckConstraint("CK_discrepancy_published",
+                "\"PublishedTransition\" IS NULL OR \"PublishedTransition\" IN ('opened','resolved','dismissed','unverifiable')");
         });
         row.HasKey(x => x.Id);
         row.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
@@ -28,6 +30,7 @@ public static class MonitorDiscrepancyModel
         row.Property(x => x.State).HasMaxLength(16);
         row.Property(x => x.Fingerprint).HasMaxLength(64);
         row.Property(x => x.PendingFingerprint).HasMaxLength(64);
+        row.Property(x => x.PublishedTransition).HasMaxLength(16);
         row.Property(x => x.Note).HasMaxLength(PlayDiscrepancy.MaxNoteLength);
         row.Property(x => x.Details).HasColumnType("jsonb");
         row.Property(x => x.Revision).IsConcurrencyToken();

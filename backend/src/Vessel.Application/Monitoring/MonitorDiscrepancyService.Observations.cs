@@ -85,6 +85,8 @@ public sealed partial class MonitorDiscrepancyService
             var instruments = play.ContractId is null ? [] : instrumentsByContract[play.ContractId].ToArray();
             if (instruments.Length != 1 || instruments[0].QuantityDecimals is < 0 or > 28)
             {
+                // A terminal Play's subject cannot be identified without its instrument: its records age as unobservable.
+                if (play.Status is PlayStatus.Closed or PlayStatus.Cancelled) continue;
                 foreach (var kind in PlayKinds) scan.Add(new(kind, "play:" + play.Id, play.Id, play.ContractId ?? "", "", Severity(kind), null, snapshotAt, [play.Id], new { }));
                 continue;
             }

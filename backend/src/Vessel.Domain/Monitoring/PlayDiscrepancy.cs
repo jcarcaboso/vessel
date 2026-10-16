@@ -2,7 +2,11 @@ using Vessel.Domain.Common;
 
 namespace Vessel.Domain.Monitoring;
 
-/// <summary>One current discrepancy per account/kind/subject. Candidates are internal, never public warnings.</summary>
+/// <summary>
+/// One current discrepancy per account/kind/subject. Every change goes through <see cref="DiscrepancyLifecycle"/>.
+/// Three independent aspects: the lifecycle <see cref="State"/> (candidate, open, resolved, dismissed); outstanding
+/// confirmation work (<see cref="PendingFingerprint"/>); and the last public announcement (<see cref="PublishedTransition"/>).
+/// </summary>
 public sealed class PlayDiscrepancy : IOwned
 {
     public const int MaxNoteLength = 2000;
@@ -16,7 +20,8 @@ public sealed class PlayDiscrepancy : IOwned
     public string SubjectKey { get; set; } = "";
     public string Kind { get; set; } = "";
     public string Severity { get; set; } = "";
-    public string State { get; set; } = "candidate";
+    public string State { get; set; } = DiscrepancyLifecycle.Candidate;
+    /// <summary>The evidence baseline: of the confirmed, cleared or dismissed condition, or a candidate's latest observation.</summary>
     public string Fingerprint { get; set; } = "";
     public string Details { get; set; } = "{}";
     public DateTimeOffset OpenedAtUtc { get; set; }
@@ -25,6 +30,7 @@ public sealed class PlayDiscrepancy : IOwned
     public DateTimeOffset? DismissedAtUtc { get; set; }
     public string? Note { get; set; }
     public long Revision { get; set; }
+    /// <summary>The last decisive (fresh present or absent) observation; the unobservable lifetime counts from here.</summary>
     public DateTimeOffset LastObservedAtUtc { get; set; }
     /// <summary>
     /// The condition awaiting (re-)confirmation, whatever the public state. It is durable monitoring work: it keeps the
@@ -34,17 +40,22 @@ public sealed class PlayDiscrepancy : IOwned
     /// <summary>Start of the current uninterrupted confirmation sequence; null after an unknown observation.</summary>
     public DateTimeOffset? PendingSinceUtc { get; set; }
     /// <summary>
-    /// Set when the subject stayed unobservable beyond the monitor's lifetime. The record is not resolved: it stays
-    /// visible with an unverifiable outcome and no longer holds the account's monitoring. Cleared by a fresh decision.
+    /// Set when outstanding work stayed unobservable beyond the monitor's lifetime: verification ended without a decision.
+    /// Not a resolution. Cleared by the next fresh decision.
     /// </summary>
     public DateTimeOffset? UnverifiableAtUtc { get; set; }
+    /// <summary>The last published transition (opened, resolved, dismissed, unverifiable); null if never announced.</summary>
+    public string? PublishedTransition { get; set; }
+    public long? PublishedRevision { get; set; }
 
-    public bool AwaitsConfirmation => PendingFingerprint is not null;
-
-    /// <summary>Unknown observations break a confirmation sequence without resolving or reviving a warning. The
-    /// outstanding confirmation itself stays recorded.</summary>
-    public void InterruptConfirmation() => PendingSinceUtc = null;
-
-    /// <summary>A fresh decision confirmed, cleared or matched the record: nothing awaits confirmation.</summary>
-    public void SettleConfirmation() { PendingFingerprint = null; PendingSinceUtc = null; }
+    /// <summary>Anything ever announced stays visible.</summary>
+    public bool Visible => PublishedTransition is not null;
+    /// <summary>The last announcement (opened or unverifiable) still awaits its matching close.</summary>
+    public bool PublicOpen => PublishedTransition is DiscrepancyLifecycle.Opened or DiscrepancyLifecycle.Unverifiable;
+    /// <summary>Scheduling work: a candidate, an open warning or a pending (re-)confirmation not yet unverifiable.</summary>
+    public bool HasWork => UnverifiableAtUtc is null &&
+        (State is DiscrepancyLifecycle.Candidate or DiscrepancyLifecycle.Open || PendingFingerprint is not null);
+    /// <summary>Evaluation membership: its subject is still evaluated whenever the account is checked.</summary>
+    public bool Tracked => State is DiscrepancyLifecycle.Candidate or DiscrepancyLifecycle.Open ||
+        PendingFingerprint is not null || PublicOpen;
 }

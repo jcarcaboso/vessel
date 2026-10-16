@@ -27,13 +27,15 @@ public sealed class MonitorDiscrepancyStore(VesselDbContext db, UnitOfWork work)
         var accounts = await db.Accounts.FromSqlInterpolated($"SELECT * FROM accounts WHERE \"Id\" = {accountId} AND \"OwnerId\" = {db.CurrentOwnerId} FOR UPDATE").ToListAsync(ct);
         if (accounts.Count != 1) throw new ProblemException(404, "Account not found.");
     }
-    public async Task<MonitorDiscrepancyFacts> LoadAsync(Guid accountId, DateTimeOffset recentSince, CancellationToken ct)
+    public async Task<MonitorDiscrepancyFacts> LoadAsync(Guid accountId, DateTimeOffset recentSince, IReadOnlyCollection<string> restingOrderIds,
+        CancellationToken ct)
     {
         work.RequireActive();
         // Only the subjects the checks can still report on, never the account's lifetime history. Callers hold the
         // account row lock, which every Play writer takes first (PlayStore.WithPlayLockAsync, ExecutionStore), so the
         // Play rows need no lock of their own here.
         var watches = db.Set<MonitorExitWatch>();
+        var resting = restingOrderIds.ToArray();
         var records = db.Set<PlayDiscrepancy>();
         var plays = await db.Plays.Where(p => p.AccountId == accountId && p.InstrumentSource == InstrumentSource.Venue &&
                 p.Origin == PlayOrigin.Planned && p.Status != PlayStatus.Draft &&
@@ -42,8 +44,11 @@ public sealed class MonitorDiscrepancyStore(VesselDbContext db, UnitOfWork work)
                     // Same terminal watch as MonitorStore eligibility: a linked order not yet proven absent.
                     db.OrderLinks.Any(l => l.PlayId == p.Id && l.State == OrderLinkState.Linked && !watches.Any(e =>
                         e.LinkId == l.Id && e.ResolvedAtUtc != null && e.LinkRevisionAtUtc >= l.UpdatedAtUtc && e.OrderId == l.OrderId)) ||
-                    records.Any(d => d.AccountId == accountId && d.PlayId == p.Id && d.UnverifiableAtUtc == null &&
-                        (d.State != "resolved" || d.PendingFingerprint != null))))
+                    // Evaluation membership, independent of scheduling: tracked records, even unverifiable ones.
+                    records.Any(d => d.AccountId == accountId && d.PlayId == p.Id && (d.State == DiscrepancyLifecycle.Candidate ||
+                        d.State == DiscrepancyLifecycle.Open || d.PendingFingerprint != null ||
+                        d.PublishedTransition == DiscrepancyLifecycle.Opened || d.PublishedTransition == DiscrepancyLifecycle.Unverifiable)) ||
+                    db.OrderLinks.Any(l => l.PlayId == p.Id && l.State == OrderLinkState.Linked && resting.Contains(l.OrderId))))
             .OrderBy(x => x.Id).ToListAsync(ct);
         var ids = plays.Select(x => x.Id).ToArray();
         var links = await db.OrderLinks.Where(x => x.AccountId == accountId && ids.Contains(x.PlayId))

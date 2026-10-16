@@ -452,6 +452,13 @@ namespace Vessel.Persistence.Migrations
                     b.Property<Guid?>("PlayId")
                         .HasColumnType("uuid");
 
+                    b.Property<long?>("PublishedRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("PublishedTransition")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<DateTimeOffset?>("ResolvedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -486,6 +493,8 @@ namespace Vessel.Persistence.Migrations
 
                     b.ToTable("play_discrepancies", null, t =>
                         {
+                            t.HasCheckConstraint("CK_discrepancy_published", "\"PublishedTransition\" IS NULL OR \"PublishedTransition\" IN ('opened','resolved','dismissed','unverifiable')");
+
                             t.HasCheckConstraint("CK_discrepancy_severity", "\"Severity\" IN ('info','warning','critical')");
 
                             t.HasCheckConstraint("CK_discrepancy_state", "\"State\" IN ('candidate','open','resolved','dismissed')");

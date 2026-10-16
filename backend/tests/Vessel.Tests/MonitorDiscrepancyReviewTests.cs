@@ -247,7 +247,7 @@ public sealed class MonitorDiscrepancyReviewPostgresTests
         await using var read = database.Scope(f);
         await read.Work.ExecuteAsync(async () =>
         {
-            var facts = await read.Store.LoadAsync(f.Account.Id, f.Clock.Now.AddMinutes(-1), default);
+            var facts = await read.Store.LoadAsync(f.Account.Id, f.Clock.Now.AddMinutes(-1), [], default);
             Assert.Equal(new[] { f.Play.Id, watched.Id, recent.Id }.Order(), facts.Plays.Select(x => x.Id).Order());
             Assert.DoesNotContain(facts.Fills, x => x.SourceFillId is "before-entry" or "other-contract");
             Assert.Contains(facts.Fills, x => x.SourceFillId == "after-entry");

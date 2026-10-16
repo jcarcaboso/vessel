@@ -90,14 +90,14 @@ public sealed class MonitorDiscrepancyRound3Tests
         f.Position = 1; f.Advance(60); await f.Evaluate();
         Assert.Equal("resolved", row.State);
         f.Position = 2; f.Advance(60); await f.Evaluate();
-        Assert.True(row.AwaitsConfirmation);
+        Assert.True(row.PendingFingerprint is not null);
         f.PositionsComplete = false; f.Advance(60);
         Assert.True((await f.Evaluate()).Incomplete);
         Assert.Equal("resolved", row.State);
-        Assert.True(row.AwaitsConfirmation);
+        Assert.True(row.PendingFingerprint is not null);
         f.PositionsComplete = true; f.Advance(60); await f.Confirm();
         Assert.Equal("open", row.State);
-        Assert.False(row.AwaitsConfirmation);
+        Assert.False(row.PendingFingerprint is not null);
     }
 
     [Fact] // Finding 3

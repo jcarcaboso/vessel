@@ -9,7 +9,8 @@ public sealed record DismissMonitorDiscrepancyRequest(string? Note = null);
 
 /// <summary>
 /// Retained facts the checks need, including suggested links: Open (and Planned/Paused) Plays, terminal Plays still
-/// under exit/orphan watch, with open records or that ended recently, their linked orders and fills, and the fills on
+/// under exit/orphan watch, with tracked records (even unverifiable), linked to a reported resting order or that ended
+/// recently, their linked orders and fills, and the fills on
 /// each Open Play's instrument after its earliest entry. A bounded load must report any omitted facts.
 /// </summary>
 /// <param name="Complete">False only when facts every check depends on were omitted.</param>
@@ -30,7 +31,9 @@ public interface IMonitorDiscrepancyStore
     Task<Play?> PlayAsync(Guid playId, CancellationToken ct);
     /// <param name="recentSince">Terminal Plays that ended at or after this time are loaded, so their late fills can
     /// make an earlier position snapshot unknown.</param>
-    Task<MonitorDiscrepancyFacts> LoadAsync(Guid accountId, DateTimeOffset recentSince, CancellationToken ct);
+    /// <param name="restingOrderIds">Orders the current read reports resting, even from a partial book. Terminal Plays
+    /// linked to them are evaluated: that is positive evidence of an orphaned entry or exit.</param>
+    Task<MonitorDiscrepancyFacts> LoadAsync(Guid accountId, DateTimeOffset recentSince, IReadOnlyCollection<string> restingOrderIds, CancellationToken ct);
     Task<IReadOnlyList<PlayDiscrepancy>> RecordsAsync(Guid accountId, CancellationToken ct);
     void Add(PlayDiscrepancy record);
     /// <summary>Serializes dismissal with the monitor account fence. Requires an active unit of work.</summary>

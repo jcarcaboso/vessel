@@ -47,7 +47,7 @@ public sealed class MonitorDiscrepancyRound4Tests
         Assert.Equal("resolved", row.State);
         var resolvedAt = row.ResolvedAtUtc;
         f.Position = 1; f.Advance(60); await f.Evaluate();
-        Assert.True(row.AwaitsConfirmation);
+        Assert.True(row.PendingFingerprint is not null);
         f.Retired = true; f.Advance(Lifetime + 60);
         Assert.False((await f.Evaluate()).Incomplete);
         Assert.Equal("resolved", row.State);

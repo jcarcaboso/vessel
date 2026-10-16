@@ -45,7 +45,7 @@ public sealed class MonitorDiscrepancyPostgresTests
         Assert.Empty(await second.Service.ReadAsync(f.Account.Id, null, default));
         await second.Work.ExecuteAsync(async () =>
         {
-            var facts = await second.Store.LoadAsync(f.Account.Id, f.Clock.Now, default);
+            var facts = await second.Store.LoadAsync(f.Account.Id, f.Clock.Now, [], default);
             Assert.True(facts.AssignmentLinksComplete);
             Assert.DoesNotContain(facts.Plays, x => x.Id == retro.Id);
             Assert.DoesNotContain(facts.Links, x => x.PlayId == retro.Id);
@@ -115,7 +115,7 @@ public sealed class MonitorDiscrepancyPostgresTests
             await third.Work.ExecuteAsync(async () =>
             {
                 // Only the loaded fills' orders need assignment coverage, so history cannot grow into a cap.
-                var facts = await third.Store.LoadAsync(f.Account.Id, f.Clock.Now, default);
+                var facts = await third.Store.LoadAsync(f.Account.Id, f.Clock.Now, [], default);
                 Assert.True(facts.Complete);
                 Assert.True(facts.AssignmentLinksComplete);
                 Assert.Contains(facts.AssignmentLinks!, x => x.OrderId == "extra-order");
