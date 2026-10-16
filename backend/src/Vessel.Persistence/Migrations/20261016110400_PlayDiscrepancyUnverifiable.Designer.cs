@@ -12,8 +12,8 @@ using Vessel.Persistence;
 namespace Vessel.Persistence.Migrations
 {
     [DbContext(typeof(VesselDbContext))]
-    [Migration("20261015073737_PlayDiscrepancies")]
-    partial class PlayDiscrepancies
+    [Migration("20261016110400_PlayDiscrepancyUnverifiable")]
+    partial class PlayDiscrepancyUnverifiable
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -462,6 +462,13 @@ namespace Vessel.Persistence.Migrations
                     b.Property<Guid?>("PlayId")
                         .HasColumnType("uuid");
 
+                    b.Property<long?>("PublishedRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("PublishedTransition")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<DateTimeOffset?>("ResolvedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -484,6 +491,9 @@ namespace Vessel.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<DateTimeOffset?>("UnverifiableAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.HasKey("Id");
 
                     b.HasIndex("OwnerId", "PlayId");
@@ -493,6 +503,8 @@ namespace Vessel.Persistence.Migrations
 
                     b.ToTable("play_discrepancies", null, t =>
                         {
+                            t.HasCheckConstraint("CK_discrepancy_published", "\"PublishedTransition\" IS NULL OR \"PublishedTransition\" IN ('opened','resolved','dismissed','unverifiable')");
+
                             t.HasCheckConstraint("CK_discrepancy_severity", "\"Severity\" IN ('info','warning','critical')");
 
                             t.HasCheckConstraint("CK_discrepancy_state", "\"State\" IN ('candidate','open','resolved','dismissed')");
@@ -642,6 +654,10 @@ namespace Vessel.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("Drawings")
                         .IsRequired()
                         .HasColumnType("jsonb");
@@ -728,6 +744,12 @@ namespace Vessel.Persistence.Migrations
                     b.HasIndex("OwnerId", "UpdatedAtUtc");
 
                     b.HasIndex("OwnerId", "AccountId", "VenueId", "ContractId");
+
+                    b.HasIndex("OwnerId", "Status", "EndedAtUtc", "UpdatedAtUtc")
+                        .IsDescending(false, false, true, true);
+
+                    b.HasIndex("OwnerId", "Status", "UpdatedAtUtc", "Id")
+                        .IsDescending(false, false, true, false);
 
                     b.ToTable("plays", (string)null);
                 });

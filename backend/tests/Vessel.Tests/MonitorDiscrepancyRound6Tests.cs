@@ -109,8 +109,8 @@ public sealed class MonitorDiscrepancyRound6Tests
                 OpenedAtUtc = f.Clock.Now, LastObservedAtUtc = f.Clock.Now,
                 ConfirmedAtUtc = shapes[i].Item2 ? f.Clock.Now : null });
         await scope.Db.SaveChangesAsync();
-        await scope.Db.GetService<IMigrator>().MigrateAsync("20261015073737_PlayDiscrepancies");
-        await scope.Db.GetService<IMigrator>().MigrateAsync("20261015172843_PlayDiscrepancyUnverifiable");
+        await scope.Db.GetService<IMigrator>().MigrateAsync("20261016110300_PlayDiscrepancies");
+        await scope.Db.GetService<IMigrator>().MigrateAsync("20261016110400_PlayDiscrepancyUnverifiable");
         scope.Db.ChangeTracker.Clear();
         var rows = await scope.Db.Set<PlayDiscrepancy>().OrderBy(x => x.SubjectKey).ToArrayAsync();
         Assert.Equal(new string?[] { "opened", "resolved", "dismissed", null, null }, rows.Select(x => x.PublishedTransition));
