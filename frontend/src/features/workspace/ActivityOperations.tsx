@@ -137,7 +137,7 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
         onPage={goTo} onPageSize={size => { if (isPageSize(size)) setList({ ...list, page: 1, pageSize: size }) }} />}
       {!compact && shown.unassignedFundingPayments.length > 0 && <details className="operation-scope">
         <summary>Unassigned funding</summary>
-        <p className="workspace-scope-note">Retained settlements in this account scope, before operation filters. These cannot be attributed safely and are not added to operation results.</p>
+        <p className="workspace-scope-note">Before operation filters. Not attributed to operation results.</p>
         <FundingPaymentsTable payments={shown.unassignedFundingPayments} accounts={accounts} />
         {shown.omittedUnassignedFundingPaymentCount > 0 && <p className="operation-incomplete">Showing the latest 100 unassigned settlements; older retained settlements are omitted.</p>}
       </details>}

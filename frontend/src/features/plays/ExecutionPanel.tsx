@@ -48,11 +48,11 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   const shownMonitor = monitor === undefined ? execution.monitor : monitor
   const { totals } = execution
   return <div className="execution-panel">
-    <div className="execution-header">
-      {!retrospective && <p className="muted" title={execution.tracked ? 'Orders link automatically by price and side; Vessel asks only when several plays could own one.' : undefined}>
+    {!retrospective && (!execution.tracked || !shownMonitor) && <div className="execution-header">
+      <p className="muted" title={execution.tracked ? 'Orders link automatically by price and side; Vessel asks only when several plays could own one.' : undefined}>
         {execution.tracked ? execution.checkedAtUtc ? `Checked ${time(execution.checkedAtUtc)}` : 'Not checked yet'
-          : execution.reason ?? 'Execution is not tracked for this play.'}</p>}
-    </div>
+          : execution.reason ?? 'Execution is not tracked for this play.'}</p>
+    </div>}
     {error && <p className="error" role="alert">{error}</p>}
     {shownMonitor && <MonitorPanel monitor={shownMonitor} busy={busy || monitorBusy} error={monitorError}
       retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} onManageCredential={onManageCredential} />}

@@ -8,6 +8,8 @@ import type { WorkspaceApi } from '@/api/workspace'
 import { activityFillFixture, activityFillsFixture, activityFixture, activityPage, operationFixture } from '@/test/activity-fixture'
 import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { ActivityOperations } from './ActivityOperations'
+import { AccountDetail } from './AccountDetail'
+import { render as renderWithVenues } from '@/test/render'
 import { OperationsTable } from './OperationsTable'
 import { ActivityTable } from './ActivityTable'
 import { sideDirection, resultSign, operationPriceReturn, operationDates, operationStatus } from './activity-format'
@@ -433,5 +435,17 @@ describe('activity loading, filters and pages', () => {
     expect(screen.getByText('Fixture scope.')).toBeInTheDocument()
     expect(screen.getByText(/Snapshot mismatch/)).toBeInTheDocument()
     expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(2)
+  })
+  it('keeps the account history notice once in scope and coverage, not as a repeated panel subtitle', async () => {
+    const notice = 'Incomplete fixture history; missing funding is not zero.'
+    const page = activityPage([operationFixture], { coverage: [{ accountId: accountFixture.id, contractId: null, notice }] })
+    const api = { ...client(vi.fn().mockResolvedValue(page)), snapshot: vi.fn().mockResolvedValue(null) }
+    renderWithVenues(<AccountDetail account={{ ...accountFixture, venueId: 'hyperliquid', syncStatus: 'synced', historyNotice: notice }}
+      api={api} refreshing={false} onSync={vi.fn()} onBack={vi.fn()} onManage={vi.fn()} />)
+    const notices = await screen.findAllByText(/Incomplete fixture history/)
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).not.toBeVisible()
+    await userEvent.click(screen.getByText('Scope and coverage', { selector: 'summary' }))
+    expect(notices[0]).toBeVisible()
   })
 })

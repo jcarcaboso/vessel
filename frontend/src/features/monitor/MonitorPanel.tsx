@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { AccountMonitor, MonitorDiscrepancy, MonitorWatch } from '@/api/monitor'
 import { Button } from '@/components/ui/button'
+import { InfoTip } from '@/components/ui/info-tip'
 import { RefreshCw } from 'lucide-react'
 import './monitor.css'
 
@@ -48,14 +49,18 @@ export function MonitorPanel({ monitor, busy, error, retryAtUtc, statusUnavailab
   return <section className="monitor-panel" aria-label="Background monitor">
     <div className="monitor-heading">
       <div><strong>{labels[monitor.state]}</strong>
-        <p className="muted">Last successful check {time(monitor.lastSuccessAtUtc)} · next scheduled {time(monitor.nextRunAtUtc)}</p>
+        {(monitor.lastSuccessAtUtc || monitor.nextRunAtUtc) && <p className="muted">
+          {monitor.lastSuccessAtUtc && <>Last success {time(monitor.lastSuccessAtUtc)}</>}
+          {monitor.lastSuccessAtUtc && monitor.nextRunAtUtc && ' · '}
+          {monitor.nextRunAtUtc && <>Next {time(monitor.nextRunAtUtc)}</>}
+        </p>}
       </div>
       {/* A new cooldown remounts the button so its countdown starts from the current time. */}
       <CheckButton key={until} until={until} monitor={monitor} busy={busy} blocked={statusUnavailable} onCheck={onCheck} />
     </div>
     {!monitor.workerOnline && <p className="monitor-warning">Worker offline. Scheduled checks and requested runs may be delayed.</p>}
     {monitor.state === 'stale' && <p className="monitor-warning">Fills may be missing. Last attempt {time(monitor.lastAttemptAtUtc)}.</p>}
-    {monitor.state === 'degraded' && <p className="monitor-warning">The latest read has incomplete coverage. Discrepancies are not corrections.</p>}
+    {monitor.state === 'degraded' && <p className="monitor-warning">Incomplete venue coverage.</p>}
     {monitor.error && <p className="monitor-warning">{monitor.error}</p>}
     {monitor.state === 'credential-error' && (onManageCredential
       ? <Button size="sm" variant="outline" onClick={onManageCredential}>Manage account credential</Button>
@@ -80,8 +85,7 @@ export function MonitorDiscrepancies({ discrepancies, busy, onDismiss }: {
   }
   if (!discrepancies.length) return null
   return <section className="monitor-discrepancies" aria-label="Monitor discrepancies">
-    <h3>Monitor discrepancies</h3>
-    <p className="muted">Dismissal acknowledges a warning. It does not change executions or stop checks, including resting exits after closure or cancellation.</p>
+    <h3>Monitor discrepancies <InfoTip label="About dismissing warnings">Dismissal acknowledges a warning. It does not change executions or stop checks, including resting exits after closure or cancellation.</InfoTip></h3>
     {error && <p className="error" role="alert">{error}</p>}
     <ul>{discrepancies.map(item => <li key={item.id}>
       <div><strong>{item.kind.replaceAll('-', ' ').replaceAll('_', ' ')} · {item.contractId}</strong>
@@ -111,8 +115,7 @@ const watchRoles = { entry: 'Entry', stop: 'Stop', target: 'Target', exit: 'Exit
 export function MonitorWatches({ watches }: { watches: MonitorWatch[] }) {
   if (!watches.length) return null
   return <section className="monitor-watches" aria-label="Watched orders">
-    <h3>Watched orders</h3>
-    <p className="muted">After a Play ends, its linked orders are checked until the venue reports them filled, cancelled or no longer open.</p>
+    <h3>Watched orders <InfoTip label="About watched orders">After a Play ends, its linked orders are checked until the venue reports them filled, cancelled or no longer open.</InfoTip></h3>
     <ul>{watches.map(watch => <li key={watch.linkId}>
       <div><strong>{watchRoles[watch.role]} order {watch.orderId}</strong>
         <span className="monitor-badge" data-watch={watch.state}>{watchStates[watch.state]}</span></div>

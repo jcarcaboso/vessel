@@ -31,6 +31,17 @@ const execution: PlayExecution = {
 }
 
 describe('execution panel', () => {
+  it('shows the check timestamp only once, retaining the fallback and untracked reason', () => {
+    const props = { execution, error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn() }
+    const view = render(<ExecutionPanel {...props} />)
+    expect(screen.queryByText(/^Checked /)).not.toBeInTheDocument()
+    expect(screen.getByText(/^Last success /)).toBeVisible()
+    view.rerender(<ExecutionPanel {...props} monitor={null} />)
+    expect(screen.getByText(/^Checked /)).toBeVisible()
+    view.rerender(<ExecutionPanel {...props} execution={{ ...execution, tracked: false, reason: 'This venue does not track orders.' }} />)
+    expect(screen.getByText('This venue does not track orders.')).toBeVisible()
+  })
+
   it('says when the venue already took fees off the closed PnL', () => {
     const net = { ...execution, totals: { ...execution.totals, closedPnlBasis: 'net-of-fee' as const } }
     const { unmount } = render(<ExecutionPanel execution={execution} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)

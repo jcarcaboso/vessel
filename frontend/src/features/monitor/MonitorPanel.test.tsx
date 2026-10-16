@@ -169,7 +169,9 @@ describe('monitor controls', () => {
     const dismiss = vi.fn().mockResolvedValue(undefined)
     const view = render(<MonitorDiscrepancies discrepancies={[discrepancyFixture]} busy={false} onDismiss={dismiss} />)
     expect(screen.getByText(/0.100000000000000001/)).toBeInTheDocument()
-    expect(screen.getByText(/does not change executions or stop checks/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'About dismissing warnings' })).toHaveAccessibleDescription(
+      'Dismissal acknowledges a warning. It does not change executions or stop checks, including resting exits after closure or cancellation.')
+    expect(screen.getByText(/does not change executions or stop checks/)).toHaveClass('sr-only')
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '  Investigating.  ' } })
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Dismiss' })))
     expect(dismiss).toHaveBeenCalledWith(discrepancyFixture.id, 'Investigating.')
@@ -200,6 +202,8 @@ describe('monitor controls', () => {
       { ...base, linkId: 'l-3', orderId: 'entry-3', role: 'entry', state: 'unverifiable', endedAtUtc: '2026-10-21T10:00:00Z' },
     ]} />)
     expect(screen.getByRole('region', { name: 'Watched orders' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'About watched orders' })).toHaveAccessibleDescription(
+      'After a Play ends, its linked orders are checked until the venue reports them filled, cancelled or no longer open.')
     expect(screen.getByText('Watching')).toHaveAttribute('data-watch', 'watching')
     expect(screen.getByText('No longer resting')).toHaveAttribute('data-watch', 'resolved')
     expect(screen.getByText('Unverifiable')).toHaveAttribute('data-watch', 'unverifiable')
@@ -207,6 +211,17 @@ describe('monitor controls', () => {
     expect(screen.getByText('Entry order entry-3')).toBeInTheDocument()
     view.rerender(<MonitorWatches watches={[]} />)
     expect(screen.queryByRole('region', { name: 'Watched orders' })).not.toBeInTheDocument()
+  })
+  it('omits empty timing boilerplate but retains the available schedule and warning state', () => {
+    const view = render(<MonitorPanel monitor={{ ...monitorFixture, lastSuccessAtUtc: null, nextRunAtUtc: null }}
+      busy={false} error={null} onCheck={vi.fn()} />)
+    expect(screen.queryByText(/not recorded/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check' })).toBeEnabled()
+    view.rerender(<MonitorPanel monitor={{ ...monitorFixture, state: 'degraded', lastSuccessAtUtc: null }}
+      busy={false} error={null} onCheck={vi.fn()} />)
+    expect(screen.getByText(/^Next /)).toBeVisible()
+    expect(screen.queryByText(/Last success/)).not.toBeInTheDocument()
+    expect(screen.getByText('Incomplete venue coverage.')).toBeVisible()
   })
   it('keeps a failed dismissal visible without claiming success', async () => {
     render(<MonitorDiscrepancies discrepancies={[discrepancyFixture]} busy={false} onDismiss={vi.fn().mockRejectedValue(new Error('failed'))} />)
