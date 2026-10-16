@@ -44,10 +44,13 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     {
         search = search?.Trim();
         if (search?.Length > MaxSearchLength) throw new ProblemException(400, $"Search is limited to {MaxSearchLength} characters.");
+        search = string.IsNullOrEmpty(search) ? null : search;
+        // Without a scope the Plays page lists every saved Play; Overview scopes follow enabled accounts only.
+        if (scope is null) return new(search, null);
         var listScope = ListScope.Parse(scope);
         if (!await store.ScopeExistsAsync(listScope, ct))
             throw new ProblemException(404, listScope.Kind == "portfolio" ? "Portfolio not found." : "Account not found.");
-        return new(string.IsNullOrEmpty(search) ? null : search, listScope);
+        return new(search, listScope);
     }
 
     private static PlayListView View(string? view) => view switch

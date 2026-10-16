@@ -50,7 +50,8 @@ public sealed record PlayCountsDto(int Drafts, int Progress, int Review, int Rev
 public enum PlayListView { Drafts, Progress, Review, Reviewed, Closed, Cancelled, All }
 
 /// <summary>Search is a trimmed, case-insensitive substring of title or instrument; the scope keeps enabled accounts only.</summary>
-public sealed record PlayListFilter(string? Search, ListScope Scope);
+/// <summary>A null scope is the Plays page: every owner Play, including those on disabled accounts.</summary>
+public sealed record PlayListFilter(string? Search, ListScope? Scope);
 
 /// <summary>Summary columns only. Plan, drawings and review text are never read for a list.</summary>
 public sealed record PlayListRow

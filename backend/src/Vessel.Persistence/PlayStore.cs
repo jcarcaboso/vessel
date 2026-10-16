@@ -45,19 +45,23 @@ public sealed class PlayStore(VesselDbContext db) : IPlayStore
     // Every character char.IsWhiteSpace accepts, so SQL "has a review" matches Play.HasReview exactly.
     private static readonly char[] Space = "\t\n\v\f\r \u0085\u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000".ToCharArray();
 
-    // Owner-filtered Plays on enabled accounts in the scope, projected to summary columns only.
+    // Owner-filtered Plays, projected to summary columns only. A scope keeps enabled accounts in it; no scope keeps every Play.
     private IQueryable<PlayListRow> Rows(PlayListFilter filter)
     {
-        var accounts = db.Accounts.Where(a => a.IsEnabled);
-        var id = filter.Scope.Id;
-        accounts = filter.Scope.Kind switch
+        var plays = db.Plays.AsQueryable();
+        if (filter.Scope is { } scope)
         {
-            "unassigned" => accounts.Where(a => a.PortfolioId == null),
-            "portfolio" => accounts.Where(a => a.PortfolioId == id),
-            "account" => accounts.Where(a => a.Id == id),
-            _ => accounts
-        };
-        var plays = db.Plays.Where(p => accounts.Any(a => a.Id == p.AccountId));
+            var accounts = db.Accounts.Where(a => a.IsEnabled);
+            var id = scope.Id;
+            accounts = scope.Kind switch
+            {
+                "unassigned" => accounts.Where(a => a.PortfolioId == null),
+                "portfolio" => accounts.Where(a => a.PortfolioId == id),
+                "account" => accounts.Where(a => a.Id == id),
+                _ => accounts
+            };
+            plays = plays.Where(p => accounts.Any(a => a.Id == p.AccountId));
+        }
         if (filter.Search is { } search)
         {
             var pattern = "%" + search.Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_") + "%";

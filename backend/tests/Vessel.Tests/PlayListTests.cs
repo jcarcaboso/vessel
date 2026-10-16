@@ -110,7 +110,7 @@ public sealed class PlayListPostgresTests
         var names = seeded.Plays.ToDictionary(p => p.Value, p => p.Key);
         await using var db = database.Context(seeded.Owner);
         var service = Service(db);
-        async Task<string[]> View(string? view, string? q = null, string? scope = null, string? page = null, string? size = null) =>
+        async Task<string[]> View(string? view, string? q = null, string? scope = "all", string? page = null, string? size = null) =>
             (await service.ListAsync(view, q, scope, page, size, default)).Plays.Select(p => names[p.Id]).ToArray();
 
         Assert.Equal(["d2", "d1"], await View("drafts"));
@@ -134,7 +134,10 @@ public sealed class PlayListPostgresTests
         foreach (var (key, id) in seeded.Plays.Where(p => p.Key != "hidden"))
             Assert.Equal((await service.GetAsync(id, default)).Summary, (await service.ListAsync("all", null, null, null, "100", default)).Plays.Single(p => p.Id == id));
 
-        Assert.Equal(new PlayCountsDto(2, 3, 3, 3, 4, 2, 11), await service.CountsAsync(null, null, default));
+        Assert.Equal(new PlayCountsDto(2, 3, 3, 3, 4, 2, 11), await service.CountsAsync(null, "all", default));
+        // The unscoped Plays page also lists Plays on disabled accounts; Overview scopes never do.
+        Assert.Equal(["hidden", "d2", "d1"], await View("drafts", scope: null));
+        Assert.Equal(new PlayCountsDto(3, 3, 3, 3, 4, 2, 12), await service.CountsAsync(null, null, default));
     }
 
     [PostgresFact]
@@ -200,7 +203,7 @@ public sealed class PlayListPostgresTests
         await using var db = database.Context(seeded.Owner);
         var service = Service(db);
         async Task<string[]> Find(string? q) =>
-            (await service.ListAsync("all", q, null, null, "100", default)).Plays.Select(p => names[p.Id]).Order().ToArray();
+            (await service.ListAsync("all", q, "all", null, "100", default)).Plays.Select(p => names[p.Id]).Order().ToArray();
 
         Assert.Equal(["d1"], await Find("%"));
         Assert.Equal(["d1"], await Find("_"));
@@ -212,7 +215,8 @@ public sealed class PlayListPostgresTests
         Assert.Empty(await Find("b_c"));
         Assert.Equal(11, (await Find("   ")).Length);
         Assert.Equal(11, (await Find(null)).Length);
-        Assert.Equal(new PlayCountsDto(1, 1, 0, 0, 0, 0, 2), await service.CountsAsync("breakout", null, default));
+        Assert.Equal(new PlayCountsDto(1, 1, 0, 0, 0, 0, 2), await service.CountsAsync("breakout", "all", default));
+        Assert.Equal(new PlayCountsDto(2, 1, 0, 0, 0, 0, 3), await service.CountsAsync("breakout", null, default));
         Assert.Empty(await Find(" " + new string('x', 100) + " "));
         Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Find(new string('x', 101)))).StatusCode);
     }
@@ -230,10 +234,10 @@ public sealed class PlayListPostgresTests
         }
         await using var reading = database.Context(seeded.Owner);
         var service = Service(reading);
-        var drafts = await service.ListAsync("drafts", null, null, "3", "5", default);
+        var drafts = await service.ListAsync("drafts", null, "all", "3", "5", default);
         Assert.Equal(("drafts", 1, 200, 202, 200), (drafts.View, drafts.Page, drafts.PageSize, drafts.TotalCount, drafts.Plays.Count));
         Assert.Equal("Bulk 199", drafts.Plays[0].Title);
-        var progress = await service.ListAsync("progress", null, null, null, null, default);
+        var progress = await service.ListAsync("progress", null, "all", null, null, default);
         Assert.Equal((1, 200, 3, 3), (progress.Page, progress.PageSize, progress.TotalCount, progress.Plays.Count));
 
         var page = await service.ListAsync("closed", null, null, "2", "3", default);
@@ -243,10 +247,11 @@ public sealed class PlayListPostgresTests
         var empty = await service.ListAsync("cancelled", "nothing matches", null, "7", null, default);
         Assert.Equal((1, 25, 0), (empty.Page, empty.PageSize, empty.TotalCount));
         Assert.Empty(empty.Plays);
-        var all = await service.ListAsync("all", null, null, "3", "100", default);
+        var all = await service.ListAsync("all", null, "all", "3", "100", default);
         Assert.Equal((3, 11), (all.Page, all.Plays.Count));
         Assert.Equal(211, all.TotalCount);
-        Assert.Equal(new PlayCountsDto(202, 3, 3, 3, 4, 2, 211), await service.CountsAsync(null, null, default));
+        Assert.Equal(new PlayCountsDto(202, 3, 3, 3, 4, 2, 211), await service.CountsAsync(null, "all", default));
+        Assert.Equal(new PlayCountsDto(203, 3, 3, 3, 4, 2, 212), await service.CountsAsync(null, null, default));
     }
 
     [PostgresFact]

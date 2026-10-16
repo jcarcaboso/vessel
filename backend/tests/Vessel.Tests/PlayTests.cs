@@ -43,7 +43,7 @@ internal sealed class MemoryPlayStore(Guid owner) : IPlayStore
         _ => true
     });
     private IEnumerable<Play> Listed(PlayListView view, PlayListFilter filter) => Plays.Where(p => p.OwnerId == owner &&
-        Accounts.Any(a => a.Id == p.AccountId && filter.Scope.Includes(a.Id, a.PortfolioId, a.IsEnabled)) &&
+        (filter.Scope is not { } scope || Accounts.Any(a => a.Id == p.AccountId && scope.Includes(a.Id, a.PortfolioId, a.IsEnabled))) &&
         (filter.Search is null || p.Title.Contains(filter.Search, StringComparison.OrdinalIgnoreCase) ||
             p.ContractId?.Contains(filter.Search, StringComparison.OrdinalIgnoreCase) == true) && view switch
         {
@@ -281,7 +281,8 @@ public sealed class PlayServiceTests
         Assert.Equal(("all", 3, 1), (all.View, all.Page, all.Plays.Count));
         Assert.Equal(201, (await service.CountsAsync(" btc ", $"account:{venue.Id}", default)).Drafts);
         venue.UpdateSettings(venue.Name, null, false);
-        Assert.Equal(0, (await service.CountsAsync(null, null, default)).All);
+        Assert.Equal(0, (await service.CountsAsync(null, "all", default)).All);
+        Assert.Equal(201, (await service.CountsAsync(null, null, default)).All);
     }
 
     [Fact]
