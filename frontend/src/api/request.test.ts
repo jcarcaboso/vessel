@@ -107,7 +107,25 @@ describe('shared API request pipeline', () => {
     await expect(api.runAccountMonitor(accountFixture.id)).rejects.toThrow()
     await expect(api.discoverAccounts('lighter', `0x${'a'.repeat(40)}`)).rejects.toThrow()
     await api.evidenceImage(savedPlayFixture.summary.id)
-    expect(timeout.mock.calls.map(call => call[1])).toEqual([8_000, 10_000, 15_000, 25_000, 30_000, 10_000, 30_000, 60_000])
+    expect(timeout.mock.calls.map(call => call[1])).toEqual([8_000, 10_000, 15_000, 25_000, 90_000, 10_000, 30_000, 60_000])
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('allows sync to finish its sequential venue reads', async () => {
+    vi.useFakeTimers()
+    let finish!: (response: Response) => void
+    let signal!: AbortSignal
+    vi.stubGlobal('fetch', vi.fn((_path: string, init: RequestInit) => new Promise<Response>((resolve, reject) => {
+      finish = resolve
+      signal = init.signal!
+      signal.addEventListener('abort', () => reject(new Error('private transport detail')), { once: true })
+    })))
+    const api = createWorkspaceApi('token')
+    const result = api.sync(accountFixture.id).then(value => ({ value }), error => ({ error }))
+    await vi.advanceTimersByTimeAsync(65_000)
+    expect(signal.aborted).toBe(false)
+    finish(new Response(JSON.stringify(accountFixture)))
+    expect(await result).toEqual({ value: accountFixture })
     expect(vi.getTimerCount()).toBe(0)
   })
 

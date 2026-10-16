@@ -159,7 +159,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         var account = await plays.AccountAsync(accountId, ct) ?? throw new ProblemException(404, "Account not found.");
         if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before reviewing imported operations.");
         var facts = await diary.ActivityAsync(accountId, ct);
-        var operation = OperationAggregator.Aggregate(facts.Fills, facts.FillPlayIds, facts.Snapshots).SingleOrDefault(o => o.Id == operationId)
+        var operation = OperationAggregator.Aggregate(facts.Fills, facts.FillPlayIds, facts.Snapshots, facts.FundingPayments).SingleOrDefault(o => o.Id == operationId)
             ?? throw new ProblemException(404, "Retained operation not found. Reload Activity.");
         var bounded = operation with { Fills = operation.Fills.Take(ActivityService.MaxFillsPerOperation).ToList(),
             OmittedFillCount = operation.OmittedFillCount + Math.Max(0, operation.Fills.Count - ActivityService.MaxFillsPerOperation) };

@@ -165,6 +165,14 @@ Distinct active plays that can share the same broker account and instrument. The
 A venue-reported fill retained with its source identity and provenance, independently of any thesis or play association.
 _Avoid_: Original trading intent
 
+**Funding payment**:
+A settled perpetual-contract cashflow reported by a venue for an account. A positive payment is received and a negative payment is paid; a published funding rate is not a payment.
+_Avoid_: Trading fee, estimated funding
+
+**Operation**:
+A position round trip reconstructed from an account's executions on one native contract, not an inferred Play. Its result distinguishes execution P&L, trading fees and attributable settled funding.
+_Avoid_: Original trading intent, retrospective Play
+
 **Manual execution**:
 An actual entry or exit recorded by the owner, with its source, time, price,
 quantity and known or unknown costs. It is not a venue-confirmed import.

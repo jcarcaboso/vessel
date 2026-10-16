@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton, SkeletonStatus } from '@/components/ui/skeleton'
 import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { ActivityTable } from './ActivityTable'
+import { FundingPaymentsTable } from './FundingPaymentsTable'
 
 /** An expanded operation's executions, read on demand. A 404 means the history changed under the page. */
 export function OperationFills({ api, operation, accounts, onReload, refreshGeneration = 0 }: {
@@ -16,7 +17,8 @@ export function OperationFills({ api, operation, accounts, onReload, refreshGene
   const [retry, setRetry] = useState(0)
   const { accountId, id } = operation
   // Re-read on every accepted Activity response and when the row's facts change, not on every render.
-  const key = JSON.stringify([accountId, id, operation.fillCount, operation.lastOccurredAtUtc, operation.playId, operation.playAssociation, refreshGeneration, retry])
+  const key = JSON.stringify([accountId, id, operation.fillCount, operation.lastOccurredAtUtc, operation.playId, operation.playAssociation,
+    operation.fundingPaymentCount, operation.fundingAsOfUtc, refreshGeneration, retry])
   const [result, setResult] = useState<{ api: WorkspaceApi; key: string; fills?: ActivityFills; error?: string; changed?: boolean } | null>(null)
   useEffect(() => {
     const controller = new AbortController()
@@ -45,5 +47,10 @@ export function OperationFills({ api, operation, accounts, onReload, refreshGene
       : <p className="workspace-scope-note">Execution rows were omitted by the response limit.</p>}
     {flips.length > 0 && <details className="operation-originals"><summary>Original flip facts</summary><ActivityTable fills={flips.map(part => part.fill)} accounts={accounts} /></details>}
     {omittedFillCount > 0 && <p className="operation-incomplete">Showing the first {fills.length.toLocaleString('en-US')} executions; operation totals include all {operation.fillCount.toLocaleString('en-US')}.</p>}
+    {result.fills.fundingPayments.length > 0 && <>
+      <h4>Settled funding</h4>
+      <FundingPaymentsTable payments={result.fills.fundingPayments} />
+    </>}
+    {result.fills.omittedFundingPaymentCount > 0 && <p className="operation-incomplete">Some funding rows are omitted; the operation funding sum includes all attributed settlements.</p>}
   </>
 }

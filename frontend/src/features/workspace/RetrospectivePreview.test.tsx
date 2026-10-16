@@ -12,7 +12,8 @@ import { ActivityOperations } from './ActivityOperations'
 function setup(preview: RetrospectivePreview = retrospectiveFixture, overrides: Partial<WorkspaceApi> = {}) {
   const api = {
     activity: vi.fn().mockResolvedValue(activityPage([preview.operation], { scopeNote: 'Synthetic retained facts only.' })),
-    activityFills: vi.fn().mockResolvedValue({ operationId: preview.operation.id, fills: preview.operation.fills, omittedFillCount: preview.operation.omittedFillCount }),
+    activityFills: vi.fn().mockResolvedValue({ operationId: preview.operation.id, fills: preview.operation.fills,
+      omittedFillCount: preview.operation.omittedFillCount, fundingPayments: [], omittedFundingPaymentCount: 0 }),
     retrospectivePreview: vi.fn().mockResolvedValue(preview),
     createRetrospectivePlay: vi.fn().mockResolvedValue(savedPlayFixture), ...overrides,
   } as unknown as WorkspaceApi

@@ -15,11 +15,13 @@ export const operationFixture: ActivityOperation = {
   quantity: '2', totalEnteredQuantity: '2', totalExitedQuantity: '0', openQuantity: '2', averageEntryPrice: activityFillFixture.price,
   averageExitPrice: null, entryOrderCount: 1, exitOrderCount: 0, fillCount: 1, reportedClosedPnlUsd: '0', grossClosedPnlUsd: '0',
   stablecoinFeesNominalUsd: '0.01', otherFees: [], netResultUsd: '-0.01', pnlBasis: 'gross', playId: null, playAssociation: 'unassigned',
+  totalResultUsd: null, fundingNetUsd: null, fundingStatus: 'unavailable', fundingPnlBasis: 'unknown', fundingAsOfUtc: null, fundingPaymentCount: 0,
   coverage: [],
 }
 /** The same operation with its rows, as a retrospective preview carries it. */
 export const operationWithFillsFixture: OperationWithFills = { ...operationFixture, fills: operationFillsFixture, omittedFillCount: 0 }
-export const activityFillsFixture: ActivityFills = { operationId: operationFixture.id, fills: operationFillsFixture, omittedFillCount: 0 }
+export const activityFillsFixture: ActivityFills = { operationId: operationFixture.id, fills: operationFillsFixture, omittedFillCount: 0,
+  fundingPayments: [], omittedFundingPaymentCount: 0 }
 
 /** A backend-shaped page: counts, facets and order follow the given operations unless overridden. */
 export function activityPage(operations: ActivityOperation[], overrides: Partial<ActivityPage> = {}): ActivityPage {
@@ -28,7 +30,7 @@ export function activityPage(operations: ActivityOperation[], overrides: Partial
     operations, page: 1, pageSize: 25, totalCount, scopeCount: totalCount, retainedFillCount: operations.reduce((n, op) => n + op.fillCount, 0),
     asOfUtc: '2026-10-13T00:00:00Z', version: 'fixture-v1',
     facets: { accountIds: [...new Set(operations.map(op => op.accountId))].sort(), contracts: [...new Set(operations.map(op => op.contractId))].sort() },
-    coverage: [], scopeNote: 'Retained fixture fills only.', ...overrides,
+    coverage: [], scopeNote: 'Retained fixture fills only.', unassignedFundingPayments: [], omittedUnassignedFundingPaymentCount: 0, ...overrides,
   }
 }
 export const activityFixture: ActivityPage = activityPage([operationFixture])
@@ -49,6 +51,7 @@ export const unknownPeakOperationFixture: OperationWithFills = {
   quantity: null, totalEnteredQuantity: '3', totalExitedQuantity: '3', openQuantity: '0', averageEntryPrice: '100', averageExitPrice: '100',
   entryOrderCount: 2, exitOrderCount: 2, fillCount: 4, reportedClosedPnlUsd: '30', grossClosedPnlUsd: '30', stablecoinFeesNominalUsd: '3',
   otherFees: [], netResultUsd: '27', pnlBasis: 'gross', playId: null, playAssociation: 'unassigned',
+  totalResultUsd: null, fundingNetUsd: null, fundingStatus: 'unavailable', fundingPnlBasis: 'unknown', fundingAsOfUtc: null, fundingPaymentCount: 0,
   coverage: ['Effect-consistent orders at a shared timestamp disagree on peak position; maximum quantity is unknown, while operation boundaries and totals are retained.'],
   fills: [peakFill(1, 0, 'buy', '2'), peakFill(2, 1, 'buy', '1'), peakFill(3, 1, 'sell', '1', '10', '1'), peakFill(4, 2, 'sell', '2', '20', '2')],
   omittedFillCount: 0,

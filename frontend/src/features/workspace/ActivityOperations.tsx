@@ -11,6 +11,7 @@ import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { OperationsSkeleton, OperationsTable } from './OperationsTable'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { RetrospectivePreview } from './RetrospectivePreview'
+import { FundingPaymentsTable } from './FundingPaymentsTable'
 import './activity-operations.css'
 
 /** Overview shows this many of the latest operations in its scope, without a pager. */
@@ -134,6 +135,12 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
       </div>
       {!compact && <Pager label="Activity pages" page={shown.page} pageSize={shown.pageSize} totalCount={shown.totalCount} disabled={pending}
         onPage={goTo} onPageSize={size => { if (isPageSize(size)) setList({ ...list, page: 1, pageSize: size }) }} />}
+      {!compact && shown.unassignedFundingPayments.length > 0 && <details className="operation-scope">
+        <summary>Unassigned funding</summary>
+        <p className="workspace-scope-note">Retained settlements in this account scope, before operation filters. These cannot be attributed safely and are not added to operation results.</p>
+        <FundingPaymentsTable payments={shown.unassignedFundingPayments} accounts={accounts} />
+        {shown.omittedUnassignedFundingPaymentCount > 0 && <p className="operation-incomplete">Showing the latest 100 unassigned settlements; older retained settlements are omitted.</p>}
+      </details>}
       {!compact && <details className="operation-scope"><summary>Scope and coverage</summary><p className="workspace-scope-note">{shown.scopeNote}</p>{shown.coverage.filter(c => enabled.some(a => a.id === c.accountId)).map((c, index) => <p className="workspace-scope-note" key={index}><strong>{accounts.find(a => a.id === c.accountId)?.name}{c.contractId ? ` · ${c.contractId}` : ''}</strong>: {c.notice}</p>)}</details>}
     </>}
     </div>

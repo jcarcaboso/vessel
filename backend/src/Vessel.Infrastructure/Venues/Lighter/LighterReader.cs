@@ -17,7 +17,7 @@ namespace Vessel.Infrastructure.Venues.Lighter;
 /// There is no credential on the HttpClient, catalogue, or string-source overload.
 /// </summary>
 public sealed partial class LighterReader
-    : IPerpetualVenueReader, IVenueOrderReader, ICandleReader, IVenueAccountDiscovery, IVenueCredentialVerifier
+    : IPerpetualVenueReader, IVenueOrderReader, ICandleReader, IVenueAccountDiscovery, IVenueCredentialVerifier, IVenueFundingReader
 {
     private const int PageSize = 100, MaxPages = 5, MaxMarkets = 2048, MaxCandles = 500;
     // Bound parallel manual imports across scoped readers, per exchange: each has its own rate limits.

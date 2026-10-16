@@ -26,9 +26,11 @@ public sealed class DiaryStore(VesselDbContext db, UnitOfWork unitOfWork) : IDia
         var accounts = await db.Accounts.Where(a => a.Id == accountId && a.IsEnabled).AsNoTracking().ToListAsync(ct);
         var fills = await db.Fills.Where(f => f.AccountId == accountId).AsNoTracking().ToListAsync(ct);
         var snapshots = await db.Snapshots.Where(s => s.AccountId == accountId).Include(s => s.Positions).AsNoTracking().ToListAsync(ct);
+        var funding = await db.FundingPayments.Where(p => p.AccountId == accountId).AsNoTracking().ToListAsync(ct);
         var links = await db.OrderLinks.Where(l => l.AccountId == accountId && l.State == OrderLinkState.Linked).AsNoTracking().ToListAsync(ct);
         var byOrder = links.ToDictionary(l => l.OrderId, l => l.PlayId);
-        return new(accounts, fills, snapshots, fills.Where(f => byOrder.ContainsKey(f.OrderId)).ToDictionary(f => f.Id, f => byOrder[f.OrderId]));
+        return new(accounts, fills, snapshots, fills.Where(f => byOrder.ContainsKey(f.OrderId)).ToDictionary(f => f.Id, f => byOrder[f.OrderId]))
+        { FundingPayments = funding };
     }
     public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct) =>
         db.Orders.Where(o => o.AccountId == accountId).AsNoTracking().ToListAsync(ct);

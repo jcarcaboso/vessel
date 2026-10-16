@@ -15,7 +15,7 @@ function Result({ value }: { value: string | null }) {
 
 function OperationsHead({ compact }: { compact: boolean }) {
   return <thead><tr>
-    <th>Operation</th><th>Account / time <span className="operation-timezone">UTC</span></th><th title="Peak position quantity">Size</th>{!compact && <><th>Average entry</th><th>Average exit</th><th title="Before reported fees; venue-reported P&L is preserved in the executions">Closed P&amp;L</th><th title="Stablecoin fees in nominal USD; other tokens listed separately">Fees</th></>}<th title="After reported fees, deducted once. Realized executions only; excludes unrealized P&L.">Net result</th>{!compact && <th>Play</th>}
+    <th>Operation</th><th>Account / time <span className="operation-timezone">UTC</span></th><th title="Peak position quantity">Size</th>{!compact && <><th>Average entry</th><th>Average exit</th><th title="Before reported fees; venue-reported P&L is preserved in the executions">Closed P&amp;L</th><th title="Stablecoin fees in nominal USD; other tokens listed separately">Fees</th><th title="Settled funding in nominal USD: positive received, negative paid. Partial coverage is not zero.">Funding</th></>}<th title="Fee-adjusted reported execution P&L. Funding inclusion may be unverified; expand for the separate combined total.">Net result</th>{!compact && <th>Play</th>}
   </tr></thead>
 }
 
@@ -39,7 +39,7 @@ export function OperationsSkeleton({ compact = false, rows, note = false }: { co
           <td className="numeric">{bar('skeleton-size')}{open && bar('skeleton-small skeleton-remaining')}</td>
           {!compact && <><td className="numeric">{bar('skeleton-price')}</td><td className="numeric">{bar('skeleton-price')}</td>
             <td className="numeric"><div className="operation-pnl">{bar('skeleton-money')}{!open && <Skeleton className="skeleton-return" />}</div></td>
-            <td className="numeric">{bar('skeleton-fee')}</td></>}
+            <td className="numeric">{bar('skeleton-fee')}</td><td className="numeric">{bar('skeleton-fee')}</td></>}
           <td className="numeric">{bar('skeleton-money')}</td>
           {!compact && <td><Skeleton className="skeleton-badge" /></td>}
         </tr>
@@ -77,12 +77,18 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
       <td><strong>{accounts.find(a => a.id === op.accountId)?.name ?? 'Account'}</strong><small className="operation-dates" title={`Opened: ${op.openedAtUtc ?? 'unknown'}; ${op.closedAtUtc ? `Closed: ${op.closedAtUtc}` : `Last execution: ${op.lastOccurredAtUtc}`}`}>{operationDates(op)}</small>{op.openedAtUtc !== null && op.closedAtUtc !== null && <small>{duration(op.openedAtUtc, op.closedAtUtc)}</small>}</td>
       <td className="numeric"><strong title={op.quantity === null ? 'Peak quantity unknown' : `Peak quantity: ${op.quantity}`}>{op.quantity === null ? '—' : amount(op.quantity)}</strong>{resultSign(op.openQuantity) === 'positive' && <small>Remaining {amount(op.openQuantity!)}</small>}</td>
       {!compact && <><td className="numeric operation-entry"><span title={op.averageEntryPrice ?? 'Unknown'}>{money(op.averageEntryPrice)}</span></td><td className={`numeric operation-result ${priceTone}`}><span title={op.averageExitPrice ?? 'Unknown'}>{money(op.averageExitPrice)}</span></td><td className="numeric"><div className="operation-pnl"><Result value={op.grossClosedPnlUsd} />{priceReturn !== null && <span className={`operation-return operation-result ${priceTone}`} title="Average entry-to-exit price return, direction-adjusted, before fees and leverage. Not an account or margin return.">{priceReturn}</span>}</div></td>
-      <td className="numeric operation-fees"><span title={op.stablecoinFeesNominalUsd}>{money(op.stablecoinFeesNominalUsd)}</span>{op.otherFees.map(f => <small key={f.token}>{amount(f.amount)} {f.token}</small>)}</td></>}
+      <td className="numeric operation-fees"><span title={op.stablecoinFeesNominalUsd}>{money(op.stablecoinFeesNominalUsd)}</span>{op.otherFees.map(f => <small key={f.token}>{amount(f.amount)} {f.token}</small>)}</td>
+      <td className="numeric"><Result value={op.fundingNetUsd} />{op.fundingStatus !== 'complete' && <small>{op.fundingStatus === 'partial' ? 'Partial' : 'Unavailable'}</small>}</td></>}
       <td className="numeric operation-net"><Result value={op.netResultUsd} /></td>
       {!compact && <td>{op.playId ? <span className="workspace-badge" title={op.playId}>Play {op.playId.slice(0, 8)}</span> : <span className="workspace-badge">{op.playAssociation === 'mixed' ? 'Mixed' : 'Unassigned'}</span>}</td>}
-    </tr>{open && <tr id={`operation-${op.id}`}><td colSpan={compact ? 4 : 9} className="operation-expanded">
+    </tr>{open && <tr id={`operation-${op.id}`}><td colSpan={compact ? 4 : 10} className="operation-expanded">
       {onPreview && <button className="text-action" aria-label={`Inspect ${op.contractId} retrospective eligibility`} onClick={() => onPreview(op)}>Inspect retrospective eligibility</button>}
       <p className="workspace-scope-note operation-details">Entered {op.totalEnteredQuantity === null ? 'unknown' : amount(op.totalEnteredQuantity)} · Exited {op.totalExitedQuantity === null ? 'unknown' : amount(op.totalExitedQuantity)} · Remaining {op.openQuantity === null ? 'unknown' : amount(op.openQuantity)}. Venue-reported P&amp;L {money(op.reportedClosedPnlUsd)} ({op.pnlBasis}).</p>
+      <dl className="operation-funding-summary">
+        <div><dt>{op.fundingStatus === 'complete' ? 'Settled funding' : 'Known settled funding'}</dt><dd><Result value={op.fundingNetUsd} /></dd></div>
+        <div><dt>Total incl. funding</dt><dd>{op.totalResultUsd === null ? 'Unverified' : <Result value={op.totalResultUsd} />}</dd></div>
+      </dl>
+      {op.fundingAsOfUtc !== null && <p className="workspace-scope-note">Funding coverage through <time dateTime={op.fundingAsOfUtc}>{op.fundingAsOfUtc}</time>. Positive received; negative paid. Nominal USD, no FX/depeg valuation.</p>}
       {op.coverage.length > 0 && <ul className="operation-coverage">{op.coverage.map(reason => <li key={reason}>{reason}</li>)}</ul>}
       <OperationFills api={api} operation={op} accounts={accounts} onReload={onReload} refreshGeneration={refreshGeneration} />
     </td></tr>}</Fragment>

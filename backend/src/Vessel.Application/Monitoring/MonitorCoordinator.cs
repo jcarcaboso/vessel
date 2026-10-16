@@ -188,6 +188,28 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 throw new VenueReadException("Invalid execution facts.");
             if (refresh)
             {
+                if (venues.Funding(capture.Account.VenueId) is { } fundingReader)
+                {
+                    // Read outside the unit of work; apply facts only after the lease/settings fence.
+                    var to = DateTimeOffset.FromUnixTimeMilliseconds(sync.Snapshot.ObservedAtUtc.ToUnixTimeMilliseconds());
+                    var from = to.AddDays(-30);
+                    VenueFundingReadResult funding;
+                    try
+                    {
+                        funding = await fundingReader.ReadFundingAsync(capture.Account, from, to, ct);
+                        ct.ThrowIfCancellationRequested();
+                        VenueFundingChecks.Validate(funding, from, to);
+                    }
+                    catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
+                        ex is OperationCanceledException && !ct.IsCancellationRequested)
+                    {
+                        if (ex is VenueRateLimitException limited)
+                            await store.DeferVenueAsync(capture.Account.VenueId, limited.RetryAtUtc, time.GetUtcNow(), CancellationToken.None);
+                        funding = new([], from, to, false,
+                            "Funding history could not be refreshed. Retained payments are unchanged; missing funding is not zero.");
+                    }
+                    sync = sync with { Funding = funding };
+                }
                 // Preserve the public Refresh commit even if the later optional order read is cancelled.
                 // This is a short fenced transaction; the lease, not a DB lock, spans the order read.
                 if (!await ApplyAsync(lease, capture, new(sync, null), ct, snapshotOnly: true)) return false;

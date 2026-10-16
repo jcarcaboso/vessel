@@ -159,7 +159,7 @@ describe('activity fills API', () => {
   })
   it('accepts an entry and an exit sharing a timestamp, as an unknown-peak operation has', async () => {
     const { id, fills } = unknownPeakOperationFixture
-    response({ operationId: id, fills, omittedFillCount: 0 })
+    response({ ...activityFillsFixture, operationId: id, fills, omittedFillCount: 0 })
     await expect(createWorkspaceApi('token').activityFills(accountFixture.id, id)).resolves.toMatchObject({ fills: { length: 4 } })
   })
   it('reports a changed operation as a 404 and rejects invalid identities without a request', async () => {

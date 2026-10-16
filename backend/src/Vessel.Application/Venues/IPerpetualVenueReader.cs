@@ -122,7 +122,10 @@ public sealed record PerpetualVenueReadResult(
     bool FillHistoryComplete = false,
     bool? FillHistoryTruncated = null,
     DateTimeOffset? OldestRawFillAtUtc = null,
-    int OmittedExecutions = 0);
+    int OmittedExecutions = 0)
+{
+    public VenueFundingReadResult? Funding { get; init; }
+}
 
 public class VenueReadException(string message) : Exception(message);
 

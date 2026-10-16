@@ -60,6 +60,18 @@ October 16, 2026: account creation now queues one initial bounded refresh in the
 
 ## Project tracking
 
+October 16, 2026: the owner requested funding retrieval per venue, storage,
+display and operation aggregation. Follow `docs/architecture/venue-funding.md`
+and the four venue funding research notes. Funding is a signed actual settlement,
+not a rate estimate; refresh covers a bounded 30-day window under account locking.
+Retain native identities, exact amounts and RISEx native nanoseconds. Activity
+shows attributable and unassigned payments; ambiguous timestamp buckets stay
+unassigned. Preserve the existing execution net and expose a separate combined
+total only with verified coverage and a proven execution-P&L funding basis.
+All current venue execution-field bases remain Unknown; never force a double-counted
+total. Review, sizing and Play attribution are unchanged. Apply the new migration
+explicitly, never to the owner's database during tests.
+
 October 13, 2026: the owner authorized all P1 diary must-haves from the product
 review, delegated Sol implementation, two independent adversarial Sol reviews,
 a pull request and synthetic browser captures. Follow

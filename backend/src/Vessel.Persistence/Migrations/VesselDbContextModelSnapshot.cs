@@ -958,6 +958,49 @@ namespace Vessel.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Workspace.AccountFundingState", b =>
+                {
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CoveredFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("CoveredToUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("LastAttemptFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("LastAttemptToUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("LastReadComplete")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Notice")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("PnlBasis")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("OwnerId", "AccountId");
+
+                    b.ToTable("account_funding_states", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_account_funding_states_basis", "\"PnlBasis\" IN ('excluded', 'included', 'unknown')");
+
+                            t.HasCheckConstraint("CK_account_funding_states_window", "(\"CoveredFromUtc\" IS NULL AND \"CoveredToUtc\" IS NULL OR \"CoveredFromUtc\" IS NOT NULL AND \"CoveredToUtc\" IS NOT NULL AND \"CoveredFromUtc\" <= \"CoveredToUtc\") AND \"LastAttemptFromUtc\" <= \"LastAttemptToUtc\" ");
+                        });
+                });
+
             modelBuilder.Entity("Vessel.Domain.Workspace.AccountPosition", b =>
                 {
                     b.Property<Guid>("OwnerId")
@@ -1070,6 +1113,56 @@ namespace Vessel.Persistence.Migrations
                     b.HasKey("OwnerId", "AccountId", "TokenId");
 
                     b.ToTable("account_stablecoins", (string)null);
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Workspace.FundingPayment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Asset")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ContractId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<long?>("OccurredAtUnixNanoseconds")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("VenueContractId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "AccountId", "OccurredAtUtc");
+
+                    b.HasIndex("OwnerId", "AccountId", "SourceId")
+                        .IsUnique();
+
+                    b.ToTable("funding_payments", (string)null);
                 });
 
             modelBuilder.Entity("Vessel.Domain.Workspace.ImportedFill", b =>
@@ -1423,6 +1516,16 @@ namespace Vessel.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Workspace.AccountFundingState", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Vessel.Domain.Workspace.AccountPosition", b =>
                 {
                     b.HasOne("Vessel.Domain.Workspace.AccountSnapshot", null)
@@ -1448,6 +1551,16 @@ namespace Vessel.Persistence.Migrations
                         .WithMany("Stablecoins")
                         .HasForeignKey("OwnerId", "AccountId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Workspace.FundingPayment", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

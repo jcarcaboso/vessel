@@ -644,7 +644,8 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     },
     snapshot: (id, signal) => call(`${accountPath(id)}/snapshot`, { ...workspaceRequest, validate: snapshot, ...withSignal(signal) }),
     fills: (id, signal) => call(`${accountPath(id)}/fills`, { ...workspaceRequest, validate: (v): v is ImportedFill[] => Array.isArray(v) && v.every(isImportedFill), ...withSignal(signal) }),
-    sync: (id, signal) => call(`${accountPath(id)}/sync`, { ...workspaceRequest, validate: account, method: 'POST', ...withSignal(signal), timeout: 30_000, badGateway: 'The venue refresh failed. Previous account data is still available.' }),
+    // History, funding and order retention each allow 20s; leave room for account locking and persistence.
+    sync: (id, signal) => call(`${accountPath(id)}/sync`, { ...workspaceRequest, validate: account, method: 'POST', ...withSignal(signal), timeout: 90_000, badGateway: 'The venue refresh failed. Previous account data is still available.' }),
   }
   return api
 }

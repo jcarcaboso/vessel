@@ -14,7 +14,7 @@ namespace Vessel.Infrastructure.Venues.Risex;
 /// explicit User-Agent (the API's firewall rejects some default client strings).
 /// </summary>
 public sealed partial class RisexReader(HttpClient httpClient, TimeProvider timeProvider, RisexCatalogueCache catalogueCache)
-    : IPerpetualVenueReader, IVenueOrderReader, ICandleReader, IMarketContextReader
+    : IPerpetualVenueReader, IVenueOrderReader, ICandleReader, IMarketContextReader, IVenueFundingReader
 {
     // https://developer.rise.trade/llms.txt, checked October 5, 2026; shapes observed live the same day.
     // All timestamps are nanoseconds as decimal strings. See docs/architecture/risex-integration.md.

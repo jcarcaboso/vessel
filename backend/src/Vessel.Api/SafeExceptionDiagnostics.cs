@@ -8,17 +8,14 @@ internal static class SafeExceptionDiagnostics
 {
     public static bool IsDependencyOutage(Exception error)
     {
-        // Persistence deliberately resolves missing configuration lazily. Match its code
-        // origin, not its message; unrelated InvalidOperationExceptions are still bugs.
-        if (error is InvalidOperationException &&
-            error.TargetSite?.DeclaringType?.DeclaringType == typeof(Vessel.Persistence.DependencyInjection))
-            return true;
-        // EF wraps transient Npgsql failures (refused connections, timeouts) in an
-        // InvalidOperationException or DbUpdateException, so inspect the whole chain.
+        // Use a typed missing-configuration signal: JIT inlining can change TargetSite.
+        // EF wraps dependency failures, so inspect the whole chain, never exception messages.
         for (var current = error; current is not null; current = current.InnerException)
         {
             switch (current)
             {
+                case Vessel.Persistence.MissingDatabaseConfigurationException:
+                    return true;
                 case NpgsqlException database:
                     return database.IsTransient;
                 case HttpRequestException { StatusCode: null }:

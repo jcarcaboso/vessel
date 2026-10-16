@@ -33,6 +33,10 @@ public sealed class OverviewSummaryPostgresTests
             foreach (var account in accounts)
             {
                 db.Snapshots.Add(new AccountSnapshot { OwnerId = actor, AccountId = account.Id, ObservedAtUtc = now, ValueScope = "fixture" });
+                db.FundingPayments.Add(new FundingPayment { Id = Guid.NewGuid(), OwnerId = actor, AccountId = account.Id,
+                    SourceId = "funding", ContractId = "BTC", Amount = 1, Asset = "USDC", OccurredAtUtc = now });
+                db.FundingStates.Add(new AccountFundingState { OwnerId = actor, AccountId = account.Id,
+                    LastAttemptFromUtc = now.AddDays(-30), LastAttemptToUtc = now, Notice = "Synthetic funding coverage." });
                 var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("manual", "BTC"), InstrumentSource.Manual, "{}", now);
                 db.Plays.Add(play);
                 db.OrderLinks.Add(new PlayOrderLink(play, "order", OrderLinkRole.Entry, "entry", null, OrderLinkState.Linked, OrderLinkSource.Owner, now));
@@ -59,7 +63,9 @@ public sealed class OverviewSummaryPostgresTests
         Assert.Equal(selected.Id, Assert.Single(facts.Snapshots).AccountId);
         Assert.Equal(120, facts.FillPlayIds.Count);
         Assert.All(facts.FillPlayIds.Keys, id => Assert.Contains(facts.Fills, f => f.Id == id));
-        Assert.Equal(4, commands.Count); // Scoped accounts, fills, snapshots and linked orders.
+        Assert.Equal(selected.Id, Assert.Single(facts.FundingPayments).AccountId);
+        Assert.Equal(selected.Id, Assert.Single(facts.FundingStates).AccountId);
+        Assert.Equal(6, commands.Count); // Scoped accounts, fills, snapshots, funding, funding state and linked orders.
         // Even caller-supplied disabled/foreign IDs cannot bypass the SQL account restrictions.
         var guarded = await store.ReadAsync(null, default, new HashSet<Guid> { selected.Id, disabled.Id, foreign.Id });
         Assert.Equal(selected.Id, Assert.Single(guarded.Accounts).Id);
@@ -67,6 +73,7 @@ public sealed class OverviewSummaryPostgresTests
         commands.Clear();
         var empty = await store.ReadAsync(null, default, new HashSet<Guid>());
         Assert.Empty(empty.Accounts); Assert.Empty(empty.Fills); Assert.Empty(empty.Snapshots); Assert.Empty(empty.FillPlayIds);
+        Assert.Empty(empty.FundingPayments); Assert.Empty(empty.FundingStates);
         Assert.Empty(commands);
     }
 

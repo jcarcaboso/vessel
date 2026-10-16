@@ -15,7 +15,7 @@ namespace Vessel.Infrastructure.Venues.Hyperliquid;
 /// </summary>
 public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvider timeProvider,
     HyperliquidCatalogueCache? catalogueCache = null)
-    : IPerpetualVenueReader, ICandleReader
+    : IPerpetualVenueReader, ICandleReader, IVenueFundingReader
 {
     // Official schemas and bounds, checked October 1, 2026:
     // https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint

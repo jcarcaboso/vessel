@@ -7,7 +7,7 @@ using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence;
 
-public sealed class WorkspaceStore(VesselDbContext db, UnitOfWork unitOfWork) : IWorkspaceStore
+public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOfWork) : IWorkspaceStore
 {
     public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct) => db.Portfolios.OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
     public Task<List<Account>> AccountsAsync(CancellationToken ct) => db.Accounts.OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
@@ -73,6 +73,8 @@ public sealed class WorkspaceStore(VesselDbContext db, UnitOfWork unitOfWork) : 
         // Positions cascade from the snapshot, never from trading intent.
         await db.Fills.Where(f => f.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Orders.Where(o => o.AccountId == account.Id).ExecuteDeleteAsync(ct);
+        await db.FundingPayments.Where(p => p.AccountId == account.Id).ExecuteDeleteAsync(ct);
+        await db.FundingStates.Where(s => s.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Snapshots.Where(s => s.AccountId == account.Id).ExecuteDeleteAsync(ct);
         // Event identities whose subject is this account go with it; their receipts cascade. A removed
         // sequence is a permanent hole that subscribers count as settled.
@@ -92,6 +94,8 @@ public sealed class WorkspaceStore(VesselDbContext db, UnitOfWork unitOfWork) : 
                 ImportedOrder o => o.OwnerId == account.OwnerId && o.AccountId == account.Id,
                 AccountSnapshot s => s.OwnerId == account.OwnerId && s.AccountId == account.Id,
                 AccountPosition p => p.OwnerId == account.OwnerId && p.AccountId == account.Id,
+                FundingPayment p => p.OwnerId == account.OwnerId && p.AccountId == account.Id,
+                AccountFundingState s => s.OwnerId == account.OwnerId && s.AccountId == account.Id,
                 Vessel.Domain.Credentials.AccountCredential c => c.OwnerId == account.OwnerId && c.AccountId == account.Id,
                 _ => false
             };
@@ -117,6 +121,8 @@ public sealed class WorkspaceStore(VesselDbContext db, UnitOfWork unitOfWork) : 
 
     public Task SaveRefreshAsync(Account account, PerpetualVenueReadResult result, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
+        // Validate immutable settlement identities before any refresh facts are written.
+        if (result.Funding is { } funding) await SaveFundingAsync(account, funding, ct);
         var observation = result.Snapshot;
         var snapshot = await db.Snapshots.Include(x => x.Positions).Include(x => x.Stablecoins).AsSplitQuery().SingleOrDefaultAsync(x => x.AccountId == account.Id, ct);
         var replacePerps = snapshot is null || observation.ObservedAtUtc > snapshot.ObservedAtUtc;

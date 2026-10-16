@@ -10,10 +10,11 @@ namespace Vessel.Application.Activity;
 public static class OperationAggregator
 {
     public static IReadOnlyList<ActivityOperationDto> Aggregate(IEnumerable<ImportedFill> fills,
-        IReadOnlyDictionary<Guid, Guid>? fillPlayIds = null, IReadOnlyList<AccountSnapshot>? snapshots = null)
+        IReadOnlyDictionary<Guid, Guid>? fillPlayIds = null, IReadOnlyList<AccountSnapshot>? snapshots = null,
+        IReadOnlyList<FundingPayment>? funding = null)
     {
         var retained = fills.ToList();
-        return AggregateSummaries(retained, fillPlayIds, new(retained, snapshots ?? []))
+        return AggregateSummaries(retained, fillPlayIds, new(retained, snapshots ?? [], funding))
             .Select(o => o with { Fills = o.Fills.ToList() }).ToList();
     }
 

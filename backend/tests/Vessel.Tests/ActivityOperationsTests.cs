@@ -966,7 +966,8 @@ public sealed class ActivityOperationsTests
         var response = await client.GetAsync($"/api/activity?accountId={AccountId}&scope=all&status=closed&period=custom&from=2026-10-12&to=2026-10-12&page=1&pageSize=5");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode); Assert.True(response.Headers.CacheControl?.NoStore);
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(["operations", "page", "pageSize", "totalCount", "scopeCount", "retainedFillCount", "asOfUtc", "version", "facets", "coverage", "scopeNote"],
+        Assert.Equal(["operations", "page", "pageSize", "totalCount", "scopeCount", "retainedFillCount", "asOfUtc", "version", "facets", "coverage", "scopeNote",
+                "unassignedFundingPayments", "omittedUnassignedFundingPaymentCount"],
             json.EnumerateObject().Select(p => p.Name));
         Assert.Equal(["accountIds", "contracts"], json.GetProperty("facets").EnumerateObject().Select(p => p.Name));
         var row = Assert.Single(json.GetProperty("operations").EnumerateArray());
@@ -977,7 +978,7 @@ public sealed class ActivityOperationsTests
         var fills = await client.GetAsync($"/api/activity/fills?accountId={AccountId}&operationId={row.GetProperty("id").GetString()}");
         Assert.Equal(HttpStatusCode.OK, fills.StatusCode); Assert.True(fills.Headers.CacheControl?.NoStore);
         var expanded = await fills.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(["operationId", "fills", "omittedFillCount"], expanded.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(["operationId", "fills", "omittedFillCount", "fundingPayments", "omittedFundingPaymentCount"], expanded.EnumerateObject().Select(p => p.Name));
         Assert.Equal(2, expanded.GetProperty("fills").GetArrayLength());
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/activity/fills?accountId={AccountId}&operationId=gone")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/activity/fills?operationId=gone")).StatusCode);
