@@ -317,8 +317,11 @@ public sealed class EventSubscriptionTests
         Assert.Equal(0, await runtime.CountAsync("SELECT count(*) FROM event_receipts WHERE sequence<=2"));
         Assert.Equal(3, await runtime.CountAsync("SELECT count(*) FROM event_dedup"));
         Assert.Equal(0, await runtime.DeleteBatchAsync());
+        // A fresh start pages through retained history; pruning never resets it.
         var page = await EventReads.ReadAsync(runtime.Reader, 0, 10, default);
-        Assert.True(page.ResetRequired);
+        Assert.False(page.ResetRequired);
+        Assert.Equal(recent.Id, Assert.Single(page.Events).Id);
+        Assert.True((await EventReads.ReadAsync(runtime.Reader, 1, 10, default)).ResetRequired);
         Assert.Equal(recent.Id, Assert.Single((await EventReads.ReadAsync(runtime.Reader, 2, 10, default)).Events).Id);
         Assert.Equal(DispatchOutcome.Historical, (await runtime.DispatchAsync(slow, deliveredOld.Id)).Outcome);
         // The lagging subscription resumes past its gap and holds retention again.

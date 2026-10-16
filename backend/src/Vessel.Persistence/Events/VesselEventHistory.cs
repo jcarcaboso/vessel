@@ -44,9 +44,12 @@ public sealed class VesselEventHistory(VesselDbContext db) : IVesselEventReader
                 next = rows.GetInt64(3);
                 events.Add(JsonSerializer.Deserialize<VesselEvent>(rows.GetString(4), VesselEventJson.Options)!);
             }
-            // "0" (no epoch) starts a stream; any other epoch, a pruned or a future cursor needs a state reload.
-            var reset = cursor.Epoch is null ? cursor.Sequence != 0 : cursor.Epoch != epoch;
-            reset |= cursor.Sequence < floor || cursor.Sequence > latest;
+            // "0" (no epoch) starts at the oldest retained event, so pruning never resets it. Any other epoch,
+            // a pruned or a future cursor needs a state reload.
+            var start = cursor.Epoch is null && cursor.Sequence == 0;
+            var reset = cursor.Epoch is null ? !start : cursor.Epoch != epoch;
+            reset |= (!start && cursor.Sequence < floor) || cursor.Sequence > latest;
+            if (start && events.Count == 0) next = Math.Max(next, floor);
             return new(reset ? [] : events, VesselEventCursor.Format(epoch, reset ? latest : next), reset);
         }
         finally { await db.Database.CloseConnectionAsync(); }
