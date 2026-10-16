@@ -81,7 +81,22 @@ The UI reloads stored state on relevant events and polls stored state every 60 s
 
 ## Execution and discrepancies
 
-`GET /api/plays/{id}/execution` adds `monitor: AccountMonitor | null` and `discrepancies: MonitorDiscrepancy[]`. Keep all existing fields, including P1 execution issues. An untracked/manual/retrospective Play may have null monitor. The old `execution/check` route no longer directly reads venues once the worker layer is active.
+`GET /api/plays/{id}/execution` adds `monitor: AccountMonitor | null`, `discrepancies: MonitorDiscrepancy[]` and `watches: MonitorWatch[]`. Keep all existing fields, including P1 execution issues. An untracked/manual/retrospective Play may have null monitor. `POST /api/plays/{id}/execution/check` no longer reads venues: it records the same manual request as `monitor/run` for the Play's account and answers like it (202 `MonitorRunAccepted`, 429 with `Retry-After`, 409 when the Play cannot be monitored).
+
+```ts
+// A linked exit of a Closed or Cancelled Play, watched until the venue reports it filled, cancelled or rejected,
+// a complete open-order read no longer lists it, or Vessel:Monitor:WatchLifetime (7 days) passes.
+interface MonitorWatch {
+  linkId: string
+  playId: string
+  orderId: string
+  state: 'watching' | 'resolved' | 'unverifiable' // unverifiable is persistent and never claims the order is gone
+  startedAtUtc: string
+  endedAtUtc: string | null
+}
+```
+
+`POST /api/accounts/{id}/sync` (account Refresh) stays synchronous: 200 with the refreshed account, 429 with `Retry-After` while the account is checking or cooling down or the venue deadline applies, 502 when the read failed or changed settings superseded it. Its outcome never changes the monitor state, backoff or scheduled check, and a refused Refresh is never replayed later.
 
 ```ts
 interface MonitorDiscrepancy {
