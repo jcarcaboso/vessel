@@ -25,6 +25,9 @@ internal static class VesselEventTestHosting
     {
         services.DisableAllExternalWolverineTransports();
         services.DisableAllWolverineMessagePersistence();
+        // No database at startup: the deployment registration check belongs to the broker tests.
+        foreach (var guard in services.Where(d => d.ImplementationType == typeof(Vessel.Messaging.MessagingDeploymentGuard)).ToArray())
+            services.Remove(guard);
         services.Replace(ServiceDescriptor.Scoped<IVesselEventOutbox, NonTransportOutbox>());
     }
 

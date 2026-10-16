@@ -27,6 +27,10 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         return new(online, heartbeat?.HeartbeatAtUtc, accounts);
     }
 
+    /// <summary>Starts or stops scheduling for the owner's accounts as their eligibility changes.</summary>
+    public Task DiscoverAsync(IReadOnlyCollection<string> venueIds, DateTimeOffset now, CancellationToken ct) =>
+        store.DiscoverAsync(venueIds, now, ct);
+
     public async Task<AccountMonitorDto> AccountAsync(Guid id, CancellationToken ct)
     {
         _ = await store.CaptureAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");

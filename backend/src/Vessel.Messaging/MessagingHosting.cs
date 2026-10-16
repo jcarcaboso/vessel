@@ -59,6 +59,8 @@ public static class MessagingHosting
         builder.Services.AddVesselEvents(builder.Configuration);
         builder.Services.Replace(ServiceDescriptor.Scoped<IVesselEventOutbox, WolverineVesselEventOutbox>());
         foreach (var module in host.RunningModules) module.AddRunningServices(builder.Services, builder.Configuration);
+        // Registered before Wolverine, so it runs first: never recover envelopes from a schema provisioned for others.
+        builder.Services.AddHostedService<MessagingDeploymentGuard>();
         builder.UseWolverine(options =>
         {
             Configure(options, settings, connection, deployment);

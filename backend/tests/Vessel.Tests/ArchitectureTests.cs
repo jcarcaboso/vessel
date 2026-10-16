@@ -11,6 +11,7 @@ public sealed class ArchitectureTests
     [InlineData("Infrastructure", "Application")]
     [InlineData("Messaging", "Application,Persistence")]
     [InlineData("Api", "Application,Infrastructure,Messaging,Persistence")]
+    [InlineData("Worker", "Application,Infrastructure,Messaging,Persistence")]
     public void Project_dependencies_point_inward(string project, string expected)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

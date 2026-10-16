@@ -134,11 +134,11 @@ public sealed class MonitorEndToEndTests
             Assert.NotNull(accepted);
             Assert.NotEqual(Guid.Empty, accepted.RequestId);
             await gate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
-            // No scheduler tick was fired. Only Rabbit's real command handler could start this read.
+            // No scheduler tick was fired. Only the real command's hand-off could wake the scheduler for this read;
+            // the listener itself acknowledges once the pending request is validated and never polls the venue.
             var running = await fixture.MonitorAsync();
             Assert.Equal(accepted.RequestId, running.RequestId);
             Assert.Equal("running", running.ManualState);
-            Assert.StartsWith("command-", running.LeaseHolder);
             await AssertBusyAsync(client, route);
             gate.Release.TrySetResult();
             await fixture.WaitForRunAsync(previous.Generation + 1);

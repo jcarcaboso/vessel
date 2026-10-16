@@ -15,8 +15,8 @@ namespace Vessel.Messaging;
 public sealed record ProvisioningResult(IReadOnlyList<string> Schemas, IReadOnlyList<string> Registered, IReadOnlyList<string> Existing);
 
 /// <summary>
-/// The explicit provision step, run after the EF migrations and never at runtime: envelope storage for every
-/// logical deployment, the broker topology of every known module, then insert-only subscription registrations.
+/// The explicit provision step, run after the EF migrations and never at runtime: envelope storage and the schema
+/// registration of every configured logical deployment, the broker topology of every known module, then insert-only subscription registrations.
 /// </summary>
 public static class MessagingProvisioning
 {
@@ -28,11 +28,11 @@ public static class MessagingProvisioning
         var connection = configuration.GetConnectionString("Vessel");
         if (string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("The event database is not configured.");
         registry ??= VesselModuleRegistry.From(settings);
-        var deployments = new[] { MessagingHosting.ApiDeployment }.Concat(registry.Modules.Select(m => m.Name)).ToArray();
-        var schemas = deployments.Select(settings.SchemaFor).ToArray();
+        var deployments = settings.DeploymentModules(registry);
+        var schemas = deployments.Keys.Select(settings.SchemaFor).ToArray();
         if (schemas.Distinct(StringComparer.Ordinal).Count() != schemas.Length)
             throw new InvalidOperationException("Every logical deployment needs its own envelope schema.");
-        foreach (var deployment in deployments)
+        foreach (var (deployment, modules) in deployments)
         {
             // Storage only: no transport, so nothing about the broker is inferred from Wolverine's endpoint model.
             var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
@@ -40,6 +40,7 @@ public static class MessagingProvisioning
             builder.UseWolverine(options => MessagingHosting.Configure(options, settings, connection, deployment));
             using var host = builder.Build();
             await host.SetupResources();
+            await MessagingDeployments.RegisterAsync(connection, settings.SchemaFor(deployment), deployment, modules, cancellationToken);
         }
         // Registration first: a changed filter is rejected before any new binding reaches the broker.
         var registered = new List<string>();
