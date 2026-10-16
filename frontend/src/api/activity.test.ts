@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
 import { activityPath, type ActivityQuery } from './activity'
-import { activityFillFixture, activityFillsFixture, activityFixture, activityPage, operationFillsFixture, operationFixture } from '@/test/activity-fixture'
+import { activityFillFixture, activityFillsFixture, activityFixture, activityPage, operationFillsFixture, operationFixture, unknownPeakOperationFixture, unknownPeakSummaryFixture } from '@/test/activity-fixture'
 import { accountFixture } from '@/test/workspace-fixture'
 
 function response(value: unknown, status = 200) { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(value), { status }))) }
@@ -75,6 +75,21 @@ describe('activity API', () => {
       await expect(createWorkspaceApi('token').activity(first)).rejects.toMatchObject({ kind: 'invalid-response' })
     }
   })
+  it('accepts an operation whose peak is unknown because same-timestamp orders disagree, with everything else known', async () => {
+    response(activityPage([unknownPeakSummaryFixture]))
+    await expect(createWorkspaceApi('token').activity(first)).resolves.toMatchObject({ operations: [{ status: 'closed', direction: 'long',
+      quantity: null, totalEnteredQuantity: '3', totalExitedQuantity: '3', openQuantity: '0', averageEntryPrice: '100', netResultUsd: '27' }] })
+    // The same unknown peak while the position is still open.
+    const open = { ...unknownPeakSummaryFixture, status: 'open' as const, closedAtUtc: null, totalExitedQuantity: '1', openQuantity: '2' }
+    response(activityPage([open]))
+    await expect(createWorkspaceApi('token').activity({ ...first, status: 'partial' })).resolves.toMatchObject({ operations: [{ quantity: null }] })
+    // Only the peak may be unknown, and only with a coverage notice that says so.
+    for (const invalid of [{ coverage: [] }, { totalEnteredQuantity: null }, { averageEntryPrice: null }, { openQuantity: null },
+      { openedAtUtc: null }, { direction: null }, { closedAtUtc: null }]) {
+      response(activityPage([{ ...unknownPeakSummaryFixture, ...invalid }]))
+      await expect(createWorkspaceApi('token').activity(first)).rejects.toMatchObject({ kind: 'invalid-response' })
+    }
+  })
   it('rejects missing page fields, foreign coverage identities and duplicated operations', async () => {
     for (const key of Object.keys(activityFixture)) {
       const document = structuredClone(activityFixture); delete (document as unknown as Record<string, unknown>)[key]; response(document)
@@ -136,6 +151,11 @@ describe('activity fills API', () => {
   ])('rejects foreign, unordered or unbounded rows %#', async fields => {
     response({ ...activityFillsFixture, ...fields })
     await expect(createWorkspaceApi('token').activityFills(accountFixture.id, operationFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+  it('accepts an entry and an exit sharing a timestamp, as an unknown-peak operation has', async () => {
+    const { id, fills } = unknownPeakOperationFixture
+    response({ operationId: id, fills, omittedFillCount: 0 })
+    await expect(createWorkspaceApi('token').activityFills(accountFixture.id, id)).resolves.toMatchObject({ fills: { length: 4 } })
   })
   it('reports a changed operation as a 404 and rejects invalid identities without a request', async () => {
     response({}, 404)

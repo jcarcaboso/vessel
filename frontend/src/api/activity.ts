@@ -167,9 +167,12 @@ export function isActivityOperation(op: unknown): op is ActivityOperation {
     return op.openedAtUtc === null && op.quantity === null && op.totalEnteredQuantity === null && op.averageEntryPrice === null &&
       op.openQuantity !== null && op.totalExitedQuantity !== null
   }
-  return !(op.direction === null || op.openedAtUtc === null || op.quantity === null || op.openQuantity === null ||
+  if (op.direction === null || op.openedAtUtc === null || op.openQuantity === null ||
     op.totalEnteredQuantity === null || op.totalExitedQuantity === null || op.averageEntryPrice === null ||
-    (op.status === 'closed') !== (op.closedAtUtc !== null) || op.closedAtUtc !== null && Date.parse(String(op.closedAtUtc)) < Date.parse(String(op.openedAtUtc)))
+    (op.status === 'closed') !== (op.closedAtUtc !== null) || op.closedAtUtc !== null && Date.parse(String(op.closedAtUtc)) < Date.parse(String(op.openedAtUtc))) return false
+  // Orders sharing a timestamp may disagree on the peak position: boundaries, totals and prices stay known,
+  // only the peak quantity is unknown, and the server says so in the operation's coverage.
+  return op.quantity !== null || op.coverage.length > 0
 }
 
 /** Execution rows of one operation, all from the same account and instrument, at most `limit`. */
