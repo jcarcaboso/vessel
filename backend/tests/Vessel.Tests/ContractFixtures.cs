@@ -30,6 +30,8 @@ internal static partial class ContractFixtures
         });
         json = Timestamp().Replace(json, match => "2026-10-14T03:20:41.1234567" + match.Groups["offset"].Value);
         json = Sequence().Replace(json, match => match.Groups["name"].Value + "\"42\"");
+        // Opaque {epoch}.{sequence} cursors: the stream epoch is random per database.
+        json = Cursor().Replace(json, match => match.Groups["name"].Value + "\"00000000000040008000000000000000.42\"");
         return Online().Replace(json, match => match.Groups["name"].Value + "true");
     }
 
@@ -37,8 +39,10 @@ internal static partial class ContractFixtures
     private static partial Regex Guid();
     [GeneratedRegex("""\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?<offset>Z|[+-]\d{2}:\d{2})""")]
     private static partial Regex Timestamp();
-    [GeneratedRegex("(?<name>\"(?:sequence|nextSequence|eventPageNextSequence)\":\\s*)\"\\d+\"")]
+    [GeneratedRegex("(?<name>\"sequence\":\\s*)\"\\d+\"")]
     private static partial Regex Sequence();
+    [GeneratedRegex("(?<name>\"(?:nextCursor|eventPageNextCursor)\":\\s*)\"[0-9a-f]{32}\\.\\d+\"")]
+    private static partial Regex Cursor();
     [GeneratedRegex("""(?<name>"workerOnline":\s*)(?:true|false)""")]
     private static partial Regex Online();
 }

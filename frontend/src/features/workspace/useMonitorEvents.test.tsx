@@ -2,16 +2,16 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MonitorStreamEvent } from '@/api/monitor'
 import type { WorkspaceApi } from '@/api/workspace'
-import { monitorEventFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
+import { eventCursor, eventFrame, monitorEventFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
 import { ApiError } from '@/api/errors'
 import { reconnectDelay, stableStream, useMonitorEvents } from './useMonitorEvents'
 
 /** The head the client reads before any stored state; the fixture event lies after it. */
-const headSequence = '9007199254740990'
+const headSequence = eventCursor('9007199254740990')
 function client() {
   const connections: { after: string; signal: AbortSignal; emit: (frame: MonitorStreamEvent) => void; finish: () => void }[] = []
   const api = {
-    monitorEvents: vi.fn().mockResolvedValue({ events: [], nextSequence: headSequence, resetRequired: true }),
+    monitorEvents: vi.fn().mockResolvedValue({ events: [], nextCursor: headSequence, resetRequired: true }),
     monitor: vi.fn().mockResolvedValue(monitorSummaryFixture),
     monitorStream: vi.fn((after: string, signal: AbortSignal, emit: (frame: MonitorStreamEvent) => void) => new Promise<void>(resolve => {
       connections.push({ after, signal, emit, finish: resolve })
@@ -24,7 +24,7 @@ function client() {
 beforeEach(() => vi.useFakeTimers())
 afterEach(() => vi.useRealTimers())
 const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
-const ready = (nextSequence = headSequence) => ({ type: 'status', status: { state: 'ready', nextSequence } }) as const
+const ready = (nextCursor = headSequence) => ({ type: 'status', status: { state: 'ready', nextCursor } }) as const
 
 describe('one shell monitor subscription', () => {
   it('reads the head before stored state and streams from it, so a change committed in between is delivered without a second load', async () => {
@@ -42,7 +42,7 @@ describe('one shell monitor subscription', () => {
     // The server replays a change committed after the head read but before the stream opened.
     act(() => {
       connections[0]!.emit(ready())
-      connections[0]!.emit({ type: 'event', event: monitorEventFixture })
+      connections[0]!.emit(eventFrame())
     })
     await advance(250)
     expect(reload).toHaveBeenCalledOnce()
@@ -64,12 +64,12 @@ describe('one shell monitor subscription', () => {
     await advance(0)
     expect(view.result.current.cursorReady).toBe(true)
     expect(connections[0]!.after).not.toBe(headSequence)
-    act(() => connections[0]!.emit({ type: 'status', status: { state: 'reset', nextSequence: '41' } }))
+    act(() => connections[0]!.emit({ type: 'status', status: { state: 'reset', nextCursor: eventCursor('41') } }))
     await advance(250)
     expect(reload).toHaveBeenCalledOnce()
     act(() => connections[0]!.finish())
     await advance(2000)
-    expect(connections[1]!.after).toBe('41')
+    expect(connections[1]!.after).toBe(eventCursor('41'))
   })
   it('debounces owner events and reset into stored reloads without browser persistence or venue reads', async () => {
     const { api, connections } = client()
@@ -79,9 +79,9 @@ describe('one shell monitor subscription', () => {
     await advance(0)
     act(() => {
       connections[0]!.emit(ready())
-      connections[0]!.emit({ type: 'event', event: monitorEventFixture })
-      connections[0]!.emit({ type: 'event', event: { ...monitorEventFixture, sequence: '9007199254740994' } })
-      connections[0]!.emit({ type: 'status', status: { state: 'reset', nextSequence: '9007199254740995' } })
+      connections[0]!.emit(eventFrame())
+      connections[0]!.emit(eventFrame({ ...monitorEventFixture, sequence: '9007199254740994' }))
+      connections[0]!.emit({ type: 'status', status: { state: 'reset', nextCursor: eventCursor('9007199254740995') } })
     })
     await advance(249)
     expect(reload).not.toHaveBeenCalled()
@@ -94,6 +94,26 @@ describe('one shell monitor subscription', () => {
     view.unmount()
     local.mockRestore()
   })
+  it('adopts a reset into a new stream epoch and treats its events as new whatever their sequence', async () => {
+    const { api, connections } = client()
+    const reload = vi.fn()
+    renderHook(() => useMonitorEvents(api, true, reload, 0))
+    await advance(0)
+    const restored = 'fedcba9876543210fedcba9876543210'
+    act(() => {
+      connections[0]!.emit(ready())
+      connections[0]!.emit({ type: 'status', status: { state: 'reset', nextCursor: eventCursor('1', restored) } })
+    })
+    await advance(250)
+    expect(reload).toHaveBeenCalledOnce()
+    act(() => {
+      connections[0]!.emit({ type: 'event', event: { ...monitorEventFixture, sequence: '2' }, cursor: eventCursor('2', restored) })
+      connections[0]!.finish()
+    })
+    await advance(2000)
+    expect(reload).toHaveBeenCalledTimes(2)
+    expect(connections[1]!.after).toBe(eventCursor('2', restored))
+  })
   it('reconnects with exact cursors, ignores duplicate events and permits a server reset to a lower cursor', async () => {
     const { api, connections } = client()
     const reload = vi.fn()
@@ -101,21 +121,21 @@ describe('one shell monitor subscription', () => {
     await advance(0)
     act(() => {
       connections[0]!.emit(ready())
-      connections[0]!.emit({ type: 'event', event: monitorEventFixture })
+      connections[0]!.emit(eventFrame())
       connections[0]!.finish()
     })
     await advance(2000)
-    expect(connections[1]!.after).toBe(monitorEventFixture.sequence)
+    expect(connections[1]!.after).toBe(eventCursor(monitorEventFixture.sequence))
     reload.mockClear()
-    act(() => connections[1]!.emit({ type: 'event', event: monitorEventFixture }))
+    act(() => connections[1]!.emit(eventFrame()))
     await advance(250)
     expect(reload).not.toHaveBeenCalled()
     act(() => {
-      connections[1]!.emit({ type: 'status', status: { state: 'reset', nextSequence: '2' } })
+      connections[1]!.emit({ type: 'status', status: { state: 'reset', nextCursor: eventCursor('2') } })
       connections[1]!.finish()
     })
     await advance(2000)
-    expect(connections[2]!.after).toBe('2')
+    expect(connections[2]!.after).toBe(eventCursor('2'))
     expect(reload).toHaveBeenCalledOnce()
   })
   it('does not acknowledge undispatched catch-up events from a ready frame', async () => {
@@ -124,12 +144,12 @@ describe('one shell monitor subscription', () => {
     renderHook(() => useMonitorEvents(api, true, reload, 0))
     await advance(0)
     act(() => {
-      connections[0]!.emit({ type: 'status', status: { state: 'ready', nextSequence: '9007199254740999' } })
-      connections[0]!.emit({ type: 'event', event: monitorEventFixture })
+      connections[0]!.emit({ type: 'status', status: { state: 'ready', nextCursor: eventCursor('9007199254740999') } })
+      connections[0]!.emit(eventFrame())
       connections[0]!.finish()
     })
     await advance(2000)
-    expect(connections[1]!.after).toBe(monitorEventFixture.sequence)
+    expect(connections[1]!.after).toBe(eventCursor(monitorEventFixture.sequence))
     expect(reload).toHaveBeenCalledOnce()
   })
   it('backs off a ready-then-close loop without reloading the shell on each reconnect', async () => {
@@ -189,11 +209,11 @@ describe('one shell monitor subscription', () => {
     await advance(0)
     act(() => {
       first.connections[0]!.emit(ready())
-      first.connections[0]!.emit({ type: 'event', event: monitorEventFixture })
+      first.connections[0]!.emit(eventFrame())
     })
     view.rerender({ api: second.api, enabled: true })
     expect(first.connections[0]!.signal.aborted).toBe(true)
-    act(() => first.connections[0]!.emit({ type: 'event', event: { ...monitorEventFixture, sequence: '999999999999999999' } }))
+    act(() => first.connections[0]!.emit(eventFrame({ ...monitorEventFixture, sequence: '999999999999999999' })))
     await advance(1000)
     expect(reload).not.toHaveBeenCalled()
     expect(second.connections[0]!.after).toBe(headSequence)

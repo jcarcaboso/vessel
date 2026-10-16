@@ -1,7 +1,8 @@
 import { overviewSummaryPath, isOverviewSummary, type OverviewQuery, type OverviewSummaryDocument } from './overview-summary'
 import { activityFillsPath, activityPath, isActivityFills, isActivityPage, type ActivityFills, type ActivityPage, type ActivityQuery } from './activity'
 import { readSseStream, SseOverflowError, SseParser } from './sse'
-import { isAccountMonitor, isMonitorEventPage, isMonitorRunAccepted, isMonitorSummary, isSequence, monitorFrame,
+import { isRequestCursor } from './event-cursor'
+import { isAccountMonitor, isMonitorEventPage, isMonitorRunAccepted, isMonitorSummary, monitorFrame,
   type AccountMonitor, type MonitorEventPage, type MonitorRunAccepted, type MonitorSummary, type MonitorStreamEvent } from './monitor'
 import { candleIntervals, type CandleInterval } from './candles'
 import { ApiError } from './errors'
@@ -488,14 +489,14 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       validate: (v): v is MonitorRunAccepted => isMonitorRunAccepted(v) && v.monitor.accountId === id, method: 'POST', ...withSignal(signal),
       tooMany: 'A check is already running for this account or it was checked moments ago. Try again when the countdown ends.' }),
     monitorEvents: (after, limit, signal) => {
-      if (!isSequence(after) || !Number.isInteger(limit) || limit < 1 || limit > 200) {
+      if (!isRequestCursor(after) || !Number.isInteger(limit) || limit < 1 || limit > 200) {
         return Promise.reject(new ApiError('invalid-response', 'The event cursor is invalid.'))
       }
       return call(`/api/events?${new URLSearchParams({ after, limit: String(limit) })}`, { ...workspaceRequest,
         validate: isMonitorEventPage, unavailable: 'Monitor events are unavailable.', ...withSignal(signal) })
     },
     monitorStream: async (after, signal, onEvent) => {
-      if (!isSequence(after)) throw new ApiError('invalid-response', 'The event cursor is invalid.')
+      if (!isRequestCursor(after)) throw new ApiError('invalid-response', 'The event cursor is invalid.')
       if (signal.aborted) return
       let response: Response
       try {
@@ -512,8 +513,8 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
         throw new ApiError('invalid-response', 'The API returned an invalid monitor stream.')
       }
       try {
-        await readSseStream(response.body, signal, ({ event, data }) => {
-          const frame = monitorFrame(event, data)
+        await readSseStream(response.body, signal, ({ event, data, id }) => {
+          const frame = monitorFrame(event, data, id)
           if (frame) onEvent(frame)
         })
       } catch {

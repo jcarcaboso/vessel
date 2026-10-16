@@ -11,7 +11,7 @@ import { ApplicationShell } from './ApplicationShell'
 import { activityFillsFixture, activityFixture, activityPage, operationFixture } from '@/test/activity-fixture'
 import { retrospectiveFixture, retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
 import { discoveryFixture, indexAccount, indexVenue } from '@/test/account-access-fixture'
-import { discrepancyFixture, monitorEventFixture, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
+import { discrepancyFixture, eventCursor, eventFrame, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
 import type { MonitorEventPage, MonitorStreamEvent } from '@/api/monitor'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
@@ -65,10 +65,10 @@ describe('Main application shell', () => {
     expect(client.overview).not.toHaveBeenCalled()
     expect(client.monitor).not.toHaveBeenCalled()
     expect(client.monitorStream).not.toHaveBeenCalled()
-    await act(async () => head({ events: [], nextSequence: '12', resetRequired: true }))
+    await act(async () => head({ events: [], nextCursor: eventCursor('12'), resetRequired: true }))
     await screen.findByRole('button', { name: 'View Main account' })
     expect(client.overview).toHaveBeenCalledOnce()
-    expect(vi.mocked(client.monitorStream).mock.calls[0]![0]).toBe('12')
+    expect(vi.mocked(client.monitorStream).mock.calls[0]![0]).toBe(eventCursor('12'))
   })
   it('refreshes stored saved state on owner events while keeping dirty Play work and avoiding notifications', async () => {
     let emit!: (event: MonitorStreamEvent) => void
@@ -89,8 +89,8 @@ describe('Main application shell', () => {
     vi.mocked(client.play).mockResolvedValue(stored)
     // The server opens every stream with a status naming the head; only later events reload.
     act(() => {
-      emit({ type: 'status', status: { state: 'reset', nextSequence: '1' } })
-      emit({ type: 'event', event: monitorEventFixture })
+      emit({ type: 'status', status: { state: 'reset', nextCursor: eventCursor('1') } })
+      emit(eventFrame())
     })
     await screen.findByText(/The saved Play changed elsewhere/)
     expect(title).toHaveValue('Keep local revision')

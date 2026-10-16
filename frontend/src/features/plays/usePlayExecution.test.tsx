@@ -13,7 +13,7 @@ const execution: PlayExecution = {
   playId: savedPlayFixture.summary.id, status: 'open', tracked: true, checkedAtUtc: null, reason: null,
   totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
   entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Stored facts only.', issues: ['Missing exit execution.'],
-  monitor: monitorFixture, discrepancies: [discrepancyFixture],
+  monitor: monitorFixture, discrepancies: [discrepancyFixture], watches: [],
 }
 const client = () => ({ playExecution: vi.fn().mockResolvedValue(execution), runAccountMonitor: vi.fn(),
   sync: vi.fn(), dismissPlayDiscrepancy: vi.fn().mockResolvedValue(undefined),

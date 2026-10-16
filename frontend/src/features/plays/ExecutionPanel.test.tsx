@@ -27,7 +27,7 @@ const execution: PlayExecution = {
     order: order('12', { side: 'sell', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true }), filledQuantity: '0', fills: [] }],
   unlinkedOrders: [order('13', { side: 'sell', limitPrice: '110', reduceOnly: true })],
   notice: 'Orders and fills come from the venue.',
-  issues: [], monitor: monitorFixture, discrepancies: [],
+  issues: [], monitor: monitorFixture, discrepancies: [], watches: [],
 }
 
 describe('execution panel', () => {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AccountMonitor, MonitorDiscrepancy } from '@/api/monitor'
+import type { AccountMonitor, MonitorDiscrepancy, MonitorWatch } from '@/api/monitor'
 import { Button } from '@/components/ui/button'
 import { RefreshCw } from 'lucide-react'
 import './monitor.css'
@@ -85,17 +85,39 @@ export function MonitorDiscrepancies({ discrepancies, busy, onDismiss }: {
     {error && <p className="error" role="alert">{error}</p>}
     <ul>{discrepancies.map(item => <li key={item.id}>
       <div><strong>{item.kind.replaceAll('-', ' ').replaceAll('_', ' ')} · {item.contractId}</strong>
-        <span className="monitor-badge" data-severity={item.severity}>{item.severity} · {item.state}</span></div>
+        <span className="monitor-badge" data-severity={item.severity} data-outcome={item.outcome ?? undefined}>
+          {item.severity} · {item.outcome === 'unverifiable' ? 'unverifiable' : item.state}</span></div>
       <small>Opened {time(item.openedAtUtc)}{item.confirmedAtUtc ? ` · confirmed ${time(item.confirmedAtUtc)}` : ''}</small>
+      {item.outcome === 'unverifiable' && <p className="monitor-unverifiable">
+        Unverifiable since {time(item.unverifiableAtUtc)}: the venue could not confirm or clear this within the monitor lifetime.
+        It is not resolved and is no longer checked; a later fresh observation can still decide it.</p>}
       {Object.keys(item.details).length > 0 && <details><summary>Recorded details</summary><pre>{JSON.stringify(item.details, null, 2)}</pre></details>}
       {item.note && <p>{item.note}</p>}
-      {item.state === 'open' && <div className="monitor-dismiss">
+      {(item.state === 'open' || item.outcome === 'unverifiable') && <div className="monitor-dismiss">
         <label><span className="sr-only">Dismissal note for {item.kind} {item.contractId}</span>
           <input maxLength={500} placeholder="Optional dismissal note" value={notes[item.id] ?? ''}
             disabled={busy || pending !== null} onChange={event => { const value = event.target.value; setNotes(current => ({ ...current, [item.id]: value })) }} /></label>
         <Button size="sm" variant="outline" disabled={busy || pending !== null} onClick={() => { void dismiss(item.id) }}>
           {pending === item.id ? 'Dismissing…' : 'Dismiss'}</Button>
       </div>}
+    </li>)}</ul>
+  </section>
+}
+
+const watchStates = { watching: 'Watching', resolved: 'No longer resting', unverifiable: 'Unverifiable' } as const
+
+/** Linked orders of an ended Play that the monitor keeps checking until the venue shows they no longer rest. */
+export function MonitorWatches({ watches }: { watches: MonitorWatch[] }) {
+  if (!watches.length) return null
+  return <section className="monitor-watches" aria-label="Watched orders">
+    <h3>Watched orders</h3>
+    <p className="muted">After a Play ends, its linked orders are checked until the venue reports them filled, cancelled or no longer open.</p>
+    <ul>{watches.map(watch => <li key={watch.linkId}>
+      <div><strong>Order {watch.orderId}</strong>
+        <span className="monitor-badge" data-watch={watch.state}>{watchStates[watch.state]}</span></div>
+      <small>Watched since {time(watch.startedAtUtc)}{watch.endedAtUtc ? ` · ended ${time(watch.endedAtUtc)}` : ''}</small>
+      {watch.state === 'unverifiable' && <p className="monitor-unverifiable">
+        The watch lifetime passed without venue proof. The order may still rest at the venue; check it there.</p>}
     </li>)}</ul>
   </section>
 }

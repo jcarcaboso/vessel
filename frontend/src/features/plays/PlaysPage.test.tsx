@@ -36,7 +36,7 @@ function fakeServer() {
     playId: play.summary.id, status: play.summary.status, tracked: play.summary.instrumentSource === 'venue', checkedAtUtc: null,
     reason: play.summary.instrumentSource === 'venue' ? null : 'Manual instruments are not tracked at a venue.',
     totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
-    entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Venue facts.', issues: [], monitor: play.summary.instrumentSource === 'venue' ? monitorFixture : null, discrepancies: [],
+    entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Venue facts.', issues: [], monitor: play.summary.instrumentSource === 'venue' ? monitorFixture : null, discrepancies: [], watches: [],
   })
   const api = {
     plays: vi.fn((query: PlayListQuery) => playsFrom([...plays.values()].map(play => play.summary))(query)),

@@ -246,6 +246,12 @@ public sealed class MonitorEndToEndTests
         var discrepancy = JsonSerializer.SerializeToElement(new MonitorDiscrepancyDto(Guid.NewGuid(), fixture.AccountId, fixture.BtcPlay,
             "BTC", "position.excess", "warning", "open", fixture.Clock.GetUtcNow(), fixture.Clock.GetUtcNow(), null, null, null,
             JsonSerializer.SerializeToElement(new { venueQuantity = "0.100000000000000001", playQuantity = "0.1" })), json);
+        // Outcomes that need lifetimes to pass: a publicly unverifiable candidate and an unverifiable exit watch.
+        var unverifiable = JsonSerializer.SerializeToElement(new MonitorDiscrepancyDto(Guid.NewGuid(), fixture.AccountId, fixture.BtcPlay,
+            "BTC", "position.missing", "warning", "candidate", fixture.Clock.GetUtcNow(), null, null, null, null,
+            JsonSerializer.SerializeToElement(new { venueQuantity = "0", playQuantity = "0.1" }), "unverifiable", fixture.Clock.GetUtcNow()), json);
+        var watch = JsonSerializer.SerializeToElement(new MonitorWatchDto(Guid.NewGuid(), fixture.BtcPlay, "exit-order", "unverifiable",
+            fixture.Clock.GetUtcNow(), fixture.Clock.GetUtcNow()), json);
         var document = new JsonObject
         {
             ["runAccepted"] = JsonNode.Parse(accepted.GetRawText()),
@@ -256,6 +262,8 @@ public sealed class MonitorEndToEndTests
             ["runCompletedEvent"] = JsonNode.Parse(completed.GetRawText()),
             ["eventPageNextCursor"] = JsonNode.Parse(events.GetProperty("nextCursor").GetRawText()),
             ["discrepancy"] = JsonNode.Parse(discrepancy.GetRawText()),
+            ["discrepancyUnverifiable"] = JsonNode.Parse(unverifiable.GetRawText()),
+            ["watchUnverifiable"] = JsonNode.Parse(watch.GetRawText()),
         };
         var actual = ContractFixtures.Normalize(document.ToJsonString(new JsonSerializerOptions
             { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping })) + "\n";

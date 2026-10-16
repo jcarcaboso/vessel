@@ -151,7 +151,8 @@
       "workerOnline": true,
       "discrepancies": []
     },
-    "discrepancies": []
+    "discrepancies": [],
+    "watches": []
   },
   "runCompletedEvent": {
     "id": "00000000-0000-4000-8000-000000000006",
@@ -168,10 +169,18 @@
     "relevance": "current",
     "expiresAt": null,
     "subject": {
-      "accountId": "00000000-0000-4000-8000-000000000002"
+      "accountId": "00000000-0000-4000-8000-000000000002",
+      "venueId": null,
+      "contractId": null,
+      "playId": null,
+      "entryId": null,
+      "levelId": null,
+      "discrepancyId": null
     },
     "source": {
-      "trigger": "owner"
+      "trigger": "owner",
+      "orderIds": null,
+      "fillIds": null
     },
     "data": {
       "state": "live",
@@ -179,7 +188,7 @@
       "trigger": "manual"
     }
   },
-  "eventPageNextSequence": "42",
+  "eventPageNextCursor": "00000000000040008000000000000000.42",
   "discrepancy": {
     "id": "00000000-0000-4000-8000-000000000008",
     "accountId": "00000000-0000-4000-8000-000000000002",
@@ -196,6 +205,36 @@
     "details": {
       "venueQuantity": "0.100000000000000001",
       "playQuantity": "0.1"
-    }
+    },
+    "outcome": null,
+    "unverifiableAtUtc": null
+  },
+  "discrepancyUnverifiable": {
+    "id": "00000000-0000-4000-8000-000000000009",
+    "accountId": "00000000-0000-4000-8000-000000000002",
+    "playId": "00000000-0000-4000-8000-000000000003",
+    "contractId": "BTC",
+    "kind": "position.missing",
+    "severity": "warning",
+    "state": "candidate",
+    "openedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "confirmedAtUtc": null,
+    "resolvedAtUtc": null,
+    "dismissedAtUtc": null,
+    "note": null,
+    "details": {
+      "venueQuantity": "0",
+      "playQuantity": "0.1"
+    },
+    "outcome": "unverifiable",
+    "unverifiableAtUtc": "2026-10-14T03:20:41.1234567+00:00"
+  },
+  "watchUnverifiable": {
+    "linkId": "00000000-0000-4000-8000-000000000010",
+    "playId": "00000000-0000-4000-8000-000000000003",
+    "orderId": "exit-order",
+    "state": "unverifiable",
+    "startedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "endedAtUtc": "2026-10-14T03:20:41.1234567+00:00"
   }
 }

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
-import { isAccountMonitor, isMonitorEvent, isMonitorSummary, monitorFrame } from './monitor'
-import { discrepancyFixture, monitorEventFixture, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
+import { isAccountMonitor, isMonitorDiscrepancy, isMonitorEvent, isMonitorSummary, isMonitorWatch, monitorFrame } from './monitor'
+import { discrepancyFixture, eventCursor, monitorEventFixture, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
 import { accountFixture, savedPlayFixture } from '@/test/workspace-fixture'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -23,12 +23,48 @@ describe('monitor contract', () => {
     expect(isAccountMonitor({ ...monitorFixture, manualState: 'unknown' })).toBe(false)
     expect(isMonitorSummary({ ...monitorSummaryFixture, accounts: [monitorFixture, monitorFixture] })).toBe(false)
   })
+  it('requires every subject and source field as an explicit null rather than omitted', () => {
+    const omitted: Record<string, unknown> = { ...monitorEventFixture.subject }
+    delete omitted.venueId
+    expect(isMonitorEvent({ ...monitorEventFixture, subject: omitted })).toBe(false)
+    expect(isMonitorEvent({ ...monitorEventFixture, subject: { ...monitorEventFixture.subject, extra: null } })).toBe(false)
+    expect(isMonitorEvent({ ...monitorEventFixture, source: { trigger: 'scheduled' } })).toBe(false)
+    expect(isMonitorEvent({ ...monitorEventFixture, source: { ...monitorEventFixture.source, orderIds: ['o-1'] } })).toBe(true)
+    // An event's sequence is a bare decimal within its epoch, never a cursor.
+    expect(isMonitorEvent({ ...monitorEventFixture, sequence: eventCursor('1') })).toBe(false)
+  })
+  it('accepts an unverifiable outcome with its time, including a public unverifiable candidate', () => {
+    const unverifiable = { ...discrepancyFixture, outcome: 'unverifiable', unverifiableAtUtc: '2026-10-21T10:00:00Z' }
+    expect(isMonitorDiscrepancy(unverifiable)).toBe(true)
+    expect(isMonitorDiscrepancy({ ...unverifiable, state: 'candidate' })).toBe(true)
+    expect(isMonitorDiscrepancy({ ...discrepancyFixture, state: 'candidate' })).toBe(false)
+    expect(isMonitorDiscrepancy({ ...unverifiable, unverifiableAtUtc: null })).toBe(false)
+    expect(isMonitorDiscrepancy({ ...discrepancyFixture, unverifiableAtUtc: '2026-10-21T10:00:00Z' })).toBe(false)
+    expect(isMonitorDiscrepancy({ ...discrepancyFixture, outcome: 'resolved' })).toBe(false)
+    const older: Record<string, unknown> = { ...discrepancyFixture }
+    delete older.outcome
+    expect(isMonitorDiscrepancy(older)).toBe(false)
+  })
+  it('validates watched orders and keeps a watching order open-ended', () => {
+    const watch = { linkId: 'link-1', playId: savedPlayFixture.summary.id, orderId: 'exit-1', state: 'unverifiable',
+      startedAtUtc: '2026-10-14T10:00:00Z', endedAtUtc: '2026-10-21T10:00:00Z' }
+    expect(isMonitorWatch(watch)).toBe(true)
+    expect(isMonitorWatch({ ...watch, endedAtUtc: null })).toBe(true)
+    expect(isMonitorWatch({ ...watch, state: 'watching' })).toBe(false)
+    expect(isMonitorWatch({ ...watch, state: 'watching', endedAtUtc: null })).toBe(true)
+    expect(isMonitorWatch({ ...watch, state: 'gone' })).toBe(false)
+  })
   it('ignores malformed frames and unsupported event types', () => {
-    for (const [type, data] of [['event', '{'], ['event', '{}'], ['message', JSON.stringify(monitorEventFixture)],
-      ['status', '{"state":"reset","nextSequence":12}'], ['status', '{"state":"other","nextSequence":"0"}']]) {
-      expect(monitorFrame(type!, data!)).toBeNull()
+    const cursor = eventCursor('10')
+    for (const [type, data, id] of [['event', '{', cursor], ['event', '{}', cursor], ['message', JSON.stringify(monitorEventFixture), cursor],
+      // An event frame without a valid SSE id cannot be resumed after.
+      ['event', JSON.stringify(monitorEventFixture), ''], ['event', JSON.stringify(monitorEventFixture), '10'],
+      ['status', `{"state":"reset","nextCursor":10}`, ''], ['status', '{"state":"reset","nextSequence":"10"}', ''],
+      ['status', `{"state":"other","nextCursor":"${cursor}"}`, '']]) {
+      expect(monitorFrame(type!, data!, id)).toBeNull()
     }
-    expect(monitorFrame('status', '{"state":"reset","nextSequence":"10"}')).toEqual({ type: 'status', status: { state: 'reset', nextSequence: '10' } })
+    expect(monitorFrame('status', `{"state":"reset","nextCursor":"${cursor}"}`)).toEqual({ type: 'status', status: { state: 'reset', nextCursor: cursor } })
+    expect(monitorFrame('event', JSON.stringify(monitorEventFixture), cursor)).toEqual({ type: 'event', event: monitorEventFixture, cursor })
   })
   it('uses authenticated no-store reads and a body-free account run request, not execution/check', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(json(monitorSummaryFixture)).mockResolvedValueOnce(json(monitorFixture))
@@ -72,16 +108,17 @@ describe('monitor contract', () => {
     vi.stubGlobal('fetch', fetcher)
     const abort = new AbortController()
     const received = vi.fn()
-    const task = createWorkspaceApi('test').monitorStream('9007199254740992', abort.signal, received)
+    const task = createWorkspaceApi('test').monitorStream(eventCursor('9007199254740992'), abort.signal, received)
     await vi.waitFor(() => expect(fetcher).toHaveBeenCalled())
     const encoder = new TextEncoder()
     writer.enqueue(encoder.encode(': keepalive\r\nevent: event\ndata: invalid\n\nevent: event\nda'))
-    writer.enqueue(encoder.encode(`ta: ${JSON.stringify(monitorEventFixture)}\n\nevent: status\ndata: {"state":"ready","nextSequence":"9007199254740993"}\n\n`))
+    writer.enqueue(encoder.encode(`ta: ${JSON.stringify(monitorEventFixture)}\nid: ${eventCursor('9007199254740993')}\n\nevent: status\ndata: {"state":"ready","nextCursor":"${eventCursor('9007199254740993')}"}\n\n`))
     await vi.waitFor(() => expect(received).toHaveBeenCalledTimes(2))
+    expect(received.mock.calls[0]![0]).toEqual({ type: 'event', event: monitorEventFixture, cursor: eventCursor('9007199254740993') })
     abort.abort()
     await task
     expect(cancelled).toHaveBeenCalledOnce()
-    expect(fetcher.mock.calls[0]![0]).toBe('/api/events/stream?after=9007199254740992')
+    expect(fetcher.mock.calls[0]![0]).toBe(`/api/events/stream?after=${eventCursor('9007199254740992')}`)
     expect(fetcher.mock.calls[0]![1]).toMatchObject({ signal: abort.signal, headers: { Authorization: 'Bearer test', Accept: 'text/event-stream' } })
   })
 })

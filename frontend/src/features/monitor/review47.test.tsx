@@ -7,7 +7,7 @@ import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import { createWorkspaceApi } from '@/api/workspace'
 import { render } from '@/test/render'
-import { monitorFixture } from '@/test/monitor-fixture'
+import { eventCursor, monitorFixture } from '@/test/monitor-fixture'
 import { accountFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { useMonitorEvents } from '@/features/workspace/useMonitorEvents'
 import { AccountDetail } from '@/features/workspace/AccountDetail'
@@ -21,7 +21,7 @@ const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAs
 function streamClient(fail?: () => unknown) {
   const connections: { after: string; emit: (frame: MonitorStreamEvent) => void }[] = []
   const api = {
-    monitorEvents: vi.fn().mockResolvedValue({ events: [], nextSequence: '7', resetRequired: true }),
+    monitorEvents: vi.fn().mockResolvedValue({ events: [], nextCursor: eventCursor('7'), resetRequired: true }),
     monitor: vi.fn().mockResolvedValue({ workerOnline: true, heartbeatAtUtc: null, accounts: [] }),
     monitorStream: vi.fn((after: string, signal: AbortSignal, emit: (frame: MonitorStreamEvent) => void) => {
       connections.push({ after, emit })
@@ -39,9 +39,9 @@ describe('finding 3: monitor stream startup and reconnect', () => {
     const reload = vi.fn()
     renderHook(() => useMonitorEvents(api, true, reload, 0))
     await advance(0)
-    act(() => connections[0]!.emit({ type: 'status', status: { state: 'ready', nextSequence: '7' } }))
+    act(() => connections[0]!.emit({ type: 'status', status: { state: 'ready', nextCursor: eventCursor('7') } }))
     await advance(300)
-    expect(connections[0]!.after).toBe('7')
+    expect(connections[0]!.after).toBe(eventCursor('7'))
     expect(reload).not.toHaveBeenCalled()
   })
   it('backs off when the server refuses a fifth stream with 429', async () => {

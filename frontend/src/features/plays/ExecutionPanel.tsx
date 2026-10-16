@@ -1,7 +1,7 @@
 import type { LinkOrder, PlayExecution, PlaySummary } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { Link2, Link2Off } from 'lucide-react'
-import { MonitorDiscrepancies, MonitorPanel } from '@/features/monitor/MonitorPanel'
+import { MonitorDiscrepancies, MonitorPanel, MonitorWatches } from '@/features/monitor/MonitorPanel'
 import type { AccountMonitor } from '@/api/monitor'
 import type { DraftEntry } from './draft'
 import { describeOrder, fillSummary, levelName, levelOptions, orderFitsRole } from './execution'
@@ -57,6 +57,7 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
     {shownMonitor && <MonitorPanel monitor={shownMonitor} busy={busy || monitorBusy} error={monitorError}
       retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} onManageCredential={onManageCredential} />}
     {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} />}
+    <MonitorWatches watches={execution.watches} />
     <dl className="execution-totals">
       <div><dt>Entered</dt><dd>{totals.enteredQuantity}</dd></div>
       <div><dt>Exited</dt><dd>{totals.exitedQuantity}</dd></div>

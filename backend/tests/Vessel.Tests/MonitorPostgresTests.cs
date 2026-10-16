@@ -81,7 +81,7 @@ public sealed class MonitorPostgresTests
         Assert.Equal("info", completed.Severity);
         Assert.Equal(id, completed.Subject.AccountId);
         Assert.Equal("""{"trigger":"manual","outcome":"succeeded","state":"live"}""", completed.Data.GetRawText());
-        Assert.Contains(PlayEventValues.Types, type => type == completed.Type);
+        Assert.Contains(VesselEventValues.Types, type => type == completed.Type);
     }
 
     [PostgresFact]
@@ -99,7 +99,7 @@ public sealed class MonitorPostgresTests
         var sink = new EventSink();
         var coordinator = Coordinator(db, owner, new Reader(), sink, clock);
         var store = new MonitorStore(db, TestUnitOfWork.For(db));
-        await store.DiscoverAsync(["hyperliquid"], clock.Now, default);
+        await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default);
         var lease = Assert.Single(await store.ClaimDueAsync("scheduler", clock.Now, 2, default));
         Assert.Equal("scheduled", (await coordinator.AccountAsync(id, default)).RunTrigger);
         Assert.True(await coordinator.RunAsync(lease, default));

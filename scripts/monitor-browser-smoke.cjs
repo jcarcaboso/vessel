@@ -10,12 +10,17 @@ async function monitorFixture(page, accountId) {
     id: '00000000-0000-4000-8000-0000000000d1', accountId, playId: null,
     contractId: 'BTC', kind: 'position.excess', severity: 'warning', state: 'open',
     openedAtUtc: now, confirmedAtUtc: now, resolvedAtUtc: null, dismissedAtUtc: null, note: null,
-    details: { venueQuantity: '0.100000000000000001', playQuantity: '0.1' },
+    details: { venueQuantity: '0.100000000000000001', playQuantity: '0.1' }, outcome: null, unverifiableAtUtc: null,
+  }
+  // A publicly announced candidate whose subject stayed unobservable past the monitor lifetime.
+  const unverifiable = {
+    ...issue, id: '00000000-0000-4000-8000-0000000000d2', kind: 'position.missing', state: 'candidate', confirmedAtUtc: null,
+    details: { venueQuantity: '0', playQuantity: '0.1' }, outcome: 'unverifiable', unverifiableAtUtc: now,
   }
   const monitor = {
     accountId, state: 'stale', lastAttemptAtUtc: now, lastSuccessAtUtc: now,
     nextRunAtUtc: null, manualState: 'idle', runTrigger: null, nextManualAllowedAtUtc: null, error: null,
-    workerOnline: false, discrepancies: [issue],
+    workerOnline: false, discrepancies: [issue, unverifiable],
   }
   let checks = 0, dismissals = 0, statusReads = 0, finishCheck, startCheck
   const checkStarted = new Promise(resolve => { startCheck = resolve })
@@ -72,8 +77,10 @@ async function monitorFixture(page, accountId) {
     const warnings = page.getByRole('region', { name: 'Monitor discrepancies', exact: true })
     await warnings.getByText('Recorded details', { exact: true }).click()
     await warnings.getByText('0.100000000000000001', { exact: false }).waitFor()
+    await warnings.getByText('warning · unverifiable', { exact: true }).waitFor()
+    await warnings.getByText('It is not resolved and is no longer checked', { exact: false }).waitFor()
     await capture('monitor-desktop-dark')
-    pass('stored stale/offline monitor and exact discrepancy details render without automatic Check')
+    pass('stored stale/offline monitor, exact discrepancy details and an unverifiable outcome render without automatic Check')
 
     await panel.getByRole('button', { name: 'Check', exact: true }).click()
     await panel.getByRole('button', { name: 'Checking…', exact: true }).waitFor()
@@ -90,11 +97,14 @@ async function monitorFixture(page, accountId) {
     assert.equal(checks, 1)
     pass('Check is explicit, stays pending until stored status completes, and is blocked during the server cooldown')
 
-    await warnings.getByRole('textbox', { name: 'Dismissal note for position.excess BTC' }).fill('Reviewed synthetic venue position')
-    await warnings.getByRole('button', { name: 'Dismiss', exact: true }).click()
-    await warnings.getByText('warning · dismissed', { exact: true }).waitFor()
+    const excess = warnings.getByRole('listitem').filter({ hasText: 'position.excess' })
+    await excess.getByRole('textbox', { name: 'Dismissal note for position.excess BTC' }).fill('Reviewed synthetic venue position')
+    await excess.getByRole('button', { name: 'Dismiss', exact: true }).click()
+    await excess.getByText('warning · dismissed', { exact: true }).waitFor()
     assert.equal(dismissals, 1)
-    assert.equal(await warnings.getByRole('button', { name: 'Dismiss', exact: true }).count(), 0)
+    assert.equal(await excess.getByRole('button', { name: 'Dismiss', exact: true }).count(), 0)
+    // The unverifiable record stays announced, so the owner can still acknowledge it.
+    assert.equal(await warnings.getByRole('listitem').filter({ hasText: 'position.missing' }).getByRole('button', { name: 'Dismiss', exact: true }).count(), 1)
     await warnings.getByText('It does not change executions or stop checks', { exact: false }).waitFor()
     pass('dismissal persists its note and explains that monitoring continues')
 

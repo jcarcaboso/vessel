@@ -87,12 +87,13 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
           if (frame.type === 'status') {
             ready = true
             // Without a known head, stored reads may predate this stream: take its head and reload once.
-            if (isUnknownCursor(cursor)) { cursor = frame.status.nextSequence; refresh(); return }
+            if (isUnknownCursor(cursor)) { cursor = frame.status.nextCursor; refresh(); return }
             // Ready only confirms the cursor; its catch-up events follow. A reset means stored state must reload.
-            if (frame.status.state === 'reset') { cursor = frame.status.nextSequence; refresh() }
+            if (frame.status.state === 'reset') { cursor = frame.status.nextCursor; refresh() }
           } else {
             failures = 0
-            if (isAfter(frame.event.sequence, cursor)) { cursor = frame.event.sequence; refresh() }
+            // Each event frame names its own resume cursor; a reconnect resumes after the last one handled.
+            if (isAfter(frame.cursor, cursor)) { cursor = frame.cursor; refresh() }
           }
         })
       } catch (cause) {

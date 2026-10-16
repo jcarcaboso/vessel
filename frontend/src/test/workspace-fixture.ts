@@ -108,7 +108,7 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     deletePlay: vi.fn(unexpected), playExecution: vi.fn(unexpected),
     monitor: vi.fn().mockResolvedValue({ workerOnline: true, heartbeatAtUtc: null, accounts: [] }),
     accountMonitor: vi.fn(unexpected), runAccountMonitor: vi.fn(unexpected),
-    monitorEvents: vi.fn().mockResolvedValue({ events: [], nextSequence: '0', resetRequired: true }),
+    monitorEvents: vi.fn().mockResolvedValue({ events: [], nextCursor: '0', resetRequired: true }),
     monitorStream: vi.fn((_after, signal) => new Promise<void>(resolve => { signal.addEventListener('abort', () => resolve(), { once: true }) })),
     dismissPlayDiscrepancy: vi.fn(unexpected), dismissAccountDiscrepancy: vi.fn(unexpected),
     linkOrder: vi.fn(unexpected), unlinkOrder: vi.fn(unexpected), evidence: vi.fn().mockResolvedValue([]), evidenceImage: vi.fn(unexpected),

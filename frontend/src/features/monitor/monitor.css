@@ -1,13 +1,18 @@
-.monitor-panel, .monitor-discrepancies { margin-block: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+.monitor-panel, .monitor-discrepancies, .monitor-watches { margin-block: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
 .monitor-heading, .monitor-discrepancies li > div:first-child { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
-.monitor-panel p, .monitor-discrepancies p { margin: 6px 0; font-size: 12px; }
+.monitor-panel p, .monitor-discrepancies p, .monitor-watches p { margin: 6px 0; font-size: 12px; }
 .monitor-warning, .monitor-badge { color: var(--warning); }
 .monitor-badge { display: inline-block; font-size: 11px; margin: 4px; }
 .monitor-badge[data-severity="critical"] { color: var(--negative); }
 .monitor-badge[data-severity="info"] { color: var(--muted-foreground); }
-.monitor-discrepancies ul { list-style: none; padding: 0; margin: 0; }
-.monitor-discrepancies li { border-top: 1px solid var(--border); padding-block: 10px; }
-.monitor-discrepancies small { color: var(--muted-foreground); }
+.monitor-discrepancies ul, .monitor-watches ul { list-style: none; padding: 0; margin: 0; }
+.monitor-discrepancies li, .monitor-watches li { border-top: 1px solid var(--border); padding-block: 10px; }
+.monitor-discrepancies small, .monitor-watches small { color: var(--muted-foreground); }
+.monitor-watches li > div:first-child { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+/* Unverifiable is neither a resolution nor an error: it keeps the warning colour, not the positive one. */
+.monitor-unverifiable, .monitor-badge[data-outcome="unverifiable"], .monitor-badge[data-watch="unverifiable"] { color: var(--warning); }
+.monitor-badge[data-watch="watching"] { color: var(--muted-foreground); }
+.monitor-badge[data-watch="resolved"] { color: var(--positive); }
 .monitor-discrepancies pre { overflow: auto; max-height: 180px; font-size: 11px; background: var(--muted); padding: 8px; border-radius: var(--radius); }
 .monitor-discrepancies summary { cursor: pointer; font-size: 12px; margin-block: 6px; }
 .monitor-dismiss { display: flex; gap: 8px; margin-top: 8px; }

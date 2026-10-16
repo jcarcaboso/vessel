@@ -2,7 +2,7 @@ import { ApiError } from './errors'
 import { isCount, isGuid, isNullOr, isPlainDecimal, isRecord, isText, isTimestamp } from './guards'
 import { isImageMarkup, type ImageMarkup } from './markup'
 import { validOverviewScope } from './overview-summary'
-import { isAccountMonitor, isMonitorDiscrepancy, type AccountMonitor, type MonitorDiscrepancy } from './monitor'
+import { isAccountMonitor, isMonitorDiscrepancy, isMonitorWatch, type AccountMonitor, type MonitorDiscrepancy, type MonitorWatch } from './monitor'
 
 export const playStatuses = ['draft', 'planned', 'paused', 'open', 'closed', 'cancelled'] as const
 export type PlayStatus = typeof playStatuses[number]
@@ -280,6 +280,8 @@ export interface PlayExecution {
   issues: string[]
   monitor: AccountMonitor | null
   discrepancies: MonitorDiscrepancy[]
+  /** Linked orders still watched after the Play ended; empty while it is active. */
+  watches: MonitorWatch[]
 }
 export interface LinkOrder { orderId: string; role: LinkRole; entryId?: string; levelId?: string }
 
@@ -306,4 +308,5 @@ export const isPlayExecution = (v: unknown): v is PlayExecution => isRecord(v) &
   Array.isArray(v.links) && v.links.every(orderLink) && Array.isArray(v.suggestions) && v.suggestions.every(orderLink) &&
   Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) && isText(v.notice, 1000) &&
   Array.isArray(v.issues) && v.issues.every(issue => isText(issue, 1000)) &&
-  (v.monitor === null || isAccountMonitor(v.monitor)) && Array.isArray(v.discrepancies) && v.discrepancies.every(isMonitorDiscrepancy)
+  (v.monitor === null || isAccountMonitor(v.monitor)) && Array.isArray(v.discrepancies) && v.discrepancies.every(isMonitorDiscrepancy) &&
+  Array.isArray(v.watches) && v.watches.every(w => isMonitorWatch(w) && w.playId === v.playId)

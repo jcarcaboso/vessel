@@ -92,9 +92,32 @@ class Check:
   migrate:
     image: {self.images['api']}
     pull_policy: never
+    environment:
+      # Release checks only: also provision the verification subscription and its deployment.
+      Vessel__Messaging__Verification: "true"
   worker:
     image: {self.images['api']}
     pull_policy: never
+  # Runs only the verification subscription, whose receipts prove delivery and catch-up.
+  verifier:
+    image: {self.images['api']}
+    pull_policy: never
+    entrypoint: ["/app/worker"]
+    environment:
+      DOTNET_ENVIRONMENT: Production
+      Vessel__Worker__Modules__0: verification
+      Vessel__Worker__Deployment: verification
+      Vessel__Messaging__Verification: "true"
+      ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${{POSTGRES_PASSWORD}}"
+      Vessel__Auth__OwnerId: ${{Vessel__Auth__OwnerId}}
+      Vessel__Messaging__RabbitMqUri: "amqp://${{RABBITMQ_USER}}:${{RABBITMQ_PASSWORD}}@rabbitmq:5672/"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # The heartbeat file belongs to the monitor module.
+    healthcheck:
+      disable: true
+    restart: unless-stopped
   rabbitmq:
     environment:
       RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2"
@@ -270,34 +293,37 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         self.expect(self.request('/api/events?after=not-a-cursor')[0] == 400,
                     'invalid event cursor is rejected', 'monitor')
         before = self.json('/api/events?limit=200')
-        self.expect(isinstance(before['nextSequence'], str),
-                    'event cursor is an exact decimal string', 'monitor')
+        self.expect(isinstance(before['nextCursor'], str) and re.fullmatch(r'[0-9a-f]{32}\.(0|[1-9][0-9]*)', before['nextCursor']) is not None,
+                    'event cursor is an opaque {epoch}.{sequence} string', 'monitor')
+        self.expect(all(set(event['subject']) == {'accountId', 'venueId', 'contractId', 'playId', 'entryId', 'levelId', 'discrepancyId'}
+                        for event in before['events']), 'event subjects keep explicit nulls', 'monitor')
         play = self.json('/api/plays/' + self.play)
         request = {'expectedVersion': play['summary']['version'], 'status': 'planned'}
         planned = self.json('/api/plays/' + self.play + '/status', request, 'POST')
         self.expect(planned['summary']['status'] == 'planned',
                     'owner action persists with event emission enabled', 'monitor')
-        after = self.json('/api/events?after=' + before['nextSequence'] + '&limit=200')
+        after = self.json('/api/events?after=' + before['nextCursor'] + '&limit=200')
         events = [event for event in after['events']
-                  if event['subject'].get('playId') == self.play and event['type'] == 'play.status-changed']
+                  if event['subject']['playId'] == self.play and event['type'] == 'play.status-changed']
         self.expect(len(events) == 1, 'one saved status change produces one event', 'monitor')
         self.expect(self.request('/api/plays/' + self.play + '/status', 'POST', request)[0] == 409,
                     'stale owner mutation is rejected', 'monitor')
-        again = self.json('/api/events?after=' + before['nextSequence'] + '&limit=200')
+        again = self.json('/api/events?after=' + before['nextCursor'] + '&limit=200')
         self.expect([event['id'] for event in again['events']
-                     if event['subject'].get('playId') == self.play] == [event['id'] for event in events],
+                     if event['subject']['playId'] == self.play] == [event['id'] for event in events],
                     'rejected retry does not duplicate events', 'monitor')
         status, headers, _ = self.request('/api/events')
         self.expect(status == 200 and 'no-store' in dict((key.lower(), value) for key, value in headers).get('cache-control', ''),
                     'event history is not cacheable', 'monitor')
         self.monitor_event_id = events[0]['id']
-        self.event_stream(before['nextSequence'], self.monitor_event_id)
+        self.event_stream(before['nextCursor'], self.monitor_event_id)
         self.wait_event_delivery(self.monitor_event_id)
         self.compose('stop', 'rabbitmq', stdout=subprocess.DEVNULL)
         event_id = self.change_status_event('paused')
-        self.expect(self.event_pending(event_id), 'broker outage leaves a durable pending delivery', 'monitor')
+        self.expect(self.event_pending(event_id), 'broker outage leaves a durable pending publication in the outbox', 'monitor')
         self.compose('up', '-d', '--wait', 'rabbitmq', stdout=subprocess.DEVNULL)
         self.wait_event_delivery(event_id)
+        self.wait_outbox_drained()
         self.expect(self.json('/api/plays/' + self.play)['summary']['status'] == 'paused',
                     'broker recovery does not replay the owner mutation', 'monitor')
 
@@ -306,9 +332,9 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         play = self.json('/api/plays/' + self.play)
         self.json('/api/plays/' + self.play + '/status',
                   {'expectedVersion': play['summary']['version'], 'status': status}, 'POST')
-        after = self.json('/api/events?after=' + before['nextSequence'] + '&limit=200')
+        after = self.json('/api/events?after=' + before['nextCursor'] + '&limit=200')
         events = [event for event in after['events']
-                  if event['subject'].get('playId') == self.play and event['type'] == 'play.status-changed']
+                  if event['subject']['playId'] == self.play and event['type'] == 'play.status-changed']
         self.expect(len(events) == 1, 'status event commits while broker is unavailable', 'monitor')
         return events[0]['id']
 
@@ -321,41 +347,60 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             self.expect(response.status == 200 and
                         response.getheader('Content-Type', '').startswith('text/event-stream'),
                         'authenticated event stream passes through nginx', 'monitor')
-            received = []
-            for _ in range(20):
+            received, resume = [], None
+            for _ in range(40):
                 line = response.readline().decode('utf-8').strip()
+                if line.startswith('id: '):
+                    resume = line[4:]
                 if line.startswith('data: '):
                     received.append(json.loads(line[6:]))
                     if received[-1].get('id') == expected_id:
                         break
             self.expect(any(item.get('id') == expected_id for item in received),
                         'SSE catch-up delivers the committed event without a venue read', 'monitor')
+            self.expect(resume is not None and resume.startswith(after.split('.')[0] + '.'),
+                        'SSE event frames carry their resume cursor in the stream epoch', 'monitor')
         finally:
             connection.close()
 
-    def event_pending(self, event_id, project=None):
-        return self.event_delivery_state(event_id, project) in ('pending', 'failed')
-
-    def event_delivery_state(self, event_id, project=None):
+    def sql(self, query, project=None):
         # Only this check's generated Compose project/database; never a supplied DSN.
-        event_id = str(uuid.UUID(event_id))
-        result = self.compose(
-            'exec', '-T', 'postgres', 'psql', '-U', 'vessel', '-d', 'vessel', '-At', '-c',
-            "SELECT state FROM event_deliveries WHERE owner_id = '" + self.owner +
-            "' AND event_id = '" + event_id + "' AND consumer = 'monitor'",
-            project=project, capture_output=True, text=True)
+        result = self.compose('exec', '-T', 'postgres', 'psql', '-U', 'vessel', '-d', 'vessel', '-At', '-c', query,
+                              project=project, capture_output=True, text=True)
         return result.stdout.strip()
 
+    def outbox_count(self, project=None):
+        # The API publishes through its own Wolverine envelope schema; a broker outage leaves envelopes here.
+        return int(self.sql('SELECT count(*) FROM wolverine_api.wolverine_outgoing_envelopes', project) or '0')
+
+    def event_pending(self, event_id, project=None):
+        # The committed event is the record; its publication waits in the outbox until the broker returns.
+        # The verification subscription may still catch up from the database on its own, which is the design.
+        return self.outbox_count(project) > 0 and self.event_delivery_state(event_id, project) != 'failed'
+
+    def event_delivery_state(self, event_id, project=None):
+        event_id = str(uuid.UUID(event_id))
+        return self.sql("SELECT state FROM event_receipts WHERE owner_id = '" + self.owner + "' AND event_id = '" + event_id +
+                        "' AND subscription = 'verification'", project)
+
     def wait_event_delivery(self, event_id, project=None):
-        for _ in range(90):
+        for _ in range(120):
             if self.event_delivery_state(event_id, project) == 'delivered':
-                self.expect(True, 'durable monitor consumer acknowledged event ' + event_id, 'monitor')
+                self.expect(True, 'verification subscription settled event ' + event_id + ' as delivered', 'monitor')
                 return
             time.sleep(1)
         raise AssertionError('Durable event delivery did not recover: ' + event_id)
 
+    def wait_outbox_drained(self, project=None):
+        for _ in range(120):
+            if self.outbox_count(project) == 0:
+                self.expect(True, 'the outbox drains once the broker is reachable', 'monitor')
+                return
+            time.sleep(1)
+        raise AssertionError('The event outbox did not drain after the broker returned.')
+
     def private_logs(self, project=None):
-        logs = self.compose('logs', '--no-color', 'api', 'worker', 'migrate',
+        logs = self.compose('logs', '--no-color', 'api', 'worker', 'verifier', 'migrate',
                             project=project, capture_output=True, text=True).stdout
         for secret in (self.token, self.database_password, self.broker_password, self.s3_secret):
             self.expect(secret not in logs, 'application logs omit a synthetic secret', 'security')
@@ -500,8 +545,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         self.expect(self.event_pending(self.restore_event_id),
                     'database backup includes pending event work', 'restore')
         self.private_logs()
-        # Every host stops before a backup: web, api and the worker (README upgrade/backup procedure).
-        self.compose('stop', 'web', 'api', 'worker', stdout=subprocess.DEVNULL)
+        # Every host stops before a backup: web, api and the workers (README upgrade/backup procedure).
+        self.compose('stop', 'web', 'api', 'worker', 'verifier', stdout=subprocess.DEVNULL)
         service, directory, uid = ('rustfs', '/data', '10001') if self.args.storage == 's3' else ('api', '/var/lib/vessel/evidence', '1654')
         if self.args.storage == 's3':
             # RustFS stores object metadata too; take its complete volume offline.
@@ -534,6 +579,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         self.compose('up', '-d', '--wait', project=project, stdout=subprocess.DEVNULL)
         self.ready()
         self.wait_event_delivery(self.restore_event_id, project)
+        self.wait_outbox_drained(project)
         restored_events = self.json('/api/events?limit=200')
         self.expect(any(event['id'] == self.restore_event_id for event in restored_events['events']),
                     'event identity survives database restore and broker volume loss', 'restore')
@@ -548,6 +594,13 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         self.expect(item['note'] == 'Synthetic restore evidence' and item['markup'] == self.markup, 'evidence note and vector markup restored', 'restore')
         self.expect(self.json('/api/accounts/' + self.credential_account + '/credential')['storageConfigured'], 'restored mode-600 ring loaded by UID 1654', 'restore')
         self.expect(run('docker', 'run', '--rm', '-v', f'{self.temp}:/backup:ro', 'node:24-bookworm-slim', 'sh', '-c', 'cmp /backup/ring.backup /backup/secrets/restored.json', stdout=subprocess.DEVNULL).returncode == 0, 'restored key IDs/bytes unchanged', 'restore')
+        # The verification subscription is not a production consumer: stop its host, then deregister it.
+        self.compose('stop', 'verifier', project=project, stdout=subprocess.DEVNULL)
+        removed = self.compose('run', '--rm', '--no-deps', '--entrypoint', 'dotnet', 'migrate', '/app/Vessel.Api.dll',
+                               'deregister-event-subscription', 'verification', project=project, check=False, capture_output=True, text=True)
+        self.expect(removed.returncode == 0 and self.sql("SELECT count(*) FROM event_subscriptions WHERE name = 'verification'", project) == '0' and
+                    self.sql("SELECT count(*) FROM event_receipts WHERE subscription = 'verification'", project) == '0',
+                    'verification subscription deregistered with its receipts', 'restore')
 
     def cleanup(self):
         self.fixture = False

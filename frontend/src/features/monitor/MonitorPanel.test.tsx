@@ -4,7 +4,7 @@ import type { WorkspaceApi } from '@/api/workspace'
 import type { AccountMonitor } from '@/api/monitor'
 import { ApiError } from '@/api/errors'
 import { discrepancyFixture, monitorFixture } from '@/test/monitor-fixture'
-import { MonitorBadge, MonitorDiscrepancies, MonitorPanel } from './MonitorPanel'
+import { MonitorBadge, MonitorDiscrepancies, MonitorPanel, MonitorWatches } from './MonitorPanel'
 import { useMonitorRun } from './useMonitorRun'
 
 afterEach(() => vi.useRealTimers())
@@ -176,6 +176,35 @@ describe('monitor controls', () => {
     view.rerender(<MonitorDiscrepancies discrepancies={[{ ...discrepancyFixture, state: 'dismissed', note: '<b>plain text</b>' }]} busy={false} onDismiss={dismiss} />)
     expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument()
     expect(screen.getByText('<b>plain text</b>').tagName).toBe('P')
+  })
+  it('shows an unverifiable outcome as neither resolved nor checked, and still lets the owner dismiss it', async () => {
+    const dismiss = vi.fn().mockResolvedValue(undefined)
+    const unverifiable = { ...discrepancyFixture, state: 'candidate' as const, outcome: 'unverifiable' as const, unverifiableAtUtc: '2026-10-21T10:00:00Z' }
+    const view = render(<MonitorDiscrepancies discrepancies={[unverifiable]} busy={false} onDismiss={dismiss} />)
+    expect(screen.getByText('warning · unverifiable')).toHaveAttribute('data-outcome', 'unverifiable')
+    expect(screen.getByText(/not resolved and is no longer checked/)).toHaveClass('monitor-unverifiable')
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Dismiss' })))
+    expect(dismiss).toHaveBeenCalledWith(unverifiable.id, undefined)
+    // A later fresh decision clears the outcome; a resolved record is not dismissable again.
+    view.rerender(<MonitorDiscrepancies discrepancies={[{ ...discrepancyFixture, state: 'resolved' }]} busy={false} onDismiss={dismiss} />)
+    expect(screen.getByText('warning · resolved')).not.toHaveAttribute('data-outcome')
+    expect(screen.queryByText(/no longer checked/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument()
+  })
+  it('lists watched orders of an ended Play with a persistent unverifiable state', () => {
+    const base = { playId: discrepancyFixture.playId!, startedAtUtc: '2026-10-14T10:00:00Z' }
+    const view = render(<MonitorWatches watches={[
+      { ...base, linkId: 'l-1', orderId: 'exit-1', state: 'watching', endedAtUtc: null },
+      { ...base, linkId: 'l-2', orderId: 'exit-2', state: 'resolved', endedAtUtc: '2026-10-15T10:00:00Z' },
+      { ...base, linkId: 'l-3', orderId: 'entry-3', state: 'unverifiable', endedAtUtc: '2026-10-21T10:00:00Z' },
+    ]} />)
+    expect(screen.getByRole('region', { name: 'Watched orders' })).toBeInTheDocument()
+    expect(screen.getByText('Watching')).toHaveAttribute('data-watch', 'watching')
+    expect(screen.getByText('No longer resting')).toHaveAttribute('data-watch', 'resolved')
+    expect(screen.getByText('Unverifiable')).toHaveAttribute('data-watch', 'unverifiable')
+    expect(screen.getAllByText(/may still rest at the venue/)).toHaveLength(1)
+    view.rerender(<MonitorWatches watches={[]} />)
+    expect(screen.queryByRole('region', { name: 'Watched orders' })).not.toBeInTheDocument()
   })
   it('keeps a failed dismissal visible without claiming success', async () => {
     render(<MonitorDiscrepancies discrepancies={[discrepancyFixture]} busy={false} onDismiss={vi.fn().mockRejectedValue(new Error('failed'))} />)

@@ -1,7 +1,8 @@
 // Real API JSON written by backend MonitorEndToEndTests.Monitor_http_json_matches_the_browser_contract_fixture.
 // The backend test fails when its responses drift from this file; this test fails when the browser guards reject it.
 import { describe, expect, it } from 'vitest'
-import { isAccountMonitor, isMonitorDiscrepancy, isMonitorEvent, isMonitorRunAccepted, isMonitorSummary, isSequence } from '@/api/monitor'
+import { isAccountMonitor, isMonitorDiscrepancy, isMonitorEvent, isMonitorRunAccepted, isMonitorSummary, isMonitorWatch } from '@/api/monitor'
+import { isEventCursor } from '@/api/event-cursor'
 import { isPlayExecution } from '@/api/plays'
 import recorded from './monitor-api.json?raw'
 
@@ -15,8 +16,16 @@ describe('monitor API contract fixture', () => {
     expect(isMonitorSummary(fixture.summary)).toBe(true)
     expect(isPlayExecution(fixture.playExecution)).toBe(true)
     expect(isMonitorDiscrepancy(fixture.discrepancy)).toBe(true)
+    expect(isMonitorDiscrepancy(fixture.discrepancyUnverifiable)).toBe(true)
+    expect(isMonitorWatch(fixture.watchUnverifiable)).toBe(true)
     expect(isMonitorEvent(fixture.runCompletedEvent)).toBe(true)
-    expect(isSequence(fixture.eventPageNextSequence)).toBe(true)
+    expect(isEventCursor(fixture.eventPageNextCursor)).toBe(true)
+  })
+  it('records explicit nulls and the unverifiable outcomes', () => {
+    expect(fixture.runCompletedEvent).toMatchObject({ subject: { playId: null, discrepancyId: null }, source: { orderIds: null, fillIds: null } })
+    expect(fixture.discrepancy).toMatchObject({ outcome: null, unverifiableAtUtc: null })
+    expect(fixture.discrepancyUnverifiable).toMatchObject({ state: 'candidate', outcome: 'unverifiable' })
+    expect(fixture.watchUnverifiable).toMatchObject({ state: 'unverifiable' })
   })
   it('records an accepted owner Check as pending with its trigger, and its completion event', () => {
     expect(fixture.runAccepted).toMatchObject({ monitor: { manualState: 'pending', runTrigger: 'owner' } })

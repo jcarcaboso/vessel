@@ -1,4 +1,5 @@
 import { isFilledText, isPositiveCount, isRecord as object, isText as text, isTimestamp } from './guards'
+import { isEventCursor, isEventSequence, type EventCursor } from './event-cursor'
 
 export interface MonitorDiscrepancy {
   id: string
@@ -7,13 +8,28 @@ export interface MonitorDiscrepancy {
   contractId: string
   kind: string
   severity: 'info' | 'warning' | 'critical'
-  state: 'open' | 'resolved' | 'dismissed'
+  /** A candidate is only visible once announced as unverifiable. */
+  state: 'candidate' | 'open' | 'resolved' | 'dismissed'
   openedAtUtc: string
   confirmedAtUtc: string | null
   resolvedAtUtc: string | null
   dismissedAtUtc: string | null
   note: string | null
   details: Record<string, unknown>
+  /** `unverifiable`: the subject stayed unobservable beyond the monitor lifetime. Neither resolved nor still checked. */
+  outcome: 'unverifiable' | null
+  unverifiableAtUtc: string | null
+}
+
+/** A terminal Play's linked exit or entry order, watched until the venue shows it is no longer resting. */
+export interface MonitorWatch {
+  linkId: string
+  playId: string
+  orderId: string
+  /** `unverifiable` is persistent: the watch lifetime passed without proof, which never claims the order is gone. */
+  state: 'watching' | 'resolved' | 'unverifiable'
+  startedAtUtc: string
+  endedAtUtc: string | null
 }
 
 export interface AccountMonitor {
@@ -52,27 +68,36 @@ export interface MonitorEvent {
   timeliness: 'timely' | 'late'
   relevance: 'current' | 'superseded'
   expiresAt: string | null
-  subject: { accountId?: string; venueId?: string; contractId?: string; playId?: string; entryId?: string; levelId?: string; discrepancyId?: string }
-  source: { trigger: string; orderIds?: string[]; fillIds?: string[] }
+  /** Every field is present; unknown ones are explicit nulls. */
+  subject: { accountId: string | null; venueId: string | null; contractId: string | null; playId: string | null
+    entryId: string | null; levelId: string | null; discrepancyId: string | null }
+  source: { trigger: string; orderIds: string[] | null; fillIds: string[] | null }
   data: Record<string, unknown>
 }
-export interface MonitorEventPage { events: MonitorEvent[]; nextSequence: string; resetRequired: boolean }
-export type MonitorStreamEvent = { type: 'event'; event: MonitorEvent } |
-  { type: 'status'; status: { state: 'ready' | 'reset'; nextSequence: string } }
+export interface MonitorEventPage { events: MonitorEvent[]; nextCursor: EventCursor; resetRequired: boolean }
+/** An event frame carries its resume cursor from the SSE `id:` line. */
+export type MonitorStreamEvent = { type: 'event'; event: MonitorEvent; cursor: EventCursor } |
+  { type: 'status'; status: { state: 'ready' | 'reset'; nextCursor: EventCursor } }
 
 const id = (v: unknown): v is string => isFilledText(v, 128)
 // Monitor timestamps are bounded UTC strings with up to seven fractional digits.
 const date = (v: unknown): v is string => isTimestamp(v, 64) &&
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|\+00:00)$/.test(v)
 const nullableDate = (v: unknown) => v === null || date(v)
+const subjectKeys = ['accountId', 'venueId', 'contractId', 'playId', 'entryId', 'levelId', 'discrepancyId'] as const
 const severity = (v: unknown) => ['info', 'warning', 'critical'].includes(v as string)
-export const isSequence = (v: unknown): v is string => text(v, 40) && /^(0|[1-9]\d*)$/.test(v)
 
 export const isMonitorDiscrepancy = (v: unknown): v is MonitorDiscrepancy => object(v) &&
   id(v.id) && id(v.accountId) && (v.playId === null || id(v.playId)) && id(v.contractId) && id(v.kind) &&
-  severity(v.severity) && ['open', 'resolved', 'dismissed'].includes(v.state as string) &&
+  severity(v.severity) && ['candidate', 'open', 'resolved', 'dismissed'].includes(v.state as string) &&
   date(v.openedAtUtc) && nullableDate(v.confirmedAtUtc) && nullableDate(v.resolvedAtUtc) && nullableDate(v.dismissedAtUtc) &&
-  (v.note === null || text(v.note, 2000)) && object(v.details)
+  (v.note === null || text(v.note, 2000)) && object(v.details) &&
+  // The outcome and its time come together; only an unverifiable record is visible as a candidate.
+  (v.outcome === null ? v.unverifiableAtUtc === null && v.state !== 'candidate' : v.outcome === 'unverifiable' && date(v.unverifiableAtUtc))
+
+export const isMonitorWatch = (v: unknown): v is MonitorWatch => object(v) && id(v.linkId) && id(v.playId) && id(v.orderId) &&
+  ['watching', 'resolved', 'unverifiable'].includes(v.state as string) && date(v.startedAtUtc) &&
+  (v.state === 'watching' ? v.endedAtUtc === null : nullableDate(v.endedAtUtc))
 
 export const isAccountMonitor = (v: unknown): v is AccountMonitor => object(v) && id(v.accountId) &&
   ['live', 'stale', 'degraded', 'credential-error', 'idle'].includes(v.state as string) &&
@@ -91,21 +116,23 @@ export const isMonitorRunAccepted = (v: unknown): v is MonitorRunAccepted => obj
 export const isMonitorEvent = (v: unknown): v is MonitorEvent => object(v) &&
   ['id', 'type', 'ownerId', 'runId'].every(key => id(v[key])) && text(v.dedupKey, 1024) && v.dedupKey.length > 0 &&
   isPositiveCount(v.version) &&
-  isSequence(v.sequence) && severity(v.severity) && date(v.occurredAt) && date(v.detectedAt) && nullableDate(v.expiresAt) &&
+  isEventSequence(v.sequence) && severity(v.severity) && date(v.occurredAt) && date(v.detectedAt) && nullableDate(v.expiresAt) &&
   ['timely', 'late'].includes(v.timeliness as string) && ['current', 'superseded'].includes(v.relevance as string) &&
-  object(v.subject) && Object.values(v.subject).every(value => id(value)) &&
-  object(v.source) && id(v.source.trigger) && ['orderIds', 'fillIds'].every(key => v.source && object(v.source) &&
-    (v.source[key] === undefined || Array.isArray(v.source[key]) && v.source[key].every(id))) && object(v.data)
+  object(v.subject) && Object.keys(v.subject).length === subjectKeys.length &&
+  subjectKeys.every(key => object(v.subject) && (v.subject[key] === null || id(v.subject[key]))) &&
+  object(v.source) && Object.keys(v.source).length === 3 && id(v.source.trigger) && ['orderIds', 'fillIds'].every(key => v.source && object(v.source) &&
+    (v.source[key] === null || Array.isArray(v.source[key]) && v.source[key].every(id))) && object(v.data)
 
-export function monitorFrame(event: string, data: string): MonitorStreamEvent | null {
+/** `id` is the frame's SSE `id:` line: an event's resume cursor. */
+export function monitorFrame(event: string, data: string, id?: string): MonitorStreamEvent | null {
   let body: unknown
   try { body = JSON.parse(data) } catch { return null }
-  if (event === 'event' && isMonitorEvent(body)) return { type: 'event', event: body }
-  if (event === 'status' && object(body) && (body.state === 'ready' || body.state === 'reset') && isSequence(body.nextSequence)) {
-    return { type: 'status', status: { state: body.state, nextSequence: body.nextSequence } }
+  if (event === 'event' && isMonitorEvent(body) && isEventCursor(id)) return { type: 'event', event: body, cursor: id }
+  if (event === 'status' && object(body) && (body.state === 'ready' || body.state === 'reset') && isEventCursor(body.nextCursor)) {
+    return { type: 'status', status: { state: body.state, nextCursor: body.nextCursor } }
   }
   return null
 }
 
 export const isMonitorEventPage = (v: unknown): v is MonitorEventPage => object(v) && Array.isArray(v.events) && v.events.length <= 200 &&
-  v.events.every(isMonitorEvent) && isSequence(v.nextSequence) && typeof v.resetRequired === 'boolean'
+  v.events.every(isMonitorEvent) && isEventCursor(v.nextCursor) && typeof v.resetRequired === 'boolean'
