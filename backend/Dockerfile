@@ -5,7 +5,7 @@ COPY global.json ./
 COPY backend/ backend/
 WORKDIR /src/backend
 RUN dotnet restore Vessel.slnx --locked-mode && dotnet tool restore
-ARG VERSION=0.1.3
+ARG VERSION=0.2.0
 RUN dotnet publish src/Vessel.Api/Vessel.Api.csproj -c Release --no-restore \
     -p:Version=${VERSION} -o /out/api
 RUN dotnet publish src/Vessel.Worker/Vessel.Worker.csproj -c Release --no-restore \
@@ -16,7 +16,7 @@ RUN ConnectionStrings__Vessel='Host=localhost;Database=vessel;Username=vessel' \
     --target-runtime linux-x64 --output /out/migrate-ef
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
-ARG VERSION=0.1.3
+ARG VERSION=0.2.0
 ARG REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/jcarcaboso/vessel" \
       org.opencontainers.image.version="${VERSION}" \

@@ -264,8 +264,8 @@ public sealed class AccountOrderHistoryTests
     [PostgresTheory]
     [InlineData("hyperliquid", 488)]
     [InlineData("risex", 312)]
-    [InlineData("lighter", 874)]
-    [InlineData("lighter-rh", 874)]
+    [InlineData("lighter", 871)]
+    [InlineData("lighter-rh", 871)]
     public async Task Optional_failure_notice_fits_with_each_venues_maximum_public_coverage(string venue, int combinedLength)
     {
         var coverage = AccountHistoryNoticeBudget.CombinedCases().Where(c => c.Venue == venue).MaxBy(c => c.Public.Length);
