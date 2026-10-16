@@ -84,12 +84,13 @@ The UI reloads stored state on relevant events and polls stored state every 60 s
 `GET /api/plays/{id}/execution` adds `monitor: AccountMonitor | null`, `discrepancies: MonitorDiscrepancy[]` and `watches: MonitorWatch[]`. Keep all existing fields, including P1 execution issues. An untracked/manual/retrospective Play may have null monitor. `POST /api/plays/{id}/execution/check` no longer reads venues: it records the same manual request as `monitor/run` for the Play's account and answers like it (202 `MonitorRunAccepted`, 429 with `Retry-After`, 409 when the Play cannot be monitored).
 
 ```ts
-// A linked exit of a Closed or Cancelled Play, watched until the venue reports it filled, cancelled or rejected,
-// a complete open-order read no longer lists it, or Vessel:Monitor:WatchLifetime (7 days) passes.
+// A linked order (exit or entry) of a Closed or Cancelled Play, watched until the venue reports it filled, cancelled
+// or rejected, a complete open-order read no longer lists it, or Vessel:Monitor:WatchLifetime (7 days) passes.
 interface MonitorWatch {
   linkId: string
   playId: string
   orderId: string
+  role: 'entry' | 'stop' | 'target' | 'exit'
   state: 'watching' | 'resolved' | 'unverifiable' // unverifiable is persistent and never claims the order is gone
   startedAtUtc: string
   endedAtUtc: string | null
