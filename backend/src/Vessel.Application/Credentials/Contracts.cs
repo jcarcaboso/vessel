@@ -18,8 +18,11 @@ public sealed class CredentialStorageException() : Exception("Credential storage
 public interface IAccountCredentialReader
 {
     Task<string?> ReadAsync(Guid accountId, CancellationToken cancellationToken);
-    async Task<CredentialAttempt?> ReadAttemptAsync(Guid accountId, CancellationToken cancellationToken) =>
-        await ReadAsync(accountId, cancellationToken) is { } token ? new(token, "") : null;
+    /// <summary>
+    /// The token with the revision of the sealed envelope it came from, so a later refusal can only mark that envelope.
+    /// Every implementation must report the stored revision; an empty or stale revision never marks a refusal.
+    /// </summary>
+    Task<CredentialAttempt?> ReadAttemptAsync(Guid accountId, CancellationToken cancellationToken);
 
     /// <summary>
     /// Metadata-only check for status displays and polling: no account lock and no decryption.

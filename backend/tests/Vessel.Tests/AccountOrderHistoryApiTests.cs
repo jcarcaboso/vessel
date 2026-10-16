@@ -422,53 +422,65 @@ public sealed class AccountOrderHistoryApiTests
     }
 
     [PostgresFact]
-    public async Task Order_phase_after_a_newer_public_refresh_and_failure_keeps_the_locked_current_account_state()
+    public async Task Order_phase_holds_the_refresh_lease_so_newer_refreshes_wait_and_a_later_public_failure_keeps_its_coverage()
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid(); var reader = AccountHistoryOrders.PublicReader(); var orders = new AccountHistoryOrders();
-        await using var factory = Factory(owner, database, reader, orders);
+        var clock = new RefreshClock();
+        await using var factory = Factory(owner, database, reader, orders, clock: clock);
         using var client = factory.AuthorizedClient(); var account = await Import(client);
         await Sync(client, account.Id);
         var venues = AccountHistoryOrders.Registry(reader, orders);
-        // Run the production public and order phases separately to force the interleaving between their locks.
-        await using var older = database.Context(owner);
-        var olderWorkspace = new WorkspaceService(new WorkspaceStore(older, TestUnitOfWork.For(older)), new CoreOwner(owner), venues, TestUnitOfWork.For(older));
-        await olderWorkspace.SyncAsync(account.Id, default);
-        reader.Result = reader.Result with
-        {
-            HistoryNotice = "Newer public coverage.",
-            Snapshot = reader.Result.Snapshot with { ObservedAtUtc = reader.Result.Snapshot.ObservedAtUtc.AddMinutes(1) }
-        };
-        await using (var newer = database.Context(owner))
-        {
-            var workspace = new WorkspaceService(new WorkspaceStore(newer, TestUnitOfWork.For(newer)), new CoreOwner(owner), venues, TestUnitOfWork.For(newer));
-            await workspace.SyncAsync(account.Id, default);
-            reader.Fail = true;
-            Assert.Equal(502, (await Assert.ThrowsAsync<ProblemException>(() => workspace.SyncAsync(account.Id, default))).StatusCode);
-        }
-        var failed = (await client.GetFromJsonAsync<AccountDto>($"/api/accounts/{account.Id}"))!;
-        Assert.Equal("error", failed.SyncStatus);
-        Assert.Contains(orders.Result.Notice, failed.HistoryNotice);
+        // The public phase commits first; the lease, not a database lock, spans the optional order read.
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        orders.WaitForRead = async ct => { entered.TrySetResult(); await release.Task.WaitAsync(ct); };
         orders.Failure = new HttpRequestException("synthetic optional failure");
-        var execution = new PlayExecutionService(new PlayStore(older, TestUnitOfWork.For(older)), new ExecutionStore(older, TestUnitOfWork.For(older)), olderWorkspace, venues, TimeProvider.System, TestUnitOfWork.For(older));
-        await execution.RetainAccountOrdersAsync(account.Id, default);
-        var retained = (await client.GetFromJsonAsync<AccountDto>($"/api/accounts/{account.Id}"))!;
-        Assert.Equal((failed.SyncStatus, failed.LastSyncError, failed.LastSyncedAtUtc, failed.SettingsRevision),
-            (retained.SyncStatus, retained.LastSyncError, retained.LastSyncedAtUtc, retained.SettingsRevision));
+        clock.Advance(reader, orders);
+        reader.Result = reader.Result with { HistoryNotice = "Newer public coverage." };
+        var reads = orders.Reads;
+        await using var older = database.Context(owner);
+        var pending = MonitorTestPaths.RefreshAsync(older, owner, venues, account.Id, time: clock);
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            // No newer refresh or check can interleave with the held order phase.
+            using var busy = await client.PostAsync($"/api/accounts/{account.Id}/sync", null);
+            Assert.Equal(HttpStatusCode.TooManyRequests, busy.StatusCode);
+            await using (var newer = database.Context(owner))
+                Assert.True((await Assert.ThrowsAsync<MonitorAdmissionException>(() =>
+                    MonitorTestPaths.RefreshAsync(newer, owner, venues, account.Id, time: clock))).RetryAfter > 0);
+        }
+        finally { release.TrySetResult(); }
+        var retained = await pending;
+        orders.WaitForRead = null;
+        Assert.Equal(reads + 1, orders.Reads);
+        Assert.Equal(("synced", (string?)null), (retained.SyncStatus, retained.LastSyncError));
         Assert.Contains("Newer public coverage.", retained.HistoryNotice);
-        Assert.Contains("could not be refreshed", retained.HistoryNotice);
+        Assert.Contains("order coverage is unavailable", retained.HistoryNotice);
         Assert.DoesNotContain(orders.Result.Notice, retained.HistoryNotice);
         Assert.DoesNotContain("Bounded recent public fills only.", retained.HistoryNotice);
         await AssertReloadedCoverage(client, retained);
-        // The subsequent order result replaces that warning without clearing the newer public failure.
-        orders.Failure = null;
-        await execution.RetainAccountOrdersAsync(account.Id, default);
-        var recoveredOrders = (await client.GetFromJsonAsync<AccountDto>($"/api/accounts/{account.Id}"))!;
-        Assert.Equal((failed.SyncStatus, failed.LastSyncError, failed.LastSyncedAtUtc, failed.SettingsRevision),
-            (recoveredOrders.SyncStatus, recoveredOrders.LastSyncError, recoveredOrders.LastSyncedAtUtc, recoveredOrders.SettingsRevision));
-        Assert.Contains(orders.Result.Notice, recoveredOrders.HistoryNotice);
-        Assert.DoesNotContain("could not be refreshed", recoveredOrders.HistoryNotice);
-        await AssertReloadedCoverage(client, recoveredOrders);
+        // A later public failure records the error and keeps that coverage, without an order read.
+        reader.Fail = true;
+        clock.Advance(reader, orders);
+        using (var failure = await client.PostAsync($"/api/accounts/{account.Id}/sync", null))
+            Assert.Equal(HttpStatusCode.BadGateway, failure.StatusCode);
+        Assert.Equal(reads + 1, orders.Reads);
+        var failed = (await client.GetFromJsonAsync<AccountDto>($"/api/accounts/{account.Id}"))!;
+        Assert.Equal("error", failed.SyncStatus);
+        Assert.Equal((retained.HistoryNotice, retained.LastSyncedAtUtc, retained.SettingsRevision),
+            (failed.HistoryNotice, failed.LastSyncedAtUtc, failed.SettingsRevision));
+        await AssertReloadedCoverage(client, failed);
+        // The next complete refresh replaces the warning and clears the failure.
+        reader.Fail = false; orders.Failure = null;
+        clock.Advance(reader, orders);
+        var recovered = await Sync(client, account.Id);
+        Assert.Equal(("synced", (string?)null, account.SettingsRevision), (recovered.SyncStatus, recovered.LastSyncError, recovered.SettingsRevision));
+        Assert.Contains("Newer public coverage.", recovered.HistoryNotice);
+        Assert.Contains(orders.Result.Notice, recovered.HistoryNotice);
+        Assert.DoesNotContain("order coverage is unavailable", recovered.HistoryNotice);
+        await AssertReloadedCoverage(client, recovered);
     }
 
     [PostgresFact]
@@ -644,16 +656,15 @@ public sealed class AccountOrderHistoryApiTests
             Assert.Null(retained.LastSyncError);
             await AssertReloadedCoverage(client, retained);
         }
-        // Updating only order coverage must not reset a later public failure.
+        // A later public failure keeps the complete maximum coverage; it reads no orders and changes no settings.
         reader.Fail = true;
         clock.Advance(reader, orders);
+        var orderReads = orders.Reads;
         using var failed = await client.PostAsync($"/api/accounts/{account.Id}/sync", null);
         Assert.Equal(HttpStatusCode.BadGateway, failed.StatusCode);
+        Assert.Equal(orderReads, orders.Reads);
         await using var verify = database.Context(owner);
         var row = await verify.Accounts.SingleAsync();
-        var workspace = new WorkspaceService(new WorkspaceStore(verify, TestUnitOfWork.For(verify)), new CoreOwner(owner), AccountHistoryOrders.Registry(reader, orders), TestUnitOfWork.For(verify));
-        var execution = new PlayExecutionService(new PlayStore(verify, TestUnitOfWork.For(verify)), new ExecutionStore(verify, TestUnitOfWork.For(verify)), workspace, AccountHistoryOrders.Registry(reader, orders), TimeProvider.System, TestUnitOfWork.For(verify), new AccountHistoryCredential("ro:synthetic-only"));
-        await execution.RetainAccountOrdersAsync(account.Id, default);
         Assert.Equal("error", row.SyncStatus);
         Assert.NotNull(row.LastSyncError);
         Assert.Equal(cases[^1].Public + "\nOrder history: " + orders.Result.Notice, row.HistoryNotice);

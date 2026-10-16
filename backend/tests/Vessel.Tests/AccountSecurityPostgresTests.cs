@@ -125,23 +125,28 @@ public sealed class AccountSecurityPostgresTests
     }
 
     [PostgresFact]
-    public async Task Credential_write_waits_for_sync_and_nested_reader_uses_same_transaction()
+    public async Task Credential_write_during_a_refresh_supersedes_it_and_the_adapter_reads_in_its_own_transaction()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); var account = SecurityFixture.Account(owner);
         await using (var seed = database.Context(owner)) { seed.Accounts.Add(account); await seed.SaveChangesAsync(); }
         await using var syncDb = database.Context(owner); await using var writeDb = database.Context(owner);
         using var vault = SecurityFixture.Vault();
         var syncStore = new WorkspaceStore(syncDb, TestUnitOfWork.For(syncDb));
-        var reader = new BlockingReader(new AccountCredentialReader(syncStore, new AccountCredentialStore(syncDb, TestUnitOfWork.For(syncDb)), new CoreOwner(owner), vault, SecurityFixture.Clock, TestUnitOfWork.For(syncDb)));
-        var registry = SecurityFixture.Registry(reader);
-        var syncing = new WorkspaceService(syncStore, new CoreOwner(owner), registry, TestUnitOfWork.For(syncDb)).SyncAsync(account.Id, default);
+        var credentials = new AccountCredentialReader(syncStore, new AccountCredentialStore(syncDb, TestUnitOfWork.For(syncDb)), new CoreOwner(owner), vault, SecurityFixture.Clock, TestUnitOfWork.For(syncDb));
+        var reader = new BlockingReader(credentials);
+        var syncing = MonitorTestPaths.RefreshAsync(syncDb, owner, SecurityFixture.Registry(reader), account.Id, credentials);
         await reader.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        // The refresh holds its monitor lease, not the account row, while the venue read is outstanding.
         var verifier = new BlockingVerifier(); verifier.Release.SetResult();
         var writer = new AccountCredentialService(new WorkspaceStore(writeDb, TestUnitOfWork.For(writeDb)), new AccountCredentialStore(writeDb, TestUnitOfWork.For(writeDb)), new CoreOwner(owner), SecurityFixture.Registry(reader, verifier), vault, SecurityFixture.Clock, TestUnitOfWork.For(writeDb));
-        var saving = writer.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
-        await Task.Delay(100); Assert.False(verifier.Entered.Task.IsCompleted); Assert.False(saving.IsCompleted);
-        reader.Release.SetResult(); await syncing.WaitAsync(TimeSpan.FromSeconds(5)); await saving.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Single(await writeDb.AccountCredentials.ToListAsync()); Assert.Equal("synced", (await writeDb.Accounts.SingleAsync()).SyncStatus);
+        try { await writer.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default).WaitAsync(TimeSpan.FromSeconds(5)); }
+        finally { reader.Release.TrySetResult(); }
+        Assert.True(verifier.Entered.Task.IsCompleted);
+        // The new credential revision discards the read taken before it; nothing is written for it.
+        Assert.Equal(502, (await Assert.ThrowsAsync<ProblemException>(() => syncing.WaitAsync(TimeSpan.FromSeconds(5)))).StatusCode);
+        await using var verify = database.Context(owner);
+        Assert.Single(await verify.AccountCredentials.ToListAsync()); Assert.Equal("not-synced", (await verify.Accounts.SingleAsync()).SyncStatus);
+        Assert.Empty(await verify.Snapshots.ToListAsync());
     }
 
     private sealed class BlockingVerifier : IVenueCredentialVerifier

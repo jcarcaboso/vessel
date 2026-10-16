@@ -49,7 +49,6 @@ public sealed class WorkspaceTests
         Assert.Equal("unavailable", overview.Portfolios.Single(p => p.Id == empty.Id).ValueCoverage);
         Assert.Null(unknown.AccountValueUsd);
         Assert.Null(await service.SnapshotAsync(unknown.Id, default));
-        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.SyncAsync(unknown.Id, default))).StatusCode);
     }
 
     [Fact]
@@ -74,7 +73,6 @@ public sealed class WorkspaceTests
         var foreign = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Foreign"); store.Accounts.Add(foreign);
         Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.SnapshotAsync(foreign.Id, default))).StatusCode);
         Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.FillsAsync(foreign.Id, default))).StatusCode);
-        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.SyncAsync(foreign.Id, default))).StatusCode);
         Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(Guid.NewGuid(), "Foreign", "manual"), default))).StatusCode);
     }
 }

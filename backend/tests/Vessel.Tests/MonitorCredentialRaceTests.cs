@@ -73,4 +73,26 @@ public sealed class MonitorCredentialRaceTests
         Assert.True(await reader.IsUsableAsync(account, default));
         Assert.Equal(replacement, await reader.ReadAsync(account.Id, default));
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("0000000000000000000000000000000000000000000000000000000000000000")]
+    public async Task A_refusal_without_the_stored_revision_never_marks_the_credential(string revision)
+    {
+        var owner = Guid.NewGuid();
+        var accounts = new MemoryWorkspaceStore(owner);
+        var account = SecurityFixture.Account(owner);
+        accounts.Accounts.Add(account);
+        var credentials = new SecurityCredentialStore();
+        using var vault = SecurityFixture.Vault();
+        await SecurityFixture.Service(owner, accounts, credentials, vault).PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
+        var reader = new AccountCredentialReader(accounts, credentials, new CoreOwner(owner),
+            vault, SecurityFixture.Clock, TestUnitOfWork.None);
+        // Every read reports the sealed envelope's revision, never an empty one a refusal could match.
+        Assert.NotEqual(revision, Assert.IsType<CredentialAttempt>(await reader.ReadAttemptAsync(account.Id, default)).Revision);
+        await reader.MarkRefusedAsync(account.Id, revision, default);
+        Assert.Null(credentials.Stored!.LastError);
+        Assert.True(await reader.IsUsableAsync(account, default));
+        Assert.Equal(SecurityFixture.Token, await reader.ReadAsync(account.Id, default));
+    }
 }

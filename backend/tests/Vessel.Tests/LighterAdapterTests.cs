@@ -85,6 +85,8 @@ public sealed partial class LighterAdapterTests
         public List<Guid> Reads { get; } = [];
         public List<Guid> Refused { get; } = [];
         public Task<string?> ReadAsync(Guid accountId, CancellationToken ct) { Reads.Add(accountId); return Task.FromResult(value); }
+        public async Task<CredentialAttempt?> ReadAttemptAsync(Guid accountId, CancellationToken ct) =>
+            await ReadAsync(accountId, ct) is { } token ? new(token, "synthetic-revision") : null;
         public Task MarkRefusedAsync(Guid accountId, string attemptedRevision, CancellationToken ct) { Refused.Add(accountId); return Task.CompletedTask; }
     }
     private sealed class Handler : HttpMessageHandler
