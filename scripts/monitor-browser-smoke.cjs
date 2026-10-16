@@ -68,7 +68,7 @@ async function monitorFixture(page, accountId) {
     // Navigating and receiving events must not request venue checks.
     assert.equal(checks, 0)
     await page.getByRole('link', { name: 'Settings', exact: true }).click()
-    await page.getByRole('button', { name: /^Graphite / }).click()
+    await page.getByRole('button', { name: /^Graphite(\s|$)/ }).click()
     await page.getByRole('link', { name: 'Accounts', exact: true }).click()
     await page.getByRole('button', { name: 'View Synthetic chart', exact: true }).click()
     const panel = page.getByRole('region', { name: 'Background monitor', exact: true })
@@ -109,7 +109,7 @@ async function monitorFixture(page, accountId) {
     pass('dismissal persists its note and explains that monitoring continues')
 
     await page.getByRole('link', { name: 'Settings', exact: true }).click()
-    await page.getByRole('button', { name: /^Paper / }).click()
+    await page.getByRole('button', { name: /^Paper(\s|$)/ }).click()
     await page.getByRole('link', { name: 'Accounts', exact: true }).click()
     await page.getByRole('button', { name: 'View Synthetic chart', exact: true }).click()
     await panel.waitFor()
