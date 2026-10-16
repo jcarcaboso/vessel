@@ -65,8 +65,8 @@ async function main() {
     await page.getByRole('link', { name: 'Plays', exact: true }).click()
     const back = page.getByRole('button', { name: 'All plays', exact: true })
     if (await back.count()) await back.click()
-    // The list starts on "In progress"; closed and cancelled Plays are under "All".
-    await page.getByRole('group', { name: 'Show plays', exact: true }).getByRole('button', { name: 'All', exact: true }).click()
+    // The list starts on "In progress"; closed and cancelled Plays are under the "All" tab (its name carries a count).
+    await page.getByRole('tablist', { name: 'Show plays', exact: true }).getByRole('tab', { name: /^All\b/ }).click()
     await page.getByRole('button', { name: `Open ${title}`, exact: true }).click()
     await page.getByRole('tab', { name: 'Execution', exact: true }).click()
     return page.getByRole('region', { name: 'Background monitor', exact: true })

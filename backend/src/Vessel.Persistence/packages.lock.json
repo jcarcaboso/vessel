@@ -333,7 +333,7 @@
       "vessel.application": {
         "type": "Project",
         "dependencies": {
-          "Vessel.Domain": "[0.1.1, )"
+          "Vessel.Domain": "[0.1.3, )"
         }
       },
       "vessel.domain": {
