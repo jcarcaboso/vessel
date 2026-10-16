@@ -64,7 +64,10 @@ public static class MessagingHosting
         builder.UseWolverine(options =>
         {
             Configure(options, settings, connection, deployment);
+            // No request/reply: without this Wolverine declares a wolverine.response.* queue per node at runtime,
+            // which is both runtime topology and a permission the least-privilege application user lacks.
             options.UseRabbitMq(settings.BrokerUri()).UseQuorumQueues().DisableDeadLetterQueueing()
+                .DisableSystemRequestReplyQueueDeclaration()
                 .ConfigureChannelCreation(channel =>
                 {
                     channel.PublisherConfirmationsEnabled = true;
