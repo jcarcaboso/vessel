@@ -68,7 +68,7 @@ export function CreatePortfolioDialog({ open, onOpenChange, api, accounts = [], 
 
 export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accounts = [], onCreated }: {
   open: boolean; onOpenChange: (open: boolean) => void; api: WorkspaceApi; portfolios: Portfolio[]
-  accounts?: BrokerAccount[]; onCreated: () => void
+  accounts?: BrokerAccount[]; onCreated: (account?: BrokerAccount) => void
 }) {
   const [name, setName] = useState('')
   const destination = usePortfolioDestination(portfolios, api, onCreated)
@@ -98,11 +98,11 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
     let portfolioCreated = false
     try {
       const target = await destination.resolve(); portfolioCreated = target.created
-      await api.createAccount({
+      const account = await api.createAccount({
         portfolioId: target.portfolioId, name: name.trim(), venueId: venue,
         ...(needsAddress ? { address: address.trim().toLowerCase() } : needsIndex ? { sourceId: address.trim() } : manualValue.trim() ? { manualAccountValueUsd: manualValue.trim() } : {}),
       })
-      setName(''); setAddress(''); setManualValue(''); onOpenChange(false); onCreated()
+      setName(''); setAddress(''); setManualValue(''); onOpenChange(false); onCreated(account)
     } catch (cause) { setError((portfolioCreated ? 'The new portfolio was created and kept. Retry adding the account into it; a duplicate portfolio will not be created. ' : '') + (errorMessage(cause, 'Could not create this account.'))) }
     finally { setPending(false) }
   }

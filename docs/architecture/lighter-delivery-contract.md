@@ -9,7 +9,7 @@ October 7, 2026. The owner authorized implementation and a pull request after RI
 - Generic source identity replaces the address-only assumption. EVM venues keep accepting `address`; account indices use `sourceId`, represented as strings end to end.
 - Read-only tokens are optional for public account reads and required for orders. They are encrypted per account, never returned, and verified before storage. No wallet signature, private key or trading token is requested.
 - Manual chart refresh first. A Lighter live stream and the generic stream-relay refactor are deferred; the descriptor must not advertise an unimplemented stream.
-- Imports and token saves report per-account success/failure. A token failure never hides or deletes an account already created. Refresh is explicit, not an unbounded history import.
+- Imports and token saves report per-account success/failure. A token failure never hides or deletes an account already created. October 16 owner correction: after each account's optional token save attempt, the browser queues one initial bounded refresh using the shared session queue; subsequent refreshes remain explicit, never an unbounded history import. See [account management](account-management-contract.md#october-16-2026-initial-account-refresh).
 - Keep the existing Plays layout unchanged. Do not invent missing financial values or double-count wallet and perpetual balances.
 
 ## Shared API boundary
