@@ -352,11 +352,13 @@ Never generate a replacement for a lost existing ring. See
 
 ## Optional venue hosts
 
-The API reads each venue's host from `Vessel:Venues`. The defaults are the
-production hosts, so most installations set nothing. To point a venue at a
-different host, for example an egress proxy, add the matching variable to the
-`api` service's `environment` in your own Compose override file and include it
-on every Compose command. The example `compose.yaml` does not forward these
+The API and the worker read each venue's host from `Vessel:Venues`. The
+defaults are the production hosts, so most installations set nothing. To point
+a venue at a different host, for example an egress proxy, add the matching
+variable to both the `api` and the `worker` services' `environment` in your own
+Compose override file and include it on every Compose command. The worker makes
+all monitor reads, so setting it only on the API leaves monitoring on the
+default hosts. The example `compose.yaml` does not forward these
 from `.env`, and an empty value is invalid rather than a default.
 
 | Variable | Default |
@@ -369,7 +371,7 @@ from `.env`, and an empty value is invalid rather than a default.
 
 Base URLs must be `https://` origins with no path. Stream URLs must be `wss://`.
 Neither may contain user info, a query or a fragment. The API refuses to start
-with an invalid value and names only the key, never the value. A host receives
+with an invalid value, and so does the worker; both name only the key, never the value. A host receives
 the venue's read-only tokens, so configure only hosts you trust as much as the
 venue itself.
 
