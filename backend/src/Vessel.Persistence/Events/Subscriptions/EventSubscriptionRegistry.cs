@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Events;
 
 namespace Vessel.Persistence.Events.Subscriptions;
@@ -61,6 +62,20 @@ public sealed class EventSubscriptionRegistry(VesselDbContext db, UnitOfWork wor
             return result;
         }
         finally { await db.Database.CloseConnectionAsync(); }
+    }
+
+    /// <summary>
+    /// Host start check: every subscription this host runs needs its keyed <see cref="IVesselEventSubscriber"/>.
+    /// A missing handler is a configuration error, so the host fails fast instead of failing each delivery.
+    /// </summary>
+    public static void EnsureHandlers(IServiceProvider services, IEnumerable<EventSubscription> subscriptions)
+    {
+        var keyed = services.GetRequiredService<IServiceProviderIsKeyedService>();
+        var missing = subscriptions.Where(s => !keyed.IsKeyedService(typeof(IVesselEventSubscriber), s.Name))
+            .Select(s => s.Name).ToArray();
+        if (missing.Length != 0)
+            throw new InvalidOperationException(
+                $"No event handler is registered for subscription(s) {string.Join(", ", missing)}. Register a keyed IVesselEventSubscriber in the owning module.");
     }
 
     internal static string[] MatchingTypes(EventSubscription subscription) =>

@@ -198,7 +198,7 @@ flowchart LR
 3. looks the event up by owner and ID, never trusting the message's sequence or payload. Absent with an `event_dedup` row: `Historical`; absent with neither: `Unknown`; retained at or below the floor: `Historical`;
 4. checks responsibility: registered, same fingerprint, sequence above `responsible_from`, type matching the filter. Otherwise `NotResponsible`, with no receipt;
 5. inserts the receipt if absent and locks it (`FOR UPDATE`; catch-up uses `SKIP LOCKED` and returns `Busy`, live delivery waits);
-6. returns `AlreadySettled` for a terminal receipt and `NotDue` before `next_attempt_at`; settles `expired` past `expiresAt`, `failed` for a version above the subscription's `SupportedVersion` or when the attempt cap is reached;
+6. returns `AlreadySettled` for a terminal receipt and `NotDue` before `next_attempt_at`; settles `expired` past `expiresAt`, and `failed` with zero handler attempts when the stored payload cannot be read as an event (`Unreadable event.`; the payload is never logged), for a version above the subscription's `SupportedVersion` or when the attempt cap is reached. Each of these settles in the same transaction as the receipt insert, so a poison event never blocks catch-up or the low-water mark;
 7. runs the keyed `IVesselEventSubscriber` inside `IsolateAsync` and settles `delivered` or `skipped`; on a handler or save failure it records the attempt on the still-locked receipt (`TerminalEventException` fails it at once).
 
 If the whole unit then fails at commit after the handler ran, the attempt is recorded in a new transaction. The cap therefore bounds recorded attempts, not every rolled-back invocation; if that recording also fails or the process dies, the invocation is not counted. This is accepted because handlers are database-only and idempotent. Shutdown cancellation is not an attempt.
@@ -211,7 +211,7 @@ stateDiagram-v2
     pending --> delivered: handler returned Delivered
     pending --> skipped: handler returned Skipped
     pending --> pending: retryable failure, attempts + 1, next_attempt_at
-    pending --> failed: attempt cap, unsupported version or TerminalEventException
+    pending --> failed: attempt cap, unreadable payload, unsupported version or TerminalEventException
     pending --> expired: past expiresAt
     failed --> pending: retry-event-receipts adds a bounded budget
     delivered --> [*]
@@ -300,7 +300,7 @@ Every messaging host applies a module's publishing side: a durable-outbox route 
    - return `EventHandling.Delivered`, or `Skipped` when the event no longer applies (for example superseded or no longer relevant);
    - throw `TerminalEventException` (safe, server-authored text, cut to 200 characters) for a permanent failure; any other exception is retried;
    - for external work, write durable work rows (and an outbox message) in the same transaction and send from elsewhere, never while holding the receipt lock.
-3. **Declare it** in the module: `Subscriptions => [new("name", ModuleName, ["play.*"])]`, with an `EventSubscriptionLimits` override only if needed, and register the handler in `AddRunningServices`: `services.AddKeyedScoped<IVesselEventSubscriber, Handler>("name")`. The listener (`EventSubscriptionListener`) and catch-up come with the host.
+3. **Declare it** in the module: `Subscriptions => [new("name", ModuleName, ["play.*"])]`, with an `EventSubscriptionLimits` override only if needed, and register the handler in `AddRunningServices`: `services.AddKeyedScoped<IVesselEventSubscriber, Handler>("name")`. The listener (`EventSubscriptionListener`) and catch-up come with the host. A host that runs a subscription without its keyed handler fails at start (`EventSubscriberGuard`): a missing handler is a configuration error, never settled as a poison event.
 4. **Provision before starting** the hosting worker: run `migrate` (or `provision-messaging`). The queue, bindings, `.dlx`/`.dlq` and registration are created; the registration starts at the current sequence.
 5. **Run it** in a worker whose `Vessel:Worker:Modules` includes the module.
 6. **Tests:** a handler unit test; a PostgreSQL test through `EventDispatcher` and `EventCatchUp` covering delivered, skipped, retried and terminal outcomes and idempotent redelivery (see `EventSubscriptionTests`); a registration test if the filter matters; optionally a broker test in the `VesselEventTransportTests` style.
