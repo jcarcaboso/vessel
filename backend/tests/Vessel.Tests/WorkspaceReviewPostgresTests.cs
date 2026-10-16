@@ -17,7 +17,7 @@ namespace Vessel.Tests;
 public sealed class WorkspaceReviewPostgresTests
 {
     private static WorkspaceService Service(VesselDbContext db, Guid owner, FixtureReader? reader = null) =>
-        new(new WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(reader ?? new FixtureReader()));
+        new(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(reader ?? new FixtureReader()), TestUnitOfWork.For(db));
 
     [PostgresFact]
     public async Task Account_inserted_disabled_is_not_stored_as_enabled_by_the_column_default()
@@ -26,7 +26,12 @@ public sealed class WorkspaceReviewPostgresTests
         var account = new Account(Guid.NewGuid(), owner, "manual", "Disabled before insert");
         account.Configure(null, null, null);
         account.UpdateSettings(account.Name, null, false);
-        await using (var db = database.Context(owner)) await new WorkspaceStore(db).AddAccountAsync(account, default);
+        await using (var db = database.Context(owner))
+            await TestUnitOfWork.For(db).ExecuteAsync(async () =>
+            {
+                await new WorkspaceStore(db, TestUnitOfWork.For(db)).AddAccountAsync(account, default);
+                return true;
+            }, default);
         await using var read = database.Context(owner);
         Assert.False((await read.Accounts.SingleAsync()).IsEnabled);
     }
@@ -106,9 +111,9 @@ public sealed class WorkspaceReviewPostgresTests
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); var address = "0x" + new string('d', 40);
         var statuses = await Task.WhenAll(Enumerable.Range(0, 4).Select(async _ =>
         {
-            await using var db = database.Context(owner); var store = new WorkspaceStore(db);
+            await using var db = database.Context(owner); var store = new WorkspaceStore(db, TestUnitOfWork.For(db));
             var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Source"); account.Configure(null, address, null);
-            try { await store.AddAccountAsync(account, default); return 201; }
+            try { return await TestUnitOfWork.For(db).ExecuteAsync(async () => { await store.AddAccountAsync(account, default); return 201; }, default); }
             catch (ProblemException error)
             {
                 Assert.DoesNotContain(address, error.Message); Assert.DoesNotContain("23505", error.Message); return error.StatusCode;
@@ -277,8 +282,8 @@ public sealed class WorkspaceReviewPostgresTests
             Assert.Contains("WHERE", query.Sql); Assert.Contains("IsEnabled", query.Sql);
         });
         await targetService.UpdateAccountAsync(id, new("Disabled", null, false, 2), default);
-        Assert.Null(await new WorkspaceStore(target).SnapshotAsync(id, default));
-        await using var foreign = database.Context(Guid.NewGuid()); Assert.Null(await new WorkspaceStore(foreign).SnapshotAsync(unrelated, default));
+        Assert.Null(await new WorkspaceStore(target, TestUnitOfWork.For(target)).SnapshotAsync(id, default));
+        await using var foreign = database.Context(Guid.NewGuid()); Assert.Null(await new WorkspaceStore(foreign, TestUnitOfWork.For(foreign)).SnapshotAsync(unrelated, default));
     }
 
     [PostgresFact]

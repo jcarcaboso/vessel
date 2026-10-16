@@ -23,7 +23,7 @@ public sealed class StructuredReviewTests
         play.RecordManualOpen(at);
         play.RecordManualClose(at.AddSeconds(1), at.AddSeconds(1));
         store.Add(play);
-        service = new(store, new MemoryObjectStore(), TimeProvider.System);
+        service = new(store, new MemoryObjectStore(), TimeProvider.System, TestUnitOfWork.Saving(store.SaveAsync));
     }
 
     private Task<PlayDto> Save(ReviewAnswers answers, string review = "Updated review") =>

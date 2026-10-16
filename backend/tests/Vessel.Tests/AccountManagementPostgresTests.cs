@@ -15,7 +15,7 @@ namespace Vessel.Tests;
 public sealed class AccountManagementPostgresTests
 {
     private static WorkspaceService Service(VesselDbContext db, Guid owner, IPerpetualVenueReader? reader = null) =>
-        new(new WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(reader ?? new FixtureReader()));
+        new(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(reader ?? new FixtureReader()), TestUnitOfWork.For(db));
 
     private static async Task<AccountDto> VenueAccount(WorkspaceService service, Guid? portfolio = null) =>
         await service.CreateAccountAsync(new(portfolio, "Venue", "hyperliquid", "0x" + Guid.NewGuid().ToString("N") + "00000000"), default);
@@ -209,11 +209,11 @@ public sealed class AccountManagementPostgresTests
         // Preload to prove lock acquisition reloads an already tracked stale enabled record.
         Assert.True((await syncing.Accounts.SingleAsync()).IsEnabled);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var store = new WorkspaceStore(changing);
-        var disable = store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
+        var store = new WorkspaceStore(changing, TestUnitOfWork.For(changing));
+        var disable = TestUnitOfWork.For(changing).ExecuteAsync(() => store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
         {
             account.UpdateSettings("Disabled", null, false); await store.SaveAsync(default); entered.TrySetResult(); await release.Task; return true;
-        }, default), default);
+        }, default), default), default);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await syncing.Database.OpenConnectionAsync(); var pid = ((NpgsqlConnection)syncing.Database.GetDbConnection()).ProcessID;
         var sync = Service(syncing, owner, reader).SyncAsync(id, default);
@@ -235,11 +235,11 @@ public sealed class AccountManagementPostgresTests
         Assert.NotNull(await syncing.Accounts.SingleOrDefaultAsync(a => a.Id == id));
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var store = new WorkspaceStore(deleting);
-        var deletion = store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
+        var store = new WorkspaceStore(deleting, TestUnitOfWork.For(deleting));
+        var deletion = TestUnitOfWork.For(deleting).ExecuteAsync(() => store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
         {
             await store.DeleteAccountAsync(account, default); entered.TrySetResult(); await release.Task; return true;
-        }, default), default);
+        }, default), default), default);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await syncing.Database.OpenConnectionAsync(); var pid = ((NpgsqlConnection)syncing.Database.GetDbConnection()).ProcessID;
         var sync = Service(syncing, owner, reader).SyncAsync(id, default);

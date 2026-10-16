@@ -13,7 +13,7 @@ namespace Vessel.Application.Sizing;
 /// The owner's track record from closed Plays, the exposure level it implies and the limits the editor's
 /// sizing suggestions use. Outcomes come only from linked venue fills; nothing is inferred from prices.
 /// </summary>
-public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner, TimeProvider time)
+public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner, TimeProvider time, IUnitOfWork unitOfWork)
 {
     private const string Notice = "Results come from each closed play's linked fills: venue closed PnL less fees paid in listed USD stablecoins. " +
         NominalStablecoins.Caveat + " Plays on venues with different quote stablecoins are pooled nominally. " +
@@ -30,10 +30,14 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
         if (!ExactDecimal.TryParseRiskPercent(request.RiskPercent, out var risk))
             throw new ProblemException(400, "Risk per trade must be a decimal percentage.");
         var now = time.GetUtcNow();
-        var settings = await store.SettingsAsync(ct);
-        if (settings is null) store.Add(new SizingSettings(owner.OwnerId, risk, now));
-        else settings.SetRisk(risk, now);
-        await store.SaveAsync(ct);
+        await unitOfWork.ExecuteAsync(async () =>
+        {
+            var settings = await store.SettingsAsync(ct);
+            if (settings is null) store.Add(new SizingSettings(owner.OwnerId, risk, now));
+            else settings.SetRisk(risk, now);
+            await store.SaveAsync(ct);
+            return true;
+        }, ct);
         return ToDto(risk, await store.ClosedPlaysAsync(ct));
     }
 

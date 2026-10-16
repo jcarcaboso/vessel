@@ -153,7 +153,7 @@ public sealed class AccountSecurityTests
     public async Task Account_index_is_an_exact_string(string source)
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var service = new WorkspaceService(store, new CoreOwner(owner), SecurityFixture.Registry());
+        var service = new WorkspaceService(store, new CoreOwner(owner), SecurityFixture.Registry(), TestUnitOfWork.None);
         var created = await service.CreateAccountAsync(new(null, "Lighter", SecurityFixture.Venue.Id, SourceId: source), default);
         Assert.Equal(source, created.SourceId); Assert.Null(created.Address); Assert.Equal(source, store.Accounts.Single().SourceId);
     }
@@ -165,7 +165,7 @@ public sealed class AccountSecurityTests
     public async Task Invalid_account_indices_do_not_create_accounts(string? source)
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var service = new WorkspaceService(store, new CoreOwner(owner), SecurityFixture.Registry());
+        var service = new WorkspaceService(store, new CoreOwner(owner), SecurityFixture.Registry(), TestUnitOfWork.None);
         var error = await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(null, "Account", SecurityFixture.Venue.Id, SourceId: source), default));
         Assert.Equal(400, error.StatusCode); Assert.Empty(store.Accounts);
     }
@@ -174,7 +174,7 @@ public sealed class AccountSecurityTests
     public async Task Address_compatibility_and_conflicting_source_checks()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var service = new WorkspaceService(store, new CoreOwner(owner), SecurityFixture.Registry());
+        var service = new WorkspaceService(store, new CoreOwner(owner), SecurityFixture.Registry(), TestUnitOfWork.None);
         var address = "0x" + new string('A', 40);
         var account = await service.CreateAccountAsync(new(null, "EVM", "hyperliquid", Address: address), default);
         Assert.Equal(address.ToLowerInvariant(), account.Address); Assert.Equal(account.Address, account.SourceId);
@@ -210,7 +210,7 @@ public sealed class AccountSecurityTests
         var service = SecurityFixture.Service(owner, store, credentials, vault, verifier);
         await service.PutAsync(account.Id, new() { Token = " \r\n" + SecurityFixture.Token + "\t " }, default);
         Assert.Equal(SecurityFixture.Token, verifier.ReceivedToken);
-        var reader = new AccountCredentialReader(store, credentials, new CoreOwner(owner), vault, SecurityFixture.Clock);
+        var reader = new AccountCredentialReader(store, credentials, new CoreOwner(owner), vault, SecurityFixture.Clock, TestUnitOfWork.None);
         Assert.Equal(SecurityFixture.Token, await reader.ReadAsync(account.Id, default));
     }
 
@@ -255,7 +255,7 @@ public sealed class AccountSecurityTests
         Assert.Equal("valid", saved.Credential!.Status); Assert.True(saved.StorageConfigured);
         var json = JsonSerializer.Serialize(saved);
         Assert.DoesNotContain(SecurityFixture.Token, json); Assert.DoesNotContain("Ciphertext", json); Assert.DoesNotContain("KeyId", json);
-        var reader = new AccountCredentialReader(store, credentials, new CoreOwner(owner), vault, SecurityFixture.Clock);
+        var reader = new AccountCredentialReader(store, credentials, new CoreOwner(owner), vault, SecurityFixture.Clock, TestUnitOfWork.None);
         Assert.Equal(SecurityFixture.Token, await reader.ReadAsync(account.Id, default));
         using var absent = new AesGcmCredentialVault(new());
         var unavailable = SecurityFixture.Service(owner, store, credentials, absent);
@@ -277,7 +277,7 @@ public sealed class AccountSecurityTests
         Assert.DoesNotContain(SecurityFixture.Token, error.ToString()); Assert.Equal(SecurityFixture.Now.AddDays(7), credentials.Stored!.ExpiresAt);
         credentials.Stored.ExpiresAt = SecurityFixture.Now;
         Assert.Equal("expired", (await service.GetAsync(account.Id, default)).Credential!.Status);
-        var reader = new AccountCredentialReader(store, credentials, new CoreOwner(owner), vault, SecurityFixture.Clock);
+        var reader = new AccountCredentialReader(store, credentials, new CoreOwner(owner), vault, SecurityFixture.Clock, TestUnitOfWork.None);
         Assert.Null(await reader.ReadAsync(account.Id, default));
         account.UpdateSettings(account.Name, null, false);
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => reader.ReadAsync(account.Id, default))).StatusCode);
@@ -293,14 +293,14 @@ public sealed class AccountSecurityTests
         var credentials = new SecurityCredentialStore(); using var vault = SecurityFixture.Vault();
         var service = SecurityFixture.Service(owner, store, credentials, vault);
         await service.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
-        var reader = new AccountCredentialReader(store, credentials, new CoreOwner(owner), vault, SecurityFixture.Clock);
+        var reader = new AccountCredentialReader(store, credentials, new CoreOwner(owner), vault, SecurityFixture.Clock, TestUnitOfWork.None);
         await reader.MarkRefusedAsync(account.Id, default);
         Assert.Equal(AccountCredentialReader.RefusedError, credentials.Stored!.LastError);
         Assert.Equal("unavailable", (await service.GetAsync(account.Id, default)).Credential!.Status);
         Assert.False(await reader.IsUsableAsync(account, default));
         Assert.Null(await reader.ReadAsync(account.Id, default));
         await Assert.ThrowsAsync<ProblemException>(() =>
-            new AccountCredentialReader(store, credentials, new CoreOwner(Guid.NewGuid()), vault, SecurityFixture.Clock).MarkRefusedAsync(account.Id, default));
+            new AccountCredentialReader(store, credentials, new CoreOwner(Guid.NewGuid()), vault, SecurityFixture.Clock, TestUnitOfWork.None).MarkRefusedAsync(account.Id, default));
         await service.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
         Assert.Null(credentials.Stored!.LastError);
         Assert.True(await reader.IsUsableAsync(account, default));
@@ -312,11 +312,11 @@ public sealed class AccountSecurityTests
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var account = SecurityFixture.Account(owner); store.Accounts.Add(account);
         var credentials = new SecurityCredentialStore(); using var vault = SecurityFixture.Vault();
         await SecurityFixture.Service(owner, store, credentials, vault).PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
-        var reader = new AccountCredentialReader(store, credentials, new CoreOwner(owner), vault, SecurityFixture.Clock);
+        var reader = new AccountCredentialReader(store, credentials, new CoreOwner(owner), vault, SecurityFixture.Clock, TestUnitOfWork.None);
         Assert.True(await reader.IsUsableAsync(account, default));
         using var rotated = new Vessel.Infrastructure.Credentials.AesGcmCredentialVault(new() { ActiveKeyId = "v2", Keys = new() { ["v2"] = SecurityFixture.Key } });
-        Assert.False(await new AccountCredentialReader(store, credentials, new CoreOwner(owner), rotated, SecurityFixture.Clock).IsUsableAsync(account, default));
-        Assert.False(await new AccountCredentialReader(store, credentials, new CoreOwner(Guid.NewGuid()), vault, SecurityFixture.Clock).IsUsableAsync(account, default));
+        Assert.False(await new AccountCredentialReader(store, credentials, new CoreOwner(owner), rotated, SecurityFixture.Clock, TestUnitOfWork.None).IsUsableAsync(account, default));
+        Assert.False(await new AccountCredentialReader(store, credentials, new CoreOwner(Guid.NewGuid()), vault, SecurityFixture.Clock, TestUnitOfWork.None).IsUsableAsync(account, default));
         credentials.Stored!.ExpiresAt = SecurityFixture.Now;
         Assert.False(await reader.IsUsableAsync(account, default));
         credentials.Stored.ExpiresAt = SecurityFixture.Now.AddDays(1);
@@ -342,8 +342,8 @@ internal static class SecurityFixture
     {
         var account = new Account(Guid.NewGuid(), owner, Venue.Id, "Index account"); account.Configure(null, null, null, source); return account;
     }
-    public static AccountCredentialService Service(Guid owner, IWorkspaceStore accounts, IAccountCredentialStore credentials, ICredentialVault vault, SecurityVerifier? verifier = null) =>
-        new(accounts, credentials, new CoreOwner(owner), Registry(verifier ?? new()), vault, Clock);
+    public static AccountCredentialService Service(Guid owner, IWorkspaceStore accounts, IAccountCredentialStore credentials, ICredentialVault vault, SecurityVerifier? verifier = null, Vessel.Application.Ownership.IUnitOfWork? unitOfWork = null) =>
+        new(accounts, credentials, new CoreOwner(owner), Registry(verifier ?? new()), vault, Clock, unitOfWork ?? TestUnitOfWork.None);
     private sealed class SecurityClock : TimeProvider { public override DateTimeOffset GetUtcNow() => Now; }
 }
 

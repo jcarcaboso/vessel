@@ -27,7 +27,7 @@ public sealed class StablecoinPersistenceTests
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
         var reader = new FixtureReader();
-        var service = new WorkspaceService(new Vessel.Persistence.WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(reader));
+        var service = new WorkspaceService(new Vessel.Persistence.WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.For(db));
         var portfolio = await service.CreatePortfolioAsync(new("Both modes"), default);
         Vessel.Application.Venues.PerpetualVenueReadResult With(string mode, decimal perps) => reader.Result with
         {
@@ -59,7 +59,7 @@ public sealed class StablecoinPersistenceTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var store = new Vessel.Persistence.WorkspaceStore(db);
+        var store = new Vessel.Persistence.WorkspaceStore(db, TestUnitOfWork.For(db));
         var reader = new FixtureReader();
         reader.Result = reader.Result with
         {
@@ -70,7 +70,7 @@ public sealed class StablecoinPersistenceTests
                     new("USDH", 360, "0x54e00a5988577cb0b0c9ab0cb6ef7f4b", 4m, 0m, 4m)])
             }
         };
-        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader));
+        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.For(db));
         var portfolio = await service.CreatePortfolioAsync(new("Wallet group"), default);
         var account = await service.CreateAccountAsync(new(portfolio.Id, "Wallet", "hyperliquid", "0x" + new string('1', 40)), default);
         var synced = await service.SyncAsync(account.Id, default);
@@ -110,7 +110,7 @@ public sealed class StablecoinPersistenceTests
                 new("USDC", 0, "known-token", 10m, 1m, 9m)])
             }
         };
-        var service = new WorkspaceService(new Vessel.Persistence.WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(reader));
+        var service = new WorkspaceService(new Vessel.Persistence.WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.For(db));
         var account = await service.CreateAccountAsync(new(null, "Wallet", "hyperliquid", "0x" + new string('2', 40)), default);
         await service.SyncAsync(account.Id, default);
         await service.SyncAsync(account.Id, default);
@@ -118,7 +118,7 @@ public sealed class StablecoinPersistenceTests
         await using (var foreign = database.Context(Guid.NewGuid()))
         {
             Assert.Empty(await foreign.Stablecoins.ToListAsync());
-            var foreignService = new WorkspaceService(new Vessel.Persistence.WorkspaceStore(foreign), new CoreOwner(foreign.CurrentOwnerId), TestVenues.With(reader));
+            var foreignService = new WorkspaceService(new Vessel.Persistence.WorkspaceStore(foreign, TestUnitOfWork.For(foreign)), new CoreOwner(foreign.CurrentOwnerId), TestVenues.With(reader), TestUnitOfWork.For(foreign));
             Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => foreignService.SnapshotAsync(account.Id, default))).StatusCode);
         }
         reader.Result = reader.Result with
@@ -141,7 +141,7 @@ public sealed class StablecoinPersistenceTests
         await using (var old = database.Context(owner)) await old.Database.MigrateAsync();
         await using var db = database.Context(owner);
         var reader = new FixtureReader();
-        var service = new WorkspaceService(new Vessel.Persistence.WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(reader));
+        var service = new WorkspaceService(new Vessel.Persistence.WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.For(db));
         var account = await service.CreateAccountAsync(new(null, "Legacy reader", "hyperliquid", "0x" + new string('3', 40)), default);
         await service.SyncAsync(account.Id, default);
         Assert.Null((await service.AccountAsync(account.Id, default)).AvailableStablecoinNominalUsd);

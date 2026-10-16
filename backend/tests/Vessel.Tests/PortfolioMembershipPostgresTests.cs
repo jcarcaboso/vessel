@@ -66,7 +66,7 @@ public sealed class PortfolioMembershipPostgresTests
     }
 
     private static WorkspaceService Service(VesselDbContext db, Guid owner) =>
-        new(new WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(new FixtureReader()));
+        new(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(new FixtureReader()), TestUnitOfWork.For(db));
 
     [PostgresFact]
     public async Task Bulk_move_null_noop_disabled_and_stale_settings_retain_all_facts()

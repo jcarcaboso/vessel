@@ -61,7 +61,7 @@ public sealed class VenueRegistryTests
         Assert.Equal("Last", Assert.Single(found.Accounts).Name);
         var account = SecurityFixture.Account(owner); store.Accounts.Add(account);
         using var vault = SecurityFixture.Vault();
-        await new AccountCredentialService(store, new SecurityCredentialStore(), new CoreOwner(owner), registry, vault, SecurityFixture.Clock)
+        await new AccountCredentialService(store, new SecurityCredentialStore(), new CoreOwner(owner), registry, vault, SecurityFixture.Clock, TestUnitOfWork.None)
             .PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
         Assert.Null(firstVerifier.ReceivedToken); Assert.Equal(SecurityFixture.Token, lastVerifier.ReceivedToken);
     }
@@ -70,7 +70,7 @@ public sealed class VenueRegistryTests
     public async Task A_second_venue_works_through_create_instruments_and_sync_rules_without_use_case_changes()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var service = new WorkspaceService(store, new CoreOwner(owner), Registry(new FixtureReader(), new OtherReader()));
+        var service = new WorkspaceService(store, new CoreOwner(owner), Registry(new FixtureReader(), new OtherReader()), TestUnitOfWork.None);
         const string address = "0x0123456789abcdef0123456789abcdef01234567";
 
         var bad = await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(null, "Bad", "other", "0x12"), default));
@@ -94,13 +94,13 @@ public sealed class VenueRegistryTests
         const string address = "0x0123456789abcdef0123456789abcdef01234567";
         var noSync = Other with { Capabilities = Other.Capabilities with { Sync = false } };
         var registry = new VenueRegistry([VenueDescriptor.Manual, HyperliquidPerpetualReader.Descriptor, noSync], [new FixtureReader()], [], [], [], [], [], []);
-        var service = new WorkspaceService(store, new CoreOwner(owner), registry);
+        var service = new WorkspaceService(store, new CoreOwner(owner), registry, TestUnitOfWork.None);
         var manual = await service.CreateAccountAsync(new(null, "Manual", "manual"), default);
         var refused = await Assert.ThrowsAsync<ProblemException>(() => service.SyncAsync(manual.Id, default));
         Assert.Equal((400, "Only Hyperliquid accounts can be refreshed."), (refused.StatusCode, refused.Message));
 
         // Sync is allowed for the venue but its adapter is not registered.
-        var missing = new WorkspaceService(store, new CoreOwner(owner), Registry());
+        var missing = new WorkspaceService(store, new CoreOwner(owner), Registry(), TestUnitOfWork.None);
         var account = await missing.CreateAccountAsync(new(null, "Second", "other", address), default);
         var unavailable = await Assert.ThrowsAsync<ProblemException>(() => missing.SyncAsync(account.Id, default));
         Assert.Equal((503, "Venue reader is unavailable."), (unavailable.StatusCode, unavailable.Message));

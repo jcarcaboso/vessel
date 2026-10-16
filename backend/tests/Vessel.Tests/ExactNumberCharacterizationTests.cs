@@ -41,7 +41,7 @@ public sealed class ExactNumberCharacterizationTests
     {
         var owner = Guid.NewGuid();
         var store = new MemoryWorkspaceStore(owner);
-        try { await new WorkspaceService(store, new CoreOwner(owner), TestVenues.With()).CreateAccountAsync(new(null, "Manual", "manual", ManualAccountValueUsd: text), default); }
+        try { await new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(), TestUnitOfWork.None).CreateAccountAsync(new(null, "Manual", "manual", ManualAccountValueUsd: text), default); }
         catch (ProblemException e) when (e.Message == "Manual account value must be an exact nonnegative decimal string.") { return "x"; }
         return Describe(store.Accounts.Single().ManualAccountValueUsd!.Value);
     }
@@ -77,7 +77,7 @@ public sealed class ExactNumberCharacterizationTests
     private static async Task<string> RiskPercent(string? text)
     {
         var store = new MemorySizingStore();
-        try { await new SizingService(store, new CoreOwner(Guid.NewGuid()), TimeProvider.System).UpdateSettingsAsync(new(text!), default); }
+        try { await new SizingService(store, new CoreOwner(Guid.NewGuid()), TimeProvider.System, TestUnitOfWork.None).UpdateSettingsAsync(new(text!), default); }
         catch (ProblemException e) when (e.Message == "Risk per trade must be a decimal percentage.") { return "x"; }
         catch (DomainValidationException) { return "rule"; }
         return Describe(store.Settings!.RiskPercent);

@@ -4,6 +4,7 @@ using Vessel.Application.Sizing;
 using Vessel.Application.Venues;
 using Vessel.Application.Credentials;
 using Vessel.Application.Workspace;
+using Vessel.Application.Ownership;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
@@ -16,7 +17,7 @@ namespace Vessel.Application.Plays.Execution;
 /// Unambiguous orders link automatically; ambiguous ones become suggestions for the owner. Read-only at the venue.
 /// </summary>
 public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore store, WorkspaceService workspace,
-    IVenueRegistry venues, TimeProvider time, IAccountCredentialReader? credentials = null)
+    IVenueRegistry venues, TimeProvider time, IUnitOfWork unitOfWork, IAccountCredentialReader? credentials = null)
 {
     private const int MaxUnlinkedOrders = 20;
     private const string Notice = "Orders and fills come from the venue and link to this play by order ID. " +
@@ -24,12 +25,12 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
 
     /// <summary>Retains bounded venue order history on explicit account refresh, without linking orders or changing Plays.</summary>
     public Task<string?> RetainAccountOrdersAsync(Guid accountId, CancellationToken ct) =>
-        workspace.WithAccountLockAsync<string?>(accountId, async account =>
+        unitOfWork.ExecuteAsync(() => workspace.WithAccountLockAsync<string?>(accountId, async account =>
         {
             var notice = await RetainAccountOrdersLockedAsync(account, ct);
             await workspace.RecordOrderHistoryNoticeAsync(account, notice, ct);
             return notice;
-        }, ct);
+        }, ct), ct);
 
     private async Task<string?> RetainAccountOrdersLockedAsync(Account account, CancellationToken ct)
     {
@@ -40,13 +41,15 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         if (account.SourceId is null) throw new ProblemException(400, "A source identity is required before refresh.");
         if (venues.Orders(account.VenueId) is not { } reader)
             return "Order history was not refreshed because the venue order reader is unavailable.";
+        // The credential read participates in the unit of work, so it stays outside the catch-and-continue block below.
+        if (await CredentialReasonAsync(account, usableOnly: false, ct) is { } reason)
+        {
+            ct.ThrowIfCancellationRequested();
+            return $"Order history was not refreshed. {reason}";
+        }
         VenueOrderReadResult read;
         try
         {
-            var reason = await CredentialReasonAsync(account, usableOnly: false, ct);
-            ct.ThrowIfCancellationRequested();
-            if (reason is not null)
-                return $"Order history was not refreshed. {reason}";
             read = await reader.ReadOrdersAsync(account, ct);
             if (!read.Orders.All(VenueFactChecks.Valid))
                 throw new VenueReadException("The venue adapter returned orders outside Vessel's execution vocabulary.");
@@ -74,7 +77,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         if (UntrackedReason(play, account, account is null ? null : venues.Descriptor(account.VenueId)) is { } reason) throw new ProblemException(409, reason);
         if (venues.Orders(account!.VenueId) is not { } orderReader) throw new ProblemException(503, "Venue reader is unavailable.");
         await workspace.SyncAsync(account.Id, ct);
-        await workspace.WithAccountLockAsync(account.Id, async lockedAccount =>
+        await unitOfWork.ExecuteAsync(() => workspace.WithAccountLockAsync(account.Id, async lockedAccount =>
         {
             if (!lockedAccount.IsEnabled) throw new ProblemException(409, "Enable the account to track its orders.");
             if (await CredentialReasonAsync(lockedAccount, usableOnly: false, ct) is { } credentialReason)
@@ -94,7 +97,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             await store.WithAccountLockAsync(lockedAccount.Id, async () => { await ReconcileAsync(lockedAccount, read, ticks, ct); return true; }, ct);
             await workspace.RecordOrderHistoryNoticeAsync(lockedAccount, read.Notice, ct);
             return true;
-        }, ct);
+        }, ct), ct);
         return await GetAsync(playId, ct);
     }
 
@@ -156,7 +159,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             "entry" => OrderLinkRole.Entry, "stop" => OrderLinkRole.Stop, "target" => OrderLinkRole.Target, "exit" => OrderLinkRole.Exit,
             _ => throw new ProblemException(400, "Role must be entry, stop, target or exit.")
         };
-        await store.WithAccountLockAsync(play.AccountId, async () =>
+        await unitOfWork.ExecuteAsync(() => store.WithAccountLockAsync(play.AccountId, async () =>
         {
             await RequireActiveAsync(play, NotLinkable, ct);
             // The committed plan decides, not the one this request read first.
@@ -186,7 +189,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             await ApplyTransitionsAsync(play.AccountId, [play], ct);
             await store.SaveAsync(ct);
             return true;
-        }, ct);
+        }, ct), ct);
         return await GetAsync(playId, ct);
     }
 
@@ -197,7 +200,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     public async Task<PlayExecutionDto> UnlinkAsync(Guid playId, Guid linkId, CancellationToken ct)
     {
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
-        await store.WithAccountLockAsync(play.AccountId, async () =>
+        await unitOfWork.ExecuteAsync(() => store.WithAccountLockAsync(play.AccountId, async () =>
         {
             var link = (await store.LinksAsync(play.AccountId, ct)).FirstOrDefault(l => l.Id == linkId && l.PlayId == play.Id &&
                 l.State != OrderLinkState.Dismissed) ?? throw new ProblemException(404, "Link not found.");
@@ -205,7 +208,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             link.Dismiss(time.GetUtcNow());
             await store.SaveAsync(ct);
             return true;
-        }, ct);
+        }, ct), ct);
         return await GetAsync(playId, ct);
     }
 

@@ -42,7 +42,11 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
         }.Concat(settings ?? []).GroupBy(pair => pair.Key).ToDictionary(group => group.Key, group => group.Last().Value)));
         builder.ConfigureServices(services =>
         {
-            if (store is not null) services.AddSingleton(store);
+            if (store is not null)
+            {
+                services.AddSingleton(store);
+                services.AddSingleton<Vessel.Application.Ownership.IUnitOfWork>(TestUnitOfWork.None);
+            }
             if (reader is not null) services.AddSingleton<IPerpetualVenueReader>(reader);
             else if (candles is not null)
             {

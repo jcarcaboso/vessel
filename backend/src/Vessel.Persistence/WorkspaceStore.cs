@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Application.Venues;
@@ -8,7 +7,7 @@ using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence;
 
-public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
+public sealed class WorkspaceStore(VesselDbContext db, UnitOfWork unitOfWork) : IWorkspaceStore
 {
     public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct) => db.Portfolios.OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
     public Task<List<Account>> AccountsAsync(CancellationToken ct) => db.Accounts.OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
@@ -25,33 +24,28 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
         .Where(x => (accountId == null || x.AccountId == accountId) && db.Accounts.Any(a => a.Id == x.AccountId && a.IsEnabled)).OrderByDescending(x => x.OccurredAtUtc).ThenBy(x => x.Id)
         .Take(limit).AsNoTracking().ToListAsync(ct);
     public Task<int> FillCountAsync(CancellationToken ct) => db.Fills.Where(f => db.Accounts.Any(a => a.Id == f.AccountId && a.IsEnabled)).CountAsync(ct);
-    public async Task AddPortfolioAsync(Portfolio portfolio, CancellationToken ct) { db.Portfolios.Add(portfolio); await db.SaveChangesAsync(ct); }
+    public async Task AddPortfolioAsync(Portfolio portfolio, CancellationToken ct) { unitOfWork.RequireActive(); db.Portfolios.Add(portfolio); await unitOfWork.SaveChangesAsync(ct); }
     public async Task AddAccountAsync(Account account, CancellationToken ct)
     {
+        unitOfWork.RequireActive();
         db.Accounts.Add(account);
-        try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateException error) when (error.InnerException is PostgresException
-        { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "UX_accounts_owner_venue_source" })
-        {
-            throw new ProblemException(409, "An account for this venue and source already exists. Manage or re-enable that account.");
-        }
+        await unitOfWork.SaveChangesAsync(ct);
     }
-    public async Task SaveAsync(CancellationToken ct) => await db.SaveChangesAsync(ct);
 
-    public async Task<T> WithManagementLockAsync<T>(Func<Task<T>> action, CancellationToken ct)
+    public async Task SaveAsync(CancellationToken ct) => await unitOfWork.SaveChangesAsync(ct);
+
+    public Task<T> WithManagementLockAsync<T>(Func<Task<T>> action, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         // Grouping mutations for an owner acquire this before any account row lock.
         // This avoids assignment/portfolio-delete lock-order inversions. It is cross-process,
         // transaction-scoped and contains no provider I/O; ordinary sync does not take it.
         var key = "vessel-management:" + db.CurrentOwnerId;
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);
         var result = await action();
-        await transaction.CommitAsync(ct);
         return result;
-    }
+    }, ct);
 
-    public async Task DeletePortfolioAsync(Guid id, CancellationToken ct)
+    public Task DeletePortfolioAsync(Guid id, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
         // Lock the parent as well as all accounts. PostgreSQL FK key-share locks serialize
         // concurrent assignments (even privileged SQL) against this parent deletion.
@@ -65,12 +59,13 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
             await db.Entry(account).ReloadAsync(ct);
             account.UpdateSettings(account.Name, null, account.IsEnabled);
         }
-        await db.SaveChangesAsync(ct);
+        await unitOfWork.SaveChangesAsync(ct);
         db.Portfolios.Remove(portfolio);
-        await db.SaveChangesAsync(ct);
-    }
+        await unitOfWork.SaveChangesAsync(ct);
+        return true;
+    }, ct);
 
-    public async Task DeleteAccountAsync(Account account, CancellationToken ct)
+    public Task DeleteAccountAsync(Account account, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
         if (await db.Plays.AnyAsync(p => p.AccountId == account.Id, ct))
             throw new ProblemException(409, "This account has linked Plays and cannot be deleted.");
@@ -95,12 +90,12 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
             if (deleted) entry.State = EntityState.Detached;
         }
         db.Accounts.Remove(account);
-        await db.SaveChangesAsync(ct);
-    }
+        await unitOfWork.SaveChangesAsync(ct);
+        return true;
+    }, ct);
 
-    public async Task<T> WithAccountLockAsync<T>(Guid id, Func<Account, Task<T>> action, CancellationToken ct)
+    public Task<T> WithAccountLockAsync<T>(Guid id, Func<Account, Task<T>> action, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
-        await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         // PostgreSQL row lock serializes refreshes across API processes, not just this host.
         // Owner is explicit in raw SQL as well as the global query filter.
         var accounts = await db.Accounts.FromSqlInterpolated(
@@ -109,11 +104,10 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
         // A scoped context could already track this account before waiting on the lock.
         await db.Entry(account).ReloadAsync(ct);
         var result = await action(account);
-        if (transaction is not null) await transaction.CommitAsync(ct);
         return result;
-    }
+    }, ct);
 
-    public async Task SaveRefreshAsync(Account account, PerpetualVenueReadResult result, CancellationToken ct)
+    public Task SaveRefreshAsync(Account account, PerpetualVenueReadResult result, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
         var observation = result.Snapshot;
         var snapshot = await db.Snapshots.Include(x => x.Positions).Include(x => x.Stablecoins).AsSplitQuery().SingleOrDefaultAsync(x => x.AccountId == account.Id, ct);
@@ -139,7 +133,7 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
                 snapshot.Stablecoins.Clear();
             }
             // Delete only the advancing ledger's composite keys before replacement.
-            await db.SaveChangesAsync(ct);
+            await unitOfWork.SaveChangesAsync(ct);
         }
         // Equal timestamps are no-ops for that ledger. Stale state never prevents
         // importing new fill identities, or updating an independently newer wallet.
@@ -213,6 +207,7 @@ public sealed class WorkspaceStore(VesselDbContext db) : IWorkspaceStore
         }
         // RawJson intentionally never crosses into journal persistence or logs.
         account.RecordSync(snapshot.ObservedAtUtc, result.HistoryNotice);
-        await db.SaveChangesAsync(ct);
-    }
+        await unitOfWork.SaveChangesAsync(ct);
+        return true;
+    }, ct);
 }

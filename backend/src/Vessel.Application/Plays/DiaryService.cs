@@ -7,13 +7,14 @@ using Vessel.Application.Common;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
 using Vessel.Application.Venues;
+using Vessel.Application.Ownership;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Plays;
 
 public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecutionStore executions,
-    IVenueRegistry venues, TimeProvider time)
+    IVenueRegistry venues, TimeProvider time, IUnitOfWork unitOfWork)
 {
     public const int MaxManualRecords = 200, MaxManualHistory = 1000;
     public const int MaxReasons = 100;
@@ -31,11 +32,11 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     public Task<ManualExecutionsDto> ManualAsync(Guid playId, CancellationToken ct) =>
-        plays.WithPlayLockAsync(playId, async () =>
+        unitOfWork.ExecuteAsync(() => plays.WithPlayLockAsync(playId, async () =>
         {
             var play = await RequireManual(playId, ct);
             return await ManualResult(play, await diary.ManualAsync(playId, ct), ct);
-        }, ct);
+        }, ct), ct);
 
     public Task<ManualExecutionsDto> RecordAsync(Guid playId, Guid? executionId, ManualExecutionRequest request, CancellationToken ct) =>
         Idempotent(request.RequestId, new { playId, executionId, request }, async () =>
@@ -149,7 +150,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         row.Side, row.Quantity, row.Price, row.Fee, row.FeeCurrency, row.Source, row.CreatedAtUtc, row.UpdatedAtUtc);
 
     public Task<RetrospectivePreviewDto> PreviewAsync(Guid accountId, string operationId, CancellationToken ct) =>
-        executions.WithAccountLockAsync(accountId, () => PreviewLocked(accountId, operationId, ct), ct);
+        unitOfWork.ExecuteAsync(() => executions.WithAccountLockAsync(accountId, () => PreviewLocked(accountId, operationId, ct), ct), ct);
 
     private async Task<RetrospectivePreviewDto> PreviewLocked(Guid accountId, string operationId, CancellationToken ct)
     {
@@ -246,7 +247,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         }, ct), ct);
 
     private Task<T> Idempotent<T>(Guid requestId, object payload, Func<Task<T>> action, CancellationToken ct) =>
-        diary.WithRequestLockAsync(requestId, async () =>
+        unitOfWork.ExecuteAsync(() => diary.WithRequestLockAsync(requestId, async () =>
         {
             if (requestId == Guid.Empty) throw new ProblemException(400, "A nonempty requestId is required.");
             var hash = Hash(payload);
@@ -269,7 +270,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
             diary.Add(new DiaryRequest { Id = requestId, OwnerId = ownerId, PayloadHash = hash, Response = JsonSerializer.Serialize(result, Json) });
             await plays.SaveAsync(ct);
             return result;
-        }, ct);
+        }, ct), ct);
 
     private static string Hash(object payload) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload, Json))));
 
