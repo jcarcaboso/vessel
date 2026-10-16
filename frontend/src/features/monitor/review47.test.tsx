@@ -61,17 +61,17 @@ describe('finding 4: account detail order', () => {
     render(<AccountDetail account={{ ...accountFixture, venueId: 'hyperliquid', syncStatus: 'synced', sourceId: '7' }} api={api}
       refreshing={false} onSync={vi.fn()} onBack={vi.fn()} onManage={vi.fn()} monitor={{ ...monitorFixture, accountId: accountFixture.id, state: 'stale' }} />)
     const back = screen.getByRole('button', { name: /All accounts/ })
-    const heading = screen.getByRole('heading', { name: accountFixture.name })
+    // The page title names the account; the refreshed summary card carries the venue, freshness and badges.
+    const summary = screen.getByRole('region', { name: 'Account summary' })
     const source = screen.getByText('Source')
-    const note = screen.getByText(/Refresh account rereads supported current state/)
     const panel = screen.getByRole('region', { name: 'Background monitor' })
     const tiles = screen.getByText('Available balance')
-    const order = [back, heading, source, note, panel, tiles]
+    const order = [back, summary, source, panel, tiles]
     for (let index = 1; index < order.length; index++) {
       expect(order[index - 1]!.compareDocumentPosition(order[index]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     }
-    // The exceptional monitor badge stays inside the heading section.
-    expect(heading.closest('section')).toContainElement(screen.getByText('Monitor stale', { selector: '.monitor-badge' }))
+    // The exceptional monitor badge stays inside the account summary.
+    expect(summary).toContainElement(screen.getByText('Monitor stale', { selector: '.monitor-badge' }))
   })
 })
 
