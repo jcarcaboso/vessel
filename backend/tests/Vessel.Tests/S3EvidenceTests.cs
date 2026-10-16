@@ -298,7 +298,10 @@ public sealed class S3IntegrationTests
             var play = EvidenceFixtures.PlayFor(owner);
             metadata.Plays.Add(play);
             await using var factory = new CoreApiFactory(owner, settings: settings, configure: services =>
-                services.AddSingleton<IEvidenceMetadataStore>(metadata));
+            {
+                services.AddSingleton<IEvidenceMetadataStore>(metadata);
+                services.AddSingleton<Vessel.Application.Ownership.IUnitOfWork>(TestUnitOfWork.None);
+            });
             using var api = factory.AuthorizedClient();
             using var form = new MultipartFormDataContent { { new ByteArrayContent(EvidenceFixtures.Png), "file", "image.png" } };
             var upload = await api.PostAsync($"/api/plays/{play.Id}/evidence", form);

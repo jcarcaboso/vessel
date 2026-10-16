@@ -4,6 +4,10 @@ October 16, 2026. These screenshots use the real application and API with an
 explicitly migrated, disposable PostgreSQL 18 database. No live venue history,
 owner data or venue credential was used.
 
+Captured at feature revision `89ec971`, before integration with the Play monitor
+stack. The funding presentation is unchanged; monitor controls are outside
+these captures' scope.
+
 The CSS viewport is 1600px wide, with a height of 1000px for the list and 1100px
 for the expanded views. T3 saves the captures at 1280px wide. Graphite is the
 default theme; the final capture uses Paper.

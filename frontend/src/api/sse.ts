@@ -1,7 +1,11 @@
-/** One dispatched server-sent event. `event` defaults to `message`; multi-line data is joined with `\n`. */
+/**
+ * One dispatched server-sent event. `event` defaults to `message`; multi-line data is joined with `\n`. `id` is the
+ * last event ID in effect when it was dispatched (empty when the stream never set one).
+ */
 export interface SseEvent {
   event: string
   data: string
+  id: string
 }
 
 export class SseOverflowError extends Error {
@@ -12,7 +16,7 @@ export class SseOverflowError extends Error {
 }
 
 /**
- * Incremental `text/event-stream` parser (WHATWG rules for `event` and `data`; `id` and `retry` are ignored).
+ * Incremental `text/event-stream` parser (WHATWG rules for `event`, `data` and `id`; `retry` is ignored).
  * Chunks may split lines, CRLF pairs or events anywhere. Pending text is bounded so a peer that never
  * ends a line or an event cannot grow memory without limit.
  */
@@ -21,6 +25,8 @@ export class SseParser {
   private data: string[] = []
   private dataSize = 0
   private type = ''
+  // The last event ID persists across events until the stream changes it.
+  private lastId = ''
 
   constructor(private readonly onEvent: (event: SseEvent) => void, private readonly maxBuffer = 1024 * 1024) {}
 
@@ -47,6 +53,7 @@ export class SseParser {
   end() {
     if (this.buffer.endsWith('\r')) this.push('\n')
     this.reset()
+    this.lastId = ''
   }
 
   private reset() {
@@ -58,7 +65,7 @@ export class SseParser {
 
   private line(line: string) {
     if (line === '') {
-      if (this.data.length) this.onEvent({ event: this.type || 'message', data: this.data.join('\n') })
+      if (this.data.length) this.onEvent({ event: this.type || 'message', data: this.data.join('\n'), id: this.lastId })
       this.data = []
       this.dataSize = 0
       this.type = ''
@@ -70,9 +77,37 @@ export class SseParser {
     let value = colon < 0 ? '' : line.slice(colon + 1)
     if (value.startsWith(' ')) value = value.slice(1)
     if (field === 'event') this.type = value
+    // An ID containing NULL is ignored, as the specification requires.
+    else if (field === 'id') { if (!value.includes('\0')) this.lastId = value }
     else if (field === 'data') {
       this.data.push(value)
       this.dataSize += value.length + 1
     }
+  }
+}
+
+/** Read an authenticated fetch response using the same bounded decoder for every SSE channel. */
+export async function readSseStream(body: ReadableStream<Uint8Array>, signal: AbortSignal, onEvent: (event: SseEvent) => void) {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  const parser = new SseParser(event => { if (!signal.aborted) onEvent(event) })
+  const stop = () => { void reader.cancel().catch(() => undefined) }
+  signal.addEventListener('abort', stop, { once: true })
+  try {
+    if (signal.aborted) return
+    for (;;) {
+      const chunk = await reader.read()
+      if (signal.aborted) return
+      if (chunk.done) {
+        parser.push(decoder.decode())
+        parser.end()
+        return
+      }
+      parser.push(decoder.decode(chunk.value, { stream: true }))
+    }
+  } finally {
+    signal.removeEventListener('abort', stop)
+    await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
   }
 }

@@ -17,6 +17,11 @@ public sealed class PostgresFactAttribute : FactAttribute
     }
 }
 
+public sealed class PostgresTheoryAttribute : TheoryAttribute
+{
+    public PostgresTheoryAttribute() => Skip = new PostgresFactAttribute().Skip;
+}
+
 public sealed class PostgresTests
 {
     [PostgresFact]

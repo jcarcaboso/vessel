@@ -43,6 +43,8 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(VesselDbContext).Assembly);
+        MonitorModel.Configure(modelBuilder);
+        MonitorDiscrepancyModel.Configure(modelBuilder);
         ApplyOwnerFilters(modelBuilder);
     }
 

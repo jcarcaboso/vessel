@@ -28,6 +28,8 @@ public static class DependencyInjection
                 (CoreEventId.QueryIterationFailed, LogLevel.Debug),
                 (CoreEventId.SaveChangesFailed, LogLevel.Debug)));
         });
+        services.AddScoped<UnitOfWork>();
+        services.AddScoped<Vessel.Application.Ownership.IUnitOfWork>(sp => sp.GetRequiredService<UnitOfWork>());
         services.AddScoped<Vessel.Application.Workspace.IWorkspaceStore, WorkspaceStore>();
         services.AddScoped<Vessel.Application.Activity.IActivityStore, ActivityStore>();
         services.AddScoped<Vessel.Application.Credentials.IAccountCredentialStore, AccountCredentialStore>();

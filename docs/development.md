@@ -7,7 +7,7 @@ The application lives in `frontend/` and `backend/`. Overview, portfolio/account
 - Node 24, selected by `.nvmrc`, with the engine constraint in root `package.json`.
 - pnpm **12.8.1**, pinned in root `package.json`.
 - .NET SDK **10.0.302**, pinned in `global.json` with patch roll-forward.
-- Docker with Compose for the local PostgreSQL service.
+- Docker with Compose for local PostgreSQL and RabbitMQ.
 
 Evidence storage keeps the backward-compatible Local default at `data/evidence`
 relative to the API content root; no storage configuration or credentials are
@@ -85,15 +85,20 @@ scheme/client headers. The production credential guard is never disabled.
 transport modes and restores synthetic backups into fresh volumes. Its optional
 `--browser-module` check verifies the built SPA's CSP without real venue calls.
 
-## PostgreSQL
+## PostgreSQL and RabbitMQ
 
-Copy `.env.example` to the ignored root `.env`, set a private local database password and a random API token, and keep the file private. The development runner supports KEY=value entries and optional matching quotes, not shell commands. Then:
+Copy `.env.example` to the ignored root `.env`, set private database and broker passwords, a random API token and a nonempty owner GUID, and keep the file private. The development runner supports KEY=value entries and optional matching quotes, not shell commands. Then:
 
 ```sh
 pnpm db:up
+pnpm broker:up
 ```
 
 The development service binds **only `127.0.0.1:55432`**. It uses PostgreSQL 18 and a named volume. These database credentials and privileges are for local development, not a production security configuration.
+
+`pnpm dev`, `pnpm dev:api`, `pnpm dev:worker` and `pnpm db:migrate` start both services with `docker compose up --wait` first (set `Vessel_DEV_SKIP_SERVICES=1` to manage them yourself), and stop early when the broker credentials are missing, because the API and worker cannot start without the broker. `pnpm dev` runs the API, the worker (the `monitor` module, `Vessel__Worker__Modules`) and the frontend; `pnpm dev:api` runs the API alone, so the monitor shows as offline.
+
+RabbitMQ binds AMQP to `127.0.0.1:55672` and management to `127.0.0.1:55673`. Its credentials stay in the API/worker environment, never Vite. The development runner constructs the connection from `RABBITMQ_USER` and `RABBITMQ_PASSWORD`; an explicit `Vessel__Messaging__RabbitMqUri` overrides it. The production Compose file does not publish AMQP.
 
 Set the backend connection in your process environment or secret manager:
 
@@ -104,19 +109,16 @@ ConnectionStrings__Vessel=Host=127.0.0.1;Port=55432;Database=vessel;Username=ves
 Do not commit the populated value. Migrations are deliberate:
 
 ```sh
-cd backend
-dotnet tool restore
-dotnet ef database update --project src/Vessel.Persistence
-cd ..
+pnpm db:migrate
 ```
 
-The API does not migrate at startup. `pnpm db:migrate` reads server connection settings from root `.env` and applies both explicit migrations. The core schema adds owned portfolios, snapshots, positions and imported fills. Its active-play account/instrument index remains non-unique, with composite owner constraints. No complete journal schema or inferred fill association is provided.
+Neither API nor worker migrates or provisions at startup. `pnpm db:migrate` starts both local services if needed, applies EF migrations, then runs the API binary's explicit `provision-messaging` command: envelope storage and the schema registration of every deployment (`api` and `monitor`), the broker topology of every module and insert-only subscription registrations. A host whose schema was provisioned for other modules refuses to start. The active-Play account/instrument index remains non-unique, with composite owner constraints.
 
 ## API and token
 
 Configure `Vessel__Auth__Token` privately before connecting. There is no default production token. It is read by the API, not Vite. Never create a `VITE_*` token variable.
 
-Optional owner configuration is `Vessel__Auth__OwnerId` and `Vessel__Auth__OwnerName`. The default seeded identity is documented in [the shared contract](architecture/scaffold-contract.md); it is not a login system or venue credential.
+Set `Vessel__Auth__OwnerId` to the same nonempty GUID for API and worker. `Vessel__Auth__OwnerName` is optional; neither value is a venue credential.
 
 Run:
 
@@ -133,7 +135,7 @@ The development launch profile binds `http://127.0.0.1:5080`.
 
 Lighter read-only tokens are separate from the Vessel API token. Configure a server-only encryption key ring before saving them; public account discovery and reads work without one. The default setup uses `scripts/credential_keys.py init` to create a private file without printing its key. Set only `Vessel__Credentials__KeyFile` in `.env`. The optional `fetch-infisical` command can provision the same file through an authenticated Infisical CLI later, without changing the API or existing ciphertext. Neither command runs automatically. See [credential setup, HTTPS and rotation](architecture/venue-credentials.md#operator-setup) and the [implemented import workflow](architecture/lighter-state.md). The Vite development build permits token entry on LAN HTTP when the API also runs in Development, and displays a plaintext-transport warning. Use only a trusted test network; HTTPS is still preferable. Production builds and non-Development APIs retain the HTTPS guard outside loopback.
 
-Metadata and liveness can run without database connectivity. The protected core endpoints provide portfolio/account create/list/read, overview, snapshots, fills and bounded manual-trigger Hyperliquid refresh. There is no full Play CRUD, job scheduler or full-history backfill.
+Metadata and liveness can run without database connectivity. Protected endpoints provide accounts, portfolios, saved Plays, review, snapshots and retained executions. The separate worker checks active Plays and potentially resting linked exits at the configured interval. Manual Refresh and Check share account admission limits. Venue reads remain bounded, not a full-history backfill.
 
 ## Frontend
 
@@ -143,13 +145,13 @@ In a second terminal:
 pnpm dev:web
 ```
 
-Or start both processes from the root with `pnpm dev`. That runner reads private API/database values from root `.env` and does not pass them to the frontend. `pnpm db:up` and `pnpm db:migrate` are explicit setup steps; the API does not migrate implicitly. Use Ctrl+C to stop the runner while retaining PostgreSQL.
+Or start API, worker and frontend with `pnpm dev`. The runner reads private server values from root `.env` and does not pass them to the frontend. `pnpm dev:api` and `pnpm dev:worker` start the individual server processes. Setup remains explicit; neither server migrates implicitly. Use Ctrl+C to stop the runner while retaining PostgreSQL and RabbitMQ.
 
 Open `http://127.0.0.1:5180`. The Vite development proxy forwards `/api` and `/health` to the API. `VESSEL_API_TARGET` can override the server-side proxy target; it is not a token or a browser configuration secret.
 
 Enter the configured backend token at runtime. The field clears after connection; the API-client closure keeps the token only in session memory for protected reads/writes, until disconnect. Nothing stores it in browser storage, a URL or the build.
 
-The default page uses actual core API records, with honest loading/empty/error states. Manual values may be unavailable. Hyperliquid refresh covers primary-perpetual state and bounded recent executions. Imported fills remain unassigned; there is no invented thesis, FX adjustment or complete-lifetime claim. Plays can be saved with revisions and lifecycle status, link imported orders and fills, render venue candle charts with drawings and indicators, and keep evidence images; unsaved drafts stay in browser memory. Background jobs and notification delivery remain later work. See [the Plays contract](architecture/plays-workspace-contract.md), [Play lifecycle](architecture/play-lifecycle.md) and [portfolio review](architecture/portfolio-review.md).
+The default page uses actual core API records, with honest loading/empty/error states. Manual values may be unavailable. Venue refresh covers supported perpetual state and bounded recent executions. Imported fills carry no invented thesis, FX adjustment or complete-lifetime claim. Plays can be saved with revisions and lifecycle status, link imported orders and fills, render venue candle charts with drawings and indicators, and keep evidence images; unsaved drafts stay in browser memory. The browser reads committed monitor events and stored state rather than polling venues. Notification delivery remains later work. See [the monitor plan](architecture/play-monitor-plan.md), [the Plays contract](architecture/plays-workspace-contract.md), [Play lifecycle](architecture/play-lifecycle.md) and [portfolio review](architecture/portfolio-review.md).
 
 These HTTP addresses are loopback development endpoints. A real self-hosted deployment needs HTTPS and deliberate proxy/authentication policy.
 

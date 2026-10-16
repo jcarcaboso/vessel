@@ -115,10 +115,10 @@ public interface IPlayStore
     void Add(PlayPlanRevision revision);
     void Add(PlayStatusChange change);
     void Add(PlayReviewRevision revision);
-    /// <summary>Saves pending changes; a concurrent write to the same Play is a 409.</summary>
+    /// <summary>Persists pending changes through the active unit of work without committing; a concurrent Play write is a 409.</summary>
     Task SaveAsync(CancellationToken ct);
     /// <summary>
-    /// Runs the action in one transaction holding account, execution advisory, then Play, so import/link/plan writes take turns.
+    /// Requires an active unit of work and holds account, execution advisory, then Play locks until its completion.
     /// Inside it the Play is read with its committed values.
     /// Cross-account moves first hold the owner management lock and reload the locked destination account.
     /// </summary>

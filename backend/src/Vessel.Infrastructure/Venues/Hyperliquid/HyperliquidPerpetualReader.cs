@@ -113,11 +113,13 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
 
             using var state = await ReadJsonAsync(
                 new { type = "clearinghouseState", user = publicAddress, dex = "" }, token);
-            var snapshot = ReadSnapshot(state.RootElement, contracts, latestTimestamp);
+            var snapshot = ReadSnapshot(state.RootElement, contracts, latestTimestamp, out var positionsComplete);
 
             using var fills = await ReadJsonAsync(
                 new { type = "userFills", user = publicAddress, aggregateByTime = false }, token);
-            var executions = ReadFills(fills.RootElement, contracts, latestTimestamp);
+            var executions = ReadFills(fills.RootElement, contracts, latestTimestamp, out var omitted);
+            var fillCoverage = new RawFillReadCoverage();
+            fillCoverage.Observe(fills.RootElement, row => Timestamp(Property(row, "time"), latestTimestamp));
 
             using var abstraction = await ReadJsonAsync(new { type = "userAbstraction", user = publicAddress }, token);
             var accountMode = ReadAccountMode(abstraction.RootElement);
@@ -125,7 +127,9 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
             var stablecoins = ReadStablecoinMetadata(spotMeta.RootElement);
             using var spotState = await ReadJsonAsync(new { type = "spotClearinghouseState", user = publicAddress }, token);
             var wallet = ReadStablecoinWallet(spotState.RootElement, stablecoins, accountMode, timeProvider.GetUtcNow());
-            return new PerpetualVenueReadResult(snapshot with { StablecoinWallet = wallet }, instruments, executions, HistoryNotice);
+            return new PerpetualVenueReadResult(snapshot with { StablecoinWallet = wallet }, instruments, executions, HistoryNotice,
+                PositionsComplete: positionsComplete, FillHistoryTruncated: fillCoverage.Count == MaxFills,
+                OldestRawFillAtUtc: fillCoverage.OldestAtUtc, OmittedExecutions: omitted);
         }, cancellationToken);
     }
 
@@ -159,9 +163,11 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         return result;
     }
 
-    private static VenueSnapshot ReadSnapshot(JsonElement state, HashSet<string> contracts, long latestTimestamp)
+    private static VenueSnapshot ReadSnapshot(JsonElement state, HashSet<string> contracts, long latestTimestamp,
+        out bool positionsComplete)
     {
         var summary = Property(state, "marginSummary");
+        positionsComplete = true; // clearinghouseState has the full current primary-DEX position list, not history.
         var positions = new List<VenuePosition>();
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in Array(Property(state, "assetPositions")).EnumerateArray())
@@ -169,7 +175,10 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
             var position = Property(item, "position");
             var name = Text(Property(position, "coin"));
             if (!contracts.Contains(name))
+            {
+                if (IsPrimaryContract(name)) positionsComplete = false;
                 continue;
+            }
             var quantity = Number(Property(position, "szi"));
             if (quantity == 0)
                 continue;
@@ -196,8 +205,13 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
             positions);
     }
 
-    private static List<VenueFill> ReadFills(JsonElement root, HashSet<string> contracts, long latestTimestamp)
+    /// <param name="omitted">
+    /// Primary-perpetual fills on a contract the catalogue does not list. Spot (<c>@…</c>, <c>A/B</c>) and HIP-3
+    /// (<c>dex:…</c>) fills are proven out of scope; an unrecognized primary contract is an in-scope fact Vessel left out.
+    /// </param>
+    internal static List<VenueFill> ReadFills(JsonElement root, HashSet<string> contracts, long latestTimestamp, out int omitted)
     {
+        omitted = 0;
         var array = Array(root);
         if (array.GetArrayLength() > MaxFills)
             throw new VenueReadException(InvalidResponse);
@@ -206,7 +220,10 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         {
             var name = Text(Property(fill, "coin"));
             if (!contracts.Contains(name))
+            {
+                if (IsPrimaryContract(name)) omitted++;
                 continue;
+            }
             var side = Text(Property(fill, "side"));
             if (side is not ("A" or "B"))
                 throw new VenueReadException(InvalidResponse);

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Common;
+using Vessel.Application.Monitoring;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
@@ -19,21 +20,26 @@ public sealed class FundingPostgresTests
         public decimal Amount = -0.1234567890123456789012345678m;
         public DateTimeOffset Observation = At;
         public VenueFundingReadResult? Funding;
+        public Func<CancellationToken, Task>? BeforeFunding;
         public Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<VenueInstrument>>([]);
         public Task<PerpetualVenueReadResult> ReadAsync(string source, CancellationToken ct) =>
             Task.FromResult(new PerpetualVenueReadResult(new(Observation, "fixture", 100, 80, 0, []), [], [], "Synthetic bounded executions."));
-        public Task<VenueFundingReadResult> ReadFundingAsync(Account account, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+        public async Task<VenueFundingReadResult> ReadFundingAsync(Account account, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
         {
             FundingReads++;
+            if (BeforeFunding is not null) await BeforeFunding(ct);
+            ct.ThrowIfCancellationRequested();
             if (CancelFunding) throw new OperationCanceledException(ct);
             if (FailFunding) throw new VenueReadException("Provider secret must not appear.");
-            return Task.FromResult(Funding ?? new([new("funding-1", "BTC", "1", Amount, "USDC", At.AddDays(-1),
-                "Raw payload must not be stored")], from, to, true, "Synthetic settled funding.", FundingFacts.Excluded));
+            return Funding ?? new([new("funding-1", "BTC", "1", Amount, "USDC", At.AddDays(-1),
+                "Raw payload must not be stored")], from, to, true, "Synthetic settled funding.", FundingFacts.Excluded);
         }
     }
     private static WorkspaceService Service(VesselDbContext db, Guid owner, Reader reader) =>
-        new(new WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(reader));
+        new(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.For(db));
+    private static Task<AccountDto> Refresh(VesselDbContext db, Guid owner, Reader reader, Guid id, CancellationToken ct = default) =>
+        MonitorTestPaths.RefreshAsync(db, owner, TestVenues.With(reader), id, ct: ct);
     private static async Task<Guid> Account(VesselDbContext db, Guid owner)
     {
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic funding");
@@ -52,13 +58,16 @@ public sealed class FundingPostgresTests
             Assert.False(db.Database.HasPendingModelChanges());
             id = await Account(db, owner);
         }
-        await Task.WhenAll(Enumerable.Range(0, 3).Select(async _ =>
+        var refreshed = await Task.WhenAll(Enumerable.Range(0, 3).Select(async _ =>
         {
             await using var db = database.Context(owner);
-            await Service(db, owner, reader).SyncAsync(id, default);
+            try { await Refresh(db, owner, reader, id); return true; }
+            catch (MonitorAdmissionException) { return false; }
         }));
+        Assert.Contains(true, refreshed);
         await using (var db = database.Context(owner))
         {
+            await Refresh(db, owner, reader, id);
             var payment = await db.FundingPayments.SingleAsync();
             Assert.Equal(reader.Amount, payment.Amount);
             Assert.Equal(At.AddDays(-30), (await db.FundingStates.SingleAsync()).CoveredFromUtc);
@@ -84,14 +93,14 @@ public sealed class FundingPostgresTests
         var owner = Guid.NewGuid(); var reader = new Reader(); Guid id;
         await using (var db = database.Context(owner))
         {
-            id = await Account(db, owner); await Service(db, owner, reader).SyncAsync(id, default);
+            id = await Account(db, owner); await Refresh(db, owner, reader, id);
         }
         var original = reader.Amount;
         reader.Amount = 50; reader.Observation = At.AddHours(1);
         await using (var db = database.Context(owner))
         {
-            var error = await Assert.ThrowsAsync<ProblemException>(() => Service(db, owner, reader).SyncAsync(id, default));
-            Assert.Equal(409, error.StatusCode);
+            var error = await Assert.ThrowsAsync<ProblemException>(() => Refresh(db, owner, reader, id));
+            Assert.Equal(502, error.StatusCode);
         }
         await using (var db = database.Context(owner))
         {
@@ -108,9 +117,9 @@ public sealed class FundingPostgresTests
         var owner = Guid.NewGuid(); var reader = new Reader(); Guid id;
         await using (var db = database.Context(owner))
         {
-            id = await Account(db, owner); await Service(db, owner, reader).SyncAsync(id, default);
+            id = await Account(db, owner); await Refresh(db, owner, reader, id);
             reader.FailFunding = true; reader.Observation = At.AddHours(1);
-            await Service(db, owner, reader).SyncAsync(id, default);
+            await Refresh(db, owner, reader, id);
         }
         await using (var db = database.Context(owner))
         {
@@ -129,14 +138,14 @@ public sealed class FundingPostgresTests
         var owner = Guid.NewGuid(); var reader = new Reader(); Guid id;
         await using (var db = database.Context(owner))
         {
-            id = await Account(db, owner); await Service(db, owner, reader).SyncAsync(id, default);
+            id = await Account(db, owner); await Refresh(db, owner, reader, id);
             reader.Observation = At.AddDays(1);
-            await Service(db, owner, reader).SyncAsync(id, default);
+            await Refresh(db, owner, reader, id);
             Assert.Equal(At.AddDays(-30), (await db.FundingStates.SingleAsync()).CoveredFromUtc);
             Assert.Equal(At.AddDays(1), (await db.FundingStates.SingleAsync()).CoveredToUtc);
             reader.Observation = At.AddDays(40);
             reader.Funding = new([], At.AddDays(10), At.AddDays(40), true, "Later verified empty window.", FundingFacts.Excluded);
-            await Service(db, owner, reader).SyncAsync(id, default);
+            await Refresh(db, owner, reader, id);
         }
         await using (var db = database.Context(owner))
         {
@@ -157,13 +166,13 @@ public sealed class FundingPostgresTests
         { OccurredAtUnixNanoseconds = ns }], At.AddDays(-30), At, true, "Exact native timestamp.");
         await using (var db = database.Context(owner))
         {
-            id = await Account(db, owner); await Service(db, owner, reader).SyncAsync(id, default);
+            id = await Account(db, owner); await Refresh(db, owner, reader, id);
         }
         await using (var db = database.Context(owner))
         {
             var payment = await db.FundingPayments.SingleAsync();
             Assert.Equal(ns, payment.OccurredAtUnixNanoseconds); Assert.Equal(timestamp, payment.OccurredAtUtc);
-            await Service(db, owner, reader).SyncAsync(id, default);
+            await Refresh(db, owner, reader, id);
             Assert.Single(await db.FundingPayments.ToListAsync());
         }
     }
@@ -178,15 +187,65 @@ public sealed class FundingPostgresTests
         {
             id = await Account(db, owner);
             cancellation.Cancel();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Service(db, owner, reader).SyncAsync(id, cancellation.Token));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Refresh(db, owner, reader, id, cancellation.Token));
         }
         await using (var db = database.Context(owner))
         {
             Assert.Empty(await db.FundingPayments.ToListAsync()); Assert.Empty(await db.Snapshots.ToListAsync());
             var account = await db.Accounts.SingleAsync(); account.UpdateSettings(account.Name, null, false); await db.SaveChangesAsync();
-            await Assert.ThrowsAsync<ProblemException>(() => Service(db, owner, reader).SyncAsync(id, default));
+            await Assert.ThrowsAsync<ProblemException>(() => Refresh(db, owner, reader, id));
             Assert.Equal(0, reader.FundingReads);
         }
+    }
+
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Funding_reads_outside_the_unit_and_changed_settings_discard_the_captured_refresh(bool disable)
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var reader = new Reader();
+        await using var db = database.Context(owner);
+        var id = await Account(db, owner);
+        var inUnit = true;
+        var settingsChanged = false;
+        reader.BeforeFunding = async ct =>
+        {
+            inUnit = TestUnitOfWork.For(db).IsActive || db.Database.CurrentTransaction is not null;
+            await using var changed = database.Context(owner);
+            var account = await changed.Accounts.SingleAsync(ct);
+            account.UpdateSettings("Changed during funding read", null, !disable);
+            await changed.SaveChangesAsync(ct);
+            settingsChanged = true;
+        };
+        var error = await Assert.ThrowsAsync<ProblemException>(() => Refresh(db, owner, reader, id));
+        Assert.Equal(502, error.StatusCode);
+        Assert.False(inUnit);
+        Assert.True(settingsChanged);
+        Assert.Equal(1, reader.FundingReads);
+        await using var verify = database.Context(owner);
+        Assert.Empty(await verify.FundingPayments.ToListAsync());
+        Assert.Empty(await verify.FundingStates.ToListAsync());
+        Assert.Empty(await verify.Snapshots.ToListAsync());
+    }
+
+    [PostgresFact]
+    public async Task Cancellation_during_funding_read_does_not_commit_snapshot_or_settlements()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var reader = new Reader();
+        using var cancellation = new CancellationTokenSource();
+        reader.BeforeFunding = _ => { cancellation.Cancel(); return Task.CompletedTask; };
+        await using (var db = database.Context(owner))
+        {
+            var id = await Account(db, owner);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Refresh(db, owner, reader, id, cancellation.Token));
+            Assert.Equal(1, reader.FundingReads);
+        }
+        await using var verify = database.Context(owner);
+        Assert.Empty(await verify.FundingPayments.ToListAsync());
+        Assert.Empty(await verify.FundingStates.ToListAsync());
+        Assert.Empty(await verify.Snapshots.ToListAsync());
     }
 
     [PostgresFact]

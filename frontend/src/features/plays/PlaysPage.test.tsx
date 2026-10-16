@@ -1,3 +1,4 @@
+import { monitorFixture } from '@/test/monitor-fixture'
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import { act, screen, waitFor, within } from '@testing-library/react'
 import { render } from '@/test/render'
@@ -35,7 +36,7 @@ function fakeServer() {
     playId: play.summary.id, status: play.summary.status, tracked: play.summary.instrumentSource === 'venue', checkedAtUtc: null,
     reason: play.summary.instrumentSource === 'venue' ? null : 'Manual instruments are not tracked at a venue.',
     totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
-    entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Venue facts.', issues: [],
+    entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Venue facts.', issues: [], monitor: play.summary.instrumentSource === 'venue' ? monitorFixture : null, discrepancies: [], watches: [],
   })
   const api = {
     plays: vi.fn((query: PlayListQuery) => playsFrom([...plays.values()].map(play => play.summary))(query)),
@@ -99,17 +100,18 @@ function fakeServer() {
     }),
     updateEvidenceMarkup: vi.fn(),
     playExecution: vi.fn((id: string) => Promise.resolve(execution(find(id)))),
-    checkPlayExecution: vi.fn((id: string) => Promise.resolve(execution(find(id)))),
+    runAccountMonitor: vi.fn(() => Promise.resolve({ requestId: ids(5000), monitor: monitorFixture })),
+    accountMonitor: vi.fn(() => Promise.resolve(monitorFixture)),
     deleteEvidence: vi.fn((id: string) => { evidence.splice(evidence.findIndex(item => item.id === id), 1); return Promise.resolve() }),
   }
   return { api, plays, history, evidence, execution }
 }
 
-function Page({ api, accounts = [accountFixture], initial = createPlaysSession(), onControl }: { api: WorkspaceApi; accounts?: BrokerAccount[];
-  initial?: PlaysSession; onControl?: (set: Dispatch<SetStateAction<PlaysSession>>) => void }) {
+function Page({ api, accounts = [accountFixture], initial = createPlaysSession(), onControl, onManageAccount }: { api: WorkspaceApi; accounts?: BrokerAccount[];
+  initial?: PlaysSession; onControl?: (set: Dispatch<SetStateAction<PlaysSession>>) => void; onManageAccount?: (id: string) => void }) {
   const [session, setSession] = useState(initial)
   useEffect(() => { onControl?.(setSession) }, [onControl])
-  return <NotificationProvider><PlaysPage accounts={accounts} portfolios={[portfolioFixture]} api={api} session={session} onSession={setSession} /></NotificationProvider>
+  return <NotificationProvider><PlaysPage accounts={accounts} portfolios={[portfolioFixture]} api={api} session={session} onSession={setSession} onManageAccount={onManageAccount} /></NotificationProvider>
 }
 
 const client = (server: ReturnType<typeof fakeServer>, overrides: Partial<WorkspaceApi> = {}) =>
@@ -529,21 +531,48 @@ describe('venue tracking', () => {
     const direction = () => within(screen.getByRole('group', { name: 'Direction' }))
     expect(direction().getByRole('button', { name: /Short/ })).toBeEnabled()
     // The venue reports the entry filled: the server moves the play to Open on the next check.
-    server.api.checkPlayExecution.mockImplementation((id: string) => {
+    server.api.runAccountMonitor.mockImplementation(() => {
+      const id = [...server.plays.keys()][0]!
       const play = server.plays.get(id)!
       const opened = { ...play, summary: { ...play.summary, status: 'open' as const, version: play.summary.version + 1 } }
       server.plays.set(id, opened)
-      return Promise.resolve(server.execution(opened))
+      return Promise.resolve({ requestId: ids(5000), monitor: monitorFixture })
     })
     await user.click(screen.getByRole('button', { name: 'Plan it' }))
-    await waitFor(() => expect(server.api.checkPlayExecution).toHaveBeenCalled())
+    expect(server.api.runAccountMonitor).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('tab', { name: 'Execution' }))
+    await user.click(await screen.findByRole('button', { name: 'Check' }))
+    await waitFor(() => expect(server.api.runAccountMonitor).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByText('Open', { selector: '.badge' })).toBeInTheDocument())
     // A filled entry fixes the direction: it decides which side closes the position.
     expect(direction().getByRole('button', { name: /Short/ })).toBeDisabled()
     expect(direction().getByRole('button', { name: /Long/ })).toBeDisabled()
     await user.click(screen.getByRole('tab', { name: 'Execution' }))
-    expect(screen.getByRole('button', { name: 'Check venue' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument()
+  })
+})
+
+describe('monitor credential', () => {
+  it('opens the Play account credential management from the Execution monitor', async () => {
+    const server = fakeServer()
+    const venue = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}` }
+    const api = client(server, { instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}),
+      marketContext: () => new Promise(() => {}),
+      playExecution: vi.fn((id: string) => Promise.resolve({ ...server.execution(server.plays.get(id)!),
+        monitor: { ...monitorFixture, state: 'credential-error' as const } })) })
+    const manage = vi.fn()
+    const user = userEvent.setup()
+    render(<Page api={api} accounts={[venue]} onManageAccount={manage} />)
+    await user.click(await screen.findByRole('button', { name: 'New play' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
+    await pickInstrument(user, 'BTC')
+    await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
+    await user.click(screen.getByRole('button', { name: 'Plan it' }))
+    await user.click(await screen.findByRole('tab', { name: 'Execution' }))
+    await user.click(await screen.findByRole('button', { name: 'Manage account credential' }))
+    expect(manage).toHaveBeenCalledWith(venue.id)
+    expect(screen.queryByRole('link', { name: 'Manage account credential' })).not.toBeInTheDocument()
   })
 })
 

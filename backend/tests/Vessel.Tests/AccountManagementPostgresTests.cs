@@ -15,7 +15,11 @@ namespace Vessel.Tests;
 public sealed class AccountManagementPostgresTests
 {
     private static WorkspaceService Service(VesselDbContext db, Guid owner, IPerpetualVenueReader? reader = null) =>
-        new(new WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(reader ?? new FixtureReader()));
+        new(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(reader ?? new FixtureReader()), TestUnitOfWork.For(db));
+
+    /// <summary>The owner's account Refresh through the monitor path, as POST /api/accounts/{id}/sync runs it.</summary>
+    private static Task<AccountDto> Refresh(VesselDbContext db, Guid owner, Guid id, IPerpetualVenueReader? reader = null) =>
+        MonitorTestPaths.RefreshAsync(db, owner, TestVenues.With(reader ?? new FixtureReader()), id);
 
     private static async Task<AccountDto> VenueAccount(WorkspaceService service, Guid? portfolio = null) =>
         await service.CreateAccountAsync(new(portfolio, "Venue", "hyperliquid", "0x" + Guid.NewGuid().ToString("N") + "00000000"), default);
@@ -44,17 +48,17 @@ public sealed class AccountManagementPostgresTests
         await using (var db = database.Context(owner))
         {
             var service = Service(db, owner, reader); portfolioId = (await service.CreatePortfolioAsync(new("Values"), default)).Id;
-            id = (await VenueAccount(service, portfolioId)).Id; await service.SyncAsync(id, default);
+            id = (await VenueAccount(service, portfolioId)).Id; await Refresh(db, owner, id, reader);
             other = (await VenueAccount(service, portfolioId)).Id;
             var older = new FixtureReader(); older.Result = older.Result with { Fills = [example with { SourceFillId = "older", OccurredAtUtc = example.OccurredAtUtc.AddDays(-1) }] };
-            await Service(db, owner, older).SyncAsync(other, default);
+            await Refresh(db, owner, other, older);
         }
         await using (var db = database.Context(owner))
         {
             var service = Service(db, owner, reader); var disabled = await service.UpdateAccountAsync(id, new("Disabled", portfolioId, false, 1), default);
             Assert.False(disabled.IsEnabled); Assert.Equal(0, disabled.PositionCount);
             Assert.Null(await service.SnapshotAsync(id, default)); Assert.Empty(await service.FillsAsync(id, default));
-            Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.SyncAsync(id, default))).StatusCode);
+            Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Refresh(db, owner, id, reader))).StatusCode);
             var overview = await service.OverviewAsync(default);
             Assert.Equal(2, overview.Totals.AccountCount); Assert.Equal(2, overview.Portfolios.Single().AccountCount);
             Assert.Equal(1, overview.Totals.ValuedAccountCount); Assert.Equal(1, overview.Totals.OpenPositionCount); Assert.Equal(1, overview.Totals.ImportedFillCount);
@@ -79,7 +83,7 @@ public sealed class AccountManagementPostgresTests
         {
             var service = Service(db, owner); portfolioId = (await service.CreatePortfolioAsync(new("Original"), default)).Id;
             first = (await VenueAccount(service, portfolioId)).Id; second = (await VenueAccount(service, portfolioId)).Id;
-            await service.SyncAsync(first, default); await service.SyncAsync(second, default);
+            await Refresh(db, owner, first); await Refresh(db, owner, second);
             var account = await db.Accounts.SingleAsync(a => a.Id == first);
             db.Plays.AddRange(TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC")), TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC")));
             await db.SaveChangesAsync(); await service.UpdateAccountAsync(second, new("Disabled", portfolioId, false, 1), default);
@@ -108,12 +112,12 @@ public sealed class AccountManagementPostgresTests
         await using (var db = database.Context(foreign))
         {
             var service = Service(db, foreign); foreignPortfolio = (await service.CreatePortfolioAsync(new("Foreign"), default)).Id;
-            foreignId = (await VenueAccount(service, foreignPortfolio)).Id; await service.SyncAsync(foreignId, default);
+            foreignId = (await VenueAccount(service, foreignPortfolio)).Id; await Refresh(db, foreign, foreignId);
         }
         await using (var db = database.Context(owner))
         {
             var service = Service(db, owner); var first = await service.CreatePortfolioAsync(new("First"), default); var second = await service.CreatePortfolioAsync(new("Second"), default);
-            id = (await VenueAccount(service, first.Id)).Id; other = (await VenueAccount(service)).Id; await service.SyncAsync(id, default); await service.SyncAsync(other, default);
+            id = (await VenueAccount(service, first.Id)).Id; other = (await VenueAccount(service)).Id; await Refresh(db, owner, id); await Refresh(db, owner, other);
             var moved = await service.UpdateAccountAsync(id, new("Moved", second.Id, true, 1), default); Assert.Equal(second.Id, moved.PortfolioId); Assert.Equal("hyperliquid", moved.VenueId);
             Assert.Equal((await db.Accounts.SingleAsync(a => a.Id == id)).Address, moved.Address); Assert.Equal(1, moved.PositionCount);
             await service.UpdateAccountAsync(id, new("Unlinked", null, false, moved.SettingsRevision), default);
@@ -143,7 +147,7 @@ public sealed class AccountManagementPostgresTests
         await using (var db = database.Context(owner))
         {
             var service = Service(db, owner); protectedId = (await VenueAccount(service)).Id; disposable = (await VenueAccount(service)).Id;
-            await service.SyncAsync(protectedId, default); await service.SyncAsync(disposable, default);
+            await Refresh(db, owner, protectedId); await Refresh(db, owner, disposable);
             var account = await db.Accounts.SingleAsync(a => a.Id == protectedId);
             var play = TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC")); play.Cancel(CancelReason.Other, null, DateTimeOffset.UnixEpoch); db.Plays.Add(play);
             db.Plays.Add(TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC")));
@@ -165,39 +169,39 @@ public sealed class AccountManagementPostgresTests
     }
 
     [PostgresFact]
-    public async Task Disable_waits_for_inflight_sync_then_prevents_any_late_refresh()
+    public async Task Disable_during_inflight_refresh_supersedes_it_and_prevents_any_late_refresh()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); Guid id;
         await using (var db = database.Context(owner)) id = (await VenueAccount(Service(db, owner))).Id;
         var reader = new GatedReader(); await using var syncing = database.Context(owner); await using var changing = database.Context(owner);
-        await changing.Database.OpenConnectionAsync(); var pid = ((NpgsqlConnection)changing.Database.GetDbConnection()).ProcessID;
-        var sync = Service(syncing, owner, reader).SyncAsync(id, default); await reader.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        var disable = Service(changing, owner).UpdateAccountAsync(id, new("Disabled", null, false, 1), default);
-        try { await WaitForLock(database, pid); Assert.False(disable.IsCompleted); }
+        var sync = Refresh(syncing, owner, id, reader); await reader.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        // The refresh holds its monitor lease, not the account row, during the venue read: the disable commits at once.
+        Task<AccountDto> disable;
+        try { disable = Service(changing, owner).UpdateAccountAsync(id, new("Disabled", null, false, 1), default); Assert.False((await disable.WaitAsync(TimeSpan.FromSeconds(10))).IsEnabled); }
         finally { reader.Release.TrySetResult(); }
-        await sync; Assert.False((await disable).IsEnabled);
+        // The read then finds the changed settings and is discarded, never written behind the disable.
+        var superseded = await Assert.ThrowsAsync<ProblemException>(() => sync);
+        Assert.Equal((502, MonitorTestPaths.RefreshFailed), (superseded.StatusCode, superseded.Message));
         await using var verify = database.Context(owner); var service = Service(verify, owner, reader);
-        Assert.False((await verify.Accounts.SingleAsync()).IsEnabled); Assert.Single(await verify.Snapshots.ToListAsync()); Assert.Single(await verify.Fills.ToListAsync());
-        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.SyncAsync(id, default))).StatusCode); Assert.Equal(1, reader.Reads);
+        Assert.False((await verify.Accounts.SingleAsync()).IsEnabled); Assert.Empty(await verify.Snapshots.ToListAsync()); Assert.Empty(await verify.Fills.ToListAsync());
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Refresh(verify, owner, id, reader))).StatusCode); Assert.Equal(1, reader.Reads);
         Assert.Null(await service.SnapshotAsync(id, default)); Assert.Empty((await service.OverviewAsync(default)).RecentActivity);
     }
 
     [PostgresFact]
-    public async Task Delete_waits_for_inflight_sync_then_removes_all_facts_without_resurrection()
+    public async Task Delete_during_inflight_refresh_removes_all_facts_without_resurrection()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); Guid id;
         await using (var db = database.Context(owner)) id = (await VenueAccount(Service(db, owner))).Id;
         var reader = new GatedReader(); await using var syncing = database.Context(owner); await using var deleting = database.Context(owner);
-        await deleting.Database.OpenConnectionAsync(); var pid = ((NpgsqlConnection)deleting.Database.GetDbConnection()).ProcessID;
-        var sync = Service(syncing, owner, reader).SyncAsync(id, default); await reader.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        var delete = Service(deleting, owner).DeleteAccountAsync(id, default);
-        try { await WaitForLock(database, pid); Assert.False(delete.IsCompleted); }
+        var sync = Refresh(syncing, owner, id, reader); await reader.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        // The venue read holds the monitor lease, not the account row, so the delete commits at once.
+        try { await Service(deleting, owner).DeleteAccountAsync(id, default).WaitAsync(TimeSpan.FromSeconds(10)); }
         finally { reader.Release.TrySetResult(); }
-        // A concurrent delete can win immediately after sync commits, so its readback may be 404.
-        try { await sync; } catch (ProblemException error) { Assert.Contains(error.StatusCode, new[] { 404, 409 }); }
-        await delete;
+        // The finished read finds no account to write to.
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => sync)).StatusCode);
         await using var verify = database.Context(owner); Assert.Empty(await verify.Accounts.ToListAsync()); Assert.Empty(await verify.Snapshots.ToListAsync()); Assert.Empty(await verify.Positions.ToListAsync()); Assert.Empty(await verify.Fills.ToListAsync());
-        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => Service(verify, owner, reader).SyncAsync(id, default))).StatusCode); Assert.Equal(1, reader.Reads);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => Refresh(verify, owner, id, reader))).StatusCode); Assert.Equal(1, reader.Reads);
     }
 
     [PostgresFact]
@@ -209,14 +213,14 @@ public sealed class AccountManagementPostgresTests
         // Preload to prove lock acquisition reloads an already tracked stale enabled record.
         Assert.True((await syncing.Accounts.SingleAsync()).IsEnabled);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var store = new WorkspaceStore(changing);
-        var disable = store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
+        var store = new WorkspaceStore(changing, TestUnitOfWork.For(changing));
+        var disable = TestUnitOfWork.For(changing).ExecuteAsync(() => store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
         {
             account.UpdateSettings("Disabled", null, false); await store.SaveAsync(default); entered.TrySetResult(); await release.Task; return true;
-        }, default), default);
+        }, default), default), default);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await syncing.Database.OpenConnectionAsync(); var pid = ((NpgsqlConnection)syncing.Database.GetDbConnection()).ProcessID;
-        var sync = Service(syncing, owner, reader).SyncAsync(id, default);
+        var sync = Refresh(syncing, owner, id, reader);
         try { await WaitForLock(database, pid); Assert.Equal(0, reader.Reads); }
         finally { release.TrySetResult(); }
         await disable; Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => sync)).StatusCode); Assert.Equal(0, reader.Reads);
@@ -229,20 +233,20 @@ public sealed class AccountManagementPostgresTests
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); Guid id;
         await using (var db = database.Context(owner))
         {
-            var service = Service(db, owner); id = (await VenueAccount(service)).Id; await service.SyncAsync(id, default);
+            var service = Service(db, owner); id = (await VenueAccount(service)).Id; await Refresh(db, owner, id);
         }
         await using var deleting = database.Context(owner); await using var syncing = database.Context(owner); var reader = new FixtureReader();
         Assert.NotNull(await syncing.Accounts.SingleOrDefaultAsync(a => a.Id == id));
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var store = new WorkspaceStore(deleting);
-        var deletion = store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
+        var store = new WorkspaceStore(deleting, TestUnitOfWork.For(deleting));
+        var deletion = TestUnitOfWork.For(deleting).ExecuteAsync(() => store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
         {
             await store.DeleteAccountAsync(account, default); entered.TrySetResult(); await release.Task; return true;
-        }, default), default);
+        }, default), default), default);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await syncing.Database.OpenConnectionAsync(); var pid = ((NpgsqlConnection)syncing.Database.GetDbConnection()).ProcessID;
-        var sync = Service(syncing, owner, reader).SyncAsync(id, default);
+        var sync = Refresh(syncing, owner, id, reader);
         try { await WaitForLock(database, pid); Assert.Equal(0, reader.Reads); }
         finally { release.TrySetResult(); }
         await deletion; Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => sync)).StatusCode); Assert.Equal(0, reader.Reads);
@@ -277,7 +281,7 @@ public sealed class AccountManagementPostgresTests
     }
 
     [PostgresFact]
-    public async Task Portfolio_delete_waits_for_sync_and_retains_finished_snapshot_when_unlinking()
+    public async Task Portfolio_delete_during_refresh_supersedes_it_and_a_retry_retains_the_snapshot_when_unlinked()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); Guid id; Guid portfolio;
         await using (var db = database.Context(owner))
@@ -285,12 +289,13 @@ public sealed class AccountManagementPostgresTests
             var service = Service(db, owner); portfolio = (await service.CreatePortfolioAsync(new("Portfolio"), default)).Id; id = (await VenueAccount(service, portfolio)).Id;
         }
         var reader = new GatedReader(); await using var syncing = database.Context(owner); await using var deleting = database.Context(owner);
-        await deleting.Database.OpenConnectionAsync(); var pid = ((NpgsqlConnection)deleting.Database.GetDbConnection()).ProcessID;
-        var sync = Service(syncing, owner, reader).SyncAsync(id, default); await reader.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        var deletion = Service(deleting, owner).DeletePortfolioAsync(portfolio, default);
-        try { await WaitForLock(database, pid); Assert.False(deletion.IsCompleted); }
+        var sync = Refresh(syncing, owner, id, reader); await reader.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        // Unlinking changes the account settings revision while the read holds only the monitor lease.
+        try { await Service(deleting, owner).DeletePortfolioAsync(portfolio, default).WaitAsync(TimeSpan.FromSeconds(10)); }
         finally { reader.Release.TrySetResult(); }
-        await sync; await deletion;
+        Assert.Equal(502, (await Assert.ThrowsAsync<ProblemException>(() => sync)).StatusCode);
+        await using (var db = database.Context(owner)) Assert.Empty(await db.Snapshots.ToListAsync());
+        await using (var db = database.Context(owner)) Assert.Equal("synced", (await Refresh(db, owner, id, reader)).SyncStatus);
         await using var verify = database.Context(owner); var account = await verify.Accounts.SingleAsync(); Assert.Null(account.PortfolioId); Assert.True(account.IsEnabled); Assert.Equal("synced", account.SyncStatus);
         Assert.Single(await verify.Snapshots.ToListAsync()); Assert.Single(await verify.Positions.ToListAsync()); Assert.Single(await verify.Fills.ToListAsync());
     }

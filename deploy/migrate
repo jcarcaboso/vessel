@@ -1,0 +1,7 @@
+#!/bin/sh
+# One-shot: EF migrations, then explicit messaging provisioning (envelope storage, broker topology and
+# insert-only subscription registrations). The API and workers never migrate or provision at startup.
+set -eu
+cd /app
+/app/migrate-ef "$@"
+exec dotnet /app/Vessel.Api.dll provision-messaging

@@ -57,7 +57,7 @@ public sealed class ExecutionIntegrityTests
         return planned;
     }
 
-    private PlayExecutionService Service => new(plays, store, null!, TestVenues.With(), TimeProvider.System);
+    private PlayExecutionService Service => new(plays, store, TestVenues.With(), TimeProvider.System, TestUnitOfWork.None);
 
     private void Add(string id, string side, decimal price, int minute, decimal size = 1, string status = "filled", bool reduceOnly = false,
         params ImportedFill[] fills)

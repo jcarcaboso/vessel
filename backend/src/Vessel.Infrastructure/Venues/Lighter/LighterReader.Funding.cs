@@ -26,9 +26,10 @@ public sealed partial class LighterReader
             $"{venue.Collateral}; positive received, negative paid. Execution PnL funding inclusion is unverified.",
             FundingFacts.Unknown);
 
-        var credential = await credentials.ReadAsync(account.Id, cancellationToken);
-        if (credential is null)
+        var attempt = await credentials.ReadAttemptAsync(account.Id, cancellationToken);
+        if (attempt is null)
             return Result(false, "a usable read-only token is required; ordinary account history is unchanged.");
+        var credential = attempt.Token;
 
         var refused = false;
         VenueFundingReadResult result;
@@ -86,7 +87,7 @@ public sealed partial class LighterReader
             // Never surface an upstream body, URL, token or arbitrary exception message.
             result = Result(false, "the funding read could not be verified; coverage is incomplete. Ordinary account history is unchanged.");
         }
-        if (refused) await credentials.MarkRefusedAsync(account.Id, cancellationToken);
+        if (refused) await credentials.MarkRefusedAsync(account.Id, attempt.Revision, cancellationToken);
         return result;
     }
 

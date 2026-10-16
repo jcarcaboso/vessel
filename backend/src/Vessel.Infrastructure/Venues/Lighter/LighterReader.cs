@@ -65,7 +65,7 @@ public sealed partial class LighterReader
                 finally { readSlots.Release(); }
             }, ct);
         }
-        catch (LighterAuthenticationException) { throw new VenueReadException(venue.TokenRefused); }
+        catch (LighterAuthenticationException) { throw new VenueCredentialRejectedException(); }
         catch (FormatException) { throw json.Invalid(); }
         catch (OverflowException) { throw json.Invalid(); }
         catch (ArgumentOutOfRangeException) { throw json.Invalid(); }

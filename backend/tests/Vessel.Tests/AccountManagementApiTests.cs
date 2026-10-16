@@ -103,12 +103,18 @@ public sealed class AccountManagementApiTests
         Assert.True(dto.IsEnabled); Assert.Null(dto.PortfolioId); Assert.Empty(store.Portfolios);
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task Full_PUT_preserves_venue_address_and_value_and_portfolio_delete_unlinks_disabled_account()
     {
-        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var portfolio = new Portfolio(Guid.NewGuid(), owner, "Original"); store.Portfolios.Add(portfolio);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Original"); account.Configure(portfolio.Id, "0x1111111111111111111111111111111111111111", null); store.Accounts.Add(account);
-        await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var portfolio = new Portfolio(Guid.NewGuid(), owner, "Original");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Original"); account.Configure(portfolio.Id, "0x1111111111111111111111111111111111111111", null);
+        await using (var db = database.Context(owner))
+        {
+            db.Portfolios.Add(portfolio); db.Accounts.Add(account);
+            await db.SaveChangesAsync();
+        }
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString); using var client = factory.AuthorizedClient();
         var response = await client.PutAsJsonAsync($"/api/accounts/{account.Id}", new { name = "Renamed", portfolioId = portfolio.Id, isEnabled = false, expectedRevision = 1, venueId = "manual", address = "attacker", manualAccountValueUsd = "999", ownerId = Guid.NewGuid() });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode); var dto = (await response.Content.ReadFromJsonAsync<AccountDto>())!;
         Assert.False(dto.IsEnabled); Assert.Equal("hyperliquid", dto.VenueId); Assert.Equal(account.Address, dto.Address); Assert.Null(dto.AccountValueUsd);

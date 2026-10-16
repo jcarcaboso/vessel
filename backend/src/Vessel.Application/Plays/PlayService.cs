@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using System.Text.Json;
 using Vessel.Application.Common;
 using Vessel.Application.Evidence;
+using Vessel.Application.Ownership;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
@@ -13,7 +14,7 @@ namespace Vessel.Application.Plays;
 /// Saved Plays and their lifecycle. Open and Closed come from linked venue fills, so this service
 /// only performs the owner's transitions: plan, pause, resume and cancel. Nothing is sent to a venue.
 /// </summary>
-public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore objects, TimeProvider time)
+public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore objects, TimeProvider time, IUnitOfWork unitOfWork)
 {
     public const int MaxUnpagedPlays = 200, MaxSearchLength = 100;
 
@@ -67,7 +68,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
 
     public async Task<PlayDto> GetAsync(Guid id, CancellationToken ct) => ToDto(await Find(id, ct));
 
-    public async Task<PlayDto> CreateAsync(CreatePlayRequest request, CancellationToken ct)
+    public Task<PlayDto> CreateAsync(CreatePlayRequest request, CancellationToken ct) => unitOfWork.ExecuteAsync(async () =>
     {
         var account = await EnabledAccount(request.AccountId, ct);
         var (instrument, source) = Instrument(account, request.Instrument, request.InstrumentSource);
@@ -78,12 +79,11 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             request.Review ?? "", now, request.StructuredReview);
         store.Add(play);
         if (review is not null) store.Add(review);
-        await store.SaveAsync(ct);
         return ToDto(play);
-    }
+    }, ct);
 
     /// <summary>Holds the Play while it checks entry fills and saves, so no order links to an entry this revision changes in between.</summary>
-    public Task<PlayDto> UpdateAsync(Guid id, UpdatePlayRequest request, CancellationToken ct) => store.WithPlayLockAsync(id, async () =>
+    public Task<PlayDto> UpdateAsync(Guid id, UpdatePlayRequest request, CancellationToken ct) => unitOfWork.ExecuteAsync(() => store.WithPlayLockAsync(id, async () =>
     {
         var play = await Find(id, ct);
         RequireVersion(play, request.ExpectedVersion);
@@ -106,12 +106,11 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var review = play.Annotate(request.Title ?? "", drawings, request.Review ?? "", now, request.StructuredReview);
         if (revision is not null) store.Add(revision);
         if (review is not null) store.Add(review);
-        await store.SaveAsync(ct);
         return ToDto(play);
-    }, ct, destinationAccountId: request.AccountId);
+    }, ct, destinationAccountId: request.AccountId), ct);
 
     public Task<PlayDto> ChangeStatusAsync(Guid id, ChangePlayStatusRequest request, CancellationToken ct) =>
-        store.WithPlayLockAsync(id, async () =>
+        unitOfWork.ExecuteAsync(() => store.WithPlayLockAsync(id, async () =>
     {
         var play = await Find(id, ct);
         RequireVersion(play, request.ExpectedVersion);
@@ -147,9 +146,8 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             default:
                 throw new ProblemException(400, "Status must be planned, paused or cancelled.");
         }
-        await store.SaveAsync(ct);
         return ToDto(play);
-    }, ct);
+    }, ct), ct);
 
     public async Task<PlayHistoryDto> HistoryAsync(Guid id, CancellationToken ct)
     {
@@ -166,10 +164,16 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
 
     public async Task DeleteAsync(Guid id, CancellationToken ct)
     {
-        var play = await Find(id, ct);
-        if (play.Status != PlayStatus.Draft)
-            throw new ProblemException(409, "Only Drafts can be deleted. Cancel a planned Play instead, so its history is kept.");
-        foreach (var key in await store.DeleteAsync(play, ct))
+        // Evidence images are deleted once the Play removal commits, so this must be the outermost unit.
+        unitOfWork.RequireOutermost("Play deletion");
+        var keys = await unitOfWork.ExecuteAsync(async () =>
+        {
+            var play = await Find(id, ct);
+            if (play.Status != PlayStatus.Draft)
+                throw new ProblemException(409, "Only Drafts can be deleted. Cancel a planned Play instead, so its history is kept.");
+            return await store.DeleteAsync(play, ct);
+        }, ct);
+        foreach (var key in keys)
         {
             try { await objects.DeleteAsync(key, CancellationToken.None); }
             catch (Exception) { /* Unreferenced objects are harmless; cleanup is a later maintenance task. */ }

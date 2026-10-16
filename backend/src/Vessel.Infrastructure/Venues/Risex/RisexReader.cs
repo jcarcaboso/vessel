@@ -64,8 +64,10 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
     /// <summary>A RISEx market and the Vessel key it maps to. Retired markets keep their key for history but are never selectable.</summary>
     internal sealed record RisexMarket(string MarketId, string Key, bool Active, VenueInstrument Instrument);
 
-    internal sealed record RisexCatalogue(IReadOnlyList<RisexMarket> Markets)
+    /// <param name="OutOfScopeIds">Markets proven outside Vessel's scope (not quoted in USDC); their fills are not omissions.</param>
+    internal sealed record RisexCatalogue(IReadOnlyList<RisexMarket> Markets, IReadOnlySet<string>? OutOfScopeIds = null)
     {
+        public bool OutOfScope(string marketId) => OutOfScopeIds?.Contains(marketId) == true;
         public RisexMarket? ById(string marketId) => Markets.FirstOrDefault(m => m.MarketId == marketId);
         public RisexMarket? ActiveByKey(string key) => Markets.FirstOrDefault(m => m.Active && m.Key == key);
     }
@@ -86,14 +88,17 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
         var markets = new List<RisexMarket>();
         var ids = new HashSet<string>(StringComparer.Ordinal);
         var activeKeys = new HashSet<string>(StringComparer.Ordinal);
+        var outOfScope = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in Json.Array(Json.Property(data, "markets")).EnumerateArray())
         {
             var id = Json.Text(Json.Property(item, "market_id"), 20);
             if (!id.All(char.IsAsciiDigit) || !ids.Add(id)) throw Json.Invalid();
             var config = Json.Property(item, "config");
             var match = MarketName().Match(Json.Text(Json.Property(config, "name")));
-            // A name the map cannot classify is left out rather than guessed.
-            if (!match.Success || Json.Text(Json.Property(item, "quote_asset_symbol"), 16) != QuoteAsset) continue;
+            // Another quote asset is out of scope. A USDC name the map cannot classify is left out rather than
+            // guessed, and its fills count as omitted, not out of scope.
+            if (Json.Text(Json.Property(item, "quote_asset_symbol"), 16) != QuoteAsset) { outOfScope.Add(id); continue; }
+            if (!match.Success) continue;
             var key = match.Groups["asset"].Value;
             var active = !match.Groups["retired"].Success && Json.Boolean(Json.Property(item, "active")) &&
                 Json.Boolean(Json.Property(config, "unlocked"));
@@ -105,7 +110,7 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
                 (int)leverage, QuoteAsset, Json.Positive(Json.Property(config, "step_price")),
                 category.Length == 0 ? null : category, id)));
         }
-        return new(markets);
+        return new(markets, outOfScope);
     }
 
     private static int Decimals(decimal step)
@@ -130,35 +135,51 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
         {
             var catalogue = await CatalogueAsync(token);
             using var portfolio = await GetAsync($"/v1/portfolio/details?account={address}", token);
-            var snapshot = ReadSnapshot(Data(portfolio), catalogue, timeProvider.GetUtcNow());
+            var snapshot = ReadSnapshot(Data(portfolio), catalogue, timeProvider.GetUtcNow(), out var positionsComplete);
             var fills = new List<VenueFill>();
+            var omitted = new HashSet<(string Market, string Trade)>();
+            var fillCoverage = new RawFillReadCoverage();
+            var hasNextPage = false;
             for (var page = 1; page <= MaxFillPages; page++)
             {
                 using var history = await GetAsync($"/v1/trade-history?account={address}&limit={PageSize}&page={page}", token);
                 var data = Data(history);
-                fills.AddRange(ReadFills(data, catalogue, latest));
-                if (!Json.Boolean(Json.Property(data, "has_next_page"))) break;
+                fills.AddRange(ReadFills(data, catalogue, latest, omitted));
+                fillCoverage.Observe(Json.Property(data, "trades"), row => Nanoseconds(Json.Property(row, "time"), latest));
+                hasNextPage = Json.Boolean(Json.Property(data, "has_next_page"));
+                if (!hasNextPage) break;
             }
             return new PerpetualVenueReadResult(snapshot,
                 catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument).ToList(),
                 fills.GroupBy(f => (f.ContractId, f.SourceFillId)).Select(g => g.First()).OrderByDescending(f => f.OccurredAtUtc).ToList(),
-                HistoryNotice);
+                HistoryNotice, PositionsComplete: positionsComplete,
+                FillHistoryTruncated: hasNextPage || fillCoverage.Count == MaxFillPages * PageSize,
+                OldestRawFillAtUtc: fillCoverage.OldestAtUtc, OmittedExecutions: omitted.Count);
         }, cancellationToken);
     }
 
     /// <summary>Signed sizes and decimal strings from portfolio details. RISEx reports no withdrawable amount, so it stays unknown.</summary>
     internal static VenueSnapshot ReadSnapshot(JsonElement data, RisexCatalogue catalogue, DateTimeOffset observedAt)
+        => ReadSnapshot(data, catalogue, observedAt, out _);
+
+    private static VenueSnapshot ReadSnapshot(JsonElement data, RisexCatalogue catalogue, DateTimeOffset observedAt,
+        out bool positionsComplete)
     {
+        positionsComplete = true; // Portfolio details returns current positions without pagination.
         var summary = Json.Property(data, "summary");
         var positions = new List<VenuePosition>();
         var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in Json.Array(Json.Property(data, "positions")).EnumerateArray())
         {
             var sizeText = Json.TextOrEmpty(Json.Property(item, "size"), 64);
-            if (sizeText.Length == 0) continue;
+            if (sizeText.Length == 0) { positionsComplete = false; continue; }
             var size = Json.ParseDecimal(sizeText);
             if (size == 0) continue;
-            if (catalogue.ById(Json.Text(Json.Property(item, "market_id"), 20)) is not { } market) continue;
+            if (catalogue.ById(Json.Text(Json.Property(item, "market_id"), 20)) is not { } market)
+            {
+                positionsComplete = false;
+                continue;
+            }
             if (!keys.Add(market.Key)) throw Json.Invalid();
             var leverage = Json.Nonnegative(Json.Property(item, "leverage"));
             positions.Add(new(market.Key, size, Json.Positive(Json.Property(item, "avg_entry_price")),
@@ -208,7 +229,12 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             _ => side == ExecutionFacts.Buy ? "Buy" : "Sell"
         };
 
-    internal static List<VenueFill> ReadFills(JsonElement data, RisexCatalogue catalogue, DateTimeOffset latest)
+    internal static List<VenueFill> ReadFills(JsonElement data, RisexCatalogue catalogue, DateTimeOffset latest) =>
+        ReadFills(data, catalogue, latest, new HashSet<(string, string)>());
+
+    /// <param name="omitted">Receives (market, trade) of fills on a market the catalogue neither lists nor proves out of scope.</param>
+    internal static List<VenueFill> ReadFills(JsonElement data, RisexCatalogue catalogue, DateTimeOffset latest,
+        ISet<(string Market, string Trade)> omitted)
     {
         var trades = Json.Array(Json.Property(data, "trades"));
         if (trades.GetArrayLength() > PageSize) throw Json.Invalid();
@@ -216,7 +242,11 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
         foreach (var trade in trades.EnumerateArray())
         {
             var marketId = Json.Text(Json.Property(trade, "market_id"), 20);
-            if (catalogue.ById(marketId) is not { } market) continue;
+            if (catalogue.ById(marketId) is not { } market)
+            {
+                if (!catalogue.OutOfScope(marketId)) omitted.Add((marketId, Json.Text(Json.Property(trade, "id"))));
+                continue;
+            }
             var side = Side(Json.Property(trade, "side"));
             var positionSide = Side(Json.Property(trade, "position_side"));
             var fee = Json.Nonnegative(Json.Property(trade, "fee"));
@@ -247,7 +277,8 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             var orders = ReadOrders(Data(history), catalogue, latest).Concat(ReadTpslOrders(Data(tpsl), catalogue, latest))
                 .GroupBy(o => o.OrderId, StringComparer.Ordinal).Select(g => g.OrderByDescending(o => o.StatusAtUtc).First())
                 .OrderByDescending(o => o.PlacedAtUtc).ToList();
-            return new VenueOrderReadResult(orders, timeProvider.GetUtcNow(), OrdersNotice);
+            // Both reads are bounded history pages, not /orders/open plus a complete TP/SL list.
+            return new VenueOrderReadResult(orders, timeProvider.GetUtcNow(), OrdersNotice, OpenOrdersComplete: false);
         }, cancellationToken);
     }
 

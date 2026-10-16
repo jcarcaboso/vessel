@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
 import type { OverviewQuery } from '@/api/overview-summary'
 import type { PlayView } from '@/api/plays'
+import type { AccountMonitor } from '@/api/monitor'
 import { Button } from '@/components/ui/button'
 import { ArrowRight, Wallet } from 'lucide-react'
 import { AccountRows } from './AccountRows'
@@ -12,9 +13,10 @@ import { OverviewSummary } from './OverviewSummary'
 import { OverviewPlays } from './OverviewPlays'
 import { OverviewAllocation } from './OverviewAllocation'
 
-export function OverviewPage({ data, api, overviewQuery, setOverviewQuery, reloadKey, refreshAllAction, refreshing,
+export function OverviewPage({ data, api, monitors = [], overviewQuery, setOverviewQuery, reloadKey, refreshAllAction, refreshing,
   onAddAccount, onCreatePortfolio, onAccounts, onActivity, viewAccount, sync, manageAccount, browsePlays, viewPlay, reload }: {
   data: Overview; api: WorkspaceApi; overviewQuery: OverviewQuery
+  monitors?: AccountMonitor[]
   setOverviewQuery: (query: OverviewQuery | ((previous: OverviewQuery) => OverviewQuery)) => void
   reloadKey: number; refreshAllAction: ReactNode; refreshing: string | null
   onAddAccount: () => void; onCreatePortfolio: () => void; onAccounts: () => void; onActivity: () => void
@@ -42,7 +44,7 @@ export function OverviewPage({ data, api, overviewQuery, setOverviewQuery, reloa
         <h2>Your enabled accounts</h2>
         <div className="panel-heading-actions">{refreshAllAction}<button className="text-action" onClick={onAccounts}>View all<ArrowRight size={14} /></button></div>
       </header>
-      {enabledAccounts.length ? <AccountRows accounts={scopedAccounts.slice(0, 4)} portfolioNames={portfolioNames}
+      {enabledAccounts.length ? <AccountRows monitors={monitors} accounts={scopedAccounts.slice(0, 4)} portfolioNames={portfolioNames}
         refreshing={refreshing} onDetail={viewAccount} onSync={id => { void sync(id) }} onManage={manageAccount} /> :
         <div className="workspace-empty small-empty">
           <strong>All accounts are disabled</strong>

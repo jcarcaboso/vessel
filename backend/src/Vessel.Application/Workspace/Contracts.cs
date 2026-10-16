@@ -83,6 +83,7 @@ public interface IWorkspaceStore
     Task<int> FillCountAsync(CancellationToken ct);
     Task AddPortfolioAsync(Portfolio portfolio, CancellationToken ct);
     Task AddAccountAsync(Account account, CancellationToken ct);
+    // Locks require the caller's active unit of work and never complete it.
     Task<T> WithAccountLockAsync<T>(Guid id, Func<Account, Task<T>> action, CancellationToken ct);
     Task SaveRefreshAsync(Account account, PerpetualVenueReadResult result, CancellationToken ct);
     // Management serializes owner grouping changes before acquiring account row locks.
@@ -90,5 +91,6 @@ public interface IWorkspaceStore
     Task<T> WithManagementLockAsync<T>(Func<Task<T>> action, CancellationToken ct);
     Task DeletePortfolioAsync(Guid id, CancellationToken ct);
     Task DeleteAccountAsync(Account account, CancellationToken ct);
+    // Intermediate persistence through the active unit of work, never a commit.
     Task SaveAsync(CancellationToken ct);
 }

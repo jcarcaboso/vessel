@@ -30,17 +30,18 @@ and malformed reads cannot prove a complete empty history.
 ## Refresh and storage
 
 The existing enabled-account refresh invokes the optional funding-reader port
-under the same owner-scoped account lock. Its requested window is the last
+outside database transactions, under the account's refresh lease. Its requested window is the last
 30 days, ending at the snapshot's observation truncated to whole milliseconds,
 inclusive at both ends. The adapters widen venue request boundaries where
 necessary and locally enforce the exact requested window. Reads remain bounded
 by their existing HTTP response/deadline limits and explicit page budgets.
 There is no lifetime backfill, separate automatic job or new authorization.
 Browser account refresh allows 90 seconds for the sequential bounded history,
-funding and order-retention reads plus locking/persistence overhead. A Play
-execution check allows 120 seconds because it can also read tick metadata
-before reconciliation. Explicit session cancellation still cancels either
-whole refresh.
+funding and order-retention reads plus locking/persistence overhead. Play
+checks now use the monitor's asynchronous admission endpoint and retain its
+10-second request budget; neither scheduled checks nor Play checks add a funding
+read. Funding imports are applied in the monitor's short owner-scoped unit of
+work only after revalidating the lease, settings, source and credential revision.
 
 `funding_payments` stores immutable normalized settlement facts, with exact
 PostgreSQL `numeric` amounts, source ID, canonical and native instrument,
@@ -62,7 +63,9 @@ multiple coverage intervals only when that limitation needs removing.
 
 Funding outages do not discard a valid ordinary snapshot/fill refresh.
 Previously retained funding facts remain and the failure is explicit. Cancellation
-does not save the refresh. Disabling hides funding with account activity; deleting
+during the funding read saves neither snapshot nor settlements. As in the existing
+monitor Refresh path, cancellation during a later optional order read does not
+undo already committed public refresh facts. Disabling hides funding with account activity; deleting
 an unlinked account removes funding facts/state under the existing explicit
 account-delete workflow. Composite owner foreign keys, read filters and save
 guards cover both new tables. No credentials or raw provider errors are stored

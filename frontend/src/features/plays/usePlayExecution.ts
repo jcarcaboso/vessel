@@ -1,74 +1,64 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
 import type { LinkOrder, PlayExecution } from '@/api/plays'
 import { errorMessage } from '@/api/errors'
 
-/** How often an open play view checks the venue while the tab is visible. */
-export const executionCheckInterval = 60_000
-
-const active = (execution: PlayExecution | null) =>
-  !!execution?.tracked && ['planned', 'paused', 'open'].includes(execution.status)
-
-/** Requests belong to one API/Play/status session. Cancelling observation never rolls back a mutation. */
-export function usePlayExecution(api: WorkspaceApi, playId: string | null, status?: string) {
-  const session = useMemo(() => ({ api, playId, status, active: false, sequence: 0, applied: 0,
-    requests: new Set<{ controller: AbortController | null }>() }), [api, playId, status])
-  const [state, setState] = useState({ session, execution: null as PlayExecution | null, error: null as string | null, busy: false })
-
-  const run = useCallback(async (action: (id: string, signal?: AbortSignal) => Promise<PlayExecution>, cancellable: boolean) => {
-    if (!session.active || !session.playId) return null
-    const sequence = ++session.sequence
-    const controller = cancellable ? new AbortController() : null
-    const request = { controller }
-    session.requests.add(request)
-    setState(current => ({ ...(current.session === session ? current : { session, execution: null, error: null }), busy: true }))
-    const currentRequest = () => session.active && session.requests.has(request) && !controller?.signal.aborted
-    try {
-      const next = await action(session.playId, controller?.signal)
-      if (!currentRequest() || sequence < session.applied) return null
-      session.applied = sequence
-      setState({ session, execution: next, error: null, busy: session.requests.size > 0 })
-      return next
-    } catch (cause) {
-      if (currentRequest() && sequence >= session.applied) {
-        // A newer error also supersedes older requests; they must not silently clear it.
-        session.applied = sequence
-        setState(current => ({ ...current, session, error: errorMessage(cause, 'The change could not be completed. Try again.') }))
+/**
+ * Stored execution reads only. The shell owns event-driven and disconnected fallback refreshes.
+ * Writes belong to the API and Play, not its status: a status change (often caused by the write's own
+ * fills) re-reads the execution but never aborts a link or unlink already sent.
+ */
+export function usePlayExecution(api: WorkspaceApi, playId: string | null, status?: string, generation = 0) {
+  const context = useMemo(() => ({ api, playId }), [api, playId])
+  const [result, setResult] = useState<{ context: typeof context; execution: PlayExecution } | null>(null)
+  const [error, setError] = useState<{ context: typeof context; message: string; source: 'read' | 'action' } | null>(null)
+  const [workState, setWorkState] = useState<{ context: typeof context; signal: AbortSignal; busy: boolean } | null>(null)
+  const [revision, setRevision] = useState(0)
+  const session = useRef<{ context: typeof context; controller: AbortController; busy: boolean } | null>(null)
+  const read = useRef(0)
+  useEffect(() => {
+    const work = { context, controller: new AbortController(), busy: false }
+    session.current = work
+    return () => work.controller.abort()
+  }, [context])
+  const reload = useCallback(() => setRevision(value => value + 1), [])
+  useEffect(() => {
+    if (!playId) return
+    const controller = new AbortController()
+    const version = ++read.current
+    api.playExecution(playId, controller.signal).then(execution => {
+      if (!controller.signal.aborted && read.current === version) {
+        setResult({ context, execution })
+        setError(current => current?.context === context && current.source === 'action' ? current : null)
       }
-      return null
+    }).catch(cause => { if (!controller.signal.aborted && read.current === version) setError({ context, message: errorMessage(cause, 'The change could not be completed. Try again.'), source: 'read' }) })
+    return () => controller.abort()
+  }, [api, playId, context, status, generation, revision])
+
+  const run = useCallback(async (action: (id: string, signal: AbortSignal) => Promise<PlayExecution | void>) => {
+    const work = session.current
+    if (!work || !context.playId || work.context !== context || work.busy || work.controller.signal.aborted) return
+    work.busy = true
+    const version = ++read.current
+    setWorkState({ context, signal: work.controller.signal, busy: true })
+    try {
+      const execution = await action(context.playId, work.controller.signal)
+      if (!work.controller.signal.aborted) {
+        if (execution && read.current === version) setResult({ context, execution })
+        setError(null)
+      }
+    } catch (cause) {
+      if (!work.controller.signal.aborted) { setError({ context, message: errorMessage(cause, 'The change could not be completed. Try again.'), source: 'action' }); throw cause }
     } finally {
-      session.requests.delete(request)
-      if (session.active) setState(current => current.session === session ? { ...current, busy: session.requests.size > 0 } : current)
+      work.busy = false
+      if (!work.controller.signal.aborted) { setWorkState({ context, signal: work.controller.signal, busy: false }); reload() }
     }
-  }, [session])
-
-  const check = useCallback(() => run((id, signal) => api.checkPlayExecution(id, signal), true), [api, run])
-  // These writes have no abort signal. A stale completion is ignored, not claimed to be undone.
-  const link = useCallback((request: LinkOrder) => run(id => api.linkOrder(id, request), false), [api, run])
-  const unlink = useCallback((linkId: string) => run(id => api.unlinkOrder(id, linkId), false), [api, run])
-
-  useEffect(() => {
-    session.active = true
-    const initialSequence = session.sequence + 1
-    void run((id, signal) => api.playExecution(id, signal), true).then(next => {
-      if (session.active && session.applied === initialSequence && session.requests.size === 0 && active(next)) void check()
-    })
-    return () => {
-      session.active = false
-      for (const request of session.requests) request.controller?.abort()
-      session.requests.clear()
-    }
-  }, [api, session, run, check])
-
-  const execution = state.session === session ? state.execution : null
-  const tracking = active(execution)
-  useEffect(() => {
-    if (!tracking) return
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible' && session.requests.size === 0) void check()
-    }, executionCheckInterval)
-    return () => clearInterval(timer)
-  }, [tracking, session, check])
-
-  return { execution, error: state.session === session ? state.error : null, busy: state.session === session && state.busy, check, link, unlink }
+  }, [context, reload])
+  // The error state above shows link/unlink failures; the rejection itself needs no other handler.
+  const link = useCallback((request: LinkOrder) => run((id, signal) => api.linkOrder(id, request, signal)).catch(() => undefined), [api, run])
+  const unlink = useCallback((linkId: string) => run((id, signal) => api.unlinkOrder(id, linkId, signal)).catch(() => undefined), [api, run])
+  const dismiss = useCallback((id: string, note?: string) => run((play, signal) => api.dismissPlayDiscrepancy(play, id, note, signal)), [api, run])
+  return { execution: result?.context === context ? result.execution : null,
+    error: error?.context === context ? error.message : null,
+    busy: workState?.context === context && !workState.signal.aborted && workState.busy, reload, link, unlink, dismiss }
 }

@@ -19,7 +19,7 @@
       "vessel.application": {
         "type": "Project",
         "dependencies": {
-          "Vessel.Domain": "[0.1.0, )"
+          "Vessel.Domain": "[0.1.1, )"
         }
       },
       "vessel.domain": {

@@ -5,7 +5,7 @@ using Vessel.Infrastructure.Venues.Hyperliquid;
 
 namespace Vessel.Tests;
 
-public sealed class HyperliquidOrderTests
+public sealed partial class HyperliquidOrderTests
 {
     private const string Address = "0x0123456789abcdef0123456789ABCDEF01234567";
     private const string Meta = """{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":40}]}""";

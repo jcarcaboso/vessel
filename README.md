@@ -32,6 +32,7 @@ This repository contains the approved Graphite prototype and the React/Vite/Type
 - [First-part PR review safeguards](docs/architecture/pr-review-fixes.md)
 - [Venue credentials](docs/architecture/venue-credentials.md) and [Lighter integration state](docs/architecture/lighter-state.md)
 - [Play lifecycle](docs/architecture/play-lifecycle.md), [chart plan](docs/architecture/chart-plan.md) and [portfolio review](docs/architecture/portfolio-review.md)
+- [Play monitor plan](docs/architecture/play-monitor-plan.md), [messaging, events and workers reference](docs/architecture/messaging-and-workers.md) and [architecture overview page](docs/architecture/play-monitor-overview.html)
 
 The owner authorized foundation scaffolding after confirming perpetuals-first across venues and multiple active plays on the same account/instrument. Frontend and backend work were delegated to separate Sol agents. The confirmed MVP remains self-hosted and single-user with token access, Hyperliquid first and Lighter next, manual accounts, optional history import and in-page notifications.
 
@@ -65,11 +66,12 @@ Then start development:
 
 ```sh
 pnpm db:up
+pnpm broker:up
 pnpm db:migrate
 pnpm dev
 ```
 
-The runner gives credentials to the API, not the frontend. API uses loopback 5080, frontend 5180 and PostgreSQL 55432. Core routes need the mounted/migrated database. Stop the runner with Ctrl+C; the database volume remains. These processes do not replace the existing LAN prototype.
+The runner starts the API, monitor worker and frontend. Only the API and worker receive server credentials. API uses loopback 5080, frontend 5180, PostgreSQL 55432 and RabbitMQ 55672 (management 55673). `db:migrate` applies EF migrations and provisions both messaging schemas and broker bindings explicitly. Stop the runner with Ctrl+C; database and broker volumes remain. These processes do not replace the existing LAN prototype.
 
 The owner-requested actual-app LAN review is currently **http://10.1.0.219:5180/**, backed by the real API and migrated local database. It uses a separate development token delivered to the owner, not a credential embedded here. See [LAN operation and stop/recreate instructions](docs/development.md#current-lan-review). This is a restricted HTTP development preview, not an internet/production deployment.
 

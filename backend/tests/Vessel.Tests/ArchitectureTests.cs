@@ -9,7 +9,9 @@ public sealed class ArchitectureTests
     [InlineData("Application", "Domain")]
     [InlineData("Persistence", "Application,Domain")]
     [InlineData("Infrastructure", "Application")]
-    [InlineData("Api", "Application,Infrastructure,Persistence")]
+    [InlineData("Messaging", "Application,Persistence")]
+    [InlineData("Api", "Application,Infrastructure,Messaging,Persistence")]
+    [InlineData("Worker", "Application,Infrastructure,Messaging,Persistence")]
     public void Project_dependencies_point_inward(string project, string expected)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -26,5 +28,10 @@ public sealed class ArchitectureTests
             Assert.Empty(xml.Descendants("PackageReference"));
             Assert.Empty(xml.Descendants("FrameworkReference"));
         }
+        // Wolverine and RabbitMQ live in the one messaging adapter, never in the business layers or Persistence.
+        var packages = xml.Descendants("PackageReference").Select(x => x.Attribute("Include")!.Value).ToArray();
+        if (project is not "Messaging")
+            Assert.DoesNotContain(packages, p => p.StartsWith("WolverineFx", StringComparison.OrdinalIgnoreCase) ||
+                p.StartsWith("RabbitMQ", StringComparison.OrdinalIgnoreCase));
     }
 }

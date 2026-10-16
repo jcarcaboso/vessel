@@ -48,6 +48,9 @@ internal sealed class DeferredAccountCredentialReader(Func<AccountCredentialRead
     public Task<bool> IsUsableAsync(Account account, CancellationToken cancellationToken) =>
         reader().IsUsableAsync(account, cancellationToken);
 
-    public Task MarkRefusedAsync(Guid accountId, CancellationToken cancellationToken) =>
-        reader().MarkRefusedAsync(accountId, cancellationToken);
+    public Task<CredentialAttempt?> ReadAttemptAsync(Guid accountId, CancellationToken cancellationToken) =>
+        reader().ReadAttemptAsync(accountId, cancellationToken);
+
+    public Task MarkRefusedAsync(Guid accountId, string attemptedRevision, CancellationToken cancellationToken) =>
+        reader().MarkRefusedAsync(accountId, attemptedRevision, cancellationToken);
 }

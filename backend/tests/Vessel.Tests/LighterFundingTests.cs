@@ -59,9 +59,12 @@ public sealed class LighterFundingTests
             Reads.Add(accountId);
             return Task.FromResult(token);
         }
-        public Task MarkRefusedAsync(Guid accountId, CancellationToken ct)
+        public async Task<CredentialAttempt?> ReadAttemptAsync(Guid accountId, CancellationToken ct) =>
+            await ReadAsync(accountId, ct) is { } value ? new(value, "funding-attempt-revision") : null;
+        public Task MarkRefusedAsync(Guid accountId, string attemptedRevision, CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
+            Assert.Equal("funding-attempt-revision", attemptedRevision);
             Refused.Add(accountId);
             return Task.CompletedTask;
         }
