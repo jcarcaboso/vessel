@@ -100,7 +100,7 @@ public sealed class PlayListPostgresTests
     private static Play Paused(Play play, int minute) { play.Pause(T0.AddMinutes(minute)); return play; }
     private static Play Open(Play play, int minute) { play.MarkOpen("Filled", T0.AddMinutes(minute)); return play; }
 
-    private static PlayService Service(VesselDbContext db) => new(new PlayStore(db), new MemoryObjectStore(), TimeProvider.System);
+    private static PlayService Service(VesselDbContext db) => new(new PlayStore(db, TestUnitOfWork.For(db)), new MemoryObjectStore(), TimeProvider.System, TestUnitOfWork.For(db));
 
     [PostgresFact]
     public async Task Views_follow_the_review_definition_order_and_projection()

@@ -9,7 +9,7 @@ namespace Vessel.Application.Credentials;
 
 public sealed class AccountCredentialService(
     IWorkspaceStore accounts, IAccountCredentialStore credentials, IJournalOwnerContext owner,
-    IVenueRegistry venues, ICredentialVault vault, TimeProvider time)
+    IVenueRegistry venues, ICredentialVault vault, TimeProvider time, IUnitOfWork unitOfWork)
 {
     // Read-only: no row lock, so opening Manage account does not wait behind a running refresh.
     public async Task<AccountCredentialDto> GetAsync(Guid id, CancellationToken ct)
@@ -21,7 +21,7 @@ public sealed class AccountCredentialService(
     }
 
     public Task<AccountCredentialDto> PutAsync(Guid id, SaveAccountCredentialRequest request, CancellationToken ct) =>
-        accounts.WithAccountLockAsync(id, async account =>
+        unitOfWork.ExecuteAsync(() => accounts.WithAccountLockAsync(id, async account =>
         {
             Guard(account, requireEnabled: true);
             if (!vault.IsConfigured) throw new ProblemException(503, "Credential storage is not configured.");
@@ -59,15 +59,15 @@ public sealed class AccountCredentialService(
             };
             await credentials.SaveAsync(credential, ct);
             return Metadata(account, credential);
-        }, ct);
+        }, ct), ct);
 
     public async Task DeleteAsync(Guid id, CancellationToken ct) =>
-        await accounts.WithAccountLockAsync(id, async account =>
+        await unitOfWork.ExecuteAsync(() => accounts.WithAccountLockAsync(id, async account =>
         {
             Guard(account, requireEnabled: false);
             await credentials.DeleteAsync(id, Purpose(account), ct);
             return true;
-        }, ct);
+        }, ct), ct);
 
     private void Guard(Account account, bool requireEnabled)
     {

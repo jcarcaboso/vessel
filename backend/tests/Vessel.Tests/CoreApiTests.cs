@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -19,6 +20,7 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
     public const string Token = "core-tests-only-token-not-a-real-secret";
     protected override IHost CreateHost(IHostBuilder builder)
     {
+        VesselEventTestHosting.ConfigureBootstrap(builder);
         // Production validation runs before ConfigureAppConfiguration on a minimal host.
         // Supply synthetic bootstrap settings early; never change the process environment.
         if (environment != "Development")
@@ -42,7 +44,12 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
         }.Concat(settings ?? []).GroupBy(pair => pair.Key).ToDictionary(group => group.Key, group => group.Last().Value)));
         builder.ConfigureServices(services =>
         {
-            if (store is not null) services.AddSingleton(store);
+            VesselEventTestHosting.ConfigureServices(services);
+            if (store is not null)
+            {
+                services.AddSingleton(store);
+                services.AddSingleton<Vessel.Application.Ownership.IUnitOfWork>(TestUnitOfWork.None);
+            }
             if (reader is not null) services.AddSingleton<IPerpetualVenueReader>(reader);
             else if (candles is not null)
             {
@@ -81,11 +88,11 @@ public sealed class CoreApiTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(new(new HttpMethod(method), path))).StatusCode);
     }
 
-    [Fact]
+    [PostgresFact]
     public async Task Manual_account_shape_null_snapshot_and_owner_cannot_be_supplied_by_body()
     {
-        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
+        await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString); using var client = factory.AuthorizedClient();
         var response = await client.PostAsJsonAsync("/api/portfolios", new { name = "Swing", ownerId = Guid.NewGuid() });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var portfolio = (await response.Content.ReadFromJsonAsync<PortfolioDto>())!;
@@ -94,7 +101,11 @@ public sealed class CoreApiTests
         Assert.Equal(HttpStatusCode.Created, accountResponse.StatusCode);
         var account = (await accountResponse.Content.ReadFromJsonAsync<AccountDto>())!;
         Assert.Equal("123.12345678901234567890123456", account.AccountValueUsd);
-        Assert.Equal(owner, store.Accounts.Single().OwnerId); Assert.Equal(owner, store.Portfolios.Single().OwnerId);
+        await using (var db = database.Context(owner))
+        {
+            Assert.Equal(owner, (await db.Accounts.IgnoreQueryFilters().SingleAsync()).OwnerId);
+            Assert.Equal(owner, (await db.Portfolios.IgnoreQueryFilters().SingleAsync()).OwnerId);
+        }
         using var json = JsonDocument.Parse(await accountResponse.Content.ReadAsStringAsync());
         Assert.Equal(new[] { "id", "portfolioId", "name", "venueId", "address", "accountValueUsd", "lastSyncedAtUtc", "syncStatus", "lastSyncError", "positionCount", "historyNotice", "isEnabled", "settingsRevision", "availableStablecoinNominalUsd", "stablecoinScope", "accountMode", "totalStablecoinNominalUsd", "balanceUsd", "sourceId", "availableBalanceUsd", "availableBalanceSource" }, json.RootElement.EnumerateObject().Select(p => p.Name));
         Assert.Null(account.SourceId);

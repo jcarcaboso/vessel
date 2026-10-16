@@ -243,10 +243,13 @@ public sealed class ExecutionPostgresTests
         public Guid Owner => owner;
         public FixtureReader Reader => reader;
         public FakeOrderReader Orders => orders;
-        public WorkspaceService Workspace { get; } = new(new WorkspaceStore(db), new CoreOwner(owner), TestVenues.With(reader));
-        public PlayService Plays { get; } = new(new PlayStore(db), new MemoryObjectStore(), TimeProvider.System);
-        public PlayExecutionService Execution => new(new PlayStore(db), new ExecutionStore(db), Workspace, TestVenues.With(orders), TimeProvider.System);
-        public SizingService Sizing => new(new SizingStore(db), new CoreOwner(owner), TimeProvider.System);
+        public WorkspaceService Workspace { get; } = new(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.For(db));
+        public PlayService Plays { get; } = new(new PlayStore(db, TestUnitOfWork.For(db)), new MemoryObjectStore(), TimeProvider.System, TestUnitOfWork.For(db));
+        public PlayExecutionService Execution => new(new PlayStore(db, TestUnitOfWork.For(db)), new ExecutionStore(db, TestUnitOfWork.For(db)), TestVenues.With(orders), TimeProvider.System, TestUnitOfWork.For(db));
+        /// <summary>The owner's Check through the monitor: admission, then the worker's claim and run of that request.</summary>
+        public Task<PlayExecutionDto> CheckAsync(Guid playId, bool expectCompleted = true) => MonitorTestPaths.CheckAsync(db, owner,
+            TestVenues.With(MonitorTestPaths.Advancing(reader), orders), playId, expectCompleted: expectCompleted);
+        public SizingService Sizing => new(new SizingStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.For(db));
     }
 
     private static async Task<(CoreDatabase Database, Harness Harness, Guid Account)> SetUp()
@@ -301,7 +304,7 @@ public sealed class ExecutionPostgresTests
         Assert.Null(ExecutionMatcher.Levels(play.Plan).Single(l => l.Role == OrderLinkRole.Target).Price);
 
         h.Orders.Orders.AddRange([Order("entry", "buy", 100000m), Order("exit", "sell", 1000000m, reduceOnly: true)]);
-        execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        execution = await h.CheckAsync(play.Summary.Id);
         Assert.Equal(("entry", "entry"), (Assert.Single(execution.Links).Role, execution.Links[0].Order!.OrderId));
         Assert.Equal("exit", Assert.Single(execution.UnlinkedOrders).OrderId);
         Assert.Empty(execution.Suggestions);
@@ -321,7 +324,7 @@ public sealed class ExecutionPostgresTests
         tiny = await h.Plays.ChangeStatusAsync(tiny.Summary.Id, new(tiny.Summary.Version, "planned"), default);
         h.Orders.Orders.AddRange([Order("ordinary", "buy", 100m), Order("tiny", "buy", 0.0000000000000000000000001m)]);
 
-        var execution = await h.Execution.CheckAsync(ordinary.Summary.Id, default);
+        var execution = await h.CheckAsync(ordinary.Summary.Id);
         Assert.Equal("ordinary", Assert.Single(execution.Links).Order!.OrderId);
         Assert.Empty(execution.Suggestions);
         var tinyExecution = await h.Execution.GetAsync(tiny.Summary.Id, default);
@@ -341,7 +344,7 @@ public sealed class ExecutionPostgresTests
         // Entry and target orders of 0.5; a filled order's size is what its retained fills must add up to.
         h.Orders.Orders.AddRange([Order("11", "buy", 100.01m, size: 0.5m), Order("12", "sell", 94m, trigger: 95m, type: "Stop Market", reduceOnly: true),
             Order("13", "sell", 110m, reduceOnly: true, size: 0.5m), Order("14", "buy", 80m)]);
-        var execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        var execution = await h.CheckAsync(play.Summary.Id);
         Assert.Equal(["entry", "stop", "target"], execution.Links.Select(l => l.Role));
         Assert.All(execution.Links, l => Assert.Equal(("linked", "automatic"), (l.State, l.Source)));
         Assert.Equal("14", Assert.Single(execution.UnlinkedOrders).OrderId);
@@ -349,13 +352,13 @@ public sealed class ExecutionPostgresTests
 
         h.Orders.Orders[0] = Order("11", "buy", 100.01m, "filled", size: 0.5m);
         h.Reader.Result = h.Reader.Result with { Fills = [Fill("f1", "11", "Open Long", 100m, 0.5m)] };
-        execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        execution = await h.CheckAsync(play.Summary.Id);
         Assert.Equal(("open", "0.5", "0.5", "100"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.OpenQuantity,
             execution.Entries.Single().AverageFillPrice));
 
         h.Orders.Orders[2] = Order("13", "sell", 110m, "filled", reduceOnly: true, size: 0.5m);
         h.Reader.Result = h.Reader.Result with { Fills = [Fill("f1", "11", "Open Long", 100m, 0.5m), Fill("f2", "13", "Close Long", 110m, 0.5m)] };
-        execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        execution = await h.CheckAsync(play.Summary.Id);
         Assert.Equal(("closed", "0", "5"), (execution.Status, execution.Totals.OpenQuantity, execution.Totals.ClosedPnlUsd));
         Assert.Equal("0.02", Assert.Single(execution.Totals.Fees).Amount);
 
@@ -374,7 +377,7 @@ public sealed class ExecutionPostgresTests
         var first = await PlannedPlay(h, account, "First");
         var second = await PlannedPlay(h, account, "Second");
         h.Orders.Orders.Add(Order("21", "buy", 100m));
-        var execution = await h.Execution.CheckAsync(first.Summary.Id, default);
+        var execution = await h.CheckAsync(first.Summary.Id);
         Assert.Empty(execution.Links);
         var suggestion = Assert.Single(execution.Suggestions);
         Assert.Single((await h.Execution.GetAsync(second.Summary.Id, default)).Suggestions);
@@ -387,7 +390,7 @@ public sealed class ExecutionPostgresTests
         // Unlinking is remembered: the next check does not link it again.
         execution = await h.Execution.UnlinkAsync(first.Summary.Id, execution.Links.Single().Id, default);
         Assert.Empty(execution.Links);
-        await h.Execution.CheckAsync(first.Summary.Id, default);
+        await h.CheckAsync(first.Summary.Id);
         Assert.Empty((await h.Execution.GetAsync(first.Summary.Id, default)).Links);
         Assert.Single((await h.Execution.GetAsync(second.Summary.Id, default)).Links);
         Assert.NotEqual(Guid.Empty, suggestion.Id);
@@ -405,7 +408,7 @@ public sealed class ExecutionPostgresTests
         var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Two stops", plan), default);
         var play = await h.Plays.ChangeStatusAsync(draft.Summary.Id, new(draft.Summary.Version, "planned"), default);
         h.Orders.Orders.AddRange([Order("41", "sell", 89m, trigger: 90m, type: "Stop Market", reduceOnly: true), Order("42", "sell", 80m, trigger: 85m, type: "Stop Market", reduceOnly: true)]);
-        var execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        var execution = await h.CheckAsync(play.Summary.Id);
         var automatic = Assert.Single(execution.Links);
         Assert.Equal(("41", "stop", "stop-2"), (automatic.Order!.OrderId, automatic.Role, automatic.LevelId));
 
@@ -422,7 +425,7 @@ public sealed class ExecutionPostgresTests
         var play = await PlannedPlay(h, account);
         h.Orders.Orders.AddRange([Order("31", "buy", 100m, "filled"), Order("32", "sell", 103m, "filled", placedLater: 5)]);
         h.Reader.Result = h.Reader.Result with { Fills = [Fill("f1", "31", "Open Long", 100m, 1m), Fill("f2", "32", "Close Long", 103m, 1m)] };
-        var execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        var execution = await h.CheckAsync(play.Summary.Id);
         Assert.Equal(["entry", "exit"], execution.Links.Select(l => l.Role));
         Assert.Equal("closed", execution.Status);
 
@@ -442,7 +445,7 @@ public sealed class ExecutionPostgresTests
         var play = await PlannedPlay(h, account);
         h.Orders.Orders.Add(Order("41", "buy", 100m, "filled"));
         h.Reader.Result = h.Reader.Result with { Fills = [Fill("f1", "41", "Open Long", 100m, 0.2m)] };
-        Assert.Equal("open", (await h.Execution.CheckAsync(play.Summary.Id, default)).Status);
+        Assert.Equal("open", (await h.CheckAsync(play.Summary.Id)).Status);
         var current = await h.Plays.GetAsync(play.Summary.Id, default);
         var error = await Assert.ThrowsAsync<ProblemException>(() => h.Plays.UpdateAsync(play.Summary.Id,
             new(current.Summary.Version, account, "BTC", "venue", current.Summary.Title, TestPlays.Plan("101"), current.Drawings, "", "Chased"), default));
@@ -463,20 +466,20 @@ public sealed class ExecutionPostgresTests
         h.Orders.Orders.AddRange([Order("51", "buy", 100m, "filled", size: 2m, placed: at.AddMinutes(1)),
             Order("52", "sell", 110m, "filled", reduceOnly: true, placed: at.AddMinutes(3))]);
         AddFills(h, Fill("g1", "51", "Open Long", 100m, 1m, at.AddMinutes(2)), Fill("g2", "52", "Close Long", 110m, 1m, at.AddMinutes(4)));
-        var execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        var execution = await h.CheckAsync(play.Summary.Id);
         Assert.Equal(("open", "1", "1"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity));
         Assert.Equal(0, (await h.Sizing.GetAsync(default)).Record.ClosedPlays);
 
         // The missing execution arrives later under its own fill ID: one unit is still open.
         AddFills(h, Fill("g3", "51", "Open Long", 100m, 1m, at.AddMinutes(2)));
-        execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        execution = await h.CheckAsync(play.Summary.Id);
         Assert.Equal(("open", "2", "1", "1"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity,
             execution.Totals.OpenQuantity));
 
         // The final exit closes it, and only then does sizing score it.
         h.Orders.Orders.Add(Order("53", "sell", 110m, "filled", reduceOnly: true, placed: at.AddMinutes(5)));
         AddFills(h, Fill("g4", "53", "Close Long", 110m, 1m, at.AddMinutes(6)));
-        Assert.Equal("closed", (await h.Execution.CheckAsync(play.Summary.Id, default)).Status);
+        Assert.Equal("closed", (await h.CheckAsync(play.Summary.Id)).Status);
         var sizing = await h.Sizing.GetAsync(default);
         Assert.Equal((1, 1), (sizing.Record.ClosedPlays, sizing.Record.Wins));
     }
@@ -494,7 +497,7 @@ public sealed class ExecutionPostgresTests
             Order("63", "buy", 100m, "filled", placed: at.AddMinutes(3))]);
         AddFills(h, Fill("h1", "61", "Close Long", 110m, 1m, at.AddMinutes(2)), Fill("h2", "62", "Close Long", 95m, 1m, at.AddMinutes(2)),
             Fill("h3", "63", "Open Long", 100m, 1m, at.AddMinutes(4)));
-        var execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        var execution = await h.CheckAsync(play.Summary.Id);
         Assert.Equal(("open", "1", "0"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity));
         Assert.Equal(["63"], execution.Links.Select(l => l.Order!.OrderId));
         Assert.Equal(0, (await h.Sizing.GetAsync(default)).Record.ClosedPlays);
@@ -502,7 +505,7 @@ public sealed class ExecutionPostgresTests
         // A target placed before the entry filled but executed after it is this play's exit.
         h.Orders.Orders.Add(Order("64", "sell", 110m, "filled", reduceOnly: true, placed: at.AddMinutes(2)));
         AddFills(h, Fill("h4", "64", "Close Long", 110m, 1m, at.AddMinutes(5)));
-        execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        execution = await h.CheckAsync(play.Summary.Id);
         Assert.Equal(("closed", "1"), (execution.Status, execution.Totals.ExitedQuantity));
         Assert.Equal(["63", "64"], execution.Links.Select(l => l.Order!.OrderId));
     }
@@ -517,7 +520,7 @@ public sealed class ExecutionPostgresTests
         // A buy at the entry price that closed an earlier short does not open this long play.
         h.Orders.Orders.Add(Order("71", "buy", 100m, "filled", placed: at.AddMinutes(1)));
         AddFills(h, Fill("k1", "71", "Close Short", 100m, 1m, at.AddMinutes(2)));
-        var execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        var execution = await h.CheckAsync(play.Summary.Id);
         Assert.Equal(("planned", "0"), (execution.Status, execution.Totals.EnteredQuantity));
         Assert.Empty(execution.Links);
 
@@ -525,14 +528,14 @@ public sealed class ExecutionPostgresTests
         h.Orders.Orders.AddRange([Order("72", "buy", 100m, "filled", placed: at.AddMinutes(3)),
             Order("73", "sell", 110m, "filled", size: 2m, placed: at.AddMinutes(5))]);
         AddFills(h, Fill("k2", "72", "Open Long", 100m, 1m, at.AddMinutes(4)), Fill("k3", "73", "Long > Short", 110m, 2m, at.AddMinutes(6)));
-        execution = await h.Execution.CheckAsync(play.Summary.Id, default);
+        execution = await h.CheckAsync(play.Summary.Id);
         Assert.Equal(("open", "1", "0"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity));
         Assert.Equal(["72"], execution.Links.Select(l => l.Order!.OrderId));
 
         // The owner decides which play owns an order, not what its fills did: a second buy adds to the long.
         h.Orders.Orders.Add(Order("74", "buy", 102m, "filled", placed: at.AddMinutes(7)));
         AddFills(h, Fill("k4", "74", "Open Long", 102m, 1m, at.AddMinutes(8)));
-        await h.Execution.CheckAsync(play.Summary.Id, default);
+        await h.CheckAsync(play.Summary.Id);
         foreach (var order in new[] { "74", "73" })
             Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.LinkAsync(play.Summary.Id, new(order, "exit"), default))).StatusCode);
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.LinkAsync(play.Summary.Id, new("71", "entry", "entry-1"), default))).StatusCode);
@@ -550,7 +553,7 @@ public sealed class ExecutionPostgresTests
         var at = DateTimeOffset.UtcNow;
         h.Orders.Orders.AddRange([Order("81", "buy", 100m, "filled", placed: at.AddMinutes(1)), Order("83", "buy", 101m, placed: at.AddMinutes(1))]);
         AddFills(h, Fill("m1", "81", "Open Long", 100m, 1m, at.AddMinutes(2)));
-        Assert.Equal("open", (await h.Execution.CheckAsync(play.Summary.Id, default)).Status);
+        Assert.Equal("open", (await h.CheckAsync(play.Summary.Id)).Status);
 
         // Another request reads the open play, then its exit closes it before that request takes the account lock.
         await using var other = database.Context(h.Owner);
@@ -558,7 +561,7 @@ public sealed class ExecutionPostgresTests
         Assert.Equal("open", (await stale.Plays.GetAsync(play.Summary.Id, default)).Summary.Status);
         h.Orders.Orders.Add(Order("82", "sell", 110m, "filled", reduceOnly: true, placed: at.AddMinutes(3)));
         AddFills(h, Fill("m2", "82", "Close Long", 110m, 1m, at.AddMinutes(4)));
-        var closed = await h.Execution.CheckAsync(play.Summary.Id, default);
+        var closed = await h.CheckAsync(play.Summary.Id);
         Assert.Equal(("closed", 2), (closed.Status, closed.Links.Count));
 
         foreach (var link in closed.Links)
@@ -589,7 +592,7 @@ public sealed class ExecutionPostgresTests
         var at = DateTimeOffset.UtcNow;
         h.Orders.Orders.Add(Order("91", "buy", 100m, "filled", placed: at.AddMinutes(1)));
         AddFills(h, Fill("n1", "91", "Open Long", 100m, 1m, at.AddMinutes(2)));
-        Assert.Equal("open", (await h.Execution.CheckAsync(play.Summary.Id, default)).Status);
+        Assert.Equal("open", (await h.CheckAsync(play.Summary.Id)).Status);
         var current = await h.Plays.GetAsync(play.Summary.Id, default);
         var error = await Assert.ThrowsAsync<ProblemException>(() => h.Plays.UpdateAsync(play.Summary.Id,
             new(current.Summary.Version, account, "BTC", "venue", current.Summary.Title, shortPlan, current.Drawings, "", "Changed my mind"), default));
@@ -603,7 +606,7 @@ public sealed class ExecutionPostgresTests
             TestPlays.Plan(stop: "97"), current.Drawings, "", "Trail"), default)).Summary.PlanRevision);
         h.Orders.Orders.Add(Order("92", "sell", 110m, "filled", reduceOnly: true, placed: at.AddMinutes(3)));
         AddFills(h, Fill("n2", "92", "Close Long", 110m, 1m, at.AddMinutes(4)));
-        Assert.Equal("closed", (await h.Execution.CheckAsync(play.Summary.Id, default)).Status);
+        Assert.Equal("closed", (await h.CheckAsync(play.Summary.Id)).Status);
     }
 
     [PostgresFact]
@@ -615,7 +618,7 @@ public sealed class ExecutionPostgresTests
         var unlinking = await PlannedPlay(h, account, "Unlinking");
         // Away from every planned level, so only the owner links them.
         h.Orders.Orders.AddRange([Order("101", "buy", 80m), Order("102", "buy", 80m)]);
-        await h.Execution.CheckAsync(linking.Summary.Id, default);
+        await h.CheckAsync(linking.Summary.Id);
         var link = Assert.Single((await h.Execution.LinkAsync(unlinking.Summary.Id, new("102", "entry", "entry-1"), default)).Links);
 
         async Task CancelWhileHeld(Guid play, string write, Func<Harness, Task> request)
@@ -664,7 +667,7 @@ public sealed class ExecutionPostgresTests
         var dropped = await PlannedPlay(h, account, "Dropped");
         h.Orders.Orders.AddRange([Order("111", "buy", 80m, placed: at.AddMinutes(5)), Order("112", "buy", 80m, "filled", placed: at.AddMinutes(5))]);
         AddFills(h, Fill("p2", "112", "Open Long", 80m, 1m, at.AddMinutes(6)));
-        await h.Execution.CheckAsync(scaling, default);
+        await h.CheckAsync(scaling);
 
         // The owner's link request reads the play, then another request changes it before the link takes the account lock.
         async Task<int> ChangedBeforeLock(Guid play, LinkOrderRequest request, Func<Harness, PlayDto, Task> change)
@@ -711,7 +714,7 @@ public sealed class ExecutionPostgresTests
         var both = (await h.Plays.GetAsync(scaling, default)).Plan;
         h.Orders.Orders.AddRange([Order("121", "buy", 80m, "filled", placed: at.AddMinutes(5)), Order("122", "buy", 80m, "filled", placed: at.AddMinutes(5))]);
         AddFills(h, Fill("q1", "121", "Open Long", 80m, 1m, at.AddMinutes(6)), Fill("q2", "122", "Open Long", 80m, 1m, at.AddMinutes(6)));
-        await h.Execution.CheckAsync(scaling, default);
+        await h.CheckAsync(scaling);
 
         // The first request is held at its gated command; the second must wait for it, then decide from what it committed.
         async Task<(Task First, Task Second)> Turns(string gated, Func<Harness, PlayDto, Task> first, Func<Harness, PlayDto, Task> second)
@@ -778,7 +781,7 @@ public sealed class ExecutionPostgresTests
         var play = await h.Plays.ChangeStatusAsync(draft.Summary.Id, new(draft.Summary.Version, "planned"), default);
         h.Orders.Orders.Add(Order("110", "buy", 100m, "filled", placed: at.AddMinutes(1)));
         AddFills(h, Fill("p1", "110", "Open Long", 100m, 1m, at.AddMinutes(2)));
-        Assert.Equal("open", (await h.Execution.CheckAsync(play.Summary.Id, default)).Status);
+        Assert.Equal("open", (await h.CheckAsync(play.Summary.Id)).Status);
         return (play.Summary.Id, plan with { Entries = [first] });
     }
 
@@ -820,12 +823,14 @@ public sealed class ExecutionPostgresTests
         manual = await h.Plays.ChangeStatusAsync(manual.Summary.Id, new(manual.Summary.Version, "planned"), default);
         var execution = await h.Execution.GetAsync(manual.Summary.Id, default);
         Assert.False(execution.Tracked);
-        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.CheckAsync(manual.Summary.Id, default))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.CheckAsync(manual.Summary.Id))).StatusCode);
 
         var play = await PlannedPlay(h, account);
         h.Orders.Fail = true;
-        var failure = await Assert.ThrowsAsync<ProblemException>(() => h.Execution.CheckAsync(play.Summary.Id, default));
-        Assert.Equal(502, failure.StatusCode);
-        Assert.DoesNotContain("secret", failure.Message);
+        // A failed check is recorded on the account monitor for the owner, with a fixed message and never the venue's text.
+        Assert.Equal("planned", (await h.CheckAsync(play.Summary.Id, expectCompleted: false)).Status);
+        var monitor = (await new MonitorStore(h.Db, TestUnitOfWork.For(h.Db)).FindAsync(account, default))!;
+        Assert.Equal(("degraded", "The venue check failed. Monitoring will retry."), (monitor.State, monitor.Error));
+        Assert.DoesNotContain("secret", monitor.Error);
     }
 }

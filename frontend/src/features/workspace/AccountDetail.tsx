@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { AccountMonitor } from '@/api/monitor'
+import { MonitorBadge, MonitorDiscrepancies, MonitorPanel } from '@/features/monitor/MonitorPanel'
+import { useMonitorRun } from '@/features/monitor/useMonitorRun'
 import type { AccountSnapshot, BrokerAccount, WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
 import { Button } from '@/components/ui/button'
@@ -14,10 +17,24 @@ function SourcePill({ text, detail }: { text: string; detail: string }) {
   return <InfoTip className="value-tag" trigger={text}>{detail}</InfoTip>
 }
 
-export function AccountDetail({ account, api, refreshing, busy = refreshing, onSync, onBack, onManage, reloadGeneration = 0, onOpenPlay, onCreated }: {
+export function AccountDetail({ account, api, refreshing, busy = refreshing, onSync, onBack, onManage, reloadGeneration = 0, onOpenPlay, onCreated, monitor = null }: {
   account: BrokerAccount; api: WorkspaceApi; refreshing: boolean; busy?: boolean; onSync: (id: string) => void; onBack: () => void; onManage: () => void; reloadGeneration?: number
+  monitor?: AccountMonitor | null
   onOpenPlay?: (id: string, signal: AbortSignal) => Promise<void>; onCreated?: () => void
 }) {
+  const monitorRun = useMonitorRun(api, account.isEnabled !== false ? monitor : null, onCreated)
+  const dismissal = useRef<AbortController | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    dismissal.current = controller
+    return () => controller.abort()
+  }, [api, account.id])
+  async function dismissDiscrepancy(id: string, note?: string) {
+    const controller = dismissal.current
+    if (!controller || controller.signal.aborted) return
+    try { await api.dismissAccountDiscrepancy(account.id, id, note, controller.signal) }
+    finally { if (!controller.signal.aborted) onCreated?.() }
+  }
   const venues = useVenues()
   const synced = venues.can(account.venueId, 'sync')
   const wallet = venues.can(account.venueId, 'stablecoinWallet')
@@ -45,10 +62,16 @@ export function AccountDetail({ account, api, refreshing, busy = refreshing, onS
       title={venues.can(account.venueId, 'readOnlyCredential') ? 'Rename, move or disable; inspect or replace the read-only token if order access is unavailable or expired' : undefined}>Manage account</Button>{synced && <Button variant="outline" onClick={() => onSync(account.id)} disabled={busy || account.isEnabled === false}
       title="Rereads current state and bounded recent executions, not complete lifetime history"><RefreshCw size={15} className={refreshing ? 'is-spinning' : ''} />{refreshing ? 'Refreshing…' : 'Refresh account'}</Button>}</div></div>
     {/* The page title already names the account, so this card carries only the venue and freshness. */}
-    <section className="shell-panel account-detail-heading" aria-label="Account summary"><VenueLogo venueId={account.venueId} size="lg" /><div><p>{venues.name(account.venueId)}{synced ? ` · ${account.lastSyncedAtUtc ? `refreshed ${time(account.lastSyncedAtUtc)}` : 'not refreshed yet'}` : venues.isManual(account.venueId) ? '' : ' · reader not enabled'}</p></div><span className={`workspace-badge ${accountStatusTone(account)}`}>{accountStatus(account)}</span></section>
+    <section className="shell-panel account-detail-heading" aria-label="Account summary"><VenueLogo venueId={account.venueId} size="lg" /><div><p>{venues.name(account.venueId)}{synced ? ` · ${account.lastSyncedAtUtc ? `refreshed ${time(account.lastSyncedAtUtc)}` : 'not refreshed yet'}` : venues.isManual(account.venueId) ? '' : ' · reader not enabled'}</p></div><span className={`workspace-badge ${accountStatusTone(account)}`}>{accountStatus(account)}</span>{account.isEnabled !== false && <MonitorBadge monitor={monitorRun.monitor} />}</section>
     {(account.sourceId ?? account.address) && <p className="account-source"><span>Source</span> {account.sourceId ?? account.address}</p>}
     {error && <div className="workspace-alert" role="alert">{error}</div>}
     {account.isEnabled === false && <div className="workspace-alert" role="status">Disabled: imports and positions are hidden and excluded from totals.</div>}
+    {/* Account identity and source come first; monitor state precedes the balances. */}
+    {monitorRun.monitor && <div>
+      <MonitorPanel monitor={monitorRun.monitor} busy={monitorRun.busy} error={monitorRun.error} retryAtUtc={monitorRun.retryAtUtc} statusUnavailable={monitorRun.statusUnavailable}
+        onCheck={() => { void monitorRun.check() }} onManageCredential={onManage} />
+      <MonitorDiscrepancies discrepancies={monitorRun.monitor.discrepancies} busy={monitorRun.busy} onDismiss={dismissDiscrepancy} />
+    </div>}
     <div className="workspace-stat-grid three">
       <div className="shell-panel metric"><span>{wallet ? 'Wallet stablecoins available' : synced ? 'Account value · reported' : 'Known manual value'}</span><strong>{money(wallet ? account.availableStablecoinNominalUsd ?? null : account.accountValueUsd)}</strong>
         <div className="metric-tags">{account.isEnabled === false ? <SourcePill text="hidden" detail="Hidden while disabled" />

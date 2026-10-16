@@ -10,6 +10,9 @@ import type { ActivityQuery } from '@/api/activity'
 import { ApplicationShell } from './ApplicationShell'
 import { activityFillsFixture, activityFixture, activityPage, operationFixture } from '@/test/activity-fixture'
 import { retrospectiveFixture, retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
+import { discoveryFixture, indexAccount, indexVenue } from '@/test/account-access-fixture'
+import { discrepancyFixture, eventCursor, eventFrame, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
+import type { MonitorEventPage, MonitorStreamEvent } from '@/api/monitor'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
@@ -39,6 +42,76 @@ beforeAll(async () => {
 }, 60_000)
 beforeEach(() => { window.history.replaceState(null, '', '/') })
 describe('Main application shell', () => {
+  it('keeps one owner stream across navigation, displays exceptional health, and aborts it on disconnect', async () => {
+    const client = api({ overview: vi.fn().mockResolvedValue(overviewFixture),
+      monitor: vi.fn().mockResolvedValue({ ...monitorSummaryFixture, workerOnline: false, accounts: [{ ...monitorFixture, state: 'stale' }] }) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await screen.findByText(/Worker offline. Background Play checks are delayed/)
+    expect(screen.getByText('Monitor stale')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('link', { name: 'Accounts' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Plays' }))
+    expect(client.monitorStream).toHaveBeenCalledOnce()
+    expect(client.runAccountMonitor).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: /^Disconnect .*session$/ }))
+    expect(vi.mocked(client.monitorStream).mock.calls[0]![1].aborted).toBe(true)
+    expect(client.runAccountMonitor).not.toHaveBeenCalled()
+  })
+  it('reads the event head before any stored workspace read and streams from it', async () => {
+    let head!: (page: MonitorEventPage) => void
+    const client = api({ overview: vi.fn().mockResolvedValue(overviewFixture),
+      monitorEvents: vi.fn(() => new Promise<MonitorEventPage>(resolve => { head = resolve })) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await screen.findByText('Loading your workspace…')
+    expect(client.overview).not.toHaveBeenCalled()
+    expect(client.monitor).not.toHaveBeenCalled()
+    expect(client.monitorStream).not.toHaveBeenCalled()
+    await act(async () => head({ events: [], nextCursor: eventCursor('12'), resetRequired: true }))
+    await screen.findByRole('button', { name: 'View Main account' })
+    expect(client.overview).toHaveBeenCalledOnce()
+    expect(vi.mocked(client.monitorStream).mock.calls[0]![0]).toBe(eventCursor('12'))
+  })
+  it('refreshes stored saved state on owner events while keeping dirty Play work and avoiding notifications', async () => {
+    let emit!: (event: MonitorStreamEvent) => void
+    const play = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, instrumentSource: 'venue' as const, status: 'planned' as const } }
+    const stored = { ...play, summary: { ...play.summary, version: play.summary.version + 1, title: 'Server revision' } }
+    const client = api({
+      overview: vi.fn().mockResolvedValue(overviewFixture), plays: vi.fn(playsFrom([play.summary])), playCounts: vi.fn(playCountsFrom([play.summary])),
+      play: vi.fn().mockResolvedValue(play), evidence: vi.fn().mockResolvedValue([]),
+      monitorStream: vi.fn((_after, signal, onEvent) => new Promise<void>(resolve => {
+        emit = onEvent; signal.addEventListener('abort', () => resolve(), { once: true })
+      })),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Saved idea' }))
+    const title = await screen.findByRole('textbox', { name: 'Play title' })
+    await userEvent.clear(title)
+    await userEvent.type(title, 'Keep local revision')
+    vi.mocked(client.play).mockResolvedValue(stored)
+    // The server opens every stream with a status naming the head; only later events reload.
+    act(() => {
+      emit({ type: 'status', status: { state: 'reset', nextCursor: eventCursor('1') } })
+      emit(eventFrame())
+    })
+    await screen.findByText(/The saved Play changed elsewhere/)
+    expect(title).toHaveValue('Keep local revision')
+    expect(client.overview).toHaveBeenCalledTimes(2)
+    expect(client.runAccountMonitor).not.toHaveBeenCalled()
+    expect(client.sync).not.toHaveBeenCalled()
+    expect(document.querySelector('.notification')).toBeNull()
+  })
+  it('dismisses account-level discrepancies with a stored reload and no venue request', async () => {
+    const client = api({ overview: vi.fn().mockResolvedValue(overviewFixture),
+      monitor: vi.fn().mockResolvedValue({ ...monitorSummaryFixture, accounts: [{ ...monitorFixture, discrepancies: [discrepancyFixture] }] }),
+      dismissAccountDiscrepancy: vi.fn().mockResolvedValue(undefined) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'View Main account' }))
+    await userEvent.type(await screen.findByRole('textbox', { name: /Dismissal note/ }), 'Checked separately.')
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    await waitFor(() => expect(client.dismissAccountDiscrepancy).toHaveBeenCalledWith(accountFixture.id, discrepancyFixture.id, 'Checked separately.', expect.any(AbortSignal)))
+    await waitFor(() => expect(client.overview).toHaveBeenCalledTimes(2))
+    expect(client.sync).not.toHaveBeenCalled()
+    expect(client.runAccountMonitor).not.toHaveBeenCalled()
+  })
   it.each(['disconnect', 'unmount', 'API replacement'])('cancels Refresh all on %s while the first sync is pending', async action => {
     const first = { ...accountFixture, venueId: 'hyperliquid' }
     const second = { ...first, id: 'second', name: 'Second' }
@@ -662,6 +735,39 @@ describe('Main application shell', () => {
     await waitFor(() => expect(client.createAccount).toHaveBeenCalledWith({ portfolioId: null, name: 'Unassigned manual', venueId: 'manual' }))
     expect(client.createPortfolio).not.toHaveBeenCalled()
     expect(client.sync).not.toHaveBeenCalled()
+  })
+  it('queues an initial venue sync after adding an account and keeps it running after the dialog closes', async () => {
+    let finish!: () => void
+    const client = api({
+      createAccount: vi.fn().mockResolvedValue({ ...accountFixture, venueId: 'hyperliquid' }),
+      sync: vi.fn().mockImplementation(() => new Promise<void>(resolve => { finish = resolve })),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Add your first account' }))
+    await userEvent.type(screen.getByLabelText('Account name'), 'New wallet')
+    await userEvent.type(screen.getByLabelText('Public wallet address'), `0x${'ab'.repeat(20)}`)
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add account' }))
+    await waitFor(() => expect(client.sync).toHaveBeenCalledExactlyOnceWith(accountFixture.id, expect.any(AbortSignal)))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await act(async () => finish())
+    await screen.findByText('1 of 1 accounts refreshed.')
+  })
+  it.each(['lighter', 'lighter-rh'])('automatically refreshes a newly imported %s account', async venueId => {
+    const venue = { ...indexVenue, id: venueId }
+    const client = api({
+      discoverAccounts: vi.fn().mockResolvedValue({ ...discoveryFixture, venueId }),
+      createAccount: vi.fn().mockResolvedValue({ ...indexAccount, venueId }),
+    })
+    const system = { ...systemFixture, venues: [venue, ...systemFixture.venues.filter(v => v.id !== venueId)] }
+    render(<ApplicationShell system={system} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Add your first account' }))
+    await userEvent.type(screen.getByLabelText('Public wallet address'), discoveryFixture.address)
+    await userEvent.click(screen.getByRole('button', { name: 'Find wallet' }))
+    await userEvent.click(await screen.findByRole('checkbox', { name: /Main account.*9007199254740993/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Import selected (1)' }))
+    await waitFor(() => expect(client.sync).toHaveBeenCalledExactlyOnceWith(indexAccount.id, expect.any(AbortSignal)))
+    expect(client.saveAccountCredential).not.toHaveBeenCalled()
+    expect(client.createAccount).toHaveBeenCalledTimes(1)
   })
   it('creates a manual account without fabricating an unavailable balance', async () => {
     const client = api({ overview: vi.fn().mockResolvedValue({ ...emptyOverview, portfolios: [portfolioFixture] }) })

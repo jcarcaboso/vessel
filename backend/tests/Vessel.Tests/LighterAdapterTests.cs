@@ -12,7 +12,7 @@ using Vessel.Persistence;
 
 namespace Vessel.Tests;
 
-public sealed class LighterAdapterTests
+public sealed partial class LighterAdapterTests
 {
     private const string Source = "9007199254740993";
     private const string Address = "0x1111111111111111111111111111111111111111";
@@ -85,7 +85,9 @@ public sealed class LighterAdapterTests
         public List<Guid> Reads { get; } = [];
         public List<Guid> Refused { get; } = [];
         public Task<string?> ReadAsync(Guid accountId, CancellationToken ct) { Reads.Add(accountId); return Task.FromResult(value); }
-        public Task MarkRefusedAsync(Guid accountId, CancellationToken ct) { Refused.Add(accountId); return Task.CompletedTask; }
+        public async Task<CredentialAttempt?> ReadAttemptAsync(Guid accountId, CancellationToken ct) =>
+            await ReadAsync(accountId, ct) is { } token ? new(token, "synthetic-revision") : null;
+        public Task MarkRefusedAsync(Guid accountId, string attemptedRevision, CancellationToken ct) { Refused.Add(accountId); return Task.CompletedTask; }
     }
     private sealed class Handler : HttpMessageHandler
     {
@@ -545,7 +547,9 @@ public sealed class LighterAdapterTests
         {
             var handler = new Handler { Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/accountMetadata", StringComparison.Ordinal)
                 ? Response(body) : null };
-            var error = await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).DiscoverAsync(Address, Token, default));
+            var error = body.Contains("\"code\":20013", StringComparison.Ordinal)
+                ? (Exception)await Assert.ThrowsAsync<VenueCredentialRejectedException>(() => Reader(handler).DiscoverAsync(Address, Token, default))
+                : await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).DiscoverAsync(Address, Token, default));
             Assert.DoesNotContain(Token, error.ToString());
         }
     }
@@ -595,7 +599,9 @@ public sealed class LighterAdapterTests
     public async Task Invalid_wrong_scope_and_expired_tokens_make_no_network_calls(string token)
     {
         var handler = new Handler();
-        var error = await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).VerifyAsync(Source, token, default));
+        var error = token == "ro:1:single:1000000000:abcdef"
+            ? (Exception)await Assert.ThrowsAsync<VenueCredentialRejectedException>(() => Reader(handler).VerifyAsync(Source, token, default))
+            : await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).VerifyAsync(Source, token, default));
         Assert.DoesNotContain(token, error.ToString());
         Assert.Empty(handler.Requests);
     }
@@ -655,7 +661,7 @@ public sealed class LighterAdapterTests
             if (request.RequestUri.AbsolutePath.EndsWith("/accountsByL1Address", StringComparison.Ordinal)) return Response(Discovery);
             return Response($$"""{"code":401,"message":"{{Token}}"}""", HttpStatusCode.Unauthorized);
         };
-        var error = await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).VerifyAsync(Source, Token, default));
+        Exception error = await Assert.ThrowsAsync<VenueCredentialRejectedException>(() => Reader(handler).VerifyAsync(Source, Token, default));
         Assert.DoesNotContain(Token, error.ToString());
         handler.Reply = _ => throw new HttpRequestException(Token);
         error = await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).VerifyAsync(Source, Token, default));
@@ -916,6 +922,22 @@ public sealed class LighterAdapterTests
         Assert.Equal(2, history.Length);
         Assert.Equal(Token, history[0].Token);
         Assert.Null(history[1].Token);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task Order_authentication_refusal_keeps_its_category_and_marks_only_the_attempted_credential(HttpStatusCode status)
+    {
+        var handler = new Handler { Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/accountActiveOrders", StringComparison.Ordinal)
+            ? Response($$"""{"message":"{{Token}}"}""", status) : null };
+        var credentials = new Credentials(Token);
+        var account = Account();
+        var error = await Assert.ThrowsAsync<VenueCredentialRejectedException>(() =>
+            Reader(handler, credentials).ReadOrdersAsync(account, default));
+        Assert.Equal([account.Id], credentials.Refused);
+        Assert.DoesNotContain(Token, error.ToString());
+        Assert.DoesNotContain(handler.Requests, request => request.Url.Contains("/accountInactiveOrders"));
     }
 
     [Fact]

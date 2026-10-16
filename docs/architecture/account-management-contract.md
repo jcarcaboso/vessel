@@ -12,6 +12,21 @@ October 1, 2026. The owner requested rename/delete portfolios and accounts, disa
 - Hard account deletion removes that account's retained imported facts and latest snapshots/positions. Require an explicit confirmation in the UI. If any Play head references it, return safe 409 and retain everything; do not delete trading intent as a side effect.
 - Move/unlink does not rewrite imported facts or historical intent. Grouping uses the current account assignment; historical portfolio membership analysis is not part of this step.
 
+## October 16, 2026: initial account refresh
+
+Adding an account in the browser queues one initial refresh when its venue descriptor advertises `sync`.
+Manual and disabled accounts are not queued. Wallet imports finish the optional read-only credential
+save attempt before queueing each confirmed account, so its first read can use the saved credential.
+A failed credential save still keeps the account and queues its available public reads.
+
+The shell owns this session-only queue, shared with individual refresh and Refresh all: reads run
+sequentially, queued/current account IDs are deduplicated, and a failure does not stop later accounts.
+Closing the import dialog or navigating pages does not cancel queued work. Disconnect, shell unmount
+or API replacement aborts the request and discards the queue without late notifications or reloads.
+Account creation stays successful if its initial refresh fails; existing refresh notifications and
+manual retry remain available. This is not a durable backend job, automatic retry or history backfill;
+venue limits and fee/PnL integrity checks are unchanged.
+
 ## October 12, 2026: refresh and account filters
 
 Accounts and Overview's enabled-account panel offer Refresh all. It takes every enabled account whose descriptor has `sync`, regardless of the current account filters, and calls the existing locked refresh endpoint one account at a time. The button shows "Refreshing N of M", the active row spins, and individual/bulk refresh buttons are disabled during any refresh. No eligible accounts also disables the action. Failures do not stop later accounts; one summary notification names failed accounts and the shell reloads once after the batch. Backend management/sync locking is unchanged.

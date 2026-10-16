@@ -37,7 +37,7 @@ public sealed class AccountSecurityPostgresTests
         var position = await db.Positions.SingleAsync();
         Assert.Equal("1000PEPE", position.ContractId); Assert.Equal("kPEPE", position.VenueContractId);
         Assert.False(db.Database.HasPendingModelChanges());
-        var service = new WorkspaceService(new WorkspaceStore(db), new CoreOwner(owner), SecurityFixture.Registry());
+        var service = new WorkspaceService(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), SecurityFixture.Registry(), TestUnitOfWork.For(db));
         var duplicate = await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(null, "Duplicate", "hyperliquid", Address: SecurityFixture.Address), default));
         Assert.Equal(409, duplicate.StatusCode);
         var created = await service.CreateAccountAsync(new(null, "Index", SecurityFixture.Venue.Id, SourceId: "9223372036854775807"), default);
@@ -46,7 +46,7 @@ public sealed class AccountSecurityPostgresTests
         Assert.False(disabled.IsEnabled);
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(null, "Again", SecurityFixture.Venue.Id, SourceId: created.SourceId), default))).StatusCode);
         await using var other = database.Context(Guid.NewGuid());
-        var otherService = new WorkspaceService(new WorkspaceStore(other), new CoreOwner(other.CurrentOwnerId), SecurityFixture.Registry());
+        var otherService = new WorkspaceService(new WorkspaceStore(other, TestUnitOfWork.For(other)), new CoreOwner(other.CurrentOwnerId), SecurityFixture.Registry(), TestUnitOfWork.For(other));
         Assert.NotNull(await otherService.CreateAccountAsync(new(null, "Other owner", SecurityFixture.Venue.Id, SourceId: created.SourceId), default));
     }
 
@@ -73,19 +73,19 @@ public sealed class AccountSecurityPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
         await using var db = database.Context(owner); var account = SecurityFixture.Account(owner); db.Accounts.Add(account); await db.SaveChangesAsync();
-        var store = new WorkspaceStore(db); var credentialStore = new AccountCredentialStore(db); using var vault = SecurityFixture.Vault();
-        var service = SecurityFixture.Service(owner, store, credentialStore, vault);
+        var store = new WorkspaceStore(db, TestUnitOfWork.For(db)); var credentialStore = new AccountCredentialStore(db, TestUnitOfWork.For(db)); using var vault = SecurityFixture.Vault();
+        var service = SecurityFixture.Service(owner, store, credentialStore, vault, unitOfWork: TestUnitOfWork.For(db));
         await service.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
         var row = await db.AccountCredentials.AsNoTracking().SingleAsync();
         Assert.Equal(owner, row.OwnerId); Assert.Equal(account.Id, row.AccountId);
         Assert.Equal(SecurityFixture.Venue.Id + "-read-token", row.Purpose); Assert.Equal("v1", row.KeyId);
         Assert.DoesNotContain(SecurityFixture.Token, System.Text.Encoding.UTF8.GetString(row.Ciphertext));
-        var reader = new AccountCredentialReader(store, credentialStore, new CoreOwner(owner), vault, SecurityFixture.Clock);
+        var reader = new AccountCredentialReader(store, credentialStore, new CoreOwner(owner), vault, SecurityFixture.Clock, TestUnitOfWork.For(db));
         Assert.Equal(SecurityFixture.Token, await reader.ReadAsync(account.Id, default));
         await using var foreign = database.Context(Guid.NewGuid());
         Assert.Empty(await foreign.AccountCredentials.ToListAsync());
-        Assert.Null(await new AccountCredentialStore(foreign).FindAsync(account.Id, row.Purpose, default));
-        var foreignService = SecurityFixture.Service(foreign.CurrentOwnerId, new WorkspaceStore(foreign), new AccountCredentialStore(foreign), vault);
+        Assert.Null(await new AccountCredentialStore(foreign, TestUnitOfWork.For(foreign)).FindAsync(account.Id, row.Purpose, default));
+        var foreignService = SecurityFixture.Service(foreign.CurrentOwnerId, new WorkspaceStore(foreign, TestUnitOfWork.For(foreign)), new AccountCredentialStore(foreign, TestUnitOfWork.For(foreign)), vault, unitOfWork: TestUnitOfWork.For(foreign));
         Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => foreignService.GetAsync(account.Id, default))).StatusCode);
         await Assert.ThrowsAsync<PostgresException>(() => foreign.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO account_credentials ("OwnerId", "AccountId", "Purpose", "KeyId", "Nonce", "Ciphertext", "Tag", "Scope", "ExpiresAt", "CreatedAt", "LastVerifiedAt")
@@ -98,7 +98,7 @@ public sealed class AccountSecurityPostgresTests
         };
         foreign.AccountCredentials.Add(stolen);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => foreign.SaveChangesAsync());
-        await new WorkspaceService(store, new CoreOwner(owner), SecurityFixture.Registry()).DeleteAccountAsync(account.Id, default);
+        await new WorkspaceService(store, new CoreOwner(owner), SecurityFixture.Registry(), TestUnitOfWork.For(db)).DeleteAccountAsync(account.Id, default);
         Assert.Empty(await db.AccountCredentials.AsNoTracking().ToListAsync()); Assert.Empty(await db.Accounts.ToListAsync());
     }
 
@@ -109,40 +109,44 @@ public sealed class AccountSecurityPostgresTests
         await using (var seed = database.Context(owner)) { seed.Accounts.Add(account); await seed.SaveChangesAsync(); }
         await using var writerDb = database.Context(owner); await using var managementDb = database.Context(owner);
         using var vault = SecurityFixture.Vault(); var verifier = new BlockingVerifier();
-        var writer = new AccountCredentialService(new WorkspaceStore(writerDb), new AccountCredentialStore(writerDb), new CoreOwner(owner),
-            SecurityFixture.Registry(verifier), vault, SecurityFixture.Clock);
+        var writer = new AccountCredentialService(new WorkspaceStore(writerDb, TestUnitOfWork.For(writerDb)), new AccountCredentialStore(writerDb, TestUnitOfWork.For(writerDb)), new CoreOwner(owner), SecurityFixture.Registry(verifier), vault, SecurityFixture.Clock, TestUnitOfWork.For(writerDb));
         var saving = writer.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
         await verifier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var management = new WorkspaceService(new WorkspaceStore(managementDb), new CoreOwner(owner), SecurityFixture.Registry());
+        var management = new WorkspaceService(new WorkspaceStore(managementDb, TestUnitOfWork.For(managementDb)), new CoreOwner(owner), SecurityFixture.Registry(), TestUnitOfWork.For(managementDb));
         var disabling = management.UpdateAccountAsync(account.Id, new("Disabled", null, false, 1), default);
         await Task.Delay(100); Assert.False(disabling.IsCompleted);
         verifier.Release.SetResult();
         await saving.WaitAsync(TimeSpan.FromSeconds(5)); await disabling.WaitAsync(TimeSpan.FromSeconds(5));
         await using var check = database.Context(owner);
         Assert.False((await check.Accounts.SingleAsync()).IsEnabled); Assert.Single(await check.AccountCredentials.ToListAsync());
-        var reader = new AccountCredentialReader(new WorkspaceStore(check), new AccountCredentialStore(check), new CoreOwner(owner), vault, SecurityFixture.Clock);
+        var reader = new AccountCredentialReader(new WorkspaceStore(check, TestUnitOfWork.For(check)), new AccountCredentialStore(check, TestUnitOfWork.For(check)), new CoreOwner(owner), vault, SecurityFixture.Clock, TestUnitOfWork.For(check));
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => reader.ReadAsync(account.Id, default))).StatusCode);
         await management.DeleteAccountAsync(account.Id, default); Assert.Empty(await check.AccountCredentials.AsNoTracking().ToListAsync());
     }
 
     [PostgresFact]
-    public async Task Credential_write_waits_for_sync_and_nested_reader_uses_same_transaction()
+    public async Task Credential_write_during_a_refresh_supersedes_it_and_the_adapter_reads_in_its_own_transaction()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); var account = SecurityFixture.Account(owner);
         await using (var seed = database.Context(owner)) { seed.Accounts.Add(account); await seed.SaveChangesAsync(); }
         await using var syncDb = database.Context(owner); await using var writeDb = database.Context(owner);
         using var vault = SecurityFixture.Vault();
-        var syncStore = new WorkspaceStore(syncDb);
-        var reader = new BlockingReader(new AccountCredentialReader(syncStore, new AccountCredentialStore(syncDb), new CoreOwner(owner), vault, SecurityFixture.Clock));
-        var verifier = new BlockingVerifier(); verifier.Release.SetResult();
-        var registry = SecurityFixture.Registry(reader, verifier);
-        var syncing = new WorkspaceService(syncStore, new CoreOwner(owner), registry).SyncAsync(account.Id, default);
+        var syncStore = new WorkspaceStore(syncDb, TestUnitOfWork.For(syncDb));
+        var credentials = new AccountCredentialReader(syncStore, new AccountCredentialStore(syncDb, TestUnitOfWork.For(syncDb)), new CoreOwner(owner), vault, SecurityFixture.Clock, TestUnitOfWork.For(syncDb));
+        var reader = new BlockingReader(credentials);
+        var syncing = MonitorTestPaths.RefreshAsync(syncDb, owner, SecurityFixture.Registry(reader), account.Id, credentials);
         await reader.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var writer = new AccountCredentialService(new WorkspaceStore(writeDb), new AccountCredentialStore(writeDb), new CoreOwner(owner), registry, vault, SecurityFixture.Clock);
-        var saving = writer.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
-        await Task.Delay(100); Assert.False(verifier.Entered.Task.IsCompleted); Assert.False(saving.IsCompleted);
-        reader.Release.SetResult(); await syncing.WaitAsync(TimeSpan.FromSeconds(5)); await saving.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Single(await writeDb.AccountCredentials.ToListAsync()); Assert.Equal("synced", (await writeDb.Accounts.SingleAsync()).SyncStatus);
+        // The refresh holds its monitor lease, not the account row, while the venue read is outstanding.
+        var verifier = new BlockingVerifier(); verifier.Release.SetResult();
+        var writer = new AccountCredentialService(new WorkspaceStore(writeDb, TestUnitOfWork.For(writeDb)), new AccountCredentialStore(writeDb, TestUnitOfWork.For(writeDb)), new CoreOwner(owner), SecurityFixture.Registry(reader, verifier), vault, SecurityFixture.Clock, TestUnitOfWork.For(writeDb));
+        try { await writer.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default).WaitAsync(TimeSpan.FromSeconds(5)); }
+        finally { reader.Release.TrySetResult(); }
+        Assert.True(verifier.Entered.Task.IsCompleted);
+        // The new credential revision discards the read taken before it; nothing is written for it.
+        Assert.Equal(502, (await Assert.ThrowsAsync<ProblemException>(() => syncing.WaitAsync(TimeSpan.FromSeconds(5)))).StatusCode);
+        await using var verify = database.Context(owner);
+        Assert.Single(await verify.AccountCredentials.ToListAsync()); Assert.Equal("not-synced", (await verify.Accounts.SingleAsync()).SyncStatus);
+        Assert.Empty(await verify.Snapshots.ToListAsync());
     }
 
     private sealed class BlockingVerifier : IVenueCredentialVerifier

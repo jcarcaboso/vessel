@@ -22,17 +22,31 @@ public sealed partial class LighterReader
     public async Task<VenueOrderReadResult> ReadOrdersAsync(Account account, CancellationToken cancellationToken)
     {
         var source = Source(account);
-        var credential = await credentials.ReadAsync(account.Id, cancellationToken)
+        var attempt = await credentials.ReadAttemptAsync(account.Id, cancellationToken)
             ?? throw new VenueReadException(venue.TokenRequired);
-        return await BoundedAsync(async ct =>
+        var credential = attempt.Token;
+        try
+        {
+            return await BoundedAsync(async ct =>
         {
             await BindAsync(source, credential, ct);
             var catalogue = await CatalogueAsync(ct, refresh: true);
             var observed = timeProvider.GetUtcNow();
             var orders = new Dictionary<string, VenueOrder>(StringComparer.Ordinal);
+            bool openOrdersComplete;
             using (var active = await GetAsync("accountActiveOrders?account_index=" + source + "&market_type=perp", ct, credential))
-                foreach (var order in ReadOrders(active.RootElement, catalogue, source, observed, 1000))
+            {
+                var current = ReadOrders(active.RootElement, catalogue, source, observed, 1000);
+                var rows = Rows(json, active.RootElement, "orders", 1000);
+                // Active orders cover all perp markets without a market_id filter. A cursor, cap,
+                // omitted unsupported order or unknown active status prevents negative evidence.
+                var noNextPage = !active.RootElement.TryGetProperty("next_cursor", out var next) ||
+                    next.ValueKind == JsonValueKind.String && next.GetString() == "";
+                openOrdersComplete = rows.GetArrayLength() < 1000 && noNextPage &&
+                    current.Count == rows.GetArrayLength() && current.All(o => o.Status == VenueOrderStatus.Open);
+                foreach (var order in current)
                     if (!orders.TryAdd(order.OrderId, order)) throw json.Invalid();
+            }
             string? cursor = null;
             var cursors = new HashSet<string>(StringComparer.Ordinal);
             for (var page = 0; page < MaxPages; page++)
@@ -48,8 +62,14 @@ public sealed partial class LighterReader
                 if (!cursors.Add(cursor)) throw json.Invalid();
             }
             return new VenueOrderReadResult(orders.Values.ToArray(), observed, venue.OrdersNotice +
-                (cursor is null ? "" : OrdersPageLimitNotice));
-        }, cancellationToken);
+                (cursor is null ? "" : OrdersPageLimitNotice), OpenOrdersComplete: openOrdersComplete);
+            }, cancellationToken);
+        }
+        catch (VenueCredentialRejectedException)
+        {
+            await credentials.MarkRefusedAsync(account.Id, attempt.Revision, cancellationToken);
+            throw;
+        }
     }
 
     private static DateTimeOffset Seconds(StrictJson json, JsonElement row, string name, DateTimeOffset latest)

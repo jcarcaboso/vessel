@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Vessel.Application.Credentials;
@@ -9,6 +10,7 @@ using Vessel.Application.MarketData;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Infrastructure;
 using Vessel.Infrastructure.Venues;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 using Vessel.Infrastructure.Venues.Lighter;
@@ -61,7 +63,8 @@ public sealed class LighterRobinhoodTests
     private sealed class NoCredentials : IAccountCredentialReader
     {
         public Task<string?> ReadAsync(Guid accountId, CancellationToken ct) => Task.FromResult<string?>(null);
-        public Task MarkRefusedAsync(Guid accountId, CancellationToken ct) => Task.CompletedTask;
+        public Task<CredentialAttempt?> ReadAttemptAsync(Guid accountId, CancellationToken ct) => Task.FromResult<CredentialAttempt?>(null);
+        public Task MarkRefusedAsync(Guid accountId, string attemptedRevision, CancellationToken ct) => Task.CompletedTask;
     }
 
     private sealed class Clock : TimeProvider
@@ -380,14 +383,20 @@ public sealed class LighterRobinhoodTests
         Assert.Equal("https://hl.example.test/", services.GetRequiredService<IOptions<VenueHostOptions>>().Value.BaseUri("Hyperliquid").AbsoluteUri);
     }
 
+    // A plain host, not WebApplicationFactory: when startup fails, the factory's deferred host can resolve
+    // services from the host the entry point already disposed, so under parallel test load it sometimes reports
+    // ObjectDisposedException instead of the validation error. The factory wiring is covered by the test above.
     [Fact]
-    public void Invalid_configured_host_fails_startup_naming_the_key_not_the_value()
+    public async Task Invalid_configured_host_fails_startup_naming_the_key_not_the_value()
     {
-        using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new()
+        var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Vessel:Venues:LighterRh:BaseUrl"] = "https://user:do-not-log-this@rh.example.test/"
         });
-        var error = Assert.ThrowsAny<Exception>(() => factory.Services);
+        builder.Services.AddVesselInfrastructure(builder.Configuration);
+        using var host = builder.Build();
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
         var message = error.ToString();
         Assert.Contains("Vessel:Venues:LighterRh:BaseUrl", message);
         Assert.DoesNotContain("do-not-log-this", message);

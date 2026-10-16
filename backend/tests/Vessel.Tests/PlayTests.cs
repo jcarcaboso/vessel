@@ -251,7 +251,7 @@ public sealed class PlayServiceTests
         venue = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue");
         manual = new Account(Guid.NewGuid(), owner, "manual", "Manual");
         store.Accounts.AddRange(venue, manual);
-        service = new PlayService(store, objects, TimeProvider.System);
+        service = new PlayService(store, objects, TimeProvider.System, TestUnitOfWork.Saving(store.SaveAsync));
     }
 
     private Task<PlayDto> Create(Account? account = null, string? instrument = "BTC", string source = "venue", PlayPlanDocument? plan = null) =>
@@ -468,8 +468,8 @@ public sealed class PlayPostgresTests
         }
         await using (var db = database.Context(owner))
         {
-            var store = new Vessel.Persistence.PlayStore(db);
-            Assert.Equal(["k/a.png"], await store.DeleteAsync((await store.FindAsync(play.Id, default))!, default));
+            var store = new Vessel.Persistence.PlayStore(db, TestUnitOfWork.For(db));
+            Assert.Equal(["k/a.png"], await TestUnitOfWork.For(db).ExecuteAsync(async () => await store.DeleteAsync((await store.FindAsync(play.Id, default))!, default), default));
         }
         await using (var db = database.Context(owner))
         {

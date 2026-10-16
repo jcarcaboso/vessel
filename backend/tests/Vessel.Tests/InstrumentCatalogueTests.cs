@@ -25,7 +25,7 @@ public sealed class InstrumentCatalogueTests
         var before = JsonSerializer.Serialize(new { store.Accounts, store.Snapshots, store.Fills });
         var reader = new FixtureReader { Fail = failure };
         reader.Result = reader.Result with { Instruments = [new("MiXeD", 5, 40, "USDC"), new("BTC", 0, 3, "USDC")] };
-        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader));
+        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.None);
         using var caller = new CancellationTokenSource();
 
         if (failure)
@@ -57,7 +57,7 @@ public sealed class InstrumentCatalogueTests
         var account = new Account(Guid.NewGuid(), owner, "manual", "Manual");
         store.Accounts.Add(account);
         var reader = new FixtureReader { Fail = true };
-        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader));
+        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.None);
         var result = await service.InstrumentsAsync(account.Id, default);
         Assert.Equal("manual", result.VenueId);
         Assert.Equal("manual", result.Scope);
@@ -83,7 +83,7 @@ public sealed class InstrumentCatalogueTests
             account.UpdateSettings(account.Name, null, false);
         if (scenario != "missing") store.Accounts.Add(account);
         var reader = new FixtureReader { Fail = true };
-        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader));
+        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.None);
         var error = await Assert.ThrowsAsync<ProblemException>(() => service.InstrumentsAsync(account.Id, default));
         Assert.Equal(status, error.StatusCode);
         Assert.DoesNotContain("Private", error.Message);
@@ -106,7 +106,7 @@ public sealed class InstrumentCatalogueTests
             "network" => new HttpRequestException("private-secret"),
             _ => new OperationCanceledException("private-secret")
         }};
-        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader));
+        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.None);
         var error = await Assert.ThrowsAsync<ProblemException>(() => service.InstrumentsAsync(account.Id, default));
         Assert.Equal(502, error.StatusCode);
         Assert.Equal("The venue instrument read failed. Try again later.", error.Message);
@@ -125,7 +125,7 @@ public sealed class InstrumentCatalogueTests
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
         var account = new Account(Guid.NewGuid(), owner, "unsupported-venue", "Legacy"); store.Accounts.Add(account);
         var reader = new FixtureReader();
-        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader));
+        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.None);
         var error = await Assert.ThrowsAsync<ProblemException>(() => service.InstrumentsAsync(account.Id, default));
         Assert.Equal(502, error.StatusCode);
         Assert.Equal("The venue instrument read failed. Try again later.", error.Message);
@@ -139,7 +139,7 @@ public sealed class InstrumentCatalogueTests
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "HL"); store.Accounts.Add(account);
         var reader = new FixtureReader();
-        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader));
+        var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.None);
         using var caller = new CancellationTokenSource(); caller.Cancel();
         var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.InstrumentsAsync(account.Id, caller.Token));
         Assert.Equal(caller.Token, error.CancellationToken);

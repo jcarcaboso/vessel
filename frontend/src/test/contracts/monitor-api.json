@@ -1,0 +1,241 @@
+{
+  "runAccepted": {
+    "requestId": "00000000-0000-4000-8000-000000000001",
+    "monitor": {
+      "accountId": "00000000-0000-4000-8000-000000000002",
+      "state": "live",
+      "lastAttemptAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+      "lastSuccessAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+      "nextRunAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+      "manualState": "pending",
+      "runTrigger": "owner",
+      "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+      "error": null,
+      "workerOnline": true,
+      "discrepancies": []
+    }
+  },
+  "accountMonitorRunning": {
+    "accountId": "00000000-0000-4000-8000-000000000002",
+    "state": "live",
+    "lastAttemptAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "lastSuccessAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "nextRunAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "manualState": "running",
+    "runTrigger": "owner",
+    "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "error": null,
+    "workerOnline": true,
+    "discrepancies": []
+  },
+  "accountMonitorIdle": {
+    "accountId": "00000000-0000-4000-8000-000000000002",
+    "state": "live",
+    "lastAttemptAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "lastSuccessAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "nextRunAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "manualState": "idle",
+    "runTrigger": null,
+    "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "error": null,
+    "workerOnline": true,
+    "discrepancies": []
+  },
+  "summary": {
+    "workerOnline": true,
+    "heartbeatAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "accounts": [
+      {
+        "accountId": "00000000-0000-4000-8000-000000000002",
+        "state": "live",
+        "lastAttemptAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+        "lastSuccessAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+        "nextRunAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+        "manualState": "running",
+        "runTrigger": "owner",
+        "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+        "error": null,
+        "workerOnline": true,
+        "discrepancies": []
+      }
+    ]
+  },
+  "playExecution": {
+    "playId": "00000000-0000-4000-8000-000000000003",
+    "status": "planned",
+    "tracked": true,
+    "reason": null,
+    "checkedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "totals": {
+      "enteredQuantity": "0",
+      "exitedQuantity": "0",
+      "openQuantity": "0",
+      "closedPnlUsd": "0",
+      "closedPnlBasis": "gross",
+      "fees": []
+    },
+    "entries": [
+      {
+        "entryId": "entry-1",
+        "filledQuantity": "0",
+        "averageFillPrice": null,
+        "restingOrders": 1
+      }
+    ],
+    "links": [
+      {
+        "id": "00000000-0000-4000-8000-000000000004",
+        "role": "entry",
+        "entryId": "entry-1",
+        "levelId": null,
+        "state": "linked",
+        "source": "automatic",
+        "order": {
+          "orderId": "btc-entry",
+          "side": "buy",
+          "orderType": "Limit",
+          "limitPrice": "100",
+          "triggerPrice": null,
+          "reduceOnly": false,
+          "isPositionTpsl": false,
+          "originalSize": "1",
+          "remainingSize": "1",
+          "placedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+          "status": "open",
+          "venueStatus": "open",
+          "statusAtUtc": "2026-10-14T03:20:41.1234567+00:00"
+        },
+        "filledQuantity": "0",
+        "fills": []
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000005",
+        "role": "stop",
+        "entryId": "entry-1",
+        "levelId": "stop-1",
+        "state": "linked",
+        "source": "automatic",
+        "order": {
+          "orderId": "btc-stop",
+          "side": "sell",
+          "orderType": "Stop Market",
+          "limitPrice": "95",
+          "triggerPrice": "95",
+          "reduceOnly": true,
+          "isPositionTpsl": false,
+          "originalSize": "1",
+          "remainingSize": "1",
+          "placedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+          "status": "open",
+          "venueStatus": "open",
+          "statusAtUtc": "2026-10-14T03:20:41.1234567+00:00"
+        },
+        "filledQuantity": "0",
+        "fills": []
+      }
+    ],
+    "suggestions": [],
+    "unlinkedOrders": [],
+    "notice": "Orders and fills come from the venue and link to this play by order ID. Price touches are never treated as fills. Quantities are base units from linked fills; closed PnL and fees are as the venue reports them.",
+    "issues": [],
+    "monitor": {
+      "accountId": "00000000-0000-4000-8000-000000000002",
+      "state": "live",
+      "lastAttemptAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+      "lastSuccessAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+      "nextRunAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+      "manualState": "idle",
+      "runTrigger": null,
+      "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+      "error": null,
+      "workerOnline": true,
+      "discrepancies": []
+    },
+    "discrepancies": [],
+    "watches": []
+  },
+  "runCompletedEvent": {
+    "id": "00000000-0000-4000-8000-000000000006",
+    "type": "monitor.run-completed",
+    "version": 1,
+    "ownerId": "00000000-0000-4000-8000-000000000007",
+    "sequence": "42",
+    "runId": "00000000-0000-4000-8000-000000000001",
+    "dedupKey": "monitor-run:00000000-0000-4000-8000-000000000002:00000000-0000-4000-8000-000000000001",
+    "severity": "info",
+    "occurredAt": "2026-10-14T03:20:41.1234567+00:00",
+    "detectedAt": "2026-10-14T03:20:41.1234567+00:00",
+    "timeliness": "timely",
+    "relevance": "current",
+    "expiresAt": null,
+    "subject": {
+      "accountId": "00000000-0000-4000-8000-000000000002",
+      "venueId": null,
+      "contractId": null,
+      "playId": null,
+      "entryId": null,
+      "levelId": null,
+      "discrepancyId": null
+    },
+    "source": {
+      "trigger": "owner",
+      "orderIds": null,
+      "fillIds": null
+    },
+    "data": {
+      "state": "live",
+      "outcome": "succeeded",
+      "trigger": "manual"
+    }
+  },
+  "eventPageNextCursor": "00000000000040008000000000000000.42",
+  "discrepancy": {
+    "id": "00000000-0000-4000-8000-000000000008",
+    "accountId": "00000000-0000-4000-8000-000000000002",
+    "playId": "00000000-0000-4000-8000-000000000003",
+    "contractId": "BTC",
+    "kind": "position.excess",
+    "severity": "warning",
+    "state": "open",
+    "openedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "confirmedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "resolvedAtUtc": null,
+    "dismissedAtUtc": null,
+    "note": null,
+    "details": {
+      "venueQuantity": "0.100000000000000001",
+      "playQuantity": "0.1"
+    },
+    "outcome": null,
+    "unverifiableAtUtc": null
+  },
+  "discrepancyUnverifiable": {
+    "id": "00000000-0000-4000-8000-000000000009",
+    "accountId": "00000000-0000-4000-8000-000000000002",
+    "playId": "00000000-0000-4000-8000-000000000003",
+    "contractId": "BTC",
+    "kind": "position.missing",
+    "severity": "warning",
+    "state": "candidate",
+    "openedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "confirmedAtUtc": null,
+    "resolvedAtUtc": null,
+    "dismissedAtUtc": null,
+    "note": null,
+    "details": {
+      "venueQuantity": "0",
+      "playQuantity": "0.1"
+    },
+    "outcome": "unverifiable",
+    "unverifiableAtUtc": "2026-10-14T03:20:41.1234567+00:00"
+  },
+  "watchUnverifiable": {
+    "linkId": "00000000-0000-4000-8000-000000000010",
+    "playId": "00000000-0000-4000-8000-000000000003",
+    "orderId": "exit-order",
+    "role": "stop",
+    "state": "unverifiable",
+    "startedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "endedAtUtc": "2026-10-14T03:20:41.1234567+00:00"
+  }
+}

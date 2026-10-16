@@ -17,6 +17,6 @@ public sealed class VesselDbContextFactory : IDesignTimeDbContextFactory<VesselD
 
     private sealed class MigrationOwner : IJournalOwnerContext
     {
-        public Guid OwnerId => Guid.Parse("11111111-1111-1111-1111-111111111111");
+        public Guid OwnerId => JournalOwner.Default;
     }
 }

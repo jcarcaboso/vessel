@@ -3,6 +3,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Application.Venues;
+using Vessel.Application.Monitoring;
 
 namespace Vessel.Application.Plays.Execution;
 
@@ -37,7 +38,13 @@ public sealed record ExecutionTotalsDto(string EnteredQuantity, string ExitedQua
 /// <summary><paramref name="Issues"/> say why linked fills cannot settle the play; their quantities stay out of the totals when they contradict it.</summary>
 public sealed record PlayExecutionDto(Guid PlayId, string Status, bool Tracked, string? Reason, DateTimeOffset? CheckedAtUtc,
     ExecutionTotalsDto Totals, IReadOnlyList<EntryProgressDto> Entries, IReadOnlyList<OrderLinkDto> Links,
-    IReadOnlyList<OrderLinkDto> Suggestions, IReadOnlyList<ExecutionOrderDto> UnlinkedOrders, string Notice, IReadOnlyList<string> Issues);
+    IReadOnlyList<OrderLinkDto> Suggestions, IReadOnlyList<ExecutionOrderDto> UnlinkedOrders, string Notice, IReadOnlyList<string> Issues)
+{
+    public AccountMonitorDto? Monitor { get; init; }
+    public IReadOnlyList<MonitorDiscrepancyDto> Discrepancies { get; init; } = [];
+    /// <summary>Linked exit and entry orders watched after the Play ended: watching, resolved or a persistent unverifiable.</summary>
+    public IReadOnlyList<MonitorWatchDto> Watches { get; init; } = [];
+}
 
 // Application owns this bounded port; EF details stay in Persistence. Reads are owner-filtered.
 public interface IPlayExecutionStore
@@ -55,7 +62,8 @@ public interface IPlayExecutionStore
     Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct);
     void Add(PlayOrderLink link);
     void Add(PlayStatusChange change);
+    /// <summary>Persists through the active unit of work, without committing.</summary>
     Task SaveAsync(CancellationToken ct);
-    /// <summary>Serializes reconciliation of one account across requests and processes.</summary>
+    /// <summary>Requires an active unit of work; serializes reconciliation across requests and processes until it completes.</summary>
     Task<T> WithAccountLockAsync<T>(Guid accountId, Func<Task<T>> action, CancellationToken ct);
 }

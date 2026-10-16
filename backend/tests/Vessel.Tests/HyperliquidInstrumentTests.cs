@@ -151,9 +151,13 @@ public sealed partial class HyperliquidAdapterTests
             Content = new StringContent("private-secret")
         }));
         using var client = Client(handler);
-        var exception = await Assert.ThrowsAsync<VenueReadException>(() =>
-            new HyperliquidPerpetualReader(client, new TestClock()).ReadInstrumentsAsync(default));
-        Assert.Equal("Hyperliquid is unavailable. Try again later.", exception.Message);
+        Func<Task> read = () => new HyperliquidPerpetualReader(client, new TestClock()).ReadInstrumentsAsync(default);
+        var exception = status == HttpStatusCode.TooManyRequests
+            ? await Assert.ThrowsAsync<VenueRateLimitException>(read)
+            : await Assert.ThrowsAsync<VenueReadException>(read);
+        Assert.Equal(status == HttpStatusCode.TooManyRequests
+            ? "The venue rate limit requires a later retry."
+            : "Hyperliquid is unavailable. Try again later.", exception.Message);
         Assert.Null(exception.InnerException);
         Assert.Single(handler.Requests);
     }

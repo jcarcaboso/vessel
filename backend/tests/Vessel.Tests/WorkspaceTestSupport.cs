@@ -128,7 +128,7 @@ internal sealed class CoreDatabase(string admin, string schema, string connectio
 internal static class ActivityTestSupport
 {
     public static Vessel.Application.Activity.ActivityService Activity(VesselDbContext db, TimeProvider? time = null) =>
-        new(new ActivityStore(db), new WorkspaceStore(db), time ?? TimeProvider.System);
+        new(new ActivityStore(db), new WorkspaceStore(db, TestUnitOfWork.For(db)), time ?? TimeProvider.System);
 
     /// <summary>The first 100 operations of an account (or all enabled accounts), newest first.</summary>
     public static Task<Vessel.Application.Activity.ActivityPageDto> PageAsync(this Vessel.Application.Activity.ActivityService service,

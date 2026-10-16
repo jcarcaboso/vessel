@@ -54,10 +54,11 @@ describe('shared API request pipeline', () => {
     for (const request of [() => api.overview(), () => api.play(savedPlayFixture.summary.id),
       () => api.evidenceImage(savedPlayFixture.summary.id),
       () => api.marketStream(accountFixture.id, query, new AbortController().signal, vi.fn()),
+      () => api.monitorStream('0', new AbortController().signal, vi.fn()),
       () => api.accountCredential(accountFixture.id)]) {
       await expect(request()).rejects.toThrow()
     }
-    expect(listener.mock.calls).toEqual(Array.from({ length: 5 }, () => [{ type: 'unauthorized' }]))
+    expect(listener.mock.calls).toEqual(Array.from({ length: 6 }, () => [{ type: 'unauthorized' }]))
     unsubscribe()
   })
 
@@ -103,10 +104,10 @@ describe('shared API request pipeline', () => {
     await api.play(savedPlayFixture.summary.id)
     await expect(api.candles(accountFixture.id, query)).rejects.toThrow()
     await expect(api.sync(accountFixture.id)).rejects.toThrow()
-    await expect(api.checkPlayExecution(savedPlayFixture.summary.id)).rejects.toThrow()
+    await expect(api.runAccountMonitor(accountFixture.id)).rejects.toThrow()
     await expect(api.discoverAccounts('lighter', `0x${'a'.repeat(40)}`)).rejects.toThrow()
     await api.evidenceImage(savedPlayFixture.summary.id)
-    expect(timeout.mock.calls.map(call => call[1])).toEqual([8_000, 10_000, 15_000, 25_000, 30_000, 45_000, 30_000, 60_000])
+    expect(timeout.mock.calls.map(call => call[1])).toEqual([8_000, 10_000, 15_000, 25_000, 30_000, 10_000, 30_000, 60_000])
     expect(vi.getTimerCount()).toBe(0)
   })
 
@@ -125,13 +126,15 @@ describe('shared API request pipeline', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('does not abort an open SSE stream after its header timeout', async () => {
+  it.each(['market', 'monitor'] as const)('does not abort an open %s SSE stream after its header timeout', async kind => {
     vi.useFakeTimers()
     const stream = new ReadableStream<Uint8Array>({ start() { /* Stay open until the caller aborts. */ } })
     const fetch = vi.fn().mockResolvedValue(new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } }))
     vi.stubGlobal('fetch', fetch)
     const controller = new AbortController()
-    const request = createWorkspaceApi('token').marketStream(accountFixture.id, query, controller.signal, vi.fn())
+    const api = createWorkspaceApi('token')
+    const request = kind === 'market' ? api.marketStream(accountFixture.id, query, controller.signal, vi.fn())
+      : api.monitorStream('0', controller.signal, vi.fn())
     await vi.advanceTimersByTimeAsync(25_001)
     expect((fetch.mock.calls[0]![1].signal as AbortSignal).aborted).toBe(false)
     expect(vi.getTimerCount()).toBe(0)

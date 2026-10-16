@@ -24,11 +24,13 @@ function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     ...overrides,
   }
 }
-function Fixture({ api, accounts = [] }: { api: WorkspaceApi; accounts?: BrokerAccount[] }) {
+function Fixture({ api, accounts = [], onCreated = vi.fn() }: {
+  api: WorkspaceApi; accounts?: BrokerAccount[]; onCreated?: (account?: BrokerAccount) => void
+}) {
   const [open, setOpen] = useState(true)
   return <VenuesProvider venues={[indexVenue, ...systemFixture.venues.filter(v => v.id !== indexVenue.id)]}>
     <button onClick={() => setOpen(true)}>Open import</button>
-    <CreateAccountDialog open={open} onOpenChange={setOpen} api={api} portfolios={[portfolioFixture]} accounts={accounts} onCreated={vi.fn()} />
+    <CreateAccountDialog open={open} onOpenChange={setOpen} api={api} portfolios={[portfolioFixture]} accounts={accounts} onCreated={onCreated} />
   </VenuesProvider>
 }
 async function discover() {
@@ -136,9 +138,10 @@ describe('Wallet account import', () => {
     expect(screen.queryByText(/ro:must-not-echo/)).not.toBeInTheDocument()
     expect(screen.getAllByRole('checkbox')[0]).toBeChecked()
   })
-  it('discovers concrete indices, names selected accounts, assigns a portfolio and imports without refreshing history', async () => {
+  it('discovers concrete indices, names selected accounts and hands the created account to the shell for its initial refresh', async () => {
     const api = client()
-    render(<Fixture api={api} />)
+    const onCreated = vi.fn()
+    render(<Fixture api={api} onCreated={onCreated} />)
     await discover()
     expect(api.discoverAccounts).toHaveBeenCalledWith('lighter', discoveryFixture.address, expect.any(AbortSignal))
     expect(screen.getByText('Balance unavailable')).toBeInTheDocument()
@@ -153,8 +156,25 @@ describe('Wallet account import', () => {
       venueId: 'lighter', sourceId: '9007199254740993', name: 'Long-term', portfolioId: portfolioFixture.id,
     })
     expect(api.saveAccountCredential).not.toHaveBeenCalled()
+    expect(onCreated).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: indexAccount.id }))
+    // The shell owns scheduling, so closing the dialog cannot abandon the initial refresh.
     expect(api.sync).not.toHaveBeenCalled()
     expect(screen.getByRole('checkbox', { name: /Main account.*9007199254740993/ })).toBeDisabled()
+  })
+  it.each(['saved', 'failed'] as const)('waits for the optional token attempt before queueing a refresh when it is %s', async outcome => {
+    let finish!: () => void
+    const api = client({ saveAccountCredential: vi.fn().mockImplementation(() => new Promise((resolve, reject) => {
+      finish = () => outcome === 'saved' ? resolve(credentialFixture) : reject(new Error('synthetic failure'))
+    })) })
+    const onCreated = vi.fn()
+    render(<Fixture api={api} onCreated={onCreated} />)
+    await discover(); await selectMain()
+    await userEvent.type(screen.getByLabelText('Read-only token'), 'ro:synthetic-only')
+    await userEvent.click(screen.getByRole('button', { name: 'Import selected (1)' }))
+    await waitFor(() => expect(api.saveAccountCredential).toHaveBeenCalledTimes(1))
+    expect(onCreated).not.toHaveBeenCalled()
+    await act(async () => finish())
+    await waitFor(() => expect(onCreated).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: indexAccount.id })))
   })
   it('shows imported disabled accounts from discovery, and detects duplicates in the current workspace', async () => {
     const api = client({

@@ -7,19 +7,8 @@ using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Workspace;
 
-public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext owner, IVenueRegistry venues)
+public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext owner, IVenueRegistry venues, IUnitOfWork unitOfWork)
 {
-    internal Task<T> WithAccountLockAsync<T>(Guid id, Func<Account, Task<T>> action, CancellationToken ct) =>
-        store.WithAccountLockAsync(id, action, ct);
-
-    /// <summary>The caller holds the owner-scoped account lock throughout the order read and this save.</summary>
-    internal async Task RecordOrderHistoryNoticeAsync(Account lockedAccount, string? notice, CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-        lockedAccount.RecordOrderHistoryNotice(notice);
-        await store.SaveAsync(ct);
-    }
-
     private static void ValidateName(string? name)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Length > 200)
@@ -38,7 +27,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         ValidateIcon(request.Icon);
         if (request.AccountIds is not null) ValidateAccountIds(request.AccountIds);
         ValidateExpected(request.AccountIds, request.Expected);
-        return await store.WithManagementLockAsync(async () =>
+        return await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(async () =>
         {
             var accounts = await LockAccounts(request.AccountIds ?? [], ct);
             CheckExpected(accounts, request.Expected);
@@ -47,7 +36,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             MoveAccounts(accounts, portfolio.Id);
             await store.SaveAsync(ct);
             return await PortfolioAsync(portfolio.Id, ct);
-        }, ct);
+        }, ct), ct);
     }
 
     private static void ValidateAccountIds(IReadOnlyList<Guid>? ids)
@@ -93,7 +82,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     {
         ValidateAccountIds(request.AccountIds);
         ValidateExpected(request.AccountIds, request.Expected);
-        return await store.WithManagementLockAsync(async () =>
+        return await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(async () =>
         {
             await ValidatePortfolio(request.PortfolioId, ct);
             var accounts = await LockAccounts(request.AccountIds!, ct);
@@ -104,7 +93,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             foreach (var account in accounts)
                 result.Add(ToDto(account, await store.SnapshotAsync(account.Id, ct)));
             return result;
-        }, ct);
+        }, ct), ct);
     }
 
     public async Task<AccountDto> CreateAccountAsync(CreateAccountRequest request, CancellationToken ct)
@@ -148,14 +137,14 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         }
         var account = new Account(Guid.NewGuid(), owner.OwnerId, request.VenueId, request.Name);
         account.Configure(request.PortfolioId, address, value, sourceId);
-        await store.WithManagementLockAsync(async () =>
+        await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(async () =>
         {
             await ValidatePortfolio(request.PortfolioId, ct);
             if (account.SourceId is { } source && await store.SourceExistsAsync(account.VenueId, source, ct))
                 throw new ProblemException(409, "An account for this venue and source already exists. Manage or re-enable that account.");
             await store.AddAccountAsync(account, ct);
             return true;
-        }, ct);
+        }, ct), ct);
         return ToDto(account, null);
     }
 
@@ -169,7 +158,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     {
         ValidateName(request.Name);
         ValidateIcon(request.Icon);
-        await store.WithManagementLockAsync(async () =>
+        await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(async () =>
         {
             var portfolio = (await store.PortfoliosAsync(ct)).SingleOrDefault(p => p.Id == id)
                 ?? throw new ProblemException(404, "Portfolio not found.");
@@ -177,21 +166,21 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             if (request.Icon is not null) portfolio.ChangeIcon(request.Icon);
             await store.SaveAsync(ct);
             return true;
-        }, ct);
+        }, ct), ct);
         return await PortfolioAsync(id, ct);
     }
 
     public async Task DeletePortfolioAsync(Guid id, CancellationToken ct) =>
-        await store.WithManagementLockAsync(async () =>
+        await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(async () =>
         {
             await store.DeletePortfolioAsync(id, ct);
             return true;
-        }, ct);
+        }, ct), ct);
 
     public async Task<AccountDto> UpdateAccountAsync(Guid id, UpdateAccountRequest request, CancellationToken ct)
     {
         ValidateName(request.Name);
-        return await store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
+        return await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
         {
             if (request.ExpectedRevision != account.SettingsRevision)
                 throw new ProblemException(409, "Account settings changed. Reload the current settings before saving.");
@@ -199,15 +188,15 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             account.UpdateSettings(request.Name, request.PortfolioId, request.IsEnabled);
             await store.SaveAsync(ct);
             return ToDto(account, await store.SnapshotAsync(id, ct));
-        }, ct), ct);
+        }, ct), ct), ct);
     }
 
     public async Task DeleteAccountAsync(Guid id, CancellationToken ct) =>
-        await store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
+        await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
         {
             await store.DeleteAccountAsync(account, ct);
             return true;
-        }, ct), ct);
+        }, ct), ct), ct);
 
     public async Task<IReadOnlyList<AccountDto>> AccountsAsync(CancellationToken ct)
     {
@@ -317,41 +306,11 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             "Venue perpetual contract metadata only. No orders, balances or execution refresh.");
     }
 
-    public async Task<AccountDto> SyncAsync(Guid id, CancellationToken ct)
-    {
-        var failed = await store.WithAccountLockAsync(id, async account =>
-        {
-            if (!account.IsEnabled) throw new ProblemException(400, "Enable the account before refreshing it.");
-            if (venues.Descriptor(account.VenueId) is not { Capabilities.Sync: true })
-                throw new ProblemException(400, $"Only {OrList(venues.Descriptors.Where(d => d.Capabilities.Sync).Select(d => d.Name), "and")} accounts can be refreshed.");
-            if (account.SourceId is null) throw new ProblemException(400, "A source identity is required before refresh.");
-            if (venues.Reader(account.VenueId) is not { } reader) throw new ProblemException(503, "Venue reader is unavailable.");
-            PerpetualVenueReadResult result;
-            try
-            {
-                result = await reader.ReadAsync(account, ct);
-                if (!result.Fills.All(VenueFactChecks.Valid))
-                    throw new VenueReadException("The venue adapter returned fills outside Vessel's execution vocabulary.");
-            }
-            catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
-            {
-                account.RecordSyncFailure();
-                await store.SaveAsync(ct);
-                return true;
-            }
-            await store.SaveRefreshAsync(account, result, ct);
-            return false;
-        }, ct);
-        if (failed) throw new ProblemException(502, "The venue refresh failed. Try again later.");
-        var updated = await RequireAccount(id, ct);
-        return ToDto(updated, await store.SnapshotAsync(id, ct));
-    }
-
     /// <summary>"a", "a or b", "a, b or c".</summary>
-    private static string OrList(IEnumerable<string> items, string joiner = "or")
+    private static string OrList(IEnumerable<string> items)
     {
         var list = items.ToList();
-        return list.Count <= 1 ? string.Concat(list) : $"{string.Join(", ", list[..^1])} {joiner} {list[^1]}";
+        return list.Count <= 1 ? string.Concat(list) : $"{string.Join(", ", list[..^1])} or {list[^1]}";
     }
 
     private async Task<Account> RequireAccount(Guid id, CancellationToken ct) =>

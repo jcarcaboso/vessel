@@ -9,7 +9,7 @@ October 7, 2026. The owner authorized this work after RISEx, including the accou
 3. Optionally enter a read-only token and choose **Load Lighter names** before selecting. Lighter requires authentication for account metadata. An all-scope token from the main account loads wallet account names; single scope loads only its own name. Unnamed accounts keep their index labels. The lookup saves nothing and clears the token input. Select accounts, edit their Vessel names and optionally choose a portfolio.
 4. Already imported accounts cannot be selected again. Disabled accounts are identified and remain manageable instead of being duplicated.
 5. Optionally follow the token-creation link and enter an all-scope read-only token issued for the main account. Re-enter it if a name lookup cleared it. Vessel verifies each selected account separately before saving order access.
-6. Import creates records, not a history backfill. Open an account and choose **Refresh account** to fetch its current state and bounded recent fills.
+6. Import creates records and, after each optional token save attempt, queues one initial read of current state and bounded recent fills. October 16 owner correction: the shell runs these reads sequentially even after the dialog closes, but disconnect/reload discards the session queue. This is not a history backfill. **Refresh account** remains available to retry or read later changes.
 
 One concrete Lighter account index corresponds to one Vessel account. Indices stay strings, including values beyond JavaScript's safe integer range. A failed token save does not remove a successfully imported account. The dialog reports individual outcomes and explains how to retry through account management.
 
@@ -58,7 +58,7 @@ The October 8 follow-up passed 755 backend tests with 63 opt-in database/live te
 - Credential coverage includes tamper rejection, owner/account/purpose binding, key rotation, key-file permissions, safe errors, owner isolation, deletion cascades and credential-versus-sync/disable locking. System metadata remains available without a database connection.
 - Adapter fixtures cover exact IDs, token scope, fee/PnL guards, catalogue collisions, retired markets, pagination, order normalization, candle bounds and authentication fallback.
 - The opt-in public mainnet test covers the catalogue, an empty system-account snapshot and bounded candles. No real user read-only token was supplied; authenticated order and token-verification flows were tested with controlled responses.
-- Browser checks used the actual frontend with synthetic API responses at 1440×1000 and 390×844. They covered disabled duplicates, partial token failure, indices beyond the safe integer range, no automatic refresh, token removal confirmation and empty browser storage. Both import and management dialogs passed the scoped axe WCAG A/AA checks after their opening animations completed.
+- Browser checks used the actual frontend with synthetic API responses at 1440×1000 and 390×844. They covered disabled duplicates, partial token failure, indices beyond the safe integer range, the original no-automatic-refresh behavior (superseded October 16), token removal confirmation and empty browser storage. Both import and management dialogs passed the scoped axe WCAG A/AA checks after their opening animations completed.
 
 ### Browser evidence
 

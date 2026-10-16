@@ -7,10 +7,12 @@ namespace Vessel.Application.Evidence;
 
 /// <summary>
 /// Evidence images of saved Plays. Bytes are written before metadata, so a failure leaves at most an
-/// unreferenced object, never a record without an image. Drafts keep their images in the browser.
+/// unreferenced object, never a record without an image. Object storage I/O stays outside database transactions:
+/// upload and delete refuse to run inside an enclosing unit, whose rollback could not restore a deleted image.
+/// Drafts keep their images in the browser.
 /// </summary>
 public sealed class EvidenceService(IEvidenceMetadataStore store, IEvidenceObjectStore objects, EvidenceLimits limits,
-    IJournalOwnerContext owner, TimeProvider time)
+    IJournalOwnerContext owner, TimeProvider time, IUnitOfWork unitOfWork)
 {
     public async Task<IReadOnlyList<EvidenceDto>> ListAsync(Guid playId, CancellationToken ct)
     {
@@ -20,6 +22,7 @@ public sealed class EvidenceService(IEvidenceMetadataStore store, IEvidenceObjec
 
     public async Task<EvidenceDto> UploadAsync(Guid playId, Stream content, string? note, string? source, string? markup, CancellationToken ct)
     {
+        unitOfWork.RequireOutermost("Evidence upload");
         var play = await store.PlayAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
         var kind = source switch
         {
@@ -42,7 +45,7 @@ public sealed class EvidenceService(IEvidenceMetadataStore store, IEvidenceObjec
         if (marks is not null) evidence.UpdateMarkup(EvidenceMarkup.Serialize(marks), evidence.CreatedAtUtc);
         await objects.PutAsync(key, new MemoryStream(bytes, writable: false), ct);
         bool added;
-        try { added = await store.AddAsync(evidence, limits.MaxPerPlay, ct); }
+        try { added = await unitOfWork.ExecuteAsync(() => store.AddAsync(evidence, limits.MaxPerPlay, ct), ct); }
         catch
         {
             await DeleteObjectAsync(key);
@@ -65,27 +68,33 @@ public sealed class EvidenceService(IEvidenceMetadataStore store, IEvidenceObjec
         return new(stream, evidence.ContentType, evidence.SizeBytes, evidence.Sha256);
     }
 
-    public async Task<EvidenceDto> UpdateNoteAsync(Guid id, UpdateEvidenceNoteRequest request, CancellationToken ct)
+    public Task<EvidenceDto> UpdateNoteAsync(Guid id, UpdateEvidenceNoteRequest request, CancellationToken ct) => unitOfWork.ExecuteAsync(async () =>
     {
         var evidence = await store.FindAsync(id, ct) ?? throw new ProblemException(404, "Evidence not found.");
         evidence.UpdateNote(ValidNote(request.Note), time.GetUtcNow());
         await store.SaveAsync(ct);
         return ToDto(evidence);
-    }
+    }, ct);
 
     /// <summary>Replaces the marks, or clears them with null. The image is unchanged.</summary>
-    public async Task<EvidenceDto> UpdateMarkupAsync(Guid id, ImageMarkup? markup, CancellationToken ct)
+    public Task<EvidenceDto> UpdateMarkupAsync(Guid id, ImageMarkup? markup, CancellationToken ct) => unitOfWork.ExecuteAsync(async () =>
     {
         var evidence = await store.FindAsync(id, ct) ?? throw new ProblemException(404, "Evidence not found.");
         evidence.UpdateMarkup(markup is null ? null : EvidenceMarkup.Serialize(EvidenceMarkup.Normalize(markup)), time.GetUtcNow());
         await store.SaveAsync(ct);
         return ToDto(evidence);
-    }
+    }, ct);
 
     public async Task DeleteAsync(Guid id, CancellationToken ct)
     {
-        var evidence = await store.FindAsync(id, ct) ?? throw new ProblemException(404, "Evidence not found.");
-        await store.RemoveAsync(evidence, ct);
+        // The image is deleted once the record removal commits, so this must be the outermost unit.
+        unitOfWork.RequireOutermost("Evidence deletion");
+        var evidence = await unitOfWork.ExecuteAsync(async () =>
+        {
+            var found = await store.FindAsync(id, ct) ?? throw new ProblemException(404, "Evidence not found.");
+            await store.RemoveAsync(found, ct);
+            return found;
+        }, ct);
         // The record is gone; a failed object delete only leaves an unreferenced file behind.
         await DeleteObjectAsync(evidence.ObjectKey);
     }

@@ -8,7 +8,7 @@ namespace Vessel.Tests;
 public sealed class PortfolioMembershipTests
 {
     private static readonly Guid Owner = Guid.NewGuid();
-    private static WorkspaceService Service(MemoryWorkspaceStore store) => new(store, new CoreOwner(Owner), TestVenues.With(new FixtureReader()));
+    private static WorkspaceService Service(MemoryWorkspaceStore store) => new(store, new CoreOwner(Owner), TestVenues.With(new FixtureReader()), TestUnitOfWork.None);
     private static Account Account(Guid? portfolio = null, Guid? owner = null)
     {
         var account = new Account(Guid.NewGuid(), owner ?? Owner, "manual", "Account");
