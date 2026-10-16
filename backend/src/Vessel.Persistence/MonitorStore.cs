@@ -29,26 +29,43 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
         return new(account, revision, credential?.ExpiresAt, newestFill);
     }
 
-    public async Task<IReadOnlyList<MonitorAccount>> ListAsync(CancellationToken ct) =>
-        await Rows.AsNoTracking().Where(m => db.Accounts.Any(a => a.Id == m.AccountId && a.IsEnabled))
-            .OrderBy(m => m.AccountId).Take(200).ToListAsync(ct);
+    public async Task<IReadOnlyList<(MonitorAccount Row, string VenueId)>> SummaryAsync(IReadOnlyCollection<string> venueIds,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        var cutoff = now - settings.WatchLifetime;
+        var rows = await (from m in Rows.AsNoTracking()
+                          join a in db.Accounts on m.AccountId equals a.Id
+                          where a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) &&
+                              (ActivePlays.Any(p => p.AccountId == a.Id) ||
+                               Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)))
+                          orderby m.AccountId
+                          select new { Row = m, a.VenueId }).Take(200).ToListAsync(ct);
+        return rows.Select(r => (r.Row, r.VenueId)).ToArray();
+    }
+
     public Task<MonitorAccount?> FindAsync(Guid id, CancellationToken ct) =>
         Rows.AsNoTracking().SingleOrDefaultAsync(m => m.AccountId == id, ct);
     public Task<DateTimeOffset?> VenueRetryAtAsync(string venueId, CancellationToken ct) =>
         db.Set<MonitorVenueBudget>().Where(b => b.VenueId == venueId).Select(b => (DateTimeOffset?)b.RetryAtUtc)
             .SingleOrDefaultAsync(ct);
+    public async Task<IReadOnlyDictionary<string, DateTimeOffset>> VenueRetriesAsync(CancellationToken ct) =>
+        await db.Set<MonitorVenueBudget>().AsNoTracking().ToDictionaryAsync(b => b.VenueId, b => b.RetryAtUtc, StringComparer.Ordinal, ct);
 
-    public Task DeferVenueAsync(string venueId, DateTimeOffset retryAtUtc, CancellationToken ct) =>
-        unitOfWork.ExecuteAsync(async () =>
+    public Task DeferVenueAsync(string venueId, DateTimeOffset retryAtUtc, DateTimeOffset now, CancellationToken ct)
+    {
+        // A venue cannot defer Vessel indefinitely: an hour at most, so no stored deadline outlives the clamp.
+        var deadline = VenueRateLimitException.Clamp(retryAtUtc, now);
+        return unitOfWork.ExecuteAsync(async () =>
         {
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO monitor_venue_budgets ("OwnerId", "VenueId", "RetryAtUtc")
-                VALUES ({db.CurrentOwnerId}, {venueId}, {retryAtUtc})
+                VALUES ({db.CurrentOwnerId}, {venueId}, {deadline})
                 ON CONFLICT ("OwnerId", "VenueId") DO UPDATE
                 SET "RetryAtUtc" = GREATEST(monitor_venue_budgets."RetryAtUtc", EXCLUDED."RetryAtUtc")
                 """, ct);
             return true;
         }, ct);
+    }
     public Task<MonitorHeartbeat?> HeartbeatAsync(CancellationToken ct) =>
         db.Set<MonitorHeartbeat>().AsNoTracking().SingleOrDefaultAsync(ct);
 
@@ -65,40 +82,60 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
             return true;
         }, ct);
 
-    private IQueryable<PlayOrderLink> TerminalExits(Guid accountId) => db.OrderLinks.Where(l =>
-        l.AccountId == accountId && l.State == OrderLinkState.Linked && l.Role != OrderLinkRole.Entry &&
-        db.Plays.Any(p => p.Id == l.PlayId && p.InstrumentSource == InstrumentSource.Venue &&
-            p.Origin == PlayOrigin.Planned && (p.Status == PlayStatus.Closed || p.Status == PlayStatus.Cancelled)));
+    private IQueryable<Play> ActivePlays => db.Plays.Where(p => p.InstrumentSource == InstrumentSource.Venue && p.ContractId != null &&
+        p.Origin == PlayOrigin.Planned && (p.Status == PlayStatus.Planned || p.Status == PlayStatus.Paused || p.Status == PlayStatus.Open));
 
-    public async Task<bool> EligibleAsync(Guid accountId, CancellationToken ct) =>
-        await db.Plays.AnyAsync(p => p.AccountId == accountId && p.InstrumentSource == InstrumentSource.Venue && p.ContractId != null &&
-            p.Origin == PlayOrigin.Planned && (p.Status == PlayStatus.Planned || p.Status == PlayStatus.Paused || p.Status == PlayStatus.Open), ct)
-        || await TerminalExits(accountId).AnyAsync(l => !Exits.Any(e => e.LinkId == l.Id && e.ResolvedAtUtc != null &&
-            e.LinkRevisionAtUtc >= l.UpdatedAtUtc && e.OrderId == l.OrderId), ct);
-
-    public async Task<IReadOnlyList<Guid>> DiscoverAsync(IReadOnlyCollection<string> venueIds, DateTimeOffset now, CancellationToken ct)
+    // Member initialization, not a constructor, so the projection stays translatable when it is composed further.
+    private sealed class TerminalExit
     {
-        var ids = await db.Accounts.AsNoTracking().Where(a => a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId))
-            .OrderBy(a => a.Id).Select(a => a.Id).Take(200).ToListAsync(ct);
-        foreach (var id in ids)
-        {
-            await unitOfWork.ExecuteAsync(() => LockedAsync(id, async (_, row) =>
+        public PlayOrderLink Link { get; init; } = null!;
+        public DateTimeOffset? EndedAtUtc { get; init; }
+    }
+
+    /// <summary>Linked exits of terminal planned venue Plays, with the Play's end for the watch start.</summary>
+    private IQueryable<TerminalExit> TerminalExits =>
+        from l in db.OrderLinks
+        join p in db.Plays on l.PlayId equals p.Id
+        where l.State == OrderLinkState.Linked && l.Role != OrderLinkRole.Entry &&
+            p.InstrumentSource == InstrumentSource.Venue && p.Origin == PlayOrigin.Planned &&
+            (p.Status == PlayStatus.Closed || p.Status == PlayStatus.Cancelled)
+        select new TerminalExit { Link = l, EndedAtUtc = p.EndedAtUtc };
+
+    /// <summary>Terminal exits whose current link revision has no ended watch.</summary>
+    private IQueryable<TerminalExit> Watching => TerminalExits.Where(x => !Exits.Any(e => e.LinkId == x.Link.Id &&
+        e.EndedAtUtc != null && e.LinkRevisionAtUtc >= x.Link.UpdatedAtUtc && e.OrderId == x.Link.OrderId));
+
+    public async Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct)
+    {
+        var cutoff = now - settings.WatchLifetime;
+        // The watch starts at the later of the Play's end and the link change; it is live while that is after the cutoff.
+        return await ActivePlays.AnyAsync(p => p.AccountId == accountId, ct) ||
+            await Watching.AnyAsync(x => x.Link.AccountId == accountId && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff), ct);
+    }
+
+    public async Task<IReadOnlyList<MonitorCandidate>> DiscoveryCandidatesAsync(IReadOnlyCollection<string> venueIds,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        var cutoff = now - settings.WatchLifetime;
+        var rows = await db.Accounts.AsNoTracking()
+            .Where(a => a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) ||
+                Rows.Any(m => m.AccountId == a.Id && (m.State != "idle" || m.NextRunAtUtc != null)))
+            .OrderBy(a => a.Id).Take(500)
+            .Select(a => new
             {
-                var capture = await CaptureAsync(id, ct);
-                row.IntervalSeconds = (int)settings.Interval.TotalSeconds;
-                var changedCredential = row.CredentialRevision != capture!.CredentialRevision;
-                if (changedCredential && row.ManualState == "idle")
-                {
-                    row.CredentialRevision = capture.CredentialRevision;
-                    if (row.State == "credential-error") { row.State = "idle"; row.Error = null; row.NextRunAtUtc = now; }
-                }
-                var eligible = await EligibleAsync(id, ct);
-                if (eligible && row.State != "credential-error") row.NextRunAtUtc ??= now;
-                else if (!eligible && row.ManualState == "idle") { row.State = "idle"; row.NextRunAtUtc = null; }
-                return true;
-            }, ct), ct);
-        }
-        return ids;
+                a.Id, a.VenueId,
+                Monitorable = a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId),
+                Active = ActivePlays.Any(p => p.AccountId == a.Id),
+                Watching = Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)),
+                Expired = Watching.Any(x => x.Link.AccountId == a.Id && !(x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)),
+                Row = Rows.FirstOrDefault(m => m.AccountId == a.Id)
+            }).ToListAsync(ct);
+        var ids = rows.Select(r => r.Id).ToArray();
+        var credentials = (await db.AccountCredentials.AsNoTracking().Where(c => ids.Contains(c.AccountId)).ToListAsync(ct))
+            .ToLookup(c => c.AccountId);
+        return rows.Select(r => new MonitorCandidate(r.Id, r.VenueId, r.Monitorable, r.Active || r.Watching, r.Expired,
+            credentials[r.Id].Where(c => c.Purpose == r.VenueId + "-read-token").Select(CredentialAttempt.RevisionOf).FirstOrDefault(),
+            r.Row)).ToArray();
     }
 
     public Task<T> LockedAsync<T>(Guid id, Func<Account, MonitorAccount, Task<T>> action, CancellationToken ct) =>
@@ -109,8 +146,8 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
                 """).ToListAsync(ct)).SingleOrDefault() ?? throw new ProblemException(404, "Account not found.");
             await db.Entry(account).ReloadAsync(ct);
             await db.Database.ExecuteSqlInterpolatedAsync($"""
-                INSERT INTO monitor_accounts ("AccountId", "OwnerId", "State", "IntervalSeconds", "ManualState", "Trigger", "Generation", "ConsecutiveFailures", "HasHistoryGap")
-                VALUES ({id}, {db.CurrentOwnerId}, 'idle', {(int)settings.Interval.TotalSeconds}, 'idle', 'monitor', 0, 0, false) ON CONFLICT ("AccountId") DO NOTHING
+                INSERT INTO monitor_accounts ("AccountId", "OwnerId", "State", "StateRevision", "ManualState", "Trigger", "Generation", "ConsecutiveFailures", "HasHistoryGap")
+                VALUES ({id}, {db.CurrentOwnerId}, 'idle', 0, 'idle', 'monitor', 0, 0, false) ON CONFLICT ("AccountId") DO NOTHING
                 """, ct);
             var row = (await db.Set<MonitorAccount>().FromSqlInterpolated($"""
                 SELECT * FROM monitor_accounts WHERE "AccountId" = {id} AND "OwnerId" = {db.CurrentOwnerId} FOR UPDATE
@@ -128,7 +165,6 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
                 WHERE a."OwnerId" = {db.CurrentOwnerId} AND a."IsEnabled" AND a."SourceId" IS NOT NULL
                 AND (m."NextRunAtUtc" <= {now} OR m."ManualState" <> 'idle')
                 AND (m."LeaseUntilUtc" IS NULL OR m."LeaseUntilUtc" <= {now})
-                AND (m."NextManualAllowedAtUtc" IS NULL OR m."NextManualAllowedAtUtc" <= {now})
                 AND NOT EXISTS (SELECT 1 FROM monitor_venue_budgets b
                     WHERE b."OwnerId" = a."OwnerId" AND b."VenueId" = a."VenueId" AND b."RetryAtUtc" > {now})
                 ORDER BY m."NextRunAtUtc", a."Id" LIMIT {Math.Clamp(limit, 1, 2)}
@@ -139,12 +175,17 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
             {
                 var lease = await LockedAsync<MonitorLease?>(account.Id, async (_, row) =>
                 {
+                    // A refresh was answered to the owner (or its API process died); it is never replayed here.
+                    row.ReleaseAbandonedRefresh(now);
+                    if (row.ManualState == "idle" && !(row.NextRunAtUtc <= now)) return null;
                     if (await VenueRetryAtAsync(account.VenueId, ct) > now) return null;
                     if (!await ReadCapacityAsync(now, ct)) return null;
                     if (row.ManualState == "idle")
                     {
-                        if (!await EligibleAsync(account.Id, ct)) { row.NextRunAtUtc = null; row.State = "idle"; return null; }
-                        row.Admit(Guid.CreateVersion7(), row.ConfirmationAtUtc <= now ? "confirmation" : "monitor", now);
+                        // Discovery moves the persisted state, with its event; a claim only stops scheduling.
+                        if (!await EligibleAsync(account.Id, now, ct)) { row.NextRunAtUtc = null; return null; }
+                        // The manual cooldown never gates a scheduled claim; it only answers manual requests.
+                        row.Admit(Guid.CreateVersion7(), row.ConfirmationAtUtc <= now ? "confirmation" : "monitor", now, scheduled: true);
                     }
                     return row.Claim(row.RequestId!.Value, worker, now, MonitorOptions.Lease)
                         ? new MonitorLease(row.AccountId, row.RequestId.Value, row.Generation, worker, row.Trigger) : null;
@@ -157,7 +198,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
     public Task<MonitorLease?> ClaimAsync(Guid id, Guid requestId, string worker, DateTimeOffset now, CancellationToken ct) =>
         unitOfWork.ExecuteAsync(() => LockedAsync<MonitorLease?>(id, async (account, row) =>
             account.IsEnabled && account.SourceId is not null && !(await VenueRetryAtAsync(account.VenueId, ct) > now) &&
-            !(row.NextManualAllowedAtUtc > now) && await ReadCapacityAsync(now, ct) && row.Claim(requestId, worker, now, MonitorOptions.Lease)
+            row.Trigger != "refresh" && await ReadCapacityAsync(now, ct) && row.Claim(requestId, worker, now, MonitorOptions.Lease)
                 ? new MonitorLease(id, requestId, row.Generation, worker, row.Trigger) : null, ct), ct);
 
     public async Task<bool> ReadCapacityAsync(DateTimeOffset now, CancellationToken ct)
@@ -178,31 +219,81 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
             return Task.FromResult(true);
         }, ct), ct);
 
-    public async Task ResolveExitsAsync(Guid accountId, VenueOrderReadResult orders, CancellationToken ct)
+    public async Task UpdateWatchesAsync(Guid accountId, VenueOrderReadResult? orders, DateTimeOffset now, CancellationToken ct)
     {
-        if (!orders.OpenOrdersComplete) return;
-        var links = await TerminalExits(accountId).ToListAsync(ct);
-        var ended = await db.Plays.Where(p => p.AccountId == accountId &&
-            (p.Status == PlayStatus.Closed || p.Status == PlayStatus.Cancelled))
-            .ToDictionaryAsync(p => p.Id, p => p.EndedAtUtc, ct);
+        unitOfWork.RequireActive();
+        var cutoff = now - settings.WatchLifetime;
+        var links = await TerminalExits.Where(x => x.Link.AccountId == accountId).ToListAsync(ct);
         var watches = await Exits.Where(e => e.AccountId == accountId).ToDictionaryAsync(e => e.LinkId, ct);
-        foreach (var link in links)
+        foreach (var exit in links)
         {
+            var (link, ended) = (exit.Link, exit.EndedAtUtc);
+            var started = ended > link.UpdatedAtUtc ? ended.Value : link.UpdatedAtUtc;
             if (!watches.TryGetValue(link.Id, out var watch))
             {
-                watch = new() { LinkId = link.Id, OwnerId = link.OwnerId, AccountId = accountId, PlayId = link.PlayId, OrderId = link.OrderId };
+                watch = new() { LinkId = link.Id, OwnerId = link.OwnerId, AccountId = accountId, PlayId = link.PlayId,
+                    OrderId = link.OrderId, LinkRevisionAtUtc = link.UpdatedAtUtc, StartedAtUtc = started };
                 db.Add(watch);
             }
+            if (watch.LinkRevisionAtUtc < link.UpdatedAtUtc || watch.OrderId != link.OrderId)
+            {
+                // A relinked exit is a new watch with its own lifetime.
+                watch.LinkRevisionAtUtc = link.UpdatedAtUtc;
+                watch.OrderId = link.OrderId;
+                watch.StartedAtUtc = started;
+                watch.EndedAtUtc = null;
+                watch.Outcome = null;
+            }
+            if (watch.Outcome == MonitorWatchOutcomes.Unverifiable) continue;
             // Closing during this import does not make an earlier order observation fresh after closure.
-            if (orders.ObservedAtUtc <= link.UpdatedAtUtc || ended.GetValueOrDefault(link.PlayId) >= orders.ObservedAtUtc) continue;
-            var current = orders.Orders.FirstOrDefault(o => o.OrderId == link.OrderId);
-            if (watch.LinkRevisionAtUtc < link.UpdatedAtUtc || watch.OrderId != link.OrderId ||
-                current?.Status == VenueOrderStatus.Open)
-                watch.ResolvedAtUtc = null;
-            watch.LinkRevisionAtUtc = link.UpdatedAtUtc;
-            watch.OrderId = link.OrderId;
-            if (current is null || current.Status is VenueOrderStatus.Filled or VenueOrderStatus.Canceled or VenueOrderStatus.Rejected)
-                watch.ResolvedAtUtc = orders.ObservedAtUtc;
+            if (orders is not null && orders.ObservedAtUtc > link.UpdatedAtUtc && !(ended >= orders.ObservedAtUtc))
+            {
+                var current = orders.Orders.FirstOrDefault(o => o.OrderId == link.OrderId);
+                if (current?.Status == VenueOrderStatus.Open)
+                {
+                    watch.EndedAtUtc = null;
+                    watch.Outcome = null;
+                }
+                else if (current?.Status is VenueOrderStatus.Filled or VenueOrderStatus.Canceled or VenueOrderStatus.Rejected)
+                {
+                    // The read reports this specific order's end, whether or not it covers the whole book.
+                    watch.EndedAtUtc = orders.ObservedAtUtc;
+                    watch.Outcome = MonitorWatchOutcomes.Terminal;
+                }
+                else if (current is null && orders.OpenOrdersComplete)
+                {
+                    // Absence proves nothing on an incomplete read.
+                    watch.EndedAtUtc = orders.ObservedAtUtc;
+                    watch.Outcome = MonitorWatchOutcomes.Absent;
+                }
+            }
+            if (watch.Outcome is null && watch.StartedAtUtc <= cutoff)
+            {
+                watch.EndedAtUtc = now;
+                watch.Outcome = MonitorWatchOutcomes.Unverifiable;
+            }
         }
+    }
+
+    public async Task<IReadOnlyList<MonitorWatchDto>> WatchesAsync(Guid playId, DateTimeOffset now, CancellationToken ct)
+    {
+        var cutoff = now - settings.WatchLifetime;
+        var links = await TerminalExits.AsNoTracking().Where(x => x.Link.PlayId == playId).ToListAsync(ct);
+        var ids = links.Select(x => x.Link.Id).ToArray();
+        var watches = await Exits.AsNoTracking().Where(e => ids.Contains(e.LinkId)).ToDictionaryAsync(e => e.LinkId, ct);
+        return links.OrderBy(x => x.Link.OrderId, StringComparer.Ordinal).Select(x =>
+        {
+            var started = x.EndedAtUtc > x.Link.UpdatedAtUtc ? x.EndedAtUtc.Value : x.Link.UpdatedAtUtc;
+            var watch = watches.GetValueOrDefault(x.Link.Id);
+            if (watch is not null && (watch.LinkRevisionAtUtc < x.Link.UpdatedAtUtc || watch.OrderId != x.Link.OrderId)) watch = null;
+            var state = watch?.Outcome switch
+            {
+                MonitorWatchOutcomes.Unverifiable => "unverifiable",
+                MonitorWatchOutcomes.Terminal or MonitorWatchOutcomes.Absent => "resolved",
+                // Past its lifetime but not yet recorded by a run: still never "resolved".
+                _ => started <= cutoff ? "unverifiable" : "watching"
+            };
+            return new MonitorWatchDto(x.Link.Id, x.Link.PlayId, x.Link.OrderId, state, watch?.StartedAtUtc ?? started, watch?.EndedAtUtc);
+        }).ToArray();
     }
 }

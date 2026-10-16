@@ -41,6 +41,29 @@ public sealed class VenueRateLimitTests
         Assert.Equal(Now.AddSeconds(60), error.RetryAtUtc);
     }
 
+    [Theory]
+    [InlineData("315360000")]
+    [InlineData("Fri, 31 Dec 9999 23:59:59 GMT")]
+    public async Task Review_M1_retry_after_is_clamped_to_one_hour(string value)
+    {
+        using var http = new HttpClient(new MissingRetry(value)) { BaseAddress = new("https://synthetic.invalid") };
+        var reader = new BoundedJsonHttp(http, new Clock(), new StrictJson("Invalid synthetic read."), "Unavailable.", "Timed out.");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/read");
+        var error = await Assert.ThrowsAsync<VenueRateLimitException>(() => reader.SendAsync(request, default));
+        Assert.Equal(Now.AddHours(1), error.RetryAtUtc);
+    }
+
+    [PostgresFact]
+    public async Task Review_M1_a_stored_venue_deadline_never_exceeds_one_hour()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using var db = database.Context(owner);
+        var store = new Vessel.Persistence.MonitorStore(db, TestUnitOfWork.For(db));
+        await store.DeferVenueAsync("hyperliquid", DateTimeOffset.MaxValue, Now, default);
+        Assert.Equal(Now.AddHours(1), await store.VenueRetryAtAsync("hyperliquid", default));
+    }
+
     [PostgresFact]
     public async Task Api_refresh_manual_and_legacy_check_report_the_persisted_venue_retry_after()
     {

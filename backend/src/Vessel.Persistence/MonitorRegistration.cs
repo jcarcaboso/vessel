@@ -27,6 +27,14 @@ public static class MonitorRegistration
 /// <summary>Renew through separate scopes so the read and its DbContext are never used concurrently.</summary>
 public sealed class MonitorRunExecutor(IServiceScopeFactory scopes, MonitorCoordinator coordinator, TimeProvider time)
 {
+    /// <summary>
+    /// The owner's account Refresh: the same admission gate and two-read budget as checks, then the run on the
+    /// API's own lease. It never leaves work pending for the worker, and its outcome leaves check scheduling alone.
+    /// </summary>
+    /// <returns>False when the venue read failed or changed settings superseded it.</returns>
+    public async Task<bool> RefreshAsync(Guid accountId, CancellationToken ct) =>
+        await RunAsync(await coordinator.AdmitRefreshAsync(accountId, "api-" + Guid.NewGuid().ToString("N"), ct), ct);
+
     public async Task<bool> RunAsync(MonitorLease lease, CancellationToken ct)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);

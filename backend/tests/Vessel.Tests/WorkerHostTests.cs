@@ -103,6 +103,57 @@ public sealed class WorkerHostTests
         Assert.Equal(1u, await broker.ReadyAsync(MessagingTopology.DeadLetterQueue(queue)));
     }
 
+    [PostgresFact]
+    public async Task Review_M2_heartbeat_advances_only_after_a_productive_scheduling_pass()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var file = Path.Combine(Path.GetTempPath(), "vessel-heartbeat-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using (var healthy = Scheduler(database.ConnectionString, owner, file, out var scheduler))
+            {
+                await scheduler.TickAsync(default);
+                var parts = (await File.ReadAllTextAsync(file)).Split(' ');
+                Assert.Equal(2, parts.Length);
+                Assert.Equal("90", parts[1]);
+                await using var db = database.Context(owner);
+                Assert.NotNull(await new Vessel.Persistence.MonitorStore(db, TestUnitOfWork.For(db)).HeartbeatAsync(default));
+            }
+            // Discovery cannot run: the pass is not productive, so neither heartbeat advances.
+            await File.WriteAllTextAsync(file, "1 90");
+            using (var broken = Scheduler("Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused", owner, file, out var scheduler))
+                await Assert.ThrowsAnyAsync<Exception>(() => scheduler.TickAsync(default));
+            Assert.Equal("1 90", await File.ReadAllTextAsync(file));
+            // The heartbeat file cannot be written: the database heartbeat is not recorded either.
+            var other = Guid.NewGuid();
+            var missing = Path.Combine(Path.GetTempPath(), "vessel-missing-" + Guid.NewGuid().ToString("N"), "heartbeat");
+            using (var unwritable = Scheduler(database.ConnectionString, other, missing, out var scheduler))
+                await Assert.ThrowsAnyAsync<IOException>(() => scheduler.TickAsync(default));
+            await using var foreign = database.Context(other);
+            Assert.Null(await new Vessel.Persistence.MonitorStore(foreign, TestUnitOfWork.For(foreign)).HeartbeatAsync(default));
+        }
+        finally { File.Delete(file); }
+    }
+
+    private static IHost Scheduler(string connection, Guid owner, string file, out MonitorScheduler scheduler)
+    {
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
+        builder.Configuration.AddConfiguration(Configuration(new()
+        {
+            ["ConnectionStrings:Vessel"] = connection,
+            ["Vessel:Auth:OwnerId"] = owner.ToString(),
+            ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1",
+            ["Vessel:Monitor:HeartbeatFile"] = file
+        }));
+        builder.Logging.ClearProviders();
+        WorkerHost.Configure(builder);
+        VesselEventTestHosting.ConfigureServices(builder.Services);
+        var host = builder.Build();
+        scheduler = host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
+        return host;
+    }
+
     private static IHost Worker(BrokerScope broker, string module, string? deployment = null)
     {
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });

@@ -96,4 +96,39 @@ public sealed class MonitorAccountTests
         Assert.Equal(TimeSpan.FromMinutes(9), options.NextDelay(0, 0));
         Assert.Equal(TimeSpan.FromMinutes(11), options.NextDelay(3, 1));
     }
+
+    [Fact]
+    public void Review_L4_manual_cooldown_longer_than_interval_is_rejected()
+    {
+        var options = new MonitorOptions { Interval = TimeSpan.FromMinutes(1), ManualCooldown = TimeSpan.FromMinutes(2) };
+        Assert.Throws<InvalidOperationException>(options.Validate);
+        options.ManualCooldown = TimeSpan.FromMinutes(1);
+        options.Validate();
+    }
+
+    [Fact]
+    public void Review_b_state_revision_advances_only_when_the_state_changes()
+    {
+        var row = new MonitorAccount();
+        Assert.False(row.SetState("idle"));
+        Assert.True(row.SetState("live"));
+        Assert.False(row.SetState("live"));
+        Assert.True(row.SetState("degraded"));
+        Assert.True(row.SetState("live"));
+        Assert.Equal(3, row.StateRevision);
+        // Fencing is separate: a claim changes the lease generation, not the state identity.
+        row.Admit(Guid.NewGuid(), "manual", DateTimeOffset.UtcNow);
+        Assert.True(row.Claim(row.RequestId!.Value, "worker", DateTimeOffset.UtcNow, TimeSpan.FromMinutes(5)));
+        Assert.Equal(3, row.StateRevision);
+    }
+
+    [Fact]
+    public void Review_L4_scheduled_admission_ignores_the_manual_cooldown()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var row = new MonitorAccount { NextManualAllowedAtUtc = now.AddMinutes(1) };
+        Assert.Throws<InvalidOperationException>(() => row.Admit(Guid.NewGuid(), "manual", now));
+        row.Admit(Guid.NewGuid(), "monitor", now, scheduled: true);
+        Assert.Equal("pending", row.ManualState);
+    }
 }

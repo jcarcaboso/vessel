@@ -12,8 +12,8 @@ public static class MonitorModel
         var account = model.Entity<MonitorAccount>();
         account.ToTable("monitor_accounts", table =>
         {
-            table.HasCheckConstraint("CK_monitor_interval", "\"IntervalSeconds\" BETWEEN 60 AND 3600");
             table.HasCheckConstraint("CK_monitor_generation", "\"Generation\" >= 0");
+            table.HasCheckConstraint("CK_monitor_state_revision", "\"StateRevision\" >= 0");
             table.HasCheckConstraint("CK_monitor_manual_state", "\"ManualState\" IN ('idle','pending','running')");
         });
         account.HasKey(x => x.AccountId);
@@ -38,12 +38,14 @@ public static class MonitorModel
         budget.Property(x => x.VenueId).HasMaxLength(40);
 
         var exit = model.Entity<MonitorExitWatch>();
-        exit.ToTable("monitor_exit_watches");
+        exit.ToTable("monitor_exit_watches", table => table.HasCheckConstraint("CK_monitor_exit_watch_outcome",
+            "\"Outcome\" IS NULL OR \"Outcome\" IN ('terminal','absent','unverifiable')"));
         exit.HasKey(x => x.LinkId);
         exit.Property(x => x.OrderId).HasMaxLength(200);
+        exit.Property(x => x.Outcome).HasMaxLength(16);
         exit.HasOne<PlayOrderLink>().WithMany().HasForeignKey(x => x.LinkId).OnDelete(DeleteBehavior.Cascade);
         exit.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Cascade);
-        exit.HasIndex(x => new { x.OwnerId, x.AccountId, x.ResolvedAtUtc });
+        exit.HasIndex(x => new { x.OwnerId, x.AccountId, x.EndedAtUtc });
     }
 }

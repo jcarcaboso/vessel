@@ -84,12 +84,11 @@ public static class WorkspaceEndpoints
             Results.Ok(await service.ContextAsync(id, instrument, ct))).WithMetadata(new CompressMarketData());
         api.MapGet("/accounts/{id:guid}/market-stream", MarketStreamEndpoint.StreamAsync);
         api.MapPost("/accounts/{id:guid}/sync", async (Guid id, WorkspaceService service, HttpContext context,
-            MonitorCoordinator monitor, MonitorRunExecutor executor, CancellationToken ct) =>
+            MonitorRunExecutor executor, CancellationToken ct) =>
         {
             try
             {
-                var lease = await monitor.AdmitRefreshAsync(id, "api-" + Guid.NewGuid().ToString("N"), ct);
-                if (!await executor.RunAsync(lease, ct))
+                if (!await executor.RefreshAsync(id, ct))
                     throw new ProblemException(502, "The venue refresh failed or was superseded by changed account settings. Try again later.");
             }
             catch (MonitorAdmissionException ex) { return MonitorEndpoints.Busy(context, ex); }

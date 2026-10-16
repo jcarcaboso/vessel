@@ -5,6 +5,8 @@ using Vessel.Application.Events;
 using Vessel.Application.Ownership;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
+using Vessel.Domain.Accounts;
+using Vessel.Domain.Monitoring;
 
 namespace Vessel.Application.Monitoring;
 
@@ -17,25 +19,67 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     {
         var heartbeat = await store.HeartbeatAsync(ct);
         var online = IsOnline(heartbeat?.HeartbeatAtUtc);
+        // One bounded read of rows and venue deadlines; no per-row account capture.
+        var budgets = await store.VenueRetriesAsync(ct);
         var accounts = new List<AccountMonitorDto>();
-        foreach (var row in await store.ListAsync(ct))
-        {
-            var capture = await store.CaptureAsync(row.AccountId, ct);
-            if (capture is not null && EligibleVenue(capture.Account.VenueId) && await store.EligibleAsync(row.AccountId, ct))
-                accounts.Add(await ToDto(row, online, ct));
-        }
+        foreach (var (row, venueId) in await store.SummaryAsync(EligibleVenues(), time.GetUtcNow(), ct))
+            accounts.Add(await ToDto(row, budgets.TryGetValue(venueId, out var deadline) ? deadline : null, online, ct));
         return new(online, heartbeat?.HeartbeatAtUtc, accounts);
     }
 
-    /// <summary>Starts or stops scheduling for the owner's accounts as their eligibility changes.</summary>
-    public Task DiscoverAsync(IReadOnlyCollection<string> venueIds, DateTimeOffset now, CancellationToken ct) =>
-        store.DiscoverAsync(venueIds, now, ct);
-
     public async Task<AccountMonitorDto> AccountAsync(Guid id, CancellationToken ct)
     {
-        _ = await store.CaptureAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
+        var capture = await store.CaptureAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
         var row = await store.FindAsync(id, ct) ?? new() { AccountId = id, OwnerId = owner.OwnerId };
-        return await ToDto(row, IsOnline((await store.HeartbeatAsync(ct))?.HeartbeatAtUtc), ct);
+        return await ToDto(row, await store.VenueRetryAtAsync(capture.Account.VenueId, ct),
+            IsOnline((await store.HeartbeatAsync(ct))?.HeartbeatAtUtc), ct);
+    }
+
+    public Task<IReadOnlyList<MonitorWatchDto>> WatchesAsync(Guid playId, CancellationToken ct) =>
+        store.WatchesAsync(playId, time.GetUtcNow(), ct);
+
+    /// <summary>
+    /// Starts or stops scheduling as accounts change: eligibility, disable and credential changes. Inputs are read
+    /// set-based; only rows whose scheduling or state changes are locked, revalidated and written.
+    /// </summary>
+    public async Task<int> DiscoverAsync(IReadOnlyCollection<string> venueIds, DateTimeOffset now, CancellationToken ct)
+    {
+        var changed = 0;
+        foreach (var candidate in await store.DiscoveryCandidatesAsync(venueIds, now, ct))
+        {
+            if (!NeedsDiscovery(candidate)) continue;
+            if (await unitOfWork.ExecuteAsync(() => store.LockedAsync(candidate.AccountId, async (account, row) =>
+                {
+                    // A pending or running request is settled by its run, which sees the same changes.
+                    if (row.ManualState != "idle") return false;
+                    var old = row.State;
+                    var monitorable = account.IsEnabled && account.SourceId is not null && venueIds.Contains(account.VenueId);
+                    if (monitorable) await store.UpdateWatchesAsync(account.Id, null, now, ct);
+                    var current = await store.CaptureAsync(account.Id, ct);
+                    if (row.CredentialRevision != current?.CredentialRevision)
+                    {
+                        // Saving or removing a token reschedules the account.
+                        row.CredentialRevision = current?.CredentialRevision;
+                        if (row.State == "credential-error") { row.Idle(); row.NextRunAtUtc = now; }
+                    }
+                    var eligible = monitorable && await store.EligibleAsync(account.Id, now, ct);
+                    if (eligible && row.State != "credential-error") row.NextRunAtUtc ??= now;
+                    else if (!eligible) row.Idle();
+                    await StateEventAsync(account.Id, old, row, Guid.CreateVersion7(), "monitor", now, ct);
+                    return true;
+                }, ct), ct))
+                changed++;
+        }
+        return changed;
+    }
+
+    private static bool NeedsDiscovery(MonitorCandidate candidate)
+    {
+        var eligible = candidate.Monitorable && candidate.Eligible;
+        if (candidate.Row is not { } row) return eligible || candidate.Monitorable && candidate.HasExpiredWatches;
+        if (row.ManualState != "idle") return false;
+        return row.CredentialRevision != candidate.CredentialRevision || candidate.Monitorable && candidate.HasExpiredWatches ||
+            (eligible ? row.State != "credential-error" && row.NextRunAtUtc is null : row.State != "idle" || row.NextRunAtUtc is not null);
     }
 
     public async Task<MonitorRunAccepted> RequestAsync(Guid accountId, CancellationToken ct)
@@ -43,12 +87,14 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         var request = Guid.CreateVersion7();
         await unitOfWork.ExecuteAsync(() => store.LockedAsync(accountId, async (account, row) =>
         {
+            var now = time.GetUtcNow();
             if (!account.IsEnabled || account.SourceId is null || !EligibleVenue(account.VenueId) ||
-                !await store.EligibleAsync(accountId, ct))
+                !await store.EligibleAsync(accountId, now, ct))
                 throw new ProblemException(409, "This account has no eligible venue Plays or pending linked exits.");
-            var retry = await RetryAfterAsync(account.VenueId, row, time.GetUtcNow(), ct);
+            row.ReleaseAbandonedRefresh(now);
+            var retry = await RetryAfterAsync(account.VenueId, row, now, ct);
             if (retry > 0) throw new MonitorAdmissionException(retry);
-            row.Admit(request, "manual", time.GetUtcNow());
+            row.Admit(request, "manual", now);
             await commands.EnqueueAsync(new(request, accountId, owner.OwnerId, "manual"), ct);
             return true;
         }, ct), ct);
@@ -64,6 +110,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 throw new ProblemException(400, "This account cannot be refreshed.");
             if (venues.Reader(account.VenueId) is null) throw new ProblemException(503, "Venue reader is unavailable.");
             var now = time.GetUtcNow();
+            row.ReleaseAbandonedRefresh(now);
             var retry = await RetryAfterAsync(account.VenueId, row, now, ct);
             if (retry > 0) throw new MonitorAdmissionException(retry);
             if (!await store.ReadCapacityAsync(now, ct)) throw new MonitorAdmissionException(30);
@@ -79,11 +126,12 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         if (capture is null) return false;
         var before = await store.FindAsync(lease.AccountId, ct);
         if (before is null || !before.Owns(lease.Generation, lease.WorkerId, time.GetUtcNow())) return false;
+        var refresh = lease.Trigger == "refresh";
         var snapshotApplied = false;
         try
         {
-            if (lease.Trigger != "refresh" && !await store.EligibleAsync(lease.AccountId, ct))
-                return await FailAsync(lease, capture, false, "This account no longer has monitored Plays or pending exits.", ct);
+            if (!refresh && !await store.EligibleAsync(lease.AccountId, time.GetUtcNow(), ct))
+                return await SupersedeAsync(lease, ct);
             // Commit the watched-history baseline before any adapter call.
             await unitOfWork.ExecuteAsync(async () =>
             {
@@ -91,23 +139,22 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 return true;
             }, ct);
             // A different account may have learned a venue-wide deadline after this lease was claimed.
-            // Keep accepted work pending rather than consuming it without a venue observation.
+            // Keep accepted check work pending rather than consuming it without a venue observation.
             var deferred = await DeferThrottledLeaseAsync(lease, ct);
             if (deferred != 0)
             {
-                if (deferred > 0 && lease.Trigger == "refresh") throw new MonitorAdmissionException(deferred);
+                if (deferred > 0 && refresh) throw new MonitorAdmissionException(deferred);
                 return false;
             }
-            if (!capture.Account.IsEnabled || capture.Account.SourceId is null)
-                return await FailAsync(lease, capture, false, "Account settings changed before the check.", ct);
-            if (lease.Trigger != "refresh" && venues.Descriptor(capture.Account.VenueId)?.Capabilities.ReadOnlyCredential == true &&
+            if (!capture.Account.IsEnabled || capture.Account.SourceId is null) return await SupersedeAsync(lease, ct);
+            if (!refresh && venues.Descriptor(capture.Account.VenueId)?.Capabilities.ReadOnlyCredential == true &&
                 !await credentials.IsUsableAsync(capture.Account, ct))
                 return await FailAsync(lease, capture, true, "A usable read-only credential is required. Update it to resume monitoring.", ct);
             var reader = venues.Reader(capture.Account.VenueId) ?? throw new VenueReadException("Reader unavailable.");
             var sync = await reader.ReadAsync(capture.Account, ct);
             if (!sync.Fills.All(VenueFactChecks.Valid))
                 throw new VenueReadException("Invalid execution facts.");
-            if (lease.Trigger == "refresh")
+            if (refresh)
             {
                 // Preserve the public Refresh commit even if the later optional order read is cancelled.
                 // This is a short fenced transaction; the lease, not a DB lock, spans the order read.
@@ -130,14 +177,13 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                         .ReadOrdersAsync(capture.Account, ct);
                     if (!orders.Orders.All(VenueFactChecks.Valid)) throw new VenueReadException("Invalid order facts.");
                 }
-                catch (Exception ex) when (lease.Trigger == "refresh" &&
-                    (ex is not OperationCanceledException || !ct.IsCancellationRequested))
+                catch (Exception ex) when (refresh && (ex is not OperationCanceledException || !ct.IsCancellationRequested))
                 {
                     // Refresh imports public facts even when private/order coverage is unavailable.
                     // Never expose exception text, which can contain credentials or request URLs.
                     orders = null;
                     if (ex is VenueRateLimitException limited)
-                        await store.DeferVenueAsync(capture.Account.VenueId, limited.RetryAtUtc, CancellationToken.None);
+                        await store.DeferVenueAsync(capture.Account.VenueId, limited.RetryAtUtc, time.GetUtcNow(), CancellationToken.None);
                     credentialError = ex is VenueCredentialRejectedException or CredentialStorageException;
                     orderError = credentialError
                         ? "Public account data refreshed; order coverage is unavailable. Update the read-only credential."
@@ -156,14 +202,14 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         catch (VenueRateLimitException limited)
         {
             // A throttle is valid even when this account's lease or settings were superseded.
-            await store.DeferVenueAsync(capture.Account.VenueId, limited.RetryAtUtc, CancellationToken.None);
+            await store.DeferVenueAsync(capture.Account.VenueId, limited.RetryAtUtc, time.GetUtcNow(), CancellationToken.None);
             return await FailAsync(lease, capture, false, "The venue rate limit deferred the next account check.", ct, snapshotApplied);
         }
         catch (Exception ex) when (ex is not MonitorAdmissionException &&
             (ex is not OperationCanceledException || !ct.IsCancellationRequested))
         {
             // Do not log exception payloads: HTTP errors may contain credential-bearing request information.
-            var credential = venues.Descriptor(capture.Account.VenueId)?.Capabilities.ReadOnlyCredential == true &&
+            var credential = !refresh && venues.Descriptor(capture.Account.VenueId)?.Capabilities.ReadOnlyCredential == true &&
                 !await credentials.IsUsableAsync(capture.Account, ct);
             return await FailAsync(lease, capture, credential, credential ?
                 "The read-only credential is unavailable or was refused. Update it to resume monitoring." :
@@ -171,7 +217,9 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         }
         catch (OperationCanceledException)
         {
-            await FailAsync(lease, capture, false, "The account check was interrupted. Monitoring will retry.", CancellationToken.None, snapshotApplied);
+            // An interrupted run (shutdown or a lost lease) is not a failure; the next run repeats the work.
+            if (refresh) await FailAsync(lease, capture, false, "", CancellationToken.None, snapshotApplied);
+            else await SupersedeAsync(lease, CancellationToken.None);
             throw;
         }
     }
@@ -180,11 +228,11 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         bool snapshotOnly = false, bool snapshotApplied = false) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>
         {
-            await events.SetRunAsync(lease.RequestId, lease.Trigger == "refresh" ? "owner" : "monitor", ct);
+            var refresh = lease.Trigger == "refresh";
+            await events.SetRunAsync(lease.RequestId, refresh ? "owner" : "monitor", ct);
             var now = time.GetUtcNow();
             if (!row.Owns(lease.Generation, lease.WorkerId, now)) return false;
             var current = await store.CaptureAsync(account.Id, ct);
-            var refresh = lease.Trigger == "refresh";
             // Refresh imports immutable facts even when a ledger timestamp is unchanged. The store
             // leaves equal-time ledger values intact. Checks still require a new observation before
             // reconciliation/confirmation, and a genuinely newer retained observation fences both.
@@ -198,44 +246,64 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 (refresh ? account.LastSyncedAtUtc > read.Sync.Snapshot.ObservedAtUtc :
                     account.LastSyncedAtUtc >= read.Sync.Snapshot.ObservedAtUtc))
             {
+                // Changed settings or a newer observation superseded this run: discarded, not failed.
                 var discardedState = row.State;
-                row.Complete(now, options.ManualCooldown, options.Interval, false, error: "Changed settings or a newer observation superseded this check.");
+                Supersede(account, row, refresh, now);
                 await ApplyVenueBudgetAsync(account.VenueId, row, ct);
-                if (!account.IsEnabled) { row.State = "idle"; row.NextRunAtUtc = null; }
-                await StateEventAsync(account.Id, discardedState, row, lease, now, ct);
+                await StateEventAsync(account.Id, discardedState, row, lease.RequestId, "monitor", now, ct);
                 return false;
             }
-            var oldState = row.State;
-            var previousSuccess = row.LastSuccessAtUtc;
-            var previousFill = row.NewestFillAtUtc ?? captured.NewestRetainedFillAtUtc;
-            var previousDue = row.NextRunAtUtc;
-            var observedGap = read.Sync.FillHistoryTruncated == true && previousFill is not null &&
-                (read.Sync.OldestRawFillAtUtc is null || read.Sync.OldestRawFillAtUtc > previousFill);
-            var gap = !read.Sync.FillHistoryComplete && (row.HasHistoryGap || observedGap);
-            row.HasHistoryGap = gap;
             if (!snapshotApplied) await workspace.SaveRefreshAsync(account, read.Sync, ct);
             if (snapshotOnly)
             {
                 row.LastObservationAtUtc = read.Sync.Snapshot.ObservedAtUtc;
                 return true;
             }
+            if (refresh)
+            {
+                // An owner refresh retains facts and fences older results, nothing more: no lifecycle
+                // reconciliation, and no change to check backoff, state, last success, gap evidence or due time.
+                if (read.Orders is { } refreshed)
+                {
+                    await executions.RetainAsync(account, refreshed, ct);
+                    account.RecordOrderHistoryNotice(refreshed.Notice);
+                    await workspace.SaveAsync(ct);
+                }
+                if (read.OrderError is not null)
+                {
+                    account.RecordOrderHistoryNotice(read.OrderError);
+                    await workspace.SaveAsync(ct);
+                }
+                row.LastObservationAtUtc = read.Sync.Snapshot.ObservedAtUtc;
+                row.LastOrdersObservationAtUtc = read.Orders?.ObservedAtUtc ?? row.LastOrdersObservationAtUtc;
+                row.CompleteRefresh(now, options.ManualCooldown);
+                await ApplyVenueBudgetAsync(account.VenueId, row, ct);
+                return true;
+            }
+            var oldState = row.State;
+            var previousSuccess = row.LastSuccessAtUtc;
+            var previousFill = row.NewestFillAtUtc ?? captured.NewestRetainedFillAtUtc;
+            var observedGap = read.Sync.FillHistoryTruncated == true && previousFill is not null &&
+                (read.Sync.OldestRawFillAtUtc is null || read.Sync.OldestRawFillAtUtc > previousFill);
+            var gap = !read.Sync.FillHistoryComplete && (row.HasHistoryGap || observedGap);
+            row.HasHistoryGap = gap;
             if (read.Orders is { } orders)
             {
                 await executions.RetainAsync(account, orders, ct);
-                if (!refresh) await executions.ReconcileAsync(account, orders, read.Sync.Instruments, ct);
+                await executions.ReconcileAsync(account, orders, read.Sync.Instruments, ct);
                 account.RecordOrderHistoryNotice(orders.Notice);
                 await workspace.SaveAsync(ct);
-                await store.ResolveExitsAsync(account.Id, orders, ct);
-                // Eligibility queries must see the resolved watch within this same transaction.
-                await unitOfWork.SaveChangesAsync(ct);
             }
+            // With or without an order read: a watch past its lifetime ends unverifiable either way.
+            await store.UpdateWatchesAsync(account.Id, read.Orders, now, ct);
+            // Eligibility queries must see the updated watches within this same transaction.
+            await unitOfWork.SaveChangesAsync(ct);
             if (read.OrderError is not null)
             {
                 account.RecordOrderHistoryNotice(read.OrderError);
                 await workspace.SaveAsync(ct);
             }
-            var evaluation = refresh ? new MonitorEvaluationResult(row.ConfirmationAtUtc) :
-                evaluator is null ? new MonitorEvaluationResult(null) : await evaluator.EvaluateAsync(
+            var evaluation = evaluator is null ? new MonitorEvaluationResult(null) : await evaluator.EvaluateAsync(
                 new(lease.RequestId, account, read, previousSuccess, previousFill, gap, lease.Trigger), ct);
             row.LastObservationAtUtc = read.Sync.Snapshot.ObservedAtUtc;
             row.LastOrdersObservationAtUtc = read.Orders?.ObservedAtUtc ?? row.LastOrdersObservationAtUtc;
@@ -250,21 +318,17 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 error: read.OrderError ?? (gap ? "The venue fill window may have a gap. Missing executions cannot be ruled out." :
                     evaluation.Incomplete ? evaluation.SafeNotice ?? "The account comparison has unknown coverage." :
                     degraded ? "The venue observation has incomplete position, fill-window or open-order coverage." : null));
-            // Refresh never performs lifecycle reconciliation. Do not let frequent owner refreshes
-            // postpone a scheduled Check (or an outstanding candidate confirmation) indefinitely.
-            if (refresh && !read.CredentialError && previousDue is { } due)
-                row.NextRunAtUtc = due < row.NextManualAllowedAtUtc ? row.NextManualAllowedAtUtc : due;
             row.ConfirmationAtUtc = evaluation.NextConfirmationAtUtc;
             if (!read.CredentialError && evaluation.NextConfirmationAtUtc is { } deadline)
             {
+                // The manual cooldown never delays a confirmation run; only the venue budget can.
                 var earliest = now.AddSeconds(60);
                 if (deadline < earliest) deadline = earliest;
-                if (deadline < row.NextManualAllowedAtUtc) deadline = row.NextManualAllowedAtUtc.Value;
                 if (deadline < row.NextRunAtUtc) row.NextRunAtUtc = deadline;
             }
             await ApplyVenueBudgetAsync(account.VenueId, row, ct);
-            if (!await store.EligibleAsync(account.Id, ct)) { row.State = "idle"; row.NextRunAtUtc = null; }
-            await StateEventAsync(account.Id, oldState, row, lease, now, ct);
+            if (!await store.EligibleAsync(account.Id, now, ct)) row.Idle();
+            await StateEventAsync(account.Id, oldState, row, lease.RequestId, "monitor", now, ct);
             if (captured.CredentialExpiresAtUtc is { } expires && expires > now && expires <= now.AddDays(14))
                 await events.AppendAsync(new("credential.expiring", lease.RequestId,
                     $"credential:{account.Id}:{captured.CredentialRevision}:expiring", "warning", now, now,
@@ -277,33 +341,66 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         bool snapshotApplied = false) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>
         {
-            await events.SetRunAsync(lease.RequestId, lease.Trigger == "refresh" ? "owner" : "monitor", ct);
+            var refresh = lease.Trigger == "refresh";
+            await events.SetRunAsync(lease.RequestId, refresh ? "owner" : "monitor", ct);
             var now = time.GetUtcNow();
             if (!row.Owns(lease.Generation, lease.WorkerId, now)) return false;
             var old = row.State;
             var capture = await store.CaptureAsync(lease.AccountId, ct);
-            var settingsChanged = account.SettingsRevision != expected.Account.SettingsRevision ||
+            var settingsChanged = !account.IsEnabled || account.SettingsRevision != expected.Account.SettingsRevision ||
                 account.SourceId != expected.Account.SourceId || capture?.CredentialRevision != expected.CredentialRevision;
+            if (refresh)
+            {
+                // The owner gets the failure; check backoff, state, last success and due time stay as they were.
+                if (!settingsChanged)
+                {
+                    if (snapshotApplied)
+                        account.RecordOrderHistoryNotice("Public account data refreshed; order coverage is unavailable because the order check did not complete.");
+                    else account.RecordSyncFailure();
+                }
+                row.CompleteRefresh(now, options.ManualCooldown);
+                await ApplyVenueBudgetAsync(account.VenueId, row, ct);
+                return false;
+            }
             if (settingsChanged)
             {
-                credential = false;
-                error = "Account settings or credentials changed during the check. The previous result was discarded.";
+                // Superseded by changed settings or credentials during the read: discarded, not failed.
+                Supersede(account, row, false, now);
             }
-            row.CredentialRevision = capture?.CredentialRevision;
-            if (!settingsChanged && account.IsEnabled && lease.Trigger == "refresh")
+            else
             {
-                if (snapshotApplied)
-                    account.RecordOrderHistoryNotice("Public account data refreshed; order coverage is unavailable because the order check did not complete.");
-                else account.RecordSyncFailure();
+                row.CredentialRevision = capture?.CredentialRevision;
+                await store.UpdateWatchesAsync(account.Id, null, now, ct);
+                await unitOfWork.SaveChangesAsync(ct);
+                row.Complete(now, options.ManualCooldown, options.NextDelay(row.ConsecutiveFailures + 1, Random.Shared.NextDouble()),
+                    false, credentialError: credential, error: error);
+                if (!await store.EligibleAsync(account.Id, now, ct)) row.Idle();
             }
-            row.Complete(now, options.ManualCooldown, options.NextDelay(row.ConsecutiveFailures + 1, Random.Shared.NextDouble()),
-                false, credentialError: credential, error: error);
             await ApplyVenueBudgetAsync(account.VenueId, row, ct);
-            if (!account.IsEnabled || lease.Trigger != "refresh" && !await store.EligibleAsync(account.Id, ct))
-                { row.State = "idle"; row.NextRunAtUtc = null; }
-            await StateEventAsync(lease.AccountId, old, row, lease, now, ct);
+            await StateEventAsync(lease.AccountId, old, row, lease.RequestId, "monitor", now, ct);
             return false;
         }, ct), ct);
+
+    /// <summary>The account no longer qualifies, or the run was interrupted, before any result: not a failure.</summary>
+    private Task<bool> SupersedeAsync(MonitorLease lease, CancellationToken ct) =>
+        unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>
+        {
+            var now = time.GetUtcNow();
+            if (!row.Owns(lease.Generation, lease.WorkerId, now)) return false;
+            var old = row.State;
+            Supersede(account, row, lease.Trigger == "refresh", now);
+            if (account.IsEnabled && !await store.EligibleAsync(account.Id, now, ct)) row.Idle();
+            await ApplyVenueBudgetAsync(account.VenueId, row, ct);
+            await StateEventAsync(lease.AccountId, old, row, lease.RequestId, "monitor", now, ct);
+            return false;
+        }, ct), ct);
+
+    private void Supersede(Account account, MonitorAccount row, bool refresh, DateTimeOffset now)
+    {
+        if (refresh) row.CompleteRefresh(now, options.ManualCooldown);
+        else row.Supersede(now, options.ManualCooldown, MonitorOptions.FirstRetry);
+        if (!account.IsEnabled) row.Idle();
+    }
 
     private Task<int> DeferThrottledLeaseAsync(MonitorLease lease, CancellationToken ct) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>
@@ -312,6 +409,13 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             if (!row.Owns(lease.Generation, lease.WorkerId, now)) return -1;
             var deadline = await store.VenueRetryAtAsync(account.VenueId, ct);
             if (!(deadline > now)) return 0;
+            if (lease.Trigger == "refresh")
+            {
+                // The owner gets 429 for this refresh. It is not kept pending for the worker to replay.
+                row.Release();
+                row.NextManualAllowedAtUtc = Later(row.NextManualAllowedAtUtc, deadline);
+                return SecondsUntil(deadline, now);
+            }
             row.ManualState = "pending";
             row.LeaseHolder = null;
             row.LeaseUntilUtc = null;
@@ -320,10 +424,10 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             return SecondsUntil(deadline, now);
         }, ct), ct);
 
-    private async Task<int> RetryAfterAsync(string venueId, Domain.Monitoring.MonitorAccount row, DateTimeOffset now, CancellationToken ct) =>
+    private async Task<int> RetryAfterAsync(string venueId, MonitorAccount row, DateTimeOffset now, CancellationToken ct) =>
         Math.Max(row.RetryAfter(now), SecondsUntil(await store.VenueRetryAtAsync(venueId, ct), now));
 
-    private async Task ApplyVenueBudgetAsync(string venueId, Domain.Monitoring.MonitorAccount row, CancellationToken ct)
+    private async Task ApplyVenueBudgetAsync(string venueId, MonitorAccount row, CancellationToken ct)
     {
         var deadline = await store.VenueRetryAtAsync(venueId, ct);
         row.NextManualAllowedAtUtc = Later(row.NextManualAllowedAtUtc, deadline);
@@ -335,24 +439,27 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     private static int SecondsUntil(DateTimeOffset? deadline, DateTimeOffset now) =>
         deadline > now ? (int)Math.Min(int.MaxValue, Math.Ceiling((deadline.Value - now).TotalSeconds)) : 0;
 
-    private Task StateEventAsync(Guid accountId, string old, Domain.Monitoring.MonitorAccount row,
-        MonitorLease lease, DateTimeOffset now, CancellationToken ct) => old == row.State ? Task.CompletedTask :
-        events.AppendAsync(new("monitor.state-changed", lease.RequestId, $"monitor:{accountId}:{lease.Generation}:{row.State}",
-            row.State == "credential-error" ? "warning" : "info", now, now, new(AccountId: accountId),
-            new(lease.Trigger == "refresh" ? "owner" : "monitor"),
+    /// <summary>
+    /// One event per persisted state change, keyed by its <see cref="MonitorAccount.StateRevision"/>: repeated
+    /// cycles are distinct events, and a retry or re-read of an unchanged state is none.
+    /// </summary>
+    private Task StateEventAsync(Guid accountId, string old, MonitorAccount row, Guid runId, string trigger,
+        DateTimeOffset now, CancellationToken ct) => old == row.State ? Task.CompletedTask :
+        events.AppendAsync(new("monitor.state-changed", runId, $"monitor:{accountId}:{row.StateRevision}:{row.State}",
+            old == "live" && row.State != "idle" ? "warning" : "info", now, now, new(AccountId: accountId), new(trigger),
             JsonSerializer.SerializeToElement(new { previous = old, state = row.State, error = row.Error })), ct);
 
+    private string[] EligibleVenues() => venues.Descriptors
+        .Where(v => v.Capabilities is { Sync: true, Orders: true }).Select(v => v.Id).ToArray();
     private bool EligibleVenue(string venue) => venues.Descriptor(venue) is { Capabilities.Sync: true, Capabilities.Orders: true };
     private bool IsOnline(DateTimeOffset? heartbeat) => heartbeat is { } at && at <= time.GetUtcNow() &&
         time.GetUtcNow() - at <= options.HeartbeatTimeout;
-    private async Task<AccountMonitorDto> ToDto(Domain.Monitoring.MonitorAccount row, bool online, CancellationToken ct)
+    private async Task<AccountMonitorDto> ToDto(MonitorAccount row, DateTimeOffset? venueDeadline, bool online, CancellationToken ct)
     {
-        var account = await store.CaptureAsync(row.AccountId, ct);
-        var deadline = account is null ? null : await store.VenueRetryAtAsync(account.Account.VenueId, ct);
         var state = row.State == "live" && row.LastSuccessAtUtc < time.GetUtcNow() - options.Interval * 2 ? "stale" : row.State;
         return new(row.AccountId, state, row.LastAttemptAtUtc, row.LastSuccessAtUtc,
-            row.NextRunAtUtc is null ? null : Later(row.NextRunAtUtc, deadline),
-            row.ManualState, Later(row.NextManualAllowedAtUtc, deadline), row.Error, online,
+            row.NextRunAtUtc is null ? null : Later(row.NextRunAtUtc, venueDeadline),
+            row.ManualState, Later(row.NextManualAllowedAtUtc, venueDeadline), row.Error, online,
             evaluator is null ? [] : await evaluator.ReadAsync(row.AccountId, null, ct));
     }
 }

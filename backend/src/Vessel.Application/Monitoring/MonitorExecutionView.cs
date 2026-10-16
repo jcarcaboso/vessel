@@ -20,7 +20,8 @@ public sealed class MonitorExecutionView(IPlayStore plays, IWorkspaceStore works
         return execution with
         {
             Monitor = await monitor.AccountAsync(play.AccountId, ct),
-            Discrepancies = evaluator is null ? [] : await evaluator.ReadAsync(play.AccountId, play.Id, ct)
+            Discrepancies = evaluator is null ? [] : await evaluator.ReadAsync(play.AccountId, play.Id, ct),
+            Watches = await monitor.WatchesAsync(play.Id, ct)
         };
     }
 

@@ -62,9 +62,9 @@ public sealed class BoundedJsonHttp(HttpClient httpClient, TimeProvider timeProv
             var retry = response.Headers.RetryAfter;
             var delta = retry?.Delta ?? TimeSpan.FromSeconds(60);
             var deadline = retry?.Date?.ToUniversalTime() ??
-                (delta > DateTimeOffset.MaxValue - now ? DateTimeOffset.MaxValue : now + delta);
+                (delta > VenueRateLimitException.MaxDelay ? now + VenueRateLimitException.MaxDelay : now + delta);
             // No response body, request URL or authorization information crosses the adapter boundary.
-            throw new VenueRateLimitException(deadline < now ? now : deadline);
+            throw new VenueRateLimitException(VenueRateLimitException.Clamp(deadline, now));
         }
         if (!response.IsSuccessStatusCode)
             throw new VenueReadException(unavailable);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -18,7 +18,7 @@ namespace Vessel.Persistence.Migrations
                     AccountId = table.Column<Guid>(type: "uuid", nullable: false),
                     OwnerId = table.Column<Guid>(type: "uuid", nullable: false),
                     State = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
-                    IntervalSeconds = table.Column<int>(type: "integer", nullable: false),
+                    StateRevision = table.Column<long>(type: "bigint", nullable: false),
                     NextRunAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     RequestId = table.Column<Guid>(type: "uuid", nullable: true),
                     Trigger = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
@@ -42,8 +42,8 @@ namespace Vessel.Persistence.Migrations
                 {
                     table.PrimaryKey("PK_monitor_accounts", x => x.AccountId);
                     table.CheckConstraint("CK_monitor_generation", "\"Generation\" >= 0");
-                    table.CheckConstraint("CK_monitor_interval", "\"IntervalSeconds\" BETWEEN 60 AND 3600");
                     table.CheckConstraint("CK_monitor_manual_state", "\"ManualState\" IN ('idle','pending','running')");
+                    table.CheckConstraint("CK_monitor_state_revision", "\"StateRevision\" >= 0");
                     table.ForeignKey(
                         name: "FK_monitor_accounts_accounts_OwnerId_AccountId",
                         columns: x => new { x.OwnerId, x.AccountId },
@@ -62,11 +62,14 @@ namespace Vessel.Persistence.Migrations
                     PlayId = table.Column<Guid>(type: "uuid", nullable: false),
                     OrderId = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                     LinkRevisionAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    ResolvedAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
+                    StartedAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    EndedAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    Outcome = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_monitor_exit_watches", x => x.LinkId);
+                    table.CheckConstraint("CK_monitor_exit_watch_outcome", "\"Outcome\" IS NULL OR \"Outcome\" IN ('terminal','absent','unverifiable')");
                     table.ForeignKey(
                         name: "FK_monitor_exit_watches_accounts_OwnerId_AccountId",
                         columns: x => new { x.OwnerId, x.AccountId },
@@ -118,9 +121,9 @@ namespace Vessel.Persistence.Migrations
                 columns: new[] { "OwnerId", "NextRunAtUtc" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_monitor_exit_watches_OwnerId_AccountId_ResolvedAtUtc",
+                name: "IX_monitor_exit_watches_OwnerId_AccountId_EndedAtUtc",
                 table: "monitor_exit_watches",
-                columns: new[] { "OwnerId", "AccountId", "ResolvedAtUtc" });
+                columns: new[] { "OwnerId", "AccountId", "EndedAtUtc" });
         }
 
         /// <inheritdoc />

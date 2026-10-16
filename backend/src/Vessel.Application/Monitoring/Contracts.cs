@@ -43,23 +43,45 @@ public interface IMonitorImporter
     Task ReconcileAsync(Account account, VenueOrderReadResult orders, IReadOnlyList<VenueInstrument> instruments, CancellationToken ct);
 }
 
+/// <summary>One account's discovery inputs, read set-based; only rows whose scheduling changes are then locked.</summary>
+public sealed record MonitorCandidate(Guid AccountId, string VenueId, bool Monitorable, bool Eligible, bool HasExpiredWatches,
+    string? CredentialRevision, MonitorAccount? Row);
+
+/// <summary>A linked exit watched after its Play ended. <paramref name="State"/>: watching, resolved or unverifiable.</summary>
+public sealed record MonitorWatchDto(Guid LinkId, Guid PlayId, string OrderId, string State, DateTimeOffset StartedAtUtc,
+    DateTimeOffset? EndedAtUtc);
+
 public interface IMonitorStore
 {
     Task<MonitorCapture?> CaptureAsync(Guid accountId, CancellationToken ct);
-    Task<IReadOnlyList<MonitorAccount>> ListAsync(CancellationToken ct);
+    /// <summary>Monitor rows of enabled, currently eligible accounts on the given venues, bounded, in one read.</summary>
+    Task<IReadOnlyList<(MonitorAccount Row, string VenueId)>> SummaryAsync(IReadOnlyCollection<string> venueIds,
+        DateTimeOffset now, CancellationToken ct);
     Task<MonitorAccount?> FindAsync(Guid accountId, CancellationToken ct);
     Task<DateTimeOffset?> VenueRetryAtAsync(string venueId, CancellationToken ct);
-    /// <summary>Persists the maximum Retry-After deadline, independently of any account lease.</summary>
-    Task DeferVenueAsync(string venueId, DateTimeOffset retryAtUtc, CancellationToken ct);
+    Task<IReadOnlyDictionary<string, DateTimeOffset>> VenueRetriesAsync(CancellationToken ct);
+    /// <summary>
+    /// Persists the maximum Retry-After deadline, independently of any account lease. The deadline is clamped to at
+    /// most <see cref="VenueRateLimitException.MaxDelay"/> after <paramref name="now"/> before it is stored.
+    /// </summary>
+    Task DeferVenueAsync(string venueId, DateTimeOffset retryAtUtc, DateTimeOffset now, CancellationToken ct);
     Task<MonitorHeartbeat?> HeartbeatAsync(CancellationToken ct);
     Task RecordHeartbeatAsync(string workerId, DateTimeOffset now, CancellationToken ct);
-    Task<IReadOnlyList<Guid>> DiscoverAsync(IReadOnlyCollection<string> venueIds, DateTimeOffset now, CancellationToken ct);
-    Task<bool> EligibleAsync(Guid accountId, CancellationToken ct);
+    /// <summary>Accounts that may need scheduling changes: monitorable ones, and any with a non-idle monitor row.</summary>
+    Task<IReadOnlyList<MonitorCandidate>> DiscoveryCandidatesAsync(IReadOnlyCollection<string> venueIds, DateTimeOffset now,
+        CancellationToken ct);
+    Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct);
     Task<T> LockedAsync<T>(Guid accountId, Func<Account, MonitorAccount, Task<T>> action, CancellationToken ct);
     Task<IReadOnlyList<MonitorLease>> ClaimDueAsync(string workerId, DateTimeOffset now, int limit, CancellationToken ct);
     Task<MonitorLease?> ClaimAsync(Guid accountId, Guid requestId, string workerId, DateTimeOffset now, CancellationToken ct);
     Task<bool> RenewAsync(MonitorLease lease, DateTimeOffset now, CancellationToken ct);
-    Task ResolveExitsAsync(Guid accountId, VenueOrderReadResult orders, CancellationToken ct);
+    /// <summary>
+    /// Inside the account lock. With <paramref name="orders"/>, a reported terminal status ends a watch whatever the
+    /// read's completeness, and absence ends it only on a complete open-order read. Watches past their lifetime end
+    /// <c>unverifiable</c>, with or without a read.
+    /// </summary>
+    Task UpdateWatchesAsync(Guid accountId, VenueOrderReadResult? orders, DateTimeOffset now, CancellationToken ct);
+    Task<IReadOnlyList<MonitorWatchDto>> WatchesAsync(Guid playId, DateTimeOffset now, CancellationToken ct);
     /// <summary>Inside account admission transaction. Serializes the two-read budget across API and workers.</summary>
     Task<bool> ReadCapacityAsync(DateTimeOffset now, CancellationToken ct);
 }

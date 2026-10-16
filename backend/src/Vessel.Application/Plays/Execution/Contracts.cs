@@ -42,6 +42,8 @@ public sealed record PlayExecutionDto(Guid PlayId, string Status, bool Tracked, 
 {
     public AccountMonitorDto? Monitor { get; init; }
     public IReadOnlyList<MonitorDiscrepancyDto> Discrepancies { get; init; } = [];
+    /// <summary>Linked exits watched after the Play ended: watching, resolved or a persistent unverifiable.</summary>
+    public IReadOnlyList<MonitorWatchDto> Watches { get; init; } = [];
 }
 
 // Application owns this bounded port; EF details stay in Persistence. Reads are owner-filtered.

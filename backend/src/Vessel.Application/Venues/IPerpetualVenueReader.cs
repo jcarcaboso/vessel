@@ -123,7 +123,12 @@ public class VenueReadException(string message) : Exception(message);
 /// <summary>A safe rate-limit category; the deadline comes from Retry-After, never the response body.</summary>
 public sealed class VenueRateLimitException(DateTimeOffset retryAtUtc) : VenueReadException("The venue rate limit requires a later retry.")
 {
+    /// <summary>The longest venue deadline Vessel honours; a longer or far-future Retry-After is clamped to it.</summary>
+    public static readonly TimeSpan MaxDelay = TimeSpan.FromHours(1);
     public DateTimeOffset RetryAtUtc { get; } = retryAtUtc;
+
+    public static DateTimeOffset Clamp(DateTimeOffset retryAtUtc, DateTimeOffset now) =>
+        retryAtUtc < now ? now : retryAtUtc - now > MaxDelay ? now + MaxDelay : retryAtUtc;
 }
 
 /// <summary>The owner's credential input is unusable (format, expiry or wrong wallet); not a venue outage.</summary>

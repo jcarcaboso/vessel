@@ -7,8 +7,12 @@ public sealed class MonitorAccount : IOwned
 {
     public Guid AccountId { get; set; }
     public Guid OwnerId { get; set; }
-    public string State { get; set; } = "idle";
-    public int IntervalSeconds { get; set; } = 600;
+    public string State { get; private set; } = "idle";
+    /// <summary>
+    /// The persisted identity of <see cref="State"/>: incremented under the account and monitor lock whenever the
+    /// state changes. It keys <c>monitor.state-changed</c>; the lease <see cref="Generation"/> only fences runs.
+    /// </summary>
+    public long StateRevision { get; private set; }
     public DateTimeOffset? NextRunAtUtc { get; set; }
     public Guid? RequestId { get; set; }
     public string Trigger { get; set; } = "monitor";
@@ -28,6 +32,23 @@ public sealed class MonitorAccount : IOwned
     public string? CredentialRevision { get; set; }
     public DateTimeOffset? ConfirmationAtUtc { get; set; }
 
+    /// <returns>Whether the state changed, and so took a new <see cref="StateRevision"/>.</returns>
+    public bool SetState(string state)
+    {
+        if (State == state) return false;
+        State = state;
+        StateRevision = checked(StateRevision + 1);
+        return true;
+    }
+
+    /// <summary>Nothing to watch: no scheduled run and no stale error text.</summary>
+    public void Idle()
+    {
+        SetState("idle");
+        NextRunAtUtc = null;
+        Error = null;
+    }
+
     public int RetryAfter(DateTimeOffset now)
     {
         if (ManualState != "idle")
@@ -36,9 +57,11 @@ public sealed class MonitorAccount : IOwned
             ? Math.Max(1, (int)Math.Ceiling((NextManualAllowedAtUtc.Value - now).TotalSeconds)) : 0;
     }
 
-    public void Admit(Guid requestId, string trigger, DateTimeOffset now)
+    /// <param name="scheduled">A scheduled or confirmation run, which the manual cooldown never gates.</param>
+    public void Admit(Guid requestId, string trigger, DateTimeOffset now, bool scheduled = false)
     {
-        if (requestId == Guid.Empty || RetryAfter(now) != 0)
+        ReleaseAbandonedRefresh(now);
+        if (requestId == Guid.Empty || ManualState != "idle" || !scheduled && RetryAfter(now) != 0)
             throw new InvalidOperationException("Monitor admission is busy or cooling down.");
         RequestId = requestId;
         Trigger = trigger;
@@ -54,7 +77,8 @@ public sealed class MonitorAccount : IOwned
         Generation = checked(Generation + 1);
         LeaseHolder = holder;
         LeaseUntilUtc = now + lease;
-        LastAttemptAtUtc = now;
+        // An owner refresh is not a check attempt.
+        if (Trigger != "refresh") LastAttemptAtUtc = now;
         ManualState = "running";
         return true;
     }
@@ -62,19 +86,57 @@ public sealed class MonitorAccount : IOwned
     public bool Owns(long generation, string holder, DateTimeOffset now) =>
         Generation == generation && LeaseHolder == holder && ManualState == "running" && LeaseUntilUtc > now;
 
-    public void Complete(DateTimeOffset now, TimeSpan cooldown, TimeSpan nextDelay, bool success,
-        bool degraded = false, bool credentialError = false, string? error = null)
+    /// <summary>
+    /// The owner received the refresh's answer (or its API crashed), so nobody else may replay it later.
+    /// An abandoned refresh leaves the check schedule as it was.
+    /// </summary>
+    public bool ReleaseAbandonedRefresh(DateTimeOffset now)
+    {
+        if (Trigger != "refresh" || ManualState == "idle" || ManualState == "running" && LeaseUntilUtc > now) return false;
+        Release();
+        return true;
+    }
+
+    public void Release()
     {
         ManualState = "idle";
         LeaseHolder = null;
         LeaseUntilUtc = null;
+    }
+
+    /// <summary>A check finished: the only outcome that moves backoff, state, last success and the due time.</summary>
+    public void Complete(DateTimeOffset now, TimeSpan cooldown, TimeSpan nextDelay, bool success,
+        bool degraded = false, bool credentialError = false, string? error = null)
+    {
+        Release();
         NextManualAllowedAtUtc = now + cooldown;
         NextRunAtUtc = credentialError ? null : now + nextDelay;
         ConsecutiveFailures = success ? 0 : checked(ConsecutiveFailures + 1);
         if (success) LastSuccessAtUtc = now;
-        State = credentialError ? "credential-error" : success ? degraded ? "degraded" : "live" :
-            ConsecutiveFailures >= 3 ? "stale" : "degraded";
+        SetState(credentialError ? "credential-error" : success ? degraded ? "degraded" : "live" :
+            ConsecutiveFailures >= 3 ? "stale" : "degraded");
         Error = error;
+    }
+
+    /// <summary>
+    /// An owner refresh finished, either way. It shares the admission gate, so the manual cooldown starts, but it
+    /// never changes check backoff, state, last success, consecutive failures or the scheduled due time.
+    /// </summary>
+    public void CompleteRefresh(DateTimeOffset now, TimeSpan cooldown)
+    {
+        Release();
+        NextManualAllowedAtUtc = now + cooldown;
+    }
+
+    /// <summary>
+    /// Changed settings or a newer observation superseded the run, or it was interrupted. That is not a failure:
+    /// backoff, state and last success stay; scheduled work is retried after <paramref name="retry"/>.
+    /// </summary>
+    public void Supersede(DateTimeOffset now, TimeSpan cooldown, TimeSpan retry)
+    {
+        Release();
+        NextManualAllowedAtUtc = now + cooldown;
+        if (NextRunAtUtc is not null) NextRunAtUtc = now + retry;
     }
 }
 
@@ -93,7 +155,20 @@ public sealed class MonitorVenueBudget : IOwned
     public DateTimeOffset RetryAtUtc { get; set; }
 }
 
-/// <summary>Terminal Play exits remain watched until a fresh complete order read establishes absence.</summary>
+public static class MonitorWatchOutcomes
+{
+    /// <summary>A read reported the order filled, cancelled or rejected.</summary>
+    public const string Terminal = "terminal";
+    /// <summary>A complete open-order read no longer listed it.</summary>
+    public const string Absent = "absent";
+    /// <summary>The watch reached its lifetime without proof. It neither resolves an orphan nor claims the order is gone.</summary>
+    public const string Unverifiable = "unverifiable";
+}
+
+/// <summary>
+/// A linked exit of a Closed or Cancelled Play, watched until venue evidence shows it is no longer resting or its
+/// lifetime ends. <see cref="Outcome"/> is null while watching.
+/// </summary>
 public sealed class MonitorExitWatch : IOwned
 {
     public Guid LinkId { get; set; }
@@ -102,5 +177,8 @@ public sealed class MonitorExitWatch : IOwned
     public Guid PlayId { get; set; }
     public string OrderId { get; set; } = null!;
     public DateTimeOffset LinkRevisionAtUtc { get; set; }
-    public DateTimeOffset? ResolvedAtUtc { get; set; }
+    /// <summary>When this link revision came under watch: the later of the Play's end and the link change.</summary>
+    public DateTimeOffset StartedAtUtc { get; set; }
+    public DateTimeOffset? EndedAtUtc { get; set; }
+    public string? Outcome { get; set; }
 }

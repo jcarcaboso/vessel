@@ -40,7 +40,7 @@ public sealed class MonitorPostgresTests
         Assert.Null(row.LastSuccessAtUtc);
         Assert.Equal(clock.Now.AddSeconds(60), row.NextManualAllowedAtUtc);
         clock.Now = clock.Now.AddHours(1);
-        await store.DiscoverAsync(["hyperliquid"], clock.Now, default);
+        await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default);
         Assert.Empty(await store.ClaimDueAsync("scheduler", clock.Now, 2, default));
     }
 
@@ -71,16 +71,17 @@ public sealed class MonitorPostgresTests
             var lease = await coordinator.AdmitRefreshAsync(ids[0], "api", default);
             Assert.False(await coordinator.RunAsync(lease, default));
             var row = (await new MonitorStore(worker, TestUnitOfWork.For(worker)).FindAsync(ids[0], default))!;
-            Assert.Equal(deadline, row.NextRunAtUtc);
+            // A refresh never schedules a check; the venue deadline still gates manual work.
+            Assert.Null(row.NextRunAtUtc);
             Assert.Equal(deadline, row.NextManualAllowedAtUtc);
         }
         await using (var anotherProcess = database.Context(owner))
         {
             var store = new MonitorStore(anotherProcess, TestUnitOfWork.For(anotherProcess));
-            await store.DeferVenueAsync("hyperliquid", clock.Now.AddSeconds(120), default);
+            await store.DeferVenueAsync("hyperliquid", clock.Now.AddSeconds(120), clock.Now, default);
             Assert.Equal(deadline, await store.VenueRetryAtAsync("hyperliquid", default));
             Assert.Null(await store.VenueRetryAtAsync("risex", default));
-            await store.DiscoverAsync(["hyperliquid"], clock.Now, default);
+            await Coordinator(anotherProcess, owner, new Reader(), clock: clock).DiscoverAsync(["hyperliquid"], clock.Now, default);
             Assert.Empty(await store.ClaimDueAsync("scheduler", clock.Now, 2, default));
             Assert.Null(await store.ClaimAsync(ids[1], pending, "command", clock.Now, default));
             Assert.Equal(deadline, (await Coordinator(anotherProcess, owner, new Reader(), clock: clock)
@@ -110,7 +111,7 @@ public sealed class MonitorPostgresTests
     }
 
     [PostgresFact]
-    public async Task A_new_throttle_between_claim_and_read_defers_the_same_request_without_network()
+    public async Task A_new_throttle_between_claim_and_read_answers_the_refresh_without_network_and_never_replays_it()
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
@@ -120,18 +121,17 @@ public sealed class MonitorPostgresTests
         var lease = await coordinator.AdmitRefreshAsync(id, "api", default);
         await using (var concurrent = database.Context(owner))
             await new MonitorStore(concurrent, TestUnitOfWork.For(concurrent))
-                .DeferVenueAsync("hyperliquid", clock.Now.AddSeconds(600), default);
+                .DeferVenueAsync("hyperliquid", clock.Now.AddSeconds(600), clock.Now, default);
         Assert.Equal(600, (await Assert.ThrowsAsync<MonitorAdmissionException>(() => coordinator.RunAsync(lease, default))).RetryAfter);
         var store = new MonitorStore(db, TestUnitOfWork.For(db));
-        var pending = (await store.FindAsync(id, default))!;
-        Assert.Equal(lease.RequestId, pending.RequestId);
-        Assert.Equal("pending", pending.ManualState);
-        Assert.Null(pending.LeaseUntilUtc);
-        Assert.Null(pending.LastSuccessAtUtc);
+        // Review L1: the owner was answered with 429, so the refresh is released, not left pending for the worker.
+        var released = (await store.FindAsync(id, default))!;
+        Assert.Equal("idle", released.ManualState);
+        Assert.Null(released.LeaseUntilUtc);
+        Assert.Null(released.LastSuccessAtUtc);
+        Assert.True(released.NextManualAllowedAtUtc > clock.Now.AddSeconds(599));
         clock.Now = clock.Now.AddSeconds(600);
-        var resumed = Assert.Single(await store.ClaimDueAsync("scheduler", clock.Now, 2, default));
-        Assert.Equal(lease.RequestId, resumed.RequestId);
-        Assert.True(resumed.Generation > lease.Generation);
+        Assert.Empty(await store.ClaimDueAsync("scheduler", clock.Now, 2, default));
     }
 
     [PostgresFact]
@@ -231,27 +231,27 @@ public sealed class MonitorPostgresTests
         db.AddRange(play, link);
         await db.SaveChangesAsync();
         var work = TestUnitOfWork.For(db); var store = new MonitorStore(db, work);
-        Assert.True(await store.EligibleAsync(id, default));
+        Assert.True(await store.EligibleAsync(id, DateTimeOffset.UtcNow, default));
         async Task Observe(VenueOrderReadResult read) => await work.ExecuteAsync(async () =>
         {
-            await store.ResolveExitsAsync(id, read, default);
+            await store.UpdateWatchesAsync(id, read, DateTimeOffset.UtcNow, default);
             await work.SaveChangesAsync(default);
             return true;
         }, default);
         await Observe(new([], now.AddSeconds(1), "Incomplete", OpenOrdersComplete: false));
-        Assert.True(await store.EligibleAsync(id, default));
+        Assert.True(await store.EligibleAsync(id, DateTimeOffset.UtcNow, default));
         await Observe(new([], now.AddSeconds(-1), "Earlier than cancellation", OpenOrdersComplete: true));
-        Assert.True(await store.EligibleAsync(id, default));
+        Assert.True(await store.EligibleAsync(id, DateTimeOffset.UtcNow, default));
         await Observe(new([], now.AddSeconds(2), "Fresh absence", OpenOrdersComplete: true));
-        Assert.False(await store.EligibleAsync(id, default));
+        Assert.False(await store.EligibleAsync(id, DateTimeOffset.UtcNow, default));
         link.Confirm(now.AddSeconds(3));
         await db.SaveChangesAsync();
-        Assert.True(await store.EligibleAsync(id, default));
+        Assert.True(await store.EligibleAsync(id, DateTimeOffset.UtcNow, default));
         await Observe(new([new("stop-1", "BTC", "sell", "Stop", 90, 90, true, false, 1, 1,
             now.AddMinutes(-8), VenueOrderStatus.Open, "open", now.AddSeconds(4))],
             now.AddSeconds(4), "Still resting", OpenOrdersComplete: true));
-        Assert.True(await store.EligibleAsync(id, default));
-        Assert.Null((await db.Set<MonitorExitWatch>().SingleAsync()).ResolvedAtUtc);
+        Assert.True(await store.EligibleAsync(id, DateTimeOffset.UtcNow, default));
+        Assert.Null((await db.Set<MonitorExitWatch>().SingleAsync()).EndedAtUtc);
     }
 
     [PostgresFact]
@@ -265,7 +265,7 @@ public sealed class MonitorPostgresTests
             new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue, "{}", now.AddMinutes(-1));
         play.MarkPlanned(now.AddSeconds(-30));
         db.Add(play);
-        db.Add(new MonitorAccount { OwnerId = owner, AccountId = id, State = "live",
+        db.Add(new MonitorAccount { OwnerId = owner, AccountId = id,
             NextRunAtUtc = now.AddSeconds(80), ConfirmationAtUtc = now.AddSeconds(80) });
         await db.SaveChangesAsync();
         var importer = new Importer();
@@ -302,7 +302,9 @@ public sealed class MonitorPostgresTests
         Assert.Equal(0, importer.Retained);
         var row = await db.Set<MonitorAccount>().SingleAsync();
         Assert.NotNull(row.NextManualAllowedAtUtc);
-        Assert.Contains("order coverage is unavailable", row.Error);
+        // The refresh outcome is the account's notice; it never becomes the check state or error.
+        Assert.Equal("idle", row.State);
+        Assert.Null(row.Error);
     }
 
     [PostgresFact]
@@ -400,7 +402,7 @@ public sealed class MonitorPostgresTests
     }
 
     [PostgresFact]
-    public async Task Failed_network_attempt_records_safe_error_and_cooldown_persisted_for_next_API_scope()
+    public async Task Failed_refresh_records_a_safe_account_failure_and_cooldown_without_changing_check_state()
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
@@ -412,10 +414,14 @@ public sealed class MonitorPostgresTests
         }
         await using var next = database.Context(owner);
         var state = await Coordinator(next, owner, new Reader()).AccountAsync(id, default);
-        Assert.Equal("degraded", state.State);
-        Assert.DoesNotContain("SECRET", state.Error);
-        Assert.DoesNotContain("TOKEN", state.Error);
+        Assert.Equal("idle", state.State);
+        Assert.Null(state.Error);
         Assert.Null(state.LastSuccessAtUtc);
+        Assert.Null(state.LastAttemptAtUtc);
+        var account = await next.Accounts.SingleAsync();
+        Assert.Equal("error", account.SyncStatus);
+        Assert.DoesNotContain("SECRET", account.LastSyncError ?? "");
+        Assert.DoesNotContain("TOKEN", account.LastSyncError ?? "");
         var refused = await Assert.ThrowsAsync<MonitorAdmissionException>(() =>
             Coordinator(next, owner, new Reader()).AdmitRefreshAsync(id, "next-tab", default));
         Assert.InRange(refused.RetryAfter, 1, 60);
@@ -431,8 +437,10 @@ public sealed class MonitorPostgresTests
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var reader = new Reader { BeforeRead = async ct => { entered.SetResult(); await gate.Task.WaitAsync(ct); } };
         await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, clock.Now);
         var monitor = Coordinator(db, owner, reader, clock: clock);
-        var original = await monitor.AdmitRefreshAsync(id, "lost-worker", default);
+        var accepted = await monitor.RequestAsync(id, default);
+        var original = (await new MonitorStore(db, TestUnitOfWork.For(db)).ClaimAsync(id, accepted.RequestId, "lost-worker", clock.Now, default))!;
         var running = monitor.RunAsync(original, default);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         clock.Now += MonitorOptions.Lease;
@@ -465,6 +473,284 @@ public sealed class MonitorPostgresTests
             Coordinator(foreign, foreign.CurrentOwnerId, new Reader()).AccountAsync(id, default))).StatusCode);
     }
 
+    [PostgresFact]
+    public async Task Review_H1_terminal_exit_resolves_from_explicit_cancel_even_when_open_book_is_incomplete()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var now = DateTimeOffset.UtcNow;
+        await using var db = database.Context(owner);
+        var (play, _) = await SeedCancelledWithStopAsync(db, now);
+        var work = TestUnitOfWork.For(db); var store = new MonitorStore(db, work);
+        // RISEx always reports OpenOrdersComplete:false; the scheduled check sees the stop explicitly cancelled.
+        await work.ExecuteAsync(async () =>
+        {
+            await store.UpdateWatchesAsync(id, new([Stop(VenueOrderStatus.Canceled, now.AddSeconds(1))],
+                now.AddSeconds(1), "Bounded history", OpenOrdersComplete: false), now.AddSeconds(1), default);
+            return true;
+        }, default);
+        Assert.False(await store.EligibleAsync(id, now.AddSeconds(1), default));
+        var watch = Assert.Single(await store.WatchesAsync(play.Id, now.AddSeconds(1), default));
+        Assert.Equal("resolved", watch.State);
+    }
+
+    [PostgresFact]
+    public async Task Review_H1_absence_on_an_incomplete_read_never_resolves_and_the_watch_ends_unverifiable()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var now = DateTimeOffset.UtcNow;
+        await using var db = database.Context(owner);
+        var (play, _) = await SeedCancelledWithStopAsync(db, now);
+        var options = new MonitorOptions { WatchLifetime = TimeSpan.FromHours(2) };
+        var work = TestUnitOfWork.For(db); var store = new MonitorStore(db, work, options);
+        async Task Observe(VenueOrderReadResult? read, DateTimeOffset at) => await work.ExecuteAsync(async () =>
+        {
+            await store.UpdateWatchesAsync(id, read, at, default);
+            return true;
+        }, default);
+        await Observe(new([], now.AddMinutes(1), "Incomplete", OpenOrdersComplete: false), now.AddMinutes(1));
+        Assert.True(await store.EligibleAsync(id, now.AddMinutes(1), default));
+        Assert.Equal("watching", Assert.Single(await store.WatchesAsync(play.Id, now.AddMinutes(1), default)).State);
+        // Past its lifetime without proof, even before a run records it, it is never shown as resolved.
+        var later = now.AddHours(3);
+        Assert.False(await store.EligibleAsync(id, later, default));
+        Assert.Equal("unverifiable", Assert.Single(await store.WatchesAsync(play.Id, later, default)).State);
+        await Observe(null, later);
+        var recorded = await db.Set<MonitorExitWatch>().AsNoTracking().SingleAsync();
+        Assert.Equal(MonitorWatchOutcomes.Unverifiable, recorded.Outcome);
+        // Persistent: a later incomplete absence does not turn it into "gone".
+        await Observe(new([], later.AddMinutes(1), "Incomplete", OpenOrdersComplete: false), later.AddMinutes(1));
+        Assert.Equal("unverifiable", Assert.Single(await store.WatchesAsync(play.Id, later.AddMinutes(1), default)).State);
+    }
+
+    [PostgresFact]
+    public async Task Review_L1_throttled_refresh_is_not_replayed_by_the_worker_after_the_api_returned_429()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, clock.Now);
+        var coordinator = Coordinator(db, owner, new Reader(), clock: clock);
+        var lease = await coordinator.AdmitRefreshAsync(id, "api", default);
+        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        await store.DeferVenueAsync("hyperliquid", clock.Now.AddSeconds(120), clock.Now, default);
+        await Assert.ThrowsAsync<MonitorAdmissionException>(() => coordinator.RunAsync(lease, default));
+        db.ChangeTracker.Clear();
+        var claimed = await store.ClaimDueAsync("scheduler", clock.Now.AddSeconds(121), 2, default);
+        Assert.DoesNotContain(claimed, l => l.Trigger == "refresh");
+    }
+
+    [PostgresFact]
+    public async Task Review_L1_a_refresh_whose_api_died_is_abandoned_not_replayed_after_lease_expiry()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, clock.Now);
+        _ = await Coordinator(db, owner, new Reader(), clock: clock).AdmitRefreshAsync(id, "api-crashed", default);
+        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        clock.Now += MonitorOptions.Lease + TimeSpan.FromSeconds(1);
+        db.ChangeTracker.Clear();
+        // Nothing was scheduled for checks, so the abandoned refresh yields no run at all.
+        Assert.Empty(await store.ClaimDueAsync("scheduler", clock.Now, 2, default));
+        var row = (await store.FindAsync(id, default))!;
+        Assert.Equal("idle", row.ManualState);
+        Assert.Null(row.LeaseHolder);
+        // And it does not block the owner's next request either.
+        Assert.Equal("pending", (await Coordinator(db, owner, new Reader(), clock: clock).RequestAsync(id, default)).Monitor.ManualState);
+    }
+
+    [PostgresFact]
+    public async Task Review_L2_refresh_does_not_reset_check_backoff_or_scheduling()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        await using var db = database.Context(owner);
+        db.Add(Row(owner, id, "stale", now));
+        await db.SaveChangesAsync();
+        var coordinator = Coordinator(db, owner, new Reader(), clock: new Clock(now));
+        Assert.True(await coordinator.RunAsync(await coordinator.AdmitRefreshAsync(id, "api", default), default));
+        db.ChangeTracker.Clear();
+        AssertUnchanged(await db.Set<MonitorAccount>().SingleAsync(), now);
+    }
+
+    [PostgresFact]
+    public async Task Review_L2_failed_refresh_does_not_postpone_a_due_check()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        await using var db = database.Context(owner);
+        db.Add(Row(owner, id, "stale", now));
+        await db.SaveChangesAsync();
+        var coordinator = Coordinator(db, owner, new Reader { Failure = new HttpRequestException("down") }, clock: new Clock(now));
+        Assert.False(await coordinator.RunAsync(await coordinator.AdmitRefreshAsync(id, "api", default), default));
+        db.ChangeTracker.Clear();
+        AssertUnchanged(await db.Set<MonitorAccount>().SingleAsync(), now);
+    }
+
+    private static MonitorAccount Row(Guid owner, Guid id, string state, DateTimeOffset now)
+    {
+        var row = new MonitorAccount { OwnerId = owner, AccountId = id, ConsecutiveFailures = 3,
+            NextRunAtUtc = now.AddSeconds(30), LastSuccessAtUtc = now.AddHours(-1), LastAttemptAtUtc = now.AddMinutes(-3),
+            Error = "The venue check failed. Monitoring will retry." };
+        row.SetState(state);
+        return row;
+    }
+
+    private static void AssertUnchanged(MonitorAccount row, DateTimeOffset now)
+    {
+        Assert.Equal("stale", row.State);
+        Assert.Equal(1, row.StateRevision);
+        Assert.Equal(3, row.ConsecutiveFailures);
+        Assert.Equal(now.AddSeconds(30), row.NextRunAtUtc);
+        Assert.Equal(now.AddHours(-1), row.LastSuccessAtUtc);
+        Assert.Equal(now.AddMinutes(-3), row.LastAttemptAtUtc);
+        Assert.Equal("The venue check failed. Monitoring will retry.", row.Error);
+        Assert.Equal("idle", row.ManualState);
+        Assert.Equal(now.AddSeconds(60), row.NextManualAllowedAtUtc);
+    }
+
+    [PostgresFact]
+    public async Task Review_L3_a_check_superseded_by_changed_settings_is_not_a_failure()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, clock.Now);
+        var reader = new Reader
+        {
+            BeforeRead = async _ =>
+            {
+                await using var changed = database.Context(owner);
+                (await changed.Accounts.SingleAsync()).UpdateSettings("Renamed during read", null, true);
+                await changed.SaveChangesAsync();
+            }
+        };
+        var coordinator = Coordinator(db, owner, reader, clock: clock);
+        var accepted = await coordinator.RequestAsync(id, default);
+        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        var lease = (await store.ClaimAsync(id, accepted.RequestId, "worker", clock.Now, default))!;
+        Assert.False(await coordinator.RunAsync(lease, default));
+        db.ChangeTracker.Clear();
+        var row = await db.Set<MonitorAccount>().SingleAsync();
+        Assert.Equal(0, row.ConsecutiveFailures);
+        Assert.Equal("idle", row.State);
+        Assert.Null(row.Error);
+        Assert.Equal(clock.Now + MonitorOptions.FirstRetry, row.NextRunAtUtc);
+    }
+
+    [PostgresFact]
+    public async Task Review_L4_the_manual_cooldown_does_not_gate_a_scheduled_claim()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, now);
+        var row = Row(owner, id, "live", now);
+        row.NextRunAtUtc = now;
+        row.NextManualAllowedAtUtc = now.AddSeconds(45);
+        db.Add(row);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var lease = Assert.Single(await new MonitorStore(db, TestUnitOfWork.For(db)).ClaimDueAsync("scheduler", now, 2, default));
+        Assert.Equal("monitor", lease.Trigger);
+    }
+
+    [PostgresFact]
+    public async Task Review_b_repeated_state_cycles_emit_distinct_events_and_an_unchanged_state_emits_none()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, clock.Now);
+        var sink = new EventSink();
+        var failing = true;
+        var reader = new Reader { BeforeRead = _ => failing ? throw new HttpRequestException("down") : Task.CompletedTask };
+        var coordinator = Coordinator(db, owner, reader, sink, clock);
+        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        async Task CheckAsync(bool fail)
+        {
+            failing = fail;
+            var accepted = await coordinator.RequestAsync(id, default);
+            var lease = (await store.ClaimAsync(id, accepted.RequestId, "worker", clock.Now, default))!;
+            await coordinator.RunAsync(lease, default);
+            clock.Now = clock.Now.AddMinutes(2);
+            db.ChangeTracker.Clear();
+        }
+        await CheckAsync(true);   // idle → degraded
+        await CheckAsync(false);  // degraded → live
+        await CheckAsync(true);   // live → degraded
+        await CheckAsync(true);   // degraded, unchanged: no event
+        await CheckAsync(false);  // degraded → live
+        await CheckAsync(false);  // live, unchanged: no event
+        var keys = sink.Drafts.Where(d => d.Type == "monitor.state-changed").Select(d => d.DedupKey).ToArray();
+        Assert.Equal([$"monitor:{id}:1:degraded", $"monitor:{id}:2:live", $"monitor:{id}:3:degraded", $"monitor:{id}:4:live"], keys);
+        Assert.Equal(4, (await store.FindAsync(id, default))!.StateRevision);
+    }
+
+    [PostgresFact]
+    public async Task Review_b_and_L5_discovery_idles_a_disabled_account_once_and_locks_nothing_unchanged()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, clock.Now);
+        var sink = new EventSink();
+        var coordinator = Coordinator(db, owner, new Reader(), sink, clock);
+        Assert.Equal(1, await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default));
+        Assert.Equal(0, await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default));
+        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        await coordinator.RunAsync(Assert.Single(await store.ClaimDueAsync("scheduler", clock.Now, 2, default)), default);
+        Assert.Equal("live", (await store.FindAsync(id, default))!.State);
+        db.ChangeTracker.Clear();
+        (await db.Accounts.SingleAsync()).UpdateSettings("Disabled", null, false);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        Assert.Equal(1, await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default));
+        Assert.Equal(0, await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default));
+        var row = (await store.FindAsync(id, default))!;
+        Assert.Equal("idle", row.State);
+        Assert.Null(row.NextRunAtUtc);
+        Assert.Equal($"monitor:{id}:2:idle", sink.Drafts.Last(d => d.Type == "monitor.state-changed").DedupKey);
+        // Summary reads only enabled, eligible accounts.
+        Assert.Empty((await coordinator.SummaryAsync(default)).Accounts);
+    }
+
+    private static async Task<(Play Play, PlayOrderLink Link)> SeedCancelledWithStopAsync(VesselDbContext db, DateTimeOffset now)
+    {
+        var play = new Play(Guid.NewGuid(), await db.Accounts.SingleAsync(),
+            new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue, "{}", now.AddMinutes(-10));
+        play.MarkPlanned(now.AddMinutes(-9));
+        var link = new PlayOrderLink(play, "stop-1", OrderLinkRole.Stop, "entry-1", "stop-1",
+            OrderLinkState.Linked, OrderLinkSource.Owner, now.AddMinutes(-8));
+        play.Cancel(CancelReason.ChangedMind, null, now);
+        db.AddRange(play, link);
+        await db.SaveChangesAsync();
+        return (play, link);
+    }
+
+    private static VenueOrder Stop(VenueOrderStatus status, DateTimeOffset observed) => new("stop-1", "BTC", "sell", "Stop", 90, 90,
+        true, false, 1, status == VenueOrderStatus.Open ? 1 : 0, observed.AddMinutes(-8), status, status.ToString().ToLowerInvariant(), observed);
+
+    private static async Task<Play> SeedPlannedAsync(VesselDbContext db, DateTimeOffset now)
+    {
+        var play = new Play(Guid.NewGuid(), await db.Accounts.SingleAsync(), new PerpetualInstrument("hyperliquid", "BTC"),
+            InstrumentSource.Venue, "{}", now.AddMinutes(-2));
+        play.MarkPlanned(now.AddMinutes(-1));
+        db.Add(play);
+        await db.SaveChangesAsync();
+        return play;
+    }
+
     private static async Task<Guid[]> AccountsAsync(CoreDatabase database, Guid owner, int count)
     {
         await using var db = database.Context(owner);
@@ -480,12 +766,13 @@ public sealed class MonitorPostgresTests
     }
 
     private static MonitorCoordinator Coordinator(VesselDbContext db, Guid owner, Reader reader, EventSink? sink = null,
-        TimeProvider? clock = null, Importer? importer = null, Orders? orders = null)
+        TimeProvider? clock = null, Importer? importer = null, Orders? orders = null, MonitorOptions? options = null)
     {
         var work = TestUnitOfWork.For(db);
-        return new(new MonitorStore(db, work), new WorkspaceStore(db, work), importer ?? new Importer(), TestVenues.With(reader, orders ?? new Orders()),
+        options ??= new MonitorOptions();
+        return new(new MonitorStore(db, work, options), new WorkspaceStore(db, work), importer ?? new Importer(), TestVenues.With(reader, orders ?? new Orders()),
             new Credentials(), work, sink ?? new EventSink(), new Commands(), new CoreOwner(owner),
-            new MonitorOptions(), clock ?? TimeProvider.System);
+            options, clock ?? TimeProvider.System);
     }
 
     private sealed class Reader : IPerpetualVenueReader
@@ -537,7 +824,8 @@ public sealed class MonitorPostgresTests
         public bool Baseline;
         public Task SetRunAsync(Guid runId, string trigger, CancellationToken ct) => Task.CompletedTask;
         public Task EnsureMonitoringBaselineAsync(Guid accountId, CancellationToken ct) { Baseline = true; return Task.CompletedTask; }
-        public Task AppendAsync(VesselEventDraft draft, CancellationToken ct) => Task.CompletedTask;
+        public List<VesselEventDraft> Drafts { get; } = [];
+        public Task AppendAsync(VesselEventDraft draft, CancellationToken ct) { Drafts.Add(draft); return Task.CompletedTask; }
     }
     private sealed class Clock(DateTimeOffset now) : TimeProvider
     {
