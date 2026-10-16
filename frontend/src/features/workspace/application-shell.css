@@ -143,7 +143,8 @@
 .overview-play-tabs { gap: 0; padding-top: 14px; min-width: 0; }
 /* Tabs keep their label and count together and wrap to another line when the panel is narrow, as on the Plays page. */
 .overview-play-tabs > [data-slot="tabs-list"] { display: flex; flex-wrap: wrap; width: calc(100% - 36px); height: auto; min-height: 36px; margin: 0 18px; gap: 2px; }
-.overview-play-tabs [data-slot="tabs-trigger"] { flex: 1 0 auto; gap: 6px; padding: 5px 8px; font-size: var(--text-xs); }
+/* Triggers size to their own line (the shared trigger fills the list height, which overlaps rows once tabs wrap). */
+.overview-play-tabs [data-slot="tabs-trigger"] { flex: 1 0 auto; height: auto; min-height: 30px; gap: 5px; padding: 5px 7px; font-size: var(--text-xs); }
 .overview-play-count { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); font-size: var(--text-2xs); line-height: 17px; font-feature-settings: var(--figures); }
 /* A fixed five rows, so the list takes their height instead of scrolling inside the panel. */
 .overview-play-list { margin: 8px 0 0; padding: 0; list-style: none; }
