@@ -104,4 +104,27 @@ public sealed partial class RisexAdapterTests
         Assert.Equal(empty ? 0 : 3, result.Orders.Count);
         Assert.DoesNotContain(routes.Requests, request => request.Contains("/orders/open?", StringComparison.Ordinal));
     }
+
+    [Theory]
+    [InlineData("999", 1)] // Not in the catalogue at all: an in-scope fact Vessel cannot verify.
+    [InlineData("77", 1)]  // A USDC market whose name the map cannot classify: left out, so omitted.
+    [InlineData("88", 0)]  // Quoted in another asset: proven out of scope.
+    public async Task Coverage_only_unrecognized_markets_count_as_omitted_executions(string market, int omitted)
+    {
+        var markets = JsonNode.Parse(Markets)!;
+        var list = markets["data"]!["markets"]!.AsArray();
+        var unclassified = JsonNode.Parse(Market("77", "Mystery Index"))!;
+        var otherQuote = JsonNode.Parse(Market("88", "BTC/USDT"))!;
+        otherQuote["quote_asset_symbol"] = "USDT";
+        list.Add(unclassified);
+        list.Add(otherQuote);
+        var accepted = Trade("0xaccepted", "1", "BUY", "BUY", "0.086", "-0.086", Now.AddMinutes(-1));
+        var dropped = Trade("0xdropped", market, "BUY", "BUY", "0.086", "-0.086", Now.AddMinutes(-2));
+        var body = "{\"data\":{\"trades\":[" + accepted + "," + dropped + "," + dropped + "],\"has_next_page\":false}}";
+        var result = await Reader(new() { ["/v1/markets"] = markets.ToJsonString(), ["/v1/trade-history"] = body })
+            .Reader.ReadAsync(Address, default);
+        Assert.Equal("0xaccepted", Assert.Single(result.Fills).SourceFillId);
+        // The duplicated row is one execution.
+        Assert.Equal(omitted, result.OmittedExecutions);
+    }
 }
