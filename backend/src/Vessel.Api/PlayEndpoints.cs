@@ -9,7 +9,10 @@ public static class PlayEndpoints
     public static void MapPlays(this WebApplication app)
     {
         var api = app.MapGroup("/api/plays").RequireAuthorization();
-        api.MapGet("", async (PlayService service, CancellationToken ct) => Results.Ok(await service.ListAsync(ct)));
+        api.MapGet("", async (string? view, string? q, string? scope, string? page, string? pageSize, PlayService service, CancellationToken ct) =>
+            Results.Ok(await service.ListAsync(view, q, scope, page, pageSize, ct)));
+        api.MapGet("/counts", async (string? q, string? scope, PlayService service, CancellationToken ct) =>
+            Results.Ok(await service.CountsAsync(q, scope, ct)));
         api.MapPost("", async (CreatePlayRequest request, PlayService service, CancellationToken ct) =>
         {
             var result = await service.CreateAsync(request, ct);

@@ -27,6 +27,9 @@ internal sealed class PlayConfiguration : IEntityTypeConfiguration<Play>
         builder.Ignore(x => x.HasReview);
         builder.Property(x => x.Version).IsConcurrencyToken();
         builder.HasIndex(x => new { x.OwnerId, x.UpdatedAtUtc });
+        // List views filter by status and order by last update or end time, newest first.
+        builder.HasIndex(x => new { x.OwnerId, x.Status, x.UpdatedAtUtc, x.Id }).IsDescending(false, false, true, false);
+        builder.HasIndex(x => new { x.OwnerId, x.Status, x.EndedAtUtc, x.UpdatedAtUtc }).IsDescending(false, false, true, true);
         builder.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         builder.Ignore(x => x.Instrument);

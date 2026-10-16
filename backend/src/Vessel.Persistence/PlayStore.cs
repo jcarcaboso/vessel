@@ -8,8 +8,74 @@ namespace Vessel.Persistence;
 
 public sealed class PlayStore(VesselDbContext db) : IPlayStore
 {
-    public Task<List<Play>> ListAsync(CancellationToken ct) =>
-        db.Plays.OrderByDescending(x => x.UpdatedAtUtc).ThenBy(x => x.Id).AsNoTracking().ToListAsync(ct);
+    public Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct) => scope.Kind switch
+    {
+        "portfolio" => db.Portfolios.AnyAsync(p => p.Id == scope.Id, ct),
+        "account" => db.Accounts.AnyAsync(a => a.Id == scope.Id, ct),
+        _ => Task.FromResult(true)
+    };
+
+    public Task<int> CountAsync(PlayListView view, PlayListFilter filter, CancellationToken ct) => View(Rows(filter), view).CountAsync(ct);
+
+    public Task<List<PlayListRow>> ListAsync(PlayListView view, PlayListFilter filter, int skip, int take, CancellationToken ct)
+    {
+        var rows = View(Rows(filter), view);
+        var ordered = view is PlayListView.Drafts or PlayListView.Progress or PlayListView.All
+            ? rows.OrderByDescending(x => x.UpdatedAtUtc).ThenBy(x => x.Id)
+            : rows.OrderByDescending(x => x.EndedAtUtc).ThenByDescending(x => x.UpdatedAtUtc).ThenBy(x => x.Id);
+        return ordered.Skip(skip).Take(take).ToListAsync(ct);
+    }
+
+    public async Task<List<PlayCountRow>> CountsAsync(PlayListFilter filter, CancellationToken ct) =>
+        (await Rows(filter).GroupBy(x => new { x.Status, Reviewed = x.HasReview || x.ReviewedAtUtc != null })
+            .Select(g => new { g.Key.Status, g.Key.Reviewed, Count = g.Count() }).ToListAsync(ct))
+        .Select(g => new PlayCountRow(g.Status, g.Reviewed, g.Count)).ToList();
+
+    private static IQueryable<PlayListRow> View(IQueryable<PlayListRow> rows, PlayListView view) => view switch
+    {
+        PlayListView.Drafts => rows.Where(x => x.Status == PlayStatus.Draft),
+        PlayListView.Progress => rows.Where(x => x.Status == PlayStatus.Planned || x.Status == PlayStatus.Paused || x.Status == PlayStatus.Open),
+        PlayListView.Review => rows.Where(x => (x.Status == PlayStatus.Closed || x.Status == PlayStatus.Cancelled) && !(x.HasReview || x.ReviewedAtUtc != null)),
+        PlayListView.Reviewed => rows.Where(x => (x.Status == PlayStatus.Closed || x.Status == PlayStatus.Cancelled) && (x.HasReview || x.ReviewedAtUtc != null)),
+        PlayListView.Closed => rows.Where(x => x.Status == PlayStatus.Closed),
+        PlayListView.Cancelled => rows.Where(x => x.Status == PlayStatus.Cancelled),
+        _ => rows
+    };
+
+    // Every character char.IsWhiteSpace accepts, so SQL "has a review" matches Play.HasReview exactly.
+    private static readonly char[] Space = "\t\n\v\f\r \u0085\u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000".ToCharArray();
+
+    // Owner-filtered Plays on enabled accounts in the scope, projected to summary columns only.
+    private IQueryable<PlayListRow> Rows(PlayListFilter filter)
+    {
+        var accounts = db.Accounts.Where(a => a.IsEnabled);
+        var id = filter.Scope.Id;
+        accounts = filter.Scope.Kind switch
+        {
+            "unassigned" => accounts.Where(a => a.PortfolioId == null),
+            "portfolio" => accounts.Where(a => a.PortfolioId == id),
+            "account" => accounts.Where(a => a.Id == id),
+            _ => accounts
+        };
+        var plays = db.Plays.Where(p => accounts.Any(a => a.Id == p.AccountId));
+        if (filter.Search is { } search)
+        {
+            var pattern = "%" + search.Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_") + "%";
+            plays = plays.Where(p => EF.Functions.ILike(p.Title, pattern, @"\") ||
+                p.ContractId != null && EF.Functions.ILike(p.ContractId, pattern, @"\"));
+        }
+        return plays.Select(p => new PlayListRow
+        {
+            Id = p.Id, Title = p.Title, Status = p.Status, AccountId = p.AccountId, VenueId = p.VenueId, ContractId = p.ContractId,
+            InstrumentSource = p.InstrumentSource, Direction = p.Direction, PlanRevision = p.PlanRevision, Version = p.Version,
+            CancelReason = p.CancelReason, CreatedAtUtc = p.CreatedAtUtc, UpdatedAtUtc = p.UpdatedAtUtc, PlannedAtUtc = p.PlannedAtUtc,
+            EndedAtUtc = p.EndedAtUtc, Origin = p.Origin, ReviewedAtUtc = p.ReviewedAtUtc,
+            HasReview = p.Review.Trim(Space) != "" || p.ReviewAdherence != null ||
+                p.ReviewMistakeTag != null && p.ReviewMistakeTag.Trim(Space) != "" ||
+                p.ReviewLesson.Trim(Space) != "" || p.ReviewNextAction.Trim(Space) != ""
+        });
+    }
+
     public Task<Play?> FindAsync(Guid id, CancellationToken ct) => db.Plays.SingleOrDefaultAsync(x => x.Id == id, ct);
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => db.Accounts.SingleOrDefaultAsync(x => x.Id == id, ct);
     public Task<List<PlayPlanRevision>> RevisionsAsync(Guid playId, CancellationToken ct) =>

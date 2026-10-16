@@ -83,7 +83,7 @@ public sealed class PostgresTests
         var foreignOwner = Guid.NewGuid();
         var playId = Guid.NewGuid();
         var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync(
-            $"INSERT INTO plays (\"Id\", \"OwnerId\", \"AccountId\", \"VenueId\", \"ContractId\", \"Status\") VALUES ({playId}, {foreignOwner}, {account.Id}, 'manual', 'BTC-PERP', 'Active')"));
+            $"INSERT INTO plays (\"Id\", \"OwnerId\", \"AccountId\", \"VenueId\", \"ContractId\", \"Status\", \"Direction\") VALUES ({playId}, {foreignOwner}, {account.Id}, 'manual', 'BTC-PERP', 'Active', 'long')"));
         Assert.Equal(PostgresErrorCodes.ForeignKeyViolation, error.SqlState);
     }
 
