@@ -21,7 +21,20 @@ The stack is based on `main` at `f80e641`, including the P1 diary changes, backe
 - Preserve owner filters, account and Play locking, exact execution facts, retrospective/manual workflows and theme tokens.
 - Record executed commands, results, independent review findings and PR links here as each layer completes. Pending tests are not passing tests.
 
-## Final restacked chain, October 16
+## Final chain on main, October 16
+
+The reviewed chain was rebased onto `main` at `f52f129` (the visual refresh, #49) as `final/43` → `final/47`. Every layer combines with the refresh rather than replacing it: AGENTS keeps main's paragraphs plus the monitor ones; account rows keep the refresh's grouping and add the monitor badge; account detail keeps the refresh's summary card (monitor badge inside it), then Source, then the monitor and discrepancy sections before the balance tiles; the Play journal's Execution tab keeps the refresh's quieter header and shows the monitor panel (with Check, the 202 run) instead of the old Check venue button; the shell keeps the page-settle wrapper and gates Review on the event head; Settings keeps the refresh's shorter copy; monitor CSS uses the refresh's panel, divider and type tokens. Two final #45 review fixes were added (stranded work on disabled or source-less accounts is settled by discovery; only a current-book Open row keeps a watched order resting), and a settled owner Check now completes with `monitor.run-completed` (`superseded`).
+
+| Check (at `final/47`) | Result |
+|---|---|
+| Backend suite, disposable PostgreSQL and RabbitMQ | 2,260 passed, zero failed, five optional live/S3 skips (`final/45` 2,060; `final/46` 2,256) |
+| Frontend frozen install, typecheck, lint, tests, build | Passed; 1,982 tests across 108 files (`final/45`: 1,911 across 101) |
+| Operator Python, prototype, `docker compose config` | 29 and 76 passed; base and six overlays valid |
+| Packaged verification (S3 mode, synthetic data) | 166 checks passed, zero failed: image 5, HTTP 44, TLS 47, worker 10, monitor 26, restore 12, security 8, browser 14 |
+
+Synthetic captures of Overview, account detail with monitor and discrepancies, and the Play editor's monitor panel were taken in Graphite and Paper at desktop and 390 px widths for review.
+
+## Restacked chain, October 16
 
 After the October 15 redesign and review fixes, the five layers were restacked into one linear chain on `main` at `7335a42`: `stack/43` (unit of work) → `stack/44` (events, topics and subscriptions) → `stack/45` (worker) → `stack/46` (discrepancies) → `stack/47` (monitor UI). Semantic adaptations made while restacking:
 
