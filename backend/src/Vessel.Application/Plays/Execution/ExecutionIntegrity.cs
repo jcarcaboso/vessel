@@ -1,4 +1,5 @@
 using Vessel.Application.Sizing;
+using Vessel.Application.Venues;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
@@ -32,6 +33,8 @@ public static class ExecutionIntegrity
         var name = $"an {(entry ? "entry" : "exit")} of a {plan.Direction} play";
         if (entry != (order.Side == entrySide)) return $"A {order.Side} order cannot be {name}.";
         if (entry && (order.ReduceOnly || order.IsPositionTpsl)) return $"A reduce-only or position TP/SL order cannot be {name}.";
+        if (role == OrderLinkRole.Stop && OrderMechanics.Classify(order.OrderType, order.TriggerPrice is not null) == OrderMechanism.TakeProfit)
+            return $"A take-profit order cannot be a stop of a {plan.Direction} play.";
         var effects = fills.Where(f => Contradicts(role, entrySide, f)).Select(f => $"{f.Side} {f.PositionEffect}").Distinct().ToList();
         return effects.Count > 0 ? $"This order has {string.Join(", ", effects)} fills, so it cannot be {name}." : null;
     }

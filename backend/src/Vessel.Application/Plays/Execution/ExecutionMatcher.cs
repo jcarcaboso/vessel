@@ -1,4 +1,5 @@
 using System.Globalization;
+using Vessel.Application.Venues;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 
@@ -63,7 +64,7 @@ public static class ExecutionMatcher
                 order.PlacedAtUtc < play.CreatedAtUtc)
                 continue;
             var acting = order.TriggerPrice ?? order.LimitPrice;
-            var kind = order.OrderType.ToLowerInvariant();
+            var mechanism = OrderMechanics.Classify(order.OrderType, order.TriggerPrice is not null);
             var entrySide = ExecutionIntegrity.EntrySide(plan);
             var opened = firstEntryFill?.Invoke(play);
             bool Executed(OrderLinkRole role) => fills.All(f => !ExecutionIntegrity.Contradicts(role, entrySide, f)) &&
@@ -75,8 +76,8 @@ public static class ExecutionMatcher
                 {
                     OrderLinkRole.Entry => !order.ReduceOnly && !order.IsPositionTpsl,
                     // A stop acts through a trigger; a resting limit at the stop would fill at once.
-                    OrderLinkRole.Stop => order.TriggerPrice is not null && !kind.Contains("take profit"),
-                    OrderLinkRole.Target => !kind.Contains("stop"),
+                    OrderLinkRole.Stop => mechanism is not (OrderMechanism.Plain or OrderMechanism.TakeProfit),
+                    OrderLinkRole.Target => mechanism != OrderMechanism.Stop,
                     _ => false
                 };
                 if (fits && Executed(level.Role)) planned.Add(new(play, level));

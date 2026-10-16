@@ -5,9 +5,12 @@ using Vessel.Domain.Monitoring;
 
 namespace Vessel.Application.Monitoring;
 
+/// <param name="Outcome"><c>unverifiable</c> when the subject stayed unobservable beyond the monitor lifetime; the
+/// record is neither resolved nor still checked. Null otherwise.</param>
 public sealed record MonitorDiscrepancyDto(Guid Id, Guid AccountId, Guid? PlayId, string ContractId, string Kind,
     string Severity, string State, DateTimeOffset OpenedAtUtc, DateTimeOffset? ConfirmedAtUtc,
-    DateTimeOffset? ResolvedAtUtc, DateTimeOffset? DismissedAtUtc, string? Note, JsonElement Details);
+    DateTimeOffset? ResolvedAtUtc, DateTimeOffset? DismissedAtUtc, string? Note, JsonElement Details,
+    string? Outcome = null, DateTimeOffset? UnverifiableAtUtc = null);
 public sealed record AccountMonitorDto(Guid AccountId, string State, DateTimeOffset? LastAttemptAtUtc,
     DateTimeOffset? LastSuccessAtUtc, DateTimeOffset? NextRunAtUtc, string ManualState,
     DateTimeOffset? NextManualAllowedAtUtc, string? Error, bool WorkerOnline, IReadOnlyList<MonitorDiscrepancyDto> Discrepancies);
@@ -35,6 +38,12 @@ public interface IMonitorEvaluator
     /// <returns>A confirmation deadline, if another fresh account-wide observation is needed.</returns>
     Task<MonitorEvaluationResult> EvaluateAsync(MonitorEvaluation observation, CancellationToken ct);
     Task<IReadOnlyList<MonitorDiscrepancyDto>> ReadAsync(Guid accountId, Guid? playId, CancellationToken ct);
+    /// <summary>
+    /// Discrepancy housekeeping for a lease-owned run that made no discrepancy decisions, under the same account fence.
+    /// <paramref name="interrupted"/> (failed or discarded checks) breaks pending confirmation sequences; every run
+    /// ages outstanding work toward its unverifiable outcome.
+    /// </summary>
+    Task SettleAsync(Account account, Guid runId, string trigger, bool interrupted, CancellationToken ct);
 }
 
 public interface IMonitorImporter

@@ -37,7 +37,8 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
                           join a in db.Accounts on m.AccountId equals a.Id
                           where a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) &&
                               (ActivePlays.Any(p => p.AccountId == a.Id) ||
-                               Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)))
+                               Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)) ||
+                               AwaitingDiscrepancies.Any(d => d.AccountId == a.Id))
                           orderby m.AccountId
                           select new { Row = m, a.VenueId }).Take(200).ToListAsync(ct);
         return rows.Select(r => (r.Row, r.VenueId)).ToArray();
@@ -113,7 +114,26 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
         var cutoff = now - settings.WatchLifetime;
         // The watch starts at the later of the Play's end and the link change; it is live while that is after the cutoff.
         return await ActivePlays.AnyAsync(p => p.AccountId == accountId, ct) ||
-            await Watching.AnyAsync(x => x.Link.AccountId == accountId && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff), ct);
+            await Watching.AnyAsync(x => x.Link.AccountId == accountId && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff), ct) ||
+            await AwaitsDiscrepancyAsync(accountId, ct);
+    }
+
+    /// <summary>Outstanding, still verifiable discrepancy work: a (re-)confirmation or an open warning.</summary>
+    private IQueryable<PlayDiscrepancy> AwaitingDiscrepancies => db.Set<PlayDiscrepancy>().Where(d => d.UnverifiableAtUtc == null &&
+        (d.State == DiscrepancyLifecycle.Candidate || d.State == DiscrepancyLifecycle.Open || d.PendingFingerprint != null));
+
+    /// <summary>
+    /// Outstanding discrepancy work keeps the account checked, even after its last Play or watch ends: a (re-)confirmation
+    /// in progress whatever the public state, including across interrupted sequences, or an open warning awaiting fresh
+    /// clearance. An unverifiable record no longer does. Rows changed in this unit of work but not yet saved take precedence.
+    /// </summary>
+    private async Task<bool> AwaitsDiscrepancyAsync(Guid accountId, CancellationToken ct)
+    {
+        var local = db.ChangeTracker.Entries<PlayDiscrepancy>()
+            .Where(e => e.Entity.AccountId == accountId && e.State != EntityState.Deleted).Select(e => e.Entity).ToArray();
+        if (local.Any(x => x.HasWork)) return true;
+        var tracked = local.Select(x => x.Id).ToArray();
+        return await AwaitingDiscrepancies.AnyAsync(d => d.AccountId == accountId && !tracked.Contains(d.Id), ct);
     }
 
     public async Task<IReadOnlyList<MonitorCandidate>> DiscoveryCandidatesAsync(IReadOnlyCollection<string> venueIds,
@@ -133,12 +153,13 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
                 Active = ActivePlays.Any(p => p.AccountId == a.Id),
                 Watching = Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)),
                 Expired = Watching.Any(x => x.Link.AccountId == a.Id && !(x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)),
+                Awaiting = AwaitingDiscrepancies.Any(d => d.AccountId == a.Id),
                 Row = Rows.FirstOrDefault(m => m.AccountId == a.Id)
             }).ToListAsync(ct);
         var ids = rows.Select(r => r.Id).ToArray();
         var credentials = (await db.AccountCredentials.AsNoTracking().Where(c => ids.Contains(c.AccountId)).ToListAsync(ct))
             .ToLookup(c => c.AccountId);
-        return rows.Select(r => new MonitorCandidate(r.Id, r.VenueId, r.Monitorable, r.Active || r.Watching, r.Expired,
+        return rows.Select(r => new MonitorCandidate(r.Id, r.VenueId, r.Monitorable, r.Active || r.Watching || r.Awaiting, r.Expired,
             credentials[r.Id].Where(c => c.Purpose == r.VenueId + "-read-token").Select(CredentialAttempt.RevisionOf).FirstOrDefault(),
             r.Row)).ToArray();
     }
