@@ -85,13 +85,13 @@ public sealed partial class LighterAdapterTests
     public async Task Coverage_fill_omissions_preserve_valid_facts_without_asserting_complete_history()
     {
         var missingPnl = Change(Trade, "ask_account_pnl", null);
-        var unverified = Change(Trade, "maker_fee", null);
+        var omittedZeroFee = Change(Trade, "maker_fee", null);
         var feeBearing = Change(Trade, "maker_fee", JsonValue.Create(1));
         var selfTrade = Change(Trade, "bid_account_id", JsonValue.Create(Source));
         using var handler = CoverageHandler();
         var snapshotReply = handler.Reply!;
         handler.Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/trades", StringComparison.Ordinal)
-            ? Response(Trades(string.Join(",", Trade, missingPnl, unverified, feeBearing, selfTrade)))
+            ? Response(Trades(string.Join(",", Trade, missingPnl, omittedZeroFee, feeBearing, selfTrade)))
             : snapshotReply(request);
         var result = await Reader(handler).ReadAsync(Source, default);
         Assert.True(result.PositionsComplete);
@@ -99,10 +99,10 @@ public sealed partial class LighterAdapterTests
         Assert.False(result.FillHistoryTruncated);
         Assert.Equal("9223372036854775806", Assert.Single(result.Fills).SourceFillId);
         Assert.Contains("1 executions omitted because realized PnL was not reported", result.HistoryNotice);
-        Assert.Contains("2 fee-bearing or unverified-fee executions omitted", result.HistoryNotice);
+        Assert.Contains("1 fee-bearing or unverified-fee executions omitted", result.HistoryNotice);
         Assert.Contains("1 self-trade executions omitted", result.HistoryNotice);
-        // Normalized for the monitor: one missing-PnL and two fee executions; self-trades leave the position unchanged.
-        Assert.Equal(3, result.OmittedExecutions);
+        // One missing-PnL and one fee execution. The zero-fee duplicate is valid; self-trades leave position unchanged.
+        Assert.Equal(2, result.OmittedExecutions);
     }
 
     [Fact]
