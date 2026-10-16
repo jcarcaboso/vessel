@@ -277,6 +277,29 @@ public sealed class EventSubscriptionTests
         Assert.Equal(5, (await runtime.CatchUpAsync(plays)).LowWaterMark);
     }
 
+    // A fresh "0" cursor over fully pruned history starts at the floor, and resuming from it never resets.
+    [VesselEventPostgresFact]
+    public async Task Fresh_cursor_over_fully_pruned_history_resumes_without_reset()
+    {
+        await using var runtime = await Runtime.CreateAsync();
+        var old = runtime.Clock.GetUtcNow().AddDays(-100);
+        await runtime.AppendAsync(Draft("old-1", detected: old));
+        await runtime.AppendAsync(Draft("old-2", detected: old));
+        Assert.Equal(new RetentionResult(2, 2), await runtime.RetainAsync());
+        var history = new VesselEventHistory(runtime.Reader);
+        var empty = await history.ReadAsync("0", 10, default);
+        Assert.False(empty.ResetRequired);
+        Assert.Empty(empty.Events);
+        Assert.EndsWith(".2", empty.NextCursor);
+        var resumed = await history.ReadAsync(empty.NextCursor, 10, default);
+        Assert.False(resumed.ResetRequired);
+        Assert.Empty(resumed.Events);
+        var fresh = await runtime.AppendAsync(Draft("fresh"));
+        var next = await history.ReadAsync(empty.NextCursor, 10, default);
+        Assert.False(next.ResetRequired);
+        Assert.Equal(fresh.Id, Assert.Single(next.Events).Id);
+    }
+
     // B5/B6: contiguous prefix only, pending work holds retention, lagging subscriptions are released with a
     // recorded gap, physical deletion repeats safely and the cursor lock is not held while scanning.
     [VesselEventPostgresFact]
