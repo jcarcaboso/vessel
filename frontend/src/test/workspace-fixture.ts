@@ -1,7 +1,7 @@
 import { vi } from 'vitest'
 import { emptyReview } from './review-fixture'
 import type { SizingDocument } from '@/api/sizing'
-import type { SavedPlay } from '@/api/plays'
+import { pagedPlayViews, playInView, playViews, unpagedPlayLimit, type PlayCounts, type PlayList, type PlayListQuery, type PlaySummary, type SavedPlay } from '@/api/plays'
 import type { BrokerAccount, CandleSeries, InstrumentCatalog, MarketContext, Overview, Portfolio, WorkspaceApi } from '@/api/workspace'
 
 export const portfolioFixture: Portfolio = {
@@ -73,14 +73,37 @@ export const marketContextFixture: MarketContext = {
 export const idleMarketStream: WorkspaceApi['marketStream'] = (_id, _query, signal) =>
   new Promise(resolve => signal.aborted ? resolve() : signal.addEventListener('abort', () => resolve(), { once: true }))
 
+/** The server's list selection over these plays: view, search, scope, order and page, for fake APIs. */
+export function playListPage(plays: PlaySummary[], query: PlayListQuery): PlayList {
+  const q = query.q?.trim().toLowerCase() ?? ''
+  const account = query.scope?.startsWith('account:') ? query.scope.slice(8) : null
+  const ended = !['drafts', 'progress', 'all'].includes(query.view)
+  const time = (value: string | null) => value === null ? 0 : Date.parse(value)
+  const matching = plays.filter(play => playInView(play, query.view) && (account === null || play.accountId === account) &&
+    (!q || play.title.toLowerCase().includes(q) || (play.instrument ?? '').toLowerCase().includes(q)))
+    .sort((a, b) => (ended ? time(b.endedAtUtc) - time(a.endedAtUtc) : 0) || time(b.updatedAtUtc) - time(a.updatedAtUtc) || a.id.localeCompare(b.id))
+  if (!pagedPlayViews.includes(query.view)) {
+    const limit = Math.min(query.pageSize ?? unpagedPlayLimit, unpagedPlayLimit)
+    return { plays: matching.slice(0, limit), view: query.view, page: 1, pageSize: limit, totalCount: matching.length }
+  }
+  const pageSize = query.pageSize ?? 25
+  const page = Math.min(query.page ?? 1, Math.max(1, Math.ceil(matching.length / pageSize)))
+  return { plays: matching.slice((page - 1) * pageSize, page * pageSize), view: query.view, page, pageSize, totalCount: matching.length }
+}
+/** A fake `plays` endpoint over these plays. */
+export const playsFrom = (plays: PlaySummary[]): WorkspaceApi['plays'] => query => Promise.resolve(playListPage(plays, query))
+/** A fake `playCounts` endpoint over these plays. */
+export const playCountsFrom = (plays: PlaySummary[]): WorkspaceApi['playCounts'] => query => Promise.resolve(
+  Object.fromEntries(playViews.map(view => [view, playListPage(plays, { ...query, view }).totalCount])) as PlayCounts)
+
 /** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
-export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' |
+export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' | 'playCounts' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' |
   'deletePlay' | 'playExecution' | 'checkPlayExecution' | 'linkOrder' | 'unlinkOrder' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'review' | 'reviewExclusions' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution'> {
   const unexpected = () => Promise.reject(new Error('Unexpected play API call in this test.'))
   return {
     // Tests outside Overview keep this unrelated read pending unless they supply a summary fixture.
     overviewSummary: vi.fn().mockImplementation(() => new Promise(() => {})),
-    plays: vi.fn().mockResolvedValue([]), play: vi.fn(unexpected), createPlay: vi.fn(unexpected), updatePlay: vi.fn(unexpected),
+    plays: vi.fn(playsFrom([])), playCounts: vi.fn(playCountsFrom([])), play: vi.fn(unexpected), createPlay: vi.fn(unexpected), updatePlay: vi.fn(unexpected),
     changePlayStatus: vi.fn(unexpected), playHistory: vi.fn().mockResolvedValue({ revisions: [], statusChanges: [] }),
     deletePlay: vi.fn(unexpected), playExecution: vi.fn(unexpected), checkPlayExecution: vi.fn(unexpected),
     linkOrder: vi.fn(unexpected), unlinkOrder: vi.fn(unexpected), evidence: vi.fn().mockResolvedValue([]), evidenceImage: vi.fn(unexpected),

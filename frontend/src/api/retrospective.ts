@@ -1,11 +1,11 @@
-import { isActivityDocument, isOperationId, type ActivityOperation } from './activity'
+import { isOperationId, isOperationWithFills, type OperationWithFills } from './activity'
 import { isGuid, isNonBlankText, isRecord, isText } from './guards'
 
 export interface RetrospectivePreview {
   eligible: boolean
   reasons: string[]
   fingerprint: string
-  operation: ActivityOperation
+  operation: OperationWithFills
   notice: string
 }
 export interface CreateRetrospectivePlayRequest {
@@ -16,18 +16,17 @@ export interface CreateRetrospectivePlayRequest {
   title: string
   review?: string
 }
+/** A preview carries at most this many original rows, as before Activity paging. */
+const previewFillLimit = 200
 /** Validate the original operation with the same bounded fact guard used by Activity. */
 export function isRetrospectivePreview(value: unknown): value is RetrospectivePreview {
   if (!isRecord(value) || typeof value.eligible !== 'boolean' || !isNonBlankText(value.fingerprint, 256) || !isNonBlankText(value.notice, 4000) ||
     !Array.isArray(value.reasons) || value.reasons.length > 10_000 || !value.reasons.every(reason => isNonBlankText(reason, 2000)) ||
     !isRecord(value.operation)) return false
   const op = value.operation
-  return isActivityDocument({
-    operations: [op], totalOperationCount: 1, retainedFillCount: op.fillCount,
-    omittedOperationCount: 0, coverage: [], scopeNote: value.notice,
-  }) && (!value.eligible || value.reasons.length === 0 && op.status === 'closed' &&
+  return isOperationWithFills(op, previewFillLimit) && (!value.eligible || value.reasons.length === 0 && op.status === 'closed' &&
     op.direction !== null && op.playAssociation === 'unassigned' && op.omittedFillCount === 0 &&
-    (op.fills as ActivityOperation['fills']).every(part => part.fill.playId === null &&
+    op.fills.every(part => part.fill.playId === null &&
       (part.role === 'entry' && part.fill.positionEffect === 'open' || part.role === 'exit' && part.fill.positionEffect === 'close')))
 }
 

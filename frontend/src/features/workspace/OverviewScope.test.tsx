@@ -2,9 +2,11 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OverviewQuery, OverviewSummaryDocument } from '@/api/overview-summary'
 import { createWorkspaceApi, type Overview } from '@/api/workspace'
-import { accountFixture, overviewFixture, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
+import { accountFixture, overviewFixture, playListPage, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
+import type { ActivityQuery } from '@/api/activity'
+import { playViews, type PlayCounts, type PlayListQuery } from '@/api/plays'
 import { overviewSummaryFixture, summaryTotals } from '@/test/overview-summary-fixture'
-import { activityFixture, operationFixture } from '@/test/activity-fixture'
+import { activityPage, operationFixture } from '@/test/activity-fixture'
 import { systemFixture } from '@/test/system-fixture'
 import { ApplicationShell } from './ApplicationShell'
 import { overviewAccounts, resolveOverviewScope } from './overview-scope'
@@ -23,10 +25,16 @@ function scopedSummary(query: OverviewQuery): OverviewSummaryDocument {
   document.totalGroupCount = document.rows.length
   return document
 }
+const operations = [operationFixture, { ...operationFixture, id: 'other-op', accountId: other.id, contractId: 'ETH' }]
+const plays = [{ ...savedPlayFixture.summary, status: 'planned' as const, title: 'Main play' }, { ...savedPlayFixture.summary, status: 'planned' as const, id: 'other-play', title: 'Other play', accountId: other.id }]
+/** The server's scope: only enabled accounts in the selected portfolio, Unassigned or account. */
+const inScope = (scope: string | undefined, accountId: string) => overviewAccounts(scope ?? 'all', overview.accounts).some(a => a.id === accountId)
 function client() {
+  const playPage = (query: PlayListQuery) => playListPage(plays.filter(p => inScope(query.scope, p.accountId)), { ...query, scope: 'all' })
   return { ...createWorkspaceApi('test'), overview: vi.fn().mockResolvedValue(overview), overviewSummary: vi.fn(async (q: OverviewQuery) => scopedSummary(q)),
-    activity: vi.fn().mockResolvedValue({ ...activityFixture, operations: [operationFixture, { ...operationFixture, id: 'other-op', accountId: other.id, contractId: 'ETH' }], totalOperationCount: 2 }),
-    plays: vi.fn().mockResolvedValue([ { ...savedPlayFixture.summary, title: 'Main play' }, { ...savedPlayFixture.summary, id: 'other-play', title: 'Other play', accountId: other.id } ]) }
+    activity: vi.fn(async (q: ActivityQuery) => activityPage(operations.filter(op => inScope(q.scope, op.accountId)), { pageSize: q.pageSize })),
+    plays: vi.fn(async (q: PlayListQuery) => playPage(q)),
+    playCounts: vi.fn(async (q: { scope?: string }) => Object.fromEntries(playViews.map(view => [view, playPage({ ...q, view }).totalCount])) as PlayCounts) }
 }
 beforeEach(() => { window.history.replaceState(null, '', '/') })
 describe('Overview scope', () => {
@@ -50,7 +58,7 @@ describe('Overview scope', () => {
     expect(within(recent).queryByText('BTC')).not.toBeInTheDocument()
     expect(within(plays).queryByRole('button', { name: 'Open Main play' })).not.toBeInTheDocument()
     fireEvent.change(scope, { target: { value: `account:${main.id}` } })
-    await waitFor(() => expect(api.activity).toHaveBeenCalledWith(main.id, expect.any(AbortSignal)))
+    await waitFor(() => expect(api.activity).toHaveBeenCalledWith({ scope: `account:${main.id}`, page: 1, pageSize: 5 }, expect.any(AbortSignal)))
     await waitFor(() => expect(within(metrics).getByText('$10.00')).toBeInTheDocument())
     expect(within(recent).queryByText('ETH')).not.toBeInTheDocument()
   })

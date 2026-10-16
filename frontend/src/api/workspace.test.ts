@@ -487,7 +487,7 @@ describe('Client events', () => {
     const { events } = listen(api), { events: otherEvents } = listen(other)
     vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(new Response('{}', { status }))))
     await expect(api.overview()).rejects.toMatchObject({ kind: 'unauthorized' })
-    await expect(api.plays()).rejects.toMatchObject({ kind: 'unauthorized' })
+    await expect(api.plays({ view: 'progress' })).rejects.toMatchObject({ kind: 'unauthorized' })
     await expect(api.marketStream(accountFixture.id, { instrument: 'BTC', interval: '1h' }, new AbortController().signal, vi.fn()))
       .rejects.toMatchObject({ kind: 'unauthorized' })
     expect(events).toEqual([{ type: 'unauthorized' }, { type: 'unauthorized' }, { type: 'unauthorized' }])

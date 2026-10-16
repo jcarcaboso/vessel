@@ -162,6 +162,12 @@
 .workspace-badge.positive-badge { color: var(--positive); background: color-mix(in srgb, var(--positive) 9%, transparent); border-color: color-mix(in srgb, var(--positive) 28%, transparent); }
 .overview-play-tabs > .workspace-loading { margin: 12px 18px; }
 .overview-plays .workspace-alert { margin: 12px 18px; }
+.overview-play-pending { min-height: 120px; }
+.overview-play-skeleton { cursor: default; }
+.overview-play-skeleton .skeleton-title { width: min(180px, 60%); height: 15px; }
+.overview-play-skeleton .skeleton-identity { flex: 1 0 100%; max-width: 260px; height: 20px; }
+.overview-play-skeleton .skeleton-badge { width: 58px; height: 22px; }
+.overview-play-skeleton .skeleton-time { width: 92px; height: 11px; }
 .workspace-empty { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 230px; padding: 50px 25px; text-align: center; color: var(--muted-foreground); }
 .workspace-empty > svg { color: var(--brand); }
 .workspace-empty strong { color: var(--foreground); font-size: 15px; font-weight: 600; letter-spacing: var(--tracking-title); }

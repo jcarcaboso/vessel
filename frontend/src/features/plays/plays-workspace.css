@@ -547,11 +547,6 @@
 .plays-list-page h1 { margin: 9px 0 6px; font-size: var(--text-display); font-weight: 650; letter-spacing: var(--tracking-display); line-height: 1.15; }
 .plays-list-page .plays-unsaved { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 14px; }
 .plays-list-page .plays-unsaved span { flex: 1 1 260px; }
-.plays-list-filters { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; margin-bottom: 14px; border: 1px solid var(--line); border-radius: calc(var(--radius) + 2px); background: var(--surface-sunken); }
-.plays-list-filters button { padding: 6px 13px; border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground); font-size: var(--text-sm); font-weight: 550; cursor: pointer; transition: color .14s var(--ease-out), background .14s var(--ease-out); }
-.plays-list-filters button:hover { color: var(--foreground); }
-.plays-list-filters button.active { border-color: var(--line); background: var(--card); color: var(--foreground); box-shadow: var(--elevation-1); }
-.plays-list-filters button:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .plays-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .plays-list-item {
   display: grid; grid-template-columns: minmax(0, 1fr) auto auto minmax(120px, auto); align-items: center; gap: 14px;
@@ -573,6 +568,25 @@
 .plays-list-item .direction-chip.long { color: var(--positive); }
 .plays-list-item .direction-chip.short { color: var(--negative); }
 .plays-list-empty { padding: 40px 18px; border: 1px dashed var(--border); border-radius: var(--radius-panel); color: var(--muted-foreground); text-align: center; font-size: var(--text-sm); }
+/* Views, search and pages. The skeleton reuses the list item's padding, grid and border. */
+.plays-list-tabs { gap: 0; }
+.plays-list-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin-bottom: 14px; }
+.plays-list-toolbar > [data-slot="tabs-list"] { flex-wrap: wrap; height: auto; max-width: 100%; }
+.plays-list-toolbar [data-slot="tabs-trigger"] { flex: 0 0 auto; gap: 6px; padding: 5px 11px; font-size: var(--text-sm); }
+.plays-tab-count { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); font-size: var(--text-2xs); line-height: 17px; font-feature-settings: var(--figures); }
+.plays-search { position: relative; display: flex; align-items: center; flex: 0 1 260px; min-width: 180px; }
+.plays-search > svg { position: absolute; left: 11px; color: var(--muted-foreground); pointer-events: none; }
+.plays-search input { width: 100%; height: 36px; padding: 0 12px 0 32px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--field); color: var(--foreground); font: inherit; font-size: var(--text-sm); }
+.plays-search input::placeholder { color: var(--muted-foreground); }
+.plays-search input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.plays-list-tabs .pager { margin-top: 12px; padding-inline: 4px; border-top: 0; }
+.plays-cap { margin: 0 0 12px; }
+.plays-list-pending { min-height: 160px; }
+.plays-list-skeleton { cursor: default; }
+.plays-list-skeleton .skeleton-title { width: min(220px, 70%); height: 16px; }
+.plays-list-skeleton .skeleton-identity { width: min(300px, 90%); height: 20px; }
+.plays-list-skeleton .skeleton-chip { width: 52px; height: 20px; }
+.plays-list-skeleton .skeleton-meta { width: 120px; height: 14px; justify-self: end; }
 /* Quiet pills beside the status: plan revision and retrospective origin. */
 .plays-page .plays-status-pills { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .plays-page .badge:is(.play-revision, .play-retrospective) { display: inline-flex; flex-shrink: 0; align-items: center; padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-sunken); color: var(--muted-foreground); font-size: var(--text-2xs); font-weight: 550; letter-spacing: .02em; line-height: 1.4; }
@@ -589,6 +603,8 @@
 @media (max-width: 640px) {
   .plays-list-item { grid-template-columns: minmax(0, 1fr) auto; }
   .plays-list-meta { grid-column: 1 / -1; text-align: left; }
+  .plays-list-skeleton .skeleton-meta { grid-column: 1 / -1; justify-self: start; }
+  .plays-search { flex-basis: 100%; }
 }
 
 /* Execution tab: linked venue orders and fills, on the journal's surfaces (inline and expanded). */

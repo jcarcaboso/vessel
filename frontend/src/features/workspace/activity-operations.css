@@ -61,3 +61,15 @@
 .workspace-table.operations-table :is(th, td) { padding-left: 12px; padding-right: 12px; }
 .workspace-table.operations-table :is(th, td):first-child { padding-left: 16px; }
 .workspace-table.operations-table th { letter-spacing: .04em; }
+/* Paging: first-load skeleton rows with the real row geometry, lazy executions and the changed notice. */
+.operations-pending { min-height: 120px; }
+.operations-skeleton .operation-toggle { display: block; }
+.operations-skeleton .skeleton { width: 72%; height: 12px; }
+.operations-skeleton .skeleton-asset { width: 64px; height: 14px; }
+.operations-skeleton .skeleton-tags { width: 112px; height: 21px; margin-top: 7px; }
+.operation-fills-pending { min-height: 72px; }
+.operation-fills-skeleton { display: grid; gap: 4px; padding: 6px 0; }
+.operation-fills-skeleton-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+.operation-fills-skeleton-row .skeleton { width: 70%; }
+.activity-operations > .workspace-alert { margin: 0 20px 14px; }
+.activity-changed { align-items: center; }

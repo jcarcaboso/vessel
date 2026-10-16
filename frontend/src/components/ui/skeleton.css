@@ -1,0 +1,15 @@
+/* Placeholder bars for a first load, and the dimmed state of rows that are being replaced. Theme tokens only. */
+.skeleton {
+  position: relative; display: block; overflow: hidden; width: 100%; height: 12px; border-radius: calc(var(--radius-control) - 2px);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(100deg, transparent 20%, color-mix(in srgb, var(--foreground) 7%, transparent) 50%, transparent 80%);
+    animation: skeleton-shimmer 1.4s var(--ease-out) infinite;
+  }
+  @keyframes skeleton-shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+}
+/* Previous rows stay readable but quiet while the next page or filter result loads. */
+.list-refetching { opacity: .55; pointer-events: none; transition: opacity .15s var(--ease-out); }
