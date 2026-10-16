@@ -18,6 +18,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
     private const string Notice = "Results come from each closed play's linked fills: venue closed PnL less fees paid in listed USD stablecoins. " +
         NominalStablecoins.Caveat + " Plays on venues with different quote stablecoins are pooled nominally. " +
         "Suggestions are mechanical estimates from your risk setting and record, not advice.";
+    private const string RatioNotice = " The win/loss ratio exceeds the supported decimal range and is unknown.";
 
     public async Task<SizingDto> GetAsync(CancellationToken ct)
     {
@@ -32,9 +33,9 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
         var now = time.GetUtcNow();
         await unitOfWork.ExecuteAsync(async () =>
         {
-            var settings = await store.SettingsAsync(ct);
-            if (settings is null) store.Add(new SizingSettings(owner.OwnerId, risk, now));
-            else settings.SetRisk(risk, now);
+            // Validates before any write; concurrent first writes share one owner row and the last writer wins.
+            var settings = await store.SettingsForUpdateAsync(new SizingSettings(owner.OwnerId, risk, now), ct);
+            settings.SetRisk(risk, now);
             await store.SaveAsync(ct);
             return true;
         }, ct);
@@ -66,7 +67,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
                 ExactDecimal.FormatEightPlaces(record.AverageLossR), recent),
             new SizingLimitsDto(ExactDecimal.FormatEightPlaces(limits.EffectiveRiskPercent), ExactDecimal.FormatEightPlaces(limits.MaxStopPercent),
                 ExactDecimal.FormatEightPlaces(limits.MinRewardRisk), Source(limits.MaxStopSource), Source(limits.MinRewardRiskSource)),
-            Notice);
+            record is { AverageGainPercent: not null, AverageLossPercent: > 0, WinLossRatio: null } ? Notice + RatioNotice : Notice);
     }
 
     private static string Name<T>(T value) where T : Enum => value.ToString().ToLowerInvariant();
