@@ -57,7 +57,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
     // Strict parsing and bounded reads are shared with other venues; Hyperliquid keeps its own messages.
     private static readonly StrictJson Json = new(InvalidResponse);
     private const string Unavailable = "Hyperliquid is unavailable. Try again later.";
-    private BoundedJsonHttp Http => new(httpClient, timeProvider, Json, Unavailable, "Hyperliquid read timed out.", MaxResponseBytes);
+    // One per reader: the reader owns the injected HttpClient for its own (scoped) lifetime.
+    private readonly BoundedJsonHttp Http = new(httpClient, timeProvider, Json, Unavailable, "Hyperliquid read timed out.", MaxResponseBytes);
 
     private Task<T> ReadBoundedAsync<T>(Func<CancellationToken, Task<T>> read, CancellationToken cancellationToken) =>
         Http.ReadBoundedAsync(read, cancellationToken);
