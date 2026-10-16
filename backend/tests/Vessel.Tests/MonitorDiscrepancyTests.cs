@@ -72,6 +72,7 @@ public sealed class MonitorDiscrepancyTests
     [InlineData("orders")]
     [InlineData("positions")]
     [InlineData("gap")]
+    [InlineData("omitted")]
     [InlineData("stale")]
     [InlineData("future")]
     [InlineData("load-cap")]
@@ -84,6 +85,7 @@ public sealed class MonitorDiscrepancyTests
             case "orders": f.OrdersComplete = false; break;
             case "positions": f.PositionsComplete = false; break;
             case "gap": f.HistoryGap = true; break;
+            case "omitted": f.Omitted = 1; break;
             case "stale": f.ObservationOffset = TimeSpan.FromMinutes(-6); break;
             case "future": f.ObservationOffset = TimeSpan.FromMinutes(1); break;
             case "load-cap": f.Store.Complete = false; break;
@@ -454,6 +456,7 @@ internal sealed class DiscrepancyFixture
     public decimal? PriceStep;
     public bool PositionsComplete = true, OrdersComplete = true, HistoryGap, StampOpenOrders = true, Retired;
     public bool? Truncated;
+    public int Omitted;
     public TimeSpan ObservationOffset;
     public DiscrepancyFixture()
     {
@@ -496,7 +499,7 @@ internal sealed class DiscrepancyFixture
         var at = Clock.Now + ObservationOffset;
         return new(Guid.NewGuid(), Account, new(new(new(at, "primary-perpetuals", 100, 100, 0,
             Position == 0 || Retired ? [] : [new("BTC", Position, 100, 0, 0, 1)]), Retired ? [] : [new("BTC", 4, 10, "USDC", PriceStep)], [], "bounded",
-            PositionsComplete, false, Truncated), new(VenueOrders.Select(x => StampOpenOrders && x.Status == VenueOrderStatus.Open ? x with { StatusAtUtc = at } : x).ToArray(), at, "bounded", OrdersComplete)),
+            PositionsComplete, false, Truncated, OmittedExecutions: Omitted), new(VenueOrders.Select(x => StampOpenOrders && x.Status == VenueOrderStatus.Open ? x with { StatusAtUtc = at } : x).ToArray(), at, "bounded", OrdersComplete)),
             null, null, HistoryGap, "scheduled");
     }
     public Task<MonitorEvaluationResult> Evaluate() => Service.EvaluateAsync(Observation(), default);

@@ -44,7 +44,10 @@ public sealed partial class MonitorDiscrepancyService
 
     private Scan Observe(MonitorEvaluation observation, MonitorDiscrepancyFacts facts, DateTimeOffset now)
     {
-        var scan = new Scan { Incomplete = observation.HistoryGap || !facts.Complete };
+        // Executions the adapter knowingly omitted may belong to any Play or be unlinked: fill-derived quantities and
+        // the unlinked-fill check are unknown, exactly as with a fill-window gap.
+        var gap = observation.HistoryGap || observation.Read.Sync.OmittedExecutions > 0;
+        var scan = new Scan { Incomplete = gap || !facts.Complete };
         if (!facts.Complete) return scan;
         var sync = observation.Read.Sync;
         var orders = observation.Read.Orders;
@@ -125,7 +128,7 @@ public sealed partial class MonitorDiscrepancyService
             var ids = involved.Select(x => x.Play.Id).ToArray();
             var positions = positionsByContract[instrument.ContractId].ToArray();
             // A Play that closed after the snapshot (now terminal, so not expected) can still be in the venue position.
-            var valid = positionsFresh && !observation.HistoryGap && instrument.QuantityDecimals is >= 0 and <= 28 &&
+            var valid = positionsFresh && !gap && instrument.QuantityDecimals is >= 0 and <= 28 &&
                 involved.All(x => x.Valid && x.LastFill <= snapshotAt) && onInstrument.All(x => !(x.LastFill > snapshotAt)) &&
                 positions.Length <= 1 && positions.All(x => Same(instrument, x.ContractId, x.VenueContractId));
             var expected = involved.Aggregate(default(ExactAmount), (sum, p) => sum + (p.Plan.Direction == "long" ? p.Quantity : -p.Quantity));
@@ -157,7 +160,7 @@ public sealed partial class MonitorDiscrepancyService
             // A retained positive fact remains unlinked even after leaving the bounded recent venue window.
             // Linking/suggestion is local evidence of resolution; absence from recent fills never is.
             var ambiguousFills = after.Length != unlinked.Length;
-            var fillKnown = assignmentsComplete && Fresh(snapshotAt) && !observation.HistoryGap && !ambiguousFills && involved.All(x => x.Valid) &&
+            var fillKnown = assignmentsComplete && Fresh(snapshotAt) && !gap && !ambiguousFills && involved.All(x => x.Valid) &&
                 !truncatedFills.Contains(instrument.ContractId) && unlinked.All(x => x.OccurredAtUtc <= snapshotAt);
             // Details stay bounded for any number of fills; the fingerprint still covers every fill ID.
             scan.Add(new("fill.unlinked", Subject(instrument), null, instrument.ContractId, Native(instrument), "warning", fillKnown ? unlinked.Length > 0 : null,
@@ -186,7 +189,7 @@ public sealed partial class MonitorDiscrepancyService
             var knownOrders = ordersFresh && !duplicateOrders && identityKnown &&
                 scoped.All(x => x.Order is null || x.Order.StatusAtUtc <= at);
             var completeOrders = knownOrders && orders!.OpenOrdersComplete;
-            var freshQuantity = p.Valid && !observation.HistoryGap && p.LastFill <= at;
+            var freshQuantity = p.Valid && !gap && p.LastFill <= at;
             var resting = scoped.Where(x => Resting(x.Order)).ToArray();
             // A stop on the entry side closes nothing of this exposure: a sell stop covers a long, a buy stop a short.
             var exitSide = ExecutionMatcher.ExitSide(p.Plan);
