@@ -439,8 +439,12 @@ it. Check and account Refresh share admission and the two-account read limit.
 A Refresh never changes check backoff, monitor state or the scheduled check, and
 a refused or abandoned Refresh is never replayed by the worker.
 `Vessel:Monitor:WatchLifetime` (default `7.00:00:00`) bounds how long the linked
-exits of a closed or cancelled Play are watched; after it, a watch without proof
-ends as a persistent `unverifiable`, never as resolved.
+exits and entries of a closed or cancelled Play are watched; after it, a watch
+without proof ends as a persistent `unverifiable`, never as resolved.
+`Vessel:Monitor:UnobservableLifetime` (default `7.00:00:00`) bounds how long a
+discrepancy's subject may stay unobservable before the record becomes
+`unverifiable` and stops holding the account in monitoring. Both accept one hour
+to ninety days.
 Venue HTTP 429 `Retry-After` deadlines are retained in PostgreSQL per owner and
 venue. Check, Refresh and scheduled work respect the longest deadline across
 API and worker instances; a shorter later response cannot shorten it. A missing
@@ -670,9 +674,10 @@ This upgrade adds two services and new required settings. Before it:
   `VESSEL_MONITOR_*`, `RABBITMQ_APP_USER`/`RABBITMQ_APP_PASSWORD`.
 - Messaging settings are `Vessel__Messaging__*` (for example
   `Vessel__Messaging__RabbitMqUri`, which Compose builds for you).
-- Migrations `20261016110000_VesselEvents`, `20261016110100_AccountMonitor` and
-  `20261016110200_MessagingDeployments` add the event log, subscriptions and
-  receipts, monitor state and the deployment registrations.
+- Migrations `20261014180000_VesselEvents`, `20261015072425_AccountMonitor`,
+  `20261015072500_MessagingDeployments`, `20261015073737_PlayDiscrepancies` and
+  `20261015172843_PlayDiscrepancyUnverifiable` add the event log, subscriptions
+  and receipts, monitor state, the deployment registrations and discrepancies.
 - `migrate` now also runs `provision-messaging` against the new `rabbitmq`
   service, which must be healthy first; then `api` and the new `worker` start.
 - The restore procedure gains the mandatory `rotate-event-epoch` step below.
@@ -836,7 +841,13 @@ python3 scripts/verify-release.py --browser-module /absolute/path/to/playwright
 
 It checks HTTP and internal-CA TLS trust, spoofed scheme/address handling,
 compression, headers, unbuffered SSE via a local fixture, upload limits, unpublished
-web in TLS mode and a fresh-volume restore. The fixture replaces only the upstream
+web in TLS mode and a fresh-volume restore. For delivery it sets
+`Vessel__Messaging__Verification=true` on `migrate` and runs the `verification`
+subscription in a separate `verifier` worker (deployment `verification`), leaving
+the monitor worker's configuration as shipped: receipts prove live delivery, an
+outbox that holds the publication while RabbitMQ is stopped, delivery after the
+broker returns and after a restore without the broker volume; the subscription is
+deregistered at the end. The fixture replaces only the upstream
 for its nginx transport test, not production code. Cleanup runs on success/failure.
 The browser check uses synthetic API data and intercepts chart market reads, with
 no real venue call. Run frontend/.NET checks separately as in `docs/development.md`.

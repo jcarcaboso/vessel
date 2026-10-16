@@ -1,6 +1,6 @@
 # Play monitor: development plan
 
-October 14, 2026, revised October 15, 2026. Status: **implementation authorized on October 14, 2026, with Sol implementation and independent verification, final isolated end-to-end checks and stacked pull requests. On October 15 the owner replaced the delivery design with topics and subscriptions and accepted the review corrections below; the stack (#43–#47) is being amended before merge.**
+October 14, 2026, revised October 15 and 16, 2026. Status: **implementation authorized on October 14, 2026, with Sol implementation and independent verification, final isolated end-to-end checks and stacked pull requests. On October 15 the owner replaced the delivery design with topics and subscriptions and accepted the review corrections below; the stack (#43–#47) was amended and, on October 16, restacked into one linear chain before merge.**
 
 The owner asked to shape a background monitor before building it. The monitor watches active Plays at their venues, detects fills, checks stops and targets against the real venue position and moves Play status automatically. Every change raises an event. A later, platform-independent notification system consumes those events: Telegram first, Discord later, and in-app popups. This is step 4 of the [Play lifecycle](play-lifecycle.md#monitoring-and-notifications). Building notifications is out of scope; the event contract is designed for them.
 
@@ -22,7 +22,7 @@ Settled on October 14 after the first draft:
 - **Event retention:** configurable, starting at 90 days for every event type. Play history, imported facts and deduplication records remain separate; pending delivery work is not silently deleted. (How subscriptions hold retention was settled on October 15, below.)
 - **Browser checks on demand only.** The worker still checks automatically at the configured interval. Opening a Play does not request an extra run. The Check button is blocked while a run is pending or running and then for a configurable cooldown, shown as a countdown. The server enforces the same rule, so repeated presses or several tabs cannot queue extra venue reads.
 - **Check cooldown:** 60 seconds by default, configurable, measured from completion including failed attempts.
-- **Closed-Play follow-up:** keep checking linked exits after closure or cancellation at the normal interval until fresh venue evidence confirms they are no longer resting. Dismissing a warning does not stop those checks. Account-disable and credential guards still apply.
+- **Closed-Play follow-up:** keep checking linked exits (and, since the #45 review, linked entries) after closure or cancellation at the normal interval until fresh venue evidence confirms they are no longer resting. Dismissing a warning does not stop those checks. Account-disable and credential guards still apply.
 - **RabbitMQ management page:** exposed for now, for troubleshooting.
 - **Wolverine fit is checked first** (W0 spike) before any product work. W0 is complete with a conditional-go recommendation. Subsequent implementation authorization is recorded above.
 - **Unit of work first.** After W0, the owner chose a bounded unit-of-work refactor to centralize saves and transaction completion before integrating Wolverine. The top-level use case owns the boundary; nested stores do not commit or dispatch. Necessary intermediate saves remain inside the same transaction.
@@ -143,6 +143,8 @@ Clarified on October 15:
 - **Rollback failure keeps the cause.** If rollback also fails, the original exception is the one reported; the rollback failure is attached to it, and the scope becomes unusable.
 - **Failures cannot be swallowed.** Once a participant has thrown, the unit of work rolls back even if a caller catches the exception and carries on. This is deliberate: callers must not use catch-and-continue around participants, and must start a new unit of work instead.
 - **All write paths use it.** Evidence and sizing writes go through the unit of work, like Play, execution and account-import writes.
+- **No object storage inside a unit.** `IUnitOfWork.IsActive` is true while a unit runs in the scope, including inside a dispatched handler's savepoint, and also for any EF, explicitly enlisted or ambient `System.Transactions` transaction. Evidence upload/deletion and Play deletion call `RequireOutermost` and refuse before any storage call, because a rollback could not undo it.
+- **Savepoint isolation is the dispatcher's.** `UnitOfWork.IsolateAsync` (internal) runs a subscription handler and saves its effects in a savepoint; on failure it rolls back to the savepoint, clears tracked entities and every participant's buffered state, and keeps the unit and its receipt lock. Call it before any other buffered participant write in the unit, since that state is discarded too.
 
 ### Records and transport
 
@@ -290,6 +292,17 @@ Whole-position orders and coverage (October 15):
 
 One open record exists per account, kind and subject. When an open record's details change (a partial fill, a quantity change), its details are updated in place and no event is emitted; its identity and `OpenedAt` are kept. Only a resolved or dismissed record can re-open; re-opening increments its revision, so it raises a new `discrepancy.opened`.
 
+**Lifecycle (October 15–16).** `DiscrepancyLifecycle` is the one deterministic state machine, free of I/O, that applies an input (fresh present, fresh absent, incomplete, expiry tick, dismissal) to a record:
+- **States** are `candidate`, `open`, `resolved` and `dismissed`. A condition opens only after an uninterrupted fresh confirmation (a second independent observation at least 60 s later). An open warning follows its evidence silently. A changed recurrence of a resolved or dismissed record is durable pending work (`PendingFingerprint`) whatever the public state, until a fresh observation confirms or clears it; an incomplete observation restarts the sequence but does not erase the work.
+- **Announcements.** `PublishedTransition` and `PublishedRevision` record the last announced transition (`opened`, `resolved`, `dismissed`, `unverifiable`) and its revision. Anything ever announced stays visible, and every announcement (`opened` or `unverifiable`) gets exactly one matching close (`resolved` or `dismissed`). Dedup keys are revision-based: `discrepancy:{id}:{revision}:{transition}`.
+- **Unverifiable.** Work whose subject stays unobservable for `Vessel:Monitor:UnobservableLifetime` (1 hour to 90 days, default 7 days) after its last decisive observation gets the `unverifiable` outcome (`UnverifiableAtUtc`, DTO `outcome: "unverifiable"`) and one `discrepancy.unverifiable`, including for an unconfirmed candidate, which then becomes public. It is neither resolved nor still checked; it no longer holds eligibility or marks runs incomplete; the owner can dismiss it; a later fresh decision clears it. The option follows the same convention as the exit watch's `Vessel:Monitor:WatchLifetime`, but the two lifetimes are separate concepts.
+- **Eligibility versus evaluation membership.** Outstanding verifiable work (a candidate, an open warning or pending re-confirmation, not unverifiable) keeps the account eligible for scheduled checks, in `EligibleAsync`, set-based discovery and the summary, including rows changed but not yet saved in the unit. Evaluation membership is wider: every tracked record's subject, unverifiable or publicly open ones included, is evaluated whenever the account is checked.
+- **Housekeeping on every lease-owned outcome.** An evaluated check settles inside the evaluator. Every other lease-owned outcome settles discrepancy housekeeping exactly once through the coordinator's `SettleDiscrepanciesAsync`: a failed, discarded (timestamp-fenced or settings-changed) or interrupted check interrupts pending confirmations and ages work; a venue deferral (check or refused refresh), a check superseded before its read and an owner refresh only age work. A refresh never reconciles or confirms. Eligibility is recomputed afterwards, so a check without remaining work is not kept pending.
+- **Overdue checks are starvation-free.** Scheduled and confirmation claims are never gated by the manual cooldown, and a refresh never moves the check due time, so repeated owner refreshes cannot postpone a due check.
+- **Omitted executions.** When an adapter reports `OmittedExecutions` (in-scope fills knowingly left out), fill-derived position, protection-quantity and unlinked-fill checks are unknown, like a fill-window gap: they neither open nor resolve, and the evaluation is incomplete.
+
+**Order mechanics.** `OrderMechanics` is the single venue-neutral classification (plain, stop, take-profit, unrecognized trigger) from the adapters' normalized order type and trigger facts, shared by the automatic matcher, manual link validation and the monitor. Only stop mechanics establish own or shared stop protection; a take-profit or plain limit linked as a stop never does, and an unrecognized trigger leaves coverage unknown. Manual linking refuses a take-profit order for a stop level, and the matcher no longer auto-matches a take-profit (for example a Lighter take-profit) to a stop level. `protection.orphaned` still considers every resting linked stop or target.
+
 **Evaluation loads only what it needs:** Open Plays, terminal Plays still under exit or entry-orphan watch, and fills on the relevant contracts and orders since the earliest open entry. There are no growth-based caps that disable every check once an account has a long history.
 
 ## Event contract
@@ -345,9 +358,10 @@ Discrepancies are evaluated on the current state, so a problem that resolved its
 | `link.needs-confirmation` | An ambiguous order became a suggestion | warning | `link:{linkId}:suggested` |
 | `execution.link-changed` | An owner or the matcher links, confirms, unlinks or dismisses a link; data carries previous/current state | info | Stable link-change identity allocated with the mutation |
 | `discrepancy.opened` | A confirmed discrepancy opens or re-opens; data carries its kind and details. Updates to an open record emit nothing. | per kind | `discrepancy:{id}:{revision}:opened` |
-| `discrepancy.resolved` | Cleared or dismissed | info | `discrepancy:{id}:{revision}:resolved` |
+| `discrepancy.resolved` | Cleared or dismissed; data carries the resolution (`resolved` or `dismissed`) | info | `discrepancy:{id}:{revision}:resolved` or `discrepancy:{id}:{revision}:dismissed` |
+| `discrepancy.unverifiable` | Verification ended without a decision: the subject stayed unobservable beyond `UnobservableLifetime`. Data carries kind, state, `outcome`, last decisive observation and `unverifiableAtUtc`. | warning | `discrepancy:{id}:{revision}:unverifiable` |
 | `monitor.state-changed` | An account moves between persisted monitor states | warning when leaving `live`, info when returning | `monitor:{accountId}:{stateRevision}:{state}` |
-| `monitor.run-completed` | An owner-requested run completes | info | `monitor-run:{accountId}:{requestId}` |
+| `monitor.run-completed` | An owner-requested Check completes, even without a state change; data `{ trigger, outcome: succeeded \| failed \| superseded, state }`. A deferred Check is still pending and emits nothing; scheduled runs emit nothing. | info | `monitor-run:{accountId}:{requestId}` |
 | `credential.expiring` | A read-only token expires within 14 days | warning | `credential:{accountId}:{credentialRevision}:expiring` |
 
 `monitor_accounts.StateRevision` is the persisted identity of monitor state. It is incremented under the account and monitor lock whenever the state changes (run outcomes, account disable, credential changes), and is separate from the lease `Generation`. `runId` keeps the request or action identity. No identity is generated while serving reads: the API-derived `offline` and `stale` are projections, not events, unless a writer persists the transition.
@@ -399,6 +413,8 @@ Live delivery and catch-up use the same dispatcher. In one transaction it:
 Invariant: an event and its dedup identity are created atomically. Ordinary event deletion is only retention pruning, which keeps the dedup identity; account deletion removes both.
 
 Subscription handlers in this stack are database-only. The Notification Hub later enqueues provider work transactionally; nothing sends externally while holding the receipt lock.
+
+The handler runs in a savepoint of the dispatcher's unit (`IsolateAsync`), so a failing effect rolls back while the receipt stays locked and the attempt is recorded in the same transaction. The attempt cap bounds *recorded* attempts, not every rolled-back handler invocation: when the whole transaction fails at commit after the handler ran, the attempt is recorded in a new transaction, and if that also fails or the process dies the invocation is not counted (accepted in review). Handlers must therefore be database-only and idempotent.
 
 ### Settlement
 
@@ -453,7 +469,7 @@ Recovery is subscriber-side; there is no producer-side republish loop.
 
 ### In this stack
 
-No durable production subscription is required yet. The no-op `monitor` event consumer is removed. Tests and the release check register a verification subscription, prove delivery, broker loss and catch-up, then deregister it. The Notification Hub will be the first real subscription.
+No durable production subscription is required yet. The no-op `monitor` event consumer is removed. Tests and the release check register a verification subscription, prove delivery, broker loss and catch-up, then deregister it. The release check provisions it with `Vessel:Messaging:Verification` on `migrate` and runs it in a separate `verifier` worker (deployment `verification`), so the default monitor worker keeps its production configuration; during a broker outage it checks that the API outbox holds the publication. The Notification Hub will be the first real subscription.
 
 ### Notification Hub (future)
 
@@ -495,12 +511,13 @@ The UI shows this inside existing areas; the approved layout does not change:
 | `GET /api/events/stream?after={cursor}` | SSE: `event`, `status`, keepalive. Read with `fetch` and the bearer header through `api/sse.ts`; at most 4 streams per owner |
 | `POST /api/accounts/{id}/monitor/run` | 202 with the request time; 429 with `Retry-After` while a manual run is pending, running or cooling down; 409 when the account cannot be monitored |
 | `GET /api/accounts/{id}/monitor` | State, last success, next run, safe error, manual run state and when Check is available again |
-| `GET /api/plays/{id}/execution` | Adds `monitor` and `discrepancies` |
+| `GET /api/plays/{id}/execution` | Adds `monitor`, `discrepancies` and `watches` (linked exit and entry orders of an ended Play, with role and state) |
 | `POST /api/plays/{id}/discrepancies/{discrepancyId}/dismiss` | With an optional note |
 
-- **Check endpoint:** `POST /api/plays/{id}/execution/check` no longer reads venues: it records the same manual request as `monitor/run` for the Play's account (202, 429 or 409). The browser-driven `CheckAsync`, refresh-time order retention and the lock-holding `SyncAsync` are removed.
+- **Check endpoint:** `POST /api/plays/{id}/execution/check` no longer reads venues: it records the same manual request as `monitor/run` for the Play's account (202 `MonitorRunAccepted`, 429 or 409). It stays as an API alias; the browser uses `monitor/run`. The browser-driven `CheckAsync`, refresh-time order retention and the lock-holding `SyncAsync` are removed. Behaviour changes from that removal: opening a Play or the browser timer never reads a venue or links orders; reconciliation and status changes happen only in worker checks; an account Refresh retains facts but performs no linking or lifecycle change; a Check answers accepted, not done.
 - **Browser:** the 60 s venue polling in `usePlayExecution` goes away. The shell keeps one event stream. On an event for the open Play's account, the browser re-reads the stored execution, which touches the database only. If the stream is down, it polls that read every 60 s.
-- **Manual refresh** of an account stays available on the Accounts page. Its server path shares admission, source-revision validation and import locking with monitor runs. Decide its synchronous/asynchronous response shape during the worker step without allowing it to bypass read throttling.
+- **Manual refresh** of an account stays available on the Accounts page. Its server path shares admission, source-revision validation and import locking with monitor runs. Settled for #45: it stays synchronous in the API on its own refresh lease and read budget; a refused or abandoned refresh is released, never replayed by the worker.
+- **Browser stream (#47).** Before its first stored read the shell reads the event head and streams from it. The API has no dedicated head read: `frontend/src/api/event-cursor.ts`, the only code that knows cursor syntax, sends a bare legacy sequence beyond any retained one, which always answers with a reset naming the head. Status frames and pages carry `nextCursor`; event frames carry their resume cursor in the SSE `id:` line.
 
 ## Review corrections, October 15
 
@@ -545,7 +562,9 @@ Review of the stack found these defects; the owner accepted the corrections. Eac
 - `level.drift` decided per order;
 - evaluation loads only relevant Plays, orders and fills, with no growth-based caps.
 
-**#47 monitor UI:** adds `monitor.run-completed` for owner-requested runs, follows the cursor epoch and reset, and shows unknown coverage, `unverifiable` exit watches and `entry.orphaned` within the existing layout.
+**#46 follow-up (October 16):** the lifecycle state machine, revisioned announcements, `discrepancy.unverifiable`, `UnobservableLifetime`, eligibility versus evaluation membership, settlement on every lease-owned outcome, refresh expiry housekeeping, starvation-free overdue checks, `OrderMechanics`, and omitted executions as unknown evidence; see [Discrepancies](#discrepancies).
+
+**#47 monitor UI:** adds `monitor.run-completed` for owner Checks, follows the opaque `{epoch}.{sequence}` cursor, resets and SSE resume ids, reads explicit nulls, labels runs by `runTrigger`, and shows unknown coverage, `unverifiable` discrepancies and watches (with their role) and `entry.orphaned` within the existing layout.
 
 ## Delivery steps
 

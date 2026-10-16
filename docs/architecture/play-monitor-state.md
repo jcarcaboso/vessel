@@ -1,6 +1,6 @@
 # Play monitor implementation state
 
-October 15, 2026. Implementation authorized with Sol implementation agents, independent Sol verification, a final isolated end-to-end check and stacked pull requests. No notifications or drawing alerts are included.
+October 15, 2026, updated October 16. Implementation authorized with Sol implementation agents, independent Sol verification, a final isolated end-to-end check and stacked pull requests. No notifications or drawing alerts are included.
 
 ## Stack
 
@@ -20,6 +20,29 @@ The stack is based on `main` at `f80e641`, including the P1 diary changes, backe
 - Never read repository `.env`, connect tests to the owner database or apply migrations to it.
 - Preserve owner filters, account and Play locking, exact execution facts, retrospective/manual workflows and theme tokens.
 - Record executed commands, results, independent review findings and PR links here as each layer completes. Pending tests are not passing tests.
+
+## Final restacked chain, October 16
+
+After the October 15 redesign and review fixes, the five layers were restacked into one linear chain on `main` at `7335a42`: `stack/43` (unit of work) → `stack/44` (events, topics and subscriptions) → `stack/45` (worker) → `stack/46` (discrepancies) → `stack/47` (monitor UI). Semantic adaptations made while restacking:
+
+- **#44 on the final unit of work:** the event test scope implements `IsActive`; a dispatch test proves the handler's savepoint stays inside the active unit, so object-storage I/O is refused there and counted as an ordinary attempt.
+- **#46 on the reworked worker:** discrepancy housekeeping settles exactly once on every lease-owned outcome of the new coordinator, including supersedes and venue deferrals of checks and refused refreshes; the overdue-check exception was dropped because scheduled claims ignore the cooldown and refreshes never move the due time; discrepancy work is part of eligibility, set-based discovery and the summary; entry links are watched once, through the final #45 `TerminalLinks`; both discrepancy migration designers carry the final #45 model; omitted venue executions make fill-derived checks unknown.
+- **#47 on the final event layer:** `monitor.run-completed` through the new sink after every completed owner Check; the browser cursor is the opaque `{epoch}.{sequence}` with `nextCursor`, SSE `id:` resume cursors and all syntax in `event-cursor.ts`; explicit nulls; the `unverifiable` discrepancy outcome and watches with their role in the UI; the interim #45 Check client is replaced by `monitor/run` while keeping its 202 validator and the rule that opening a Play or a timer never requests a check. The release check proves delivery with the verification subscription in a separate `verifier` worker and checks the outbox during broker loss.
+
+| Check (at `stack/47`) | Result |
+|---|---|
+| Locked restore and Release build | Passed; zero warnings |
+| Backend suite, disposable PostgreSQL and RabbitMQ | 2,256 passed, zero failed, five optional live/S3 skips |
+| EF model | No pending changes; a fresh database migrates through `PlayDiscrepancyUnverifiable` |
+| Frontend typecheck, lint, tests, build | Passed; 1,871 tests across 104 files |
+| Operator Python tests | 29 passed |
+| Prototype tests | 76 passed |
+| `docker compose config` | Base file and six overlay combinations valid |
+| Packaged verification (S3 mode, synthetic data) | 166 checks passed, zero failed: image 5, HTTP 44, TLS 47, worker 10, monitor 26, restore 12, security 8, browser 14 |
+
+The packaged run built local API/web images and fresh Compose projects with private RustFS. Delivery was proven by the `verification` subscription's receipts from a separate `verifier` worker: live delivery, the API outbox holding the publication while RabbitMQ was stopped and draining after it returned, and delivery of an event pending at backup after a restore without the broker volume (after `rotate-event-epoch`), followed by deregistration. The browser smoke ran in the pinned `mcr.microsoft.com/playwright:v1.63.0-noble` image against the packaged web with UI-only monitor fixtures, including an unverifiable discrepancy; dark, light and 390 px captures were inspected.
+
+Each lower layer was also checked on its own: `stack/45` 2,057 backend tests and 1,800 frontend tests, `stack/46` 2,253 backend tests, all passing. The October 15 verification below predates the topic/subscription rework; its delivery statements (consumer delivery rows, republish) describe the replaced design.
 
 ## Current work
 

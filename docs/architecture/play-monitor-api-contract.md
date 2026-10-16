@@ -1,8 +1,8 @@
 # Play monitor API implementation contract
 
-October 14, 2026. Shared contract for the authorized backend/frontend workers. Implements the [monitor plan](play-monitor-plan.md), not notification delivery. Existing Play/execution DTO fields and approved layout remain intact.
+October 14, 2026, revised October 16 for the final stack. Shared contract for the authorized backend/frontend workers. Implements the [monitor plan](play-monitor-plan.md), not notification delivery. Existing Play/execution DTO fields and approved layout remain intact.
 
-All routes are authenticated and owner-scoped. Responses use `Cache-Control: no-store`. Times are ISO UTC or null. Decimal values in event/discrepancy details are strings. Event sequences are decimal strings, avoiding JavaScript integer precision limits. Browser cursors are opaque strings `{epoch}.{sequence}` (or `0` for a stream not yet seen); the epoch is rotated by the restore procedure.
+All routes are authenticated and owner-scoped. Responses use `Cache-Control: no-store`. Times are ISO UTC or null. Decimal values in event/discrepancy details are strings. Event sequences are decimal strings, avoiding JavaScript integer precision limits. Browser cursors are opaque strings `{epoch}.{sequence}` (or `0` for a stream not yet seen); the epoch is rotated by the restore procedure. Only `frontend/src/api/event-cursor.ts` parses, validates or orders them.
 
 ## Monitor state
 
@@ -40,9 +40,9 @@ interface MonitorRunAccepted {
 }
 ```
 
-The 202 response reports `manualState: 'pending'` and the unchanged state. The browser leaves pending/running when a stream event arrives, including `monitor.run-completed` (info, dedup key `monitor-run:{accountId}:{requestId}`, data `{ trigger, outcome: 'succeeded' | 'failed' | 'superseded', state }`), which every owner Check emits on completion even when the account state did not change; while a displayed account is not idle it also re-reads the stored account monitor every few seconds. Scheduled runs share admission and show as scheduled, not as an owner Check.
+The 202 response reports `manualState: 'pending'` and the unchanged state; it is accepted, not done. The browser leaves pending/running when a stream event arrives, including `monitor.run-completed` (info, dedup key `monitor-run:{accountId}:{requestId}`, data `{ trigger, outcome: 'succeeded' | 'failed' | 'superseded', state }`), which every owner Check emits on completion even when the account state did not change (a deferred Check stays pending and emits nothing; scheduled runs never emit it); while a displayed account is not idle it also re-reads the stored account monitor every few seconds. Scheduled runs share admission and show as scheduled, not as an owner Check.
 
-Busy/cooling requests return 429 with `Retry-After`; ineligible accounts return 409. The button counts down from server timestamps, disables during pending/running and does not create runs on page load. Scheduled and manual runs share admission. A failed attempt also starts the configured cooldown.
+Busy/cooling requests return 429 with `Retry-After`; ineligible accounts (no eligible venue Plays, pending linked orders or discrepancy work) return 409. The button counts down from server timestamps, disables during pending/running and does not create runs on page load. Scheduled and manual runs share admission. A failed attempt also starts the configured cooldown.
 
 ## Events
 
@@ -80,7 +80,7 @@ A cursor from another epoch (a restored database), below the retention floor, ah
 
 `GET /api/events/stream?after={cursor}` uses authenticated fetch SSE through the existing decoder. `event` frames contain `MonitorEvent` and an SSE `id:` line holding that event's resume cursor. `status` frames contain `{ state: 'ready' | 'reset', nextCursor: string }`; `ready` echoes the accepted cursor normalized with the epoch, and reset requires reloading stored state, not replaying historical popups. Keepalive comments need no UI action. Limit to four streams per owner and cancel when the API connection changes/disconnects. One shell subscription serves the browser; it is a database-cursor reader, not a broker subscription.
 
-Before its first stored-state read the shell reads the current head (an events page after a cursor beyond the retained range returns `resetRequired` with the head as `nextSequence`) and opens the stream from it, so a change committed during the initial load is delivered rather than skipped. Only `frontend/src/api/event-cursor.ts` interprets cursors. Reconnects back off from 2 s to 60 s with jitter, honour `Retry-After`, reset only after a stable connection or an event, and reload stored state only on `reset`.
+Before its first stored-state read the shell reads the current head and opens the stream from it, so a change committed during the initial load is delivered rather than skipped. There is no dedicated head read: `event-cursor.ts` sends a bare pre-epoch sequence beyond any retained one (`after=9223372036854775807&limit=1`), which always returns `resetRequired` with the head as `nextCursor`; that probe never leaves the module. The browser resumes after each event from its SSE `id:` cursor; an event in another epoch is new whatever its sequence. Reconnects back off from 2 s to 60 s with jitter, honour `Retry-After`, reset only after a stable connection or an event, and reload stored state only on `reset`.
 
 The UI reloads stored state on relevant events and polls stored state every 60 seconds when disconnected from the stream. These reads do not contact venues. No event/financial-data browser persistence is introduced.
 
@@ -112,16 +112,20 @@ interface MonitorDiscrepancy {
   contractId: string
   kind: string
   severity: 'info' | 'warning' | 'critical'
-  state: 'open' | 'resolved' | 'dismissed'
+  state: 'candidate' | 'open' | 'resolved' | 'dismissed' // a candidate is visible only once announced unverifiable
   openedAtUtc: string
   confirmedAtUtc: string | null
   resolvedAtUtc: string | null
   dismissedAtUtc: string | null
   note: string | null
   details: Record<string, unknown>
+  // 'unverifiable': the subject stayed unobservable beyond Vessel:Monitor:UnobservableLifetime (7 days). Neither resolved
+  // nor still checked; dismissable; cleared by a later fresh decision. Both fields are null otherwise, never omitted.
+  outcome: 'unverifiable' | null
+  unverifiableAtUtc: string | null
 }
 ```
 
-`POST /api/plays/{id}/discrepancies/{discrepancyId}/dismiss` accepts `{ note?: string | null }` and returns 204. An instrument-level discrepancy may be dismissed from an involved Play after server validation. `POST /api/accounts/{id}/discrepancies/{discrepancyId}/dismiss` supports the account-detail view and returns 204. Notes are bounded plain text. Dismissal does not stop monitoring or change executions.
+`POST /api/plays/{id}/discrepancies/{discrepancyId}/dismiss` accepts `{ note?: string | null }` and returns 204; only open or unverifiable records can be dismissed (409 otherwise). An instrument-level discrepancy may be dismissed from an involved Play after server validation. `POST /api/accounts/{id}/discrepancies/{discrepancyId}/dismiss` supports the account-detail view and returns 204. Notes are bounded plain text. Dismissal does not stop monitoring or change executions.
 
 Render monitor state within the existing Execution area, exceptional account badges and an offline shell banner. Preserve component theme tokens and accessible controls. No toast/notification system or new layout is included.
