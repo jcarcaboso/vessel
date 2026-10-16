@@ -725,6 +725,125 @@ public sealed class MonitorPostgresTests
         Assert.Empty((await coordinator.SummaryAsync(default)).Accounts);
     }
 
+    [PostgresFact]
+    public async Task Review2_a_cancelled_play_whose_only_linked_order_is_a_resting_entry_stays_watched()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var now = DateTimeOffset.UtcNow;
+        await using var db = database.Context(owner);
+        var play = new Play(Guid.NewGuid(), await db.Accounts.SingleAsync(),
+            new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue, "{}", now.AddMinutes(-10));
+        play.MarkPlanned(now.AddMinutes(-9));
+        var link = new PlayOrderLink(play, "entry-order", OrderLinkRole.Entry, "entry-1", null,
+            OrderLinkState.Linked, OrderLinkSource.Owner, now.AddMinutes(-8));
+        play.Cancel(CancelReason.ChangedMind, null, now);
+        db.AddRange(play, link);
+        await db.SaveChangesAsync();
+        var work = TestUnitOfWork.For(db); var store = new MonitorStore(db, work);
+        // The cancelled Play has no active Plays beside it: only the resting entry keeps the account monitored.
+        Assert.True(await store.EligibleAsync(id, now.AddSeconds(1), default));
+        VenueOrder Entry(VenueOrderStatus status, DateTimeOffset at) => new("entry-order", "BTC", "buy", "Limit", 100, null,
+            false, false, 1, status == VenueOrderStatus.Open ? 1 : 0, now.AddMinutes(-8), status, status.ToString().ToLowerInvariant(), at);
+        async Task Observe(VenueOrderReadResult read, DateTimeOffset at) => await work.ExecuteAsync(async () =>
+        {
+            await store.UpdateWatchesAsync(id, read, at, default);
+            return true;
+        }, default);
+        await Observe(new([Entry(VenueOrderStatus.Open, now.AddSeconds(2))], now.AddSeconds(2), "Still resting", OpenOrdersComplete: true), now.AddSeconds(2));
+        var watching = Assert.Single(await store.WatchesAsync(play.Id, now.AddSeconds(2), default));
+        Assert.Equal(("entry", "watching"), (watching.Role, watching.State));
+        Assert.True(await store.EligibleAsync(id, now.AddSeconds(2), default));
+        // Absence on an incomplete read proves nothing; a fresh cancellation of that order ends the watch.
+        await Observe(new([], now.AddSeconds(3), "Incomplete", OpenOrdersComplete: false), now.AddSeconds(3));
+        Assert.True(await store.EligibleAsync(id, now.AddSeconds(3), default));
+        await Observe(new([Entry(VenueOrderStatus.Canceled, now.AddSeconds(4))], now.AddSeconds(4), "Cancelled", OpenOrdersComplete: false), now.AddSeconds(4));
+        Assert.Equal("resolved", Assert.Single(await store.WatchesAsync(play.Id, now.AddSeconds(4), default)).State);
+        Assert.False(await store.EligibleAsync(id, now.AddSeconds(4), default));
+    }
+
+    [PostgresFact]
+    public async Task Review2_a_run_with_known_omitted_executions_is_degraded_not_live()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, clock.Now);
+        // What LighterReader reports for a bounded, untruncated read that left out a trade without realized PnL.
+        var reader = new Reader { Shape = read => read with { FillHistoryComplete = false, FillHistoryTruncated = false,
+            OldestRawFillAtUtc = clock.Now.AddMinutes(-1), OmittedExecutions = 1 } };
+        var coordinator = Coordinator(db, owner, reader, clock: clock);
+        var accepted = await coordinator.RequestAsync(id, default);
+        var lease = (await new MonitorStore(db, TestUnitOfWork.For(db)).ClaimAsync(id, accepted.RequestId, "worker", clock.Now, default))!;
+        Assert.True(await coordinator.RunAsync(lease, default));
+        db.ChangeTracker.Clear();
+        var row = await db.Set<MonitorAccount>().SingleAsync();
+        Assert.Equal("degraded", row.State);
+        Assert.Equal(clock.Now, row.LastSuccessAtUtc);
+        Assert.Contains("could not verify", row.Error);
+    }
+
+    [PostgresFact]
+    public async Task Review2_discovery_reaches_eligible_accounts_beyond_the_first_batch()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var ids = await AccountsAsync(database, owner, 5);
+        var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        await using var db = database.Context(owner);
+        // Only the account that sorts last (as PostgreSQL orders uuids) has a Play.
+        var last = (await db.Accounts.OrderBy(a => a.Id).Select(a => a.Id).ToListAsync()).Last();
+        var play = new Play(Guid.NewGuid(), await db.Accounts.SingleAsync(a => a.Id == last), new PerpetualInstrument("hyperliquid", "BTC"),
+            InstrumentSource.Venue, "{}", now.AddMinutes(-2));
+        play.MarkPlanned(now.AddMinutes(-1));
+        db.Add(play);
+        await db.SaveChangesAsync();
+        var coordinator = Coordinator(db, owner, new Reader(), clock: new Clock(now));
+        Assert.Equal(1, await coordinator.DiscoverAsync(["hyperliquid"], now, default, batch: 2));
+        db.ChangeTracker.Clear();
+        var row = await db.Set<MonitorAccount>().SingleAsync();
+        Assert.Equal(last, row.AccountId);
+        Assert.Equal(now, row.NextRunAtUtc);
+    }
+
+    [PostgresFact]
+    public async Task Review2_venue_failures_are_logged_by_ids_and_exception_type_only()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, DateTimeOffset.UtcNow);
+        var logs = new CapturingLogger();
+        var coordinator = Coordinator(db, owner,
+            new Reader { Failure = new HttpRequestException("https://venue.invalid/?token=ro:SENTINEL-SECRET body") },
+            log: new MonitorRunLog(logs));
+        var accepted = await coordinator.RequestAsync(id, default);
+        var lease = (await new MonitorStore(db, TestUnitOfWork.For(db)).ClaimAsync(id, accepted.RequestId, "worker", DateTimeOffset.UtcNow, default))!;
+        Assert.False(await coordinator.RunAsync(lease, default));
+        var message = Assert.Single(logs.Messages);
+        Assert.Contains(nameof(HttpRequestException), message);
+        Assert.Contains(lease.RequestId.ToString(), message);
+        Assert.Contains(id.ToString(), message);
+        Assert.DoesNotContain("SENTINEL", message);
+        Assert.DoesNotContain("venue.invalid", message);
+        Assert.Null(logs.Exception);
+    }
+
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<MonitorRunLog>
+    {
+        public List<string> Messages { get; } = [];
+        public Exception? Exception { get; private set; }
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(state, exception) + " " + string.Join(" ", (state as IEnumerable<KeyValuePair<string, object?>>)?
+                .Select(p => p.Value?.ToString()) ?? []));
+            Exception ??= exception;
+        }
+    }
+
     private static async Task<(Play Play, PlayOrderLink Link)> SeedCancelledWithStopAsync(VesselDbContext db, DateTimeOffset now)
     {
         var play = new Play(Guid.NewGuid(), await db.Accounts.SingleAsync(),
@@ -766,13 +885,14 @@ public sealed class MonitorPostgresTests
     }
 
     private static MonitorCoordinator Coordinator(VesselDbContext db, Guid owner, Reader reader, EventSink? sink = null,
-        TimeProvider? clock = null, Importer? importer = null, Orders? orders = null, MonitorOptions? options = null)
+        TimeProvider? clock = null, Importer? importer = null, Orders? orders = null, MonitorOptions? options = null,
+        IMonitorRunLog? log = null)
     {
         var work = TestUnitOfWork.For(db);
         options ??= new MonitorOptions();
         return new(new MonitorStore(db, work, options), new WorkspaceStore(db, work), importer ?? new Importer(), TestVenues.With(reader, orders ?? new Orders()),
             new Credentials(), work, sink ?? new EventSink(), new Commands(), new CoreOwner(owner),
-            options, clock ?? TimeProvider.System);
+            options, clock ?? TimeProvider.System, log: log);
     }
 
     private sealed class Reader : IPerpetualVenueReader
@@ -780,14 +900,17 @@ public sealed class MonitorPostgresTests
         public string VenueId => "hyperliquid";
         public Func<CancellationToken, Task>? BeforeRead { get; init; }
         public Exception? Failure { get; init; }
+        /// <summary>Replaces the complete synthetic read, e.g. with the coverage an adapter reports.</summary>
+        public Func<PerpetualVenueReadResult, PerpetualVenueReadResult>? Shape { get; init; }
         public Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<VenueInstrument>>([]);
         public async Task<PerpetualVenueReadResult> ReadAsync(string source, CancellationToken ct)
         {
             if (BeforeRead is { } before) await before(ct);
             if (Failure is { } failure) throw failure;
-            return new(new(DateTimeOffset.UtcNow, "synthetic", 100, 100, 0, []), [], [], "Synthetic isolated read",
+            var read = new PerpetualVenueReadResult(new(DateTimeOffset.UtcNow, "synthetic", 100, 100, 0, []), [], [], "Synthetic isolated read",
                 PositionsComplete: true, FillHistoryComplete: true);
+            return Shape is null ? read : Shape(read);
         }
     }
     private sealed class Importer : IMonitorImporter

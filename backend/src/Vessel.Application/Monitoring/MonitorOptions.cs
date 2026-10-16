@@ -9,7 +9,7 @@ public sealed class MonitorOptions
     public TimeSpan ManualCooldown { get; set; } = TimeSpan.FromSeconds(60);
     public TimeSpan HeartbeatTimeout { get; set; } = TimeSpan.FromSeconds(90);
     public string HeartbeatFile { get; set; } = "/tmp/vessel-worker-heartbeat";
-    /// <summary>How long a terminal Play's linked exit is watched before it ends as <c>unverifiable</c>.</summary>
+    /// <summary>How long a terminal Play's linked order (exit or entry) is watched before it ends as <c>unverifiable</c>.</summary>
     public TimeSpan WatchLifetime { get; set; } = TimeSpan.FromDays(7);
     public static readonly TimeSpan SchedulerTick = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan Lease = TimeSpan.FromMinutes(5);

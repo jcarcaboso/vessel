@@ -166,8 +166,8 @@ public static class MonitorWatchOutcomes
 }
 
 /// <summary>
-/// A linked exit of a Closed or Cancelled Play, watched until venue evidence shows it is no longer resting or its
-/// lifetime ends. <see cref="Outcome"/> is null while watching.
+/// A linked order of a Closed or Cancelled Play (an exit, or an entry that may still rest), watched until venue
+/// evidence shows it is no longer resting or its lifetime ends. <see cref="Outcome"/> is null while watching.
 /// </summary>
 public sealed class MonitorExitWatch : IOwned
 {

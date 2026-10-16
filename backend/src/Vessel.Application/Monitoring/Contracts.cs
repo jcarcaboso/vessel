@@ -47,9 +47,21 @@ public interface IMonitorImporter
 public sealed record MonitorCandidate(Guid AccountId, string VenueId, bool Monitorable, bool Eligible, bool HasExpiredWatches,
     string? CredentialRevision, MonitorAccount? Row);
 
-/// <summary>A linked exit watched after its Play ended. <paramref name="State"/>: watching, resolved or unverifiable.</summary>
-public sealed record MonitorWatchDto(Guid LinkId, Guid PlayId, string OrderId, string State, DateTimeOffset StartedAtUtc,
+/// <summary>
+/// A linked order (exit or entry) watched after its Play ended. <paramref name="Role"/>: entry, stop, target or exit;
+/// <paramref name="State"/>: watching, resolved or unverifiable.
+/// </summary>
+public sealed record MonitorWatchDto(Guid LinkId, Guid PlayId, string OrderId, string Role, string State, DateTimeOffset StartedAtUtc,
     DateTimeOffset? EndedAtUtc);
+
+/// <summary>
+/// Records why a run failed: the run, account and the exception's type name only. Never messages, URLs, bodies or
+/// credentials, which venue and HTTP errors can carry.
+/// </summary>
+public interface IMonitorRunLog
+{
+    void Failed(MonitorLease lease, string errorType);
+}
 
 public interface IMonitorStore
 {
@@ -67,9 +79,12 @@ public interface IMonitorStore
     Task DeferVenueAsync(string venueId, DateTimeOffset retryAtUtc, DateTimeOffset now, CancellationToken ct);
     Task<MonitorHeartbeat?> HeartbeatAsync(CancellationToken ct);
     Task RecordHeartbeatAsync(string workerId, DateTimeOffset now, CancellationToken ct);
-    /// <summary>Accounts that may need scheduling changes: monitorable ones, and any with a non-idle monitor row.</summary>
+    /// <summary>
+    /// Accounts that may need scheduling changes (monitorable ones, and any with a non-idle monitor row), ordered by
+    /// account ID after <paramref name="after"/>, at most <paramref name="limit"/>.
+    /// </summary>
     Task<IReadOnlyList<MonitorCandidate>> DiscoveryCandidatesAsync(IReadOnlyCollection<string> venueIds, DateTimeOffset now,
-        CancellationToken ct);
+        Guid? after, int limit, CancellationToken ct);
     Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct);
     Task<T> LockedAsync<T>(Guid accountId, Func<Account, MonitorAccount, Task<T>> action, CancellationToken ct);
     Task<IReadOnlyList<MonitorLease>> ClaimDueAsync(string workerId, DateTimeOffset now, int limit, CancellationToken ct);

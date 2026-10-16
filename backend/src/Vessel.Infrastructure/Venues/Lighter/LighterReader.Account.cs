@@ -134,7 +134,9 @@ public sealed partial class LighterReader
                 catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument!).ToArray(), fills, string.Join(" ", notices),
                 PositionsComplete: positionsComplete,
                 FillHistoryTruncated: historyAvailable ? cursor is not null || fillCoverage.Count == venue.TradePages * PageSize : null,
-                OldestRawFillAtUtc: historyAvailable ? fillCoverage.OldestAtUtc : null), refused);
+                OldestRawFillAtUtc: historyAvailable ? fillCoverage.OldestAtUtc : null,
+                // Self-trades are out of scope (they leave the position unchanged); these are in-scope facts left out.
+                OmittedExecutions: missingPnl + fees), refused);
         }, cancellationToken);
 
     internal static VenueSnapshot ReadSnapshot(JsonElement account, Catalogue catalogue, DateTimeOffset observed)

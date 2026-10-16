@@ -92,17 +92,20 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
         public DateTimeOffset? EndedAtUtc { get; init; }
     }
 
-    /// <summary>Linked exits of terminal planned venue Plays, with the Play's end for the watch start.</summary>
-    private IQueryable<TerminalExit> TerminalExits =>
+    /// <summary>
+    /// Linked orders of terminal planned venue Plays, exits and entries alike (a resting entry on a Cancelled Play is an
+    /// orphan too), with the Play's end for the watch start.
+    /// </summary>
+    private IQueryable<TerminalExit> TerminalLinks =>
         from l in db.OrderLinks
         join p in db.Plays on l.PlayId equals p.Id
-        where l.State == OrderLinkState.Linked && l.Role != OrderLinkRole.Entry &&
+        where l.State == OrderLinkState.Linked &&
             p.InstrumentSource == InstrumentSource.Venue && p.Origin == PlayOrigin.Planned &&
             (p.Status == PlayStatus.Closed || p.Status == PlayStatus.Cancelled)
         select new TerminalExit { Link = l, EndedAtUtc = p.EndedAtUtc };
 
-    /// <summary>Terminal exits whose current link revision has no ended watch.</summary>
-    private IQueryable<TerminalExit> Watching => TerminalExits.Where(x => !Exits.Any(e => e.LinkId == x.Link.Id &&
+    /// <summary>Terminal Plays' linked orders whose current link revision has no ended watch.</summary>
+    private IQueryable<TerminalExit> Watching => TerminalLinks.Where(x => !Exits.Any(e => e.LinkId == x.Link.Id &&
         e.EndedAtUtc != null && e.LinkRevisionAtUtc >= x.Link.UpdatedAtUtc && e.OrderId == x.Link.OrderId));
 
     public async Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct)
@@ -114,13 +117,15 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
     }
 
     public async Task<IReadOnlyList<MonitorCandidate>> DiscoveryCandidatesAsync(IReadOnlyCollection<string> venueIds,
-        DateTimeOffset now, CancellationToken ct)
+        DateTimeOffset now, Guid? after, int limit, CancellationToken ct)
     {
         var cutoff = now - settings.WatchLifetime;
+        // Keyset page: the filter applies before the limit, so every candidate is reached by a later page.
         var rows = await db.Accounts.AsNoTracking()
             .Where(a => a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) ||
                 Rows.Any(m => m.AccountId == a.Id && (m.State != "idle" || m.NextRunAtUtc != null)))
-            .OrderBy(a => a.Id).Take(500)
+            .Where(a => after == null || a.Id.CompareTo(after.Value) > 0)
+            .OrderBy(a => a.Id).Take(Math.Clamp(limit, 1, 1000))
             .Select(a => new
             {
                 a.Id, a.VenueId,
@@ -223,7 +228,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
     {
         unitOfWork.RequireActive();
         var cutoff = now - settings.WatchLifetime;
-        var links = await TerminalExits.Where(x => x.Link.AccountId == accountId).ToListAsync(ct);
+        var links = await TerminalLinks.Where(x => x.Link.AccountId == accountId).ToListAsync(ct);
         var watches = await Exits.Where(e => e.AccountId == accountId).ToDictionaryAsync(e => e.LinkId, ct);
         foreach (var exit in links)
         {
@@ -237,7 +242,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
             }
             if (watch.LinkRevisionAtUtc < link.UpdatedAtUtc || watch.OrderId != link.OrderId)
             {
-                // A relinked exit is a new watch with its own lifetime.
+                // A relinked order is a new watch with its own lifetime.
                 watch.LinkRevisionAtUtc = link.UpdatedAtUtc;
                 watch.OrderId = link.OrderId;
                 watch.StartedAtUtc = started;
@@ -278,7 +283,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
     public async Task<IReadOnlyList<MonitorWatchDto>> WatchesAsync(Guid playId, DateTimeOffset now, CancellationToken ct)
     {
         var cutoff = now - settings.WatchLifetime;
-        var links = await TerminalExits.AsNoTracking().Where(x => x.Link.PlayId == playId).ToListAsync(ct);
+        var links = await TerminalLinks.AsNoTracking().Where(x => x.Link.PlayId == playId).ToListAsync(ct);
         var ids = links.Select(x => x.Link.Id).ToArray();
         var watches = await Exits.AsNoTracking().Where(e => ids.Contains(e.LinkId)).ToDictionaryAsync(e => e.LinkId, ct);
         return links.OrderBy(x => x.Link.OrderId, StringComparer.Ordinal).Select(x =>
@@ -293,7 +298,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
                 // Past its lifetime but not yet recorded by a run: still never "resolved".
                 _ => started <= cutoff ? "unverifiable" : "watching"
             };
-            return new MonitorWatchDto(x.Link.Id, x.Link.PlayId, x.Link.OrderId, state, watch?.StartedAtUtc ?? started, watch?.EndedAtUtc);
+            return new MonitorWatchDto(x.Link.Id, x.Link.PlayId, x.Link.OrderId, x.Link.Role.ToString().ToLowerInvariant(), state, watch?.StartedAtUtc ?? started, watch?.EndedAtUtc);
         }).ToArray();
     }
 }

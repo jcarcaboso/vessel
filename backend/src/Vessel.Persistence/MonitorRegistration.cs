@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -17,11 +18,20 @@ public static class MonitorRegistration
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<IMonitorStore, MonitorStore>();
         services.AddScoped<IMonitorImporter>(sp => sp.GetRequiredService<PlayExecutionService>());
+        services.TryAddSingleton<IMonitorRunLog, MonitorRunLog>();
         services.AddScoped<MonitorCoordinator>();
         services.AddScoped<MonitorExecutionView>();
         services.AddScoped<MonitorRunExecutor>();
         return services;
     }
+}
+
+/// <summary>Logs a failed monitor run by request, account and trigger, with the exception type name only.</summary>
+public sealed class MonitorRunLog(ILogger<MonitorRunLog> logger) : IMonitorRunLog
+{
+    public void Failed(MonitorLease lease, string errorType) =>
+        logger.LogWarning("Monitor run {RequestId} ({Trigger}) for account {AccountId} failed with {ErrorType}.",
+            lease.RequestId, lease.Trigger, lease.AccountId, errorType);
 }
 
 /// <summary>Renew through separate scopes so the read and its DbContext are never used concurrently.</summary>

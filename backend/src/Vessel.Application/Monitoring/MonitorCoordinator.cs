@@ -13,7 +13,7 @@ namespace Vessel.Application.Monitoring;
 public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore workspace, IMonitorImporter executions,
     IVenueRegistry venues, IAccountCredentialReader credentials, IUnitOfWork unitOfWork,
     IVesselEventSink events, IMonitorCommandSink commands, IJournalOwnerContext owner, MonitorOptions options,
-    TimeProvider time, IMonitorEvaluator? evaluator = null)
+    TimeProvider time, IMonitorEvaluator? evaluator = null, IMonitorRunLog? log = null)
 {
     public async Task<MonitorSummaryDto> SummaryAsync(CancellationToken ct)
     {
@@ -42,10 +42,26 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     /// Starts or stops scheduling as accounts change: eligibility, disable and credential changes. Inputs are read
     /// set-based; only rows whose scheduling or state changes are locked, revalidated and written.
     /// </summary>
-    public async Task<int> DiscoverAsync(IReadOnlyCollection<string> venueIds, DateTimeOffset now, CancellationToken ct)
+    public async Task<int> DiscoverAsync(IReadOnlyCollection<string> venueIds, DateTimeOffset now, CancellationToken ct,
+        int batch = 500)
     {
         var changed = 0;
-        foreach (var candidate in await store.DiscoveryCandidatesAsync(venueIds, now, ct))
+        Guid? after = null;
+        while (true)
+        {
+            // Keyset pages: every account is reached each pass, however many the owner has.
+            var page = await store.DiscoveryCandidatesAsync(venueIds, now, after, batch, ct);
+            changed += await DiscoverPageAsync(page, venueIds, now, ct);
+            if (page.Count < batch) return changed;
+            after = page[^1].AccountId;
+        }
+    }
+
+    private async Task<int> DiscoverPageAsync(IReadOnlyList<MonitorCandidate> candidates, IReadOnlyCollection<string> venueIds,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        var changed = 0;
+        foreach (var candidate in candidates)
         {
             if (!NeedsDiscovery(candidate)) continue;
             if (await unitOfWork.ExecuteAsync(() => store.LockedAsync(candidate.AccountId, async (account, row) =>
@@ -90,7 +106,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             var now = time.GetUtcNow();
             if (!account.IsEnabled || account.SourceId is null || !EligibleVenue(account.VenueId) ||
                 !await store.EligibleAsync(accountId, now, ct))
-                throw new ProblemException(409, "This account has no eligible venue Plays or pending linked exits.");
+                throw new ProblemException(409, "This account has no eligible venue Plays or pending linked orders.");
             row.ReleaseAbandonedRefresh(now);
             var retry = await RetryAfterAsync(account.VenueId, row, now, ct);
             if (retry > 0) throw new MonitorAdmissionException(retry);
@@ -181,6 +197,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 {
                     // Refresh imports public facts even when private/order coverage is unavailable.
                     // Never expose exception text, which can contain credentials or request URLs.
+                    log?.Failed(lease, ex.GetType().Name);
                     orders = null;
                     if (ex is VenueRateLimitException limited)
                         await store.DeferVenueAsync(capture.Account.VenueId, limited.RetryAtUtc, time.GetUtcNow(), CancellationToken.None);
@@ -197,10 +214,12 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         }
         catch (Exception ex) when (ex is VenueCredentialRejectedException or CredentialStorageException)
         {
+            log?.Failed(lease, ex.GetType().Name);
             return await FailAsync(lease, capture, true, "The read-only credential is unavailable or was refused. Update it to resume monitoring.", ct, snapshotApplied);
         }
         catch (VenueRateLimitException limited)
         {
+            log?.Failed(lease, limited.GetType().Name);
             // A throttle is valid even when this account's lease or settings were superseded.
             await store.DeferVenueAsync(capture.Account.VenueId, limited.RetryAtUtc, time.GetUtcNow(), CancellationToken.None);
             return await FailAsync(lease, capture, false, "The venue rate limit deferred the next account check.", ct, snapshotApplied);
@@ -209,6 +228,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             (ex is not OperationCanceledException || !ct.IsCancellationRequested))
         {
             // Do not log exception payloads: HTTP errors may contain credential-bearing request information.
+            log?.Failed(lease, ex.GetType().Name);
             var credential = !refresh && venues.Descriptor(capture.Account.VenueId)?.Capabilities.ReadOnlyCredential == true &&
                 !await credentials.IsUsableAsync(capture.Account, ct);
             return await FailAsync(lease, capture, credential, credential ?
@@ -310,12 +330,14 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             var newest = read.Sync.Fills.Count == 0 ? previousFill : read.Sync.Fills.Max(f => f.OccurredAtUtc);
             if (newest > row.NewestFillAtUtc || row.NewestFillAtUtc is null) row.NewestFillAtUtc = newest;
             row.CredentialRevision = captured.CredentialRevision;
-            var degraded = read.OrderError is not null || evaluation.Incomplete || gap || !read.Sync.PositionsComplete ||
+            var omitted = read.Sync.OmittedExecutions > 0;
+            var degraded = read.OrderError is not null || evaluation.Incomplete || gap || omitted || !read.Sync.PositionsComplete ||
                 !read.Sync.FillHistoryComplete && read.Sync.FillHistoryTruncated is null ||
                 read.Orders is { OpenOrdersComplete: false };
             row.Complete(now, options.ManualCooldown, options.NextDelay(0, Random.Shared.NextDouble()), true, degraded,
                 credentialError: read.CredentialError,
                 error: read.OrderError ?? (gap ? "The venue fill window may have a gap. Missing executions cannot be ruled out." :
+                    omitted ? "The venue reported executions Vessel could not verify, so they were left out. Missing executions cannot be ruled out." :
                     evaluation.Incomplete ? evaluation.SafeNotice ?? "The account comparison has unknown coverage." :
                     degraded ? "The venue observation has incomplete position, fill-window or open-order coverage." : null));
             row.ConfirmationAtUtc = evaluation.NextConfirmationAtUtc;

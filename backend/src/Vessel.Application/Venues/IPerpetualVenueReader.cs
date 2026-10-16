@@ -108,6 +108,11 @@ public static class VenueFactChecks
 /// Null for no rows, an unavailable/partial read, or any raw row without a valid timestamp.
 /// This is an observed boundary, not a covered-window start or proof of gap-free history.
 /// </param>
+/// <param name="OmittedExecutions">
+/// In-scope executions the adapter read but deliberately left out because a required fact was missing or could not be
+/// verified (for example unreported realized PnL or an unverified fee). These are known missing facts, separate from
+/// lifetime completeness and raw truncation; zero means none were knowingly omitted, not that history is complete.
+/// </param>
 public sealed record PerpetualVenueReadResult(
     VenueSnapshot Snapshot,
     IReadOnlyList<VenueInstrument> Instruments,
@@ -116,7 +121,8 @@ public sealed record PerpetualVenueReadResult(
     bool PositionsComplete = false,
     bool FillHistoryComplete = false,
     bool? FillHistoryTruncated = null,
-    DateTimeOffset? OldestRawFillAtUtc = null);
+    DateTimeOffset? OldestRawFillAtUtc = null,
+    int OmittedExecutions = 0);
 
 public class VenueReadException(string message) : Exception(message);
 

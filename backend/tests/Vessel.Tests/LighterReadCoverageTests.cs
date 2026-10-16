@@ -101,6 +101,21 @@ public sealed partial class LighterAdapterTests
         Assert.Contains("1 executions omitted because realized PnL was not reported", result.HistoryNotice);
         Assert.Contains("2 fee-bearing or unverified-fee executions omitted", result.HistoryNotice);
         Assert.Contains("1 self-trade executions omitted", result.HistoryNotice);
+        // Normalized for the monitor: one missing-PnL and two fee executions; self-trades leave the position unchanged.
+        Assert.Equal(3, result.OmittedExecutions);
+    }
+
+    [Fact]
+    public async Task Coverage_a_single_missing_pnl_execution_is_a_known_omission_without_truncation()
+    {
+        using var handler = CoverageHandler();
+        var snapshotReply = handler.Reply!;
+        handler.Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/trades", StringComparison.Ordinal)
+            ? Response(Trades(string.Join(",", Trade, Change(Trade, "ask_account_pnl", null))))
+            : snapshotReply(request);
+        var result = await Reader(handler).ReadAsync(Source, default);
+        Assert.False(result.FillHistoryTruncated);
+        Assert.Equal(1, result.OmittedExecutions);
     }
 
     [Theory]
