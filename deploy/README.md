@@ -651,6 +651,30 @@ unchanged and compresses static assets only.
 
 ## Upgrade
 
+### From v0.1.3 to the account monitor release (unreleased)
+
+This upgrade adds two services and new required settings. Its migrations sort
+after v0.1.3's `PlayDirection`, so an older installation applies both in one
+migration run. Before it:
+
+- Add `RABBITMQ_USER` and `RABBITMQ_PASSWORD` (URL-safe) to `.env`, and keep
+  `Vessel__Auth__OwnerId` set: the worker and the provisioning step validate
+  every message against it. Optional: `VESSEL_RABBITMQ_MANAGEMENT_BIND`,
+  `VESSEL_MONITOR_*`, `RABBITMQ_APP_USER`/`RABBITMQ_APP_PASSWORD`.
+- Messaging settings are `Vessel__Messaging__*` (for example
+  `Vessel__Messaging__RabbitMqUri`, which Compose builds for you).
+- Migrations `20261016110000_VesselEvents`, `20261016110100_AccountMonitor`,
+  `20261016110200_MessagingDeployments`, `20261016110300_PlayDiscrepancies` and
+  `20261016110400_PlayDiscrepancyUnverifiable` add the event log, subscriptions
+  and receipts, monitor state, the deployment registrations and discrepancies.
+- `migrate` now also runs `provision-messaging` against the new `rabbitmq`
+  service, which must be healthy first; then `api` and the new `worker` start.
+- The restore procedure gains the mandatory `rotate-event-epoch` step below.
+
+Stop web, API and worker, back up, then follow the procedure below. A worker
+stopped during a run loses nothing: runs are idempotent and the next run repeats
+the work.
+
 ### From v0.1.2 to v0.1.3
 
 This upgrade includes migration `20261016104756_PlayDirection`, which adds a
@@ -685,28 +709,6 @@ Venue and architecture changes introduce no additional migration. The new
 Lighter · Robinhood venue uses its own accounts and read-only tokens; existing
 Lighter accounts and tokens remain separate. Cross-venue supported-stablecoin
 totals use nominal 1:1 values, with no FX or depeg valuation.
-
-### To the account monitor release
-
-This upgrade adds two services and new required settings. Before it:
-
-- Add `RABBITMQ_USER` and `RABBITMQ_PASSWORD` (URL-safe) to `.env`, and keep
-  `Vessel__Auth__OwnerId` set: the worker and the provisioning step validate
-  every message against it. Optional: `VESSEL_RABBITMQ_MANAGEMENT_BIND`,
-  `VESSEL_MONITOR_*`, `RABBITMQ_APP_USER`/`RABBITMQ_APP_PASSWORD`.
-- Messaging settings are `Vessel__Messaging__*` (for example
-  `Vessel__Messaging__RabbitMqUri`, which Compose builds for you).
-- Migrations `20261016110000_VesselEvents`, `20261016110100_AccountMonitor`,
-  `20261016110200_MessagingDeployments`, `20261016110300_PlayDiscrepancies` and
-  `20261016110400_PlayDiscrepancyUnverifiable` add the event log, subscriptions
-  and receipts, monitor state, the deployment registrations and discrepancies.
-- `migrate` now also runs `provision-messaging` against the new `rabbitmq`
-  service, which must be healthy first; then `api` and the new `worker` start.
-- The restore procedure gains the mandatory `rotate-event-epoch` step below.
-
-Stop web, API and worker, back up, then follow the procedure below. A worker
-stopped during a run loses nothing: runs are idempotent and the next run repeats
-the work.
 
 ### Upgrade procedure
 

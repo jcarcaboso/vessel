@@ -75,7 +75,7 @@ describe('Main application shell', () => {
     const play = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, instrumentSource: 'venue' as const, status: 'planned' as const } }
     const stored = { ...play, summary: { ...play.summary, version: play.summary.version + 1, title: 'Server revision' } }
     const client = api({
-      overview: vi.fn().mockResolvedValue(overviewFixture), plays: vi.fn().mockResolvedValue([play.summary]),
+      overview: vi.fn().mockResolvedValue(overviewFixture), plays: vi.fn(playsFrom([play.summary])), playCounts: vi.fn(playCountsFrom([play.summary])),
       play: vi.fn().mockResolvedValue(play), evidence: vi.fn().mockResolvedValue([]),
       monitorStream: vi.fn((_after, signal, onEvent) => new Promise<void>(resolve => {
         emit = onEvent; signal.addEventListener('abort', () => resolve(), { once: true })
