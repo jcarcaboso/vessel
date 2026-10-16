@@ -477,14 +477,29 @@ function PlayList({ api, accounts, busy, unsaved, list, onList, onOpen, onNew, o
   const paged = pagedPlayViews.includes(list.view)
   const query: PlayListQuery = { view: list.view, ...(list.q ? { q: list.q } : {}), ...(paged ? { page: list.page, pageSize: list.pageSize } : {}) }
   const rowsKey = JSON.stringify([query, generation])
-  const [rows, setRows] = useState<{ api: WorkspaceApi; key: string; page?: PlayListPage; error?: string } | null>(null)
+  // `requested` produced the rows; `key` is the request they answer, which differs when the server clamped the page.
+  const [rows, setRows] = useState<{ api: WorkspaceApi; key: string; requested: string; page?: PlayListPage; error?: string } | null>(null)
+  const adopted = useRef<string | null>(null)
   useEffect(() => {
+    const skip = adopted.current === rowsKey
+    adopted.current = null
+    if (skip) return
     const controller = new AbortController()
-    const request = (JSON.parse(rowsKey) as [PlayListQuery, number])[0]
-    api.plays(request, controller.signal).then(page => { if (!controller.signal.aborted) setRows({ api, key: rowsKey, page }) })
-      .catch(cause => { if (!controller.signal.aborted) setRows({ api, key: rowsKey, error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
+    const [request, at] = JSON.parse(rowsKey) as [PlayListQuery, number]
+    api.plays(request, controller.signal).then(page => {
+      if (controller.signal.aborted) return
+      const answered = request.page === undefined || page.page === request.page ? rowsKey : JSON.stringify([{ ...request, page: page.page }, at])
+      setRows({ api, key: answered, requested: rowsKey, page })
+    }).catch(cause => { if (!controller.signal.aborted) setRows({ api, key: rowsKey, requested: rowsKey, error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
     return () => controller.abort()
   }, [api, rowsKey])
+  // A page past the end comes back clamped: keep the page actually shown, so later growth does not jump back.
+  // Only the response to the current request may write, and the adopted page is not requested again.
+  useEffect(() => {
+    if (rows === null || rows.api !== api || rows.requested !== rowsKey || rows.key === rowsKey || !rows.page) return
+    adopted.current = rows.key
+    onList({ ...list, page: rows.page.page })
+  }, [api, list, onList, rows, rowsKey])
   const countsKey = JSON.stringify([list.q, generation])
   const [counts, setCounts] = useState<{ api: WorkspaceApi; key: string; counts: PlayCounts | null } | null>(null)
   useEffect(() => {
@@ -495,7 +510,7 @@ function PlayList({ api, accounts, busy, unsaved, list, onList, onOpen, onNew, o
     return () => controller.abort()
   }, [api, countsKey])
 
-  const pending = rows === null || rows.api !== api || rows.key !== rowsKey
+  const pending = rows === null || rows.api !== api || rows.key !== rowsKey && rows.requested !== rowsKey
   const previous = rows?.api === api ? rows.page ?? null : null
   const shown = pending ? previous : rows.page ?? null
   const error = pending ? null : rows.error ?? null

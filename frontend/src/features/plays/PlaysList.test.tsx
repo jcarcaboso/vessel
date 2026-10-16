@@ -94,6 +94,34 @@ describe('Plays list views', () => {
       expect(states.at(-1)).toEqual({ view: 'all', q: '', page: 1, pageSize: 100 })
     } finally { delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView }
   })
+  it('keeps the page the server clamped to, without reading it again, so a later return after growth stays there', async () => {
+    const many = Array.from({ length: 30 }, (_, n) => ended(n + 1, 'closed'))
+    const api = client(many)
+    const states: PlaysListState[] = []
+    const view = render(<Shell api={api} initial={{ ...initialPlaysList, view: 'closed', page: 5 }} onList={state => states.push(state)} />)
+    expect(await screen.findByRole('navigation', { name: 'Plays pages' })).toHaveTextContent('26–30 of 30')
+    await waitFor(() => expect(states.at(-1)).toEqual({ ...initialPlaysList, view: 'closed', page: 2 }))
+    expect(api.plays.mock.calls.map(([query]) => query.page)).toEqual([5])
+    view.unmount()
+    // More Plays end while the owner is elsewhere; returning keeps the page that was shown, not the stale request.
+    many.push(...Array.from({ length: 170 }, (_, n) => ended(n + 31, 'closed')))
+    render(<Shell api={api} initial={states.at(-1)!} />)
+    expect(await screen.findByRole('navigation', { name: 'Plays pages' })).toHaveTextContent('26–50 of 200')
+    expect(lastQuery(api)).toEqual({ view: 'closed', page: 2, pageSize: 25 })
+  })
+  it('ignores a clamped answer to a request that is no longer current', async () => {
+    let late!: (list: PlayList) => void
+    const many = Array.from({ length: 60 }, (_, n) => ended(n + 1, 'closed'))
+    const plays = vi.fn((query: PlayListQuery) => query.page === 5 ? new Promise<PlayList>(resolve => { late = resolve }) : playsFrom(many)(query))
+    const states: PlaysListState[] = []
+    render(<Shell api={client(many, { plays })} initial={{ ...initialPlaysList, view: 'closed', page: 5 }} onList={state => states.push(state)} />)
+    await waitFor(() => expect(plays).toHaveBeenCalledTimes(1))
+    await userEvent.click(await screen.findByRole('tab', { name: /^All/ }))
+    expect(await screen.findByRole('navigation', { name: 'Plays pages' })).toHaveTextContent('1–25 of 60')
+    await act(async () => late({ plays: many.slice(50, 60), view: 'closed', page: 3, pageSize: 25, totalCount: 60 }))
+    expect(states.every(state => state.page === 1)).toBe(true)
+    expect(plays).toHaveBeenCalledTimes(2)
+  })
   it('says when an unpaged view was cut at 200', async () => {
     const many = Array.from({ length: 230 }, (_, n) => play(n + 1, { status: 'planned' }))
     render(<Shell api={client(many)} />)
