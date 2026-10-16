@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.0 - October 16, 2026
+
+Release notes: [docs/releases/v0.2.0.md](docs/releases/v0.2.0.md).
+
 ### Added
 
 - Background Play monitor: a separate `worker` service (same API image,
@@ -47,7 +51,7 @@
   nothing migrates or provisions at API or worker startup.
 - Stop web, API and worker for upgrades and backups. Every database restore
   must run `rotate-event-epoch` before provisioning and starting hosts.
-  See "From v0.1.3 to the account monitor release" in `deploy/README.md`.
+  See "From v0.1.3 to v0.2.0" in `deploy/README.md`.
 
 ### Known limits
 

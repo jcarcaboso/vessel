@@ -1,10 +1,10 @@
 # Deploy with Docker
 
-Vessel v0.1.3 is a self-hosted, single-owner trading diary. These examples use the
+Vessel v0.2.0 is a self-hosted, single-owner trading diary. These examples use the
 API and web images in one Docker Hub repository:
 
-- `skorcius/vessel:api-0.1.3` and `skorcius/vessel:api-latest`
-- `skorcius/vessel:web-0.1.3` and `skorcius/vessel:web-latest`
+- `skorcius/vessel:api-0.2.0` and `skorcius/vessel:api-latest`
+- `skorcius/vessel:web-0.2.0` and `skorcius/vessel:web-latest`
 
 Use versioned tags for deployments. The `latest` tags move with each release.
 This release targets Linux amd64.
@@ -651,7 +651,7 @@ unchanged and compresses static assets only.
 
 ## Upgrade
 
-### From v0.1.3 to the account monitor release (unreleased)
+### From v0.1.3 to v0.2.0 (the account monitor)
 
 This upgrade adds two services and new required settings. Its migrations sort
 after v0.1.3's `PlayDirection`, so an older installation applies both in one
@@ -952,11 +952,11 @@ From the repository root, with no populated secret files in the build context:
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.1.3 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.1.3 .
+  --build-arg VERSION=0.2.0 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.2.0 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.1.3 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.1.3 .
+  --build-arg VERSION=0.2.0 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.2.0 .
 ```
 
 The API build pins SDK `10.0.302` to match the repository's `global.json`. The
