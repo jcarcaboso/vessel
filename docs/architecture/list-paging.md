@@ -93,8 +93,13 @@ Views:
 | `all` | every Play | updated desc, id | yes |
 
 "With a review" is `hasReview || reviewedAtUtc != null`, as the Plays page
-already defines it, evaluated in SQL. Unpaged views return at most 200 rows;
-`totalCount` stays exact so the UI can say the list was cut.
+already defines it, evaluated in SQL. Unpaged views return one page of at most
+200 rows, or of an explicit smaller `pageSize` such as Overview's 5; `totalCount`
+stays exact so the UI can say the list was cut.
+
+Without `scope` (the Plays page) the list keeps every owner Play, including
+Plays on disabled accounts, as before; any explicit scope, including `all`
+from Overview, keeps enabled accounts only.
 
 `GET /api/plays?view=&q=&scope=&page=&pageSize=` returns
 `{ plays: PlaySummary[], view, page, pageSize, totalCount }`. `q` is trimmed,

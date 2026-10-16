@@ -275,8 +275,10 @@ public sealed class PlayServiceTests
         Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.CountsAsync(new string('q', 101), null, default))).StatusCode);
         Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.CountsAsync(null, $"account:{Guid.NewGuid()}", default))).StatusCode);
         for (var i = 0; i < 201; i++) store.Plays.Add(TestPlays.Create(venue, new PerpetualInstrument("hyperliquid", "BTC")));
-        var drafts = await service.ListAsync("drafts", "  ", null, "4", "10", default);
+        var drafts = await service.ListAsync("drafts", "  ", null, "4", null, default);
         Assert.Equal(("drafts", 1, 200, 201, 200), (drafts.View, drafts.Page, drafts.PageSize, drafts.TotalCount, drafts.Plays.Count));
+        var sized = await service.ListAsync("drafts", null, null, "4", "10", default);
+        Assert.Equal((1, 10, 10), (sized.Page, sized.PageSize, sized.Plays.Count));
         var all = await service.ListAsync(null, null, null, "99", "100", default);
         Assert.Equal(("all", 3, 1), (all.View, all.Page, all.Plays.Count));
         Assert.Equal(201, (await service.CountsAsync(" btc ", $"account:{venue.Id}", default)).Drafts);

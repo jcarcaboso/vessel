@@ -17,14 +17,15 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
 {
     public const int MaxUnpagedPlays = 200, MaxSearchLength = 100;
 
-    /// <summary>One view of saved Plays. Drafts and In progress return at most 200 rows; <c>TotalCount</c> stays exact.</summary>
+    /// <summary>One view of saved Plays. Drafts and In progress return one page of at most 200 rows (or an explicit size); <c>TotalCount</c> stays exact.</summary>
     public async Task<PlayListDto> ListAsync(string? view, string? search, string? scope, string? page, string? pageSize, CancellationToken ct)
     {
         var listView = View(view);
         var (requested, size) = ListPaging.Parse(page, pageSize);
         var filter = await Filter(search, scope, ct);
         var total = await store.CountAsync(listView, filter, ct);
-        if (listView is PlayListView.Drafts or PlayListView.Progress) (requested, size) = (1, MaxUnpagedPlays);
+        // Unpaged views are one page: the whole view up to 200 rows, or an explicit smaller size such as Overview's 5.
+        if (listView is PlayListView.Drafts or PlayListView.Progress) (requested, size) = (1, string.IsNullOrEmpty(pageSize) ? MaxUnpagedPlays : size);
         requested = ListPaging.Clamp(requested, size, total);
         var rows = total == 0 ? [] : await store.ListAsync(listView, filter, ListPaging.Skip(requested, size), size, ct);
         return new(rows.Select(Summary).ToList(), ViewName(listView), requested, size, total);

@@ -234,8 +234,10 @@ public sealed class PlayListPostgresTests
         }
         await using var reading = database.Context(seeded.Owner);
         var service = Service(reading);
-        var drafts = await service.ListAsync("drafts", null, "all", "3", "5", default);
+        var drafts = await service.ListAsync("drafts", null, "all", null, null, default);
         Assert.Equal(("drafts", 1, 200, 202, 200), (drafts.View, drafts.Page, drafts.PageSize, drafts.TotalCount, drafts.Plays.Count));
+        var recent = await service.ListAsync("drafts", null, "all", "3", "5", default);
+        Assert.Equal((1, 5, 202, 5, "Bulk 199"), (recent.Page, recent.PageSize, recent.TotalCount, recent.Plays.Count, recent.Plays[0].Title));
         Assert.Equal("Bulk 199", drafts.Plays[0].Title);
         var progress = await service.ListAsync("progress", null, "all", null, null, default);
         Assert.Equal((1, 200, 3, 3), (progress.Page, progress.PageSize, progress.TotalCount, progress.Plays.Count));
