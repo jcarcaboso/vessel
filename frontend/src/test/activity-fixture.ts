@@ -54,4 +54,8 @@ export const unknownPeakOperationFixture: OperationWithFills = {
   omittedFillCount: 0,
 }
 /** The page row of the unknown-peak operation, without its execution rows. */
-export const unknownPeakSummaryFixture: ActivityOperation = (({ fills: _fills, omittedFillCount: _omitted, ...row }) => row)(unknownPeakOperationFixture)
+export const unknownPeakSummaryFixture: ActivityOperation = (() => {
+  const row: Partial<OperationWithFills> = { ...unknownPeakOperationFixture }
+  delete row.fills; delete row.omittedFillCount
+  return row as ActivityOperation
+})()
