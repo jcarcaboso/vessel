@@ -5,7 +5,7 @@ namespace Vessel.Persistence.Migrations;
 
 // Event storage uses explicit owner predicates and the current EF transaction, not EF-tracked entities.
 [DbContext(typeof(VesselDbContext))]
-[Migration("20261014180000_VesselEvents")]
+[Migration("20261016110000_VesselEvents")]
 public sealed class VesselEvents : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder) => migrationBuilder.Sql("""
