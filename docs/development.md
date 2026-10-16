@@ -41,28 +41,35 @@ The tool was installed locally through Corepack during setup. Use a current Core
 
 ## Release images
 
-Manual v0.1.1 builds target Linux amd64. From the repository root:
+Releases are published by `.github/workflows/release.yml`. Merge a release pull
+request (versions, a dated changelog section and `docs/releases/vX.Y.Z.md`),
+then push an annotated tag on `main`:
 
-Delivering a release includes running the manual image pushes below and
-verifying the remote tags. Do not stop at local builds unless the owner
-explicitly asks for preparation only or no push. No CI publishing is configured.
+```sh
+git tag -a v0.1.2 -m "Vessel v0.1.2" origin/main
+git push origin v0.1.2
+```
+
+The workflow checks that the tag, packaged versions and notes agree
+(`python3 scripts/release.py check --tag v0.1.2`), runs the foundation checks and
+`scripts/verify-release.py` for S3 and local storage, then builds and pushes
+`skorcius/vessel:api-0.1.2` and `web-0.1.2`, moves `api-latest` and `web-latest`
+only after both are verified, and creates the GitHub Release from the notes. It
+never overwrites a version published from another commit. It needs the
+`DOCKERHUB_TOKEN` secret on the `docker-hub` environment; see the
+[`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md). Pull requests
+that change packaging rehearse publication against a throwaway local registry.
+
+Linux amd64 images can still be built locally from the repository root:
 
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.1.1 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.1.1 .
+  --build-arg VERSION=0.1.2 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.1.2 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.1.1 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.1.1 .
-# Manual publication, after local verification and registry authentication:
-docker push skorcius/vessel:api-0.1.1
-docker push skorcius/vessel:web-0.1.1
-# Only after both versioned pushes succeed:
-docker tag skorcius/vessel:api-0.1.1 skorcius/vessel:api-latest
-docker tag skorcius/vessel:web-0.1.1 skorcius/vessel:web-latest
-docker push skorcius/vessel:api-latest
-docker push skorcius/vessel:web-latest
+  --build-arg VERSION=0.1.2 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.1.2 .
 ```
 
 The `api-latest` and `web-latest` tags move with releases; deploy fixed versions

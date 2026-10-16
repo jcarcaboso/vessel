@@ -2,18 +2,61 @@
 
 ## Unreleased
 
+## 0.1.2 - October 15, 2026
+
+Release notes: [docs/releases/v0.1.2.md](docs/releases/v0.1.2.md).
+
+### Added
+
 - Overview Allocation panel: donuts of each portfolio's share of the total and
-  each account's share of its portfolio, following the Overview scope.
+  each account's share of its portfolio, following the Overview scope. A View all
+  button sits beside the scope; the back arrow and a second click on the selected
+  slice always return to All accounts.
+- S3-compatible evidence storage. The deployment Compose example now starts a
+  private RustFS by default; overlays keep a local folder
+  (`compose.storage-local.yaml`) or use an external S3 service
+  (`compose.storage-external.yaml`). Invalid S3 settings or outages never fall
+  back to local files.
+- Offline, dry-run-by-default `evidence-copy-to-s3` and `evidence-copy-to-local`
+  API commands that copy and verify originals by size and SHA-256 without
+  deleting them or changing metadata or configuration.
+- Default Play titles (`BTC Long · 15 Oct 2026`) when saved without a name.
+- Accounts grouping by venue or owner address.
+- Release workflow: pushing an annotated `vX.Y.Z` tag on `main` runs the checks
+  and release verification, publishes both Docker Hub images, moves the latest
+  tags and creates the GitHub Release from `docs/releases/vX.Y.Z.md`.
+
+### Changed
+
 - Visual refresh: a readable type scale, a signature accent per theme, lit panels,
   a new mark, a depth-contour texture and ruled journal notes; layout unchanged.
+  Graphite's accent moved from `#b9c9e4` to `#9ab5f2`.
 - Play journal: one header row, an Expand journal dialog, more default height and
-  a Review tab only once a Play is open or ended.
-- Default Play titles (`BTC Long · 15 Oct 2026`) when saved without a name.
-- Distinct asset, venue and account in Play lists; Accounts grouping by venue or
-  address; one shared select style.
+  a Review tab only once a Play is Open, Closed or Cancelled.
+- Distinct asset, venue and account in Play lists, and one shared select style.
 - Less helper text: pills, info tips, coverage badges shown only when incomplete
   and one "About these numbers" disclosure, keeping required notices.
-- Allocation slices clear their selection on a second click.
+
+### Fixed
+
+- The deployment Compose PostgreSQL health check probes TCP, so a first start no
+  longer lets migrations connect to the image's temporary init server.
+
+### Upgrade
+
+- No database migration. The one-shot migration service has nothing to apply.
+- With no storage settings the API keeps using its original local evidence
+  folder. Existing Compose installations that take the new `compose.yaml` must
+  add `-f compose.storage-local.yaml` to every Compose command to keep their
+  images, or copy them to S3 first with `evidence-copy-to-s3`. Do not point the
+  new Compose default at an older API image.
+- Linux amd64 image tags are `skorcius/vessel:api-0.1.2` and
+  `skorcius/vessel:web-0.1.2`.
+
+### Known limits
+
+- Lighter and manual accounts store no owner address, so grouping by address
+  lists them together in one group without an address.
 
 ## 0.1.1 - October 15, 2026
 

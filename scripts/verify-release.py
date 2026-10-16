@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import select
 import shutil
 import socket
 import ssl
@@ -154,7 +155,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             return http.client.HTTPSConnection('localhost', self.https_port, context=ssl._create_unverified_context(), timeout=15)
         return http.client.HTTPConnection('127.0.0.1', self.http_port, timeout=15)
 
-    def request(self, path, method='GET', body=None, headers=None, auth=True, early_response=False):
+    def request(self, path, method='GET', body=None, headers=None, auth=True):
         headers = {'Host': f'localhost:{self.https_port if self.tls else self.http_port}', **(headers or {})}
         if auth:
             headers.setdefault('Authorization', f'Bearer {self.token}')
@@ -163,16 +164,49 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             body = json.dumps(body).encode()
         conn = self.connect()
         try:
-            try:
-                conn.request(method, path, body, headers)
-            except (BrokenPipeError, ConnectionResetError):
-                # A proxy may reject a declared oversize body before the client finishes sending it.
-                if not early_response:
-                    raise
+            conn.request(method, path, body, headers)
             response = conn.getresponse()
             return response.status, response.getheaders(), response.read()
         finally:
             conn.close()
+
+    def oversize_upload(self, path, length):
+        # Send only while no answer is waiting. The proxy answers once the limit is passed and closes; writing on
+        # after a TLS peer closed raises SSLEOFError with OpenSSL 3.0 and loses that answer.
+        port = self.https_port if self.tls else self.http_port
+        raw = socket.create_connection(('localhost' if self.tls else '127.0.0.1', port), timeout=15)
+        if self.tls:
+            raw = ssl._create_unverified_context().wrap_socket(raw, server_hostname='localhost')
+        with raw:
+            raw.sendall(f'POST {path} HTTP/1.1\r\nHost: localhost:{port}\r\nAuthorization: Bearer {self.token}\r\n'
+                        f'Content-Type: application/octet-stream\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n'.encode())
+            raw.setblocking(False)
+            chunk, sent, data, deadline = b'x' * 16384, 0, b'', time.monotonic() + 60
+            while b'\r\n\r\n' not in data:
+                if self.tls and raw.pending():
+                    readable, writable = [raw], []
+                else:
+                    readable, writable, _ = select.select([raw], [raw] if sent < length else [], [], max(deadline - time.monotonic(), 0))
+                if not readable and not writable:
+                    raise TimeoutError(f'{path} did not answer an oversize upload')
+                if readable:
+                    try:
+                        part = raw.recv(65536)
+                    except (ssl.SSLWantReadError, BlockingIOError):
+                        continue  # TLS 1.3 session tickets, not an answer
+                    if not part:
+                        break
+                    data += part
+                    continue
+                try:
+                    sent += raw.send(chunk[:length - sent])
+                except (ssl.SSLWantWriteError, ssl.SSLWantReadError, BlockingIOError):
+                    continue
+                except (BrokenPipeError, ConnectionResetError, ssl.SSLEOFError):
+                    sent = length  # Closed early; read whatever answer arrived.
+        head = data.split(b'\r\n\r\n', 1)[0].decode('latin-1').split('\r\n')
+        status = int(head[0].split()[1]) if head and len(head[0].split()) > 1 else 0
+        return status, [tuple(part.strip() for part in line.split(':', 1)) for line in head[1:] if ':' in line]
 
     def malformed_chunked(self, path):
         raw = socket.create_connection(('localhost' if self.tls else '127.0.0.1', self.https_port if self.tls else self.http_port), timeout=15)
@@ -227,7 +261,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             self.expect(sum(k.lower() == 'content-security-policy' for k, _ in headers) == 1, path + ' CSP')
         _, headers, data = self.request(asset, headers={'Accept-Encoding': 'gzip'})
         self.expect(any(k.lower() == 'content-encoding' and v == 'gzip' for k, v in headers) and len(gzip.decompress(data)) > len(data), 'static JS gzip')
-        status, headers, _ = self.request('/api/plays/00000000-0000-0000-0000-000000000001/evidence', 'POST', b'x' * (10551296 + 1), early_response=True)
+        status, headers = self.oversize_upload('/api/plays/00000000-0000-0000-0000-000000000001/evidence', 10551296 + 1)
         self.expect(status == 413, 'upload body limit is enforced by nginx')
         self.expect(any(k.lower() == 'x-content-type-options' and v == 'nosniff' for k, v in headers) and any(k.lower() == 'content-security-policy' for k, _ in headers), 'nginx upload error has security headers')
         for path in ('/api/test', '/health/ready'):
