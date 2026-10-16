@@ -34,7 +34,8 @@ public readonly record struct DispatchResult(DispatchOutcome Outcome)
 /// The one dispatcher behind live delivery and catch-up. In one transaction it looks the event up by owner and ID
 /// (never trusting the message's sequence or payload), acquires and locks the receipt, checks responsibility,
 /// terminal state, expiry, retry deadline and remaining attempts, runs the handler's database-only effects and
-/// settles the receipt. A handler failure rolls its effects back; a second short transaction records the attempt.
+/// settles the receipt. The handler and the save of its effects run in a savepoint: a failure rolls the effects
+/// back and the attempt is recorded in the same transaction, so the receipt lock is never released in between.
 /// </summary>
 public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServiceProvider services,
     TimeProvider time, ILogger<EventDispatcher> logger)
@@ -53,10 +54,11 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
             return new(await work.ExecuteAsync(() => DispatchInTransactionAsync(subscription, eventId, trigger, attempt, cancellationToken),
                 cancellationToken));
         }
-        catch (Exception error) when (attempt.HandlerStarted)
+        catch (Exception error) when (attempt.HandlerStarted && !cancellationToken.IsCancellationRequested)
         {
-            // Effects rolled back with the unit. Record the attempt durably; never log handler messages.
-            logger.LogWarning("Subscription {Subscription} failed event {EventId} with {ErrorType}.",
+            // The handler succeeded but the unit failed to commit (for example an event it appended was refused).
+            // The whole unit rolled back; record the attempt in a new transaction so it still counts towards the cap.
+            logger.LogWarning("Subscription {Subscription} could not commit event {EventId} ({ErrorType}).",
                 subscription.Name, eventId, error.GetType().Name);
             return new(await work.ExecuteAsync(() => RecordFailureAsync(subscription, eventId, attempt.ObservedAttempts,
                 error, cancellationToken), cancellationToken));
@@ -95,11 +97,21 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
 
         var handler = services.GetRequiredKeyedService<IVesselEventSubscriber>(subscription.Name);
         attempt.ObservedAttempts = attempts;
+        // Stays set through settlement and commit: any later failure is still this handler's attempt.
         attempt.HandlerStarted = true;
-        var handled = await handler.HandleAsync(message, ct);
+        var handled = EventHandling.Delivered;
+        var error = await work.IsolateAsync(async () => handled = await handler.HandleAsync(message, ct), ct);
+        if (error is null)
+            return await SettleAsync(subscription.Name, eventId, handled == EventHandling.Skipped ? "skipped" : "delivered",
+                1, null, time.GetUtcNow(), ct);
+        // Shutdown is not an attempt: roll everything back and leave the event to catch-up.
+        if (error is OperationCanceledException && ct.IsCancellationRequested)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+        // Effects are undone; the receipt is still locked by this transaction while the attempt is recorded.
+        logger.LogWarning("Subscription {Subscription} failed event {EventId} with {ErrorType}.",
+            subscription.Name, eventId, error.GetType().Name);
         attempt.HandlerStarted = false;
-        return await SettleAsync(subscription.Name, eventId, handled == EventHandling.Skipped ? "skipped" : "delivered",
-            1, null, time.GetUtcNow(), ct);
+        return await FailAttemptAsync(subscription, eventId, attempts, maxAttempts, error, time.GetUtcNow(), ct);
     }
 
     private async Task<DispatchOutcome> RecordFailureAsync(EventSubscription subscription, Guid eventId, int observedAttempts,
@@ -119,9 +131,16 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
         // Another dispatcher settled or attempted it after this attempt's rollback: its record stands.
         if (Terminal.Contains(receipt.State)) return DispatchOutcome.AlreadySettled;
         if (receipt.Attempts != observedAttempts) return DispatchOutcome.NotDue;
-        var attempts = receipt.Attempts + 1;
+        return await FailAttemptAsync(subscription, eventId, receipt.Attempts, receipt.MaxAttempts, error, now, ct);
+    }
+
+    /// <summary>Records one failed attempt on a receipt this transaction has locked: retry later or fail at the cap.</summary>
+    private async Task<DispatchOutcome> FailAttemptAsync(EventSubscription subscription, Guid eventId, int previousAttempts,
+        int maxAttempts, Exception error, DateTimeOffset now, CancellationToken ct)
+    {
+        var attempts = previousAttempts + 1;
         var reason = error is TerminalEventException ? Safe(error.Message) : $"Handler failed ({error.GetType().Name}).";
-        if (error is TerminalEventException || attempts >= receipt.MaxAttempts)
+        if (error is TerminalEventException || attempts >= maxAttempts)
             return await SettleAsync(subscription.Name, eventId, "failed", 1, reason, now, ct);
         var next = now + subscription.Limits.RetryDelay(attempts, Random.Shared.NextDouble());
         await VesselEventSql.ExecuteAsync(db, """

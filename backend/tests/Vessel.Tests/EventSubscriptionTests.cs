@@ -135,6 +135,58 @@ public sealed class EventSubscriptionTests
         Assert.Equal(("delivered", 1), await runtime.ReceiptAsync(raced, slow.Id));
     }
 
+    // Round 2: the receipt stays locked while a failed attempt is rolled back and recorded, so a concurrent
+    // dispatcher cannot run the handler again in between.
+    [VesselEventPostgresFact]
+    public async Task Concurrent_dispatchers_cannot_repeat_a_failing_handler_before_its_attempt_is_recorded()
+    {
+        await using var runtime = await Runtime.CreateAsync();
+        var contended = await runtime.RegisterNewAsync("contended", Fixed with { MaxAttempts = 1 });
+        var failing = await runtime.AppendAsync(Draft("retry-slow"));
+        var first = runtime.DispatchAsync(contended, failing.Id);
+        await runtime.Subscriber.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var second = runtime.DispatchAsync(contended, failing.Id);
+        await Task.Delay(300);
+        Assert.False(second.IsCompleted);
+        runtime.Subscriber.Release.TrySetResult();
+        Assert.Equal(DispatchOutcome.Failed, (await first).Outcome);
+        Assert.Equal(DispatchOutcome.AlreadySettled, (await second).Outcome);
+        Assert.Equal(1, runtime.Subscriber.Calls(failing.Id));
+        Assert.Equal(("failed", 1), await runtime.ReceiptAsync(contended, failing.Id));
+    }
+
+    // Round 2: a handler's tracked effect that fails when saved is the handler's attempt, not an infrastructure
+    // failure. It is rolled back to a savepoint, counted towards the cap, and the catch-up pass continues.
+    [VesselEventPostgresFact]
+    public async Task A_handler_effect_failing_at_save_is_a_counted_attempt_and_catch_up_continues()
+    {
+        await using var runtime = await Runtime.CreateAsync();
+        var existing = new Account(Guid.NewGuid(), runtime.Owner, "manual", "Existing");
+        await using (var seed = runtime.Database.Context(runtime.Owner))
+        {
+            seed.Accounts.Add(existing);
+            await seed.SaveChangesAsync();
+        }
+        runtime.SavingConflict = existing.Id;
+        // The handler's own monitor event does not match this subscription's filter.
+        var saving = await runtime.RegisterNewAsync(Runtime.SavingSubscription, Fixed with { MaxAttempts = 2 }, "play.#");
+        var bad = await runtime.AppendAsync(Draft("bad-save", "play.status-changed"));
+        var good = await runtime.AppendAsync(Draft("good-save", "play.status-changed"));
+        runtime.Clock.Advance(TimeSpan.FromMinutes(1));
+        var pass = await runtime.CatchUpAsync(saving);
+        Assert.Equal((2, 0L), (pass.Discovered, pass.LowWaterMark));
+        Assert.Equal(("pending", 1), await runtime.ReceiptAsync(saving, bad.Id));
+        Assert.Equal(("delivered", 1), await runtime.ReceiptAsync(saving, good.Id));
+        Assert.Equal(2, await runtime.CountAsync("SELECT count(*) FROM accounts"));
+        // The failed attempt's buffered event was discarded with its effects; the delivered one's committed.
+        Assert.Equal(["handler-good-save"], (await EventReads.ReadAsync(runtime.Reader, 0, 200, default)).Events
+            .Select(e => e.DedupKey).Where(k => k.StartsWith("handler-", StringComparison.Ordinal)));
+        runtime.Clock.Advance(TimeSpan.FromMinutes(2));
+        Assert.Equal(3, (await runtime.CatchUpAsync(saving)).LowWaterMark);
+        Assert.Equal(("failed", 2), await runtime.ReceiptAsync(saving, bad.Id));
+        Assert.StartsWith("Handler failed (", await runtime.ScalarAsync<string>($"SELECT error FROM event_receipts WHERE event_id='{bad.Id}'"));
+    }
+
     // Round 2: an admin retry waits for an in-progress floor decision instead of reopening a receipt that the
     // decision is about to publish over and delete.
     [VesselEventPostgresFact]
@@ -452,7 +504,7 @@ public sealed class EventSubscriptionTests
         {
             calls.AddOrUpdate(message.Id, 1, (_, count) => count + 1);
             Seen[message.Id] = message;
-            if (message.DedupKey == "slow")
+            if (message.DedupKey.EndsWith("slow", StringComparison.Ordinal))
             {
                 Entered.TrySetResult();
                 await Release.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
@@ -461,6 +513,19 @@ public sealed class EventSubscriptionTests
                 throw new InvalidOperationException("Synthetic retryable failure.");
             if (message.DedupKey.StartsWith("terminal", StringComparison.Ordinal))
                 throw new TerminalEventException("Synthetic permanent failure.");
+            return EventHandling.Delivered;
+        }
+    }
+
+    /// <summary>Appends an event, tracks an account and leaves the save to the unit of work; "bad" reuses an existing key.</summary>
+    private sealed class SavingSubscriber(VesselDbContext db, IVesselEventSink events, Guid owner, Func<Guid> conflict)
+        : IVesselEventSubscriber
+    {
+        public async Task<EventHandling> HandleAsync(VesselEvent message, CancellationToken cancellationToken)
+        {
+            await events.AppendAsync(Draft("handler-" + message.DedupKey), cancellationToken);
+            db.Accounts.Add(new Account(message.DedupKey.StartsWith("bad", StringComparison.Ordinal) ? conflict() : Guid.NewGuid(),
+                owner, "manual", "Handler effect"));
             return EventHandling.Delivered;
         }
     }
@@ -487,11 +552,15 @@ public sealed class EventSubscriptionTests
             services.AddVesselEvents(Configuration);
             services.AddScoped<IVesselEventOutbox, NoOutbox>();
             services.AddKeyedSingleton<IVesselEventSubscriber>(KeyedService.AnyKey, Subscriber);
+            services.AddKeyedScoped<IVesselEventSubscriber>(SavingSubscription, (sp, _) => new SavingSubscriber(
+                sp.GetRequiredService<VesselDbContext>(), sp.GetRequiredService<IVesselEventSink>(), Owner, () => SavingConflict));
             provider = services.BuildServiceProvider();
         }
 
+        public const string SavingSubscription = "saving";
         public CoreDatabase Database { get; }
         public Guid Owner { get; } = Guid.NewGuid();
+        public Guid SavingConflict { get; set; }
         public ManualClock Clock { get; } = new();
         public GatedSubscriber Subscriber { get; } = new();
         public VesselDbContext Reader { get; }

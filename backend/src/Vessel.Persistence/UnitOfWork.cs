@@ -180,6 +180,48 @@ public sealed class UnitOfWork(VesselDbContext db, IEnumerable<IUnitOfWorkPartic
         }
     }
 
+    /// <summary>
+    /// Runs an operation and saves its tracked effects inside a savepoint of the active unit. On failure the effects
+    /// roll back to the savepoint, tracked entities and participants' buffered state are discarded and the unit stays
+    /// usable, so the caller still holds its row locks and can durably record the failure in the same transaction.
+    /// Call it from the operation itself, before any other buffered participant state: that state is discarded too.
+    /// A dangling callback or a failed savepoint rollback still makes the whole unit roll back.
+    /// </summary>
+    internal async Task<Exception?> IsolateAsync(Func<Task> operation, CancellationToken cancellationToken)
+    {
+        RequireActive();
+        const string savepoint = "vessel_isolated";
+        var transaction = db.Database.CurrentTransaction!;
+        await transaction.CreateSavepointAsync(savepoint, cancellationToken);
+        try
+        {
+            await ParticipateAsync(async () =>
+            {
+                await operation();
+                // Saved here, not by the final save: a failing effect belongs to the isolated operation.
+                await SaveChangesAsync(cancellationToken);
+                return true;
+            }, cancellationToken);
+            return null;
+        }
+        catch (Exception error) when (!unusable)
+        {
+            try { await transaction.RollbackToSavepointAsync(savepoint, CancellationToken.None); }
+            catch (Exception rollback)
+            {
+                // The connection state is unknown: report the original failure, with the rollback error beside it.
+                unusable = true;
+                error.Data[RollbackErrorKey] = rollback;
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+            }
+            db.ChangeTracker.Clear();
+            foreach (var participant in participants) await participant.RollbackAsync(CancellationToken.None);
+            // The poisoning failure was confined to the savepoint that has just been undone.
+            failure = null;
+            return error;
+        }
+    }
+
     private void RequireActiveParticipation()
     {
         var root = active;

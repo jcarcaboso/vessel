@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Vessel.Persistence.Events.Subscriptions;
 
@@ -9,7 +10,8 @@ public sealed record CatchUpResult(int Discovered, int Retried, long LowWaterMar
 /// that have no receipt (past the grace period), retries due pending receipts at any sequence, then advances the
 /// low-water mark across a settled prefix. Everything goes through the one dispatcher; replicas are safe.
 /// </summary>
-public sealed class EventCatchUp(VesselDbContext db, UnitOfWork work, EventDispatcher dispatcher, TimeProvider time)
+public sealed class EventCatchUp(VesselDbContext db, UnitOfWork work, EventDispatcher dispatcher, TimeProvider time,
+    ILogger<EventCatchUp> logger)
 {
     /// <summary>Largest sequence span examined by one low-water advance.</summary>
     internal const int AdvanceWindow = 10_000;
@@ -29,7 +31,7 @@ public sealed class EventCatchUp(VesselDbContext db, UnitOfWork work, EventDispa
             ORDER BY e.sequence LIMIT @batch
             """, subscription, cancellationToken, ("types", types), ("grace", now - subscription.Limits.DiscoveryGrace));
         foreach (var id in discovered)
-            await dispatcher.DispatchAsync(subscription, db.CurrentOwnerId, id, DispatchTrigger.CatchUp, cancellationToken);
+            await DispatchAsync(subscription, id, cancellationToken);
         // Admin retries can sit behind the low-water mark; retry work is joined to retained events, not to the mark.
         var due = await IdsAsync("""
             SELECT r.event_id FROM event_receipts r
@@ -40,8 +42,20 @@ public sealed class EventCatchUp(VesselDbContext db, UnitOfWork work, EventDispa
             ORDER BY r.next_attempt_at,r.sequence LIMIT @batch
             """, subscription, cancellationToken, ("now", time.GetUtcNow()));
         foreach (var id in due)
-            await dispatcher.DispatchAsync(subscription, db.CurrentOwnerId, id, DispatchTrigger.CatchUp, cancellationToken);
+            await DispatchAsync(subscription, id, cancellationToken);
         return new(discovered.Count, due.Count, await AdvanceAsync(subscription, types, cancellationToken));
+    }
+
+    // One event that cannot even record its attempt (an infrastructure failure) must not stop the pass:
+    // later events are still dispatched and the mark still advances up to it. A later pass retries it.
+    private async Task DispatchAsync(EventSubscription subscription, Guid id, CancellationToken ct)
+    {
+        try { await dispatcher.DispatchAsync(subscription, db.CurrentOwnerId, id, DispatchTrigger.CatchUp, ct); }
+        catch (Exception error) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning("Catch-up for subscription {Subscription} could not dispatch event {EventId} ({ErrorType}).",
+                subscription.Name, id, error.GetType().Name);
+        }
     }
 
     /// <summary>
