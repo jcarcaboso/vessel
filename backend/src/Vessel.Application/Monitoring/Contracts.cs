@@ -38,8 +38,12 @@ public interface IMonitorEvaluator
     /// <returns>A confirmation deadline, if another fresh account-wide observation is needed.</returns>
     Task<MonitorEvaluationResult> EvaluateAsync(MonitorEvaluation observation, CancellationToken ct);
     Task<IReadOnlyList<MonitorDiscrepancyDto>> ReadAsync(Guid accountId, Guid? playId, CancellationToken ct);
-    /// <summary>Ages outstanding discrepancy work after a failed check, under the same account fence.</summary>
-    Task ExpireAsync(Account account, Guid runId, string trigger, CancellationToken ct);
+    /// <summary>
+    /// Discrepancy housekeeping for a lease-owned run that made no discrepancy decisions, under the same account fence.
+    /// <paramref name="interrupted"/> (failed or discarded checks) breaks pending confirmation sequences; every run
+    /// ages outstanding work toward its unverifiable outcome.
+    /// </summary>
+    Task SettleAsync(Account account, Guid runId, string trigger, bool interrupted, CancellationToken ct);
 }
 
 public interface IMonitorImporter

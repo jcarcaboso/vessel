@@ -285,6 +285,9 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 var discardedState = row.State;
                 Supersede(account, row, refresh, now);
                 await ApplyVenueBudgetAsync(account.VenueId, row, ct);
+                // The discarded observation is neither reconciled nor used for confirmation, but the run still settles.
+                await SettleDiscrepanciesAsync(account, lease, ct);
+                if (!refresh && account.IsEnabled && !await store.EligibleAsync(account.Id, now, ct)) row.Idle();
                 await StateEventAsync(account.Id, discardedState, row, lease.RequestId, "monitor", now, ct);
                 return false;
             }
@@ -309,8 +312,8 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                     account.RecordOrderHistoryNotice(read.OrderError);
                     await workspace.SaveAsync(ct);
                 }
-                // Refresh performs no lifecycle reconciliation, but still runs discrepancy expiry housekeeping.
-                if (evaluator is not null) await evaluator.ExpireAsync(account, lease.RequestId, lease.Trigger, ct);
+                // Refresh performs no lifecycle reconciliation, but still settles discrepancy housekeeping.
+                await SettleDiscrepanciesAsync(account, lease, ct);
                 row.LastObservationAtUtc = read.Sync.Snapshot.ObservedAtUtc;
                 row.LastOrdersObservationAtUtc = read.Orders?.ObservedAtUtc ?? row.LastOrdersObservationAtUtc;
                 row.CompleteRefresh(now, options.ManualCooldown);
@@ -399,6 +402,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 }
                 row.CompleteRefresh(now, options.ManualCooldown);
                 await ApplyVenueBudgetAsync(account.VenueId, row, ct);
+                await SettleDiscrepanciesAsync(account, lease, ct);
                 return false;
             }
             if (settingsChanged)
@@ -413,10 +417,10 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 await unitOfWork.SaveChangesAsync(ct);
                 row.Complete(now, options.ManualCooldown, options.NextDelay(row.ConsecutiveFailures + 1, Random.Shared.NextDouble()),
                     false, credentialError: credential, error: error);
-                // Failed reads still age discrepancy work, so they cannot hold the account eligible forever.
-                if (evaluator is not null) await evaluator.ExpireAsync(account, lease.RequestId, lease.Trigger, ct);
-                if (!await store.EligibleAsync(account.Id, now, ct)) row.Idle();
             }
+            // Failed and discarded reads still age discrepancy work, so they cannot hold the account eligible forever.
+            await SettleDiscrepanciesAsync(account, lease, ct);
+            if (account.IsEnabled && !await store.EligibleAsync(account.Id, now, ct)) row.Idle();
             await ApplyVenueBudgetAsync(account.VenueId, row, ct);
             await StateEventAsync(lease.AccountId, old, row, lease.RequestId, "monitor", now, ct);
             return false;
@@ -428,8 +432,10 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         {
             var now = time.GetUtcNow();
             if (!row.Owns(lease.Generation, lease.WorkerId, now)) return false;
+            await events.SetRunAsync(lease.RequestId, lease.Trigger == "refresh" ? "owner" : "monitor", ct);
             var old = row.State;
             Supersede(account, row, lease.Trigger == "refresh", now);
+            await SettleDiscrepanciesAsync(account, lease, ct);
             if (account.IsEnabled && !await store.EligibleAsync(account.Id, now, ct)) row.Idle();
             await ApplyVenueBudgetAsync(account.VenueId, row, ct);
             await StateEventAsync(lease.AccountId, old, row, lease.RequestId, "monitor", now, ct);
@@ -442,6 +448,14 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         else row.Supersede(now, options.ManualCooldown, MonitorOptions.FirstRetry);
         if (!account.IsEnabled) row.Idle();
     }
+
+    /// <summary>
+    /// The single place where a lease-owned run that made no discrepancy decisions (failed, discarded, superseded or
+    /// refresh) settles discrepancy housekeeping. Failed, discarded and superseded checks interrupt pending
+    /// confirmations; owner refreshes only age outstanding work. An evaluated check settles inside the evaluator.
+    /// </summary>
+    private Task SettleDiscrepanciesAsync(Account account, MonitorLease lease, CancellationToken ct) =>
+        evaluator?.SettleAsync(account, lease.RequestId, lease.Trigger, interrupted: lease.Trigger != "refresh", ct) ?? Task.CompletedTask;
 
     private Task<int> DeferThrottledLeaseAsync(MonitorLease lease, CancellationToken ct) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>

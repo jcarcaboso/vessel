@@ -87,16 +87,19 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
     }
 
     /// <summary>
-    /// Expiry housekeeping when a check made no decisions (a failed check or an owner refresh), under the account
-    /// fence, so such runs cannot hold the account forever. Nothing is decided, resolved or interrupted.
+    /// Housekeeping when a run made no decisions (a failed, discarded or refresh run), under the account fence, so such
+    /// runs can neither hold the account forever nor let a later success confirm on a stale timer. Nothing is decided.
     /// </summary>
-    public async Task ExpireAsync(Vessel.Domain.Accounts.Account account, Guid runId, string trigger, CancellationToken ct)
+    public async Task SettleAsync(Vessel.Domain.Accounts.Account account, Guid runId, string trigger, bool interrupted, CancellationToken ct)
     {
         if (account.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
         var now = clock.GetUtcNow();
         foreach (var row in await store.RecordsAsync(account.Id, ct))
+        {
+            if (interrupted) DiscrepancyLifecycle.Apply(row, DiscrepancyInput.Unknown(now));
             await Publish(row, DiscrepancyLifecycle.Apply(row, DiscrepancyInput.Expiry(now, options.UnobservableLifetime)),
                 runId, account.VenueId, trigger, now, ct);
+        }
     }
 
     public async Task<IReadOnlyList<MonitorDiscrepancyDto>> ReadAsync(Guid accountId, Guid? playId, CancellationToken ct)
