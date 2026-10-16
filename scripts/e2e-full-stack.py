@@ -44,12 +44,56 @@ EVENT_KEYS = {'id', 'type', 'version', 'ownerId', 'sequence', 'runId', 'dedupKey
 COOLDOWN = 15
 
 
+MARKER = '.vessel-e2e-run'
+MARKER_TOOL = 'vessel-e2e-full-stack'
+RUN_NAME = re.compile(r'vessel-e2e-[0-9a-f]{8}')
+RUN_LABEL = 'vessel-e2e.run'
+# Every credential this run generates; all printed, stored or reported text passes through redact().
+SECRETS = set()
+
+
 class StepFailed(Exception):
     pass
 
 
-def run(*args, **kwargs):
-    return subprocess.run(args, check=kwargs.pop('check', True), **kwargs)
+class CommandFailed(Exception):
+    """A failed external command, described by its operation and exit code only: argv can hold generated secrets."""
+
+
+class ResumeRefused(Exception):
+    pass
+
+
+def redact(text):
+    text = str(text)
+    for secret in sorted(SECRETS, key=len, reverse=True):
+        text = text.replace(secret, '[redacted]')
+    return text
+
+
+def operation(args):
+    """The command's operation words (no option values, paths or payloads), e.g. 'docker compose exec rabbitmq rabbitmqctl add_user'."""
+    words, skip = [], False
+    for arg in map(str, args):
+        if skip:
+            skip = False
+        elif arg in ('--project-directory', '-p', '-f', '-v', '-e', '-w', '--name', '--label', '--user', '--entrypoint', '--network', '-c'):
+            skip = True
+        elif not arg.startswith('-') and '/' not in arg and len(arg) <= 40:
+            words.append(arg)
+        if len(words) == 6:
+            break
+    return redact(' '.join(words))
+
+
+def run(*args, check=True, timeout=None, **kwargs):
+    try:
+        result = subprocess.run(args, check=False, timeout=timeout, **kwargs)
+    except subprocess.TimeoutExpired:
+        raise CommandFailed(f'{operation(args)} timed out after {timeout}s') from None
+    if check and result.returncode:
+        raise CommandFailed(f'{operation(args)} exited with {result.returncode}')
+    return result
 
 
 def free_port():
@@ -136,7 +180,9 @@ class E2E:
     def __init__(self, args):
         self.args = args
         self.started = time.monotonic()
-        self.temp = Path(tempfile.mkdtemp(prefix='vessel-e2e-'))
+        # The working directory and Compose projects this run may remove: set only when this run creates them, or after a
+        # --resume candidate passed every ownership check. A candidate path is never cleaned up on its own.
+        self.temp, self.owned_temp, self.owned_projects = None, None, []
         self.name = 'vessel-e2e-' + secrets.token_hex(4)
         self.project = self.name
         self.projects = [self.name, self.name + '-restore']
@@ -145,6 +191,7 @@ class E2E:
         self.database_password = secrets.token_hex(24)
         self.broker_password, self.app_password = secrets.token_hex(24), secrets.token_hex(24)
         self.s3_access, self.s3_secret = secrets.token_hex(16), secrets.token_hex(32)
+        self.register_secrets()
         self.http_port, self.broker_port, self.control_port = free_port(), free_port(), free_port()
         stamp = time.strftime('%Y%m%d-%H%M%S')
         self.artifacts = Path(args.artifacts or Path(tempfile.gettempdir()) / f'vessel-e2e-artifacts-{stamp}')
@@ -159,19 +206,29 @@ class E2E:
 
     # ---- reporting -----------------------------------------------------------------------------------
 
+    def register_secrets(self):
+        SECRETS.update(value for value in (self.token, self.database_password, self.broker_password, self.app_password,
+                                           self.s3_access, self.s3_secret) if value)
+
     def expect(self, condition, label, detail='', soft=False):
-        self.results.append((self.step, label, bool(condition), '' if condition else str(detail)[:300]))
+        label, detail = redact(label), redact(detail)
+        self.results.append((self.step, label, bool(condition), '' if condition else detail[:300]))
         print(f"{'PASS' if condition else 'FAIL'} [{self.step}] {label}" + ('' if condition else f' -- {detail}'), flush=True)
         if not condition and not soft:
             raise StepFailed(label)
         return condition
 
     def note(self, message):
-        print(f'      [{self.step}] {message}', flush=True)
+        print(f'      [{self.step}] {redact(message)}', flush=True)
 
     # ---- stack ---------------------------------------------------------------------------------------
 
     def prepare(self):
+        self.temp = Path(tempfile.mkdtemp(prefix='vessel-e2e-'))
+        self.owned_temp, self.owned_projects = self.temp, list(self.projects)
+        # The ownership marker a later --resume must find before it adopts this directory and its projects.
+        (self.temp / MARKER).write_text(json.dumps({'tool': MARKER_TOOL, 'name': self.name}))
+        (self.temp / MARKER).chmod(0o600)
         for file in ('compose.yaml',):
             shutil.copyfile(ROOT / 'deploy' / file, self.temp / file)
         shutil.copyfile(ROOT / 'scripts' / 'e2e' / 'fake_venue.py', self.temp / 'fake_venue.py')
@@ -276,21 +333,41 @@ services:
 ''')
 
     def certificates(self):
+        # Generated inside the fake venue's own image, so the host needs only Docker and Python; files stay host-owned.
+        script = '''set -e; cd /tmp
+openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 2 -subj "/CN=Vessel E2E synthetic CA" \\
+  -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign,cRLSign 2>/dev/null
+openssl req -newkey rsa:2048 -nodes -keyout venue.key -out venue.csr -subj /CN=fake-venue 2>/dev/null
+printf 'subjectAltName=DNS:fake-venue\\nextendedKeyUsage=serverAuth\\nbasicConstraints=CA:FALSE\\n' > ext.cnf
+openssl x509 -req -in venue.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out venue.crt -days 2 -extfile ext.cnf 2>/dev/null
+for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
+        output = self.standalone('certs', ['--entrypoint', 'sh', FAKE_IMAGE, '-ec', script], timeout=180)
+        parts = re.split(r'^==> (\S+)\n', output, flags=re.M)[1:]
+        files = dict(zip(parts[::2], parts[1::2]))
+        if set(files) != {'ca.crt', 'venue.crt', 'venue.key'}:
+            raise StepFailed('certificate generation returned incomplete output')
         certs = self.temp / 'certs'
         certs.mkdir()
-        ssl = ['openssl']
-        run(*ssl, 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', str(certs / 'ca.key'), '-out', str(certs / 'ca.crt'),
-            '-days', '2', '-subj', '/CN=Vessel E2E synthetic CA', '-addext', 'basicConstraints=critical,CA:TRUE',
-            '-addext', 'keyUsage=critical,keyCertSign,cRLSign', capture_output=True)
-        run(*ssl, 'req', '-newkey', 'rsa:2048', '-nodes', '-keyout', str(certs / 'venue.key'), '-out', str(certs / 'venue.csr'),
-            '-subj', '/CN=fake-venue', capture_output=True)
-        (certs / 'ext.cnf').write_text('subjectAltName=DNS:fake-venue\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\n')
-        run(*ssl, 'x509', '-req', '-in', str(certs / 'venue.csr'), '-CA', str(certs / 'ca.crt'), '-CAkey', str(certs / 'ca.key'),
-            '-CAcreateserial', '-out', str(certs / 'venue.crt'), '-days', '2', '-extfile', str(certs / 'ext.cnf'), capture_output=True)
-        (certs / 'ca.key').unlink()
-        for path in certs.iterdir():
-            path.chmod(0o644)
+        for name, content in files.items():
+            (certs / name).write_text(content)
+            (certs / name).chmod(0o644)
         certs.chmod(0o755)
+
+    def standalone(self, purpose, arguments, timeout):
+        """A run-owned, labelled `docker run --rm` container, removed explicitly if it outlives its timeout."""
+        name = f'{self.name}-{purpose}'
+        self.last_standalone = None
+        try:
+            result = subprocess.run(['docker', 'run', '--rm', '--name', name, '--label', f'{RUN_LABEL}={self.name}', *arguments],
+                                    capture_output=True, text=True, timeout=timeout, env=getattr(self, 'standalone_env', None))
+        except subprocess.TimeoutExpired:
+            # Killing the client does not stop the daemon-side container; remove it before reporting.
+            removed = subprocess.run(['docker', 'rm', '-f', name], capture_output=True, text=True).returncode == 0
+            raise CommandFailed(f'container {purpose} timed out after {timeout}s' + ('' if removed else '; removing it failed')) from None
+        self.last_standalone = result
+        if result.returncode:
+            raise CommandFailed(f'container {purpose} exited with {result.returncode}: {redact((result.stderr or result.stdout)[-300:])}')
+        return result.stdout
 
     def compose(self, *args, project=None, **kwargs):
         cmd = ['docker', 'compose', '--project-directory', str(self.temp), '-p', project or self.project,
@@ -322,9 +399,11 @@ services:
 
     def broker_app_user(self):
         # Least privilege, as documented: the hosts can only use vessel.* names and declare nothing they need.
-        for command in (['add_user', 'vessel-app', self.app_password],
-                        ['set_permissions', '-p', '/', 'vessel-app', '^vessel\\..*', '^(vessel\\..*|amq\\.default)$', '^vessel\\..*']):
-            self.compose('exec', '-T', 'rabbitmq', 'rabbitmqctl', *command, stdout=subprocess.DEVNULL)
+        # rabbitmqctl reads the password from standard input, so it never appears in argv or process listings.
+        self.compose('exec', '-T', 'rabbitmq', 'rabbitmqctl', 'add_user', 'vessel-app', input=self.app_password.encode(),
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.compose('exec', '-T', 'rabbitmq', 'rabbitmqctl', 'set_permissions', '-p', '/', 'vessel-app', '^vessel\\..*',
+                     '^(vessel\\..*|amq\\.default)$', '^vessel\\..*', stdout=subprocess.DEVNULL)
 
     def topology(self):
         queues = {q['name']: {**q, 'arguments': {a[0]: a[2] for a in q['arguments']}}
@@ -1099,14 +1178,17 @@ services:
         if not self.playwright_volume:
             pnpm = json.loads((ROOT / 'package.json').read_text())['packageManager']
             volume = self.name + '-playwright'
-            run('docker', 'volume', 'create', volume, stdout=subprocess.DEVNULL)
+            run('docker', 'volume', 'create', '--label', f'{RUN_LABEL}={self.name}', volume, stdout=subprocess.DEVNULL)
             self.playwright_volume = volume
-            install = run('docker', 'run', '--rm', '-e', 'HOME=/tmp', '-e', 'COREPACK_ENABLE_DOWNLOAD_PROMPT=0', '-v', f'{volume}:/cache',
-                          '-w', '/cache', PLAYWRIGHT_IMAGE, 'sh', '-ec',
-                          f'echo \'{{"private":true}}\' > package.json && corepack {pnpm} add --save-exact playwright-core@{PLAYWRIGHT_VERSION}',
-                          capture_output=True, text=True, check=False)
-            self.expect(install.returncode == 0, f'playwright-core {PLAYWRIGHT_VERSION} installed with {pnpm} for the pinned image',
-                        (install.stderr or install.stdout)[-300:])
+            try:
+                self.standalone('playwright-install', ['-e', 'HOME=/tmp', '-e', 'COREPACK_ENABLE_DOWNLOAD_PROMPT=0', '-v', f'{volume}:/cache',
+                                                       '-w', '/cache', PLAYWRIGHT_IMAGE, 'sh', '-ec',
+                                                       f'echo \'{{"private":true}}\' > package.json && '
+                                                       f'corepack {pnpm} add --save-exact playwright-core@{PLAYWRIGHT_VERSION}'], timeout=600)
+                installed = ''
+            except CommandFailed as error:
+                installed = str(error)
+            self.expect(not installed, f'playwright-core {PLAYWRIGHT_VERSION} installed with {pnpm} for the pinned image', installed)
         return f'{self.playwright_volume}:/playwright:ro', '/playwright/node_modules/playwright-core'
 
     def browser(self, phase):
@@ -1116,13 +1198,23 @@ services:
                'E2E_IDS': json.dumps({'account': self.account, 'accountName': 'E2E Hyperliquid', 'address': self.address,
                                       'p1': self.p1, 'p2': self.p2, 'p3': getattr(self, 'p3', None), 'p1_target': self.p1_orders['target'],
                                       'p1_stop2': self.p1_orders['stop2'], 'p3_entry': getattr(self, 'p3_entry', None), **self.ids})}
-        command = ['docker', 'run', '--rm', '--network', 'host', '--ipc=host',
-                   '-v', f'{ROOT / "scripts" / "e2e"}:/e2e:ro', '-v', mount, '-v', f'{self.artifacts}:/artifacts']
+        arguments = ['--network', 'host', '--ipc=host', '-v', f'{ROOT / "scripts" / "e2e"}:/e2e:ro', '-v', mount,
+                     '-v', f'{self.artifacts}:/artifacts']
         for key in env:
-            command += ['-e', key]
-        command += [PLAYWRIGHT_IMAGE, 'node', '/e2e/browser-e2e.cjs']
-        result = subprocess.run(command, env={**os.environ, **env}, capture_output=True, text=True, timeout=600)
-        (self.artifacts / f'browser-{phase}.log').write_text(result.stdout + result.stderr)
+            arguments += ['-e', key]
+        arguments += [PLAYWRIGHT_IMAGE, 'node', '/e2e/browser-e2e.cjs']
+        # Values travel in the client environment (-e KEY), never in argv.
+        self.standalone_env = {**os.environ, **env}
+        try:
+            self.standalone(f'browser-{phase}', arguments, timeout=600)
+            result = self.last_standalone
+        except CommandFailed as error:
+            result = self.last_standalone
+            if result is None or 'timed out' in str(error):
+                self.expect(False, f'browser phase {phase} completed', error)
+        finally:
+            self.standalone_env = None
+        (self.artifacts / f'browser-{phase}.log').write_text(redact(result.stdout + result.stderr))
         for line in result.stdout.splitlines():
             match = re.match(r'(PASS|FAIL) \[browser\] (.*)', line)
             if match:
@@ -1141,33 +1233,87 @@ services:
         (self.temp / 'e2e-state.json').write_text(json.dumps(state))
         (self.temp / 'e2e-state.json').chmod(0o600)
 
+    @staticmethod
+    def regular_json(path):
+        if path.is_symlink() or not path.is_file():
+            raise ResumeRefused(f'{path.name} is missing or not a regular file')
+        try:
+            value = json.loads(path.read_text())
+        except (OSError, ValueError):
+            raise ResumeRefused(f'{path.name} is unreadable') from None
+        if not isinstance(value, dict):
+            raise ResumeRefused(f'{path.name} is not an object')
+        return value
+
+    def validate_resume(self, directory):
+        """The (directory, state) of a kept run of this harness, or ResumeRefused. Reads only; adopts nothing."""
+        candidate = Path(directory)
+        if candidate.is_symlink() or not candidate.is_dir():
+            raise ResumeRefused('not a real directory (missing or a symlink)')
+        candidate = candidate.resolve()
+        if candidate.parent != Path(tempfile.gettempdir()).resolve() or not re.fullmatch(r'vessel-e2e-[A-Za-z0-9_]{8}', candidate.name):
+            raise ResumeRefused('not a working directory created by this harness')
+        marker = self.regular_json(candidate / MARKER)
+        if marker.get('tool') != MARKER_TOOL or not RUN_NAME.fullmatch(str(marker.get('name'))):
+            raise ResumeRefused('ownership marker does not belong to this harness')
+        state = self.regular_json(candidate / 'e2e-state.json')
+        name = marker['name']
+        if state.get('name') != name or state.get('projects') != [name, name + '-restore'] or state.get('project') not in state['projects']:
+            raise ResumeRefused('saved state does not match the ownership marker')
+        missing = [key for key in ('token', 'owner', 'http_port', 'control_port', 'address', 'account') if key not in state]
+        if missing:
+            raise ResumeRefused('saved state is incomplete: ' + ', '.join(missing))
+        projects = run('docker', 'compose', 'ls', '-a', '--format', 'json', capture_output=True, text=True, check=False)
+        try:
+            listed = {p['Name']: p.get('ConfigFiles', '') for p in json.loads(projects.stdout or '[]')}
+        except ValueError:
+            raise ResumeRefused('docker compose ls returned no project list') from None
+        configs = listed.get(state['project'])
+        if configs is None or str(candidate / 'compose.yaml') not in configs.split(','):
+            raise ResumeRefused('the saved Compose project is not running from this directory')
+        return candidate, state
+
     def load_state(self, directory):
-        shutil.rmtree(self.temp, ignore_errors=True)
-        self.temp = Path(directory)
-        for key, value in json.loads((self.temp / 'e2e-state.json').read_text()).items():
-            setattr(self, key, value)
+        candidate, state = self.validate_resume(directory)
+        # Validated: from here this run owns the directory and its two projects.
+        for key, value in state.items():
+            if key in self.STATE:
+                setattr(self, key, value)
+        self.register_secrets()
+        self.temp = self.owned_temp = candidate
+        self.owned_projects = list(state['projects'])
         self.sse = SseReader(self, self.head())
         self.sse.start()
 
     def cleanup(self):
         if self.sse:
             self.sse.close()
-        if self.args.keep:
-            print(f'Kept: projects {", ".join(self.projects)}, directory {self.temp}, web http://127.0.0.1:{self.http_port}, '
-                  f'fake control http://127.0.0.1:{self.control_port}, token in {self.temp / ".env"}', flush=True)
-            return
         failures = []
-        for project in self.projects:
-            if self.compose('down', '-v', '--remove-orphans', project=project, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            check=False).returncode:
-                failures.append(project)
-        shutil.rmtree(self.temp, ignore_errors=True)
-        if self.playwright_volume:
-            run('docker', 'volume', 'rm', self.playwright_volume, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-        if self.built:
-            for image in IMAGES.values():
-                run('docker', 'image', 'rm', image, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        # Standalone containers never outlive the run, even with --keep: they hold the token and host networking.
+        listed = run('docker', 'ps', '-aq', '--filter', f'label={RUN_LABEL}={self.name}', capture_output=True, text=True, check=False)
+        for container in listed.stdout.split():
+            if run('docker', 'rm', '-f', container, capture_output=True, check=False).returncode:
+                failures.append('container ' + container)
+        if self.args.keep:
+            print(f'Kept: projects {", ".join(self.owned_projects)}, directory {self.owned_temp}, web http://127.0.0.1:{self.http_port}, '
+                  f'fake control http://127.0.0.1:{self.control_port}, token in {self.owned_temp and self.owned_temp / ".env"}', flush=True)
+        else:
+            if self.owned_temp and self.temp == self.owned_temp:
+                for project in self.owned_projects:
+                    if self.compose('down', '-v', '--remove-orphans', project=project, capture_output=True, check=False).returncode:
+                        failures.append('project ' + project)
+                shutil.rmtree(self.owned_temp, ignore_errors=True)
+                if self.owned_temp.exists():
+                    failures.append('directory ' + str(self.owned_temp))
+            if self.playwright_volume and run('docker', 'volume', 'rm', self.playwright_volume, capture_output=True,
+                                              check=False).returncode:
+                failures.append('volume ' + self.playwright_volume)
+            if self.built:
+                for image in IMAGES.values():
+                    if run('docker', 'image', 'rm', image, capture_output=True, check=False).returncode:
+                        failures.append('image ' + image)
         if failures:
+            self.cleanup_failures = failures
             print('Cleanup failed for: ' + ', '.join(failures), flush=True)
 
     def report(self, steps, status):
@@ -1196,6 +1342,13 @@ services:
                  ('10c-streams', self.step_streams)]
         status, failed = {}, False
         resuming = bool(self.args.resume)
+        if resuming:
+            try:
+                self.validate_resume(self.args.resume)
+            except ResumeRefused as error:
+                # Nothing was adopted, so nothing (directory, projects, volumes) is cleaned up.
+                print(f'Refusing to resume {self.args.resume}: {error}. Nothing was changed or removed.', flush=True)
+                return 2
         try:
             if resuming:
                 self.load_state(self.args.resume)
@@ -1213,7 +1366,7 @@ services:
                     state = 'passed' if all(r[2] for r in self.results if r[0] == name) else 'failed'
                 except Exception as error:  # noqa: BLE001 - every failure is reported in the table
                     if not isinstance(error, StepFailed) or not any(r[0] == name and not r[2] for r in self.results):
-                        self.expect(False, 'step completed', f'{type(error).__name__}: {error}', soft=True)
+                        self.expect(False, 'step completed', f'{type(error).__name__}: {redact(error)}', soft=True)
                     state, aborted = 'failed', True
                 status[name] = (state, time.monotonic() - started)
                 if self.args.keep:
@@ -1226,20 +1379,17 @@ services:
                 if self.args.until and name.startswith(self.args.until):
                     break
         finally:
-            if failed or self.args.keep:
+            if (failed or self.args.keep) and self.owned_temp:
                 self.logs()
             self.cleanup()
             self.report(steps, status)
-        return 1 if failed or not all(r[2] for r in self.results) else 0
+        return 1 if failed or getattr(self, 'cleanup_failures', None) or not all(r[2] for r in self.results) else 0
 
     def logs(self):
         try:
             logs = self.compose('logs', '--no-color', 'api', 'worker', 'verifier', 'fake-venue', capture_output=True, text=True, check=False)
-            text = logs.stdout + logs.stderr
-            for secret in (self.token, self.database_password, self.broker_password, self.app_password, self.s3_secret):
-                text = text.replace(secret, '[redacted]')
-            (self.artifacts / 'compose.log').write_text(text)
-        except OSError:
+            (self.artifacts / 'compose.log').write_text(redact(logs.stdout + logs.stderr))
+        except (OSError, CommandFailed):
             pass
 
 
