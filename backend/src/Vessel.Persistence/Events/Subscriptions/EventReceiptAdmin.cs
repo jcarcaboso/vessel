@@ -11,7 +11,13 @@ public sealed class EventReceiptAdmin(VesselDbContext db, UnitOfWork work, TimeP
     {
         if (limit is < 1 or > 1000 || extraAttempts < 1 || extraAttempts > subscription.Limits.MaxAdminRetryBudget)
             throw new ArgumentOutOfRangeException(nameof(extraAttempts), "The admin retry budget is bounded.");
-        return work.ExecuteAsync(() => VesselEventSql.ExecuteAsync(db, """
+        return work.ExecuteAsync(async () =>
+        {
+            // Like dispatch, hold the owner's retention key shared: a floor decision computed before this retry
+            // cannot be published over the receipts it reopens, and a published floor excludes them here.
+            await VesselEventSql.ScalarAsync(db, "SELECT pg_advisory_xact_lock_shared(@key)", cancellationToken,
+                ("key", VesselEventSql.RetentionLock(db.CurrentOwnerId)));
+            return await VesselEventSql.ExecuteAsync(db, """
             UPDATE event_receipts r SET state='pending',max_attempts=r.attempts+@extra,next_attempt_at=@now,settled_at=NULL
             WHERE (r.owner_id,r.subscription,r.event_id) IN (
                 SELECT f.owner_id,f.subscription,f.event_id FROM event_receipts f
@@ -20,6 +26,7 @@ public sealed class EventReceiptAdmin(VesselDbContext db, UnitOfWork work, TimeP
                 WHERE f.owner_id=@owner AND f.subscription=@name AND f.state='failed' AND e.sequence>c.retention_floor
                 ORDER BY f.sequence LIMIT @limit FOR UPDATE OF f SKIP LOCKED)
             """, cancellationToken, ("owner", db.CurrentOwnerId), ("name", subscription.Name), ("extra", extraAttempts),
-            ("now", time.GetUtcNow()), ("limit", limit)), cancellationToken);
+            ("now", time.GetUtcNow()), ("limit", limit));
+        }, cancellationToken);
     }
 }

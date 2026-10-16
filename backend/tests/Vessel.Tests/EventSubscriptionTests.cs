@@ -135,6 +135,37 @@ public sealed class EventSubscriptionTests
         Assert.Equal(("delivered", 1), await runtime.ReceiptAsync(raced, slow.Id));
     }
 
+    // Round 2: an admin retry waits for an in-progress floor decision instead of reopening a receipt that the
+    // decision is about to publish over and delete.
+    [VesselEventPostgresFact]
+    public async Task Admin_retry_cannot_reopen_a_receipt_under_a_floor_being_published()
+    {
+        await using var runtime = await Runtime.CreateAsync();
+        var once = await runtime.RegisterNewAsync("once", Fixed with { MaxAttempts = 1 });
+        var failing = await runtime.AppendAsync(Draft("retry-old", detected: runtime.Clock.GetUtcNow().AddDays(-100)));
+        Assert.Equal(DispatchOutcome.Failed, (await runtime.DispatchAsync(once, failing.Id)).Outcome);
+        Assert.Equal(1, (await runtime.CatchUpAsync(once)).LowWaterMark);
+        // Retention has decided floor 1 (old and terminal) and is about to publish it.
+        await using var retention = new NpgsqlConnection(runtime.Database.ConnectionString);
+        await retention.OpenAsync();
+        await using var decision = await retention.BeginTransactionAsync();
+        await using (var key = new NpgsqlCommand("SELECT pg_advisory_xact_lock(@key)", retention, decision))
+        {
+            key.Parameters.AddWithValue("key", EventRetention.LockKey(runtime.Owner));
+            await key.ExecuteScalarAsync();
+        }
+        var retry = runtime.RetryFailedAsync(once, 2);
+        await Task.Delay(500);
+        Assert.False(retry.IsCompleted, "The admin retry reopened a receipt while a floor decision was in progress.");
+        await using (var publish = new NpgsqlCommand("UPDATE event_cursors SET retention_floor=1", retention, decision))
+            await publish.ExecuteNonQueryAsync();
+        await decision.CommitAsync();
+        Assert.Equal(0, await retry.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(0, await runtime.CountAsync("SELECT count(*) FROM event_receipts WHERE state='pending'"));
+        Assert.Equal(1, (await runtime.RetainAsync()).Deleted);
+        Assert.Equal(0, await runtime.CountAsync("SELECT count(*) FROM event_receipts"));
+    }
+
     [VesselEventPostgresFact]
     public async Task Admin_retry_behind_the_low_water_mark_preserves_attempts_and_never_rewinds_the_mark()
     {

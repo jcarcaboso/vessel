@@ -13,6 +13,9 @@ public sealed record RetentionResult(long Floor, int Deleted);
 /// </summary>
 public sealed class EventRetention(VesselDbContext db, UnitOfWork work, IOptions<VesselEventSettings> settings, TimeProvider time)
 {
+    /// <summary>The owner's retention advisory key: floor publication takes it exclusively, dispatch and admin retry shared.</summary>
+    public static long LockKey(Guid owner) => VesselEventSql.RetentionLock(owner);
+
     /// <summary>Largest sequence span one floor decision examines; later runs continue.</summary>
     internal const int DecisionWindow = 10_000;
 
