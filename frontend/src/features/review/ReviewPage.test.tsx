@@ -6,6 +6,7 @@ import { defaultReviewQuery, type ReviewDocument } from '@/api/review'
 import { emptyReview, reviewFixture } from '@/test/review-fixture'
 import { render as renderWithVenues } from '@/test/render'
 import { ReviewPage } from './ReviewPage'
+import { chooseInPicker } from '@/test/account-picker'
 
 function setup(review = vi.fn().mockResolvedValue(reviewFixture)) {
   const api = { ...createWorkspaceApi('test'), review }
@@ -53,7 +54,7 @@ describe('Production portfolio review', () => {
   it('supports filters, clears account on portfolio change and keeps period on reset', async () => {
     const { review, user } = setup()
     await screen.findByRole('button', { name: 'Last 7 days' })
-    await user.selectOptions(screen.getByLabelText('Account'), reviewFixture.options.accounts[0]!.id)
+    await chooseInPicker('Account', reviewFixture.options.accounts[0]!.name, user)
     await waitFor(() => expect(review).toHaveBeenLastCalledWith(expect.objectContaining({ accountId: reviewFixture.options.accounts[0]!.id }), expect.any(AbortSignal)))
     await user.selectOptions(screen.getByLabelText('Portfolio'), 'unassigned')
     await waitFor(() => expect(review).toHaveBeenLastCalledWith({ period: 'month', portfolio: 'unassigned' }, expect.any(AbortSignal)))

@@ -1,4 +1,5 @@
-/* Venue logos sit on a neutral theme tile; brand colours stay inside the bundled logo files. */
+/* Venue logos sit on a neutral theme tile; brand colours stay inside the bundled logo files (identity marks may tint
+   with a logo's `accent`, see components/accounts). */
 .venue-badge { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; vertical-align: middle; }
 .venue-badge.is-compact { gap: 0; }
 .venue-badge-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
