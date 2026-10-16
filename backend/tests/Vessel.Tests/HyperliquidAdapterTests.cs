@@ -205,6 +205,48 @@ public sealed partial class HyperliquidAdapterTests
     }
 
     [Theory]
+    [InlineData("fee", "missing")]
+    [InlineData("fee", "null")]
+    [InlineData("fee", "empty")]
+    [InlineData("closedPnl", "missing")]
+    [InlineData("closedPnl", "null")]
+    [InlineData("closedPnl", "empty")]
+    [InlineData("feeToken", "missing")]
+    [InlineData("feeToken", "null")]
+    [InlineData("feeToken", "empty")]
+    public async Task Missing_execution_money_is_not_zeroed_even_on_an_opening_fill(string field, string value)
+    {
+        var fill = Mutate(Fill, node =>
+        {
+            node["dir"] = "Open Long";
+            node["startPosition"] = "0";
+            node["closedPnl"] = "0";
+            if (value == "missing") node.AsObject().Remove(field);
+            else node[field] = value == "null" ? null : JsonValue.Create("");
+        });
+        await Invalid(() => Read(fills: $"[{fill}]"));
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("0.000123456789")]
+    [InlineData("-0.000123456789")]
+    public async Task Opening_fills_keep_explicit_zero_Pnl_and_signed_fees(string fee)
+    {
+        var fill = Mutate(Fill, node =>
+        {
+            node["dir"] = "Open Long";
+            node["startPosition"] = "0";
+            node["closedPnl"] = "0";
+            node["fee"] = fee;
+        });
+        var result = Assert.Single((await Read(fills: $"[{fill}]")).Fills);
+        Assert.Equal("open", result.PositionEffect);
+        Assert.Equal(0m, result.ClosedPnlUsd);
+        Assert.Equal(decimal.Parse(fee, CultureInfo.InvariantCulture), result.Fee);
+    }
+
+    [Theory]
     [InlineData("sz", "\"0\"")]
     [InlineData("sz", "\"-0.01\"")]
     [InlineData("px", "\"0\"")]

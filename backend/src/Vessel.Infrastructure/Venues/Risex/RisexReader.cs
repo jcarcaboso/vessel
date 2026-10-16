@@ -76,12 +76,12 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
     [GeneratedRegex(@"^(?<asset>[A-Za-z0-9]{1,24})/USDC(?<retired> \[deprecated-\d{1,20}\])?$")]
     private static partial Regex MarketName();
 
-    private Task<RisexCatalogue> CatalogueAsync(CancellationToken ct) => catalogueCache.GetAsync(token =>
+    private Task<RisexCatalogue> CatalogueAsync(CancellationToken ct, bool refresh = false) => catalogueCache.GetAsync(token =>
         Http.ReadBoundedAsync(async bounded =>
         {
             using var document = await GetAsync("/v1/markets", bounded);
             return ReadCatalogue(Data(document));
-        }, token), ct);
+        }, token), ct, refresh);
 
     internal static RisexCatalogue ReadCatalogue(JsonElement data)
     {
@@ -133,7 +133,8 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
         var latest = timeProvider.GetUtcNow().AddMinutes(5);
         return Http.ReadBoundedAsync(async token =>
         {
-            var catalogue = await CatalogueAsync(token);
+            // Imports must recognize markets listed since the public catalogue was cached.
+            var catalogue = await CatalogueAsync(token, refresh: true);
             using var portfolio = await GetAsync($"/v1/portfolio/details?account={address}", token);
             var snapshot = ReadSnapshot(Data(portfolio), catalogue, timeProvider.GetUtcNow(), out var positionsComplete);
             var fills = new List<VenueFill>();
@@ -250,7 +251,9 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             var side = Side(Json.Property(trade, "side"));
             var positionSide = Side(Json.Property(trade, "position_side"));
             var fee = Json.Nonnegative(Json.Property(trade, "fee"));
-            var pnl = Json.Number(Json.Property(trade, "realized_pnl"));
+            // Unlike Lighter's non-reducing fills, an empty RISEx PnL has no verified net-of-fee zero meaning.
+            var pnl = Json.OptionalAmount(trade, "realized_pnl") ?? throw new VenueReadException(
+                "RISEx omitted realized PnL for an execution. Its net-of-fee result is unknown; this refresh was not imported.");
             var effect = Effect(side, positionSide, pnl, fee);
             var liquidation = Json.Boolean(Json.Property(trade, "is_liquidation"));
             var chain = Json.Property(trade, "blockchain_data");
@@ -271,7 +274,7 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
         var latest = timeProvider.GetUtcNow().AddMinutes(5);
         return Http.ReadBoundedAsync(async token =>
         {
-            var catalogue = await CatalogueAsync(token);
+            var catalogue = await CatalogueAsync(token, refresh: true);
             using var history = await GetAsync($"/v1/orders?account={address}&limit={PageSize}&page=1", token);
             using var tpsl = await GetAsync($"/v1/orders/tpsl?account={address}&limit={PageSize}&page=1", token);
             var orders = ReadOrders(Data(history), catalogue, latest).Concat(ReadTpslOrders(Data(tpsl), catalogue, latest))
@@ -456,5 +459,5 @@ public sealed class RisexCatalogueCache(TimeProvider time)
     public static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(1);
     private readonly BoundedMarketDataCache<RisexReader.RisexCatalogue> entries = new(time, 1, 1, _ => 1);
     internal Task<RisexReader.RisexCatalogue> GetAsync(Func<CancellationToken, Task<RisexReader.RisexCatalogue>> load,
-        CancellationToken ct) => entries.GetAsync("markets", load, _ => Lifetime, ct);
+        CancellationToken ct, bool refresh = false) => entries.GetAsync("markets", load, _ => Lifetime, ct, refresh);
 }
