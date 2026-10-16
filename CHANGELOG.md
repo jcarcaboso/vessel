@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.3 - October 16, 2026
+
+Release notes: [docs/releases/v0.1.3.md](docs/releases/v0.1.3.md).
+
 ### Added
 
 - Activity pages on the server with a 25 / 50 / 100 rows selector (default 25),
@@ -18,6 +22,19 @@
 - The Plays list reads summary columns only; a new `Direction` column
   (migration `PlayDirection`, backfilled from the plan) avoids parsing every
   plan. Apply the migration before starting the new API.
+- Overview Plays and recent operations request only the five rows they show,
+  with counts from the server.
+
+### Upgrade
+
+- Migration `20261016104756_PlayDirection` adds the column and two list
+  indexes. Stop web and API while it runs. Older API images cannot save Plays
+  after it is applied; restore the backup to roll back.
+
+### Known limits
+
+- Activity still aggregates every retained fill on each request before paging.
+- On a desktop Overview the Plays tabs wrap to two lines.
 
 ## 0.1.2 - October 15, 2026
 
