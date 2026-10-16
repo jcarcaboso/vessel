@@ -696,9 +696,9 @@ This upgrade adds two services and new required settings. Before it:
   `VESSEL_MONITOR_*`, `RABBITMQ_APP_USER`/`RABBITMQ_APP_PASSWORD`.
 - Messaging settings are `Vessel__Messaging__*` (for example
   `Vessel__Messaging__RabbitMqUri`, which Compose builds for you).
-- Migrations `20261014180000_VesselEvents`, `20261015072425_AccountMonitor`,
-  `20261015072500_MessagingDeployments`, `20261015073737_PlayDiscrepancies` and
-  `20261015172843_PlayDiscrepancyUnverifiable` add the event log, subscriptions
+- Migrations `20261016110000_VesselEvents`, `20261016110100_AccountMonitor`,
+  `20261016110200_MessagingDeployments`, `20261016110300_PlayDiscrepancies` and
+  `20261016110400_PlayDiscrepancyUnverifiable` add the event log, subscriptions
   and receipts, monitor state, the deployment registrations and discrepancies.
 - `migrate` now also runs `provision-messaging` against the new `rabbitmq`
   service, which must be healthy first; then `api` and the new `worker` start.

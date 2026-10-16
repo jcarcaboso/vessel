@@ -110,7 +110,7 @@ These layer reviews preceded the final full-stack run.
   passed 1,915 tests with three optional live skips. A further independent
   review approved `25de361` and passed 78 focused tests covering owner guards,
   credential forwarding, Robinhood coverage and the combined account-monitor
-  migration. The owner/venue budget is in `20261015072425_AccountMonitor`;
+  migration. The owner/venue budget is in `20261016110100_AccountMonitor`;
   there is no separate budget migration.
 - Discrepancies: independent re-review passed 63 tests, including the three
   unchanged adversarial probes. Whole-position targets no longer hide missing
