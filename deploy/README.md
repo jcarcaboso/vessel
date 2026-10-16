@@ -854,6 +854,40 @@ for its nginx transport test, not production code. Cleanup runs on success/failu
 The browser check uses synthetic API data and intercepts chart market reads, with
 no real venue call. Run frontend/.NET checks separately as in `docs/development.md`.
 
+### Full-stack end-to-end test
+
+```sh
+python3 scripts/e2e-full-stack.py               # build images, run, clean up
+python3 scripts/e2e-full-stack.py --skip-build  # reuse vessel-e2e:api/web from a --keep run
+python3 scripts/e2e-full-stack.py --keep        # leave the stack, temp directory and images for inspection
+```
+
+It builds the API and web images as `vessel-e2e:api`/`vessel-e2e:web` and runs the
+real Compose stack (PostgreSQL, RabbitMQ with the least-privilege application user,
+RustFS, migrate, API, monitor worker, a `verifier` worker for the `verification`
+subscription and web) on its own project, unused subnet and loopback ports, with
+generated secrets and a synthetic owner. `scripts/e2e/fake_venue.py` is a
+deterministic Hyperliquid info-API fake on the Compose network. It serves TLS from
+a throwaway CA that only the API and worker containers trust (`SSL_CERT_FILE`), so
+the production `https`/`wss` host rules stay unchanged, and a loopback-only control
+port lets the harness place, fill and cancel orders, list markets and gate or fail
+reads between steps. The scenario drives the public API, the SSE stream through
+nginx and a Playwright browser (pinned `mcr.microsoft.com/playwright:v1.63.0-noble`
+image, with a host `playwright-core` 1.63 package given by `--playwright-module`):
+explicit provisioning and topology, Refresh, automatic linking by a Check,
+fills opening and closing Plays, confirmed and dismissed discrepancies, closed-Play
+watches, orphaned entries, omitted executions, broker outage and broker volume
+loss, a worker killed mid-read with a second replica recovering after the lease,
+a disabled account with a pending Check, admin receipt retry, retention, and
+backup/restore with an epoch rotation that resets an old SSE cursor. It sets the
+shortest allowed times (one-minute interval, zero protection grace, 15-second
+cooldown, one-hour watch and unobservable lifetimes, one-day retention) and
+shifts three timestamps in the synthetic database instead of waiting an hour or
+a day; the fixed five-minute lease is waited out. A run takes about half an hour
+and prints a pass/fail table; it exits non-zero on any failure. Screenshots and
+redacted logs go to a new temp artifacts directory (`--artifacts` to choose).
+It never reads the repository `.env`, uses the owner's database or pushes images.
+
 ## Logs and troubleshooting
 
 ```sh
