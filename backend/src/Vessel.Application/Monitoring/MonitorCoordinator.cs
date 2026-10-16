@@ -162,7 +162,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         try
         {
             if (!refresh && !await store.EligibleAsync(lease.AccountId, time.GetUtcNow(), ct))
-                return await SupersedeAsync(lease, ct);
+                return await SupersedeAsync(lease, ct, attempted: false);
             // Commit the watched-history baseline before any adapter call.
             await unitOfWork.ExecuteAsync(async () =>
             {
@@ -177,7 +177,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 if (deferred > 0 && refresh) throw new MonitorAdmissionException(deferred);
                 return false;
             }
-            if (!capture.Account.IsEnabled || capture.Account.SourceId is null) return await SupersedeAsync(lease, ct);
+            if (!capture.Account.IsEnabled || capture.Account.SourceId is null) return await SupersedeAsync(lease, ct, attempted: false);
             if (!refresh && venues.Descriptor(capture.Account.VenueId)?.Capabilities.ReadOnlyCredential == true &&
                 !await credentials.IsUsableAsync(capture.Account, ct))
                 return await FailAsync(lease, capture, true, "A usable read-only credential is required. Update it to resume monitoring.", ct);
@@ -427,7 +427,8 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         }, ct), ct);
 
     /// <summary>The account no longer qualifies, or the run was interrupted, before any result: not a failure.</summary>
-    private Task<bool> SupersedeAsync(MonitorLease lease, CancellationToken ct) =>
+    /// <param name="attempted">False before any venue read: housekeeping then only ages outstanding work.</param>
+    private Task<bool> SupersedeAsync(MonitorLease lease, CancellationToken ct, bool attempted = true) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>
         {
             var now = time.GetUtcNow();
@@ -435,7 +436,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             await events.SetRunAsync(lease.RequestId, lease.Trigger == "refresh" ? "owner" : "monitor", ct);
             var old = row.State;
             Supersede(account, row, lease.Trigger == "refresh", now);
-            await SettleDiscrepanciesAsync(account, lease, ct);
+            await SettleDiscrepanciesAsync(account, lease, ct, attempted);
             if (account.IsEnabled && !await store.EligibleAsync(account.Id, now, ct)) row.Idle();
             await ApplyVenueBudgetAsync(account.VenueId, row, ct);
             await StateEventAsync(lease.AccountId, old, row, lease.RequestId, "monitor", now, ct);
@@ -450,12 +451,13 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     }
 
     /// <summary>
-    /// The single place where a lease-owned run that made no discrepancy decisions (failed, discarded, superseded or
-    /// refresh) settles discrepancy housekeeping. Failed, discarded and superseded checks interrupt pending
-    /// confirmations; owner refreshes only age outstanding work. An evaluated check settles inside the evaluator.
+    /// The single place where a lease-owned run that made no discrepancy decisions (failed, discarded, superseded,
+    /// deferred or refresh) settles discrepancy housekeeping. A failed, discarded or interrupted check attempted an
+    /// observation and interrupts pending confirmations; a deferral, or a check superseded before its read, attempted
+    /// nothing and, like owner refreshes, only ages outstanding work. An evaluated check settles inside the evaluator.
     /// </summary>
-    private Task SettleDiscrepanciesAsync(Account account, MonitorLease lease, CancellationToken ct) =>
-        evaluator?.SettleAsync(account, lease.RequestId, lease.Trigger, interrupted: lease.Trigger != "refresh", ct) ?? Task.CompletedTask;
+    private Task SettleDiscrepanciesAsync(Account account, MonitorLease lease, CancellationToken ct, bool attempted = true) =>
+        evaluator?.SettleAsync(account, lease.RequestId, lease.Trigger, interrupted: attempted && lease.Trigger != "refresh", ct) ?? Task.CompletedTask;
 
     private Task<int> DeferThrottledLeaseAsync(MonitorLease lease, CancellationToken ct) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>
@@ -464,7 +466,11 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             if (!row.Owns(lease.Generation, lease.WorkerId, now)) return -1;
             var deadline = await store.VenueRetryAtAsync(account.VenueId, ct);
             if (!(deadline > now)) return 0;
-            if (lease.Trigger == "refresh")
+            var refresh = lease.Trigger == "refresh";
+            // Repeated deferrals must still age discrepancy work; nothing was attempted, so nothing is interrupted.
+            await events.SetRunAsync(lease.RequestId, refresh ? "owner" : "monitor", ct);
+            await SettleDiscrepanciesAsync(account, lease, ct, attempted: false);
+            if (refresh)
             {
                 // The owner gets 429 for this refresh. It is not kept pending for the worker to replay.
                 row.Release();
@@ -476,6 +482,14 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             row.LeaseUntilUtc = null;
             row.NextRunAtUtc = Later(row.NextRunAtUtc, deadline);
             row.NextManualAllowedAtUtc = Later(row.NextManualAllowedAtUtc, deadline);
+            // A check without remaining work is not kept pending.
+            if (!await store.EligibleAsync(account.Id, now, ct))
+            {
+                var old = row.State;
+                row.Release();
+                row.Idle();
+                await StateEventAsync(account.Id, old, row, lease.RequestId, "monitor", now, ct);
+            }
             return SecondsUntil(deadline, now);
         }, ct), ct);
 
