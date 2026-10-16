@@ -54,9 +54,10 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
     contract: knownContracts === null || knownContracts.includes(selected.contract) ? selected.contract : '',
   } : emptyFilters
   const pageSize = compact ? compactRows : list.pageSize
+  const sent = filterQuery(filters)
   const requested: ActivityQuery = {
     ...(scope !== undefined && scope !== 'all' ? { scope } : {}), ...(accountId !== undefined ? { accountId } : {}),
-    ...filterQuery(filters), page: compact ? 1 : list.page, pageSize,
+    ...sent, page: compact ? 1 : list.page, pageSize,
   }
   const queryKey = JSON.stringify(requested)
   const query = useMemo(() => JSON.parse(queryKey) as ActivityQuery, [queryKey])
@@ -102,7 +103,8 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
   const shown = pending ? previous : result.page
   const contracts = shown?.facets.contracts ?? (filters.contract ? [filters.contract] : [])
   // The pager already counts the rows; a note is only needed when filters narrow the scope (or Overview has no pager).
-  const filtered = (Object.keys(emptyFilters) as (keyof Filters)[]).some(field => filters[field] !== emptyFilters[field])
+  // Judge the filters actually sent: retained custom dates behind "All retained activity" narrow nothing.
+  const filtered = Object.keys(sent).length > 0
   const note = compact || filtered
   return <div className="activity-operations">
     {showFilters && <fieldset className="operation-filters"><legend>Filter operations</legend>

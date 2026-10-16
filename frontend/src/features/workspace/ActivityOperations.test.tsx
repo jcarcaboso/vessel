@@ -1,4 +1,4 @@
-import { act, render, screen, within, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -252,6 +252,13 @@ describe('activity loading, filters and pages', () => {
     expect(screen.queryByText(/operations match the filters/)).not.toBeInTheDocument()
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Direction' }), 'long')
     expect(await screen.findByText('60 of 80 operations match the filters.')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Reset filters' }))
+    // Dates kept behind "All retained activity" are not sent, so they do not count as a filter.
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Period' }), 'custom')
+    fireEvent.change(screen.getByLabelText('From date'), { target: { value: '2026-10-01' } })
+    expect(await screen.findByText('60 of 80 operations match the filters.')).toBeInTheDocument()
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Period' }), 'all')
+    await waitFor(() => expect(screen.queryByText(/operations match the filters/)).not.toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: 'Reset filters' }))
     const cases: [string, string, Partial<ActivityQuery>][] = [['Account', otherAccount.id, { account: otherAccount.id }], ['Portfolio', 'unassigned', { portfolio: 'unassigned' }],
       ['Instrument', 'ETH', { contract: 'ETH' }], ['Direction', 'short', { direction: 'short' }], ['Status', 'partial', { status: 'partial' }], ['Period', '7', { period: '7' }]]
