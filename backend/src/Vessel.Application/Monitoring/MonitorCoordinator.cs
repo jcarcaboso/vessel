@@ -66,10 +66,22 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             if (!NeedsDiscovery(candidate)) continue;
             if (await unitOfWork.ExecuteAsync(() => store.LockedAsync(candidate.AccountId, async (account, row) =>
                 {
-                    // A pending or running request is settled by its run, which sees the same changes.
-                    if (row.ManualState != "idle") return false;
                     var old = row.State;
                     var monitorable = account.IsEnabled && account.SourceId is not null && venueIds.Contains(account.VenueId);
+                    if (row.ManualState != "idle")
+                    {
+                        // A live run settles itself (it sees the same changes); a monitorable account's pending work
+                        // is claimed normally. Work no scheduler will ever claim, because the account was disabled or
+                        // lost its source, is settled here instead of staying pending forever: an unclaimed request,
+                        // or a running lease whose worker died. A still-valid lease keeps its fence.
+                        if (monitorable || row.ManualState == "running" && row.LeaseUntilUtc > now) return false;
+                        row.Release();
+                        row.Idle();
+                        // Hook: for an owner Check (Trigger "manual") the event layer emits monitor.run-completed
+                        // with outcome "superseded" here, keyed by row.RequestId.
+                        await StateEventAsync(account.Id, old, row, row.RequestId ?? Guid.CreateVersion7(), "monitor", now, ct);
+                        return true;
+                    }
                     if (monitorable) await store.UpdateWatchesAsync(account.Id, null, now, ct);
                     var current = await store.CaptureAsync(account.Id, ct);
                     if (row.CredentialRevision != current?.CredentialRevision)
@@ -93,7 +105,8 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     {
         var eligible = candidate.Monitorable && candidate.Eligible;
         if (candidate.Row is not { } row) return eligible || candidate.Monitorable && candidate.HasExpiredWatches;
-        if (row.ManualState != "idle") return false;
+        // Pending or abandoned work on an account that can no longer be monitored is settled by discovery.
+        if (row.ManualState != "idle") return !candidate.Monitorable;
         return row.CredentialRevision != candidate.CredentialRevision || candidate.Monitorable && candidate.HasExpiredWatches ||
             (eligible ? row.State != "credential-error" && row.NextRunAtUtc is null : row.State != "idle" || row.NextRunAtUtc is not null);
     }

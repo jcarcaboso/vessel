@@ -123,7 +123,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
         // Keyset page: the filter applies before the limit, so every candidate is reached by a later page.
         var rows = await db.Accounts.AsNoTracking()
             .Where(a => a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) ||
-                Rows.Any(m => m.AccountId == a.Id && (m.State != "idle" || m.NextRunAtUtc != null)))
+                Rows.Any(m => m.AccountId == a.Id && (m.State != "idle" || m.NextRunAtUtc != null || m.ManualState != "idle")))
             .Where(a => after == null || a.Id.CompareTo(after.Value) > 0)
             .OrderBy(a => a.Id).Take(Math.Clamp(limit, 1, 1000))
             .Select(a => new

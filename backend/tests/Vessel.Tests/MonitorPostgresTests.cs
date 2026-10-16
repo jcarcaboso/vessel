@@ -829,6 +829,59 @@ public sealed class MonitorPostgresTests
         Assert.Null(logs.Exception);
     }
 
+    [PostgresFact]
+    public async Task Final_an_unclaimed_request_on_a_disabled_account_is_settled_not_stranded()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, clock.Now);
+        var coordinator = Coordinator(db, owner, new Reader(), clock: clock);
+        Assert.Equal("pending", (await coordinator.RequestAsync(id, default)).Monitor.ManualState);
+        await DisableAsync(db);
+        await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default);
+        db.ChangeTracker.Clear();
+        var row = await db.Set<MonitorAccount>().SingleAsync();
+        Assert.Equal(("idle", "idle"), (row.ManualState, row.State));
+        Assert.Null(row.NextRunAtUtc);
+        Assert.Null(row.LeaseHolder);
+    }
+
+    [PostgresFact]
+    public async Task Final_an_expired_running_lease_on_a_disabled_account_is_settled_and_a_live_one_keeps_its_fence()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, clock.Now);
+        var coordinator = Coordinator(db, owner, new Reader(), clock: clock);
+        var accepted = await coordinator.RequestAsync(id, default);
+        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        var lease = (await store.ClaimAsync(id, accepted.RequestId, "dead-worker", clock.Now, default))!;
+        await DisableAsync(db);
+        // The holder may still be alive: its lease fences the row, and its own run settles it.
+        await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default);
+        db.ChangeTracker.Clear();
+        Assert.Equal("running", (await db.Set<MonitorAccount>().SingleAsync()).ManualState);
+        clock.Now += MonitorOptions.Lease + TimeSpan.FromSeconds(1);
+        await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default);
+        db.ChangeTracker.Clear();
+        var row = await db.Set<MonitorAccount>().SingleAsync();
+        Assert.Equal(("idle", "idle"), (row.ManualState, row.State));
+        Assert.Null(row.LeaseHolder);
+        Assert.False(row.Owns(lease.Generation, lease.WorkerId, clock.Now));
+    }
+
+    private static async Task DisableAsync(VesselDbContext db)
+    {
+        db.ChangeTracker.Clear();
+        (await db.Accounts.SingleAsync()).UpdateSettings("Disabled", null, false);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+    }
+
     private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<MonitorRunLog>
     {
         public List<string> Messages { get; } = [];
