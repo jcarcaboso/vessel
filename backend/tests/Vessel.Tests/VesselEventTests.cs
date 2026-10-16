@@ -511,6 +511,7 @@ public sealed class VesselEventTests
         }
         public Task<T> ExecuteAsync<T>(Func<Task<T>> operation, CancellationToken ct) => work.ExecuteAsync(operation, ct);
         public Task SaveChangesAsync(CancellationToken ct) => work.SaveChangesAsync(ct);
+        public bool IsActive => work.IsActive;
         public ValueTask DisposeAsync() => Db.DisposeAsync();
     }
 

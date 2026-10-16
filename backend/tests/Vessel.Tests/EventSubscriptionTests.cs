@@ -187,6 +187,21 @@ public sealed class EventSubscriptionTests
         Assert.StartsWith("Handler failed (", await runtime.ScalarAsync<string>($"SELECT error FROM event_receipts WHERE event_id='{bad.Id}'"));
     }
 
+    // The handler's savepoint is still inside the dispatcher's unit: object storage I/O, which a rollback could not
+    // undo, is refused there as anywhere else in a unit, and the refusal is an ordinary counted attempt.
+    [VesselEventPostgresFact]
+    public async Task A_handler_runs_inside_the_active_unit_and_cannot_start_object_storage_io()
+    {
+        await using var runtime = await Runtime.CreateAsync();
+        var storing = await runtime.RegisterNewAsync(Runtime.StorageSubscription, Fixed with { MaxAttempts = 2 });
+        var message = await runtime.AppendAsync(Draft("storage"));
+        Assert.Equal(DispatchOutcome.RetryScheduled, (await runtime.DispatchAsync(storing, message.Id)).Outcome);
+        Assert.Equal([true], runtime.StorageActive);
+        Assert.Equal(("pending", 1), await runtime.ReceiptAsync(storing, message.Id));
+        Assert.StartsWith("Handler failed (InvalidOperationException", await runtime.ScalarAsync<string>(
+            $"SELECT error FROM event_receipts WHERE event_id='{message.Id}'"));
+    }
+
     // Round 2: an admin retry waits for an in-progress floor decision instead of reopening a receipt that the
     // decision is about to publish over and delete.
     [VesselEventPostgresFact]
@@ -530,6 +545,17 @@ public sealed class EventSubscriptionTests
         }
     }
 
+    /// <summary>Records whether a unit is active, then asks to write object storage as evidence upload does.</summary>
+    private sealed class StorageSubscriber(IUnitOfWork work, List<bool> active) : IVesselEventSubscriber
+    {
+        public Task<EventHandling> HandleAsync(VesselEvent message, CancellationToken cancellationToken)
+        {
+            active.Add(work.IsActive);
+            work.RequireOutermost("Evidence upload");
+            return Task.FromResult(EventHandling.Delivered);
+        }
+    }
+
     private sealed class Runtime : IAsyncDisposable
     {
         private readonly ServiceProvider provider;
@@ -554,10 +580,14 @@ public sealed class EventSubscriptionTests
             services.AddKeyedSingleton<IVesselEventSubscriber>(KeyedService.AnyKey, Subscriber);
             services.AddKeyedScoped<IVesselEventSubscriber>(SavingSubscription, (sp, _) => new SavingSubscriber(
                 sp.GetRequiredService<VesselDbContext>(), sp.GetRequiredService<IVesselEventSink>(), Owner, () => SavingConflict));
+            services.AddKeyedScoped<IVesselEventSubscriber>(StorageSubscription, (sp, _) =>
+                new StorageSubscriber(sp.GetRequiredService<IUnitOfWork>(), StorageActive));
             provider = services.BuildServiceProvider();
         }
 
         public const string SavingSubscription = "saving";
+        public const string StorageSubscription = "storage";
+        public List<bool> StorageActive { get; } = [];
         public CoreDatabase Database { get; }
         public Guid Owner { get; } = Guid.NewGuid();
         public Guid SavingConflict { get; set; }
