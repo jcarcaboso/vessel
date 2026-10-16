@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import { systemFixture } from '@/test/system-fixture'
@@ -32,6 +32,11 @@ function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     marketStream: vi.fn(idleMarketStream), ...playApiStubs(), ...overrides,
   }
 }
+// The shell loads Plays, Review and Settings lazily. A cold import transforms a large module graph, which under a
+// loaded full-suite run can outlast a query's default wait in whichever test opens the page first; warm them once.
+beforeAll(async () => {
+  await Promise.all([import('@/features/plays/PlaysPage'), import('@/features/review/ReviewPage'), import('./SettingsPage')])
+}, 60_000)
 beforeEach(() => { window.history.replaceState(null, '', '/') })
 describe('Main application shell', () => {
   it.each(['disconnect', 'unmount', 'API replacement'])('cancels Refresh all on %s while the first sync is pending', async action => {
@@ -145,8 +150,9 @@ describe('Main application shell', () => {
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
     await screen.findByRole('button', { name: 'View Main account' })
     await userEvent.click(screen.getByRole('link', { name: 'Plays' }))
-    await userEvent.type(await screen.findByRole('searchbox', { name: 'Search plays' }), 'zzz')
-    await waitFor(() => expect(client.plays).toHaveBeenLastCalledWith({ view: 'progress', q: 'zzz' }, expect.any(AbortSignal)))
+    await userEvent.type(await screen.findByRole('searchbox', { name: 'Search plays' }, { timeout: 5_000 }), 'zzz')
+    // The search is debounced; a busy run may need longer than the default wait to send it.
+    await waitFor(() => expect(client.plays).toHaveBeenLastCalledWith({ view: 'progress', q: 'zzz' }, expect.any(AbortSignal)), { timeout: 5_000 })
     await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
     const overview = await screen.findByRole('region', { name: 'Plays overview' })
     await userEvent.click(within(overview).getByRole('tab', { name: /^Needs review/ }))
