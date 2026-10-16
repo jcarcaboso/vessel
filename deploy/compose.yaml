@@ -75,7 +75,8 @@ services:
 
   migrate:
     image: skorcius/vessel:api-${VESSEL_VERSION:-0.1.3}
-    # EF migrations, then explicit messaging provisioning. Nothing runs at API startup.
+    # EF migrations, then explicit messaging provisioning with the broker administrator.
+    # Nothing is migrated or provisioned at API or worker startup.
     entrypoint: ["/app/migrate"]
     environment:
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
@@ -104,7 +105,7 @@ services:
       Vessel__Evidence__Storage__S3__ForcePathStyle: ${VESSEL_S3_FORCE_PATH_STYLE:-true}
       Vessel__Evidence__Storage__S3__AccessKeyId: ${VESSEL_S3_ACCESS_KEY_ID:-}
       Vessel__Evidence__Storage__S3__SecretAccessKey: ${VESSEL_S3_SECRET_ACCESS_KEY:-}
-      Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_USER:?Set RABBITMQ_USER}:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}@rabbitmq:5672/"
+      Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_APP_USER:-${RABBITMQ_USER:?Set RABBITMQ_USER}}:${RABBITMQ_APP_PASSWORD:-${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}}@rabbitmq:5672/"
       Vessel__Monitor__Interval: ${VESSEL_MONITOR_INTERVAL:-00:10:00}
       Vessel__Monitor__ProtectionGrace: ${VESSEL_MONITOR_PROTECTION_GRACE:-00:10:00}
       Vessel__Monitor__ManualCooldown: ${VESSEL_MONITOR_MANUAL_COOLDOWN:-00:01:00}
@@ -118,14 +119,18 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # The monitor module and the replica-safe event maintenance. A later worker-notifications
+  # service runs the same image with other modules (deploy/README.md).
   worker:
     image: skorcius/vessel:api-${VESSEL_VERSION:-0.1.1}
     entrypoint: ["/app/worker"]
     environment:
       DOTNET_ENVIRONMENT: Production
+      Vessel__Worker__Modules__0: monitor
+      Vessel__Worker__Deployment: monitor
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       Vessel__Auth__OwnerId: ${Vessel__Auth__OwnerId:?Set a non-empty GUID}
-      Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_USER:?Set RABBITMQ_USER}:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}@rabbitmq:5672/"
+      Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_APP_USER:-${RABBITMQ_USER:?Set RABBITMQ_USER}}:${RABBITMQ_APP_PASSWORD:-${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}}@rabbitmq:5672/"
       Vessel__Monitor__Interval: ${VESSEL_MONITOR_INTERVAL:-00:10:00}
       Vessel__Monitor__ProtectionGrace: ${VESSEL_MONITOR_PROTECTION_GRACE:-00:10:00}
       Vessel__Monitor__ManualCooldown: ${VESSEL_MONITOR_MANUAL_COOLDOWN:-00:01:00}
