@@ -141,10 +141,12 @@
 .overview-bottom-grid { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(300px, 1fr); gap: 18px; margin-top: 22px; align-items: stretch; }
 .overview-plays { display: flex; flex-direction: column; }
 .overview-play-tabs { gap: 0; padding-top: 14px; min-width: 0; }
-.overview-play-tabs > [data-slot="tabs-list"] { display: flex; width: calc(100% - 36px); height: 36px; margin: 0 18px; gap: 2px; }
-.overview-play-tabs [data-slot="tabs-trigger"] { flex: 1 1 auto; min-width: 0; gap: 6px; padding: 5px 8px; font-size: var(--text-xs); }
+/* Tabs keep their label and count together and wrap to another line when the panel is narrow, as on the Plays page. */
+.overview-play-tabs > [data-slot="tabs-list"] { display: flex; flex-wrap: wrap; width: calc(100% - 36px); height: auto; min-height: 36px; margin: 0 18px; gap: 2px; }
+.overview-play-tabs [data-slot="tabs-trigger"] { flex: 1 0 auto; gap: 6px; padding: 5px 8px; font-size: var(--text-xs); }
 .overview-play-count { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); font-size: var(--text-2xs); line-height: 17px; font-feature-settings: var(--figures); }
-.overview-play-list { max-height: 340px; margin: 8px 0 0; padding: 0; overflow-y: auto; list-style: none; }
+/* A fixed five rows, so the list takes their height instead of scrolling inside the panel. */
+.overview-play-list { margin: 8px 0 0; padding: 0; list-style: none; }
 .overview-play-list li + li { border-top: 1px solid var(--line); }
 .overview-play-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; padding: 13px 20px; border: 0; background: none; color: var(--foreground); text-align: left; cursor: pointer; transition: background .14s var(--ease-out); }
 .overview-play-row:hover { background: color-mix(in srgb, var(--accent) 45%, transparent); }

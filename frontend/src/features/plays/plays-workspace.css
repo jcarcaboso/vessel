@@ -128,7 +128,8 @@
 .plays-page :is(button, input, select, textarea, summary, [tabindex]):focus-visible,
 .plays-entry-dialog :is(button, input, select, textarea, [tabindex]):focus-visible,
 .plays-journal-dialog :is(button, input, select, textarea, summary, [tabindex]):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; box-shadow: none; }
-.plays-page button:disabled,
+/* The shared pager keeps its own disabled style; `:where` adds no specificity, so later Plays overrides still win. */
+.plays-page button:disabled:where(:not(.pager *)),
 .plays-entry-dialog button:disabled,
 .plays-journal-dialog button:disabled { opacity: 1; color: var(--muted-foreground); background: var(--secondary); cursor: not-allowed; }
 .plays-page .chart-icon-button:disabled { opacity: .38; background: transparent; }

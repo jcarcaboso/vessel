@@ -101,6 +101,9 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
   const error = pending ? null : result.error
   const shown = pending ? previous : result.page
   const contracts = shown?.facets.contracts ?? (filters.contract ? [filters.contract] : [])
+  // The pager already counts the rows; a note is only needed when filters narrow the scope (or Overview has no pager).
+  const filtered = (Object.keys(emptyFilters) as (keyof Filters)[]).some(field => filters[field] !== emptyFilters[field])
+  const note = compact || filtered
   return <div className="activity-operations">
     {showFilters && <fieldset className="operation-filters"><legend>Filter operations</legend>
       <label>Account<NativeSelect value={filters.account} onChange={e => update('account', e.target.value)}><option value="">All enabled accounts</option>{enabled.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</NativeSelect></label>
@@ -112,14 +115,16 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
       {filters.period === 'custom' && <><label>From date<input type="date" value={filters.from} onChange={e => update('from', e.target.value)} /></label><label>Through date<input type="date" value={filters.to} min={filters.from || undefined} onChange={e => update('to', e.target.value)} /></label></>}
       <Button variant="outline" size="sm" onClick={() => setList({ ...list, filters: emptyFilters, page: 1 })}>Reset filters</Button>
     </fieldset>}
+    {/* A page change scrolls here, so the changed notice that may follow it is in view with the rows. */}
+    <div ref={top} className="activity-list">
     {changed && <div className="workspace-alert activity-changed" role="status"><span>Activity changed</span>
       <Button variant="ghost" size="sm" aria-label="Reload activity" onClick={reloadActivity}>Reload</Button></div>}
     {error ? <div className="workspace-alert" role="alert">{error}<Button variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>Retry operations</Button></div> :
-      shown === null ? skeleton ? <OperationsSkeleton compact={compact} rows={compact ? compactRows : 6} /> : <div className="operations-pending" aria-busy="true" /> : <>
-      <p className="workspace-scope-note in-panel" role="status">{compact
+      shown === null ? skeleton ? <OperationsSkeleton compact={compact} rows={compact ? compactRows : 6} note={note} /> : <div className="operations-pending" aria-busy="true" /> : <>
+      {note && <p className="workspace-scope-note in-panel" role="status">{compact
         ? `Showing ${count.format(shown.operations.length)} of ${count.format(shown.totalCount)} operations.`
-        : `Showing ${count.format(shown.totalCount)} of ${count.format(shown.scopeCount)} operations.`}</p>
-      <div ref={top} className={pending ? 'operations-results list-refetching' : 'operations-results'} aria-busy={pending || undefined}>
+        : `${count.format(shown.totalCount)} of ${count.format(shown.scopeCount)} operations match the filters.`}</p>}
+      <div className={pending ? 'operations-results list-refetching' : 'operations-results'} aria-busy={pending || undefined}>
         <OperationsTable api={api} operations={shown.operations} accounts={accounts} compact={compact} refreshGeneration={result?.generation ?? 0} onReload={reloadActivity} onPreview={operation => {
           trigger.current = window.document.activeElement instanceof HTMLElement ? window.document.activeElement : null
           setSelection({ accountId: operation.accountId, operationId: operation.id })
@@ -129,6 +134,7 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
         onPage={goTo} onPageSize={size => { if (isPageSize(size)) setList({ ...list, page: 1, pageSize: size }) }} />}
       {!compact && <details className="operation-scope"><summary>Scope and coverage</summary><p className="workspace-scope-note">{shown.scopeNote}</p>{shown.coverage.filter(c => enabled.some(a => a.id === c.accountId)).map((c, index) => <p className="workspace-scope-note" key={index}><strong>{accounts.find(a => a.id === c.accountId)?.name}{c.contractId ? ` · ${c.contractId}` : ''}</strong>: {c.notice}</p>)}</details>}
     </>}
+    </div>
     <Dialog open={selection !== null && enabled.some(a => a.id === selection.accountId)} onOpenChange={open => { if (!open) setSelection(null) }}>
       <DialogContent className="retrospective-dialog" onCloseAutoFocus={event => { event.preventDefault(); trigger.current?.focus() }}>
         <DialogHeader><DialogTitle>Retrospective operation preview</DialogTitle><DialogDescription className="sr-only">Inspect original facts and associations before confirming a completed Play.</DialogDescription></DialogHeader>

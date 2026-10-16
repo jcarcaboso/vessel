@@ -19,16 +19,33 @@ function OperationsHead({ compact }: { compact: boolean }) {
   </tr></thead>
 }
 
-/** First-load placeholder rows with the operations table's columns and row height. */
-export function OperationsSkeleton({ compact = false, rows }: { compact?: boolean; rows: number }) {
-  const cells = compact ? 4 : 9
-  return <SkeletonStatus label="Loading operations…" className="workspace-table-wrap"><table className="workspace-table operations-table operations-skeleton">
-    <OperationsHead compact={compact} />
-    <tbody>{Array.from({ length: rows }, (_, row) => <tr key={row} className="operation-row-skeleton">
-      <td><div className="operation-heading"><span className="operation-toggle" /><div><Skeleton className="skeleton-asset" /><Skeleton className="skeleton-tags" /></div></div></td>
-      {Array.from({ length: cells - 1 }, (_, cell) => <td key={cell}><Skeleton /></td>)}
-    </tr>)}</tbody>
-  </table></SkeletonStatus>
+/**
+ * First-load placeholder rows in the operations table's own columns. Rows alternate like real history (an open
+ * operation with its remaining size, then closed ones with a duration and a return), and each bar stands in for a
+ * line of the real cell at a typical width, so columns and row height stay put when the data arrives. `note`
+ * reserves the count line above the table.
+ */
+export function OperationsSkeleton({ compact = false, rows, note = false }: { compact?: boolean; rows: number; note?: boolean }) {
+  const bar = (className: string) => <Skeleton className={`skeleton-line ${className}`} />
+  return <SkeletonStatus label="Loading operations…">
+    {note && <p className="workspace-scope-note in-panel"><Skeleton className="skeleton-note" /></p>}
+    <div className="workspace-table-wrap"><table className="workspace-table operations-table operations-skeleton">
+      <OperationsHead compact={compact} />
+      <tbody>{Array.from({ length: rows }, (_, row) => {
+        const open = row % 4 === 0
+        return <tr key={row} className="operation-row-skeleton">
+          <td><div className="operation-heading"><span className="operation-toggle" /><div><Skeleton className="skeleton-asset" /><Skeleton className="skeleton-tags" /></div></div></td>
+          <td>{bar('skeleton-account')}{bar(`skeleton-small ${open ? 'skeleton-date' : 'skeleton-dates'}`)}{!open && bar('skeleton-small skeleton-duration')}</td>
+          <td className="numeric">{bar('skeleton-size')}{open && bar('skeleton-small skeleton-remaining')}</td>
+          {!compact && <><td className="numeric">{bar('skeleton-price')}</td><td className="numeric">{bar('skeleton-price')}</td>
+            <td className="numeric"><div className="operation-pnl">{bar('skeleton-money')}{!open && <Skeleton className="skeleton-return" />}</div></td>
+            <td className="numeric">{bar('skeleton-fee')}</td></>}
+          <td className="numeric">{bar('skeleton-money')}</td>
+          {!compact && <td><Skeleton className="skeleton-badge" /></td>}
+        </tr>
+      })}</tbody>
+    </table></div>
+  </SkeletonStatus>
 }
 
 export function OperationsTable({ operations, accounts, compact = false, onPreview, api, onReload, refreshGeneration = 0 }: {

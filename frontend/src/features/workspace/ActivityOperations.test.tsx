@@ -228,7 +228,7 @@ describe('activity loading, filters and pages', () => {
       [operationFixture, eth].filter(op => (!query.contract || op.contractId === query.contract) && (!query.account || op.accountId === query.account)), { facets, scopeCount: 2 })))
     const api = client(activity)
     const view = render(<ActivityOperations api={api} accounts={[accountFixture, otherAccount]} portfolios={[portfolioFixture]} filters />)
-    await screen.findByText(/Showing 2 of 2/)
+    await screen.findByRole('button', { name: 'Expand ETH operation' })
     const label = kind === 'portfolio' ? 'Portfolio' : kind === 'instrument' ? 'Instrument' : 'Account'
     await userEvent.selectOptions(screen.getByRole('combobox', { name: label }),
       kind === 'portfolio' ? portfolioFixture.id : kind === 'instrument' ? 'ETH' : otherAccount.id)
@@ -246,8 +246,13 @@ describe('activity loading, filters and pages', () => {
     const activity = vi.fn().mockImplementation((query: ActivityQuery) => Promise.resolve(activityPage(numbered(25), { totalCount: 60, scopeCount: 80, page: query.page, facets: { accountIds: [accountFixture.id], contracts: ['ETH', ...numbered(25).map(op => op.contractId)] } })))
     const states: ActivityListState[] = []
     render(<Shelled api={client(activity)} initial={{ ...initialActivityState, page: 2 }} onState={state => states.push(state)} />)
-    await screen.findByText('Showing 60 of 80 operations.')
+    await screen.findByRole('button', { name: 'Expand CONTRACT-0 operation' })
     expect(lastQuery(activity)).toEqual({ page: 2, pageSize: 25 })
+    // The pager counts unfiltered rows; the match note appears only while a filter narrows the scope.
+    expect(screen.queryByText(/operations match the filters/)).not.toBeInTheDocument()
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Direction' }), 'long')
+    expect(await screen.findByText('60 of 80 operations match the filters.')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Reset filters' }))
     const cases: [string, string, Partial<ActivityQuery>][] = [['Account', otherAccount.id, { account: otherAccount.id }], ['Portfolio', 'unassigned', { portfolio: 'unassigned' }],
       ['Instrument', 'ETH', { contract: 'ETH' }], ['Direction', 'short', { direction: 'short' }], ['Status', 'partial', { status: 'partial' }], ['Period', '7', { period: '7' }]]
     for (const [label, value, sent] of cases) {
@@ -394,11 +399,12 @@ describe('activity loading, filters and pages', () => {
   it('keeps the filters on screen when the server rejects a combination', async () => {
     const activity = vi.fn().mockResolvedValueOnce(activityFixture).mockRejectedValueOnce(new ApiError('http', 'The date range is invalid.', 400)).mockResolvedValue(activityFixture)
     render(<Shelled api={client(activity)} />)
-    await screen.findByText('Showing 1 of 1 operations.')
+    await screen.findAllByRole('button', { name: /^Expand .+ operation$/ })
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Direction' }), 'short')
     expect(await screen.findByRole('alert')).toHaveTextContent('The date range is invalid.')
     await userEvent.click(screen.getByRole('button', { name: 'Reset filters' }))
-    expect(await screen.findByText('Showing 1 of 1 operations.')).toBeInTheDocument()
+    expect((await screen.findAllByRole('button', { name: /^Expand .+ operation$/ })).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/operations match the filters/)).not.toBeInTheDocument()
   })
   it('discards late results from the previous account and aborts its request', async () => {
     const first = deferred<ActivityPage>()
