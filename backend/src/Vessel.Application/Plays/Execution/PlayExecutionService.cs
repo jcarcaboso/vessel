@@ -52,16 +52,21 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     {
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
         var account = await store.AccountAsync(play.AccountId, ct);
-        var links = (await store.LinksAsync(play.AccountId, ct)).Where(l => l.State != OrderLinkState.Dismissed).ToList();
-        var orders = (await store.OrdersAsync(play.AccountId, ct)).ToDictionary(o => o.OrderId, StringComparer.Ordinal);
-        var linkedOrders = links.Where(l => l.State == OrderLinkState.Linked).Select(l => l.OrderId).ToHashSet(StringComparer.Ordinal);
-        var mine = links.Where(l => l.PlayId == play.Id).ToList();
+        var mine = (await store.PlayLinksAsync(play.AccountId, play.Id, ct)).Where(l => l.State != OrderLinkState.Dismissed).ToList();
+        // Linked to any Play of the account, also closed ones: such an order is never offered again.
+        var linkedOrders = await store.LinkedOrderIdsAsync(play.AccountId, ct);
+        var mineOrders = mine.Select(l => l.OrderId).ToHashSet(StringComparer.Ordinal);
+        // This Play's linked and suggested orders (on any contract), plus its contract's orders placed since it was created.
+        var loaded = await store.OrdersAsync(play.AccountId, mineOrders, play.ContractId is null
+            ? new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal)
+            : new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal) { [play.ContractId] = play.CreatedAtUtc }, ct);
+        var orders = loaded.ToDictionary(o => o.OrderId, StringComparer.Ordinal);
         var fills = (await store.FillsAsync(play.AccountId, mine.Select(l => l.OrderId).Distinct().ToList(), ct)).ToLookup(f => f.OrderId);
         var linked = mine.Where(l => l.State == OrderLinkState.Linked)
             .OrderBy(l => l.Role).ThenBy(l => l.EntryId).ThenBy(l => l.LevelId).ThenBy(l => l.OrderId).ToList();
         var suggestions = mine.Where(l => l.State == OrderLinkState.Suggested && !linkedOrders.Contains(l.OrderId)).ToList();
         // Cancelled orders that never filled cannot be part of the play, so only live or filled ones are offered.
-        var unlinked = play.ContractId is null ? [] : orders.Values
+        var unlinked = play.ContractId is null ? [] : loaded
             .Where(o => o.ContractId == play.ContractId && o.PlacedAtUtc >= play.CreatedAtUtc && !linkedOrders.Contains(o.OrderId) &&
                 o.Status is "open" or "filled" or "triggered")
             .OrderByDescending(o => o.PlacedAtUtc).Take(MaxUnlinkedOrders).Select(OrderDto).ToList();
@@ -119,9 +124,11 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
                 OrderLinkRole.Target => entry!.Targets.FirstOrDefault(t => t.Id == request.LevelId)?.Id ?? throw new ProblemException(400, "Choose a target of this entry."),
                 _ => null
             };
-            var order = (await store.OrdersAsync(play.AccountId, ct)).FirstOrDefault(o => o.OrderId == request.OrderId && o.ContractId == play.ContractId)
+            var order = (await store.OrdersAsync(play.AccountId, [request.OrderId], NoContracts, ct))
+                .FirstOrDefault(o => o.OrderId == request.OrderId && o.ContractId == play.ContractId)
                 ?? throw new ProblemException(404, "This order is not known for the play's instrument. Check the venue first.");
-            var links = await store.LinksAsync(play.AccountId, ct);
+            // Every link on this order, for any Play and in any state.
+            var links = await store.LinksAsync(play.AccountId, [order.OrderId], [], ct);
             if (links.Any(l => l.OrderId == order.OrderId && l.State == OrderLinkState.Linked))
                 throw new ProblemException(409, "This order is already linked. Unlink it first.");
             if (ExecutionIntegrity.RoleConflict(role, plan, order, await store.FillsAsync(play.AccountId, [order.OrderId], ct)) is { } conflict)
@@ -149,8 +156,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
         await unitOfWork.ExecuteAsync(() => store.WithAccountLockAsync(play.AccountId, async () =>
         {
-            var link = (await store.LinksAsync(play.AccountId, ct)).FirstOrDefault(l => l.Id == linkId && l.PlayId == play.Id &&
-                l.State != OrderLinkState.Dismissed) ?? throw new ProblemException(404, "Link not found.");
+            var link = await store.LinkAsync(play.AccountId, play.Id, linkId, ct) is { State: not OrderLinkState.Dismissed } found
+                ? found : throw new ProblemException(404, "Link not found.");
             if (link.State == OrderLinkState.Linked) await RequireActiveAsync(play, "Closed and cancelled plays keep their linked orders.", ct);
             link.Dismiss(time.GetUtcNow());
             await store.SaveAsync(ct);
@@ -158,6 +165,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         }, ct), ct);
         return await GetAsync(playId, ct);
     }
+
+    private static readonly IReadOnlyDictionary<string, DateTimeOffset> NoContracts = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
 
     private const string NotLinkable = "Only planned, paused or open plays link orders.";
 
@@ -193,49 +202,94 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
 
     private async Task MatchAsync(Account account, List<Play> active, IReadOnlyDictionary<string, decimal> ticks, CancellationToken ct)
     {
-        var orders = await store.OrdersAsync(account.Id, ct);
-        var links = await store.LinksAsync(account.Id, ct);
-        var fills = (await store.FillsAsync(account.Id, orders.Select(o => o.OrderId).ToList(), ct)).ToLookup(f => f.OrderId);
+        // An order can only be a candidate of an active venue Play on its contract placed at or after the Play was created
+        // (ExecutionMatcher.Candidates), so other orders are not read. The matcher still applies each Play's own rule.
+        var since = active.Where(p => p.InstrumentSource == InstrumentSource.Venue && p.ContractId is not null)
+            .GroupBy(p => p.ContractId!, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Min(p => p.CreatedAtUtc), StringComparer.Ordinal);
+        var orders = await store.OrdersAsync(account.Id, new HashSet<string>(StringComparer.Ordinal), since, ct);
+        var candidateIds = orders.Select(o => o.OrderId).ToHashSet(StringComparer.Ordinal);
+        var activeIds = active.Select(p => p.Id).ToHashSet();
+        // Links on the candidate orders for any Play (one linked to a closed Play still counts as linked), plus the active Plays' own.
+        var links = await store.LinksAsync(account.Id, candidateIds, activeIds, ct);
+        // A linked entry may predate its Play; its retained order's fills still date the first entry fill.
+        var earlier = links.Where(l => activeIds.Contains(l.PlayId) && l.State == OrderLinkState.Linked && l.Role == OrderLinkRole.Entry &&
+            !candidateIds.Contains(l.OrderId)).Select(l => l.OrderId).ToHashSet(StringComparer.Ordinal);
+        var retained = earlier.Count == 0 ? [] : (await store.OrdersAsync(account.Id, earlier, NoContracts, ct)).Select(o => o.OrderId).ToList();
+        var fills = (await store.FillsAsync(account.Id, candidateIds.Concat(retained).ToList(), ct)).ToLookup(f => f.OrderId);
         var candidatesPlays = active.Select(p => (Play: p, Plan: PlayDocuments.Read(p.Plan))).ToList();
         var firstEntryFill = candidatesPlays.ToDictionary(p => p.Play.Id, p => links
             .Where(l => l.PlayId == p.Play.Id && l.State == OrderLinkState.Linked && l.Role == OrderLinkRole.Entry)
             .SelectMany(l => fills[l.OrderId]).Where(f => !ExecutionIntegrity.Contradicts(OrderLinkRole.Entry, ExecutionIntegrity.EntrySide(p.Plan), f))
             .Select(f => (DateTimeOffset?)f.OccurredAtUtc).Min());
+        var index = new LinkIndex(links);
         var now = time.GetUtcNow();
         foreach (var order in orders.OrderBy(o => o.PlacedAtUtc))
         {
             if (order.Status == "rejected") continue;
-            if (links.Any(l => l.OrderId == order.OrderId && l.State == OrderLinkState.Linked)) continue;
+            if (index.IsLinked(order.OrderId)) continue;
             // A cancelled order that never filled cannot affect a play.
             if (order.Status == "canceled" && !fills[order.OrderId].Any()) continue;
             var closes = fills[order.OrderId].Any(f => ExecutionFacts.Closes(f.PositionEffect));
             var candidates = ExecutionMatcher.Candidates(order, candidatesPlays,
-                (play, key) => links.Any(l => l.PlayId == play.Id && l.OrderId == order.OrderId && l.LevelKey == key && l.State == OrderLinkState.Dismissed),
+                (play, key) => index.IsDismissed(play.Id, order.OrderId, key),
                 closes, play => firstEntryFill.GetValueOrDefault(play.Id),
                 ticks.TryGetValue(order.ContractId, out var tick) ? tick : null, fills[order.OrderId].ToList());
             if (candidates.Count == 1)
             {
                 var (play, level) = (candidates[0].Play, candidates[0].Level);
-                var existing = links.FirstOrDefault(l => l.PlayId == play.Id && l.OrderId == order.OrderId && l.LevelKey == level.Key);
-                if (existing is not null) existing.LinkAutomatically(now);
+                var existing = index.Existing(play.Id, order.OrderId, level.Key);
+                if (existing is not null)
+                {
+                    existing.LinkAutomatically(now);
+                    index.MarkLinked(existing);
+                }
                 else
                 {
                     var link = new PlayOrderLink(play, order.OrderId, level.Role, level.EntryId, level.LevelId, OrderLinkState.Linked, OrderLinkSource.Automatic, now);
                     store.Add(link);
-                    links.Add(link);
+                    index.Add(link);
                 }
                 continue;
             }
             foreach (var candidate in candidates)
             {
-                if (links.Any(l => l.PlayId == candidate.Play.Id && l.OrderId == order.OrderId && l.LevelKey == candidate.Level.Key)) continue;
+                if (index.Existing(candidate.Play.Id, order.OrderId, candidate.Level.Key) is not null) continue;
                 var link = new PlayOrderLink(candidate.Play, order.OrderId, candidate.Level.Role, candidate.Level.EntryId, candidate.Level.LevelId,
                     OrderLinkState.Suggested, OrderLinkSource.Automatic, now);
                 store.Add(link);
-                links.Add(link);
+                index.Add(link);
             }
         }
         await store.SaveAsync(ct);
+    }
+
+    /// <summary>
+    /// Hash lookups over the loaded links, kept in step as links are added or become linked. Rows are not unique per
+    /// (Play, order, level): <see cref="Existing"/> is the first in load order, and a level is dismissed if any of its rows is.
+    /// </summary>
+    private sealed class LinkIndex
+    {
+        private readonly HashSet<string> linked = new(StringComparer.Ordinal);
+        private readonly Dictionary<(Guid PlayId, string OrderId, string LevelKey), PlayOrderLink> first = [];
+        private readonly HashSet<(Guid PlayId, string OrderId, string LevelKey)> dismissed = [];
+
+        public LinkIndex(IEnumerable<PlayOrderLink> links)
+        {
+            foreach (var link in links) Add(link);
+        }
+
+        public void Add(PlayOrderLink link)
+        {
+            var key = (link.PlayId, link.OrderId, link.LevelKey);
+            first.TryAdd(key, link);
+            if (link.State == OrderLinkState.Linked) linked.Add(link.OrderId);
+            if (link.State == OrderLinkState.Dismissed) dismissed.Add(key);
+        }
+
+        public void MarkLinked(PlayOrderLink link) => linked.Add(link.OrderId);
+        public bool IsLinked(string orderId) => linked.Contains(orderId);
+        public bool IsDismissed(Guid playId, string orderId, string levelKey) => dismissed.Contains((playId, orderId, levelKey));
+        public PlayOrderLink? Existing(Guid playId, string orderId, string levelKey) => first.GetValueOrDefault((playId, orderId, levelKey));
     }
 
     /// <summary>
@@ -244,9 +298,12 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     /// </summary>
     private async Task ApplyTransitionsAsync(Guid accountId, IReadOnlyList<Play> targets, CancellationToken ct)
     {
-        var links = (await store.LinksAsync(accountId, ct)).Where(l => l.State == OrderLinkState.Linked).ToList();
-        var orders = (await store.OrdersAsync(accountId, ct)).ToDictionary(o => o.OrderId, StringComparer.Ordinal);
-        var fills = (await store.FillsAsync(accountId, links.Select(l => l.OrderId).Distinct().ToList(), ct)).ToLookup(f => f.OrderId);
+        // Only the targets' linked orders and their fills settle them.
+        var links = (await store.LinksAsync(accountId, new HashSet<string>(StringComparer.Ordinal), targets.Select(p => p.Id).ToHashSet(), ct))
+            .Where(l => l.State == OrderLinkState.Linked).ToList();
+        var linkedIds = links.Select(l => l.OrderId).ToHashSet(StringComparer.Ordinal);
+        var orders = (await store.OrdersAsync(accountId, linkedIds, NoContracts, ct)).ToDictionary(o => o.OrderId, StringComparer.Ordinal);
+        var fills = (await store.FillsAsync(accountId, linkedIds.ToList(), ct)).ToLookup(f => f.OrderId);
         var now = time.GetUtcNow();
         foreach (var play in targets)
         {

@@ -24,10 +24,51 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
         foreach (var play in plays) await db.Entry(play).ReloadAsync(ct);
         return plays;
     }
+    // Orders are read-only for every consumer; UpsertOrdersAsync loads its own tracked rows.
     public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct) =>
-        db.Orders.Where(o => o.AccountId == accountId).OrderBy(o => o.PlacedAtUtc).ThenBy(o => o.OrderId).ToListAsync(ct);
+        db.Orders.Where(o => o.AccountId == accountId).OrderBy(o => o.PlacedAtUtc).ThenBy(o => o.OrderId).AsNoTracking().ToListAsync(ct);
+
+    public async Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<string> orderIds,
+        IReadOnlyDictionary<string, DateTimeOffset> placedSince, CancellationToken ct)
+    {
+        var ids = orderIds.Distinct(StringComparer.Ordinal).ToArray();
+        var contracts = placedSince.Keys.ToArray();
+        if (ids.Length == 0 && contracts.Length == 0) return [];
+        var query = db.Orders.Where(o => o.AccountId == accountId);
+        if (contracts.Length == 0) query = query.Where(o => ids.Contains(o.OrderId));
+        else
+        {
+            // SQL narrows to the contracts from their earliest time; the shared rule below applies each contract's own time.
+            var from = placedSince.Values.Min().ToUniversalTime();
+            query = query.Where(o => ids.Contains(o.OrderId) || contracts.Contains(o.ContractId) && o.PlacedAtUtc >= from);
+        }
+        var rows = await query.OrderBy(o => o.PlacedAtUtc).ThenBy(o => o.OrderId).AsNoTracking().ToListAsync(ct);
+        return rows.Where(o => IPlayExecutionStore.IncludesOrder(o, orderIds, placedSince)).ToList();
+    }
+
     public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, CancellationToken ct) =>
         db.OrderLinks.Where(l => l.AccountId == accountId).OrderBy(l => l.CreatedAtUtc).ThenBy(l => l.Id).ToListAsync(ct);
+
+    public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, IReadOnlyCollection<string> orderIds, IReadOnlyCollection<Guid> playIds,
+        CancellationToken ct)
+    {
+        var ids = orderIds.Distinct(StringComparer.Ordinal).ToArray();
+        var playList = playIds.Distinct().ToArray();
+        if (ids.Length == 0 && playList.Length == 0) return Task.FromResult(new List<PlayOrderLink>());
+        return db.OrderLinks.Where(l => l.AccountId == accountId && (ids.Contains(l.OrderId) || playList.Contains(l.PlayId)))
+            .OrderBy(l => l.CreatedAtUtc).ThenBy(l => l.Id).ToListAsync(ct);
+    }
+
+    public Task<List<PlayOrderLink>> PlayLinksAsync(Guid accountId, Guid playId, CancellationToken ct) =>
+        db.OrderLinks.Where(l => l.AccountId == accountId && l.PlayId == playId).OrderBy(l => l.CreatedAtUtc).ThenBy(l => l.Id)
+            .AsNoTracking().ToListAsync(ct);
+
+    public Task<PlayOrderLink?> LinkAsync(Guid accountId, Guid playId, Guid linkId, CancellationToken ct) =>
+        db.OrderLinks.SingleOrDefaultAsync(l => l.Id == linkId && l.AccountId == accountId && l.PlayId == playId, ct);
+
+    public async Task<HashSet<string>> LinkedOrderIdsAsync(Guid accountId, CancellationToken ct) =>
+        (await db.OrderLinks.Where(l => l.AccountId == accountId && l.State == OrderLinkState.Linked).Select(l => l.OrderId)
+            .Distinct().ToListAsync(ct)).ToHashSet(StringComparer.Ordinal);
     public Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct) =>
         db.Fills.Where(f => f.AccountId == accountId && orderIds.Contains(f.OrderId)).OrderBy(f => f.OccurredAtUtc).ThenBy(f => f.Id)
             .AsNoTracking().ToListAsync(ct);

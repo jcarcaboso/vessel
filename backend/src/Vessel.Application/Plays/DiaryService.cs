@@ -176,9 +176,10 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         var relevant = facts.Fills.Where(f => orderIds.Contains(f.OrderId)).ToList();
         var fillsByOrder = relevant.ToLookup(f => f.OrderId, StringComparer.Ordinal);
         var own = relevant.Where(f => ids.Contains(f.Id)).ToDictionary(f => f.Id);
-        var orders = (await diary.OrdersAsync(accountId, ct)).Where(o => orderIds.Contains(o.OrderId))
+        // Only the operation's orders and their links are read; retained fills above stay whole-order evidence.
+        var orders = (await diary.OrdersAsync(accountId, orderIds, ct)).Where(o => orderIds.Contains(o.OrderId))
             .ToDictionary(o => o.OrderId, StringComparer.Ordinal);
-        var links = (await diary.LinksAsync(accountId, ct)).Where(l => orderIds.Contains(l.OrderId)).ToList();
+        var links = (await diary.LinksAsync(accountId, orderIds, ct)).Where(l => orderIds.Contains(l.OrderId)).ToList();
         var retrospectivePlan = new PlayPlanDocument(operation.Direction ?? "long", "margin", "", "0", null, [],
             new PlanNotes("", "", "", ""));
         List<string> reasons = [];
