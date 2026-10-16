@@ -32,6 +32,7 @@ This repository contains the approved Graphite prototype and the React/Vite/Type
 - [First-part PR review safeguards](docs/architecture/pr-review-fixes.md)
 - [Venue credentials](docs/architecture/venue-credentials.md) and [Lighter integration state](docs/architecture/lighter-state.md)
 - [Play lifecycle](docs/architecture/play-lifecycle.md), [chart plan](docs/architecture/chart-plan.md) and [portfolio review](docs/architecture/portfolio-review.md)
+- [Play monitor plan](docs/architecture/play-monitor-plan.md), [messaging, events and workers reference](docs/architecture/messaging-and-workers.md) and [architecture overview page](docs/architecture/play-monitor-overview.html)
 
 The owner authorized foundation scaffolding after confirming perpetuals-first across venues and multiple active plays on the same account/instrument. Frontend and backend work were delegated to separate Sol agents. The confirmed MVP remains self-hosted and single-user with token access, Hyperliquid first and Lighter next, manual accounts, optional history import and in-page notifications.
 
