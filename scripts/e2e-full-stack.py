@@ -34,7 +34,8 @@ from dev import verification_environment
 ROOT = Path(__file__).resolve().parent.parent
 IMAGES = {'api': 'vessel-e2e:api', 'web': 'vessel-e2e:web'}
 FAKE_IMAGE = 'python:3.13-slim'
-PLAYWRIGHT_IMAGE = 'mcr.microsoft.com/playwright:v1.63.0-noble'
+PLAYWRIGHT_VERSION = '1.63.0'
+PLAYWRIGHT_IMAGE = f'mcr.microsoft.com/playwright:v{PLAYWRIGHT_VERSION}-noble'
 HEAD_PROBE = '/api/events?after=9223372036854775807&limit=1'
 CURSOR = re.compile(r'[0-9a-f]{32}\.[1-9][0-9]*')
 SUBJECT_KEYS = {'accountId', 'venueId', 'contractId', 'playId', 'entryId', 'levelId', 'discrepancyId'}
@@ -152,6 +153,7 @@ class E2E:
         self.step = None
         self.built = False
         self.sse = None
+        self.playwright_volume = None
         self.address = '0x' + secrets.token_hex(20)
         self.ids = {}
 
@@ -712,7 +714,7 @@ services:
         status, _, _ = self.request(f'/api/accounts/{self.account}/discrepancies/{excess["subject"]["discrepancyId"]}/dismiss', 'POST',
                                     {'note': 'Second note'})
         record = next(d for d in self.api(f'/api/accounts/{self.account}/monitor')['discrepancies'] if d['id'] == excess['subject']['discrepancyId'])
-        # The implementation treats a repeated dismissal as an idempotent no-op (the contract text says 409).
+        # Contract: repeating a dismissal is a 204 no-op that keeps the original note; other non-open states are 409.
         self.expect(status == 204 and record['note'] == 'Held outside Vessel Plays' and not self.events(before),
                     'repeating a dismissal is an idempotent no-op: no event, note kept', (status, record['note']))
 
@@ -1006,12 +1008,10 @@ services:
         self.expect(page['resetRequired'] and not page['events'], 'a cursor below the retention floor requires a reset', page)
         self.expect(self.sql('SELECT count(*) FROM event_dedup') == dedup, 'dedup identities survive pruning')
         page = self.api('/api/events?after=0&limit=1')
-        # The API contract says "0 starts at the beginning of retained history"; the reader resets any cursor below the floor.
         self.expect(not page['resetRequired'] and page['events'] and seq(page['events'][0]) == int(floor) + 1,
-                    'contract: after=0 starts at the beginning of retained history after pruning',
-                    {k: page[k] for k in ('resetRequired', 'nextCursor')}, soft=True)
+                    'a fresh after=0 cursor pages retained history from the oldest retained event', page)
         retained = self.retained()
-        self.expect(retained and seq(retained[0]) == int(floor) + 1, 'retained history (read from the floor cursor) starts right above the floor')
+        self.expect(retained and seq(retained[0]) == int(floor) + 1, 'retained history starts right above the floor')
 
     def step_restore(self):
         frames, _ = self.sse.snapshot()
@@ -1074,23 +1074,44 @@ services:
                   f'{len(gap)} events in the reset window')
 
     def retained(self):
-        # From the owner's floor in the current epoch: '0' would reset once retention has pruned (see step 10a).
-        floor, epoch = self.sql(f"SELECT retention_floor, replace(epoch::text, '-', '') FROM event_cursors WHERE owner_id = '{self.owner}'").split('\t')
-        return self.events(f'{epoch}.{floor}' if int(floor) else '0')
+        # A fresh '0' cursor pages retained history from the oldest retained event, also after pruning.
+        return self.events('0')
 
     # ---- browser -------------------------------------------------------------------------------------
 
+    def playwright(self):
+        """The (mount, module path) of playwright-core for the pinned Playwright image.
+
+        A supplied --playwright-module is mounted read-only. Otherwise playwright-core is installed once per run with the
+        repository's pinned pnpm (through Corepack inside the same image) into a run-owned Docker volume, so a fresh
+        machine needs only Docker and Python. The volume is removed with the run.
+        """
+        if self.args.playwright_module:
+            module = Path(self.args.playwright_module)
+            self.expect(module.exists(), 'supplied playwright-core module exists', module)
+            return f'{module.parent}:/playwright:ro', f'/playwright/{module.name}'
+        if not self.playwright_volume:
+            pnpm = json.loads((ROOT / 'package.json').read_text())['packageManager']
+            volume = self.name + '-playwright'
+            run('docker', 'volume', 'create', volume, stdout=subprocess.DEVNULL)
+            self.playwright_volume = volume
+            install = run('docker', 'run', '--rm', '-e', 'HOME=/tmp', '-e', 'COREPACK_ENABLE_DOWNLOAD_PROMPT=0', '-v', f'{volume}:/cache',
+                          '-w', '/cache', PLAYWRIGHT_IMAGE, 'sh', '-ec',
+                          f'echo \'{{"private":true}}\' > package.json && corepack {pnpm} add --save-exact playwright-core@{PLAYWRIGHT_VERSION}',
+                          capture_output=True, text=True, check=False)
+            self.expect(install.returncode == 0, f'playwright-core {PLAYWRIGHT_VERSION} installed with {pnpm} for the pinned image',
+                        (install.stderr or install.stdout)[-300:])
+        return f'{self.playwright_volume}:/playwright:ro', '/playwright/node_modules/playwright-core'
+
     def browser(self, phase):
-        module = self.args.playwright_module
-        if not module or not Path(module).exists():
-            self.expect(False, f'browser phase {phase}: Playwright module available (--playwright-module)', module)
+        mount, module = self.playwright()
         env = {'E2E_URL': f'http://127.0.0.1:{self.http_port}', 'E2E_TOKEN': self.token, 'E2E_PHASE': phase,
-               'E2E_CONTROL': f'http://127.0.0.1:{self.control_port}', 'E2E_OUT': '/artifacts', 'PLAYWRIGHT_MODULE': '/playwright/playwright-core',
+               'E2E_CONTROL': f'http://127.0.0.1:{self.control_port}', 'E2E_OUT': '/artifacts', 'PLAYWRIGHT_MODULE': module,
                'E2E_IDS': json.dumps({'account': self.account, 'accountName': 'E2E Hyperliquid', 'address': self.address,
                                       'p1': self.p1, 'p2': self.p2, 'p3': getattr(self, 'p3', None), 'p1_target': self.p1_orders['target'],
                                       'p1_stop2': self.p1_orders['stop2'], 'p3_entry': getattr(self, 'p3_entry', None), **self.ids})}
         command = ['docker', 'run', '--rm', '--network', 'host', '--ipc=host',
-                   '-v', f'{ROOT / "scripts" / "e2e"}:/e2e:ro', '-v', f'{Path(module).parent}:/playwright:ro', '-v', f'{self.artifacts}:/artifacts']
+                   '-v', f'{ROOT / "scripts" / "e2e"}:/e2e:ro', '-v', mount, '-v', f'{self.artifacts}:/artifacts']
         for key in env:
             command += ['-e', key]
         command += [PLAYWRIGHT_IMAGE, 'node', '/e2e/browser-e2e.cjs']
@@ -1135,6 +1156,8 @@ services:
                             check=False).returncode:
                 failures.append(project)
         shutil.rmtree(self.temp, ignore_errors=True)
+        if self.playwright_volume:
+            run('docker', 'volume', 'rm', self.playwright_volume, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
         if self.built:
             for image in IMAGES.values():
                 run('docker', 'image', 'rm', image, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
@@ -1223,6 +1246,6 @@ if __name__ == '__main__':
     parser.add_argument('--resume-from', metavar='STEP', default='', help='With --resume: the first step to run (name prefix).')
     parser.add_argument('--continue-on-failure', action='store_true', help='Run later steps after a failed one.')
     parser.add_argument('--artifacts', help='Directory for screenshots and logs (default: a new temp directory).')
-    parser.add_argument('--playwright-module', default=os.environ.get('PLAYWRIGHT_MODULE', '/tmp/portfolio-browser-check/node_modules/playwright-core'),
-                        help='Host path of a playwright-core 1.63 package; the browser runs in the pinned Playwright image.')
+    parser.add_argument('--playwright-module', help='Optional host path of a playwright-core 1.63 package. By default it is installed '
+                        'with the pinned pnpm into a temporary Docker volume; the browser always runs in the pinned Playwright image.')
     sys.exit(E2E(parser.parse_args()).main())

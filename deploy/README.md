@@ -872,8 +872,11 @@ a throwaway CA that only the API and worker containers trust (`SSL_CERT_FILE`), 
 the production `https`/`wss` host rules stay unchanged, and a loopback-only control
 port lets the harness place, fill and cancel orders, list markets and gate or fail
 reads between steps. The scenario drives the public API, the SSE stream through
-nginx and a Playwright browser (pinned `mcr.microsoft.com/playwright:v1.63.0-noble`
-image, with a host `playwright-core` 1.63 package given by `--playwright-module`):
+nginx and a Playwright browser that runs in the pinned
+`mcr.microsoft.com/playwright:v1.63.0-noble` image. `playwright-core` 1.63 is
+installed there with the repository's pinned pnpm (Corepack) into a temporary
+Docker volume, so only Docker and Python are needed; `--playwright-module` can
+point at an existing host package instead. The scenario covers
 explicit provisioning and topology, Refresh, automatic linking by a Check,
 fills opening and closing Plays, confirmed and dismissed discrepancies, closed-Play
 watches, orphaned entries, omitted executions, broker outage and broker volume
@@ -883,7 +886,7 @@ backup/restore with an epoch rotation that resets an old SSE cursor. It sets the
 shortest allowed times (one-minute interval, zero protection grace, 15-second
 cooldown, one-hour watch and unobservable lifetimes, one-day retention) and
 shifts three timestamps in the synthetic database instead of waiting an hour or
-a day; the fixed five-minute lease is waited out. A run takes about half an hour
+a day; the fixed five-minute lease is waited out. A run takes about twenty minutes
 and prints a pass/fail table; it exits non-zero on any failure. Screenshots and
 redacted logs go to a new temp artifacts directory (`--artifacts` to choose).
 It never reads the repository `.env`, uses the owner's database or pushes images.
