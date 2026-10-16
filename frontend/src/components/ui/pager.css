@@ -1,0 +1,24 @@
+/* Numbered pages under a list. Theme tokens only. */
+.pager {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 12px 20px;
+  border-top: 1px solid var(--line); color: var(--muted-foreground); font-size: var(--text-xs);
+}
+.pager-summary { margin: 0; font-feature-settings: var(--figures); white-space: nowrap; }
+.pager-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pager-pages button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 32px; height: 32px; padding: 0 8px;
+  border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; color: var(--muted-foreground);
+  font: inherit; font-feature-settings: var(--figures); cursor: pointer;
+  transition: color .14s var(--ease-out), background .14s var(--ease-out), border-color .14s var(--ease-out);
+}
+.pager-pages button:hover:not(:disabled) { color: var(--foreground); background: var(--surface-hover); }
+.pager-pages button:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pager-pages button:disabled { cursor: not-allowed; opacity: .5; }
+.pager-pages .pager-page[aria-current="page"] { border-color: var(--brand-line); background: var(--brand-wash); color: var(--foreground); font-weight: 600; }
+.pager-pages .pager-page[aria-current="page"]:disabled { opacity: .8; }
+.pager-gap { min-width: 20px; text-align: center; }
+.pager-size { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.pager-size .native-select { width: 76px; }
+.pager-size select { border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--field); color: var(--foreground); font: inherit; }
+.pager-size select:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+@media (max-width: 640px) { .pager { padding: 12px 16px; } }

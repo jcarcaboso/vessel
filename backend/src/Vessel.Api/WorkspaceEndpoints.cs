@@ -1,3 +1,4 @@
+using Vessel.Application.Activity;
 using Vessel.Application.MarketData;
 using Vessel.Application.Workspace;
 using Vessel.Application.Credentials;
@@ -86,8 +87,10 @@ public static class WorkspaceEndpoints
             await execution.RetainAccountOrdersAsync(id, ct);
             return Results.Ok(await service.AccountAsync(id, ct));
         });
-        api.MapGet("/activity", async (Guid? accountId, Vessel.Application.Activity.ActivityService service, CancellationToken ct) =>
-            Results.Ok(await service.GetAsync(accountId, ct)));
+        api.MapGet("/activity", async ([AsParameters] ActivityQuery query, ActivityService service, CancellationToken ct) =>
+            Results.Ok(await service.PageAsync(query, ct)));
+        api.MapGet("/activity/fills", async (Guid? accountId, string? operationId, ActivityService service, CancellationToken ct) =>
+            Results.Ok(await service.FillsAsync(accountId, operationId, ct)));
         api.MapGet("/overview/summary", async (string? groupBy, string? period, string? scope,
             Vessel.Application.Overview.OverviewSummaryService service, CancellationToken ct) =>
             Results.Ok(await service.GetAsync(groupBy, period, scope, ct)));

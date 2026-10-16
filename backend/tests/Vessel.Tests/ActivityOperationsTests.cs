@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Activity;
+using Vessel.Application.Common;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 
@@ -159,8 +160,8 @@ public sealed class ActivityOperationsTests
         var legacy = Fill(0); legacy.ContractId = "DOGE";
         var native = Fill(1); native.ContractId = "DOGE"; native.VenueContractId = "14";
         var snapshot = Snapshot(2); snapshot.Positions[0].ContractId = "DOGE"; snapshot.Positions[0].VenueContractId = "14";
-        var result = await new ActivityService(new Store(new([Account(AccountId)], [native, legacy], [snapshot],
-            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var result = await Read(new([Account(AccountId)], [native, legacy], [snapshot],
+            new Dictionary<Guid, Guid>()));
         var op = Assert.Single(result.Operations);
         Assert.Equal("long", op.Direction); Assert.Equal("open", op.Status);
         Assert.Equal("2", op.TotalEnteredQuantity); Assert.Equal("0", op.TotalExitedQuantity); Assert.Equal("2", op.OpenQuantity);
@@ -175,8 +176,8 @@ public sealed class ActivityOperationsTests
     {
         var legacy = Fill(0); legacy.ContractId = "DOGE";
         var native = Fill(1, "sell", "close"); native.ContractId = "DOGE"; native.VenueContractId = "14";
-        var result = await new ActivityService(new Store(new([Account(AccountId)], [native, legacy], [Snapshot()],
-            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var result = await Read(new([Account(AccountId)], [native, legacy], [Snapshot()],
+            new Dictionary<Guid, Guid>()));
         var op = Assert.Single(result.Operations);
         Assert.Equal("long", op.Direction); Assert.Equal("closed", op.Status);
         Assert.Equal("1", op.TotalEnteredQuantity); Assert.Equal("1", op.TotalExitedQuantity); Assert.Equal("0", op.OpenQuantity);
@@ -187,8 +188,8 @@ public sealed class ActivityOperationsTests
     public async Task Canonical_only_fill_resolves_a_native_id_observed_only_in_the_snapshot()
     {
         var snapshot = Snapshot(1); snapshot.Positions[0].VenueContractId = "14";
-        var result = await new ActivityService(new Store(new([Account(AccountId)], [Fill(0)], [snapshot],
-            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var result = await Read(new([Account(AccountId)], [Fill(0)], [snapshot],
+            new Dictionary<Guid, Guid>()));
         var op = Assert.Single(result.Operations);
         Assert.Equal("long", op.Direction); Assert.Equal("open", op.Status); Assert.Equal("1", op.OpenQuantity);
         Assert.Empty(op.Coverage); Assert.Empty(result.Coverage);
@@ -199,8 +200,8 @@ public sealed class ActivityOperationsTests
     {
         var legacy = Fill(0); var native = Fill(1); native.VenueContractId = "14";
         var snapshot = Snapshot(2);
-        var result = await new ActivityService(new Store(new([Account(AccountId)], [native, legacy], [snapshot],
-            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var result = await Read(new([Account(AccountId)], [native, legacy], [snapshot],
+            new Dictionary<Guid, Guid>()));
         var op = Assert.Single(result.Operations);
         Assert.Equal("long", op.Direction); Assert.Equal("open", op.Status); Assert.Equal("2", op.OpenQuantity);
         Assert.Empty(op.Coverage); Assert.Empty(result.Coverage);
@@ -218,9 +219,9 @@ public sealed class ActivityOperationsTests
         var closedOpen = Fill(2); var closedExit = Fill(3, "sell", "close"); var open = Fill(4);
         var snapshot = Snapshot(snapshotKind == "native" ? 1 : 0);
         if (snapshot.Positions.Count > 0) snapshot.Positions[0].VenueContractId = "14";
-        var result = await new ActivityService(new Store(new([Account(AccountId)],
+        var result = await Read(new([Account(AccountId)],
             [retired, active, closedOpen, closedExit, open], snapshotKind == "missing" ? [] : [snapshot],
-            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+            new Dictionary<Guid, Guid>()));
         Assert.Equal(4, result.TotalOperationCount);
         var unresolved = result.Operations.Where(o => o.Fills.Any(f => f.Fill.Id == closedOpen.Id || f.Fill.Id == open.Id)).ToList();
         Assert.Equal(2, unresolved.Count);
@@ -241,8 +242,8 @@ public sealed class ActivityOperationsTests
     {
         var legacy = Fill(0); var native = Fill(1); native.VenueContractId = "13";
         var snapshot = Snapshot(2); snapshot.Positions[0].VenueContractId = "14";
-        var result = await new ActivityService(new Store(new([Account(AccountId)], [legacy, native], [snapshot],
-            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var result = await Read(new([Account(AccountId)], [legacy, native], [snapshot],
+            new Dictionary<Guid, Guid>()));
         Assert.Equal(2, result.TotalOperationCount);
         var op = result.Operations.Single(o => o.Fills[0].Fill.Id == legacy.Id);
         Assert.Equal("long", op.Direction); Assert.Equal("open", op.Status); Assert.Equal("1", op.OpenQuantity);
@@ -257,8 +258,8 @@ public sealed class ActivityOperationsTests
         var first = Fill(1); first.VenueContractId = first.ContractId;
         var second = Fill(2); second.VenueContractId = "14";
         var snapshot = Snapshot(1); snapshot.Positions[0].VenueContractId = "14";
-        var result = await new ActivityService(new Store(new([Account(AccountId)], [legacy, first, second], [snapshot],
-            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var result = await Read(new([Account(AccountId)], [legacy, first, second], [snapshot],
+            new Dictionary<Guid, Guid>()));
         Assert.Equal(3, result.TotalOperationCount);
         var op = result.Operations.Single(o => o.Fills[0].Fill.Id == legacy.Id);
         Assert.Equal(1, op.FillCount); Assert.Equal("long", op.Direction); Assert.Equal("1", op.OpenQuantity);
@@ -276,8 +277,8 @@ public sealed class ActivityOperationsTests
         snapshot.Positions.Add(new() { ContractId = "ETH", VenueContractId = "15", SignedQuantity = 1 });
         var otherSnapshot = new AccountSnapshot { AccountId = otherAccount, ObservedAtUtc = Start.AddMinutes(100),
             Positions = [new() { ContractId = "BTC", VenueContractId = "13", SignedQuantity = 1 }] };
-        var result = await new ActivityService(new Store(new([Account(AccountId), Account(otherAccount)],
-            [legacy, native, foreignMarket, otherContract], [snapshot, otherSnapshot], new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var result = await Read(new([Account(AccountId), Account(otherAccount)],
+            [legacy, native, foreignMarket, otherContract], [snapshot, otherSnapshot], new Dictionary<Guid, Guid>()));
         var op = result.Operations.Single(o => o.Fills.Any(f => f.Fill.Id == legacy.Id));
         Assert.Equal(2, op.FillCount); Assert.Equal("2", op.OpenQuantity);
         Assert.Empty(op.Coverage); Assert.Empty(result.Coverage);
@@ -292,8 +293,8 @@ public sealed class ActivityOperationsTests
         var snapshot = Snapshot(1); snapshot.Positions[0].VenueContractId = "14";
         foreach (var fill in new[] { retiredOpen, retiredClose, activeClose }) fill.ContractId = "DOGE";
         snapshot.Positions[0].ContractId = "DOGE";
-        var result = await new ActivityService(new Store(new([Account(AccountId)],
-            [retiredOpen, retiredClose, activeClose], [snapshot], new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var result = await Read(new([Account(AccountId)],
+            [retiredOpen, retiredClose, activeClose], [snapshot], new Dictionary<Guid, Guid>()));
         Assert.Equal(2, result.TotalOperationCount);
         var retired = result.Operations.Single(o => o.Status == "closed");
         Assert.Equal("10", retired.ReportedClosedPnlUsd); Assert.Equal("0", retired.OpenQuantity); Assert.Empty(retired.Coverage);
@@ -307,8 +308,8 @@ public sealed class ActivityOperationsTests
     public async Task Legacy_snapshot_without_native_id_anchors_only_one_unambiguous_market()
     {
         var fill = Fill(0, "sell", "close"); fill.VenueContractId = "14";
-        var result = await new ActivityService(new Store(new([Account(AccountId)], [fill], [Snapshot(1)],
-            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var result = await Read(new([Account(AccountId)], [fill], [Snapshot(1)],
+            new Dictionary<Guid, Guid>()));
         var op = Assert.Single(result.Operations);
         Assert.Equal("long", op.Direction); Assert.Equal("1", op.OpenQuantity);
         Assert.Contains(op.Coverage, c => c.Contains("entries") && c.Contains("missing"));
@@ -320,8 +321,8 @@ public sealed class ActivityOperationsTests
     {
         var first = Fill(0); first.VenueContractId = "13";
         var second = Fill(1, "sell", "close"); second.VenueContractId = "14";
-        var result = await new ActivityService(new Store(new([Account(AccountId)], [first, second], [Snapshot(1)],
-            new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var result = await Read(new([Account(AccountId)], [first, second], [Snapshot(1)],
+            new Dictionary<Guid, Guid>()));
         Assert.Equal(2, result.TotalOperationCount);
         Assert.Null(result.Operations.Single(o => o.Fills[0].Fill.Id == second.Id).OpenQuantity);
         Assert.All(result.Operations, o => Assert.Contains(o.Coverage, c => c.Contains("native") && c.Contains("ambiguous")));
@@ -346,7 +347,7 @@ public sealed class ActivityOperationsTests
     {
         var fills = Enumerable.Range(0, 100).Select(n => { var fill = Fill(n); fill.ContractId = $"C{n}"; return fill; }).ToList();
         var snapshots = new CountedSnapshots([Snapshot()]);
-        await new ActivityService(new Store(new([Account(AccountId)], fills, snapshots, new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        await Service(new([Account(AccountId)], fills, snapshots, new Dictionary<Guid, Guid>())).PageAsync(new(), default);
         Assert.InRange(snapshots.Enumerations, 1, 2);
     }
 
@@ -360,21 +361,23 @@ public sealed class ActivityOperationsTests
     }
 
     [Fact]
-    public async Task Bounded_service_materializes_only_returned_execution_rows_without_losing_totals()
+    public async Task Pages_materialize_no_execution_rows_and_expansion_keeps_the_earliest_thousand_without_losing_totals()
     {
         var fills = Enumerable.Range(0, 15000).Select(n => Fill(n, pnl: 1, fee: 0.1m)).ToList();
-        var service = new ActivityService(new Store(new([Account(AccountId)], fills, [], new Dictionary<Guid, Guid>())));
-        _ = OperationAggregator.Aggregate(fills); _ = await service.GetAsync(null, default);
+        var service = Service(new([Account(AccountId)], fills, [], new Dictionary<Guid, Guid>()));
+        _ = OperationAggregator.Aggregate(fills); _ = await service.PageAsync(new(), default);
         var before = GC.GetAllocatedBytesForCurrentThread();
         _ = OperationAggregator.Aggregate(fills);
         var fullBytes = GC.GetAllocatedBytesForCurrentThread() - before;
         before = GC.GetAllocatedBytesForCurrentThread();
-        var result = await service.GetAsync(null, default);
-        var boundedBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        var result = await service.PageAsync(new(), default);
+        var pageBytes = GC.GetAllocatedBytesForCurrentThread() - before;
         var op = Assert.Single(result.Operations);
-        Assert.Equal(15000, op.FillCount); Assert.Equal(200, op.Fills.Count); Assert.Equal(14800, op.OmittedFillCount);
-        Assert.Equal("15000", op.ReportedClosedPnlUsd); Assert.Equal("13500", op.NetResultUsd);
-        Assert.True(boundedBytes < fullBytes * 0.7, $"Bounded DTO allocation {boundedBytes} should be below 70% of full materialization {fullBytes}.");
+        Assert.Equal(15000, op.FillCount); Assert.Equal("15000", op.ReportedClosedPnlUsd); Assert.Equal("13500", op.NetResultUsd);
+        Assert.True(pageBytes < fullBytes * 0.7, $"Page allocation {pageBytes} should be below 70% of full materialization {fullBytes}.");
+        var expanded = await service.FillsAsync(AccountId, op.Id, default);
+        Assert.Equal(op.Id, expanded.OperationId); Assert.Equal(1000, expanded.Fills.Count); Assert.Equal(14000, expanded.OmittedFillCount);
+        Assert.Equal(fills.Take(1000).Select(f => f.Id), expanded.Fills.Select(f => f.Fill.Id));
     }
 
     [Theory]
@@ -616,8 +619,8 @@ public sealed class ActivityOperationsTests
         var entry = Fill(0, quantity: 2); entry.Id = Guid.Empty;
         var opened = Fill(1, "sell", "open", quantity: 3); opened.Id = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
         var snapshot = Snapshot(-3);
-        var result = await new ActivityService(new Store(new([Account(AccountId)], [entry, Fill(1, "sell", "close", quantity: 2), opened],
-            [snapshot], new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var result = await Read(new([Account(AccountId)], [entry, Fill(1, "sell", "close", quantity: 2), opened],
+            [snapshot], new Dictionary<Guid, Guid>()));
         Assert.Equal(2, result.Operations.Count); Assert.Equal("closed", result.Operations[0].Status);
         Assert.Empty(result.Coverage); Assert.All(result.Operations, o => Assert.Empty(o.Coverage));
         Assert.Equal("3", result.Operations.Single(o => o.Status == "open").OpenQuantity);
@@ -627,21 +630,55 @@ public sealed class ActivityOperationsTests
     public async Task Snapshot_older_than_fills_is_not_treated_as_a_position_disagreement()
     {
         var snapshot = new AccountSnapshot { AccountId = AccountId, ObservedAtUtc = Start, Positions = [] };
-        var result = await new ActivityService(new Store(new([Account(AccountId)], [Fill(1)], [snapshot], new Dictionary<Guid, Guid>())))
-            .GetAsync(null, default);
+        var result = await Read(new([Account(AccountId)], [Fill(1)], [snapshot], new Dictionary<Guid, Guid>()));
         Assert.Contains(result.Coverage, c => c.Notice.Contains("predates"));
         Assert.DoesNotContain(result.Coverage, c => c.Notice.Contains("disagrees"));
     }
 
-    private static Account Account(Guid id, bool enabled = true)
+    private static Account Account(Guid id, bool enabled = true, Guid? portfolio = null)
     {
         var account = new Account(id, Owner, "manual", "Fixture");
-        account.UpdateSettings(account.Name, null, enabled);
+        account.UpdateSettings(account.Name, portfolio, enabled);
         return account;
     }
     private sealed class Store(ActivityFacts facts) : IActivityStore
     {
         public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) => Task.FromResult(facts);
+    }
+    private static readonly DateTimeOffset Now = Start.AddDays(10);
+    private sealed class Clock(DateTimeOffset now) : TimeProvider { public override DateTimeOffset GetUtcNow() => now; }
+    private static MemoryWorkspaceStore Workspace(ActivityFacts facts, params Portfolio[] portfolios)
+    {
+        var workspace = new MemoryWorkspaceStore(Owner);
+        workspace.Accounts.AddRange(facts.Accounts); workspace.Portfolios.AddRange(portfolios);
+        return workspace;
+    }
+    private static ActivityService Service(ActivityFacts facts, MemoryWorkspaceStore? workspace = null, DateTimeOffset? now = null) =>
+        new(new Store(facts), workspace ?? Workspace(facts), new Clock(now ?? Now));
+
+    private sealed record Report(IReadOnlyList<ActivityOperationDto> Operations, int TotalOperationCount, int RetainedFillCount,
+        IReadOnlyList<ActivityCoverageDto> Coverage);
+    // Every page of the unfiltered scope, each row with its expanded constituent rows: the full aggregate report.
+    private static async Task<Report> Read(ActivityFacts facts)
+    {
+        var service = Service(facts);
+        var operations = new List<ActivityOperationDto>();
+        ActivityPageDto page;
+        var number = 1;
+        do
+        {
+            page = await service.PageAsync(new(Page: number.ToString(), PageSize: "100"), default);
+            foreach (var o in page.Operations)
+            {
+                var rows = await service.FillsAsync(o.AccountId, o.Id, default);
+                operations.Add(new(o.Id, o.AccountId, o.ContractId, o.Direction, o.Status, o.OpenedAtUtc, o.ClosedAtUtc, o.LastOccurredAtUtc,
+                    o.Quantity, o.TotalEnteredQuantity, o.TotalExitedQuantity, o.OpenQuantity, o.AverageEntryPrice, o.AverageExitPrice,
+                    o.EntryOrderCount, o.ExitOrderCount, o.FillCount, o.ReportedClosedPnlUsd, o.StablecoinFeesNominalUsd, o.OtherFees,
+                    o.NetResultUsd, o.PnlBasis, o.PlayId, o.PlayAssociation, o.Coverage, rows.Fills, rows.OmittedFillCount)
+                { GrossClosedPnlUsd = o.GrossClosedPnlUsd });
+            }
+        } while (number++ * 100 < page.TotalCount);
+        return new(operations, page.TotalCount, page.RetainedFillCount, page.Coverage);
     }
 
     [Fact]
@@ -666,8 +703,8 @@ public sealed class ActivityOperationsTests
             Fills = all.Fills.Where(f => ids.Contains(f.AccountId)).ToList(),
             Snapshots = all.Snapshots.Where(s => ids.Contains(s.AccountId)).ToList()
         };
-        var full = await new ActivityService(new Store(all)).GetAsync(null, default);
-        var scoped = await new ActivityService(new Store(restricted)).GetAsync(null, default);
+        var full = await Read(all);
+        var scoped = await Read(restricted);
         Assert.Equal(JsonSerializer.Serialize(full.Operations.Where(o => ids.Contains(o.AccountId))), JsonSerializer.Serialize(scoped.Operations));
         Assert.Equal(JsonSerializer.Serialize(full.Coverage.Where(c => ids.Contains(c.AccountId))), JsonSerializer.Serialize(scoped.Coverage));
         Assert.Equal(4, scoped.RetainedFillCount);
@@ -680,8 +717,7 @@ public sealed class ActivityOperationsTests
         var fills = Enumerable.Range(0, 120).Select(n => Fill(n, n % 2 == 0 ? "buy" : "sell", n % 2 == 0 ? "open" : "close")).ToList();
         var hidden = Fill(130); hidden.AccountId = disabled; fills.Add(hidden);
         var outside = Fill(131); outside.AccountId = foreign; fills.Add(outside);
-        var service = new ActivityService(new Store(new([Account(AccountId), Account(disabled, false)], fills, [], new Dictionary<Guid, Guid>())));
-        var result = await service.GetAsync(null, default);
+        var result = await Read(new([Account(AccountId), Account(disabled, false)], fills, [], new Dictionary<Guid, Guid>()));
         Assert.Equal(120, result.RetainedFillCount); Assert.Equal(60, result.TotalOperationCount);
         Assert.All(result.Operations, o => Assert.Equal(AccountId, o.AccountId));
     }
@@ -691,8 +727,7 @@ public sealed class ActivityOperationsTests
     {
         var snapshot = new AccountSnapshot { AccountId = AccountId, ObservedAtUtc = Start.AddDays(1), Positions =
             [new() { ContractId = "BTC", SignedQuantity = 3 }, new() { ContractId = "ETH", SignedQuantity = -2 }] };
-        var result = await new ActivityService(new Store(new([Account(AccountId)], [Fill(0)], [snapshot], new Dictionary<Guid, Guid>())))
-            .GetAsync(null, default);
+        var result = await Read(new([Account(AccountId)], [Fill(0)], [snapshot], new Dictionary<Guid, Guid>()));
         var op = Assert.Single(result.Operations); Assert.Equal("incomplete", op.Status); Assert.Equal("long", op.Direction); Assert.Equal("3", op.OpenQuantity);
         Assert.Null(op.AverageEntryPrice); Assert.Contains(op.Coverage, s => s.Contains("entries") && s.Contains("missing"));
         var disagreement = Assert.Single(result.Coverage); Assert.Equal("ETH", disagreement.ContractId);
@@ -701,15 +736,217 @@ public sealed class ActivityOperationsTests
     }
 
     [Fact]
-    public async Task Response_limits_never_change_aggregate_totals()
+    public async Task Pages_have_no_operation_cap_and_never_change_aggregate_totals()
     {
         var fills = Enumerable.Range(0, 250).Select(n => Fill(n)).ToList();
-        var result = await new ActivityService(new Store(new([Account(AccountId)], fills, [], new Dictionary<Guid, Guid>()))).GetAsync(null, default);
+        var result = await Read(new([Account(AccountId)], fills, [], new Dictionary<Guid, Guid>()));
         var op = Assert.Single(result.Operations); Assert.Equal("250", op.Quantity); Assert.Equal(250, op.FillCount);
-        Assert.Equal(200, op.Fills.Count); Assert.Equal(50, op.OmittedFillCount);
+        Assert.Equal(250, op.Fills.Count); Assert.Equal(0, op.OmittedFillCount);
         fills = Enumerable.Range(0, 1100).Select(n => Fill(n, n % 2 == 0 ? "buy" : "sell", n % 2 == 0 ? "open" : "close")).ToList();
-        result = await new ActivityService(new Store(new([Account(AccountId)], fills, [], new Dictionary<Guid, Guid>()))).GetAsync(null, default);
-        Assert.Equal(500, result.Operations.Count); Assert.Equal(50, result.OmittedOperationCount);
+        var page = await Service(new([Account(AccountId)], fills, [], new Dictionary<Guid, Guid>())).PageAsync(new(Page: "6", PageSize: "100"), default);
+        Assert.Equal((550, 550, 1100, 6, 100), (page.TotalCount, page.ScopeCount, page.RetainedFillCount, page.Page, page.PageSize));
+        Assert.Equal(fills[1].OccurredAtUtc, page.Operations[^1].LastOccurredAtUtc);
+        Assert.Equal(50, page.Operations.Count);
+    }
+
+    // Fixture: the first account is in Swing, the second is Unassigned and a disabled Swing account is hidden.
+    // First: closed BTC long (minute 1), open ETH short (2), partially closed SOL long (4).
+    // Second: incomplete BTC (5) and an ETH long opened 40 days before the clock.
+    private static readonly DateTimeOffset FixtureNow = Start.AddDays(1);
+    private sealed record Fixture(ActivityService Service, Guid Second, Guid Disabled, Portfolio Swing, List<ImportedFill> Fills);
+    private static Fixture Filters(Action<List<ImportedFill>>? change = null, Dictionary<Guid, Guid>? links = null)
+    {
+        var swing = new Portfolio(Guid.NewGuid(), Owner, "Swing", "wallet");
+        Guid second = Guid.Parse("00000000-0000-0000-0000-000000000002"), disabled = Guid.NewGuid();
+        ImportedFill On(ImportedFill fill, Guid account, string contract) { fill.AccountId = account; fill.ContractId = contract; return fill; }
+        var old = On(Fill(0), second, "ETH"); old.OccurredAtUtc = FixtureNow.AddDays(-40);
+        List<ImportedFill> fills =
+        [
+            On(Fill(0), AccountId, "BTC"), On(Fill(1, "sell", "close"), AccountId, "BTC"),
+            On(Fill(2, "sell", "open", quantity: 2), AccountId, "ETH"),
+            On(Fill(3, quantity: 2), AccountId, "SOL"), On(Fill(4, "sell", "close"), AccountId, "SOL"),
+            On(Fill(5, "sell", "close"), second, "BTC"), old, On(Fill(6), disabled, "BTC")
+        ];
+        change?.Invoke(fills);
+        var facts = new ActivityFacts([Account(AccountId, portfolio: swing.Id), Account(second), Account(disabled, false, swing.Id)],
+            fills, [], links ?? new Dictionary<Guid, Guid>());
+        return new(Service(facts, Workspace(facts, swing), FixtureNow), second, disabled, swing, fills);
+    }
+
+    [Fact]
+    public async Task Each_filter_ports_the_client_semantics_after_aggregation()
+    {
+        var (service, second, _, swing, _) = Filters();
+        async Task<string[]> Ids(ActivityQuery query)
+        {
+            var page = await service.PageAsync(query, default);
+            Assert.Equal(5, page.ScopeCount); Assert.Equal(page.Operations.Count, page.TotalCount);
+            return page.Operations.Select(o => $"{(o.AccountId == AccountId ? "first" : "second")}:{o.ContractId}").ToArray();
+        }
+        Assert.Equal(["second:BTC", "first:SOL", "first:ETH", "first:BTC", "second:ETH"], await Ids(new()));
+        Assert.Equal(["first:SOL", "first:ETH", "first:BTC"], await Ids(new(Account: AccountId.ToString())));
+        Assert.Equal(["second:BTC", "second:ETH"], await Ids(new(Account: second.ToString())));
+        Assert.Equal(["first:SOL", "first:ETH", "first:BTC"], await Ids(new(Portfolio: swing.Id.ToString())));
+        Assert.Equal(["second:BTC", "second:ETH"], await Ids(new(Portfolio: "unassigned")));
+        Assert.Empty(await Ids(new(Portfolio: Guid.NewGuid().ToString())));
+        Assert.Equal(["second:BTC", "first:BTC"], await Ids(new(Contract: "BTC")));
+        Assert.Empty(await Ids(new(Contract: "btc")));
+        Assert.Equal(["first:SOL", "first:BTC", "second:ETH"], await Ids(new(Direction: "long")));
+        Assert.Equal(["first:ETH"], await Ids(new(Direction: "short")));
+        Assert.Equal(["first:SOL", "first:ETH", "second:ETH"], await Ids(new(Status: "open")));
+        Assert.Equal(["first:SOL"], await Ids(new(Status: "partial")));
+        Assert.Equal(["first:BTC"], await Ids(new(Status: "closed")));
+        Assert.Equal(["second:BTC"], await Ids(new(Status: "incomplete")));
+        Assert.Equal(["first:SOL", "first:ETH"], await Ids(new(Account: AccountId.ToString(), Status: "open")));
+        Assert.Equal(4, (await Ids(new(Period: "7"))).Length);
+        Assert.Equal(4, (await Ids(new(Period: "30"))).Length);
+        Assert.Equal(5, (await Ids(new(Period: "90"))).Length);
+        Assert.Equal(5, (await Ids(new(Period: "all"))).Length);
+        Assert.Equal(4, (await Ids(new(Period: "custom", From: "2026-10-12", To: "2026-10-12"))).Length);
+        Assert.Equal(4, (await Ids(new(Period: "custom", From: "2026-10-12"))).Length);
+        Assert.Equal(["second:ETH"], await Ids(new(Period: "custom", To: "2026-09-03")));
+        Assert.Empty(await Ids(new(Period: "custom", To: "2026-09-02")));
+        Assert.Equal(5, (await Ids(new(Period: "custom"))).Length);
+        // Empty values mean no filter, as the browser's reset does.
+        Assert.Equal(5, (await Ids(new(Account: "", Portfolio: "", Contract: "", Direction: "", Status: "", From: "", To: ""))).Length);
+    }
+
+    [Fact]
+    public async Task Rolling_periods_count_back_from_the_reported_clock()
+    {
+        var (service, _, _, _, _) = Filters();
+        var page = await service.PageAsync(new(Period: "30"), default);
+        Assert.Equal(FixtureNow, page.AsOfUtc);
+        var edge = Filters(fills => fills.Single(f => f.OccurredAtUtc < Start).OccurredAtUtc = FixtureNow.AddDays(-30));
+        Assert.Equal(5, (await edge.Service.PageAsync(new(Period: "30"), default)).TotalCount);
+        edge = Filters(fills => fills.Single(f => f.OccurredAtUtc < Start).OccurredAtUtc = FixtureNow.AddDays(-30).AddTicks(-1));
+        Assert.Equal(4, (await edge.Service.PageAsync(new(Period: "30"), default)).TotalCount);
+    }
+
+    [Fact]
+    public async Task Pages_clamp_past_the_end_and_report_the_page_returned()
+    {
+        var (service, _, _, _, _) = Filters();
+        var last = await service.PageAsync(new(Page: "99", PageSize: "2"), default);
+        Assert.Equal((3, 2, 5), (last.Page, last.PageSize, last.TotalCount));
+        Assert.Equal("ETH", Assert.Single(last.Operations).ContractId);
+        var middle = await service.PageAsync(new(Page: "2", PageSize: "2"), default);
+        Assert.Equal(["ETH", "BTC"], middle.Operations.Select(o => o.ContractId));
+        var empty = await service.PageAsync(new(Contract: "XRP", Page: "4"), default);
+        Assert.Equal((1, 25, 0, 5), (empty.Page, empty.PageSize, empty.TotalCount, empty.ScopeCount));
+        Assert.Empty(empty.Operations);
+        Assert.Equal(25, (await service.PageAsync(new(), default)).PageSize);
+    }
+
+    [Fact]
+    public async Task Ties_order_by_account_then_operation_id()
+    {
+        Guid low = Guid.Parse("10000000-0000-0000-0000-000000000000"), high = Guid.Parse("f0000000-0000-0000-0000-000000000000");
+        var a = Fill(0); a.AccountId = high; a.Id = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var b = Fill(0); b.AccountId = low; b.Id = Guid.Parse("00000000-0000-0000-0000-000000000009");
+        var c = Fill(0); c.AccountId = low; c.ContractId = "ETH"; c.Id = Guid.Parse("00000000-0000-0000-0000-000000000003");
+        var page = await Service(new([Account(high), Account(low)], [a, b, c], [], new Dictionary<Guid, Guid>())).PageAsync(new(), default);
+        Assert.Equal([c.Id, b.Id, a.Id], page.Operations.Select(o => Guid.Parse(o.Id.Split(':')[0])));
+    }
+
+    [Fact]
+    public async Task Version_identifies_the_scoped_set_independent_of_filters_and_pages()
+    {
+        var fixture = Filters();
+        var service = fixture.Service;
+        var version = (await service.PageAsync(new(), default)).Version;
+        Assert.Matches("^[0-9a-f]{32}$", version);
+        Assert.Equal(version, (await service.PageAsync(new(Contract: "BTC", Page: "2", PageSize: "1"), default)).Version);
+        Assert.Equal(version, (await service.PageAsync(new(), default)).Version);
+        Assert.NotEqual(version, (await service.PageAsync(new(Scope: "unassigned"), default)).Version);
+        // Facts outside the scope do not matter; a new fill on any scoped operation, even outside the filter, does.
+        var outside = Fill(7); outside.AccountId = fixture.Disabled; fixture.Fills.Add(outside);
+        Assert.Equal(version, (await service.PageAsync(new(Contract: "ETH"), default)).Version);
+        var exit = Fill(7, "sell", "close"); exit.ContractId = "SOL"; fixture.Fills.Add(exit);
+        var changed = await service.PageAsync(new(Contract: "ETH"), default);
+        Assert.NotEqual(version, changed.Version); Assert.Equal(2, changed.TotalCount);
+        var play = Guid.NewGuid();
+        var fill = Fill(0);
+        var unlinked = await Service(new([Account(AccountId)], [fill], [], new Dictionary<Guid, Guid>())).PageAsync(new(), default);
+        var associated = await Service(new([Account(AccountId)], [fill], [], new Dictionary<Guid, Guid> { [fill.Id] = play })).PageAsync(new(), default);
+        Assert.NotEqual(unlinked.Version, associated.Version);
+        Assert.Equal(play, Assert.Single(associated.Operations).PlayId);
+    }
+
+    [Fact]
+    public async Task Scope_limits_operations_facets_coverage_and_retained_fills()
+    {
+        var (service, second, disabled, swing, _) = Filters();
+        var all = await service.PageAsync(new(), default);
+        Assert.Equal(new[] { AccountId, second }.OrderBy(id => id.ToString()), all.Facets.AccountIds);
+        Assert.Equal(["BTC", "ETH", "SOL"], all.Facets.Contracts);
+        Assert.Equal(new[] { AccountId, second }.ToHashSet(), all.Coverage.Select(c => c.AccountId).ToHashSet());
+        Assert.Equal(7, all.RetainedFillCount);
+        var unassigned = await service.PageAsync(new(Scope: "unassigned", Account: AccountId.ToString()), default);
+        Assert.Equal((0, 2, 2), (unassigned.TotalCount, unassigned.ScopeCount, unassigned.RetainedFillCount));
+        Assert.Equal([second], unassigned.Facets.AccountIds); Assert.Equal(["BTC", "ETH"], unassigned.Facets.Contracts);
+        Assert.All(unassigned.Coverage, c => Assert.Equal(second, c.AccountId));
+        var portfolio = await service.PageAsync(new(Scope: $"portfolio:{swing.Id}"), default);
+        Assert.Equal((3, 3), (portfolio.TotalCount, portfolio.ScopeCount));
+        Assert.All(portfolio.Coverage, c => Assert.Equal(AccountId, c.AccountId));
+        var account = await service.PageAsync(new(Scope: $"account:{second}"), default);
+        Assert.Equal([second], account.Facets.AccountIds);
+        Assert.Equal(2, (await service.PageAsync(new(AccountId: second), default)).ScopeCount);
+        Assert.Equal(0, (await service.PageAsync(new(AccountId: second, Scope: $"portfolio:{swing.Id}"), default)).ScopeCount);
+        foreach (var hidden in new ActivityQuery[] { new(Scope: $"account:{disabled}"), new(AccountId: disabled) })
+        {
+            var page = await service.PageAsync(hidden, default);
+            Assert.Equal((0, 0, 0), (page.ScopeCount, page.RetainedFillCount, page.Coverage.Count));
+            Assert.Empty(page.Facets.AccountIds);
+        }
+        foreach (var missing in new ActivityQuery[] { new(Scope: $"portfolio:{Guid.NewGuid()}"), new(Scope: $"account:{Guid.NewGuid()}"), new(AccountId: Guid.NewGuid()) })
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.PageAsync(missing, default))).StatusCode);
+    }
+
+    [Theory]
+    [InlineData("page", "0")] [InlineData("page", "-1")] [InlineData("page", "1.5")] [InlineData("page", "x")] [InlineData("page", "")]
+    [InlineData("page", "99999999999")] [InlineData("pageSize", "0")] [InlineData("pageSize", "101")] [InlineData("pageSize", " 25")]
+    [InlineData("scope", "everything")] [InlineData("scope", "portfolio:nope")] [InlineData("scope", "account:00000000-0000-0000-0000-000000000000")]
+    [InlineData("account", "nope")] [InlineData("account", "00000000-0000-0000-0000-000000000000")] [InlineData("portfolio", "nope")]
+    [InlineData("direction", "up")] [InlineData("status", "pending")] [InlineData("status", "Open")] [InlineData("period", "14")]
+    [InlineData("period", "ALL")] [InlineData("from", "2026-10-12")] [InlineData("to", "2026-10-12")] [InlineData("customFrom", "2026-13-01")]
+    [InlineData("customFrom", "20261012")] [InlineData("customTo", "2026-10-12T00:00:00Z")] [InlineData("contract", "long")]
+    public async Task Invalid_activity_queries_are_400(string key, string value)
+    {
+        var query = key switch
+        {
+            "page" => new ActivityQuery(Page: value),
+            "pageSize" => new ActivityQuery(PageSize: value),
+            "scope" => new ActivityQuery(Scope: value),
+            "account" => new ActivityQuery(Account: value),
+            "portfolio" => new ActivityQuery(Portfolio: value),
+            "direction" => new ActivityQuery(Direction: value),
+            "status" => new ActivityQuery(Status: value),
+            "period" => new ActivityQuery(Period: value),
+            "from" => new ActivityQuery(From: value),
+            "to" => new ActivityQuery(Period: "all", To: value),
+            "customFrom" => new ActivityQuery(Period: "custom", From: value),
+            "customTo" => new ActivityQuery(Period: "custom", To: value),
+            _ => new ActivityQuery(Contract: new string('C', 129))
+        };
+        var service = Filters().Service;
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.PageAsync(query, default))).StatusCode);
+    }
+
+    [Fact]
+    public async Task Fill_expansion_is_chronological_and_changed_history_is_404()
+    {
+        var (service, second, disabled, _, _) = Filters();
+        var page = await service.PageAsync(new(Contract: "SOL"), default);
+        var op = Assert.Single(page.Operations);
+        var rows = await service.FillsAsync(AccountId, op.Id, default);
+        Assert.Equal((op.Id, 0), (rows.OperationId, rows.OmittedFillCount));
+        Assert.Equal(["entry", "exit"], rows.Fills.Select(f => f.Role));
+        Assert.True(rows.Fills[0].Fill.OccurredAtUtc < rows.Fills[1].Fill.OccurredAtUtc);
+        foreach (var (account, id) in new[] { (second, op.Id), (AccountId, "missing:long"), (disabled, op.Id) })
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.FillsAsync(account, id, default))).StatusCode);
+        foreach (var (account, id) in new (Guid?, string?)[] { (null, op.Id), (Guid.Empty, op.Id), (AccountId, null), (AccountId, " "), (AccountId, new string('x', 201)) })
+            Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.FillsAsync(account, id, default))).StatusCode);
     }
 
     [Fact]
@@ -717,19 +954,35 @@ public sealed class ActivityOperationsTests
     {
         await using var factory = new CoreApiFactory(Owner); using var client = factory.CreateClient();
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/activity")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync($"/api/activity/fills?accountId={AccountId}&operationId=x")).StatusCode);
     }
 
     [Fact]
-    public async Task Activity_endpoint_has_exact_payload_no_store_and_account_filter()
+    public async Task Activity_endpoints_have_exact_page_and_fill_payloads_with_no_store()
     {
-        var store = new Store(new([Account(AccountId)], [Fill(0), Fill(1, "sell", "close", pnl: 0.0000000000000000000000000001m)], [], new Dictionary<Guid, Guid>()));
-        await using var factory = new CoreApiFactory(Owner, configure: services => services.AddSingleton<IActivityStore>(store));
+        var facts = new ActivityFacts([Account(AccountId)], [Fill(0), Fill(1, "sell", "close", pnl: 0.0000000000000000000000000001m)], [], new Dictionary<Guid, Guid>());
+        await using var factory = new CoreApiFactory(Owner, store: Workspace(facts), configure: services => services.AddSingleton<IActivityStore>(new Store(facts)));
         using var client = factory.AuthorizedClient();
-        var response = await client.GetAsync($"/api/activity?accountId={AccountId}");
+        var response = await client.GetAsync($"/api/activity?accountId={AccountId}&scope=all&status=closed&period=custom&from=2026-10-12&to=2026-10-12&page=1&pageSize=5");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode); Assert.True(response.Headers.CacheControl?.NoStore);
-        var document = (await response.Content.ReadFromJsonAsync<ActivityDto>())!;
-        Assert.Equal("0.0000000000000000000000000001", Assert.Single(document.Operations).NetResultUsd);
-        Assert.Empty((await client.GetFromJsonAsync<ActivityDto>($"/api/activity?accountId={Guid.NewGuid()}"))!.Operations);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(["operations", "page", "pageSize", "totalCount", "scopeCount", "retainedFillCount", "asOfUtc", "version", "facets", "coverage", "scopeNote"],
+            json.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(["accountIds", "contracts"], json.GetProperty("facets").EnumerateObject().Select(p => p.Name));
+        var row = Assert.Single(json.GetProperty("operations").EnumerateArray());
+        Assert.False(row.TryGetProperty("fills", out _)); Assert.False(row.TryGetProperty("omittedFillCount", out _));
+        Assert.Equal("0.0000000000000000000000000001", row.GetProperty("netResultUsd").GetString());
+        Assert.Equal("0.0000000000000000000000000001", row.GetProperty("grossClosedPnlUsd").GetString());
+        Assert.DoesNotContain("500 operations", json.GetProperty("scopeNote").GetString());
+        var fills = await client.GetAsync($"/api/activity/fills?accountId={AccountId}&operationId={row.GetProperty("id").GetString()}");
+        Assert.Equal(HttpStatusCode.OK, fills.StatusCode); Assert.True(fills.Headers.CacheControl?.NoStore);
+        var expanded = await fills.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(["operationId", "fills", "omittedFillCount"], expanded.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(2, expanded.GetProperty("fills").GetArrayLength());
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/activity/fills?accountId={AccountId}&operationId=gone")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/activity/fills?operationId=gone")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/activity?accountId={Guid.NewGuid()}")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/activity?accountId=not-a-guid")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/activity?pageSize=500")).StatusCode);
     }
 }

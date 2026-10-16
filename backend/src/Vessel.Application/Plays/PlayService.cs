@@ -15,8 +15,55 @@ namespace Vessel.Application.Plays;
 /// </summary>
 public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore objects, TimeProvider time)
 {
-    public async Task<IReadOnlyList<PlaySummaryDto>> ListAsync(CancellationToken ct) =>
-        (await store.ListAsync(ct)).Select(Summary).ToList();
+    public const int MaxUnpagedPlays = 200, MaxSearchLength = 100;
+
+    /// <summary>One view of saved Plays. Drafts and In progress return one page of at most 200 rows (or an explicit size); <c>TotalCount</c> stays exact.</summary>
+    public async Task<PlayListDto> ListAsync(string? view, string? search, string? scope, string? page, string? pageSize, CancellationToken ct)
+    {
+        var listView = View(view);
+        var (requested, size) = ListPaging.Parse(page, pageSize);
+        var filter = await Filter(search, scope, ct);
+        // Unpaged views are one page: the whole view up to 200 rows, or an explicit smaller size such as Overview's 5.
+        if (listView is PlayListView.Drafts or PlayListView.Progress) (requested, size) = (1, string.IsNullOrEmpty(pageSize) ? MaxUnpagedPlays : size);
+        var result = await store.PageAsync(listView, filter, requested, size, ct);
+        return new(result.Rows.Select(Summary).ToList(), ViewName(listView), result.Page, size, result.TotalCount);
+    }
+
+    public async Task<PlayCountsDto> CountsAsync(string? search, string? scope, CancellationToken ct)
+    {
+        var rows = await store.CountsAsync(await Filter(search, scope, ct), ct);
+        int Count(Func<PlayCountRow, bool> where) => rows.Where(where).Sum(r => r.Count);
+        static bool Ended(PlayCountRow r) => r.Status is PlayStatus.Closed or PlayStatus.Cancelled;
+        return new(Count(r => r.Status == PlayStatus.Draft), Count(r => r.Status is PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open),
+            Count(r => Ended(r) && !r.Reviewed), Count(r => Ended(r) && r.Reviewed), Count(r => r.Status == PlayStatus.Closed),
+            Count(r => r.Status == PlayStatus.Cancelled), Count(_ => true));
+    }
+
+    private async Task<PlayListFilter> Filter(string? search, string? scope, CancellationToken ct)
+    {
+        search = search?.Trim();
+        if (search?.Length > MaxSearchLength) throw new ProblemException(400, $"Search is limited to {MaxSearchLength} characters.");
+        search = string.IsNullOrEmpty(search) ? null : search;
+        // Without a scope the Plays page lists every saved Play; Overview scopes follow enabled accounts only.
+        if (scope is null) return new(search, null);
+        var listScope = ListScope.Parse(scope);
+        if (!await store.ScopeExistsAsync(listScope, ct))
+            throw new ProblemException(404, listScope.Kind == "portfolio" ? "Portfolio not found." : "Account not found.");
+        return new(search, listScope);
+    }
+
+    private static PlayListView View(string? view) => view switch
+    {
+        null or "all" => PlayListView.All,
+        "drafts" => PlayListView.Drafts,
+        "progress" => PlayListView.Progress,
+        "review" => PlayListView.Review,
+        "reviewed" => PlayListView.Reviewed,
+        "closed" => PlayListView.Closed,
+        "cancelled" => PlayListView.Cancelled,
+        _ => throw new ProblemException(400, "View must be drafts, progress, review, reviewed, closed, cancelled or all.")
+    };
+    private static string ViewName(PlayListView view) => view.ToString().ToLowerInvariant();
 
     public async Task<PlayDto> GetAsync(Guid id, CancellationToken ct) => ToDto(await Find(id, ct));
 
@@ -199,6 +246,11 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
 
     public static PlaySummaryDto Summary(Play play) => new(play.Id, play.Title, StatusName(play.Status), play.AccountId, play.VenueId,
         play.ContractId, SourceName(play.InstrumentSource), PlayDocuments.Read(play.Plan).Direction, play.PlanRevision, play.Version,
+        play.CancelReason is { } reason ? ReasonName(reason) : null, play.CreatedAtUtc, play.UpdatedAtUtc, play.PlannedAtUtc, play.EndedAtUtc,
+        play.HasReview, play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned", play.ReviewedAtUtc);
+
+    private static PlaySummaryDto Summary(PlayListRow play) => new(play.Id, play.Title, StatusName(play.Status), play.AccountId, play.VenueId,
+        play.ContractId, SourceName(play.InstrumentSource), play.Direction, play.PlanRevision, play.Version,
         play.CancelReason is { } reason ? ReasonName(reason) : null, play.CreatedAtUtc, play.UpdatedAtUtc, play.PlannedAtUtc, play.EndedAtUtc,
         play.HasReview, play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned", play.ReviewedAtUtc);
 

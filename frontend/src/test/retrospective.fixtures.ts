@@ -1,6 +1,6 @@
 import type { RetrospectivePreview } from '@/api/retrospective'
 import type { SavedPlay } from '@/api/plays'
-import { activityFillFixture, operationFixture } from '@/test/activity-fixture'
+import { activityFillFixture, operationWithFillsFixture } from '@/test/activity-fixture'
 import { savedPlayFixture } from '@/test/workspace-fixture'
 
 const exit = { ...activityFillFixture, id: 'aaaaaaaa-1234-1234-1234-123456789abc',
@@ -10,10 +10,10 @@ const exit = { ...activityFillFixture, id: 'aaaaaaaa-1234-1234-1234-123456789abc
 export const retrospectiveFixture: RetrospectivePreview = {
   eligible: true, reasons: [], fingerprint: 'verified-facts-v1',
   notice: 'Retained imported facts only. Revalidated under the account lock at creation.',
-  operation: { ...operationFixture, status: 'closed', closedAtUtc: exit.occurredAtUtc, lastOccurredAtUtc: exit.occurredAtUtc,
+  operation: { ...operationWithFillsFixture, status: 'closed', closedAtUtc: exit.occurredAtUtc, lastOccurredAtUtc: exit.occurredAtUtc,
     totalExitedQuantity: '2', openQuantity: '0', averageExitPrice: exit.price,
     exitOrderCount: 1, fillCount: 2, reportedClosedPnlUsd: '20', stablecoinFeesNominalUsd: '0.02', netResultUsd: '19.98',
-    fills: [...operationFixture.fills, { fill: exit, role: 'exit', quantity: exit.quantity, fee: exit.fee, closedPnlUsd: exit.closedPnlUsd }],
+    fills: [...operationWithFillsFixture.fills, { fill: exit, role: 'exit', quantity: exit.quantity, fee: exit.fee, closedPnlUsd: exit.closedPnlUsd }],
   },
 }
 export const retrospectiveSavedFixture: SavedPlay = {

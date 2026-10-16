@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Vessel.Application.Common;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 
@@ -39,6 +40,49 @@ public sealed record PlaySummaryDto(Guid Id, string Title, string Status, Guid A
     DateTimeOffset CreatedAtUtc, DateTimeOffset UpdatedAtUtc, DateTimeOffset? PlannedAtUtc, DateTimeOffset? EndedAtUtc,
     bool HasReview, string Origin = "planned", DateTimeOffset? ReviewedAtUtc = null);
 
+public sealed record PlayListDto(IReadOnlyList<PlaySummaryDto> Plays, string View, int Page, int PageSize, int TotalCount);
+public sealed record PlayCountsDto(int Drafts, int Progress, int Review, int Reviewed, int Closed, int Cancelled, int All);
+
+/// <summary>
+/// List views. Drafts and In progress are unpaged (capped); the ended views and All are paged. "Reviewed" means
+/// a Closed or Cancelled Play whose review has text or answers, or that was ever reviewed (<c>ReviewedAtUtc</c>).
+/// </summary>
+public enum PlayListView { Drafts, Progress, Review, Reviewed, Closed, Cancelled, All }
+
+public sealed record PlayListPage(int TotalCount, int Page, List<PlayListRow> Rows);
+
+/// <summary>
+/// Search is a trimmed, case-insensitive substring of title or instrument. A scope keeps its enabled accounts only;
+/// a null scope is the Plays page: every owner Play, including those on disabled accounts.
+/// </summary>
+public sealed record PlayListFilter(string? Search, ListScope? Scope);
+
+/// <summary>Summary columns only. Plan, drawings and review text are never read for a list.</summary>
+public sealed record PlayListRow
+{
+    public Guid Id { get; init; }
+    public string Title { get; init; } = "";
+    public PlayStatus Status { get; init; }
+    public Guid AccountId { get; init; }
+    public string VenueId { get; init; } = "";
+    public string? ContractId { get; init; }
+    public InstrumentSource InstrumentSource { get; init; }
+    public string Direction { get; init; } = "";
+    public int PlanRevision { get; init; }
+    public long Version { get; init; }
+    public CancelReason? CancelReason { get; init; }
+    public DateTimeOffset CreatedAtUtc { get; init; }
+    public DateTimeOffset UpdatedAtUtc { get; init; }
+    public DateTimeOffset? PlannedAtUtc { get; init; }
+    public DateTimeOffset? EndedAtUtc { get; init; }
+    public bool HasReview { get; init; }
+    public PlayOrigin Origin { get; init; }
+    public DateTimeOffset? ReviewedAtUtc { get; init; }
+}
+
+/// <summary>Row counts by status and whether the Play counts as reviewed, from one grouped query.</summary>
+public sealed record PlayCountRow(PlayStatus Status, bool Reviewed, int Count);
+
 public sealed record PlayDto(PlaySummaryDto Summary, PlayPlanDocument Plan, JsonElement Drawings, string Review,
     ReviewAnswers? StructuredReview = null);
 
@@ -51,7 +95,14 @@ public sealed record PlayHistoryDto(IReadOnlyList<PlanRevisionDto> Revisions, IR
 // Application owns this bounded port; EF details stay in Persistence. Reads are owner-filtered.
 public interface IPlayStore
 {
-    Task<List<Play>> ListAsync(CancellationToken ct);
+    /// <summary>Whether the scope's portfolio or account exists for this owner; <c>all</c> and <c>unassigned</c> always do.</summary>
+    Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct);
+    /// <summary>
+    /// One consistent page of a view: the exact total, the requested page clamped to it and its ordered summary rows
+    /// (updated desc for Drafts, In progress and All; ended desc, updated desc otherwise; then ID), read from one snapshot.
+    /// </summary>
+    Task<PlayListPage> PageAsync(PlayListView view, PlayListFilter filter, int page, int pageSize, CancellationToken ct);
+    Task<List<PlayCountRow>> CountsAsync(PlayListFilter filter, CancellationToken ct);
     Task<Play?> FindAsync(Guid id, CancellationToken ct);
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);
     Task<List<PlayPlanRevision>> RevisionsAsync(Guid playId, CancellationToken ct);

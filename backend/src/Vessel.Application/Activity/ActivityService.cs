@@ -1,33 +1,77 @@
+using System.Security.Cryptography;
+using System.Text;
 using Vessel.Application.Workspace;
 using Vessel.Application.Common;
 
 namespace Vessel.Application.Activity;
 
-public sealed class ActivityService(IActivityStore store)
+public sealed class ActivityService(IActivityStore store, IWorkspaceStore workspace, TimeProvider time)
 {
-    public const int MaxOperations = 500, MaxFillsPerOperation = 200, MaxResponseFills = 10_000;
+    /// <summary>Retrospective preview limit; whole-order attribution beyond it is refused.</summary>
+    public const int MaxFillsPerOperation = 200;
+    public const int MaxExpandedFills = 1_000, MaxOperationIdLength = 200;
     public const string ScopeNote = "Position round trips from all retained fills on enabled accounts, not trading intent or retrospective Plays. " +
         "Retained history is bounded by venue imports; balanced fills do not prove lifetime coverage. Newest activity first. " +
-        "At most 500 operations and 10,000 allocated fill rows, up to 200 per operation. Totals include omitted rows. " +
         "Quantities, sums and flip allocations are exact. Weighted prices round only when necessary to 28 decimal places, halfway away from zero. " +
         NominalStablecoins.Caveat + " Net result subtracts listed stablecoin fees on gross fills; other fee tokens leave it unknown. Net-of-fee P&L is not charged twice. " +
         "Separate funding cashflows are not added, and RISEx reported funding inclusion remains unverified.";
 
-    public async Task<ActivityDto> GetAsync(Guid? accountId, CancellationToken ct)
+    /// <summary>
+    /// Aggregates every retained fill of the scoped enabled accounts, then filters, orders and pages the operations.
+    /// Metrics, coverage, facets and the version never depend on the filters or the page.
+    /// </summary>
+    public async Task<ActivityPageDto> PageAsync(ActivityQuery query, CancellationToken ct)
     {
-        var summary = await ReadSummariesAsync(accountId, ct);
-        var budget = MaxResponseFills;
-        var bounded = summary.Operations.Take(MaxOperations).Select(o =>
-        {
-            var take = Math.Min(budget, Math.Min(o.Fills.Count, MaxFillsPerOperation));
-            budget -= take;
-            return o with { Fills = o.Fills.Take(take).ToList(), OmittedFillCount = o.Fills.Count - take };
-        }).ToList();
-        return new(bounded, summary.Operations.Count, summary.Facts.Fills.Count,
-            summary.Operations.Count - bounded.Count, summary.Coverage, ScopeNote);
+        var (page, pageSize) = ListPaging.Parse(query.Page, query.PageSize);
+        var scope = ListScope.Parse(query.Scope);
+        if (query.AccountId == Guid.Empty) throw new ProblemException(400, "Choose a valid account.");
+        var asOf = time.GetUtcNow();
+        var filter = ActivityFilter.Parse(query, asOf);
+        var accounts = await workspace.AccountsAsync(ct);
+        var portfolios = scope.Kind == "portfolio" ? await workspace.PortfoliosAsync(ct) : [];
+        scope.RequireKnown(id => portfolios.Any(p => p.Id == id), id => accounts.Any(a => a.Id == id));
+        if (query.AccountId is { } detail && !accounts.Any(a => a.Id == detail)) throw new ProblemException(404, "Account not found.");
+        var members = accounts.Where(a => scope.Includes(a.Id, a.PortfolioId, a.IsEnabled) && (query.AccountId is null || a.Id == query.AccountId))
+            .Select(a => a.Id).ToHashSet();
+        var summary = await ReadSummariesAsync(null, ct, members);
+        var portfolioOf = summary.Facts.Accounts.ToDictionary(a => a.Id, a => a.PortfolioId);
+        var scoped = summary.Operations.OrderByDescending(o => o.LastOccurredAtUtc)
+            .ThenBy(o => o.AccountId.ToString("D"), StringComparer.Ordinal).ThenBy(o => o.Id, StringComparer.Ordinal).ToList();
+        var filtered = scoped.Where(o => filter.Matches(o, portfolioOf.GetValueOrDefault(o.AccountId))).ToList();
+        page = ListPaging.Clamp(page, pageSize, filtered.Count);
+        return new(filtered.Skip(ListPaging.Skip(page, pageSize)).Take(pageSize).Select(ActivityOperationSummaryDto.From).ToList(),
+            page, pageSize, filtered.Count, scoped.Count, summary.Facts.Fills.Count, asOf, Version(scoped),
+            new(scoped.Select(o => o.AccountId).Distinct().OrderBy(id => id.ToString("D"), StringComparer.Ordinal).ToList(),
+                scoped.Select(o => o.ContractId).Distinct().Order(StringComparer.Ordinal).ToList()),
+            summary.Coverage, ScopeNote);
     }
 
-    // Overview needs all aggregate results, not the bounded activity display or constituent DTOs.
+    /// <summary>One operation's constituent rows, re-aggregated from that account only. Changed history is 404.</summary>
+    public async Task<OperationFillsDto> FillsAsync(Guid? accountId, string? operationId, CancellationToken ct)
+    {
+        if (accountId is null || accountId == Guid.Empty || string.IsNullOrWhiteSpace(operationId) || operationId.Length > MaxOperationIdLength)
+            throw new ProblemException(400, "Choose a valid account and retained operation.");
+        // Missing and foreign accounts are 404 in the store; a disabled account has no visible operations.
+        var summary = await ReadSummariesAsync(accountId, ct);
+        var operation = summary.Operations.SingleOrDefault(o => o.Id == operationId)
+            ?? throw new ProblemException(404, "Retained operation not found. Reload Activity.");
+        var shown = operation.Fills.Take(MaxExpandedFills).ToList();
+        return new(operation.Id, shown, operation.Fills.Count - shown.Count);
+    }
+
+    // Changes when any scoped operation's identity, fill count, last execution, open quantity or Play association changes.
+    private static string Version(IEnumerable<ActivityOperationDto> operations)
+    {
+        var text = new StringBuilder();
+        foreach (var o in operations)
+            text.Append(o.AccountId.ToString("N")).Append('|').Append(o.Id).Append('|').Append(o.FillCount).Append('|')
+                .Append(o.LastOccurredAtUtc.UtcTicks).Append('|').Append(o.OpenQuantity ?? "?").Append('|')
+                .Append(o.PlayAssociation).Append('|').Append(o.PlayId?.ToString("N")).Append('\n');
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())), 0, 16);
+    }
+
+    // Overview, Activity pages and the fills endpoint share these unbounded aggregate results; constituent DTOs
+    // are only built for the rows a caller returns.
     internal async Task<ActivitySummaries> ReadSummariesAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
     {
         if (accountId == Guid.Empty) throw new ProblemException(400, "Choose a valid account.");

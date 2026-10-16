@@ -37,11 +37,11 @@ public sealed class ActivityOperationsPostgresTests
         }
         await using (var db = database.Context(owner))
         {
-            var result = await new ActivityService(new ActivityStore(db)).GetAsync(account.Id, default);
+            var result = await ActivityTestSupport.Activity(db).PageAsync(account.Id);
             var op = Assert.Single(result.Operations);
             Assert.Equal("long", op.Direction); Assert.Equal("open", op.Status);
             Assert.Equal("2", op.OpenQuantity); Assert.Equal("2", op.TotalEnteredQuantity);
-            Assert.Equal(new[] { legacy.Id, native.Id }, op.Fills.Select(f => f.Fill.Id));
+            Assert.Equal(new[] { legacy.Id, native.Id }, (await ActivityTestSupport.Activity(db).FillsAsync(account.Id, op.Id, default)).Fills.Select(f => f.Fill.Id));
             Assert.Empty(op.Coverage); Assert.Empty(result.Coverage);
             Assert.Null((await db.Fills.SingleAsync(f => f.Id == legacy.Id)).VenueContractId);
             Assert.Equal("14", (await db.Fills.SingleAsync(f => f.Id == native.Id)).VenueContractId);
@@ -67,8 +67,8 @@ public sealed class ActivityOperationsPostgresTests
         }
         await using (var db = database.Context(owner))
         {
-            var result = await new ActivityService(new ActivityStore(db)).GetAsync(account.Id, default);
-            Assert.Equal(2, result.TotalOperationCount);
+            var result = await ActivityTestSupport.Activity(db).PageAsync(account.Id);
+            Assert.Equal(2, result.TotalCount);
             Assert.Equal("10", result.Operations.Single(o => o.Status == "closed").ReportedClosedPnlUsd);
             var active = result.Operations.Single(o => o.Status == "incomplete");
             Assert.Equal("20", active.ReportedClosedPnlUsd); Assert.Equal("1", active.OpenQuantity);
@@ -106,11 +106,27 @@ public sealed class ActivityOperationsPostgresTests
             Assert.All(facts.FillPlayIds.Values, id => Assert.Equal(playId, id));
         }
         await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString); using var client = factory.AuthorizedClient();
-        var document = (await client.GetFromJsonAsync<ActivityDto>("/api/activity"))!;
-        Assert.Equal(60, document.TotalOperationCount); Assert.Equal(120, document.RetainedFillCount);
+        var document = (await client.GetFromJsonAsync<ActivityPageDto>("/api/activity?pageSize=100"))!;
+        Assert.Equal(60, document.TotalCount); Assert.Equal(120, document.RetainedFillCount);
         Assert.Equal(playId, document.Operations.Single(o => o.PlayAssociation == "linked").PlayId);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/activity?accountId={foreign.Id}")).StatusCode);
-        Assert.Empty((await client.GetFromJsonAsync<ActivityDto>($"/api/activity?accountId={disabled.Id}"))!.Operations);
+        Assert.Empty((await client.GetFromJsonAsync<ActivityPageDto>($"/api/activity?accountId={disabled.Id}"))!.Operations);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/activity?scope=account:{foreign.Id}")).StatusCode);
+        Assert.Equal(0, (await client.GetFromJsonAsync<ActivityPageDto>($"/api/activity?scope=account:{disabled.Id}"))!.ScopeCount);
+
+        // Expansion is scoped exactly like the page: own enabled accounts only, and the operation must still exist.
+        var linked = document.Operations.Single(o => o.PlayAssociation == "linked");
+        var rows = (await client.GetFromJsonAsync<OperationFillsDto>($"/api/activity/fills?accountId={account.Id}&operationId={linked.Id}"))!;
+        Assert.Equal((linked.Id, 2, 0), (rows.OperationId, rows.Fills.Count, rows.OmittedFillCount));
+        Assert.All(rows.Fills, f => Assert.Equal(playId, f.Fill.PlayId));
+        await using var foreignFactory = new CoreApiFactory(otherOwner, connection: database.ConnectionString);
+        using var other = foreignFactory.AuthorizedClient();
+        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/activity/fills?accountId={account.Id}&operationId={linked.Id}")).StatusCode);
+        var foreignOperation = (await other.GetFromJsonAsync<ActivityPageDto>("/api/activity"))!.Operations.Single();
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/activity/fills?accountId={foreign.Id}&operationId={foreignOperation.Id}")).StatusCode);
+        await using var check = database.Context(owner);
+        var disabledOperation = $"{(await check.Fills.SingleAsync(f => f.AccountId == disabled.Id)).Id}:long";
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/activity/fills?accountId={disabled.Id}&operationId={disabledOperation}")).StatusCode);
     }
 
     [PostgresFact]
@@ -127,7 +143,7 @@ public sealed class ActivityOperationsPostgresTests
         }
         await using (var db = database.Context(owner))
         {
-            var result = await new ActivityService(new ActivityStore(db)).GetAsync(account.Id, default);
+            var result = await ActivityTestSupport.Activity(db).PageAsync(account.Id);
             var op = Assert.Single(result.Operations); Assert.Equal("2", op.OpenQuantity); Assert.Equal("long", op.Direction); Assert.Equal("incomplete", op.Status);
             Assert.Null(op.AverageEntryPrice); Assert.Contains(op.Coverage, c => c.Contains("entries") && c.Contains("missing"));
             Assert.Equal(2, (await db.Positions.SingleAsync()).SignedQuantity); Assert.Single(await db.Fills.ToListAsync());

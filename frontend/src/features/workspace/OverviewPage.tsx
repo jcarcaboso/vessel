@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
 import type { OverviewQuery } from '@/api/overview-summary'
+import type { PlayView } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { ArrowRight, Wallet } from 'lucide-react'
 import { AccountRows } from './AccountRows'
@@ -18,12 +19,11 @@ export function OverviewPage({ data, api, overviewQuery, setOverviewQuery, reloa
   reloadKey: number; refreshAllAction: ReactNode; refreshing: string | null
   onAddAccount: () => void; onCreatePortfolio: () => void; onAccounts: () => void; onActivity: () => void
   viewAccount: (id: string) => void; sync: (id: string) => Promise<void>; manageAccount: (account: BrokerAccount) => void
-  browsePlays: () => void; viewPlay: (id: string, signal: AbortSignal) => Promise<void>; reload: () => void
+  browsePlays: (view: PlayView) => void; viewPlay: (id: string, signal: AbortSignal) => Promise<void>; reload: () => void
 }) {
   const { accounts, portfolios } = data
   const enabledAccounts = accounts.filter(account => account.isEnabled !== false)
   const scopedAccounts = overviewAccounts(overviewQuery.scope, accounts)
-  const scopeAccountIds = scopedAccounts.map(account => account.id)
   const portfolioNames = Object.fromEntries(portfolios.map(p => [p.id, p.name]))
   return <>
     <OverviewScope scope={overviewQuery.scope} onScope={scope => setOverviewQuery(query => ({ ...query, scope }))}
@@ -55,11 +55,10 @@ export function OverviewPage({ data, api, overviewQuery, setOverviewQuery, reloa
           <h2>Recent activity</h2>
           <button className="text-action" onClick={onActivity}>View activity<ArrowRight size={14} /></button>
         </header>
-        <ActivityOperations api={api} accounts={accounts} scopeAccountIds={scopeAccountIds}
-          accountId={overviewQuery.scope.startsWith('account:') ? overviewQuery.scope.slice(8) : undefined}
+        <ActivityOperations api={api} accounts={accounts} scope={overviewQuery.scope}
           compact reloadGeneration={reloadKey} onOpenPlay={viewPlay} onCreated={reload} />
       </section>
-      <OverviewPlays api={api} accounts={accounts} scopeAccountIds={scopeAccountIds} reloadGeneration={reloadKey}
+      <OverviewPlays api={api} accounts={accounts} scope={overviewQuery.scope} reloadGeneration={reloadKey}
         onBrowse={browsePlays} onOpen={viewPlay} />
     </div>
   </>

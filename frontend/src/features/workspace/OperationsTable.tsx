@@ -1,9 +1,10 @@
 import { Fragment, useState } from 'react'
 import type { ActivityOperation } from '@/api/activity'
-import type { BrokerAccount } from '@/api/workspace'
+import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
 import { ChevronDown, ChevronRight, Inbox } from 'lucide-react'
-import { ActivityTable } from './ActivityTable'
+import { Skeleton, SkeletonStatus } from '@/components/ui/skeleton'
 import { OperationDirection } from './OperationDirection'
+import { OperationFills } from './OperationFills'
 import { duration, operationDates, operationPriceReturn, operationStatus, resultSign } from './activity-format'
 import { amount, money } from '@/lib/format'
 import './activity-operations.css'
@@ -12,9 +13,50 @@ function Result({ value }: { value: string | null }) {
   return <span className={`operation-result ${resultSign(value)}`} title={value ?? 'Unknown'}>{money(value)}</span>
 }
 
-export function OperationsTable({ operations, accounts, compact = false, onPreview }: {
+function OperationsHead({ compact }: { compact: boolean }) {
+  return <thead><tr>
+    <th>Operation</th><th>Account / time <span className="operation-timezone">UTC</span></th><th title="Peak position quantity">Size</th>{!compact && <><th>Average entry</th><th>Average exit</th><th title="Before reported fees; venue-reported P&L is preserved in the executions">Closed P&amp;L</th><th title="Stablecoin fees in nominal USD; other tokens listed separately">Fees</th></>}<th title="After reported fees, deducted once. Realized executions only; excludes unrealized P&L.">Net result</th>{!compact && <th>Play</th>}
+  </tr></thead>
+}
+
+/**
+ * First-load placeholder rows in the operations table's own columns. Rows alternate like real history (an open
+ * operation with its remaining size, then closed ones with a duration and a return), and each bar stands in for a
+ * line of the real cell at a typical width, so columns and row height stay put when the data arrives. `note`
+ * reserves the count line above the table.
+ */
+export function OperationsSkeleton({ compact = false, rows, note = false }: { compact?: boolean; rows: number; note?: boolean }) {
+  const bar = (className: string) => <Skeleton className={`skeleton-line ${className}`} />
+  return <SkeletonStatus label="Loading operations…">
+    {note && <p className="workspace-scope-note in-panel"><Skeleton className="skeleton-note" /></p>}
+    <div className="workspace-table-wrap"><table className="workspace-table operations-table operations-skeleton">
+      <OperationsHead compact={compact} />
+      <tbody>{Array.from({ length: rows }, (_, row) => {
+        const open = row % 4 === 0
+        return <tr key={row} className="operation-row-skeleton">
+          <td><div className="operation-heading"><span className="operation-toggle" /><div><Skeleton className="skeleton-asset" /><Skeleton className="skeleton-tags" /></div></div></td>
+          <td>{bar('skeleton-account')}{bar(`skeleton-small ${open ? 'skeleton-date' : 'skeleton-dates'}`)}{!open && bar('skeleton-small skeleton-duration')}</td>
+          <td className="numeric">{bar('skeleton-size')}{open && bar('skeleton-small skeleton-remaining')}</td>
+          {!compact && <><td className="numeric">{bar('skeleton-price')}</td><td className="numeric">{bar('skeleton-price')}</td>
+            <td className="numeric"><div className="operation-pnl">{bar('skeleton-money')}{!open && <Skeleton className="skeleton-return" />}</div></td>
+            <td className="numeric">{bar('skeleton-fee')}</td></>}
+          <td className="numeric">{bar('skeleton-money')}</td>
+          {!compact && <td><Skeleton className="skeleton-badge" /></td>}
+        </tr>
+      })}</tbody>
+    </table></div>
+  </SkeletonStatus>
+}
+
+export function OperationsTable({ operations, accounts, compact = false, onPreview, api, onReload, refreshGeneration = 0 }: {
   operations: ActivityOperation[]; accounts: BrokerAccount[]; compact?: boolean
   onPreview?: (operation: ActivityOperation) => void
+  /** Reads an expanded operation's executions. */
+  api: WorkspaceApi
+  /** Reloads Activity when an expanded operation no longer exists. */
+  onReload?: () => void
+  /** Changes with every accepted Activity response, so expanded operations re-read their executions. */
+  refreshGeneration?: number
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const toggle = (id: string) => setExpanded(previous => {
@@ -23,9 +65,7 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
   // Defense in depth: a management reload may disable an account while an earlier activity read is still visible.
   const visible = operations.filter(op => accounts.some(a => a.id === op.accountId && a.isEnabled !== false))
   if (!visible.length) return <div className="workspace-empty small-empty"><Inbox size={27} /><strong>No operations in this view</strong><p>Refresh an enabled exchange account to retrieve fills, or reset the filters.</p></div>
-  return <div className="workspace-table-wrap"><table className="workspace-table operations-table"><thead><tr>
-    <th>Operation</th><th>Account / time <span className="operation-timezone">UTC</span></th><th title="Peak position quantity">Size</th>{!compact && <><th>Average entry</th><th>Average exit</th><th title="Before reported fees; venue-reported P&L is preserved in the executions">Closed P&amp;L</th><th title="Stablecoin fees in nominal USD; other tokens listed separately">Fees</th></>}<th title="After reported fees, deducted once. Realized executions only; excludes unrealized P&L.">Net result</th>{!compact && <th>Play</th>}
-  </tr></thead><tbody>{visible.map(op => {
+  return <div className="workspace-table-wrap"><table className="workspace-table operations-table"><OperationsHead compact={compact} /><tbody>{visible.map(op => {
     const open = expanded.has(op.id)
     const status = operationStatus(op)
     const priceReturn = operationPriceReturn(op)
@@ -44,10 +84,7 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
       {onPreview && <button className="text-action" aria-label={`Inspect ${op.contractId} retrospective eligibility`} onClick={() => onPreview(op)}>Inspect retrospective eligibility</button>}
       <p className="workspace-scope-note operation-details">Entered {op.totalEnteredQuantity === null ? 'unknown' : amount(op.totalEnteredQuantity)} · Exited {op.totalExitedQuantity === null ? 'unknown' : amount(op.totalExitedQuantity)} · Remaining {op.openQuantity === null ? 'unknown' : amount(op.openQuantity)}. Venue-reported P&amp;L {money(op.reportedClosedPnlUsd)} ({op.pnlBasis}).</p>
       {op.coverage.length > 0 && <ul className="operation-coverage">{op.coverage.map(reason => <li key={reason}>{reason}</li>)}</ul>}
-      {op.fills.some(part => part.fill.positionEffect === 'flip') && <p className="workspace-scope-note">Flip rows show this operation's allocated quantity, fee and P&amp;L.</p>}
-      {op.fills.length > 0 ? <ActivityTable fills={op.fills.map(part => ({ ...part.fill, quantity: part.quantity, fee: part.fee, closedPnlUsd: part.closedPnlUsd }))} accounts={accounts} /> : <p className="workspace-scope-note">Execution rows were omitted by the response limit.</p>}
-      {op.fills.some(part => part.fill.positionEffect === 'flip') && <details className="operation-originals"><summary>Original flip facts</summary><ActivityTable fills={op.fills.filter(part => part.fill.positionEffect === 'flip').map(part => part.fill)} accounts={accounts} /></details>}
-      {op.omittedFillCount > 0 && <p className="operation-incomplete">Some execution rows are not shown because of the display limit; operation totals include them.</p>}
+      <OperationFills api={api} operation={op} accounts={accounts} onReload={onReload} refreshGeneration={refreshGeneration} />
     </td></tr>}</Fragment>
   })}</tbody></table></div>
 }

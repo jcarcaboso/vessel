@@ -43,6 +43,8 @@ public sealed class Play : IOwned
     public PlayStatus Status { get; private set; }
     public string Title { get; private set; } = "";
     public string Plan { get; private set; } = null!;
+    /// <summary>The plan's direction, kept in step with <see cref="Plan"/> so lists never parse the plan; empty if it has none.</summary>
+    public string Direction { get; private set; } = "";
     public string Drawings { get; private set; } = "{}";
     public string Review { get; private set; } = "";
     public PlayOrigin Origin { get; private set; }
@@ -76,7 +78,7 @@ public sealed class Play : IOwned
         VenueId = account.VenueId;
         SetInstrument(instrument, source);
         Status = PlayStatus.Draft;
-        Plan = plan;
+        SetPlan(plan);
         Version = 1;
         CreatedAtUtc = now;
         UpdatedAtUtc = now;
@@ -174,12 +176,12 @@ public sealed class Play : IOwned
         if (!IsEditable) throw new DomainRuleException("Closed and cancelled Plays keep their plan.");
         if (Status == PlayStatus.Draft)
         {
-            Plan = plan;
+            SetPlan(plan);
             Touch(now);
             return null;
         }
         if (string.IsNullOrWhiteSpace(reason)) throw new DomainRuleException("Say why the plan changed. The reason is kept with the revision.");
-        Plan = plan;
+        SetPlan(plan);
         Touch(now);
         return new PlayPlanRevision(this, checked(++PlanRevision), reason, now);
     }
@@ -234,6 +236,15 @@ public sealed class Play : IOwned
         Status = to;
         Touch(now);
         return change;
+    }
+
+    private void SetPlan(string plan)
+    {
+        using var document = JsonDocument.Parse(plan);
+        Plan = plan;
+        Direction = document.RootElement.ValueKind == JsonValueKind.Object &&
+            document.RootElement.TryGetProperty("direction", out var direction) && direction.ValueKind == JsonValueKind.String
+            ? direction.GetString()! : "";
     }
 
     private void SetInstrument(PerpetualInstrument? instrument, InstrumentSource source)

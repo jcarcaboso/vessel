@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
 import { isCreateRetrospectivePlayRequest, isRetrospectivePreview, retrospectivePlayPath, retrospectivePreviewPath } from './retrospective'
 import { retrospectiveFixture, retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
+import { unknownPeakOperationFixture } from '@/test/activity-fixture'
 
 const op = retrospectiveFixture.operation
 const request = { requestId: 'bbbbbbbb-1234-1234-1234-123456789abc', accountId: op.accountId, operationId: op.id,
@@ -13,6 +14,11 @@ describe('retrospective API contract', () => {
       operation: { ...op, playAssociation: 'mixed' } })).toBe(true)
     expect(isCreateRetrospectivePlayRequest(request)).toBe(true)
     expect(retrospectivePlayPath()).toBe('/api/plays/retrospective')
+  })
+  it('accepts an ineligible preview of an operation whose peak quantity is unknown', () => {
+    const peak = { ...retrospectiveFixture, eligible: false, reasons: [...unknownPeakOperationFixture.coverage], operation: unknownPeakOperationFixture }
+    expect(isRetrospectivePreview(peak)).toBe(true)
+    expect(isRetrospectivePreview({ ...peak, operation: { ...unknownPeakOperationFixture, coverage: [] } })).toBe(false)
   })
   it.each([
     { fingerprint: '' }, { reasons: [''] }, { eligible: 'yes' },

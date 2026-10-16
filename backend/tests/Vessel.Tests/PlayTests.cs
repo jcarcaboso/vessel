@@ -35,7 +35,42 @@ internal sealed class MemoryPlayStore(Guid owner) : IPlayStore
     public List<PlayOrderLink> Links { get; } = [];
     public List<string> EvidenceKeys { get; } = [];
     public int Saves { get; private set; }
-    public Task<List<Play>> ListAsync(CancellationToken ct) => Task.FromResult(Plays.Where(p => p.OwnerId == owner).ToList());
+    // A plain test double for service tests; SQL view, search and scope semantics are covered against PostgreSQL.
+    public Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct) => Task.FromResult(scope.Kind switch
+    {
+        "account" => Accounts.Any(a => a.Id == scope.Id && a.OwnerId == owner),
+        "portfolio" => Accounts.Any(a => a.PortfolioId == scope.Id && a.OwnerId == owner),
+        _ => true
+    });
+    private IEnumerable<Play> Listed(PlayListView view, PlayListFilter filter) => Plays.Where(p => p.OwnerId == owner &&
+        (filter.Scope is not { } scope || Accounts.Any(a => a.Id == p.AccountId && scope.Includes(a.Id, a.PortfolioId, a.IsEnabled))) &&
+        (filter.Search is null || p.Title.Contains(filter.Search, StringComparison.OrdinalIgnoreCase) ||
+            p.ContractId?.Contains(filter.Search, StringComparison.OrdinalIgnoreCase) == true) && view switch
+        {
+            PlayListView.Drafts => p.Status == PlayStatus.Draft,
+            PlayListView.Progress => p.Status is PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open,
+            PlayListView.Review => p.Status is PlayStatus.Closed or PlayStatus.Cancelled && !(p.HasReview || p.ReviewedAtUtc != null),
+            PlayListView.Reviewed => p.Status is PlayStatus.Closed or PlayStatus.Cancelled && (p.HasReview || p.ReviewedAtUtc != null),
+            PlayListView.Closed => p.Status == PlayStatus.Closed,
+            PlayListView.Cancelled => p.Status == PlayStatus.Cancelled,
+            _ => true
+        });
+    public Task<PlayListPage> PageAsync(PlayListView view, PlayListFilter filter, int page, int pageSize, CancellationToken ct)
+    {
+        var total = Listed(view, filter).Count();
+        page = ListPaging.Clamp(page, pageSize, total);
+        return Task.FromResult(new PlayListPage(total, page, Rows(view, filter, ListPaging.Skip(page, pageSize), pageSize)));
+    }
+    private List<PlayListRow> Rows(PlayListView view, PlayListFilter filter, int skip, int take) =>
+        Listed(view, filter).OrderByDescending(p => p.UpdatedAtUtc).ThenBy(p => p.Id).Skip(skip).Take(take).Select(p => new PlayListRow
+        {
+            Id = p.Id, Title = p.Title, Status = p.Status, AccountId = p.AccountId, VenueId = p.VenueId, ContractId = p.ContractId,
+            InstrumentSource = p.InstrumentSource, Direction = p.Direction, PlanRevision = p.PlanRevision, Version = p.Version,
+            CancelReason = p.CancelReason, CreatedAtUtc = p.CreatedAtUtc, UpdatedAtUtc = p.UpdatedAtUtc, PlannedAtUtc = p.PlannedAtUtc,
+            EndedAtUtc = p.EndedAtUtc, HasReview = p.HasReview, Origin = p.Origin, ReviewedAtUtc = p.ReviewedAtUtc
+        }).ToList();
+    public Task<List<PlayCountRow>> CountsAsync(PlayListFilter filter, CancellationToken ct) => Task.FromResult(Listed(PlayListView.All, filter)
+        .GroupBy(p => (p.Status, Reviewed: p.HasReview || p.ReviewedAtUtc != null)).Select(g => new PlayCountRow(g.Key.Status, g.Key.Reviewed, g.Count())).ToList());
     public Task<Play?> FindAsync(Guid id, CancellationToken ct) => Task.FromResult(Plays.SingleOrDefault(p => p.Id == id && p.OwnerId == owner));
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => Task.FromResult(Accounts.SingleOrDefault(a => a.Id == id && a.OwnerId == owner));
     public Task<List<PlayPlanRevision>> RevisionsAsync(Guid playId, CancellationToken ct) => Task.FromResult(Revisions.Where(r => r.PlayId == playId).ToList());
@@ -222,9 +257,40 @@ public sealed class PlayServiceTests
     private Task<PlayDto> Create(Account? account = null, string? instrument = "BTC", string source = "venue", PlayPlanDocument? plan = null) =>
         service.CreateAsync(new CreatePlayRequest((account ?? venue).Id, instrument, source, " Breakout ", plan ?? TestPlays.Plan()), default);
 
+    private async Task<IReadOnlyList<PlaySummaryDto>> List() => (await service.ListAsync(null, null, null, null, null, default)).Plays;
+
     private UpdatePlayRequest Update(PlayDto play, PlayPlanDocument? plan = null, string? reason = null, string? instrument = null) =>
         new(play.Summary.Version, play.Summary.AccountId, instrument ?? play.Summary.Instrument, play.Summary.InstrumentSource,
             play.Summary.Title, plan ?? play.Plan, play.Drawings, play.Review, reason);
+
+    [Theory]
+    [InlineData("open", null, null, null, null)]
+    [InlineData("ALL", null, null, null, null)]
+    [InlineData(null, null, null, "0", null)]
+    [InlineData(null, null, null, null, "101")]
+    [InlineData(null, null, null, null, "1e2")]
+    [InlineData(null, null, "portfolio:x", null, null)]
+    [InlineData(null, null, "account", null, null)]
+    public async Task Invalid_list_queries_are_400(string? view, string? q, string? scope, string? page, string? size) =>
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.ListAsync(view, q, scope, page, size, default))).StatusCode);
+
+    [Fact]
+    public async Task List_validates_search_and_scope_and_caps_unpaged_views()
+    {
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.CountsAsync(new string('q', 101), null, default))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.CountsAsync(null, $"account:{Guid.NewGuid()}", default))).StatusCode);
+        for (var i = 0; i < 201; i++) store.Plays.Add(TestPlays.Create(venue, new PerpetualInstrument("hyperliquid", "BTC")));
+        var drafts = await service.ListAsync("drafts", "  ", null, "4", null, default);
+        Assert.Equal(("drafts", 1, 200, 201, 200), (drafts.View, drafts.Page, drafts.PageSize, drafts.TotalCount, drafts.Plays.Count));
+        var sized = await service.ListAsync("drafts", null, null, "4", "10", default);
+        Assert.Equal((1, 10, 10), (sized.Page, sized.PageSize, sized.Plays.Count));
+        var all = await service.ListAsync(null, null, null, "99", "100", default);
+        Assert.Equal(("all", 3, 1), (all.View, all.Page, all.Plays.Count));
+        Assert.Equal(201, (await service.CountsAsync(" btc ", $"account:{venue.Id}", default)).Drafts);
+        venue.UpdateSettings(venue.Name, null, false);
+        Assert.Equal(0, (await service.CountsAsync(null, "all", default)).All);
+        Assert.Equal(201, (await service.CountsAsync(null, null, default)).All);
+    }
 
     [Fact]
     public async Task Creates_a_draft_with_exact_plan_text()
@@ -234,7 +300,7 @@ public sealed class PlayServiceTests
             play.Summary.Instrument, play.Summary.InstrumentSource, play.Summary.Direction, play.Summary.PlanRevision));
         Assert.Equal("0.00001230", play.Plan.Entries[0].Price);
         Assert.Equal(JsonValueKind.Object, play.Drawings.ValueKind);
-        Assert.Single(await service.ListAsync(default));
+        Assert.Single(await List());
     }
 
     [Theory]
@@ -249,7 +315,7 @@ public sealed class PlayServiceTests
         Assert.Equal("draft", play.Summary.Status);
         play = await service.ChangeStatusAsync(play.Summary.Id,
             new ChangePlayStatusRequest(play.Summary.Version, "cancelled", "missed"), default);
-        Assert.Equal(hasReview, Assert.Single(await service.ListAsync(default)).HasReview);
+        Assert.Equal(hasReview, Assert.Single(await List()).HasReview);
         Assert.Equal(hasReview, (await service.GetAsync(play.Summary.Id, default)).Summary.HasReview);
         play = await service.UpdateAsync(play.Summary.Id, Update(play) with { Review = "" }, default);
         Assert.False(play.Summary.HasReview);
@@ -321,7 +387,7 @@ public sealed class PlayServiceTests
         store.EvidenceKeys.Add("owner/play/a.png");
         await service.DeleteAsync(draft.Summary.Id, default);
         Assert.Empty(objects.Objects);
-        Assert.Empty(await service.ListAsync(default));
+        Assert.Empty(await List());
 
         var planned = await Create();
         planned = await service.ChangeStatusAsync(planned.Summary.Id, new(planned.Summary.Version, "planned"), default);
@@ -378,7 +444,7 @@ public sealed class PlayPostgresTests
         // Another owner sees nothing and cannot read the history.
         await using var foreign = new CoreApiFactory(Guid.NewGuid(), connection: database.ConnectionString);
         using var other = foreign.AuthorizedClient();
-        Assert.Equal("[]", await other.GetStringAsync("/api/plays"));
+        Assert.Equal(0, (await other.GetFromJsonAsync<JsonElement>("/api/plays")).GetProperty("totalCount").GetInt32());
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/plays/{play.Summary.Id}/history")).StatusCode);
 
         await using var db2 = database.Context(owner);

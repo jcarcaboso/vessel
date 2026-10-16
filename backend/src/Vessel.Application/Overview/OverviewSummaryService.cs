@@ -22,20 +22,13 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
         groupBy ??= "portfolio"; period ??= "30"; scope ??= "all";
         if (groupBy is not ("portfolio" or "account")) throw new ProblemException(400, "Group by portfolio or account.");
         if (period is not ("7" or "30" or "90" or "all")) throw new ProblemException(400, "Choose 7, 30, 90 days or all retained history.");
-        var (scopeKind, scopeId) = ParseScope(scope);
+        var listScope = ListScope.Parse(scope);
         var asOf = time.GetUtcNow();
         DateTimeOffset? from = period == "all" ? null : asOf.AddDays(-int.Parse(period, CultureInfo.InvariantCulture));
         var portfolios = await store.PortfoliosAsync(ct);
         var accounts = await workspace.AccountsAsync(ct);
-        if (scopeKind == "portfolio" && !portfolios.Any(p => p.Id == scopeId)) throw new ProblemException(404, "Portfolio not found.");
-        if (scopeKind == "account" && !accounts.Any(a => a.Id == scopeId)) throw new ProblemException(404, "Account not found.");
-        var members = accounts.Where(a => a.IsEnabled && (scopeKind switch
-        {
-            "portfolio" => a.PortfolioId == scopeId,
-            "account" => a.Id == scopeId,
-            "unassigned" => a.PortfolioId is null,
-            _ => true
-        })).ToList();
+        listScope.RequireKnown(id => portfolios.Any(p => p.Id == id), id => accounts.Any(a => a.Id == id));
+        var members = accounts.Where(a => listScope.Includes(a.Id, a.PortfolioId, a.IsEnabled)).ToList();
         var summaries = await activity.ReadSummariesAsync(null, ct, members.Select(a => a.Id).ToHashSet());
         var snapshots = summaries.Facts.Snapshots.ToDictionary(s => s.AccountId);
         var operations = summaries.Operations.GroupBy(o => o.AccountId).ToDictionary(g => g.Key, g => g.ToList());
@@ -92,14 +85,5 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
             .ThenBy(r => r.Name, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
         return new(groupBy, period, scope, asOf, from, totals, rows.Take(MaxGroups).ToList(), rows.Count,
             Math.Max(0, rows.Count - MaxGroups), ScopeNote);
-    }
-
-    private static (string Kind, Guid? Id) ParseScope(string scope)
-    {
-        if (scope is "all" or "unassigned") return (scope, null);
-        var parts = scope.Split(':');
-        if (parts.Length != 2 || parts[0] is not ("portfolio" or "account") || !Guid.TryParseExact(parts[1], "D", out var id) || id == Guid.Empty)
-            throw new ProblemException(400, "Choose all, unassigned, portfolio:<id> or account:<id>.");
-        return (parts[0], id);
     }
 }

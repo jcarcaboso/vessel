@@ -54,6 +54,8 @@ metadata/configuration. Use the local export with `evidence-copy-to-s3` pointed
 at another provider for a staged switch; keep all writers stopped through both
 copies and cutover. Exported images are not a complete database/bucket backup.
 
+October 16, 2026: the owner asked that Activity and Plays stay usable as history grows. Follow `docs/architecture/list-paging.md`: Activity filters and numbered pages run on the server after full aggregation (25 default, 25/50/100), executions load on expand, and a version token flags changed data. Plays tabs are Drafts, In progress, Needs review, Reviewed, Closed, Cancelled and All with server counts and title/instrument search; Drafts and In progress are unpaged (≤200), the rest use the same pager. The unscoped Plays page still lists Plays on disabled accounts; explicit scopes (Overview) keep enabled accounts only. The list reads a `Direction` column and never the plan, drawings or review text. Skeletons are delayed, geometry-matched and motionless under reduced motion.
+
 ## Project tracking
 
 October 13, 2026: the owner authorized all P1 diary must-haves from the product

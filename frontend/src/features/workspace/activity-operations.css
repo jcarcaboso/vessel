@@ -61,3 +61,34 @@
 .workspace-table.operations-table :is(th, td) { padding-left: 12px; padding-right: 12px; }
 .workspace-table.operations-table :is(th, td):first-child { padding-left: 16px; }
 .workspace-table.operations-table th { letter-spacing: .04em; }
+/* Paging: first-load skeleton rows with the real row geometry, lazy executions and the changed notice. */
+.operations-pending { min-height: 120px; }
+.operations-skeleton .operation-toggle { display: block; }
+/* Fixed widths at typical content sizes: percentage bars would leave column widths to the headers alone. Margins
+   give each bar the line box of the text it stands in for: 16px values, then 17px small lines 4px apart. */
+.operations-skeleton .skeleton-asset { width: 48px; height: 16px; margin: 3px 0; }
+.operations-skeleton .skeleton-tags { width: 130px; height: 24px; margin-top: 6px; }
+.operations-skeleton .skeleton-line { height: 12px; margin: 2px 0; }
+.operations-skeleton .skeleton-line.skeleton-small { height: 11px; margin: 10px 0 3px; }
+.operations-skeleton .operation-pnl .skeleton-line { margin: 0; }
+.operations-skeleton .skeleton-account { width: 104px; }
+.operations-skeleton .skeleton-date { width: 72px; }
+.operations-skeleton .skeleton-dates { width: 150px; }
+.operations-skeleton .skeleton-duration { width: 18px; }
+.operations-skeleton .skeleton-size { width: 32px; }
+.operations-skeleton .skeleton-remaining { width: 80px; }
+.operations-skeleton .skeleton-price { width: 62px; }
+.operations-skeleton .skeleton-money { width: 56px; }
+.operations-skeleton .skeleton-return { width: 50px; height: 25px; }
+.operations-skeleton .skeleton-fee { width: 38px; }
+.operations-skeleton .skeleton-badge { width: 84px; height: 24px; }
+.skeleton-status .skeleton-note { display: inline-block; width: 220px; height: 11px; vertical-align: middle; }
+.operation-fills-pending { min-height: 72px; }
+.operation-fills-skeleton { display: grid; gap: 4px; padding: 6px 0; }
+.operation-fills-skeleton-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+.operation-fills-skeleton-row .skeleton { width: 70%; }
+.activity-operations > .workspace-alert, .activity-list > .workspace-alert { margin: 0 20px 14px; }
+/* A page change scrolls the list to its top; without anchoring, the changed notice that arrives with the page
+   appears in view instead of pushing the scroll position down past itself. */
+.activity-list { overflow-anchor: none; }
+.activity-changed { align-items: center; }

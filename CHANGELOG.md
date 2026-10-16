@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Added
+
+- Activity pages on the server with a 25 / 50 / 100 rows selector (default 25),
+  server-side filters and executions loaded when an operation is expanded. The
+  500-operation and 10,000-row response limits are gone.
+- Plays list tabs Drafts, In progress, Needs review, Reviewed, Closed, Cancelled
+  and All with counts, a title/instrument search and the same pager for ended
+  and All views. Overview Plays adds a Drafts tab and shows the five most recent
+  Plays per tab.
+- Delayed loading skeletons that match the row layout.
+
+### Changed
+
+- The Plays list reads summary columns only; a new `Direction` column
+  (migration `PlayDirection`, backfilled from the plan) avoids parsing every
+  plan. Apply the migration before starting the new API.
+
 ## 0.1.2 - October 15, 2026
 
 Release notes: [docs/releases/v0.1.2.md](docs/releases/v0.1.2.md).

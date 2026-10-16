@@ -84,10 +84,10 @@ Each Application folder is a feature. The table lists its entry point, what it r
 | Venues | `IVenueRegistry`, `VenueDescriptor` | — | Finds the descriptor and adapters for a venue ID. Use cases check **capabilities**, never venue names. | [venue-registry](venue-registry.md), [execution-facts](execution-facts.md), [venue-instruments](venue-instruments.md) |
 | Credentials | `AccountCredentialService`, `AccountCredentialReader` | `IAccountCredentialStore`, `ICredentialVault` | Save, verify, read and delete read-only venue tokens. | [venue-credentials](venue-credentials.md) |
 | MarketData | `CandleService`, `MarketContextService`, `MarketStreamService` | — (uses venue ports and in-memory caches) | Bounded candle windows, market statistics and a server-sent-events relay over one shared Hyperliquid WebSocket. | [chart-plan](chart-plan.md), [performance-plan](performance-plan.md) |
-| Plays | `PlayService` | `IPlayStore` | Create and edit Plays, plan normalization (`PlayDocuments`), status changes (plan, pause, resume, cancel), history, Draft deletion. | [play-lifecycle](play-lifecycle.md), [plays-workspace-contract](plays-workspace-contract.md) |
+| Plays | `PlayService` | `IPlayStore` | Create and edit Plays, plan normalization (`PlayDocuments`), status changes (plan, pause, resume, cancel), history, Draft deletion. List views (`GET /api/plays`) and counts (`/api/plays/counts`) with search, scope and pages over projected summary columns. | [play-lifecycle](play-lifecycle.md), [plays-workspace-contract](plays-workspace-contract.md), [list-paging](list-paging.md) |
 | Plays/Execution | `PlayExecutionService`, `ExecutionMatcher`, `ExecutionIntegrity` | `IPlayExecutionStore` | Retain venue orders, link orders to plan levels (automatically when unambiguous, otherwise as suggestions), move Plays to Open/Closed from linked fills. | [play-lifecycle](play-lifecycle.md) |
 | Diary | `DiaryService`, `ManualLedger` | `IDiaryStore` | Owner-entered manual executions with correction history, retrospective Plays from completed imported operations, idempotent writes by request ID. | [diary-completion-contract](diary-completion-contract.md) |
-| Activity | `ActivityService`, `OperationAggregator` | `IActivityStore` | Turns retained fills into position round trips ("operations") with explicit coverage notices. | [activity-operations](activity-operations.md) |
+| Activity | `ActivityService`, `OperationAggregator` | `IActivityStore`, `IWorkspaceStore` | Turns retained fills into position round trips ("operations") with explicit coverage notices. Filters, orders and pages them on the server (`GET /api/activity`); one operation's rows load on expand (`/api/activity/fills`). | [activity-operations](activity-operations.md), [list-paging](list-paging.md) |
 | Overview | `OverviewSummaryService` | reuses Workspace and Activity | Scoped balance, availability, unrealized and realized summaries grouped by portfolio or account. | [core-workspace-contract](core-workspace-contract.md) |
 | Review | `ReviewService` | `IReviewStore` | Scores saved closed Plays: metrics, equity series, groups, exclusions. | [portfolio-review](portfolio-review.md) |
 | Sizing | `SizingService` (+ Domain `TrackRecord`, `Exposure`, `SizingLimits`) | `ISizingStore` | Track record, exposure ladder and suggestion limits. | [sizing-suggestions](sizing-suggestions.md) |
@@ -186,7 +186,7 @@ The browser calls this when an active Play's page opens and then every 60 second
 
 ### Reporting: Activity, Overview, Review, Sizing
 
-- **Activity** groups retained fills per account and native contract and walks the signed position to find round trips. When the history is incomplete or several fills share a timestamp ambiguously, the operation is marked incomplete with a notice instead of guessed.
+- **Activity** groups retained fills per account and native contract and walks the signed position to find round trips. When the history is incomplete or several fills share a timestamp ambiguously, the operation is marked incomplete with a notice instead of guessed. Filters and pages apply after aggregation, so they never change a metric. Shared `ListScope` and `ListPaging` (`Application/Common/ListQuery.cs`) parse the `scope`, `page` and `pageSize` used by Overview, Activity and Plays.
 - **Overview** reuses workspace balances and Activity operations to build scoped totals and grouped rows.
 - **Review and Sizing** read closed Plays with their revisions, linked fills and known-incomplete orders (`SizingStore.ClosedPlaysAsync`). `PlayOutcomeCalculator` computes the net result (reported closed PnL minus USDC fees on gross-basis fills), entry notional and planned risk. Review applies stricter eligibility and explains every exclusion; Sizing feeds the Domain track record, exposure ladder and limits.
 
@@ -229,7 +229,7 @@ All tables have `OwnerId` and composite owner foreign keys. Entity mappings live
 | `account_snapshots`, `account_positions`, `account_stablecoins` | `AccountSnapshot`, … | Latest observation only. Perpetual state and wallet have independent observation times. |
 | `imported_fills` | `ImportedFill` | Normalized execution facts. Unique `(OwnerId, AccountId, ContractId, SourceFillId)`. Check constraints mirror `ExecutionFacts`. |
 | `imported_orders` | `ImportedOrder` | Latest known state of each venue order. Unique per account and order ID. |
-| `plays` | `Play` | Plan and drawings as `jsonb`, status, origin (planned or retrospective), structured review, `Version`. |
+| `plays` | `Play` | Plan and drawings as `jsonb`, `Direction` kept in step with the plan for lists, status, origin (planned or retrospective), structured review, `Version`. |
 | `play_plan_revisions`, `play_status_changes`, `play_review_revisions` | | Append-only history. |
 | `play_order_links` | `PlayOrderLink` | Order ↔ plan level, state Linked/Suggested/Dismissed. A partial unique index allows one Linked row per order. |
 | `manual_executions`, `manual_execution_history` | | Owner-entered facts and their corrections. |

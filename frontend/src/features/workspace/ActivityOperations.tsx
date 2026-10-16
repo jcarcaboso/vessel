@@ -1,54 +1,111 @@
-import { emptyFilters, filterOperations, type Filters } from './activity-filters'
-import { useEffect, useRef, useState } from 'react'
-import type { ActivityDocument } from '@/api/activity'
+import { emptyFilters, filterQuery, initialActivityState, type ActivityListState, type Filters } from './activity-filters'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ActivityPage, ActivityQuery } from '@/api/activity'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
 import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
-import { OperationsTable } from './OperationsTable'
+import { Pager } from '@/components/ui/pager'
+import { isPageSize } from '@/components/ui/paging'
+import { useDelayedFlag } from '@/lib/use-delayed-flag'
+import { OperationsSkeleton, OperationsTable } from './OperationsTable'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { RetrospectivePreview } from './RetrospectivePreview'
 import './activity-operations.css'
 
-export function ActivityOperations({ api, accounts, portfolios = [], accountId, compact = false, filters: showFilters = false, reloadGeneration = 0,
-  filterValues, onFiltersChange, scopeAccountIds, onOpenPlay, onCreated }: {
-  api: WorkspaceApi; accounts: BrokerAccount[]; portfolios?: Portfolio[]; accountId?: string | undefined; compact?: boolean; filters?: boolean; reloadGeneration?: number
-  scopeAccountIds?: readonly string[]; filterValues?: Filters; onFiltersChange?: (filters: Filters) => void
+/** Overview shows this many of the latest operations in its scope, without a pager. */
+const compactRows = 5
+const count = new Intl.NumberFormat('en-US')
+
+/**
+ * Position operations, filtered and paged by the server. The Activity page keeps its filters, page and size
+ * in shell memory (`state`); account detail keeps its own; Overview asks for the latest few in its scope.
+ */
+export function ActivityOperations({ api, accounts, portfolios = [], accountId, scope, compact = false, filters: showFilters = false, reloadGeneration = 0,
+  state, onStateChange, onOpenPlay, onCreated }: {
+  api: WorkspaceApi; accounts: BrokerAccount[]; portfolios?: Portfolio[]; accountId?: string | undefined
+  /** Overview scope: `all`, `unassigned`, `portfolio:{id}` or `account:{id}`. */
+  scope?: string | undefined
+  compact?: boolean; filters?: boolean; reloadGeneration?: number
+  state?: ActivityListState; onStateChange?: (state: ActivityListState) => void
   onOpenPlay?: (id: string, signal: AbortSignal) => Promise<void>; onCreated?: () => void
 }) {
-  const [state, setState] = useState<{ key: string; api: WorkspaceApi; document: ActivityDocument | null; error: string | null; receivedAt: number } | null>(null)
+  const [localState, setLocalState] = useState(initialActivityState)
+  const list = state ?? localState
+  const setList = onStateChange ?? setLocalState
   const [retry, setRetry] = useState(0)
-  const [localFilters, setLocalFilters] = useState(emptyFilters)
+  // `requested` is the request that produced the result; `key` is the request it answers, which differs when the
+  // server clamped the page. `generation` counts accepted pages so expanded rows re-read their executions.
+  const [result, setResult] = useState<{ api: WorkspaceApi; key: string; requested: string; page: ActivityPage | null; error: string | null; generation: number } | null>(null)
+  // The version of the first page read for these filters; a later page with another version means Activity changed.
+  const [baseline, setBaseline] = useState<{ api: WorkspaceApi; key: string; version: string; changed: boolean } | null>(null)
   const [selection, setSelection] = useState<{ accountId: string; operationId: string } | null>(null)
   const trigger = useRef<HTMLElement | null>(null)
-  const selectedFilters = filterValues ?? localFilters
-  const setFilters = onFiltersChange ?? setLocalFilters
-  const key = JSON.stringify([accountId, reloadGeneration, retry])
-  const pending = state === null || state.key !== key || state.api !== api
-  useEffect(() => {
-    const controller = new AbortController()
-    let active = true
-    api.activity(accountId, controller.signal).then(document => {
-      if (active) setState({ key, api, document, error: null, receivedAt: Date.now() })
-    }).catch(cause => {
-      if (active) setState({ key, api, document: null, receivedAt: Date.now(), error: errorMessage(cause, 'Operations could not be loaded.') })
-    })
-    return () => { active = false; controller.abort() }
-  }, [api, accountId, key])
-  if (pending) return <div className="workspace-loading" role="status">Loading operations…</div>
-  if (state.error) return <div className="workspace-alert" role="alert">{state.error}<Button variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>Retry operations</Button></div>
-  const document = state.document!
-  const enabled = accounts.filter(a => a.isEnabled !== false && (scopeAccountIds === undefined || scopeAccountIds.includes(a.id)))
-  const loaded = document.operations.filter(op => enabled.some(a => a.id === op.accountId))
-  const contracts = [...new Set(loaded.map(op => op.contractId))].sort()
-  const filters = {
-    ...selectedFilters,
-    account: enabled.some(a => a.id === selectedFilters.account) ? selectedFilters.account : '',
-    portfolio: selectedFilters.portfolio === 'unassigned' || portfolios.some(p => p.id === selectedFilters.portfolio) ? selectedFilters.portfolio : '',
-    contract: contracts.includes(selectedFilters.contract) ? selectedFilters.contract : '',
+  const top = useRef<HTMLDivElement | null>(null)
+  const enabled = accounts.filter(a => a.isEnabled !== false)
+  const previous = result?.api === api ? result.page : null
+  // Options that disappear fall back to All; instruments come from the scoped set the server reports.
+  const selected = list.filters
+  const knownContracts = previous?.facets.contracts ?? null
+  const filters: Filters = showFilters ? {
+    ...selected,
+    account: enabled.some(a => a.id === selected.account) ? selected.account : '',
+    portfolio: selected.portfolio === 'unassigned' || portfolios.some(p => p.id === selected.portfolio) ? selected.portfolio : '',
+    contract: knownContracts === null || knownContracts.includes(selected.contract) ? selected.contract : '',
+  } : emptyFilters
+  const pageSize = compact ? compactRows : list.pageSize
+  const sent = filterQuery(filters)
+  const requested: ActivityQuery = {
+    ...(scope !== undefined && scope !== 'all' ? { scope } : {}), ...(accountId !== undefined ? { accountId } : {}),
+    ...sent, page: compact ? 1 : list.page, pageSize,
   }
-  const visible = showFilters ? filterOperations(loaded, accounts, filters, state.receivedAt) : compact ? loaded.slice(0, 5) : loaded
-  const update = (field: keyof Filters, value: string) => setFilters({ ...filters, [field]: value })
+  const queryKey = JSON.stringify(requested)
+  const query = useMemo(() => JSON.parse(queryKey) as ActivityQuery, [queryKey])
+  const key = JSON.stringify([queryKey, reloadGeneration, retry])
+  const listKey = JSON.stringify([{ ...query, page: undefined }, reloadGeneration, retry])
+  const adopted = useRef<string | null>(null)
+  useEffect(() => {
+    const skip = adopted.current === key
+    adopted.current = null
+    if (skip) return
+    const controller = new AbortController()
+    api.activity(query, controller.signal).then(page => {
+      if (controller.signal.aborted) return
+      // The request a clamped page answers, so adopting it into the list state does not read it again.
+      const answered = page.page === query.page ? key : JSON.stringify([JSON.stringify({ ...query, page: page.page }), reloadGeneration, retry])
+      setResult(current => ({ api, key: answered, requested: key, page, error: null, generation: (current?.generation ?? 0) + 1 }))
+      setBaseline(current => current?.api !== api || current.key !== listKey || page.page === 1 ? { api, key: listKey, version: page.version, changed: false }
+        : current.version === page.version ? current : { ...current, changed: true })
+    }).catch(cause => {
+      if (!controller.signal.aborted) setResult(current => ({ api, key, requested: key, page: null, error: errorMessage(cause, 'Operations could not be loaded.'), generation: current?.generation ?? 0 }))
+    })
+    return () => controller.abort()
+  }, [api, query, key, listKey, reloadGeneration, retry])
+  // A page past the end comes back clamped: keep the page actually shown, so later growth does not jump back.
+  // Only the response to the current request may write, and the adopted page is not requested again.
+  useEffect(() => {
+    if (compact || result === null || result.api !== api || result.requested !== key || result.key === key || result.page === null) return
+    adopted.current = result.key
+    setList({ ...list, page: result.page.page })
+  }, [api, compact, key, list, result, setList])
+  const pending = result === null || result.api !== api || result.key !== key && result.requested !== key
+  const skeleton = useDelayedFlag(pending && previous === null)
+  const changed = baseline?.api === api && baseline.key === listKey && baseline.changed
+  const update = (field: keyof Filters, value: string) => setList({ ...list, filters: { ...filters, [field]: value }, page: 1 })
+  const reloadActivity = () => { setList({ ...list, page: 1 }); setRetry(n => n + 1) }
+  const goTo = (page: number) => {
+    setList({ ...list, page })
+    top.current?.scrollIntoView?.({ block: 'start' })
+  }
+
+  // A rejected filter combination keeps the filters on screen so it can be changed.
+  const error = pending ? null : result.error
+  const shown = pending ? previous : result.page
+  const contracts = shown?.facets.contracts ?? (filters.contract ? [filters.contract] : [])
+  // The pager already counts the rows; a note is only needed when filters narrow the scope (or Overview has no pager).
+  // Judge the filters actually sent: retained custom dates behind "All retained activity" narrow nothing.
+  const filtered = Object.keys(sent).length > 0
+  const note = compact || filtered
   return <div className="activity-operations">
     {showFilters && <fieldset className="operation-filters"><legend>Filter operations</legend>
       <label>Account<NativeSelect value={filters.account} onChange={e => update('account', e.target.value)}><option value="">All enabled accounts</option>{enabled.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</NativeSelect></label>
@@ -56,16 +113,30 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
       <label>Instrument<NativeSelect value={filters.contract} onChange={e => update('contract', e.target.value)}><option value="">All instruments</option>{contracts.map(c => <option key={c}>{c}</option>)}</NativeSelect></label>
       <label>Direction<NativeSelect value={filters.direction} onChange={e => update('direction', e.target.value)}><option value="">All directions</option><option value="long">Long</option><option value="short">Short</option></NativeSelect></label>
       <label>Status<NativeSelect value={filters.status} onChange={e => update('status', e.target.value)}><option value="">All statuses</option><option value="open">Open</option><option value="partial">Partially closed</option><option value="closed">Closed</option><option value="incomplete">Incomplete</option></NativeSelect></label>
-      <label title="Dates filter the latest execution, in UTC.">Period<NativeSelect value={filters.period} onChange={e => update('period', e.target.value)}><option value="all">All retained activity</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="custom">Date range · UTC</option></NativeSelect></label>
+      <label title={`Dates filter the latest execution, in UTC.${shown ? ` Rolling periods count back from ${shown.asOfUtc}.` : ''}`}>Period<NativeSelect value={filters.period} onChange={e => update('period', e.target.value)}><option value="all">All retained activity</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="custom">Date range · UTC</option></NativeSelect></label>
       {filters.period === 'custom' && <><label>From date<input type="date" value={filters.from} onChange={e => update('from', e.target.value)} /></label><label>Through date<input type="date" value={filters.to} min={filters.from || undefined} onChange={e => update('to', e.target.value)} /></label></>}
-      <Button variant="outline" size="sm" onClick={() => setFilters(emptyFilters)}>Reset filters</Button>
+      <Button variant="outline" size="sm" onClick={() => setList({ ...list, filters: emptyFilters, page: 1 })}>Reset filters</Button>
     </fieldset>}
-    <p className="workspace-scope-note in-panel" role="status">Showing {visible.length} of {loaded.length} loaded operations{document.omittedOperationCount > 0 ? ` · ${document.omittedOperationCount} older operations omitted` : ''}.</p>
-    <OperationsTable operations={visible} accounts={accounts} compact={compact} onPreview={operation => {
-      trigger.current = window.document.activeElement instanceof HTMLElement ? window.document.activeElement : null
-      setSelection({ accountId: operation.accountId, operationId: operation.id })
-    }} />
-    {!compact && <><details className="operation-scope"><summary>Scope and coverage</summary><p className="workspace-scope-note">{document.scopeNote}</p>{document.coverage.filter(c => enabled.some(a => a.id === c.accountId)).map((c, index) => <p className="workspace-scope-note" key={index}><strong>{accounts.find(a => a.id === c.accountId)?.name}{c.contractId ? ` · ${c.contractId}` : ''}</strong>: {c.notice}</p>)}</details></>}
+    {/* A page change scrolls here, so the changed notice that may follow it is in view with the rows. */}
+    <div ref={top} className="activity-list">
+    {changed && <div className="workspace-alert activity-changed" role="status"><span>Activity changed</span>
+      <Button variant="ghost" size="sm" aria-label="Reload activity" onClick={reloadActivity}>Reload</Button></div>}
+    {error ? <div className="workspace-alert" role="alert">{error}<Button variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>Retry operations</Button></div> :
+      shown === null ? skeleton ? <OperationsSkeleton compact={compact} rows={compact ? compactRows : 6} note={note} /> : <div className="operations-pending" aria-busy="true" /> : <>
+      {note && <p className="workspace-scope-note in-panel" role="status">{compact
+        ? `Showing ${count.format(shown.operations.length)} of ${count.format(shown.totalCount)} operations.`
+        : `${count.format(shown.totalCount)} of ${count.format(shown.scopeCount)} operations match the filters.`}</p>}
+      <div className={pending ? 'operations-results list-refetching' : 'operations-results'} aria-busy={pending || undefined}>
+        <OperationsTable api={api} operations={shown.operations} accounts={accounts} compact={compact} refreshGeneration={result?.generation ?? 0} onReload={reloadActivity} onPreview={operation => {
+          trigger.current = window.document.activeElement instanceof HTMLElement ? window.document.activeElement : null
+          setSelection({ accountId: operation.accountId, operationId: operation.id })
+        }} />
+      </div>
+      {!compact && <Pager label="Activity pages" page={shown.page} pageSize={shown.pageSize} totalCount={shown.totalCount} disabled={pending}
+        onPage={goTo} onPageSize={size => { if (isPageSize(size)) setList({ ...list, page: 1, pageSize: size }) }} />}
+      {!compact && <details className="operation-scope"><summary>Scope and coverage</summary><p className="workspace-scope-note">{shown.scopeNote}</p>{shown.coverage.filter(c => enabled.some(a => a.id === c.accountId)).map((c, index) => <p className="workspace-scope-note" key={index}><strong>{accounts.find(a => a.id === c.accountId)?.name}{c.contractId ? ` · ${c.contractId}` : ''}</strong>: {c.notice}</p>)}</details>}
+    </>}
+    </div>
     <Dialog open={selection !== null && enabled.some(a => a.id === selection.accountId)} onOpenChange={open => { if (!open) setSelection(null) }}>
       <DialogContent className="retrospective-dialog" onCloseAutoFocus={event => { event.preventDefault(); trigger.current?.focus() }}>
         <DialogHeader><DialogTitle>Retrospective operation preview</DialogTitle><DialogDescription className="sr-only">Inspect original facts and associations before confirming a completed Play.</DialogDescription></DialogHeader>

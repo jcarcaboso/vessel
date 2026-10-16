@@ -6,10 +6,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import type { ManualExecutions } from '@/api/diary'
-import { emptyStructuredReview, type PlayExecution, type PlayFields, type PlaySummary, type SavedPlay } from '@/api/plays'
+import { emptyStructuredReview, type PlayExecution, type PlayFields, type PlayList, type PlaySummary, type PlayView, type SavedPlay } from '@/api/plays'
 import { VenuesProvider } from '@/api/venues'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
-import { accountFixture, idleMarketStream, instrumentCatalogFixture, overviewFixture, playApiStubs, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
+import { accountFixture, idleMarketStream, instrumentCatalogFixture, overviewFixture, playApiStubs, playCountsFrom, playListPage, playsFrom, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { systemFixture } from '@/test/system-fixture'
 import { PlaysPage } from './PlaysPage'
 import { PlayWorkspace } from './PlayWorkspace'
@@ -51,7 +51,8 @@ const readyManualSession = (): PlaysSession => ({ ...sessionFor(planned), manual
 function client(play = terminal, more: SavedPlay[] = []) {
   let current = play
   const methods = {
-    plays: vi.fn<WorkspaceApi['plays']>(() => Promise.resolve([current.summary, ...more.map(item => item.summary)])),
+    plays: vi.fn<WorkspaceApi['plays']>(query => playsFrom([current.summary, ...more.map(item => item.summary)])(query)),
+    playCounts: vi.fn<WorkspaceApi['playCounts']>(query => playCountsFrom([current.summary, ...more.map(item => item.summary)])(query)),
     play: vi.fn<WorkspaceApi['play']>(() => Promise.resolve(current)),
     playExecution: vi.fn(() => Promise.resolve(execution(current))),
     sizing: vi.fn(() => Promise.reject(new ApiError('unavailable', 'No sizing.'))),
@@ -64,6 +65,14 @@ function client(play = terminal, more: SavedPlay[] = []) {
   }
   return { methods, api: { ...createWorkspaceApi('test-only'), ...methods } as WorkspaceApi }
 }
+/** Replies to every later list and count read with these plays. */
+function serve(methods: ReturnType<typeof client>['methods'], plays: PlaySummary[]) {
+  methods.plays.mockImplementation(playsFrom(plays))
+  methods.playCounts.mockImplementation(playCountsFrom(plays))
+}
+/** List reads, optionally of one view. */
+const reads = (methods: ReturnType<typeof client>['methods'], view?: PlayView) =>
+  methods.plays.mock.calls.filter(([query]) => view === undefined || query.view === view).length
 function Harness({ api, initial = createPlaysSession(), request = null, onHandled = vi.fn(), onSession = vi.fn(), manual = false }: {
   api: WorkspaceApi; initial?: PlaysSession; request?: string | null; onHandled?: () => void;
   onSession?: (session: PlaysSession) => void; manual?: boolean
@@ -613,11 +622,11 @@ describe('diary workspace integration', () => {
     const { api } = client(pending, [reviewed])
     render(<Harness api={api} />)
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'Pending review' }))
+    await user.click(screen.getByRole('tab', { name: /^Needs review/ }))
     expect(await screen.findByRole('button', { name: `Open ${pending.summary.title}` })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Open Imported review' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Reviewed' }))
-    expect(screen.getByRole('button', { name: 'Open Imported review' })).toHaveTextContent('Retrospective')
+    await user.click(screen.getByRole('tab', { name: /^Reviewed/ }))
+    expect(await screen.findByRole('button', { name: 'Open Imported review' })).toHaveTextContent('Retrospective')
   })
   it.each([false, true])('refreshes the mounted review queue after saving, with later dirty edits=%s', async edited => {
     const pending = { ...terminal, review: '' }
@@ -633,19 +642,19 @@ describe('diary workspace integration', () => {
     if (edited) await user.type(screen.getByLabelText('Lesson'), ' extended')
     const sent = methods.updatePlay.mock.calls[0]![1]
     await user.click(screen.getByRole('button', { name: 'All plays' }))
-    await user.click(screen.getByRole('button', { name: 'Pending review' }))
+    await user.click(screen.getByRole('tab', { name: /^Needs review/ }))
     expect(await screen.findByRole('button', { name: `Open ${pending.summary.title}` })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Discard changes' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'New play' })).toBeDisabled()
-    expect(methods.plays).toHaveBeenCalledOnce()
+    expect(reads(methods, 'review')).toBe(1)
     const reviewed = { ...pending, structuredReview: sent.structuredReview ?? emptyStructuredReview(),
       summary: { ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at } }
-    methods.plays.mockResolvedValue([reviewed.summary])
+    serve(methods, [reviewed.summary])
     await act(async () => saving.resolve(reviewed))
-    await waitFor(() => expect(methods.plays).toHaveBeenCalledTimes(2))
-    expect(screen.queryByRole('button', { name: `Open ${pending.summary.title}` })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Reviewed' }))
-    expect(screen.getByRole('button', { name: `Open ${pending.summary.title}` })).toHaveTextContent('Reviewed')
+    await waitFor(() => expect(reads(methods, 'review')).toBe(2))
+    await waitFor(() => expect(screen.queryByRole('button', { name: `Open ${pending.summary.title}` })).not.toBeInTheDocument())
+    await user.click(screen.getByRole('tab', { name: /^Reviewed/ }))
+    expect(await screen.findByRole('button', { name: `Open ${pending.summary.title}` })).toHaveTextContent('Reviewed')
     expect(seen.mock.lastCall![0].saved.summary.version).toBe(3)
     expect(methods.updatePlay).toHaveBeenCalledOnce()
     if (edited) {
@@ -664,7 +673,7 @@ describe('diary workspace integration', () => {
     const pending = { ...terminal, review: '' }
     const { api, methods } = client(pending)
     const saving = deferred<SavedPlay>()
-    const previous = deferred<PlaySummary[]>()
+    const previous = deferred<PlayList>()
     methods.updatePlay.mockImplementationOnce(() => saving.promise)
     methods.plays.mockImplementationOnce(() => previous.promise)
     render(<Harness api={api} initial={sessionFor(pending)} />)
@@ -674,23 +683,23 @@ describe('diary workspace integration', () => {
     await user.click(screen.getByRole('button', { name: /^Save$/ }))
     const sent = methods.updatePlay.mock.calls[0]![1]
     await user.click(screen.getByRole('button', { name: 'All plays' }))
-    await waitFor(() => expect(methods.plays).toHaveBeenCalledOnce())
-    const signal = methods.plays.mock.calls[0]![0]!
+    await waitFor(() => expect(reads(methods)).toBe(1))
+    const signal = methods.plays.mock.calls[0]![1]!
     const reviewed = { ...pending, structuredReview: sent.structuredReview ?? emptyStructuredReview(),
       summary: { ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at } }
-    methods.plays.mockResolvedValue([reviewed.summary])
+    serve(methods, [reviewed.summary])
     await act(async () => saving.resolve(reviewed))
-    await user.click(screen.getByRole('button', { name: 'Reviewed' }))
+    await user.click(screen.getByRole('tab', { name: /^Reviewed/ }))
     expect(await screen.findByRole('button', { name: `Open ${pending.summary.title}` })).toHaveTextContent('Reviewed')
     expect(signal.aborted).toBe(true)
     await act(async () => {
-      if (outcome === 'resolve') previous.resolve([pending.summary])
+      if (outcome === 'resolve') previous.resolve(playListPage([pending.summary], { view: 'progress' }))
       else previous.reject(new ApiError('unavailable', 'Superseded read failed.'))
     })
     expect(screen.getByRole('button', { name: `Open ${pending.summary.title}` })).toHaveTextContent('Reviewed')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Pending review' }))
-    expect(screen.queryByRole('button', { name: `Open ${pending.summary.title}` })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: /^Needs review/ }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: `Open ${pending.summary.title}` })).not.toBeInTheDocument())
   })
   it('refreshes the mounted queue after an older correction replay without advancing the observed version', async () => {
     const closed: SavedPlay = { ...terminal, review: '', summary: { ...terminal.summary, status: 'closed', version: 3 } }
@@ -721,23 +730,23 @@ describe('diary workspace integration', () => {
     read.mockResolvedValue(ledger(5))
     await user.click(screen.getByRole('button', { name: 'Reload manual ledger' }))
     await waitFor(() => expect(current.observedPlay?.version).toBe(5))
-    methods.plays.mockResolvedValue([ledger(5).play.summary])
+    serve(methods, [ledger(5).play.summary])
     await user.click(screen.getByRole('button', { name: 'Save correction' }))
     expect(correct.mock.calls[1]).toEqual(correct.mock.calls[0])
     await user.click(screen.getByRole('button', { name: 'All plays' }))
-    await user.click(screen.getByRole('button', { name: 'Pending review' }))
+    await user.click(screen.getByRole('tab', { name: /^Needs review/ }))
     expect(await screen.findByRole('button', { name: `Open ${closed.summary.title}` })).toBeDisabled()
     // A concurrent review completes after the queue read; the retry still returns its cached v4 document.
     const reviewed = { ...closed.summary, version: 6, hasReview: true, reviewedAtUtc: at }
-    methods.plays.mockResolvedValue([reviewed])
+    serve(methods, [reviewed])
     await act(async () => replay.resolve(ledger(4)))
     expect(current.saved?.summary.version).toBe(5)
     expect(current.observedPlay?.version).toBe(5)
     expect(current.manual?.executionId).toBeNull()
-    await waitFor(() => expect(methods.plays).toHaveBeenCalledTimes(2))
-    expect(screen.queryByRole('button', { name: `Open ${closed.summary.title}` })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Reviewed' }))
-    expect(screen.getByRole('button', { name: `Open ${closed.summary.title}` })).toBeEnabled()
+    await waitFor(() => expect(reads(methods, 'review')).toBe(2))
+    await waitFor(() => expect(screen.queryByRole('button', { name: `Open ${closed.summary.title}` })).not.toBeInTheDocument())
+    await user.click(screen.getByRole('tab', { name: /^Reviewed/ }))
+    expect(await screen.findByRole('button', { name: `Open ${closed.summary.title}` })).toBeEnabled()
   })
   it('refetches after a lost review response without inferring success or clearing dirty work', async () => {
     const pending = { ...terminal, review: '' }
@@ -751,17 +760,17 @@ describe('diary workspace integration', () => {
     await user.type(screen.getByLabelText('Lesson'), 'Unconfirmed lesson')
     await user.click(screen.getByRole('button', { name: /^Save$/ }))
     await user.click(screen.getByRole('button', { name: 'All plays' }))
-    await user.click(screen.getByRole('button', { name: 'Pending review' }))
+    await user.click(screen.getByRole('tab', { name: /^Needs review/ }))
     await screen.findByRole('button', { name: `Open ${pending.summary.title}` })
     // The server committed, but no saved document reaches the editor.
-    methods.plays.mockResolvedValue([{ ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at }])
+    serve(methods, [{ ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at }])
     await act(async () => saving.reject(new ApiError('unavailable', 'Review response lost.')))
-    await waitFor(() => expect(methods.plays).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(reads(methods, 'review')).toBe(2))
     expect(current.saved?.summary.version).toBe(2)
     expect(current.draft.structuredReview?.lesson).toBe('Unconfirmed lesson')
-    expect(screen.queryByRole('button', { name: `Open ${pending.summary.title}` })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Reviewed' }))
-    expect(screen.getByRole('button', { name: `Open ${pending.summary.title}` })).toBeDisabled()
+    await waitFor(() => expect(screen.queryByRole('button', { name: `Open ${pending.summary.title}` })).not.toBeInTheDocument())
+    await user.click(screen.getByRole('tab', { name: /^Reviewed/ }))
+    expect(await screen.findByRole('button', { name: `Open ${pending.summary.title}` })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Discard changes' })).toBeEnabled()
   })
   it('keeps a failed review save in the mounted pending queue with its dirty edits', async () => {
@@ -775,13 +784,14 @@ describe('diary workspace integration', () => {
     await user.type(screen.getByLabelText('Lesson'), 'Unsaved lesson')
     await user.click(screen.getByRole('button', { name: /^Save$/ }))
     await user.click(screen.getByRole('button', { name: 'All plays' }))
-    await user.click(screen.getByRole('button', { name: 'Pending review' }))
+    await user.click(screen.getByRole('tab', { name: /^Needs review/ }))
     await screen.findByRole('button', { name: `Open ${pending.summary.title}` })
     await act(async () => saving.reject(new ApiError('http', 'Review save failed.', 409)))
     expect(screen.getByRole('button', { name: `Open ${pending.summary.title}` })).toHaveTextContent('Pending review')
-    await waitFor(() => expect(methods.plays).toHaveBeenCalledTimes(2))
-    await user.click(screen.getByRole('button', { name: 'Reviewed' }))
-    expect(screen.queryByRole('button', { name: `Open ${pending.summary.title}` })).not.toBeInTheDocument()
+    await waitFor(() => expect(reads(methods, 'review')).toBe(2))
+    await user.click(screen.getByRole('tab', { name: /^Reviewed/ }))
+    await waitFor(() => expect(reads(methods, 'reviewed')).toBe(1))
+    await waitFor(() => expect(screen.queryByRole('button', { name: `Open ${pending.summary.title}` })).not.toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: 'Continue editing' }))
     await user.click(screen.getByRole('tab', { name: 'Review' }))
     expect(screen.getByLabelText('Lesson')).toHaveValue('Unsaved lesson')
@@ -1179,16 +1189,16 @@ describe('Plays review wave request regressions', () => {
     methods.play.mockReturnValueOnce(read.promise)
     render(<Harness api={api} />)
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'All' }))
+    await user.click(screen.getByRole('tab', { name: /^All/ }))
     const row = await screen.findByRole('button', { name: `Open ${terminal.summary.title}` })
-    expect(methods.plays).toHaveBeenCalledOnce()
+    expect(reads(methods, 'all')).toBe(1)
     await user.click(row)
     await waitFor(() => expect(methods.play).toHaveBeenCalledOnce())
     expect(row).toBeDisabled()
-    expect(methods.plays).toHaveBeenCalledOnce()
+    expect(reads(methods, 'all')).toBe(1)
     await act(async () => { read.resolve(target) })
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Opened Play')
-    expect(methods.plays).toHaveBeenCalledOnce()
+    expect(reads(methods, 'all')).toBe(1)
   })
 
   it.each(['revision', 'cancel'] as const)('shows a %s failure in its current intended dialog after intervening renders', async kind => {
