@@ -58,6 +58,12 @@ public static class VesselEventEndpoints
             // accepted cursor normalized with the stream epoch; reset carries where a reloaded client resumes.
             var cursor = page.ResetRequired ? page.NextCursor : Accepted(after, page.NextCursor);
             await Frame("status", new { state = page.ResetRequired ? "reset" : "ready", nextCursor = cursor });
+            // Bounded lifetime: the response ends cleanly between frames, never mid-frame, and the browser reconnects
+            // from its last cursor. Every written event frame carries its resume cursor, so nothing is skipped.
+            var time = context.RequestServices?.GetService<TimeProvider>() ?? TimeProvider.System;
+            var started = time.GetTimestamp();
+            var lifetime = settings.Value.StreamMaxLifetime;
+            TimeSpan Remaining() => lifetime - time.GetElapsedTime(started);
             while (!ct.IsCancellationRequested)
             {
                 // A reset means reload state, not replay popups from retained history.
@@ -69,8 +75,12 @@ public static class VesselEventEndpoints
                 {
                     await context.Response.WriteAsync(": keepalive\n\n", ct);
                     await context.Response.Body.FlushAsync(ct);
-                    await Task.Delay(TimeSpan.FromSeconds(settings.Value.StreamPollSeconds), ct);
+                    var poll = TimeSpan.FromSeconds(settings.Value.StreamPollSeconds);
+                    var remaining = Remaining();
+                    if (remaining <= TimeSpan.Zero) break;
+                    await Task.Delay(remaining < poll ? remaining : poll, time, ct);
                 }
+                if (Remaining() <= TimeSpan.Zero) break;
                 page = await reader.ReadAsync(cursor, 200, ct);
                 if (page.ResetRequired)
                     await Frame("status", new { state = "reset", nextCursor = page.NextCursor });
