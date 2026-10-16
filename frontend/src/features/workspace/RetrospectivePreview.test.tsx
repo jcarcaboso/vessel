@@ -5,13 +5,14 @@ import type { WorkspaceApi } from '@/api/workspace'
 import type { RetrospectivePreview } from '@/api/retrospective'
 import { ApiError } from '@/api/errors'
 import { accountFixture } from '@/test/workspace-fixture'
+import { activityPage } from '@/test/activity-fixture'
 import { retrospectiveFixture, retrospectiveSavedFixture as savedPlayFixture } from '@/test/retrospective.fixtures'
 import { ActivityOperations } from './ActivityOperations'
 
 function setup(preview: RetrospectivePreview = retrospectiveFixture, overrides: Partial<WorkspaceApi> = {}) {
   const api = {
-    activity: vi.fn().mockResolvedValue({ operations: [preview.operation], totalOperationCount: 1, retainedFillCount: preview.operation.fillCount,
-      omittedOperationCount: 0, coverage: [], scopeNote: 'Synthetic retained facts only.' }),
+    activity: vi.fn().mockResolvedValue(activityPage([preview.operation], { scopeNote: 'Synthetic retained facts only.' })),
+    activityFills: vi.fn().mockResolvedValue({ operationId: preview.operation.id, fills: preview.operation.fills, omittedFillCount: preview.operation.omittedFillCount }),
     retrospectivePreview: vi.fn().mockResolvedValue(preview),
     createRetrospectivePlay: vi.fn().mockResolvedValue(savedPlayFixture), ...overrides,
   } as unknown as WorkspaceApi

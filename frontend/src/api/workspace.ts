@@ -1,5 +1,5 @@
 import { overviewSummaryPath, isOverviewSummary, type OverviewQuery, type OverviewSummaryDocument } from './overview-summary'
-import { isActivityDocument, type ActivityDocument } from './activity'
+import { activityFillsPath, activityPath, isActivityFills, isActivityPage, type ActivityFills, type ActivityPage, type ActivityQuery } from './activity'
 import { SseOverflowError, SseParser } from './sse'
 import { candleIntervals, type CandleInterval } from './candles'
 import { ApiError } from './errors'
@@ -14,8 +14,8 @@ import {
   type AccountCredential, type AccountDiscovery,
 } from './account-access'
 import {
-  isPlayExecution, isPlayHistory, isPlaySummary, isSavedEvidence, isSavedPlay,
-  type LinkOrder, type PlayExecution, type PlayFields, type PlayHistory, type PlaySummary, type SavedEvidence, type SavedPlay, type StatusRequest,
+  isPlayCounts, isPlayExecution, isPlayHistory, isPlayList, isSavedEvidence, isSavedPlay, playCountsPath, playListPath,
+  type LinkOrder, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest,
 } from './plays'
 import { isSizingDocument, type SizingDocument } from './sizing'
 import { isReviewDocument, reviewPath, isReviewExclusions, reviewExclusionsPath, type ReviewDocument, type ReviewQuery, type ReviewExclusions } from './review'
@@ -220,7 +220,10 @@ export interface CreateAccount {
 }
 export interface WorkspaceApi {
   overviewSummary(query: OverviewQuery, signal?: AbortSignal): Promise<OverviewSummaryDocument>
-  activity(accountId?: string, signal?: AbortSignal): Promise<ActivityDocument>
+  /** One page of position operations with the request's filters, scope and page size. */
+  activity(query: ActivityQuery, signal?: AbortSignal): Promise<ActivityPage>
+  /** One operation's execution rows, loaded when its row expands. A 404 means the history changed. */
+  activityFills(accountId: string, operationId: string, signal?: AbortSignal): Promise<ActivityFills>
   review(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewDocument>
   reviewExclusions(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewExclusions>
   retrospectivePreview(accountId: string, operationId: string, signal?: AbortSignal): Promise<RetrospectivePreview>
@@ -251,7 +254,10 @@ export interface WorkspaceApi {
   snapshot(id: string, signal?: AbortSignal): Promise<AccountSnapshot | null>
   fills(id: string, signal?: AbortSignal): Promise<ImportedFill[]>
   sync(id: string, signal?: AbortSignal): Promise<BrokerAccount>
-  plays(signal?: AbortSignal): Promise<PlaySummary[]>
+  /** One view of saved Plays: Drafts and In progress in full (at most 200), the others paged. */
+  plays(query: PlayListQuery, signal?: AbortSignal): Promise<PlayList>
+  /** Rows in every view for the same search and scope. */
+  playCounts(query: { q?: string; scope?: string }, signal?: AbortSignal): Promise<PlayCounts>
   play(id: string, signal?: AbortSignal): Promise<SavedPlay>
   createPlay(fields: PlayFields): Promise<SavedPlay>
   /** A plan change after planning needs `revisionReason`. A stale `expectedVersion` is a 409. */
@@ -467,7 +473,8 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
   const none = (v: unknown): v is undefined => v === undefined
   const withSignal = (signal?: AbortSignal) => signal ? { signal } : {}
   const api: WorkspaceApi = {
-    plays: signal => call('/api/plays', { ...playRequest, validate: (v): v is PlaySummary[] => Array.isArray(v) && v.every(isPlaySummary), ...withSignal(signal) }),
+    plays: (query, signal) => call(playListPath(query), { ...playRequest, validate: (v): v is PlayList => isPlayList(v, query), ...withSignal(signal) }),
+    playCounts: (query, signal) => call(playCountsPath(query), { ...playRequest, validate: isPlayCounts, ...withSignal(signal) }),
     play: (id, signal) => call(playPath(id), { ...playRequest, validate: isSavedPlay, ...withSignal(signal) }),
     createPlay: fields => call('/api/plays', { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify(fields) }),
     updatePlay: (id, fields) => call(playPath(id), { ...playRequest, validate: isSavedPlay, method: 'PUT', body: JSON.stringify(fields) }),
@@ -515,8 +522,10 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
         v.summary.accountId === input.accountId && v.summary.origin === 'retrospective', method: 'POST', body: JSON.stringify(input), ...withSignal(signal) })
     },
     updateSizingSettings: settings => call('/api/sizing/settings', { ...playRequest, validate: isSizingDocument, method: 'PUT', body: JSON.stringify({ riskPercent: settings.riskPercent }) }),
-    activity: (id, signal) => call(`/api/activity${id !== undefined ? `?${new URLSearchParams({ accountId: resourceId(id) })}` : ''}`, { ...workspaceRequest, validate: (v): v is ActivityDocument => isActivityDocument(v) && (id === undefined ||
-        v.operations.every(op => op.accountId.toLowerCase() === id.toLowerCase()) && v.coverage.every(c => c.accountId.toLowerCase() === id.toLowerCase())), ...withSignal(signal) }),
+    activity: (query, signal) => call(activityPath(query), { ...workspaceRequest, validate: (v): v is ActivityPage => isActivityPage(v, query), ...withSignal(signal) }),
+    activityFills: (accountId, operationId, signal) => call(activityFillsPath(accountId, operationId), { ...workspaceRequest,
+      notFound: 'This operation changed. Reload Activity to see its current executions.',
+      validate: (v): v is ActivityFills => isActivityFills(v, accountId, operationId), ...withSignal(signal) }),
     overviewSummary: (query, signal) => call(overviewSummaryPath(query), { ...workspaceRequest, validate: (v): v is OverviewSummaryDocument => isOverviewSummary(v, query), ...withSignal(signal) }),
     overview: signal => call('/api/overview', { ...workspaceRequest, validate: overview, ...withSignal(signal) }),
     portfolios: signal => call('/api/portfolios', { ...workspaceRequest, validate: (v): v is Portfolio[] => Array.isArray(v) && v.every(portfolio), ...withSignal(signal) }),

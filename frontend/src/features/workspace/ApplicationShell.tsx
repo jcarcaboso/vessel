@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { useNotifications } from '@/components/notifications/notifications'
 import { createPlaysSession, hasUnsavedPlayWork, startNewPlay, type PlaysSession } from '@/features/plays/saved'
+import { initialPlaysList } from '@/features/plays/plays-list'
+import type { PlayView } from '@/api/plays'
 import { AccountDetail } from './AccountDetail'
 import { ActivityOperations } from './ActivityOperations'
 import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
@@ -15,7 +17,7 @@ import type { OverviewQuery } from '@/api/overview-summary'
 import { resolveOverviewScope } from './overview-scope'
 import { AccountsPanel } from './AccountsPanel'
 import { emptyAccountFilters } from './account-filters'
-import { emptyFilters } from './activity-filters'
+import { initialActivityState } from './activity-filters'
 import { OverviewActions } from './OverviewActions'
 import { VenuesProvider, useVenues } from '@/api/venues'
 import {
@@ -77,12 +79,14 @@ function Shell({ system, disconnect, api }: ShellProps) {
   }, [])
   const { page, navigate: navigateHash } = useHashPage(onHashNavigation)
   const [playsSession, setPlaysSession] = useState(createPlaysSession)
+  const [playsList, setPlaysList] = useState(initialPlaysList)
   const [playsLifetime, setPlaysLifetime] = useState(() => ({ api, visited: page === 'plays', generation: 0, work: createRef<symbol>() }))
   // Shell navigation hides the Plays UI without destroying the owner of an in-flight mutation.
   // A new API identity starts a new private session and invalidates all old callbacks.
   if (playsLifetime.api !== api) {
     setPlaysLifetime({ api, visited: page === 'plays', generation: playsLifetime.generation + 1, work: createRef<symbol>() })
     setPlaysSession(createPlaysSession())
+    setPlaysList(initialPlaysList)
   } else if (page === 'plays' && !playsLifetime.visited) {
     setPlaysLifetime({ ...playsLifetime, visited: true })
   }
@@ -122,7 +126,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
   const [portfolioFilter, setPortfolioFilter] = useState('')
   const [accountFilters, setAccountFilters] = useState(emptyAccountFilters)
   const [overviewQuery, setOverviewQuery] = useState<OverviewQuery>({ groupBy: 'portfolio', period: '30', scope: 'all' })
-  const [activityFilters, setActivityFilters] = useState(emptyFilters)
+  const [activityState, setActivityState] = useState(initialActivityState)
   const [portfolioDialog, setPortfolioDialog] = useState(false)
   const [accountDialog, setAccountDialog] = useState(false)
   const [focusPortfolioAccounts, setFocusPortfolioAccounts] = useState(false)
@@ -178,8 +182,9 @@ function Shell({ system, disconnect, api }: ShellProps) {
     setSelectedAccountId(id); setMenuOpen(false)
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
   }
-  function browsePlays() {
+  function browsePlays(view: PlayView) {
     setPlaysSession(session => ({ ...session, view: 'list' }))
+    setPlaysList(list => ({ ...list, view, q: '', page: 1 }))
     navigate('plays')
   }
   async function viewPlay(id: string, signal: AbortSignal) {
@@ -271,7 +276,8 @@ function Shell({ system, disconnect, api }: ShellProps) {
             <Suspense fallback={<PageLoading />}>
               <PlaysPage workRef={playsLifetime.work} active={page === 'plays'} accounts={accounts} portfolios={portfolios}
                 api={api} session={playsSession} onSession={acceptPlaysSession} onReload={reload} loading={loading}
-                requestedPlayId={requestedPlay?.api === api ? requestedPlay.id : null} onRequestedPlayHandled={() => setRequestedPlay(null)} />
+                requestedPlayId={requestedPlay?.api === api ? requestedPlay.id : null} onRequestedPlayHandled={() => setRequestedPlay(null)}
+                list={playsList} onList={setPlaysList} />
             </Suspense>
           </PageErrorBoundary>
         </div>}
@@ -292,7 +298,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
             refreshing={refreshing} refreshAction={refreshAllAction} onDetail={viewAccount} onSync={id => { void sync(id) }} onManage={manageAccount} onAdd={() => setAccountDialog(true)} />)}
 
 
-        {page === 'activity' && data && <section className="shell-panel"><header className="shell-panel-heading"><h2>Position operations</h2></header><ActivityOperations api={api} accounts={accounts} portfolios={portfolios} filters filterValues={activityFilters} onFiltersChange={setActivityFilters} reloadGeneration={reloadKey} onOpenPlay={viewPlay} onCreated={reload} /></section>}
+        {page === 'activity' && data && <section className="shell-panel"><header className="shell-panel-heading"><h2>Position operations</h2></header><ActivityOperations api={api} accounts={accounts} portfolios={portfolios} filters state={activityState} onStateChange={setActivityState} reloadGeneration={reloadKey} onOpenPlay={viewPlay} onCreated={reload} /></section>}
 
         {page === 'settings' && <Suspense fallback={<PageLoading />}><SettingsPage system={system} disconnectSession={disconnectSession} onAccounts={() => navigate('accounts')} /></Suspense>}
         </div></PageErrorBoundary>

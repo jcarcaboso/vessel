@@ -5,9 +5,9 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { pickInstrument } from '@/test/instrument'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
-import type { PlayExecution, PlayFields, PlayHistory, PlayStatus, PlaySummary, SavedEvidence, SavedPlay, StatusRequest } from '@/api/plays'
+import type { PlayExecution, PlayFields, PlayHistory, PlayListQuery, PlayStatus, PlaySummary, SavedEvidence, SavedPlay, StatusRequest } from '@/api/plays'
 import { ApiError } from '@/api/errors'
-import { accountFixture, idleMarketStream, instrumentCatalogFixture, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
+import { accountFixture, idleMarketStream, instrumentCatalogFixture, playCountsFrom, playsFrom, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { PlaysPage } from './PlaysPage'
 import { createDraft } from './draft'
@@ -38,7 +38,8 @@ function fakeServer() {
     entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Venue facts.', issues: [],
   })
   const api = {
-    plays: vi.fn(() => Promise.resolve([...plays.values()].map(play => play.summary))),
+    plays: vi.fn((query: PlayListQuery) => playsFrom([...plays.values()].map(play => play.summary))(query)),
+    playCounts: vi.fn((query: { q?: string }) => playCountsFrom([...plays.values()].map(play => play.summary))(query)),
     play: vi.fn((id: string) => Promise.resolve(find(id))),
     createPlay: vi.fn((fields: PlayFields) => {
       const id = ids(next++)
@@ -213,13 +214,14 @@ describe('saved plays', () => {
     await user.click(screen.getByRole('button', { name: 'All plays' }))
 
     expect(await screen.findByText(/Unsaved changes in/)).toHaveTextContent('First edited')
+    await user.click(screen.getByRole('tab', { name: /^Drafts/ }))
     const open = await screen.findByRole('button', { name: 'Open First' })
     expect(open).toBeDisabled()
     expect(screen.getByRole('button', { name: 'New play' })).toBeDisabled()
     expect(within(open).getByText('Draft')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Closed and cancelled' }))
-    expect(screen.getByText('No plays in this view.')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'In progress' }))
+    await user.click(screen.getByRole('tab', { name: /^Closed/ }))
+    expect(await screen.findByText('No plays in this view.')).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: /^Drafts/ }))
 
     await user.click(screen.getByRole('button', { name: 'Continue editing' }))
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('First edited')
@@ -233,9 +235,9 @@ describe('saved plays', () => {
   it('shows each saved play with a ticker chip, the venue logo and the account, described together for assistive technology', async () => {
     const server = fakeServer()
     const account = { ...accountFixture, venueId: 'hyperliquid' }
-    const venuePlay: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, title: 'Reclaim', venueId: 'hyperliquid', instrument: 'ETH', instrumentSource: 'venue' } }
-    const manualPlay: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, id: ids(77), title: 'Manual idea', venueId: 'manual', instrument: 'GDX', instrumentSource: 'manual' } }
-    const orphan: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, id: ids(78), title: 'Orphan', accountId: ids(99), instrument: '' } }
+    const venuePlay: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, status: 'planned', title: 'Reclaim', venueId: 'hyperliquid', instrument: 'ETH', instrumentSource: 'venue' } }
+    const manualPlay: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, status: 'planned', id: ids(77), title: 'Manual idea', venueId: 'manual', instrument: 'GDX', instrumentSource: 'manual' } }
+    const orphan: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, status: 'planned', id: ids(78), title: 'Orphan', accountId: ids(99), instrument: '' } }
     for (const play of [venuePlay, manualPlay, orphan]) server.plays.set(play.summary.id, play)
     render(<Page api={client(server)} accounts={[account]} />)
     const row = await screen.findByRole('button', { name: 'Open Reclaim' })
@@ -432,6 +434,7 @@ describe('default play title', () => {
     await waitFor(() => expect(titleBox()).toHaveValue('BTC-PERP Short · 16 Oct 2026'))
 
     await user.click(screen.getByRole('button', { name: 'All plays' }))
+    await user.click(await screen.findByRole('tab', { name: /^Drafts/ }))
     expect(await screen.findByRole('button', { name: 'Open BTC-PERP Short · 16 Oct 2026' })).toBeInTheDocument()
     expect(screen.queryByText('Untitled play')).not.toBeInTheDocument()
   })
@@ -498,7 +501,7 @@ describe('default play title', () => {
     server.plays.set(legacy.summary.id, legacy)
     const user = userEvent.setup()
     render(<Page api={client(server)} />)
-    await user.click(await screen.findByRole('button', { name: 'Closed and cancelled' }))
+    await user.click(await screen.findByRole('tab', { name: /^Cancelled/ }))
     await user.click(await screen.findByRole('button', { name: 'Open Untitled play' }))
     await screen.findByRole('textbox', { name: 'Play title' })
     expect(titleBox()).toHaveAttribute('placeholder', 'Name this play')

@@ -1,12 +1,17 @@
 import { errorMessage } from '@/api/errors'
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
-import { statusLabels, type PlayStatus, type PlaySummary, type SavedPlay, type StatusRequest } from '@/api/plays'
+import { isReviewed, pagedPlayViews, playSearchLength, statusLabels, type PlayCounts, type PlayList as PlayListPage, type PlayListQuery, type PlayStatus, type PlayView, type SavedPlay, type StatusRequest } from '@/api/plays'
 import { Button } from '@/components/ui/button'
+import { Pager } from '@/components/ui/pager'
+import { isPageSize } from '@/components/ui/paging'
+import { Skeleton, SkeletonStatus } from '@/components/ui/skeleton'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { useNotifications } from '@/components/notifications/notifications'
 import { preloadLightweightRenderer } from '@/components/chart/lazy'
 import { useVenues } from '@/api/venues'
-import { ArrowLeft, History, Pause, Play, Plus, Save, Trash2, X } from 'lucide-react'
+import { ArrowLeft, History, Pause, Play, Plus, Save, Search, Trash2, X } from 'lucide-react'
 import type { PlayDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
 import { PlayIdentity } from './PlayIdentity'
@@ -19,6 +24,7 @@ import { planIssues, planIssueSummary } from './planChecks'
 import { formatMoney, marginOverBudget } from './sizing'
 import { leverageOf } from './levels'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
+import { initialPlaysList, playSearchDelay, playViewTabs, type PlaysListState } from './plays-list'
 import {
   createPlaysSession, draftFromSaved, fieldsToSave, hasDraftContent, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
   observedPlayVersion, startNewPlay, syncEvidence,
@@ -27,12 +33,10 @@ import {
 
 
 const ended: PlayStatus[] = ['closed', 'cancelled']
-const filters = [['active', 'In progress'], ['ended', 'Closed and cancelled'], ['pending', 'Pending review'], ['reviewed', 'Reviewed'], ['all', 'All']] as const
-type Filter = typeof filters[number][0]
 type DialogKind = null | 'revision' | 'cancel' | 'delete' | 'history'
 type WorkKind = 'save' | 'status' | 'open' | 'delete' | 'manual'
 
-export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef }: {
+export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -46,7 +50,13 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   active?: boolean
   /** Shared with shell actions that could replace the session, before disabled controls render. */
   workRef?: RefObject<symbol | null>
+  /** The list's view, search, page and size; the shell keeps them while a Play is open. */
+  list?: PlaysListState
+  onList?: (list: PlaysListState) => void
 }) {
+  const [localList, setLocalList] = useState(initialPlaysList)
+  const listState = list ?? localList
+  const setListState = onList ?? setLocalList
   useEffect(() => { void preloadLightweightRenderer().catch(() => { /* The adapter shows a load error when mounted. */ }) }, [])
   const latest = useRef(session)
   useEffect(() => { latest.current = session })
@@ -357,7 +367,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     session.observedPlay.accountId === saved.summary.accountId && session.observedPlay.conflict
     ? <div className="workspace-alert" role="alert">The saved Play changed elsewhere. Your edits and their original version were kept. Copy any edits you want to keep, then discard the local copy from All plays and reopen the latest saved Play before saving.</div> : null
   if (session.view === 'list') {
-    return <>{requested}{conflict}<PlayList api={api} accounts={accounts} busy={busy !== null}
+    return <>{requested}{conflict}<PlayList api={api} accounts={accounts} busy={busy !== null} list={listState} onList={setListState}
       unsaved={unsaved ? draft.title.trim() || 'Untitled play' : null}
       onOpen={id => { void open(id) }}
       onNew={() => { if (activeWork.current.current) return; setError(null); update(startNewPlay(session)) }}
@@ -425,19 +435,21 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   </>
 }
 
-function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onDiscard }: {
+const count = new Intl.NumberFormat('en-US')
+
+function PlayList({ api, accounts, busy, unsaved, list, onList, onOpen, onNew, onContinue, onDiscard }: {
   api: WorkspaceApi
   accounts: BrokerAccount[]
   busy: boolean
   /** Title of the play with unsaved changes, if any. */
   unsaved: string | null
+  list: PlaysListState
+  onList: (list: PlaysListState) => void
   onOpen: (id: string) => void
   onNew: () => void
   onContinue: () => void
   onDiscard: () => void
 }) {
-  const [filter, setFilter] = useState<Filter>('active')
-  const [result, setResult] = useState<{ plays: PlaySummary[] } | { error: string } | null>(null)
   const [generation, setGeneration] = useState(0)
   // The first mount loads the list, even if a retained save is running. Subsequent work
   // reloads only on completion, including lost responses that leave the version unchanged.
@@ -446,19 +458,50 @@ function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onD
     setPreviousBusy(busy)
     if (!busy) setGeneration(current => current + 1)
   }
+  // Typing waits briefly before it becomes the search; a search set elsewhere replaces the box.
+  const [search, setSearch] = useState(list.q)
+  const [searched, setSearched] = useState(list.q)
+  if (searched !== list.q) {
+    setSearched(list.q)
+    if (search.trim() !== list.q) setSearch(list.q)
+  }
+  const latestList = useRef(list)
+  useEffect(() => { latestList.current = list })
+  useEffect(() => {
+    const q = search.trim()
+    if (q === latestList.current.q) return
+    const timer = setTimeout(() => onList({ ...latestList.current, q, page: 1 }), playSearchDelay)
+    return () => clearTimeout(timer)
+  }, [search, onList])
+
+  const paged = pagedPlayViews.includes(list.view)
+  const query: PlayListQuery = { view: list.view, ...(list.q ? { q: list.q } : {}), ...(paged ? { page: list.page, pageSize: list.pageSize } : {}) }
+  const rowsKey = JSON.stringify([query, generation])
+  const [rows, setRows] = useState<{ api: WorkspaceApi; key: string; page?: PlayListPage; error?: string } | null>(null)
   useEffect(() => {
     const controller = new AbortController()
-    api.plays(controller.signal).then(plays => { if (!controller.signal.aborted) setResult({ plays }) })
-      .catch(cause => { if (!controller.signal.aborted) setResult({ error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
+    const request = (JSON.parse(rowsKey) as [PlayListQuery, number])[0]
+    api.plays(request, controller.signal).then(page => { if (!controller.signal.aborted) setRows({ api, key: rowsKey, page }) })
+      .catch(cause => { if (!controller.signal.aborted) setRows({ api, key: rowsKey, error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
     return () => controller.abort()
-  }, [api, generation])
-  const plays = result && 'plays' in result ? result.plays : []
-  const shown = plays.filter(play => {
-    if (filter === 'all') return true
-    if (filter === 'pending' || filter === 'reviewed') return ended.includes(play.status) &&
-      (filter === 'reviewed') === (play.hasReview || !!play.reviewedAtUtc)
-    return (filter === 'ended') === ended.includes(play.status)
-  })
+  }, [api, rowsKey])
+  const countsKey = JSON.stringify([list.q, generation])
+  const [counts, setCounts] = useState<{ api: WorkspaceApi; key: string; counts: PlayCounts | null } | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    const q = (JSON.parse(countsKey) as [string, number])[0]
+    api.playCounts(q ? { q } : {}, controller.signal).then(next => { if (!controller.signal.aborted) setCounts({ api, key: countsKey, counts: next }) })
+      .catch(() => { if (!controller.signal.aborted) setCounts({ api, key: countsKey, counts: null }) })
+    return () => controller.abort()
+  }, [api, countsKey])
+
+  const pending = rows === null || rows.api !== api || rows.key !== rowsKey
+  const previous = rows?.api === api ? rows.page ?? null : null
+  const shown = pending ? previous : rows.page ?? null
+  const error = pending ? null : rows.error ?? null
+  const skeleton = useDelayedFlag(pending && previous === null)
+  const tabCounts = counts?.api === api && counts.key === countsKey ? counts.counts : null
+  const top = useRef<HTMLDivElement | null>(null)
   const accountName = (id: string) => accounts.find(account => account.id === id)?.name ?? 'Unknown account'
 
   return <section className="plays-page plays-list-page" aria-label="Saved plays">
@@ -469,23 +512,46 @@ function PlayList({ api, accounts, busy, unsaved, onOpen, onNew, onContinue, onD
     {unsaved && <div className="workspace-alert plays-unsaved" role="status"><span>Unsaved changes in <strong>{unsaved}</strong>. Save or discard them before opening another play.</span>
       <Button variant="outline" size="sm" onClick={onContinue}>Continue editing</Button>
       <Button variant="ghost" size="sm" className="danger-action" disabled={busy} onClick={onDiscard}>Discard changes</Button></div>}
-    <div className="plays-list-filters" role="group" aria-label="Show plays">
-      {filters.map(([value, label]) => <button key={value} type="button" className={filter === value ? 'active' : ''} aria-pressed={filter === value}
-        onClick={() => setFilter(value)}>{label}</button>)}
-    </div>
-    {result === null && <p className="workspace-loading" role="status">Loading plays…</p>}
-    {result && 'error' in result && <div className="workspace-alert" role="alert"><span>{result.error}</span>
-      <Button variant="ghost" size="sm" onClick={() => { setResult(null); setGeneration(current => current + 1) }}>Try again</Button></div>}
-    {result && 'plays' in result && (shown.length ? <ul className="plays-list">
-      {shown.map(play => <li key={play.id}>
-        <button type="button" className="plays-list-item" disabled={!!unsaved || busy} onClick={() => onOpen(play.id)} aria-label={`Open ${play.title || 'Untitled play'}`} aria-describedby={`plays-list-identity-${play.id}`}>
-          <span className="plays-list-title"><span className="plays-list-heading"><strong>{play.title || 'Untitled play'}</strong>{play.origin === 'retrospective' && <span className="badge play-retrospective">Retrospective</span>}</span>
-            <PlayIdentity id={`plays-list-identity-${play.id}`} instrument={play.instrument} source={play.instrumentSource} venueId={play.venueId} accountName={accountName(play.accountId)} /></span>
-          <span className={`direction-chip ${play.direction}`}>{play.direction === 'long' ? 'Long' : 'Short'}</span>
-          <span className={`badge play-status-${play.status}`}>{statusLabels[play.status]}</span>
-          <small className="plays-list-meta">{ended.includes(play.status) && (play.hasReview || play.reviewedAtUtc ? 'Reviewed · ' : 'Pending review · ')}{play.origin !== 'retrospective' && play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated {new Date(play.updatedAtUtc).toLocaleDateString()}</small>
-        </button>
-      </li>)}
-    </ul> : <div className="plays-list-empty"><p>{plays.length ? 'No plays in this view.' : 'No saved plays yet.'}</p></div>)}
+    <Tabs value={list.view} onValueChange={value => onList({ ...list, view: value as PlayView, page: 1 })} className="plays-list-tabs">
+      <div className="plays-list-toolbar">
+        <TabsList aria-label="Show plays">
+          {playViewTabs.map(tab => <TabsTrigger key={tab.view} value={tab.view} title={tab.description}>
+            {tab.label}{' '}<span className="plays-tab-count">{tabCounts ? count.format(tabCounts[tab.view]) : '—'}</span>
+          </TabsTrigger>)}
+        </TabsList>
+        <label className="plays-search"><Search size={14} aria-hidden="true" />
+          <input type="search" value={search} maxLength={playSearchLength} placeholder="Title or instrument" aria-label="Search plays"
+            autoComplete="off" onChange={event => setSearch(event.target.value)} /></label>
+      </div>
+      <TabsContent value={list.view} ref={top}>
+        {error && <div className="workspace-alert" role="alert"><span>{error}</span>
+          <Button variant="ghost" size="sm" onClick={() => { setRows(null); setGeneration(current => current + 1) }}>Try again</Button></div>}
+        {!error && shown === null && (skeleton ? <SkeletonStatus label="Loading plays…"><ul className="plays-list">
+          {[0, 1, 2, 3].map(row => <li key={row}><span className="plays-list-item plays-list-skeleton">
+            <span className="plays-list-title"><Skeleton className="skeleton-title" /><Skeleton className="skeleton-identity" /></span>
+            <Skeleton className="skeleton-chip" /><Skeleton className="skeleton-chip" /><Skeleton className="skeleton-meta" />
+          </span></li>)}
+        </ul></SkeletonStatus> : <div className="plays-list-pending" aria-busy="true" />)}
+        {!error && shown && <>
+          {!paged && shown.totalCount > shown.plays.length && <p className="workspace-scope-note plays-cap" role="status">
+            Showing the {count.format(shown.plays.length)} most recently updated of {count.format(shown.totalCount)}. Search to narrow the list.</p>}
+          {shown.plays.length ? <ul className={pending ? 'plays-list list-refetching' : 'plays-list'} aria-busy={pending || undefined}>
+            {shown.plays.map(play => <li key={play.id}>
+              <button type="button" className="plays-list-item" disabled={!!unsaved || busy} onClick={() => onOpen(play.id)} aria-label={`Open ${play.title || 'Untitled play'}`} aria-describedby={`plays-list-identity-${play.id}`}>
+                <span className="plays-list-title"><span className="plays-list-heading"><strong>{play.title || 'Untitled play'}</strong>{play.origin === 'retrospective' && <span className="badge play-retrospective">Retrospective</span>}</span>
+                  <PlayIdentity id={`plays-list-identity-${play.id}`} instrument={play.instrument} source={play.instrumentSource} venueId={play.venueId} accountName={accountName(play.accountId)} /></span>
+                <span className={`direction-chip ${play.direction}`}>{play.direction === 'long' ? 'Long' : 'Short'}</span>
+                <span className={`badge play-status-${play.status}`}>{statusLabels[play.status]}</span>
+                <small className="plays-list-meta">{ended.includes(play.status) && (isReviewed(play) ? 'Reviewed · ' : 'Pending review · ')}{play.origin !== 'retrospective' && play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated {new Date(play.updatedAtUtc).toLocaleDateString()}</small>
+              </button>
+            </li>)}
+          </ul> : <div className={pending ? 'plays-list-empty list-refetching' : 'plays-list-empty'} aria-busy={pending || undefined}>
+            <p>{list.q ? `No plays match “${list.q}”.` : tabCounts?.all === 0 ? 'No saved plays yet.' : 'No plays in this view.'}</p></div>}
+          {paged && <Pager label="Plays pages" page={shown.page} pageSize={shown.pageSize} totalCount={shown.totalCount} disabled={pending}
+            onPage={page => { onList({ ...list, page }); top.current?.scrollIntoView?.({ block: 'start' }) }}
+            onPageSize={size => { if (isPageSize(size)) onList({ ...list, page: 1, pageSize: size }) }} />}
+        </>}
+      </TabsContent>
+    </Tabs>
   </section>
 }

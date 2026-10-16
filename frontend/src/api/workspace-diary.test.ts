@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
 import { accountFixture, savedPlayFixture } from '@/test/workspace-fixture'
-import { operationFixture } from '@/test/activity-fixture'
+import { operationWithFillsFixture as operationFixture } from '@/test/activity-fixture'
 import { reviewExclusionsPath } from './review'
 import { retrospectivePreviewPath } from './retrospective'
 

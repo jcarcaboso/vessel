@@ -5,9 +5,10 @@ import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import { systemFixture } from '@/test/system-fixture'
 import { reviewFixture } from '@/test/review-fixture'
-import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, playApiStubs, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
+import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, playApiStubs, playCountsFrom, playsFrom, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
+import type { ActivityQuery } from '@/api/activity'
 import { ApplicationShell } from './ApplicationShell'
-import { activityFixture, operationFixture } from '@/test/activity-fixture'
+import { activityFillsFixture, activityFixture, activityPage, operationFixture } from '@/test/activity-fixture'
 import { retrospectiveFixture, retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
@@ -16,7 +17,8 @@ function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     accountCredential: vi.fn().mockResolvedValue({ storageConfigured: true, credential: null }),
     saveAccountCredential: vi.fn().mockRejectedValue(new Error('Unexpected credential write')),
     deleteAccountCredential: vi.fn().mockResolvedValue(undefined),
-    activity: vi.fn().mockResolvedValue({ operations: [], totalOperationCount: 0, retainedFillCount: 0, omittedOperationCount: 0, coverage: [], scopeNote: 'Fixture history' }),
+    activity: vi.fn().mockResolvedValue(activityPage([], { scopeNote: 'Fixture history' })),
+    activityFills: vi.fn().mockResolvedValue(activityFillsFixture),
     overview: vi.fn().mockResolvedValue(emptyOverview),
     portfolios: vi.fn().mockResolvedValue([]), accounts: vi.fn().mockResolvedValue([]),
     account: vi.fn().mockResolvedValue(accountFixture),
@@ -119,6 +121,41 @@ describe('Main application shell', () => {
     expect(await screen.findByRole('combobox', { name: 'Instrument' })).toHaveValue('BTC')
     expect(screen.getByRole('combobox', { name: 'Direction' })).toHaveValue('long')
     expect(screen.getByRole('combobox', { name: 'Period' })).toHaveValue('30')
+  })
+  it('retains the Activity page and size across page navigation and asks Overview for five scoped rows', async () => {
+    const operations = Array.from({ length: 60 }, (_, n) => ({ ...operationFixture, id: `${String(n).padStart(8, '0')}-1234-1234-1234-123456789abc:long`, contractId: `C-${n}` }))
+    const activity = vi.fn((query: ActivityQuery) => Promise.resolve(activityPage(operations.slice((query.page - 1) * query.pageSize, query.page * query.pageSize),
+      { page: query.page, pageSize: query.pageSize, totalCount: 60, facets: { accountIds: [accountFixture.id], contracts: operations.map(op => op.contractId).sort() } })))
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api({ overview: vi.fn().mockResolvedValue(overviewFixture), activity })} />)
+    await screen.findByRole('button', { name: 'View Main account' })
+    await waitFor(() => expect(activity).toHaveBeenCalledWith({ page: 1, pageSize: 5 }, expect.any(AbortSignal)))
+    await userEvent.click(screen.getByRole('link', { name: 'Activity' }))
+    await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Rows per page' }), '50')
+    await userEvent.click(within(await screen.findByRole('navigation', { name: 'Activity pages' })).getByRole('button', { name: 'Next' }))
+    expect(await screen.findByText('51–60 of 60')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Activity' }))
+    expect(await screen.findByText('51–60 of 60')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Rows per page' })).toHaveValue('50')
+    expect(activity).toHaveBeenLastCalledWith({ page: 2, pageSize: 50 }, expect.any(AbortSignal))
+  })
+  it('opens Plays from Overview on the same tab, without an earlier search', async () => {
+    const plays = [{ ...savedPlayFixture.summary, title: 'Waiting review', status: 'closed' as const, endedAtUtc: '2026-10-06T12:00:00Z' }]
+    const client = api({ overview: vi.fn().mockResolvedValue(overviewFixture), plays: vi.fn(playsFrom(plays)), playCounts: vi.fn(playCountsFrom(plays)) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await screen.findByRole('button', { name: 'View Main account' })
+    await userEvent.click(screen.getByRole('link', { name: 'Plays' }))
+    await userEvent.type(await screen.findByRole('searchbox', { name: 'Search plays' }), 'zzz')
+    await waitFor(() => expect(client.plays).toHaveBeenLastCalledWith({ view: 'progress', q: 'zzz' }, expect.any(AbortSignal)))
+    await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
+    const overview = await screen.findByRole('region', { name: 'Plays overview' })
+    await userEvent.click(within(overview).getByRole('tab', { name: /^Needs review/ }))
+    await within(overview).findByRole('button', { name: 'Open Waiting review' })
+    await userEvent.click(within(overview).getByRole('button', { name: 'View all' }))
+    expect(await screen.findByRole('tab', { name: /^Needs review/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('searchbox', { name: 'Search plays' })).toHaveValue('')
+    expect(await screen.findByRole('button', { name: 'Open Waiting review' })).toBeInTheDocument()
+    expect(client.plays).toHaveBeenLastCalledWith({ view: 'review', page: 1, pageSize: 25 }, expect.any(AbortSignal))
   })
   it.each([
     ['lighter', 'margin', '131.89123456789012345678901234', '$131.89', 'reported margin', 'Venue-reported available margin · not guaranteed withdrawable'],
@@ -426,7 +463,7 @@ describe('Main application shell', () => {
   it('opens a saved play from Overview and preserves edits when reopening that same play', async () => {
     const client = api({
       overview: vi.fn().mockResolvedValue(overviewFixture),
-      plays: vi.fn().mockResolvedValue([savedPlayFixture.summary]),
+      plays: vi.fn(playsFrom([{ ...savedPlayFixture.summary, status: 'planned' }])),
       play: vi.fn().mockResolvedValue(savedPlayFixture), evidence: vi.fn().mockResolvedValue([]),
     })
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
@@ -445,7 +482,7 @@ describe('Main application shell', () => {
   it('does not overwrite a local draft when a different saved play is opened from Overview', async () => {
     const client = api({
       overview: vi.fn().mockResolvedValue(overviewFixture),
-      plays: vi.fn().mockResolvedValue([savedPlayFixture.summary]),
+      plays: vi.fn(playsFrom([{ ...savedPlayFixture.summary, status: 'planned' }])),
     })
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
     await screen.findByRole('button', { name: 'Open Saved idea' })
@@ -464,8 +501,7 @@ describe('Main application shell', () => {
   it('reloads the Overview play list independently and keeps the rest of Overview visible on failure', async () => {
     const client = api({
       overview: vi.fn().mockResolvedValue(overviewFixture),
-      plays: vi.fn().mockRejectedValueOnce(new ApiError('unavailable', 'Plays temporarily unavailable.'))
-        .mockResolvedValue([savedPlayFixture.summary]),
+      plays: vi.fn(playsFrom([{ ...savedPlayFixture.summary, status: 'planned' }])).mockRejectedValueOnce(new ApiError('unavailable', 'Plays temporarily unavailable.')),
     })
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('Plays temporarily unavailable.')
@@ -701,7 +737,7 @@ describe('Main application shell', () => {
     await screen.findByRole('heading', { level: 1, name: 'Main account' })
     expect(await screen.findByText('No positions in the latest snapshot')).toBeInTheDocument()
     expect(client.snapshot).toHaveBeenCalledWith(accountFixture.id, expect.any(AbortSignal))
-    expect(client.activity).toHaveBeenCalledWith(accountFixture.id, expect.any(AbortSignal))
+    expect(client.activity).toHaveBeenCalledWith({ accountId: accountFixture.id, page: 1, pageSize: 25 }, expect.any(AbortSignal))
   })
   it('retains previous data when a refresh fails and does not invent fills', async () => {
     const wallet = { ...accountFixture, venueId: 'hyperliquid', syncStatus: 'synced' as const, address: '0x' + '1'.repeat(40) }

@@ -1,5 +1,7 @@
+import { ApiError } from './errors'
 import { isCount, isGuid, isNullOr, isPlainDecimal, isRecord, isText, isTimestamp } from './guards'
 import { isImageMarkup, type ImageMarkup } from './markup'
+import { validOverviewScope } from './overview-summary'
 
 export const playStatuses = ['draft', 'planned', 'paused', 'open', 'closed', 'cancelled'] as const
 export type PlayStatus = typeof playStatuses[number]
@@ -129,6 +131,82 @@ export const isPlayHistory = (v: unknown): v is PlayHistory => isRecord(v) && Ar
 export const isSavedEvidence = (v: unknown): v is SavedEvidence => isRecord(v) && isGuid(v.id) && isGuid(v.playId) &&
   (v.source === 'capture' || v.source === 'upload') && isText(v.contentType, 64) && isCount(v.sizeBytes) && isText(v.sha256, 64) &&
   isText(v.note, 4000) && isTimestamp(v.createdAtUtc, timeLength) && isTimestamp(v.updatedAtUtc, timeLength) && isNullOr(v.markup, isImageMarkup)
+
+/** Saved-Play list views. Drafts and In progress return in full (at most 200 rows); the others are paged. */
+export const playViews = ['drafts', 'progress', 'review', 'reviewed', 'closed', 'cancelled', 'all'] as const
+export type PlayView = typeof playViews[number]
+export const pagedPlayViews: readonly PlayView[] = ['review', 'reviewed', 'closed', 'cancelled', 'all']
+export const unpagedPlayLimit = 200
+export const playSearchLength = 100
+export interface PlayListQuery {
+  view: PlayView
+  /** Case-insensitive title or instrument search; blank means none. */
+  q?: string
+  /** Overview scope: `all`, `unassigned`, `portfolio:{id}` or `account:{id}`. */
+  scope?: string
+  page?: number
+  pageSize?: number
+}
+export interface PlayList { plays: PlaySummary[]; view: PlayView; page: number; pageSize: number; totalCount: number }
+export type PlayCounts = Record<'drafts' | 'progress' | 'review' | 'reviewed' | 'closed' | 'cancelled' | 'all', number>
+
+/** Whether a closed or cancelled Play counts as reviewed, as the list views define it. */
+export const isReviewed = (play: PlaySummary) => play.hasReview || !!play.reviewedAtUtc
+const endedStatus = (status: PlayStatus) => status === 'closed' || status === 'cancelled'
+/** Whether a Play belongs to a list view, as the server selects it. */
+export const playInView = (play: PlaySummary, view: PlayView) => {
+  switch (view) {
+    case 'drafts': return play.status === 'draft'
+    case 'progress': return play.status === 'planned' || play.status === 'paused' || play.status === 'open'
+    case 'review': return endedStatus(play.status) && !isReviewed(play)
+    case 'reviewed': return endedStatus(play.status) && isReviewed(play)
+    case 'closed': case 'cancelled': return play.status === view
+    case 'all': return true
+  }
+}
+function invalidPlayQuery(): never {
+  throw new ApiError('invalid-response', 'The plays request is invalid.')
+}
+function listParams(q: string | undefined, scope: string | undefined) {
+  const params = new URLSearchParams()
+  const search = q?.trim() ?? ''
+  if (search) { if (search.length > playSearchLength) invalidPlayQuery(); params.set('q', search) }
+  if (scope !== undefined && scope !== 'all') { if (!validOverviewScope(scope)) invalidPlayQuery(); params.set('scope', scope) }
+  return params
+}
+const isPageNumber = (v: unknown): v is number => isCount(v) && v >= 1
+const isPageSizeValue = (v: unknown): v is number => isCount(v) && v >= 1 && v <= 100
+export function playListPath(query: PlayListQuery): string {
+  if (!playViews.includes(query.view)) invalidPlayQuery()
+  const params = listParams(query.q, query.scope)
+  params.set('view', query.view)
+  if (query.page !== undefined) { if (!isPageNumber(query.page)) invalidPlayQuery(); params.set('page', String(query.page)) }
+  if (query.pageSize !== undefined) { if (!isPageSizeValue(query.pageSize)) invalidPlayQuery(); params.set('pageSize', String(query.pageSize)) }
+  return `/api/plays?${params}`
+}
+export function playCountsPath(query: { q?: string; scope?: string }): string {
+  const params = listParams(query.q, query.scope).toString()
+  return `/api/plays/counts${params ? `?${params}` : ''}`
+}
+/** A list page: the requested view, exact counts and rows that belong to the view and scope. */
+export function isPlayList(v: unknown, query: PlayListQuery): v is PlayList {
+  if (!isRecord(v) || v.view !== query.view || !Array.isArray(v.plays) || !isPageNumber(v.page) || !isCount(v.pageSize) || v.pageSize < 1 ||
+    !isCount(v.totalCount) || !v.plays.every(isPlaySummary)) return false
+  const plays = v.plays as PlaySummary[], total = v.totalCount
+  if (pagedPlayViews.includes(query.view)) {
+    if (query.pageSize !== undefined && v.pageSize !== query.pageSize || v.pageSize > 100 || v.page > Math.max(1, Math.ceil(total / v.pageSize)) ||
+      plays.length !== Math.max(0, Math.min(v.pageSize, total - (v.page - 1) * v.pageSize))) return false
+  } else if (plays.length > unpagedPlayLimit || !(plays.length === Math.min(total, unpagedPlayLimit) ||
+    query.pageSize !== undefined && plays.length === Math.min(total, query.pageSize))) return false
+  const account = query.scope?.startsWith('account:') ? query.scope.slice(8).toLowerCase() : null
+  return new Set(plays.map(play => play.id)).size === plays.length &&
+    plays.every(play => playInView(play, query.view) && (account === null || play.accountId.toLowerCase() === account))
+}
+export function isPlayCounts(v: unknown): v is PlayCounts {
+  if (!isRecord(v) || !['drafts', 'progress', 'review', 'reviewed', 'closed', 'cancelled', 'all'].every(k => isCount(v[k]))) return false
+  const c = v as PlayCounts
+  return c.drafts + c.progress + c.closed + c.cancelled === c.all && c.review + c.reviewed === c.closed + c.cancelled
+}
 
 export const statusLabels: Record<PlayStatus, string> = {
   draft: 'Draft', planned: 'Planned', paused: 'Paused', open: 'Open', closed: 'Closed', cancelled: 'Cancelled',
