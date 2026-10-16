@@ -773,11 +773,30 @@ Replicas of one deployment share its schema, claim accounts with `SKIP LOCKED` a
 
 ### Rotate RabbitMQ credentials
 
+Rotate each broker user separately: change the password in RabbitMQ first, then the matching `.env` value, then recreate only the services that use that user. `rabbitmqctl` reads the new password from standard input, and the shell's `read -s` keeps it out of the terminal, shell history and process arguments. Compose reads `.env` itself; its values are not exported to your shell, so name the user explicitly.
+
+Administrator (`RABBITMQ_USER`, used by `migrate`, and by API and worker when no application user is configured):
+
 ```sh
-docker compose exec rabbitmq rabbitmqctl change_password "$RABBITMQ_USER" 'NEW-URL-SAFE-PASSWORD'
-# update RABBITMQ_PASSWORD (and RABBITMQ_APP_PASSWORD if used) in .env, then:
+read -rs NEW_PASSWORD   # a new URL-safe value, for example from: openssl rand -hex 24
+printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl change_password <administrator-user>
+unset NEW_PASSWORD
+# Edit RABBITMQ_PASSWORD in .env, then recreate what uses the administrator:
+docker compose up -d --force-recreate api worker   # only if RABBITMQ_APP_USER is not set
+docker compose run --rm migrate                    # confirms provisioning works with the new password
+```
+
+Application user (`RABBITMQ_APP_USER`, used by API and worker):
+
+```sh
+read -rs NEW_PASSWORD
+printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl change_password <application-user>
+unset NEW_PASSWORD
+# Edit RABBITMQ_APP_PASSWORD in .env, then:
 docker compose up -d --force-recreate api worker
 ```
+
+Recreate every other service that uses the same user too, for example additional worker services. Between the broker change and the recreation, the running hosts keep their existing connections; a reconnect with the old password fails until they are recreated, and their outboxes hold publications meanwhile.
 
 `.env` values create users only on an empty volume. The optional least-privilege application user (configure, write and read on `^vessel\..*`, write also on `amq.default`) is described in [deploy/README.md](../../deploy/README.md#broker-users-and-passwords).
 

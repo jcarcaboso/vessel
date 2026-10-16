@@ -482,14 +482,32 @@ archive.
 **first** start of an empty `rabbitmq` volume only; changing them in `.env` later
 does not change the broker. That user is what `migrate` needs to declare topology.
 Use URL-safe passwords (for example `openssl rand -hex 24`): Compose places them in
-an AMQP URI. To rotate the password, change it in the broker, then in `.env`, and
-recreate the services that connect:
+an AMQP URI.
+
+Rotate each broker user separately: change the password in RabbitMQ first, then the matching `.env` value, then recreate only the services that use that user. `rabbitmqctl` reads the new password from standard input, and the shell's `read -s` keeps it out of the terminal, shell history and process arguments. Compose reads `.env` itself; its values are not exported to your shell, so name the user explicitly.
+
+Administrator (`RABBITMQ_USER`, used by `migrate`, and by API and worker when no application user is configured):
 
 ```sh
-docker compose exec rabbitmq rabbitmqctl change_password "$RABBITMQ_USER" 'NEW-URL-SAFE-PASSWORD'
-# update RABBITMQ_PASSWORD (and RABBITMQ_APP_PASSWORD if used) in .env, then:
+read -rs NEW_PASSWORD   # a new URL-safe value, for example from: openssl rand -hex 24
+printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl change_password <administrator-user>
+unset NEW_PASSWORD
+# Edit RABBITMQ_PASSWORD in .env, then recreate what uses the administrator:
+docker compose up -d --force-recreate api worker   # only if RABBITMQ_APP_USER is not set
+docker compose run --rm migrate                    # confirms provisioning works with the new password
+```
+
+Application user (`RABBITMQ_APP_USER`, used by API and worker):
+
+```sh
+read -rs NEW_PASSWORD
+printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl change_password <application-user>
+unset NEW_PASSWORD
+# Edit RABBITMQ_APP_PASSWORD in .env, then:
 docker compose up -d --force-recreate api worker
 ```
+
+Recreate every other service that uses the same user too, for example additional worker services. Between the broker change and the recreation, the running hosts keep their existing connections; a reconnect with the old password fails until they are recreated, and their outboxes hold publications meanwhile.
 
 For least privilege, API and worker can use a separate, non-administrator
 application user limited to the `vessel.` names (hosts declare nothing at
@@ -498,7 +516,9 @@ The broker tests pass with exactly these permissions. Create it once and set `RA
 in `.env`; without them API and worker use the administrator:
 
 ```sh
-docker compose exec rabbitmq rabbitmqctl add_user vessel-app 'URL-SAFE-PASSWORD'
+read -rs NEW_PASSWORD   # the value you also put in RABBITMQ_APP_PASSWORD
+printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl add_user vessel-app
+unset NEW_PASSWORD
 # configure, write (commands are published through the default exchange), read
 docker compose exec rabbitmq rabbitmqctl set_permissions -p / vessel-app \
   '^vessel\..*' '^(vessel\..*|amq\.default)$' '^vessel\..*'
@@ -866,7 +886,8 @@ It builds the API and web images as `vessel-e2e:api`/`vessel-e2e:web` and runs t
 real Compose stack (PostgreSQL, RabbitMQ with the least-privilege application user,
 RustFS, migrate, API, monitor worker, a `verifier` worker for the `verification`
 subscription and web) on its own project, unused subnet and loopback ports, with
-generated secrets and a synthetic owner. `scripts/e2e/fake_venue.py` is a
+generated secrets and a synthetic owner. Only Docker and Python are needed on the
+host: the fake venue's certificates are generated inside its pinned Python image. `scripts/e2e/fake_venue.py` is a
 deterministic Hyperliquid info-API fake on the Compose network. It serves TLS from
 a throwaway CA that only the API and worker containers trust (`SSL_CERT_FILE`), so
 the production `https`/`wss` host rules stay unchanged, and a loopback-only control
@@ -883,8 +904,9 @@ watches, orphaned entries, omitted executions, broker outage and broker volume
 loss, a worker killed mid-read with a second replica recovering after the lease,
 a disabled account with a pending Check, admin receipt retry, retention, and
 backup/restore with an epoch rotation that resets an old SSE cursor. It sets the
-shortest allowed times (one-minute interval, zero protection grace, 15-second
-cooldown, one-hour watch and unobservable lifetimes, one-day retention) and
+shortest allowed interval, protection grace, lifetimes and retention (one minute,
+zero, one hour and one day) and a 15-second manual cooldown (zero is allowed, but a
+nonzero cooldown is needed to exercise the countdown and 429 responses) and
 shifts three timestamps in the synthetic database instead of waiting an hour or
 a day; the fixed five-minute lease is waited out. A run takes about twenty minutes
 and prints a pass/fail table; it exits non-zero on any failure. Screenshots and
