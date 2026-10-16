@@ -1,10 +1,10 @@
 # Deploy with Docker
 
-Vessel v0.1.2 is a self-hosted, single-owner trading diary. These examples use the
+Vessel v0.1.3 is a self-hosted, single-owner trading diary. These examples use the
 API and web images in one Docker Hub repository:
 
-- `skorcius/vessel:api-0.1.2` and `skorcius/vessel:api-latest`
-- `skorcius/vessel:web-0.1.2` and `skorcius/vessel:web-latest`
+- `skorcius/vessel:api-0.1.3` and `skorcius/vessel:api-latest`
+- `skorcius/vessel:web-0.1.3` and `skorcius/vessel:web-latest`
 
 Use versioned tags for deployments. The `latest` tags move with each release.
 This release targets Linux amd64.
@@ -455,6 +455,16 @@ unchanged and compresses static assets only.
 
 ## Upgrade
 
+### From v0.1.2 to v0.1.3
+
+This upgrade includes migration `20261016104756_PlayDirection`, which adds a
+`Direction` column to saved Plays, fills it from each Play's plan and adds two
+list indexes. Back up the database first and keep web and API stopped while the
+explicit migration service runs, as in the [upgrade procedure](#upgrade-procedure).
+After the migration, older API images can no longer save new Plays, because
+they do not write the new column; roll back by restoring the backup, not by
+starting an older image. Storage, credentials and Compose files are unchanged.
+
 ### From v0.1.1 to v0.1.2
 
 There is no migration. With no storage settings the API keeps its original
@@ -670,11 +680,11 @@ From the repository root, with no populated secret files in the build context:
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.1.2 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.1.2 .
+  --build-arg VERSION=0.1.3 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.1.3 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.1.2 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.1.2 .
+  --build-arg VERSION=0.1.3 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.1.3 .
 ```
 
 The API build pins SDK `10.0.302` to match the repository's `global.json`. The
