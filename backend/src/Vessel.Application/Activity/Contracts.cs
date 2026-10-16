@@ -28,5 +28,32 @@ public sealed record ActivityOperationDto(string Id, Guid AccountId, string Cont
     internal ActivityContractKey ContractKey { get; init; }
 }
 public sealed record ActivityCoverageDto(Guid AccountId, string? ContractId, string Notice);
-public sealed record ActivityDto(IReadOnlyList<ActivityOperationDto> Operations, int TotalOperationCount, int RetainedFillCount,
-    int OmittedOperationCount, IReadOnlyList<ActivityCoverageDto> Coverage, string ScopeNote);
+
+/// <summary>An Activity list row: every operation metric, without its constituent execution rows.</summary>
+public sealed record ActivityOperationSummaryDto(string Id, Guid AccountId, string ContractId, string? Direction, string Status,
+    DateTimeOffset? OpenedAtUtc, DateTimeOffset? ClosedAtUtc, DateTimeOffset LastOccurredAtUtc,
+    string? Quantity, string? TotalEnteredQuantity, string? TotalExitedQuantity, string? OpenQuantity,
+    string? AverageEntryPrice, string? AverageExitPrice, int EntryOrderCount, int ExitOrderCount, int FillCount,
+    string ReportedClosedPnlUsd, string StablecoinFeesNominalUsd, IReadOnlyList<OperationFeeDto> OtherFees,
+    string? NetResultUsd, string PnlBasis, Guid? PlayId, string PlayAssociation,
+    IReadOnlyList<string> Coverage, string? GrossClosedPnlUsd)
+{
+    public static ActivityOperationSummaryDto From(ActivityOperationDto o) => new(o.Id, o.AccountId, o.ContractId, o.Direction, o.Status,
+        o.OpenedAtUtc, o.ClosedAtUtc, o.LastOccurredAtUtc, o.Quantity, o.TotalEnteredQuantity, o.TotalExitedQuantity, o.OpenQuantity,
+        o.AverageEntryPrice, o.AverageExitPrice, o.EntryOrderCount, o.ExitOrderCount, o.FillCount, o.ReportedClosedPnlUsd,
+        o.StablecoinFeesNominalUsd, o.OtherFees, o.NetResultUsd, o.PnlBasis, o.PlayId, o.PlayAssociation, o.Coverage, o.GrossClosedPnlUsd);
+}
+public sealed record ActivityFacetsDto(IReadOnlyList<Guid> AccountIds, IReadOnlyList<string> Contracts);
+/// <summary>
+/// One page of operations after server-side filters. <c>ScopeCount</c> counts the scope before filters; <c>Version</c>
+/// identifies the scoped operation set so a client can notice that later pages describe changed history.
+/// </summary>
+public sealed record ActivityPageDto(IReadOnlyList<ActivityOperationSummaryDto> Operations, int Page, int PageSize, int TotalCount,
+    int ScopeCount, int RetainedFillCount, DateTimeOffset AsOfUtc, string Version, ActivityFacetsDto Facets,
+    IReadOnlyList<ActivityCoverageDto> Coverage, string ScopeNote);
+/// <summary>Query-string values exactly as sent; <see cref="ActivityService"/> validates them.</summary>
+public sealed record ActivityQuery(Guid? AccountId = null, string? Scope = null, string? Account = null, string? Portfolio = null,
+    string? Contract = null, string? Direction = null, string? Status = null, string? Period = null, string? From = null,
+    string? To = null, string? Page = null, string? PageSize = null);
+/// <summary>One operation's constituent rows, chronological, earliest kept when capped.</summary>
+public sealed record OperationFillsDto(string OperationId, IReadOnlyList<OperationFillDto> Fills, int OmittedFillCount);

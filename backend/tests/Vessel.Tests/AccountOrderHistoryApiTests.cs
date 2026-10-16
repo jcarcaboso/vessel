@@ -40,9 +40,9 @@ public sealed class AccountOrderHistoryApiTests
         return (await response.Content.ReadFromJsonAsync<AccountDto>())!;
     }
 
-    private static async Task<(ActivityOperationDto Operation, RetrospectivePreviewDto Preview)> Preview(HttpClient client, Guid accountId)
+    private static async Task<(ActivityOperationSummaryDto Operation, RetrospectivePreviewDto Preview)> Preview(HttpClient client, Guid accountId)
     {
-        var activity = (await client.GetFromJsonAsync<ActivityDto>("/api/activity"))!;
+        var activity = (await client.GetFromJsonAsync<ActivityPageDto>("/api/activity"))!;
         var operation = Assert.Single(activity.Operations);
         var preview = (await client.GetFromJsonAsync<RetrospectivePreviewDto>(
             $"/api/activity/retrospective?accountId={accountId}&operationId={operation.Id}"))!;
@@ -60,7 +60,7 @@ public sealed class AccountOrderHistoryApiTests
             Assert.Equal((expected.SyncStatus, expected.LastSyncedAtUtc, expected.LastSyncError, expected.SettingsRevision),
                 (actual.SyncStatus, actual.LastSyncedAtUtc, actual.LastSyncError, actual.SettingsRevision));
         }
-        var activity = (await client.GetFromJsonAsync<ActivityDto>("/api/activity"))!;
+        var activity = (await client.GetFromJsonAsync<ActivityPageDto>("/api/activity"))!;
         Assert.Contains(activity.Coverage, coverage => coverage.AccountId == expected.Id && coverage.Notice == expected.HistoryNotice);
     }
 

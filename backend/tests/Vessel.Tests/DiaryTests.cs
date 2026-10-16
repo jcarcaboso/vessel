@@ -213,7 +213,7 @@ public sealed class DiaryPostgresTests
         Assert.All(history.StatusChanges, h => Assert.Equal("owner", h.Source));
         await using var verify = database.Context(owner);
         Assert.Empty(await verify.Fills.ToListAsync()); Assert.Empty(await verify.Orders.ToListAsync());
-        Assert.Empty((await new ActivityService(new ActivityStore(verify)).GetAsync(null, default)).Operations);
+        Assert.Empty((await ActivityTestSupport.Activity(verify).PageAsync(null)).Operations);
         var report = await new ReviewService(new ReviewStore(verify, new SizingStore(verify)), TimeProvider.System).GetAsync(new(Period: "all"), default);
         Assert.Equal(1, report.Metrics.Count);
         Assert.Equal(("manual", "planned", "-0.4"), (report.Plays[0].ExecutionSource, report.Plays[0].Origin, report.Plays[0].Net));
@@ -369,7 +369,7 @@ public sealed class DiaryPostgresTests
         }
         await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
         using var client = factory.AuthorizedClient();
-        var activity = (await client.GetFromJsonAsync<ActivityDto>("/api/activity"))!;
+        var activity = (await client.GetFromJsonAsync<ActivityPageDto>("/api/activity"))!;
         var operation = Assert.Single(activity.Operations);
         var url = $"/api/activity/retrospective?accountId={account.Id}&operationId={operation.Id}";
         var preview = (await client.GetFromJsonAsync<RetrospectivePreviewDto>(url))!;
@@ -427,7 +427,7 @@ public sealed class DiaryPostgresTests
         }
         RetrospectivePreviewDto preview;
         await using (var db = database.Context(owner))
-            preview = await Service(db).PreviewAsync(account.Id, (await new ActivityService(new ActivityStore(db)).GetAsync(account.Id, default)).Operations[0].Id, default);
+            preview = await Service(db).PreviewAsync(account.Id, (await ActivityTestSupport.Activity(db).PageAsync(account.Id)).Operations[0].Id, default);
         await using (var db = database.Context(owner))
         {
             (await db.Orders.SingleAsync(o => o.OrderId == "x")).OriginalSize = 2; await db.SaveChangesAsync();
@@ -455,7 +455,7 @@ public sealed class DiaryPostgresTests
         RetrospectivePreviewDto preview;
         await using (var reading = database.Context(owner))
             preview = await Service(reading).PreviewAsync(account.Id,
-                (await new ActivityService(new ActivityStore(reading)).GetAsync(account.Id, default)).Operations[0].Id, default);
+                (await ActivityTestSupport.Activity(reading).PageAsync(account.Id)).Operations[0].Id, default);
         var request = new CreateRetrospectiveRequest(Guid.NewGuid(), account.Id, preview.Operation.Id, preview.Fingerprint, "Concurrent");
         async Task<(PlayDto? Play, int? Status)> Create(CreateRetrospectiveRequest body)
         {
@@ -541,7 +541,7 @@ public sealed class DiaryPostgresTests
             await seed.SaveChangesAsync();
         }
         await using var reading = database.Context(owner);
-        var activity = await new ActivityService(new ActivityStore(reading)).GetAsync(account.Id, default);
+        var activity = await ActivityTestSupport.Activity(reading).PageAsync(account.Id);
         Assert.Equal(2, activity.Operations.Count);
         foreach (var operation in activity.Operations)
         {
@@ -559,7 +559,7 @@ public sealed class DiaryPostgresTests
             seed.Orders.AddRange(Order(flipAccount, "fe", "buy", 1), Order(flipAccount, "flip", "sell", 2), Order(flipAccount, "fx", "buy", 1));
             await seed.SaveChangesAsync();
         }
-        var flips = await new ActivityService(new ActivityStore(reading)).GetAsync(flipAccount.Id, default);
+        var flips = await ActivityTestSupport.Activity(reading).PageAsync(flipAccount.Id);
         foreach (var operation in flips.Operations)
             Assert.False((await Service(reading).PreviewAsync(flipAccount.Id, operation.Id, default)).Eligible);
 
@@ -571,7 +571,7 @@ public sealed class DiaryPostgresTests
             seed.Orders.AddRange(Order(largeAccount, "many", "buy", 201), Order(largeAccount, "flat", "sell", 201));
             await seed.SaveChangesAsync();
         }
-        var large = (await new ActivityService(new ActivityStore(reading)).GetAsync(largeAccount.Id, default)).Operations[0];
+        var large = (await ActivityTestSupport.Activity(reading).PageAsync(largeAccount.Id)).Operations[0];
         var bounded = await Service(reading).PreviewAsync(largeAccount.Id, large.Id, default);
         Assert.False(bounded.Eligible);
         Assert.Equal(200, bounded.Operation.Fills.Count); Assert.Equal(2, bounded.Operation.OmittedFillCount);
