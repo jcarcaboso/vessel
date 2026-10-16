@@ -90,6 +90,9 @@ class Check:
   migrate:
     image: {self.images['api']}
     pull_policy: never
+  worker:
+    image: {self.images['api']}
+    pull_policy: never
   web:
     image: {self.images['web']}
     pull_policy: never
@@ -287,6 +290,35 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             else:
                 raise AssertionError('TLS web remains directly reachable')
 
+    def ports(self, service):
+        container = self.compose('ps', '-q', service, capture_output=True, text=True).stdout.strip()
+        return json.loads(run('docker', 'inspect', '--format', '{{json .HostConfig.PortBindings}}', container, capture_output=True, text=True).stdout) or {}
+
+    def worker(self):
+        # The worker ships in the API image with its own entrypoint and a heartbeat healthcheck.
+        container = self.compose('ps', '-q', 'worker', capture_output=True, text=True).stdout.strip()
+        inspected = json.loads(run('docker', 'inspect', container, capture_output=True, text=True).stdout)[0]
+        self.expect(inspected['Config']['Entrypoint'] == ['/app/worker'], 'worker uses the /app/worker entrypoint', 'worker')
+        self.expect(inspected['Config']['Healthcheck']['Test'] == ['CMD', '/app/worker-health'], 'worker healthcheck reads its heartbeat', 'worker')
+        self.expect(inspected['State']['Health']['Status'] == 'healthy', 'worker is healthy after a productive pass', 'worker')
+        self.expect(inspected['Config']['User'] == 'app', 'worker runs as the non-root app user', 'worker')
+        self.expect(not self.ports('worker'), 'worker publishes no port', 'worker')
+        broker = self.ports('rabbitmq')
+        self.expect('5672/tcp' not in broker, 'RabbitMQ AMQP is not published', 'worker')
+        self.expect([b['HostIp'] for b in broker.get('15672/tcp', [])] == ['127.0.0.1'], 'RabbitMQ management is bound to loopback only', 'worker')
+        for _ in range(60):
+            if self.json('/api/monitor')['workerOnline']:
+                break
+            time.sleep(1)
+        self.expect(self.json('/api/monitor')['workerOnline'], 'API reports the worker heartbeat online', 'worker')
+        # The worker refuses a module set its deployment schema was not provisioned for.
+        wrong = self.compose('run', '--rm', '--no-deps', '-e', 'Vessel__Worker__Modules__0=verification',
+                             '-e', 'Vessel__Worker__Deployment=monitor', 'worker', check=False, capture_output=True, text=True)
+        self.expect(wrong.returncode != 0 and 'Password' not in wrong.stderr + wrong.stdout, 'worker rejects an unprovisioned module set without printing secrets', 'worker')
+        unknown = self.compose('run', '--rm', '--no-deps', '-e', 'Vessel__Worker__Modules__0=notifications', 'worker',
+                               check=False, capture_output=True, text=True)
+        self.expect(unknown.returncode != 0, 'worker rejects an unknown module', 'worker')
+
     def transport_fixture(self):
         self.fixture = True
         self.compose('up', '-d', '--wait', 'fixture', 'web', stdout=subprocess.DEVNULL)
@@ -346,7 +378,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         self.chart_account = self.json('/api/accounts', {'name': 'Synthetic chart', 'venueId': 'hyperliquid', 'address': '0x' + '1' * 40}, 'POST')['id']
 
     def restore(self):
-        self.compose('stop', 'web', 'api', stdout=subprocess.DEVNULL)
+        # Every host stops before a backup: web, api and the worker (README upgrade/backup procedure).
+        self.compose('stop', 'web', 'api', 'worker', stdout=subprocess.DEVNULL)
         service, directory, uid = ('rustfs', '/data', '10001') if self.args.storage == 's3' else ('api', '/var/lib/vessel/evidence', '1654')
         if self.args.storage == 's3':
             # RustFS stores object metadata too; take its complete volume offline.
@@ -379,6 +412,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         self.compose('up', '-d', '--wait', project=project, stdout=subprocess.DEVNULL)
         self.ready()
         self.expect(self.request('/health/ready')[0] == 200, 'restored database/migrations ready', 'restore')
+        self.expect(self.compose('ps', '--format', 'json', 'worker', project=project, capture_output=True, text=True).stdout.count('"healthy"') == 1,
+                    'restored worker healthy without the broker volume', 'restore')
         self.expect(self.json('/api/accounts/' + self.account)['name'] == 'Synthetic manual', 'account visible under preserved owner', 'restore')
         self.expect(self.json('/api/plays/' + self.play)['summary']['title'] == 'Synthetic restore play', 'saved Play restored', 'restore')
         self.expect(self.request('/api/evidence/' + self.evidence + '/content')[2] == self.png, 'original evidence bytes restored', 'restore')
@@ -417,6 +452,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             self.compose('up', '-d', '--wait', stdout=subprocess.DEVNULL)
             self.ready()
             self.seed()
+            self.worker()
             self.matrix()
             self.transport_fixture()
             self.tls = True

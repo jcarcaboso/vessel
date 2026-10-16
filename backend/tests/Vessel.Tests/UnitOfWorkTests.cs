@@ -597,8 +597,9 @@ public sealed class UnitOfWorkTests
         Assert.Equal((409, UnitOfWork.ExecutionConflict), (conflict.StatusCode, conflict.Message));
     }
 
-    // A1: adapters participate (credential read and refusal mark) before failing at the venue. The handled
-    // venue failure is recorded together with the refusal and reported as a venue error, not a server error.
+    // A1: adapters make credential calls (read and refusal mark) before failing at the venue. On the monitor
+    // refresh path the venue read runs outside the account transaction, so those calls commit on their own; the
+    // handled venue failure is still recorded beside the refusal and reported as a venue error, not a server error.
     [PostgresFact]
     public async Task Handled_venue_failure_after_participating_credential_calls_is_recorded()
     {
@@ -612,10 +613,11 @@ public sealed class UnitOfWorkTests
         using var vault = SecurityFixture.Vault();
         await SecurityFixture.Service(owner, store, new AccountCredentialStore(db, work), vault, unitOfWork: work)
             .PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
-        var reader = new RefusedThenFailingReader(new AccountCredentialReader(store, new AccountCredentialStore(db, work),
-            new CoreOwner(owner), vault, SecurityFixture.Clock, work));
-        var service = new WorkspaceService(store, new CoreOwner(owner), SecurityFixture.Registry(reader), work);
-        var error = await Assert.ThrowsAsync<Vessel.Application.Common.ProblemException>(() => service.SyncAsync(account.Id, default));
+        var credentials = new AccountCredentialReader(store, new AccountCredentialStore(db, work),
+            new CoreOwner(owner), vault, SecurityFixture.Clock, work);
+        var reader = new RefusedThenFailingReader(credentials);
+        var error = await Assert.ThrowsAsync<Vessel.Application.Common.ProblemException>(() =>
+            MonitorTestPaths.RefreshAsync(db, owner, SecurityFixture.Registry(reader), account.Id, credentials));
         Assert.Equal(502, error.StatusCode);
         Assert.True(reader.Opened);
         await using var verify = database.Context(owner);
@@ -980,8 +982,9 @@ public sealed class UnitOfWorkTests
             throw new InvalidOperationException("Use the Account overload.");
         public async Task<PerpetualVenueReadResult> ReadAsync(Account account, CancellationToken cancellationToken)
         {
-            Opened = await credentials.ReadAsync(account.Id, cancellationToken) == SecurityFixture.Token;
-            await credentials.MarkRefusedAsync(account.Id, cancellationToken);
+            var attempt = await credentials.ReadAttemptAsync(account.Id, cancellationToken);
+            Opened = attempt?.Token == SecurityFixture.Token;
+            await credentials.MarkRefusedAsync(account.Id, attempt!.Revision, cancellationToken);
             throw new VenueReadException("The venue refused the request.");
         }
     }

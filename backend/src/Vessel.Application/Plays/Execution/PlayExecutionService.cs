@@ -3,8 +3,8 @@ using Vessel.Application.Common;
 using Vessel.Application.Sizing;
 using Vessel.Application.Venues;
 using Vessel.Application.Credentials;
-using Vessel.Application.Workspace;
 using Vessel.Application.Ownership;
+using Vessel.Application.Monitoring;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
@@ -16,90 +16,37 @@ namespace Vessel.Application.Plays.Execution;
 /// Links venue orders to Play levels and moves Plays between Planned, Open and Closed from linked fills.
 /// Unambiguous orders link automatically; ambiguous ones become suggestions for the owner. Read-only at the venue.
 /// </summary>
-public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore store, WorkspaceService workspace,
-    IVenueRegistry venues, TimeProvider time, IUnitOfWork unitOfWork, IAccountCredentialReader? credentials = null)
+public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore store,
+    IVenueRegistry venues, TimeProvider time, IUnitOfWork unitOfWork, IAccountCredentialReader? credentials = null) : IMonitorImporter
 {
     private const int MaxUnlinkedOrders = 20;
     private const string Notice = "Orders and fills come from the venue and link to this play by order ID. " +
         "Price touches are never treated as fills. Quantities are base units from linked fills; closed PnL and fees are as the venue reports them.";
 
-    /// <summary>Retains bounded venue order history on explicit account refresh, without linking orders or changing Plays.</summary>
-    public Task<string?> RetainAccountOrdersAsync(Guid accountId, CancellationToken ct) =>
-        unitOfWork.ExecuteAsync(() => workspace.WithAccountLockAsync<string?>(accountId, async account =>
+    /// <summary>Retain an already-read order observation inside the caller's fenced account transaction. No linking or network reads.</summary>
+    public Task RetainAsync(Account account, VenueOrderReadResult orders, CancellationToken ct) =>
+        store.WithAccountLockAsync(account.Id, async () =>
         {
-            var notice = await RetainAccountOrdersLockedAsync(account, ct);
-            await workspace.RecordOrderHistoryNoticeAsync(account, notice, ct);
-            return notice;
-        }, ct), ct);
-
-    private async Task<string?> RetainAccountOrdersLockedAsync(Account account, CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-        if (!account.IsEnabled) throw new ProblemException(400, "Enable the account before refreshing it.");
-        if (venues.Descriptor(account.VenueId) is not { Capabilities.Orders: true })
-            return "This venue does not provide order history; execution completeness cannot be checked.";
-        if (account.SourceId is null) throw new ProblemException(400, "A source identity is required before refresh.");
-        if (venues.Orders(account.VenueId) is not { } reader)
-            return "Order history was not refreshed because the venue order reader is unavailable.";
-        // The credential read participates in the unit of work, so it stays outside the catch-and-continue block below.
-        if (await CredentialReasonAsync(account, usableOnly: false, ct) is { } reason)
-        {
-            ct.ThrowIfCancellationRequested();
-            return $"Order history was not refreshed. {reason}";
-        }
-        VenueOrderReadResult read;
-        try
-        {
-            read = await reader.ReadOrdersAsync(account, ct);
-            if (!read.Orders.All(VenueFactChecks.Valid))
-                throw new VenueReadException("The venue adapter returned orders outside Vessel's execution vocabulary.");
-        }
-        catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
-        {
-            ct.ThrowIfCancellationRequested();
-            return "Order history could not be refreshed; execution completeness remains limited to retained order records. Try again later.";
-        }
-        ct.ThrowIfCancellationRequested();
-        await store.WithAccountLockAsync(account.Id, async () =>
-        {
-            await store.UpsertOrdersAsync(account, read.Orders, read.ObservedAtUtc, ct);
+            await store.UpsertOrdersAsync(account, orders.Orders, orders.ObservedAtUtc, ct);
             return true;
         }, ct);
-        return read.Notice;
-    }
 
-
-    /// <summary>Refreshes the account's fills and orders, links what matches and applies status changes.</summary>
-    public async Task<PlayExecutionDto> CheckAsync(Guid playId, CancellationToken ct)
-    {
-        var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
-        var account = await store.AccountAsync(play.AccountId, ct);
-        if (UntrackedReason(play, account, account is null ? null : venues.Descriptor(account.VenueId)) is { } reason) throw new ProblemException(409, reason);
-        if (venues.Orders(account!.VenueId) is not { } orderReader) throw new ProblemException(503, "Venue reader is unavailable.");
-        await workspace.SyncAsync(account.Id, ct);
-        await unitOfWork.ExecuteAsync(() => workspace.WithAccountLockAsync(account.Id, async lockedAccount =>
+    /// <summary>Reuse execution matching and integrity checks with imported facts, without another venue/catalogue read.</summary>
+    public Task ReconcileImportedAsync(Account account, VenueOrderReadResult orders,
+        IReadOnlyList<VenueInstrument> instruments, CancellationToken ct) =>
+        store.WithAccountLockAsync(account.Id, async () =>
         {
-            if (!lockedAccount.IsEnabled) throw new ProblemException(409, "Enable the account to track its orders.");
-            if (await CredentialReasonAsync(lockedAccount, usableOnly: false, ct) is { } credentialReason)
-                throw new ProblemException(409, credentialReason);
-            VenueOrderReadResult read;
-            try
-            {
-                read = await orderReader.ReadOrdersAsync(lockedAccount, ct);
-                if (!read.Orders.All(VenueFactChecks.Valid))
-                    throw new VenueReadException("The venue adapter returned orders outside Vessel's execution vocabulary.");
-            }
-            catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
-            {
-                throw new ProblemException(502, "Venue orders could not be read. Try again later.");
-            }
-            var ticks = await TicksAsync(lockedAccount, ct);
-            await store.WithAccountLockAsync(lockedAccount.Id, async () => { await ReconcileAsync(lockedAccount, read, ticks, ct); return true; }, ct);
-            await workspace.RecordOrderHistoryNoticeAsync(lockedAccount, read.Notice, ct);
+            var ticks = venues.Descriptor(account.VenueId)?.PriceRule == PriceRules.TickSize
+                ? instruments.Where(i => i.PriceStep is > 0).GroupBy(i => i.ContractId, StringComparer.Ordinal)
+                    .ToDictionary(g => g.Key, g => g.First().PriceStep!.Value, StringComparer.Ordinal)
+                : new Dictionary<string, decimal>(StringComparer.Ordinal);
+            await ReconcileAsync(account, orders, ticks, ct);
             return true;
-        }, ct), ct);
-        return await GetAsync(playId, ct);
-    }
+        }, ct);
+
+    Task IMonitorImporter.ReconcileAsync(Account account, VenueOrderReadResult orders,
+        IReadOnlyList<VenueInstrument> instruments, CancellationToken ct) =>
+        ReconcileImportedAsync(account, orders, instruments, ct);
 
     public async Task<PlayExecutionDto> GetAsync(Guid playId, CancellationToken ct)
     {
@@ -144,7 +91,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             fills[link.OrderId].OrderBy(f => f.OccurredAtUtc).Select(FillDto).ToList());
         var reason = UntrackedReason(play, account, account is null ? null : venues.Descriptor(account.VenueId));
         if (reason is null && account is { IsEnabled: true } && play.Status is not (PlayStatus.Closed or PlayStatus.Cancelled))
-            reason = await CredentialReasonAsync(account, usableOnly: true, ct);
+            reason = await CredentialReasonAsync(account, ct);
         return new PlayExecutionDto(play.Id, PlayService.StatusName(play.Status), reason is null, reason, account?.LastSyncedAtUtc,
             totals, entries, linked.Select(Link).ToList(), suggestions.Select(Link).ToList(), unlinked, Notice, settlement.Problems);
     }
@@ -222,25 +169,6 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     private async Task RequireActiveAsync(Play play, string message, CancellationToken ct)
     {
         if (!(await store.ActivePlaysAsync(play.AccountId, ct)).Any(p => p.Id == play.Id)) throw new ProblemException(409, message);
-    }
-
-    /// <summary>
-    /// Price ticks by instrument for venues that round to a tick. Unavailable metadata leaves the five-significant-figure
-    /// tolerance in place rather than failing the check.
-    /// </summary>
-    private async Task<IReadOnlyDictionary<string, decimal>> TicksAsync(Account account, CancellationToken ct)
-    {
-        if (venues.Descriptor(account.VenueId) is not { PriceRule: PriceRules.TickSize } || venues.Reader(account.VenueId) is not { } reader)
-            return new Dictionary<string, decimal>();
-        try
-        {
-            return (await reader.ReadInstrumentsAsync(ct)).Where(i => i.PriceStep is > 0)
-                .GroupBy(i => i.ContractId, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First().PriceStep!.Value, StringComparer.Ordinal);
-        }
-        catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
-        {
-            return new Dictionary<string, decimal>();
-        }
     }
 
     private async Task ReconcileAsync(Account account, VenueOrderReadResult read, IReadOnlyDictionary<string, decimal> ticks, CancellationToken ct)
@@ -373,12 +301,10 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         : account.SourceId is null ? "The account needs a source identity to track its orders."
         : null;
 
-    /// <summary>The status path checks metadata only; the refresh path, already under the lock, opens the token.</summary>
-    private async Task<string?> CredentialReasonAsync(Account account, bool usableOnly, CancellationToken ct) =>
+    /// <summary>The status path checks credential metadata only, without the account lock or decryption.</summary>
+    private async Task<string?> CredentialReasonAsync(Account account, CancellationToken ct) =>
         venues.Descriptor(account.VenueId)?.Capabilities.ReadOnlyCredential == true &&
-        (credentials is null || !(usableOnly
-            ? await credentials.IsUsableAsync(account, ct)
-            : await credentials.ReadAsync(account.Id, ct) is not null))
+        (credentials is null || !await credentials.IsUsableAsync(account, ct))
             ? "Add or renew a read-only token to track orders." : null;
 
     /// <summary>The basis shared by every fill, "mixed" if they differ, or gross when there are none.</summary>

@@ -18,6 +18,9 @@ public sealed class WorkspaceReviewPostgresTests
 {
     private static WorkspaceService Service(VesselDbContext db, Guid owner, FixtureReader? reader = null) =>
         new(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(reader ?? new FixtureReader()), TestUnitOfWork.For(db));
+    /// <summary>The owner's account Refresh through the monitor path, as POST /api/accounts/{id}/sync runs it.</summary>
+    private static Task<AccountDto> Refresh(VesselDbContext db, Guid owner, Guid id, FixtureReader? reader = null) =>
+        MonitorTestPaths.RefreshAsync(db, owner, TestVenues.With(reader ?? new FixtureReader()), id);
 
     [PostgresFact]
     public async Task Account_inserted_disabled_is_not_stored_as_enabled_by_the_column_default()
@@ -52,7 +55,7 @@ public sealed class WorkspaceReviewPostgresTests
     }
 
     [PostgresFact]
-    public async Task Perp_observations_10_then_9_then_11_preserve_freshness_but_accept_new_fills()
+    public async Task Perp_observations_10_then_9_then_11_preserve_freshness_and_discard_the_older_read()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); var reader = new FixtureReader(); Guid id;
         await using (var db = database.Context(owner))
@@ -74,14 +77,23 @@ public sealed class WorkspaceReviewPostgresTests
                 Fills = [baseline.Fills.Single() with { SourceFillId = hour.ToString() }]
             };
             await using var db = database.Context(owner); var service = Service(db, owner, reader);
-            var result = await service.SyncAsync(id, default); var snapshot = (await service.SnapshotAsync(id, default))!;
+            // A refresh older than the retained observation is discarded whole, its fills included.
+            AccountDto result;
+            if (hour == 9)
+            {
+                Assert.Equal(502, (await Assert.ThrowsAsync<ProblemException>(() => Refresh(db, owner, id, reader))).StatusCode);
+                result = await service.AccountAsync(id, default);
+            }
+            else result = await Refresh(db, owner, id, reader);
+            var snapshot = (await service.SnapshotAsync(id, default))!;
             var retainedHour = hour == 9 ? 10 : hour;
             Assert.Equal(retainedHour.ToString(), snapshot.AccountValueUsd); Assert.Equal(retainedHour.ToString(), snapshot.Positions.Single().SignedQuantity);
             Assert.Equal(retainedHour.ToString(), snapshot.WithdrawableUsd); Assert.Equal(retainedHour.ToString(), snapshot.MarginUsedUsd); Assert.Equal($"scope{retainedHour}", snapshot.ValueScope);
             Assert.Equal(DateTimeOffset.Parse($"2026-10-01T{retainedHour:00}:00:00Z"), snapshot.ObservedAtUtc);
             Assert.Equal(DateTimeOffset.Parse($"2026-10-01T{retainedHour:00}:00:00Z"), result.LastSyncedAtUtc);
         }
-        await using var verify = database.Context(owner); Assert.Equal(3, await verify.Fills.CountAsync());
+        await using var verify = database.Context(owner);
+        Assert.Equal(["10", "11"], (await verify.Fills.Select(f => f.SourceFillId).ToListAsync()).Order());
     }
     [PostgresFact]
     public async Task Source_uniqueness_handles_concurrent_requests_separate_owners_and_manual_nulls()
@@ -132,7 +144,7 @@ public sealed class WorkspaceReviewPostgresTests
             var service = Service(db, owner); first = (await service.CreatePortfolioAsync(new("First"), default)).Id;
             second = (await service.CreatePortfolioAsync(new("Second"), default)).Id;
             original = await service.CreateAccountAsync(new(first, "Original", "hyperliquid", "0x" + new string('e', 40)), default); id = original.Id;
-            await service.SyncAsync(id, default); Assert.Equal(1, (await service.AccountAsync(id, default)).SettingsRevision);
+            await Refresh(db, owner, id); Assert.Equal(1, (await service.AccountAsync(id, default)).SettingsRevision);
         }
         await using var staleContext = database.Context(owner); var staleService = Service(staleContext, owner);
         Assert.True((await staleService.AccountAsync(id, default)).IsEnabled); // Track stale state deliberately.
@@ -194,13 +206,13 @@ public sealed class WorkspaceReviewPostgresTests
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); var reader = new FixtureReader(); Guid id;
         await using (var db = database.Context(owner)) id = (await Service(db, owner).CreateAccountAsync(new(null, "Venue", "hyperliquid", "0x" + new string('f', 40)), default)).Id;
         var original = reader.Result.Snapshot;
-        await using (var db = database.Context(owner)) await Service(db, owner, reader).SyncAsync(id, default);
+        await using (var db = database.Context(owner)) await Refresh(db, owner, id, reader);
         reader.Result = reader.Result with
         {
             Snapshot = original with { AccountValueUsd = 999, WithdrawableUsd = 998, MarginUsedUsd = 997, ValueScope = "changed", Positions = [] },
             Fills = [reader.Result.Fills.Single(), reader.Result.Fills.Single() with { SourceFillId = "new-on-equal" }]
         };
-        await using var verify = database.Context(owner); var service = Service(verify, owner, reader); await service.SyncAsync(id, default);
+        await using var verify = database.Context(owner); await Refresh(verify, owner, id, reader);
         var snapshot = await verify.Snapshots.Include(s => s.Positions).SingleAsync();
         Assert.Equal(original.AccountValueUsd, snapshot.AccountValueUsd); Assert.Equal(original.WithdrawableUsd, snapshot.WithdrawableUsd);
         Assert.Equal(original.MarginUsedUsd, snapshot.MarginUsedUsd); Assert.Equal(original.ValueScope, snapshot.ValueScope); Assert.Single(snapshot.Positions);
@@ -214,7 +226,7 @@ public sealed class WorkspaceReviewPostgresTests
         await using (var db = database.Context(owner)) id = (await Service(db, owner).CreateAccountAsync(new(null, "Venue", "hyperliquid", "0x" + new string('1', 40)), default)).Id;
         static DateTimeOffset At(int hour) => DateTimeOffset.Parse($"2026-10-01T{hour:00}:00:00Z");
         var baseline = reader.Result;
-        async Task Refresh(int perpsHour, int? walletHour, int expectedPerps, int expectedWallet)
+        async Task Advance(int perpsHour, int? walletHour, int expectedPerps, int expectedWallet, bool superseded = false)
         {
             reader.Result = baseline with
             {
@@ -227,17 +239,20 @@ public sealed class WorkspaceReviewPostgresTests
                     [new("USDC", 0, "usdc-token", w, 0, w)]) : null
                 }
             };
-            await using var db = database.Context(owner); var service = Service(db, owner, reader); var dto = await service.SyncAsync(id, default);
+            await using var db = database.Context(owner); var service = Service(db, owner, reader);
+            if (superseded) Assert.Equal(502, (await Assert.ThrowsAsync<ProblemException>(() => Refresh(db, owner, id, reader))).StatusCode);
+            var dto = superseded ? await service.AccountAsync(id, default) : await Refresh(db, owner, id, reader);
             var snapshot = (await service.SnapshotAsync(id, default))!;
             Assert.Equal(expectedPerps.ToString(), snapshot.AccountValueUsd); Assert.Equal(expectedPerps.ToString(), snapshot.Positions.Single().SignedQuantity);
             Assert.Equal(At(expectedPerps), dto.LastSyncedAtUtc); Assert.Equal(At(expectedWallet), snapshot.StablecoinWallet!.ObservedAtUtc);
             Assert.Equal(expectedWallet.ToString(), dto.AvailableStablecoinNominalUsd); Assert.Equal($"mode{expectedWallet}", dto.AccountMode);
         }
-        await Refresh(10, 10, 10, 10);
-        await Refresh(9, 11, 10, 11); // New wallet despite stale perps.
-        await Refresh(11, 9, 11, 11); // New perps despite stale wallet.
-        await Refresh(9, 11, 11, 11); // Equal wallet and stale perps do not change retained fields.
-        await Refresh(12, null, 12, 11); // Missing wallet never clears known wallet.
+        await Advance(10, 10, 10, 10);
+        await Advance(10, 11, 10, 11); // New wallet despite unchanged perps.
+        await Advance(11, 9, 11, 11); // New perps despite stale wallet.
+        await Advance(11, 11, 11, 11); // Equal wallet and perps do not change retained fields.
+        await Advance(12, null, 12, 11); // Missing wallet never clears known wallet.
+        await Advance(9, 13, 12, 11, superseded: true); // Stale perps discard the whole read, its newer wallet included.
         reader.Result = baseline with
         {
             Snapshot = baseline.Snapshot with
@@ -249,7 +264,7 @@ public sealed class WorkspaceReviewPostgresTests
             }
         };
         await using var verify = database.Context(owner); var finalService = Service(verify, owner, reader);
-        var final = await finalService.SyncAsync(id, default);
+        var final = await Refresh(verify, owner, id, reader);
         Assert.Equal("12", final.AccountValueUsd); Assert.Equal("11", final.AvailableStablecoinNominalUsd);
         Assert.Equal("mode11", final.AccountMode); Assert.Equal("hypercore-spot-stablecoins", final.StablecoinScope);
         Assert.Single((await finalService.SnapshotAsync(id, default))!.StablecoinWallet!.Balances);
@@ -268,7 +283,7 @@ public sealed class WorkspaceReviewPostgresTests
         {
             var service = Service(db, owner, reader); id = (await service.CreateAccountAsync(new(null, "Target", "hyperliquid", "0x" + new string('2', 40)), default)).Id;
             unrelated = (await service.CreateAccountAsync(new(null, "Unrelated", "hyperliquid", "0x" + new string('3', 40)), default)).Id;
-            await service.SyncAsync(id, default); await service.SyncAsync(unrelated, default);
+            await Refresh(db, owner, id, reader); await Refresh(db, owner, unrelated, reader);
         }
         var probe = new SnapshotProbe(); var options = new DbContextOptionsBuilder<VesselDbContext>().UseNpgsql(database.ConnectionString).AddInterceptors(probe).Options;
         await using var target = new VesselDbContext(options, new CoreOwner(owner)); var targetService = Service(target, owner);

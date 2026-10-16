@@ -26,11 +26,10 @@ public sealed partial class LighterReader
     public async Task<PerpetualVenueReadResult> ReadAsync(Account account, CancellationToken cancellationToken)
     {
         var source = Source(account);
-        var token = await credentials.ReadAsync(account.Id, cancellationToken);
-        var (result, refused) = await ReadCoreAsync(source, token, cancellationToken);
-        // Recorded after the bounded venue read, in the caller's account-lock transaction, so status and
-        // order tracking stop treating the token as usable until the owner verifies or replaces it.
-        if (refused) await credentials.MarkRefusedAsync(account.Id, cancellationToken);
+        var attempt = await credentials.ReadAttemptAsync(account.Id, cancellationToken);
+        var (result, refused) = await ReadCoreAsync(source, attempt?.Token, cancellationToken);
+        // The account lock is reacquired after network I/O. A replacement cannot be marked by this attempt.
+        if (refused && attempt is not null) await credentials.MarkRefusedAsync(account.Id, attempt.Revision, cancellationToken);
         return result;
     }
 
@@ -41,6 +40,14 @@ public sealed partial class LighterReader
             var catalogue = await CatalogueAsync(ct, refresh: true);
             using var account = await AccountAsync(source, ct);
             var snapshot = ReadSnapshot(account.RootElement.GetProperty("accounts")[0], catalogue, timeProvider.GetUtcNow());
+            // The index query validates exactly one matching account. Require the documented pagination
+            // markers as well; missing markers or a local cap cannot establish a complete position list.
+            var positionsComplete = account.RootElement.TryGetProperty("total", out var total) &&
+                total.ValueKind == JsonValueKind.Number && total.TryGetInt64(out var count) && count == 1 &&
+                account.RootElement.TryGetProperty("next_cursor", out var next) &&
+                next.ValueKind == JsonValueKind.String && next.GetString() == "" &&
+                Rows(json, account.RootElement.GetProperty("accounts")[0], "positions", MaxMarkets).GetArrayLength() < MaxMarkets &&
+                catalogue.Markets.Count + catalogue.SpotIds.Count < MaxMarkets;
             var notices = new List<string> { venue.HistoryNotice };
             var feeFreeTier = false;
             var fillsAllowed = true;
@@ -68,6 +75,8 @@ public sealed partial class LighterReader
             }
 
             var fills = new List<VenueFill>();
+            var fillCoverage = new RawFillReadCoverage();
+            var historyAvailable = fillsAllowed;
             var ids = new HashSet<string>(StringComparer.Ordinal);
             var cursors = new HashSet<string>(StringComparer.Ordinal);
             var missingPnl = 0;
@@ -97,12 +106,16 @@ public sealed partial class LighterReader
                     catch (LighterAuthenticationException)
                     {
                         notices.Add(HistoryUnavailableNotice);
+                        historyAvailable = false;
                         cursor = null;
                         break;
                     }
                     using (trades)
                     {
-                        var result = ReadFills(trades.RootElement, catalogue, source, timeProvider.GetUtcNow().AddMinutes(5), feeFreeTier);
+                        var latest = timeProvider.GetUtcNow().AddMinutes(5);
+                        var result = ReadFills(trades.RootElement, catalogue, source, latest, feeFreeTier);
+                        fillCoverage.Observe(Rows(json, trades.RootElement, "trades", PageSize),
+                            row => json.Timestamp(json.Property(row, "timestamp"), latest.ToUnixTimeMilliseconds()));
                         foreach (var fill in result.Fills)
                             if (ids.Add(fill.SourceFillId)) fills.Add(fill);
                         missingPnl += result.MissingPnl;
@@ -118,7 +131,12 @@ public sealed partial class LighterReader
             if (fees > 0) notices.Add(FeeNotice(fees));
             if (selfTrades > 0) notices.Add(SelfTradeNotice(selfTrades));
             return (new PerpetualVenueReadResult(snapshot,
-                catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument!).ToArray(), fills, string.Join(" ", notices)), refused);
+                catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument!).ToArray(), fills, string.Join(" ", notices),
+                PositionsComplete: positionsComplete,
+                FillHistoryTruncated: historyAvailable ? cursor is not null || fillCoverage.Count == venue.TradePages * PageSize : null,
+                OldestRawFillAtUtc: historyAvailable ? fillCoverage.OldestAtUtc : null,
+                // Self-trades are out of scope (they leave the position unchanged); these are in-scope facts left out.
+                OmittedExecutions: missingPnl + fees), refused);
         }, cancellationToken);
 
     internal static VenueSnapshot ReadSnapshot(JsonElement account, Catalogue catalogue, DateTimeOffset observed)

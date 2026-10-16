@@ -106,7 +106,7 @@ describe('shared API request pipeline', () => {
     await expect(api.checkPlayExecution(savedPlayFixture.summary.id)).rejects.toThrow()
     await expect(api.discoverAccounts('lighter', `0x${'a'.repeat(40)}`)).rejects.toThrow()
     await api.evidenceImage(savedPlayFixture.summary.id)
-    expect(timeout.mock.calls.map(call => call[1])).toEqual([8_000, 10_000, 15_000, 25_000, 30_000, 45_000, 30_000, 60_000])
+    expect(timeout.mock.calls.map(call => call[1])).toEqual([8_000, 10_000, 15_000, 25_000, 30_000, 15_000, 30_000, 60_000])
     expect(vi.getTimerCount()).toBe(0)
   })
 
@@ -137,5 +137,64 @@ describe('shared API request pipeline', () => {
     expect(vi.getTimerCount()).toBe(0)
     controller.abort()
     await expect(request).resolves.toBeUndefined()
+  })
+})
+
+describe('on-demand execution check contract', () => {
+  const playId = savedPlayFixture.summary.id
+  // The body an ASP.NET 202 returns: DateTimeOffset keeps its +00:00 offset.
+  const acceptedBody = '{"requestId":"0192f0c4-7b3a-7cc2-9d4e-6a1b2c3d4e5f","monitor":{"accountId":"5b0c1f8e-2a4d-4c6b-9e7f-1a2b3c4d5e6f",' +
+    '"state":"live","lastAttemptAtUtc":"2026-10-16T08:00:00+00:00","lastSuccessAtUtc":"2026-10-16T08:00:00+00:00",' +
+    '"nextRunAtUtc":"2026-10-16T08:12:00+00:00","manualState":"pending","nextManualAllowedAtUtc":"2026-10-16T08:01:00+00:00",' +
+    '"error":null,"workerOnline":true,"discrepancies":[]}}'
+  const executionBody = (extra: Record<string, unknown>) => JSON.stringify({ playId, status: 'planned', tracked: true, reason: null,
+    checkedAtUtc: '2026-10-16T08:00:00+00:00',
+    totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
+    entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Stored facts.', issues: [], ...extra })
+
+  it('resolves an accepted 202 to the queued request and its monitor state', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(acceptedBody, { status: 202, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetch)
+    await expect(createWorkspaceApi('token').checkPlayExecution(playId)).resolves.toEqual(JSON.parse(acceptedBody))
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(fetch.mock.calls[0]![0]).toBe(`/api/plays/${playId}/execution/check`)
+    expect(fetch.mock.calls[0]![1]).toMatchObject({ method: 'POST', cache: 'no-store' })
+  })
+
+  it.each([
+    ['an execution body', executionBody({})],
+    ['a missing request ID', JSON.stringify({ monitor: JSON.parse(acceptedBody).monitor })],
+    ['an unknown manual state', acceptedBody.replace('"pending"', '"queued"')],
+    ['a missing monitor', '{"requestId":"0192f0c4-7b3a-7cc2-9d4e-6a1b2c3d4e5f"}'],
+    ['an invalid timestamp', acceptedBody.replace('"2026-10-16T08:12:00+00:00"', '"soon"')],
+  ])('rejects %s as an accepted check', async (_name, body) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 202 })))
+    await expect(createWorkspaceApi('token').checkPlayExecution(playId))
+      .rejects.toMatchObject({ kind: 'invalid-response', message: 'The API returned an incompatible check response.' })
+  })
+
+  it('reports a busy or cooling account with the server wait and does not read the problem body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ title: '<script>' }),
+      { status: 429, headers: { 'Retry-After': '42', 'Content-Type': 'application/problem+json' } })))
+    await expect(createWorkspaceApi('token').checkPlayExecution(playId)).rejects.toMatchObject({ kind: 'http', status: 429,
+      message: 'This account check is running or cooling down. Try again in 42 seconds.' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 429, headers: { 'Retry-After': 'Fri, 16 Oct 2026 08:00:00 GMT' } })))
+    await expect(createWorkspaceApi('token').checkPlayExecution(playId)).rejects.toMatchObject({ status: 429,
+      message: 'This account check is running or cooling down.' })
+  })
+
+  it('accepts stored executions with monitor state and watches, and older ones without them', async () => {
+    const monitor = JSON.parse(acceptedBody).monitor
+    const watch = { linkId: '0192f0c4-7b3a-7cc2-9d4e-6a1b2c3d4e5f', playId, orderId: '123456', role: 'stop', state: 'watching',
+      startedAtUtc: '2026-10-16T08:00:00+00:00', endedAtUtc: null }
+    for (const body of [executionBody({ monitor, discrepancies: [], watches: [watch] }), executionBody({ monitor: null, discrepancies: [], watches: [] }), executionBody({})]) {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body)))
+      await expect(createWorkspaceApi('token').playExecution(playId)).resolves.toEqual(JSON.parse(body))
+    }
+    for (const body of [executionBody({ monitor: { ...monitor, manualState: 'queued' } }), executionBody({ watches: [{ ...watch, state: 'gone' }] }), executionBody({ watches: [{ ...watch, role: undefined }] }),
+      executionBody({ discrepancies: [{ id: 'x' }] }), executionBody({ watches: {} })]) {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body)))
+      await expect(createWorkspaceApi('token').playExecution(playId)).rejects.toMatchObject({ kind: 'invalid-response' })
+    }
   })
 })

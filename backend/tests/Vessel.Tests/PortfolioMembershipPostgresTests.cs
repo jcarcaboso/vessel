@@ -77,7 +77,7 @@ public sealed class PortfolioMembershipPostgresTests
             var service = Service(db, owner); target = (await service.CreatePortfolioAsync(new("Target"), default)).Id;
             first = (await service.CreateAccountAsync(new(null, "Venue", "hyperliquid", "0x1111111111111111111111111111111111111111"), default)).Id;
             second = (await service.CreateAccountAsync(new(null, "Disabled", "manual", ManualAccountValueUsd: "1.25"), default)).Id;
-            await service.SyncAsync(first, default); await service.UpdateAccountAsync(second, new("Disabled", null, false, 1), default);
+            await MonitorTestPaths.RefreshAsync(db, owner, TestVenues.With(new FixtureReader()), first); await service.UpdateAccountAsync(second, new("Disabled", null, false, 1), default);
             var moved = await service.MoveAccountsAsync(new([first, second], target), default);
             Assert.Equal(2, moved.Count); Assert.All(moved, a => Assert.Equal(target, a.PortfolioId));
             Assert.Equal(2, moved.Single(a => a.Id == first).SettingsRevision); Assert.Equal(3, moved.Single(a => a.Id == second).SettingsRevision);

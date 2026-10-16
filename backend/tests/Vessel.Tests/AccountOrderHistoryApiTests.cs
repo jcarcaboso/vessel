@@ -1,10 +1,13 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Vessel.Application.Activity;
 using Vessel.Application.Common;
 using Vessel.Application.Credentials;
+using Vessel.Application.Monitoring;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
@@ -12,18 +15,33 @@ using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Lighter;
 using Vessel.Persistence;
+using Vessel.Worker;
 
 namespace Vessel.Tests;
 
 public sealed class AccountOrderHistoryApiTests
 {
     private static CoreApiFactory Factory(Guid owner, CoreDatabase database, FixtureReader reader, AccountHistoryOrders orders,
-        IAccountCredentialReader? credential = null) =>
+        IAccountCredentialReader? credential = null, TimeProvider? clock = null) =>
         new(owner, connection: database.ConnectionString, configure: services =>
         {
             services.AddSingleton<IVenueRegistry>(AccountHistoryOrders.Registry(reader, orders));
             if (credential is not null) services.AddSingleton(credential);
+            if (clock is not null) services.AddSingleton(clock);
         });
+
+    private sealed class RefreshClock : TimeProvider
+    {
+        private DateTimeOffset now = AccountHistoryOrders.At.AddDays(1);
+        public override DateTimeOffset GetUtcNow() => now;
+        public void Advance(FixtureReader reader, AccountHistoryOrders orders, bool observations = true)
+        {
+            now = now.AddMinutes(1);
+            if (!observations) return;
+            reader.Result = reader.Result with { Snapshot = reader.Result.Snapshot with { ObservedAtUtc = now } };
+            orders.Result = orders.Result with { ObservedAtUtc = now };
+        }
+    }
 
     private static async Task<AccountDto> Import(HttpClient client)
     {
@@ -38,6 +56,32 @@ public sealed class AccountOrderHistoryApiTests
         using var response = await client.PostAsync($"/api/accounts/{accountId}/sync", null);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<AccountDto>())!;
+    }
+
+    private static async Task CompleteCheck(CoreApiFactory factory, Guid accountId, HttpResponseMessage accepted,
+        FixtureReader reader, AccountHistoryOrders orders, TimeProvider clock, IAccountCredentialReader? credential = null)
+    {
+        Assert.Equal(HttpStatusCode.Accepted, accepted.StatusCode);
+        var request = (await accepted.Content.ReadFromJsonAsync<MonitorRunAccepted>())!;
+        Assert.NotEqual(Guid.Empty, request.RequestId);
+        Assert.Equal("pending", request.Monitor.ManualState);
+        // The HTTP route only admits work. Exercise the production worker claim/executor in a fresh
+        // scope with the injected synthetic venue; real broker dispatch has its own host E2E tests.
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
+        builder.Configuration.AddConfiguration(factory.Services.GetRequiredService<IConfiguration>());
+        WorkerHost.Configure(builder);
+        VesselEventTestHosting.ConfigureServices(builder.Services);
+        builder.Services.AddSingleton(clock);
+        builder.Services.AddSingleton<IVenueRegistry>(AccountHistoryOrders.Registry(reader, orders));
+        if (credential is not null) builder.Services.AddSingleton(credential);
+        using var host = builder.Build();
+        await using var worker = host.Services.CreateAsyncScope();
+        var store = worker.ServiceProvider.GetRequiredService<IMonitorStore>();
+        var time = worker.ServiceProvider.GetRequiredService<TimeProvider>();
+        var lease = await store.ClaimAsync(accountId, request.RequestId, "synthetic-worker", time.GetUtcNow(), default);
+        Assert.NotNull(lease);
+        Assert.True(await worker.ServiceProvider.GetRequiredService<MonitorRunExecutor>().RunAsync(lease, default));
+        Assert.Null(await store.ClaimAsync(accountId, request.RequestId, "duplicate", time.GetUtcNow(), default));
     }
 
     private static async Task<(ActivityOperationSummaryDto Operation, RetrospectivePreviewDto Preview)> Preview(HttpClient client, Guid accountId)
@@ -125,7 +169,8 @@ public sealed class AccountOrderHistoryApiTests
         var owner = Guid.NewGuid(); var reader = AccountHistoryOrders.PublicReader(); var orders = new AccountHistoryOrders();
         var complete = orders.Result;
         orders.Result = complete with { Orders = [] };
-        await using var factory = Factory(owner, database, reader, orders);
+        var clock = new RefreshClock();
+        await using var factory = Factory(owner, database, reader, orders, clock: clock);
         using var client = factory.AuthorizedClient(); var account = await Import(client);
         using var firstSync = await client.PostAsync($"/api/accounts/{account.Id}/sync", null);
         firstSync.EnsureSuccessStatusCode();
@@ -135,6 +180,7 @@ public sealed class AccountOrderHistoryApiTests
         await using (var missingDb = database.Context(owner)) Assert.Empty(await missingDb.Orders.ToListAsync());
 
         orders.Result = complete with { Orders = [complete.Orders[0] with { OriginalSize = 2 }, complete.Orders[1]] };
+        clock.Advance(reader, orders);
         using var incompleteSync = await client.PostAsync($"/api/accounts/{account.Id}/sync", null);
         incompleteSync.EnsureSuccessStatusCode();
         var (_, incomplete) = await Preview(client, account.Id);
@@ -143,6 +189,7 @@ public sealed class AccountOrderHistoryApiTests
 
         orders.Result = complete with { Orders = [complete.Orders[0] with
             { Status = VenueOrderStatus.Open, VenueStatus = "open", OriginalSize = 2, RemainingSize = 1 }, complete.Orders[1]] };
+        clock.Advance(reader, orders);
         using var liveSync = await client.PostAsync($"/api/accounts/{account.Id}/sync", null);
         liveSync.EnsureSuccessStatusCode();
         var (_, live) = await Preview(client, account.Id);
@@ -160,7 +207,8 @@ public sealed class AccountOrderHistoryApiTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid(); var reader = AccountHistoryOrders.PublicReader();
         var orders = new AccountHistoryOrders { Failure = new HttpRequestException("ro:synthetic-secret provider body") };
-        await using var factory = Factory(owner, database, reader, orders);
+        var clock = new RefreshClock();
+        await using var factory = Factory(owner, database, reader, orders, clock: clock);
         using var client = factory.AuthorizedClient(); var account = await Import(client);
         using var response = await client.PostAsync($"/api/accounts/{account.Id}/sync", null);
         response.EnsureSuccessStatusCode();
@@ -168,11 +216,12 @@ public sealed class AccountOrderHistoryApiTests
         Assert.Equal("synced", refreshed.SyncStatus);
         Assert.Equal("1000", refreshed.AccountValueUsd);
         Assert.Null(refreshed.LastSyncError);
-        Assert.Contains("Order history could not be refreshed", refreshed.HistoryNotice);
+        Assert.Contains("Public account data refreshed; order coverage is unavailable. Retry the account check later.", refreshed.HistoryNotice);
         Assert.DoesNotContain("ro:", await response.Content.ReadAsStringAsync());
         await AssertReloadedCoverage(client, refreshed);
         for (var refresh = 0; refresh < 2; refresh++)
         {
+            clock.Advance(reader, orders);
             var repeated = await Sync(client, account.Id);
             Assert.Equal(refreshed.HistoryNotice, repeated.HistoryNotice);
             await AssertReloadedCoverage(client, repeated);
@@ -236,7 +285,8 @@ public sealed class AccountOrderHistoryApiTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid(); var reader = AccountHistoryOrders.PublicReader(); var orders = new AccountHistoryOrders();
-        await using var factory = Factory(owner, database, reader, orders);
+        var clock = new RefreshClock();
+        await using var factory = Factory(owner, database, reader, orders, clock: clock);
         using var client = factory.AuthorizedClient(); var account = await Import(client);
         using var created = await client.PostAsJsonAsync("/api/plays",
             new CreatePlayRequest(account.Id, "BTC", "venue", "New plan", TestPlays.Plan()));
@@ -257,9 +307,14 @@ public sealed class AccountOrderHistoryApiTests
             Assert.Equal(3, await retained.Orders.CountAsync());
             Assert.Empty(await retained.OrderLinks.ToListAsync());
         }
+        using var cooling = await client.PostAsync($"/api/plays/{play.Summary.Id}/execution/check", null);
+        Assert.Equal(HttpStatusCode.TooManyRequests, cooling.StatusCode);
+        Assert.Equal(TimeSpan.FromSeconds(60), cooling.Headers.RetryAfter!.Delta);
+        clock.Advance(reader, orders);
         using var check = await client.PostAsync($"/api/plays/{play.Summary.Id}/execution/check", null);
-        check.EnsureSuccessStatusCode();
-        var execution = (await check.Content.ReadFromJsonAsync<PlayExecutionDto>())!;
+        Assert.Equal(1, reader.Reads); Assert.Equal(1, orders.Reads);
+        await CompleteCheck(factory, account.Id, check, reader, orders, clock);
+        var execution = (await client.GetFromJsonAsync<PlayExecutionDto>($"/api/plays/{play.Summary.Id}/execution"))!;
         Assert.Equal("planned", execution.Status);
         Assert.Empty(execution.Links);
         Assert.Empty(execution.Suggestions);
@@ -278,7 +333,8 @@ public sealed class AccountOrderHistoryApiTests
         account.Configure(null, null, null, "42");
         await using (var db = database.Context(owner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); }
         // Use the production credential reader and unconfigured vault, not a fabricated retained order/token.
-        await using var factory = Factory(owner, database, reader, orders);
+        var clock = new RefreshClock();
+        await using var factory = Factory(owner, database, reader, orders, clock: clock);
         using var client = factory.AuthorizedClient();
         using var response = await client.PostAsync($"/api/accounts/{account.Id}/sync", null);
         response.EnsureSuccessStatusCode();
@@ -286,11 +342,12 @@ public sealed class AccountOrderHistoryApiTests
         Assert.Equal("synced", refreshed.SyncStatus);
         Assert.Equal("1000", refreshed.AccountValueUsd);
         Assert.Null(refreshed.LastSyncError);
-        Assert.Contains("read-only token", refreshed.HistoryNotice);
+        Assert.Contains("Public account data refreshed; order coverage is unavailable. Update the read-only credential.", refreshed.HistoryNotice);
         await AssertReloadedCoverage(client, refreshed);
         Assert.Equal(1, reader.Reads); Assert.Equal(0, orders.Reads);
         for (var refresh = 0; refresh < 2; refresh++)
         {
+            clock.Advance(reader, orders);
             var repeated = await Sync(client, account.Id);
             Assert.Equal(refreshed.HistoryNotice, repeated.HistoryNotice);
             await AssertReloadedCoverage(client, repeated);
@@ -334,30 +391,30 @@ public sealed class AccountOrderHistoryApiTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid(); var reader = AccountHistoryOrders.PublicReader(); var orders = new AccountHistoryOrders();
-        await using var factory = Factory(owner, database, reader, orders);
+        var clock = new RefreshClock();
+        await using var factory = Factory(owner, database, reader, orders, clock: clock);
         using var client = factory.AuthorizedClient(); var account = await Import(client);
         var successful = await Sync(client, account.Id);
         for (var refresh = 0; refresh < 3; refresh++)
         {
+            clock.Advance(reader, orders);
             var repeated = await Sync(client, account.Id);
             Assert.Equal(successful.HistoryNotice, repeated.HistoryNotice);
             Assert.Equal(account.SettingsRevision, repeated.SettingsRevision);
             await AssertReloadedCoverage(client, repeated);
         }
         orders.Failure = new HttpRequestException("synthetic outage");
+        clock.Advance(reader, orders);
         var partial = await Sync(client, account.Id);
-        Assert.Contains("could not be refreshed", partial.HistoryNotice);
+        Assert.Contains("order coverage is unavailable", partial.HistoryNotice);
         Assert.DoesNotContain(orders.Result.Notice, partial.HistoryNotice);
         orders.Failure = null;
-        reader.Result = reader.Result with
-        {
-            HistoryNotice = "New public coverage.",
-            Snapshot = reader.Result.Snapshot with { ObservedAtUtc = reader.Result.Snapshot.ObservedAtUtc.AddMinutes(1) }
-        };
+        reader.Result = reader.Result with { HistoryNotice = "New public coverage." };
+        clock.Advance(reader, orders);
         var recovered = await Sync(client, account.Id);
         Assert.Contains(reader.Result.HistoryNotice, recovered.HistoryNotice);
         Assert.Contains(orders.Result.Notice, recovered.HistoryNotice);
-        Assert.DoesNotContain("could not be refreshed", recovered.HistoryNotice);
+        Assert.DoesNotContain("order coverage is unavailable", recovered.HistoryNotice);
         Assert.DoesNotContain("Bounded recent public fills only.", recovered.HistoryNotice);
         Assert.Equal(account.SettingsRevision, recovered.SettingsRevision);
         Assert.Equal(reader.Result.Snapshot.ObservedAtUtc, recovered.LastSyncedAtUtc);
@@ -365,53 +422,65 @@ public sealed class AccountOrderHistoryApiTests
     }
 
     [PostgresFact]
-    public async Task Order_phase_after_a_newer_public_refresh_and_failure_keeps_the_locked_current_account_state()
+    public async Task Order_phase_holds_the_refresh_lease_so_newer_refreshes_wait_and_a_later_public_failure_keeps_its_coverage()
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid(); var reader = AccountHistoryOrders.PublicReader(); var orders = new AccountHistoryOrders();
-        await using var factory = Factory(owner, database, reader, orders);
+        var clock = new RefreshClock();
+        await using var factory = Factory(owner, database, reader, orders, clock: clock);
         using var client = factory.AuthorizedClient(); var account = await Import(client);
         await Sync(client, account.Id);
         var venues = AccountHistoryOrders.Registry(reader, orders);
-        // Run the production public and order phases separately to force the interleaving between their locks.
-        await using var older = database.Context(owner);
-        var olderWorkspace = new WorkspaceService(new WorkspaceStore(older, TestUnitOfWork.For(older)), new CoreOwner(owner), venues, TestUnitOfWork.For(older));
-        await olderWorkspace.SyncAsync(account.Id, default);
-        reader.Result = reader.Result with
-        {
-            HistoryNotice = "Newer public coverage.",
-            Snapshot = reader.Result.Snapshot with { ObservedAtUtc = reader.Result.Snapshot.ObservedAtUtc.AddMinutes(1) }
-        };
-        await using (var newer = database.Context(owner))
-        {
-            var workspace = new WorkspaceService(new WorkspaceStore(newer, TestUnitOfWork.For(newer)), new CoreOwner(owner), venues, TestUnitOfWork.For(newer));
-            await workspace.SyncAsync(account.Id, default);
-            reader.Fail = true;
-            Assert.Equal(502, (await Assert.ThrowsAsync<ProblemException>(() => workspace.SyncAsync(account.Id, default))).StatusCode);
-        }
-        var failed = (await client.GetFromJsonAsync<AccountDto>($"/api/accounts/{account.Id}"))!;
-        Assert.Equal("error", failed.SyncStatus);
-        Assert.Contains(orders.Result.Notice, failed.HistoryNotice);
+        // The public phase commits first; the lease, not a database lock, spans the optional order read.
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        orders.WaitForRead = async ct => { entered.TrySetResult(); await release.Task.WaitAsync(ct); };
         orders.Failure = new HttpRequestException("synthetic optional failure");
-        var execution = new PlayExecutionService(new PlayStore(older, TestUnitOfWork.For(older)), new ExecutionStore(older, TestUnitOfWork.For(older)), olderWorkspace, venues, TimeProvider.System, TestUnitOfWork.For(older));
-        await execution.RetainAccountOrdersAsync(account.Id, default);
-        var retained = (await client.GetFromJsonAsync<AccountDto>($"/api/accounts/{account.Id}"))!;
-        Assert.Equal((failed.SyncStatus, failed.LastSyncError, failed.LastSyncedAtUtc, failed.SettingsRevision),
-            (retained.SyncStatus, retained.LastSyncError, retained.LastSyncedAtUtc, retained.SettingsRevision));
+        clock.Advance(reader, orders);
+        reader.Result = reader.Result with { HistoryNotice = "Newer public coverage." };
+        var reads = orders.Reads;
+        await using var older = database.Context(owner);
+        var pending = MonitorTestPaths.RefreshAsync(older, owner, venues, account.Id, time: clock);
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            // No newer refresh or check can interleave with the held order phase.
+            using var busy = await client.PostAsync($"/api/accounts/{account.Id}/sync", null);
+            Assert.Equal(HttpStatusCode.TooManyRequests, busy.StatusCode);
+            await using (var newer = database.Context(owner))
+                Assert.True((await Assert.ThrowsAsync<MonitorAdmissionException>(() =>
+                    MonitorTestPaths.RefreshAsync(newer, owner, venues, account.Id, time: clock))).RetryAfter > 0);
+        }
+        finally { release.TrySetResult(); }
+        var retained = await pending;
+        orders.WaitForRead = null;
+        Assert.Equal(reads + 1, orders.Reads);
+        Assert.Equal(("synced", (string?)null), (retained.SyncStatus, retained.LastSyncError));
         Assert.Contains("Newer public coverage.", retained.HistoryNotice);
-        Assert.Contains("could not be refreshed", retained.HistoryNotice);
+        Assert.Contains("order coverage is unavailable", retained.HistoryNotice);
         Assert.DoesNotContain(orders.Result.Notice, retained.HistoryNotice);
         Assert.DoesNotContain("Bounded recent public fills only.", retained.HistoryNotice);
         await AssertReloadedCoverage(client, retained);
-        // The subsequent order result replaces that warning without clearing the newer public failure.
-        orders.Failure = null;
-        await execution.RetainAccountOrdersAsync(account.Id, default);
-        var recoveredOrders = (await client.GetFromJsonAsync<AccountDto>($"/api/accounts/{account.Id}"))!;
-        Assert.Equal((failed.SyncStatus, failed.LastSyncError, failed.LastSyncedAtUtc, failed.SettingsRevision),
-            (recoveredOrders.SyncStatus, recoveredOrders.LastSyncError, recoveredOrders.LastSyncedAtUtc, recoveredOrders.SettingsRevision));
-        Assert.Contains(orders.Result.Notice, recoveredOrders.HistoryNotice);
-        Assert.DoesNotContain("could not be refreshed", recoveredOrders.HistoryNotice);
-        await AssertReloadedCoverage(client, recoveredOrders);
+        // A later public failure records the error and keeps that coverage, without an order read.
+        reader.Fail = true;
+        clock.Advance(reader, orders);
+        using (var failure = await client.PostAsync($"/api/accounts/{account.Id}/sync", null))
+            Assert.Equal(HttpStatusCode.BadGateway, failure.StatusCode);
+        Assert.Equal(reads + 1, orders.Reads);
+        var failed = (await client.GetFromJsonAsync<AccountDto>($"/api/accounts/{account.Id}"))!;
+        Assert.Equal("error", failed.SyncStatus);
+        Assert.Equal((retained.HistoryNotice, retained.LastSyncedAtUtc, retained.SettingsRevision),
+            (failed.HistoryNotice, failed.LastSyncedAtUtc, failed.SettingsRevision));
+        await AssertReloadedCoverage(client, failed);
+        // The next complete refresh replaces the warning and clears the failure.
+        reader.Fail = false; orders.Failure = null;
+        clock.Advance(reader, orders);
+        var recovered = await Sync(client, account.Id);
+        Assert.Equal(("synced", (string?)null, account.SettingsRevision), (recovered.SyncStatus, recovered.LastSyncError, recovered.SettingsRevision));
+        Assert.Contains("Newer public coverage.", recovered.HistoryNotice);
+        Assert.Contains(orders.Result.Notice, recovered.HistoryNotice);
+        Assert.DoesNotContain("order coverage is unavailable", recovered.HistoryNotice);
+        await AssertReloadedCoverage(client, recovered);
     }
 
     [PostgresFact]
@@ -422,7 +491,8 @@ public sealed class AccountOrderHistoryApiTests
             await using var database = await CoreDatabase.CreateAsync();
             var owner = Guid.NewGuid(); var reader = AccountHistoryOrders.PublicReader(venue); var orders = new AccountHistoryOrders(venue);
             var credential = new AccountHistoryCredential(null);
-            await using var factory = Factory(owner, database, reader, orders, credential);
+            var clock = new RefreshClock();
+            await using var factory = Factory(owner, database, reader, orders, credential, clock);
             using var client = factory.AuthorizedClient();
             Guid accountId;
             if (venue == "lighter")
@@ -439,7 +509,7 @@ public sealed class AccountOrderHistoryApiTests
                 orders.Failure = new HttpRequestException("synthetic optional failure");
             }
             var partial = await Sync(client, accountId);
-            Assert.Contains(venue == "lighter" ? "read-only token" : "could not be refreshed", partial.HistoryNotice);
+            Assert.Contains(venue == "lighter" ? "Update the read-only credential." : "Retry the account check later.", partial.HistoryNotice);
             using var created = await client.PostAsJsonAsync("/api/plays",
                 new CreatePlayRequest(accountId, "BTC", "venue", "New plan", TestPlays.Plan()));
             created.EnsureSuccessStatusCode();
@@ -448,18 +518,68 @@ public sealed class AccountOrderHistoryApiTests
                 new ChangePlayStatusRequest(play.Summary.Version, "planned"));
             planned.EnsureSuccessStatusCode();
             orders.Failure = null; credential.Token = "ro:synthetic-only";
+            clock.Advance(reader, orders);
             using var check = await client.PostAsync($"/api/plays/{play.Summary.Id}/execution/check", null);
-            check.EnsureSuccessStatusCode();
+            Assert.Equal(1, reader.Reads);
+            Assert.Equal(venue == "lighter" ? 0 : 1, orders.Reads);
+            await CompleteCheck(factory, accountId, check, reader, orders, clock, credential);
             var recovered = (await client.GetFromJsonAsync<AccountDto>($"/api/accounts/{accountId}"))!;
             Assert.Contains(orders.Result.Notice, recovered.HistoryNotice);
-            Assert.DoesNotContain("could not be refreshed", recovered.HistoryNotice);
-            Assert.DoesNotContain("read-only token", recovered.HistoryNotice);
-            Assert.Equal((partial.LastSyncedAtUtc, partial.SyncStatus, partial.SettingsRevision),
+            Assert.DoesNotContain("order coverage is unavailable", recovered.HistoryNotice);
+            Assert.DoesNotContain("read-only credential", recovered.HistoryNotice);
+            Assert.Equal((reader.Result.Snapshot.ObservedAtUtc, partial.SyncStatus, partial.SettingsRevision),
                 (recovered.LastSyncedAtUtc, recovered.SyncStatus, recovered.SettingsRevision));
             Assert.Equal(2, reader.Reads);
             Assert.Equal(venue == "lighter" ? 1 : 2, orders.Reads);
             await AssertReloadedCoverage(client, recovered);
         }
+    }
+
+    [PostgresFact]
+    public async Task Equal_snapshot_refresh_retains_new_facts_without_overwriting_ledger_but_newer_observation_still_fences_it()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var reader = AccountHistoryOrders.PublicReader(); var orders = new AccountHistoryOrders();
+        var clock = new RefreshClock();
+        await using var factory = Factory(owner, database, reader, orders, clock: clock);
+        using var client = factory.AuthorizedClient(); var account = await Import(client);
+        var first = await Sync(client, account.Id);
+        // A fresh request can return the same ledger timestamp alongside newly available immutable
+        // fills/orders. Keep the original ledger, as WorkspaceStore.SaveRefreshAsync always has.
+        clock.Advance(reader, orders, observations: false);
+        reader.Result = reader.Result with
+        {
+            Snapshot = reader.Result.Snapshot with { AccountValueUsd = 2000 },
+            Fills = [..reader.Result.Fills, reader.Result.Fills[0] with { SourceFillId = "late-fill", OrderId = "late-order" }]
+        };
+        orders.Result = orders.Result with
+        {
+            Orders = [..orders.Result.Orders, orders.Result.Orders[0] with { OrderId = "late-order" }]
+        };
+        var equal = await Sync(client, account.Id);
+        Assert.Equal(first.AccountValueUsd, equal.AccountValueUsd);
+        Assert.Equal(first.LastSyncedAtUtc, equal.LastSyncedAtUtc);
+        Assert.Equal(2, reader.Reads); Assert.Equal(2, orders.Reads);
+        await using (var facts = database.Context(owner))
+        {
+            Assert.Equal(3, await facts.Fills.CountAsync());
+            Assert.Equal(3, await facts.Orders.CountAsync());
+            Assert.Empty(await facts.OrderLinks.ToListAsync());
+            var current = await facts.Accounts.SingleAsync();
+            current.RecordSync(reader.Result.Snapshot.ObservedAtUtc.AddSeconds(1), "A newer retained observation.");
+            await facts.SaveChangesAsync();
+        }
+        clock.Advance(reader, orders, observations: false);
+        reader.Result = reader.Result with
+        {
+            Fills = [..reader.Result.Fills, reader.Result.Fills[0] with { SourceFillId = "must-not-import" }]
+        };
+        using var stale = await client.PostAsync($"/api/accounts/{account.Id}/sync", null);
+        Assert.Equal(HttpStatusCode.BadGateway, stale.StatusCode);
+        await using var verify = database.Context(owner);
+        Assert.Equal(3, await verify.Fills.CountAsync());
+        Assert.Equal(3, await verify.Orders.CountAsync());
+        Assert.Equal(reader.Result.Snapshot.ObservedAtUtc.AddSeconds(1), (await verify.Accounts.SingleAsync()).LastSyncedAtUtc);
     }
 
     [PostgresFact]
@@ -472,14 +592,19 @@ public sealed class AccountOrderHistoryApiTests
         await using (var db = database.Context(owner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); }
         reader.Result = reader.Result with { HistoryNotice = LighterReader.HistoryNotice };
         orders.Result = orders.Result with { Notice = AccountHistoryNoticeBudget.LighterCappedOrders };
-        await using var factory = Factory(owner, database, reader, orders, new AccountHistoryCredential("ro:synthetic-only"));
+        var clock = new RefreshClock();
+        await using var factory = Factory(owner, database, reader, orders, new AccountHistoryCredential("ro:synthetic-only"), clock);
         using var client = factory.AuthorizedClient();
         await Sync(client, account.Id);
+        using var cooling = await client.PostAsync($"/api/accounts/{account.Id}/sync", null);
+        Assert.Equal(HttpStatusCode.TooManyRequests, cooling.StatusCode);
+        Assert.Equal(1, reader.Reads); Assert.Equal(1, orders.Reads);
+        clock.Advance(reader, orders);
         // Maxwell's reachable sequence: omitted rows, then a refused credential page and refused public retry.
         reader.Result = reader.Result with
         {
             HistoryNotice = AccountHistoryNoticeBudget.LighterPublic(LighterReader.HistoryRetryNotice, LighterReader.HistoryUnavailableNotice, 100, 100, 10),
-            Snapshot = reader.Result.Snapshot with { ObservedAtUtc = reader.Result.Snapshot.ObservedAtUtc.AddMinutes(1), AccountValueUsd = 2000 }
+            Snapshot = reader.Result.Snapshot with { AccountValueUsd = 2000 }
         };
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -516,11 +641,13 @@ public sealed class AccountOrderHistoryApiTests
         account.Configure(null, null, null, "42");
         await using (var db = database.Context(owner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); }
         orders.Result = orders.Result with { Notice = AccountHistoryNoticeBudget.LighterCappedOrders };
-        await using var factory = Factory(owner, database, reader, orders, new AccountHistoryCredential("ro:synthetic-only"));
+        var clock = new RefreshClock();
+        await using var factory = Factory(owner, database, reader, orders, new AccountHistoryCredential("ro:synthetic-only"), clock);
         using var client = factory.AuthorizedClient();
         var cases = AccountHistoryNoticeBudget.CombinedCases().Where(c => c.Venue == "lighter").OrderByDescending(c => c.Public.Length).ToList();
         foreach (var coverage in cases)
         {
+            clock.Advance(reader, orders);
             reader.Result = reader.Result with { HistoryNotice = coverage.Public };
             var retained = await Sync(client, account.Id);
             Assert.Equal(coverage.Public + "\nOrder history: " + coverage.Orders, retained.HistoryNotice);
@@ -529,15 +656,15 @@ public sealed class AccountOrderHistoryApiTests
             Assert.Null(retained.LastSyncError);
             await AssertReloadedCoverage(client, retained);
         }
-        // Updating only order coverage must not reset a later public failure.
+        // A later public failure keeps the complete maximum coverage; it reads no orders and changes no settings.
         reader.Fail = true;
+        clock.Advance(reader, orders);
+        var orderReads = orders.Reads;
         using var failed = await client.PostAsync($"/api/accounts/{account.Id}/sync", null);
         Assert.Equal(HttpStatusCode.BadGateway, failed.StatusCode);
+        Assert.Equal(orderReads, orders.Reads);
         await using var verify = database.Context(owner);
         var row = await verify.Accounts.SingleAsync();
-        var workspace = new WorkspaceService(new WorkspaceStore(verify, TestUnitOfWork.For(verify)), new CoreOwner(owner), AccountHistoryOrders.Registry(reader, orders), TestUnitOfWork.For(verify));
-        var execution = new PlayExecutionService(new PlayStore(verify, TestUnitOfWork.For(verify)), new ExecutionStore(verify, TestUnitOfWork.For(verify)), workspace, AccountHistoryOrders.Registry(reader, orders), TimeProvider.System, TestUnitOfWork.For(verify), new AccountHistoryCredential("ro:synthetic-only"));
-        await execution.RetainAccountOrdersAsync(account.Id, default);
         Assert.Equal("error", row.SyncStatus);
         Assert.NotNull(row.LastSyncError);
         Assert.Equal(cases[^1].Public + "\nOrder history: " + orders.Result.Notice, row.HistoryNotice);

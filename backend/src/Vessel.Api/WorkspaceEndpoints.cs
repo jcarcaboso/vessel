@@ -1,8 +1,11 @@
 using Vessel.Application.Activity;
+using Vessel.Application.Common;
 using Vessel.Application.MarketData;
 using Vessel.Application.Workspace;
 using Vessel.Application.Credentials;
 using Vessel.Application.Plays.Execution;
+using Vessel.Application.Monitoring;
+using Vessel.Persistence;
 
 namespace Vessel.Api;
 
@@ -80,11 +83,15 @@ public static class WorkspaceEndpoints
             MarketContextService service, CancellationToken ct) =>
             Results.Ok(await service.ContextAsync(id, instrument, ct))).WithMetadata(new CompressMarketData());
         api.MapGet("/accounts/{id:guid}/market-stream", MarketStreamEndpoint.StreamAsync);
-        api.MapPost("/accounts/{id:guid}/sync", async (Guid id, WorkspaceService service, HttpContext context, CancellationToken ct) =>
+        api.MapPost("/accounts/{id:guid}/sync", async (Guid id, WorkspaceService service, HttpContext context,
+            MonitorRunExecutor executor, CancellationToken ct) =>
         {
-            await service.SyncAsync(id, ct);
-            var execution = context.RequestServices.GetRequiredService<PlayExecutionService>();
-            await execution.RetainAccountOrdersAsync(id, ct);
+            try
+            {
+                if (!await executor.RefreshAsync(id, ct))
+                    throw new ProblemException(502, "The venue refresh failed or was superseded by changed account settings. Try again later.");
+            }
+            catch (MonitorAdmissionException ex) { return MonitorEndpoints.Busy(context, ex); }
             return Results.Ok(await service.AccountAsync(id, ct));
         });
         api.MapGet("/activity", async ([AsParameters] ActivityQuery query, ActivityService service, CancellationToken ct) =>

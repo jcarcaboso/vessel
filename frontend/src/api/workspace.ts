@@ -28,6 +28,7 @@ import {
   type ManualExecutions, type ManualExecutionInput, type ManualExecutionCorrection,
 } from './diary'
 import type { ImageMarkup } from './markup'
+import { isMonitorRunAccepted, type MonitorRunAccepted } from './monitor'
 
 export interface Portfolio {
   id: string
@@ -269,8 +270,8 @@ export interface WorkspaceApi {
   correctManualExecution(id: string, executionId: string, input: ManualExecutionCorrection, signal?: AbortSignal): Promise<ManualExecutions>
   deletePlay(id: string): Promise<void>
   playExecution(id: string, signal?: AbortSignal): Promise<PlayExecution>
-  /** Refreshes the account's fills and orders at the venue, links what matches and applies status changes. */
-  checkPlayExecution(id: string, signal?: AbortSignal): Promise<PlayExecution>
+  /** Asks the background monitor to check the play's account. Accepted is not done: read `playExecution` for the outcome. */
+  checkPlayExecution(id: string, signal?: AbortSignal): Promise<MonitorRunAccepted>
   linkOrder(id: string, link: LinkOrder): Promise<PlayExecution>
   unlinkOrder(id: string, linkId: string): Promise<PlayExecution>
   evidence(playId: string, signal?: AbortSignal): Promise<SavedEvidence[]>
@@ -492,7 +493,8 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     },
     deletePlay: id => call(playPath(id), { ...playRequest, validate: none, method: 'DELETE' }),
     playExecution: (id, signal) => call(`${playPath(id)}/execution`, { ...playRequest, validate: isPlayExecution, ...withSignal(signal) }),
-    checkPlayExecution: (id, signal) => call(`${playPath(id)}/execution/check`, { ...playRequest, validate: isPlayExecution, method: 'POST', ...withSignal(signal), timeout: 45_000 }),
+    checkPlayExecution: (id, signal) => call(`${playPath(id)}/execution/check`, { ...playRequest, validate: isMonitorRunAccepted, method: 'POST', ...withSignal(signal),
+      invalidData: 'The API returned an incompatible check response.', tooMany: 'This account check is running or cooling down.', retryAfter: true }),
     linkOrder: (id, link) => call(`${playPath(id)}/execution/links`, { ...playRequest, validate: isPlayExecution, method: 'POST', body: JSON.stringify(link) }),
     unlinkOrder: (id, linkId) => {
       if (!isGuid(linkId)) return Promise.reject(new ApiError('invalid-response', 'The link identifier is invalid.'))

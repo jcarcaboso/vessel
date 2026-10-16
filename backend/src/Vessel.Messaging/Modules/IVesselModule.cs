@@ -6,8 +6,9 @@ namespace Vessel.Messaging.Modules;
 
 /// <summary>
 /// A feature module's messaging declaration. Every host applies the publishing side (command routes and topology
-/// names); only a host that runs the module adds its listeners, handlers and hosted services. Provisioning declares
-/// every known module's topology and registers its subscriptions, whichever modules a deployment runs.
+/// names), except for the command queues it consumes; only a host that runs the module adds its listeners, handlers
+/// and hosted services. Provisioning declares every known module's topology and registers its subscriptions,
+/// whichever modules a deployment runs.
 /// </summary>
 public interface IVesselModule
 {
@@ -23,6 +24,7 @@ public interface IVesselModule
 
 /// <summary>
 /// A command queue <c>{prefix}.commands.{Name}</c> and the message type routed to it. A host that runs the module
-/// listens inline with <paramref name="Handler"/>, a handler class this project adapts to an Application port.
+/// listens inline with <paramref name="Handler"/>, a handler class this project adapts to an Application port, and
+/// does not publish to that queue.
 /// </summary>
 public sealed record CommandQueue(string Name, Type MessageType, Type? Handler = null);

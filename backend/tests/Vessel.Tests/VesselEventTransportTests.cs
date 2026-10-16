@@ -312,12 +312,15 @@ internal sealed class BrokerScope : IAsyncDisposable
 
     public Task<ProvisioningResult> ProvisionAsync() => MessagingProvisioning.ProvisionAsync(Configuration, default, Registry);
 
-    public IHost Build(string deployment, params string[] run)
+    public IHost Build(string deployment, params string[] run) => Build(deployment, run, logs: null);
+
+    public IHost Build(string deployment, string[] run, ILoggerProvider? logs)
     {
         var builder = Host.CreateApplicationBuilder([]);
         builder.Configuration.Sources.Clear();
         builder.Configuration.AddConfiguration(Configuration);
         builder.Logging.ClearProviders();
+        if (logs is not null) builder.Logging.AddProvider(logs);
         builder.Services.AddSingleton<IJournalOwnerContext>(new CoreOwner(Owner));
         builder.Services.AddVesselPersistence(builder.Configuration);
         builder.AddVesselMessaging(deployment, run, registry: Registry);

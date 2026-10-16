@@ -87,7 +87,7 @@ public sealed class AccountManagementTests
         Assert.Equal(3, overview.Portfolios.Single().AccountCount); Assert.Equal("complete", overview.Portfolios.Single().ValueCoverage);
         Assert.Equal(0, overview.Totals.ImportedFillCount); Assert.Equal(0, overview.Totals.OpenPositionCount); Assert.Empty(overview.RecentActivity);
         Assert.Null(await service.SnapshotAsync(venue.Id, default)); Assert.Empty(await service.FillsAsync(venue.Id, default));
-        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.SyncAsync(venue.Id, default))).StatusCode); Assert.Equal(0, reader.Reads);
+        Assert.Equal(0, reader.Reads);
         Assert.Single(store.Snapshots); Assert.Single(store.Fills);
         await service.UpdateAccountAsync(venue.Id, new("Venue", portfolio.Id, true, 2), default);
         Assert.NotNull(await service.SnapshotAsync(venue.Id, default)); Assert.Single(await service.FillsAsync(venue.Id, default));

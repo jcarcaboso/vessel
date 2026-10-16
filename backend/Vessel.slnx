@@ -6,6 +6,7 @@
     <Project Path="src/Vessel.Infrastructure/Vessel.Infrastructure.csproj" />
     <Project Path="src/Vessel.Messaging/Vessel.Messaging.csproj" />
     <Project Path="src/Vessel.Persistence/Vessel.Persistence.csproj" />
+    <Project Path="src/Vessel.Worker/Vessel.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Vessel.Tests/Vessel.Tests.csproj" />

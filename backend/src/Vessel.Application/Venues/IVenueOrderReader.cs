@@ -40,4 +40,12 @@ public sealed record VenueOrder(
     public decimal ActingPrice => TriggerPrice ?? LimitPrice;
 }
 
-public sealed record VenueOrderReadResult(IReadOnlyList<VenueOrder> Orders, DateTimeOffset ObservedAtUtc, string Notice);
+/// <summary>Current orders together with potentially bounded historical status records.</summary>
+/// <param name="OpenOrdersComplete">
+/// True only when every current open order in the adapter's supported perpetual scope was read without
+/// truncation or unsupported omissions. This does not assert complete order history or an atomic observation.
+/// False means unknown or incomplete; absence must not establish cancellation or missing protection.
+/// Even when true, absence does not establish a terminal status, and Orders can retain historical open statuses.
+/// </param>
+public sealed record VenueOrderReadResult(IReadOnlyList<VenueOrder> Orders, DateTimeOffset ObservedAtUtc, string Notice,
+    bool OpenOrdersComplete = false);

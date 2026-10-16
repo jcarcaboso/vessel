@@ -9,17 +9,6 @@ namespace Vessel.Application.Workspace;
 
 public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext owner, IVenueRegistry venues, IUnitOfWork unitOfWork)
 {
-    internal Task<T> WithAccountLockAsync<T>(Guid id, Func<Account, Task<T>> action, CancellationToken ct) =>
-        store.WithAccountLockAsync(id, action, ct);
-
-    /// <summary>The caller holds the owner-scoped account lock throughout the order read and this save.</summary>
-    internal async Task RecordOrderHistoryNoticeAsync(Account lockedAccount, string? notice, CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-        lockedAccount.RecordOrderHistoryNotice(notice);
-        await store.SaveAsync(ct);
-    }
-
     private static void ValidateName(string? name)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Length > 200)
@@ -317,47 +306,11 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             "Venue perpetual contract metadata only. No orders, balances or execution refresh.");
     }
 
-    public async Task<AccountDto> SyncAsync(Guid id, CancellationToken ct)
-    {
-        var failed = await unitOfWork.ExecuteAsync(() => store.WithAccountLockAsync(id, async account =>
-        {
-            if (!account.IsEnabled) throw new ProblemException(400, "Enable the account before refreshing it.");
-            if (venues.Descriptor(account.VenueId) is not { Capabilities.Sync: true })
-                throw new ProblemException(400, $"Only {OrList(venues.Descriptors.Where(d => d.Capabilities.Sync).Select(d => d.Name), "and")} accounts can be refreshed.");
-            if (account.SourceId is null) throw new ProblemException(400, "A source identity is required before refresh.");
-            if (venues.Reader(account.VenueId) is not { } reader) throw new ProblemException(503, "Venue reader is unavailable.");
-            PerpetualVenueReadResult? result = null;
-            try
-            {
-                // Adapters may participate here (credential reads, refusal marks). A participant failure poisons the
-                // unit, so the handler below only classifies the venue failure; the record is written after it.
-                result = await reader.ReadAsync(account, ct);
-                if (!result.Fills.All(VenueFactChecks.Valid))
-                    throw new VenueReadException("The venue adapter returned fills outside Vessel's execution vocabulary.");
-            }
-            catch (Exception ex) when (ex is VenueReadException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
-            {
-                result = null;
-            }
-            if (result is null)
-            {
-                account.RecordSyncFailure();
-                await store.SaveAsync(ct);
-                return true;
-            }
-            await store.SaveRefreshAsync(account, result, ct);
-            return false;
-        }, ct), ct);
-        if (failed) throw new ProblemException(502, "The venue refresh failed. Try again later.");
-        var updated = await RequireAccount(id, ct);
-        return ToDto(updated, await store.SnapshotAsync(id, ct));
-    }
-
     /// <summary>"a", "a or b", "a, b or c".</summary>
-    private static string OrList(IEnumerable<string> items, string joiner = "or")
+    private static string OrList(IEnumerable<string> items)
     {
         var list = items.ToList();
-        return list.Count <= 1 ? string.Concat(list) : $"{string.Join(", ", list[..^1])} {joiner} {list[^1]}";
+        return list.Count <= 1 ? string.Concat(list) : $"{string.Join(", ", list[..^1])} or {list[^1]}";
     }
 
     private async Task<Account> RequireAccount(Guid id, CancellationToken ct) =>

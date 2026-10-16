@@ -21,6 +21,15 @@ namespace Vessel.Messaging;
 public sealed record MessagingHost(string Deployment, Guid OwnerId, IReadOnlyList<IVesselModule> RunningModules)
 {
     public IReadOnlyList<EventSubscription> RunningSubscriptions { get; } = RunningModules.SelectMany(m => m.Subscriptions).ToArray();
+
+    /// <summary>
+    /// Command queues this host listens to. It never publishes to them: a RabbitMQ queue is one Wolverine endpoint
+    /// with one mode, so a durable publishing route there would contend with the inline listener.
+    /// </summary>
+    public IReadOnlyList<CommandQueue> ConsumedCommands { get; } =
+        RunningModules.SelectMany(m => m.Commands).Where(c => c.Handler is not null).ToArray();
+
+    public bool Consumes(Type commandType) => ConsumedCommands.Any(c => c.MessageType == commandType);
 }
 
 public static class MessagingHosting
@@ -37,7 +46,8 @@ public static class MessagingHosting
 
     /// <summary>
     /// Adds the transport for one logical deployment: its own envelope schema, durable publication of events and of
-    /// every module's commands, and inline listeners only for the modules it runs. Nothing is declared at runtime.
+    /// the commands it does not consume, and inline listeners only for the modules it runs. Nothing is declared at
+    /// runtime.
     /// </summary>
     /// <param name="registry">The compiled-in registry by default; tests may supply test-only modules.</param>
     public static IHostApplicationBuilder AddVesselMessaging(this IHostApplicationBuilder builder, string deployment,
@@ -59,10 +69,15 @@ public static class MessagingHosting
         builder.Services.AddVesselEvents(builder.Configuration);
         builder.Services.Replace(ServiceDescriptor.Scoped<IVesselEventOutbox, WolverineVesselEventOutbox>());
         foreach (var module in host.RunningModules) module.AddRunningServices(builder.Services, builder.Configuration);
+        // Registered before Wolverine, so it runs first: never recover envelopes from a schema provisioned for others.
+        builder.Services.AddHostedService<MessagingDeploymentGuard>();
         builder.UseWolverine(options =>
         {
             Configure(options, settings, connection, deployment);
+            // No request/reply: without this Wolverine declares a wolverine.response.* queue per node at runtime,
+            // which is both runtime topology and a permission the least-privilege application user lacks.
             options.UseRabbitMq(settings.BrokerUri()).UseQuorumQueues().DisableDeadLetterQueueing()
+                .DisableSystemRequestReplyQueueDeclaration()
                 .ConfigureChannelCreation(channel =>
                 {
                     channel.PublisherConfirmationsEnabled = true;
@@ -70,7 +85,12 @@ public static class MessagingHosting
                 });
             // Publish once to the topic, routing key = type. No knowledge of who listens.
             options.PublishMessage<VesselEvent>().ToRabbitTopics(topology.EventExchange).UseDurableOutbox();
-            foreach (var command in registry.Modules.SelectMany(m => m.Commands))
+            // Each command queue has exactly one mode per host. Wolverine keys a RabbitMQ queue as one endpoint
+            // for both directions, so a host that listens inline must not also ask for a durable sender there:
+            // whichever request it applied last would win, either bypassing the outbox or turning the listener into
+            // a durable inbox that acknowledges before the handler settles. Consumers never publish their own
+            // commands (the outbox refuses them); requests go through the API's durable outbox.
+            foreach (var command in registry.Modules.SelectMany(m => m.Commands).Where(c => !host.Consumes(c.MessageType)))
                 options.PublishMessage(command.MessageType)
                     .ToRabbitQueue(topology.CommandQueue(command.Name), queue => topology.Configure(queue, topology.CommandQueue(command.Name)))
                     .UseDurableOutbox();
@@ -81,13 +101,14 @@ public static class MessagingHosting
                 options.ListenToRabbitQueue(queue, q => topology.Configure(q, queue)).ProcessInline();
             }
             if (host.RunningSubscriptions.Count != 0) options.Discovery.IncludeType(typeof(EventSubscriptionListener));
-            foreach (var command in host.RunningModules.SelectMany(m => m.Commands).Where(c => c.Handler is not null))
+            foreach (var command in host.ConsumedCommands)
             {
                 var queue = topology.CommandQueue(command.Name);
                 options.ListenToRabbitQueue(queue, q => topology.Configure(q, queue)).ProcessInline();
                 options.Discovery.IncludeType(command.Handler!);
             }
             options.Policies.OnException<EventDeadLetterException>().MoveToErrorQueue();
+            options.Policies.OnException<CommandDeadLetterException>().MoveToErrorQueue();
             configure?.Invoke(options);
         });
         return builder;

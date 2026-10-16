@@ -14,6 +14,9 @@ public sealed class EventDeadLetterException(DispatchOutcome outcome)
     public DispatchOutcome Outcome { get; } = outcome;
 }
 
+/// <summary>Dead-letters the current command delivery through the queue's own dead-letter exchange.</summary>
+public sealed class CommandDeadLetterException(string reason) : Exception($"Command delivery dead-lettered: {reason}.");
+
 /// <summary>
 /// The inline listener behind every subscription queue. It acknowledges once the dispatcher has settled or recorded
 /// the attempt; only terminal failures, invalid owners and unknown events are dead-lettered. Catch-up from
