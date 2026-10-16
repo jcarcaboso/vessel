@@ -945,6 +945,27 @@ public sealed class MonitorPostgresTests
         Assert.False(row.Owns(lease.Generation, lease.WorkerId, clock.Now));
     }
 
+    [PostgresFact]
+    public async Task Final_a_settled_owner_check_on_a_disabled_account_completes_as_superseded_once()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, clock.Now);
+        var sink = new EventSink();
+        var coordinator = Coordinator(db, owner, new Reader(), sink, clock);
+        var accepted = await coordinator.RequestAsync(id, default);
+        await DisableAsync(db);
+        await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default);
+        var completed = Assert.Single(sink.Drafts, d => d.Type == "monitor.run-completed");
+        Assert.Equal((accepted.RequestId, $"monitor-run:{id}:{accepted.RequestId}"), (completed.RunId, completed.DedupKey));
+        Assert.Equal("""{"trigger":"manual","outcome":"superseded","state":"idle"}""", completed.Data.GetRawText());
+        // A later pass finds nothing left to settle.
+        await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default);
+        Assert.Single(sink.Drafts, d => d.Type == "monitor.run-completed");
+    }
+
     private static async Task DisableAsync(VesselDbContext db)
     {
         db.ChangeTracker.Clear();

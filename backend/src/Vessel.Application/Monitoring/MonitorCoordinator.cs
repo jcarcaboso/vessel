@@ -79,9 +79,10 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                         // is then left idle with no scheduled run.
                         row.Supersede(now, options.ManualCooldown, MonitorOptions.FirstRetry);
                         row.Idle();
-                        // Hook: for an owner Check (Trigger "manual") the event layer emits monitor.run-completed
-                        // with outcome "superseded" here, keyed by row.RequestId.
                         await StateEventAsync(account.Id, old, row, row.RequestId ?? Guid.CreateVersion7(), "monitor", now, ct);
+                        // The settled owner Check completes like any other: browsers waiting on it go idle.
+                        if (row.RequestId is { } request)
+                            await RunCompletedAsync(account.Id, request, row.Trigger, row, "superseded", now, ct);
                         return true;
                     }
                     if (monitorable) await store.UpdateWatchesAsync(account.Id, null, now, ct);
@@ -528,10 +529,13 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     /// completed owner Check appends one event, keyed by its request. A deferred Check is still pending: no signal.
     /// </summary>
     private Task RunCompletedAsync(MonitorLease lease, MonitorAccount row, string outcome, DateTimeOffset now, CancellationToken ct) =>
-        lease.Trigger != "manual" ? Task.CompletedTask :
-        events.AppendAsync(new("monitor.run-completed", lease.RequestId, $"monitor-run:{lease.AccountId}:{lease.RequestId}",
-            "info", now, now, new(AccountId: lease.AccountId), new("owner"),
-            JsonSerializer.SerializeToElement(new { trigger = lease.Trigger, outcome, state = row.State })), ct);
+        RunCompletedAsync(lease.AccountId, lease.RequestId, lease.Trigger, row, outcome, now, ct);
+
+    private Task RunCompletedAsync(Guid accountId, Guid requestId, string trigger, MonitorAccount row, string outcome,
+        DateTimeOffset now, CancellationToken ct) => trigger != "manual" ? Task.CompletedTask :
+        events.AppendAsync(new("monitor.run-completed", requestId, $"monitor-run:{accountId}:{requestId}",
+            "info", now, now, new(AccountId: accountId), new("owner"),
+            JsonSerializer.SerializeToElement(new { trigger, outcome, state = row.State })), ct);
 
     // Owner Checks, owner refreshes and scheduled/confirmation runs share admission; the browser labels them apart.
     private static string? RunTrigger(MonitorAccount row) => row.ManualState == "idle" ? null : row.Trigger switch
