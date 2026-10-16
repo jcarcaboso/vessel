@@ -5,7 +5,7 @@ namespace Vessel.Persistence.Migrations;
 
 // Written by the explicit provision step only; every messaging host checks its own row at startup.
 [DbContext(typeof(VesselDbContext))]
-[Migration("20261015072500_MessagingDeployments")]
+[Migration("20261016110200_MessagingDeployments")]
 public sealed class MessagingDeployments : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder) => migrationBuilder.Sql("""

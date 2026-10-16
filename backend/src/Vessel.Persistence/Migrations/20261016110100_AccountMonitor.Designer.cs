@@ -12,7 +12,7 @@ using Vessel.Persistence;
 namespace Vessel.Persistence.Migrations
 {
     [DbContext(typeof(VesselDbContext))]
-    [Migration("20261015072425_AccountMonitor")]
+    [Migration("20261016110100_AccountMonitor")]
     partial class AccountMonitor
     {
         /// <inheritdoc />
@@ -539,6 +539,10 @@ namespace Vessel.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("Drawings")
                         .IsRequired()
                         .HasColumnType("jsonb");
@@ -625,6 +629,12 @@ namespace Vessel.Persistence.Migrations
                     b.HasIndex("OwnerId", "UpdatedAtUtc");
 
                     b.HasIndex("OwnerId", "AccountId", "VenueId", "ContractId");
+
+                    b.HasIndex("OwnerId", "Status", "EndedAtUtc", "UpdatedAtUtc")
+                        .IsDescending(false, false, true, true);
+
+                    b.HasIndex("OwnerId", "Status", "UpdatedAtUtc", "Id")
+                        .IsDescending(false, false, true, false);
 
                     b.ToTable("plays", (string)null);
                 });
