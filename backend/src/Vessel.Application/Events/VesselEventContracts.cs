@@ -66,9 +66,9 @@ public readonly record struct VesselEventCursor(Guid? Epoch, long Sequence)
 
 public static class VesselEventValues
 {
-    public static string Exact(decimal value) => value.ToString("0.############################", CultureInfo.InvariantCulture);
-    public static string Sum(IEnumerable<decimal> values) =>
-        values.Aggregate(default(ExactAmount), (sum, value) => sum + ExactAmount.From(value)).ToString();
+    // The shared exact rules; event payload text is byte-identical to every other amount the API emits.
+    public static string Exact(decimal value) => ExactDecimal.Format(value);
+    public static string Sum(IEnumerable<decimal> values) => ExactDecimal.Sum(values);
     public static string? AveragePrice(IEnumerable<(decimal Price, decimal Quantity)> values)
     {
         var rows = values.ToList();
