@@ -82,6 +82,18 @@ After reviewing the preview, the owner asked for:
   Result period selects opt out of browser form restoration (`autocomplete="off"`) so a load always shows the real
   scope, All. The centre label no longer gets text-selected.
 
+## October 16, 2026: helper-copy cleanup
+
+Activity keeps funding amounts, nominal-USD labels and incomplete/unverified
+states visible, with reported P&L, coverage timestamps and verbatim notices
+under "About these numbers". Account history notices appear once under
+"Scope and coverage". Monitor explanations use heading info tips; duplicate
+check timestamps and empty timing captions are omitted. Layout, calculations
+and actionable warnings are unchanged.
+
+Verified with 2,089 frontend tests, TypeScript, ESLint and a production build,
+plus synthetic Graphite/Paper browser checks at desktop and mobile widths.
+
 ## Verification
 
 - TypeScript, ESLint (0 warnings) and all 1,897 frontend tests pass; the production build emits the contour texture

@@ -179,7 +179,6 @@
 .small-empty { min-height: 195px; padding: 29px 25px; }
 .workspace-scope-note { margin: 16px 0 0; font-size: var(--text-2xs); line-height: 1.7; color: var(--muted-foreground); }
 .workspace-scope-note.in-panel { padding: 0 22px 20px; }
-.workspace-scope-note.account-history-notice { margin: 0; padding: 12px 22px; border-bottom: 1px solid var(--line); }
 .heading-with-tip { display: flex; align-items: center; gap: 6px; }
 .metric > .metric-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .metric > .metric-tags + small { margin-top: 8px; }

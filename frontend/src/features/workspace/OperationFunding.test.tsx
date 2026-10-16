@@ -13,6 +13,7 @@ const payment: FundingPayment = {
   occurredAtUnixNanoseconds: '1791802800001234567', amount: '-0.1234567890123456789012345678', asset: 'USDG',
 }
 const operation = { ...operationFixture, fundingNetUsd: payment.amount, fundingPaymentCount: 1, fundingStatus: 'partial' as const,
+  fundingAsOfUtc: '2026-10-12T12:00:00Z',
   coverage: ['Funding coverage is incomplete; missing funding is not zero.', 'Execution P&L funding inclusion is unverified.'] }
 const api = () => ({
   activity: vi.fn().mockResolvedValue(activityPage([operation], { unassignedFundingPayments: [{ ...payment, id: '62345678-1234-1234-1234-123456789abc' }] })),
@@ -33,7 +34,13 @@ describe('settled funding', () => {
     expect(within(funding).getByText('Paid')).toBeInTheDocument()
     expect(funding.querySelector(`[title="${payment.amount}"]`)).toBeInTheDocument()
     expect(funding.querySelector('[title*="1791802800001234567"]')).toBeInTheDocument()
-    expect(screen.getByText('Funding coverage is incomplete; missing funding is not zero.')).toBeInTheDocument()
+    const notice = screen.getByText('Funding coverage is incomplete; missing funding is not zero.')
+    expect(notice).not.toBeVisible()
+    expect(screen.getByRole('button', { name: 'Nominal USD' })).toHaveAccessibleDescription('Stablecoins at 1:1, with no FX/depeg valuation.')
+    await userEvent.click(screen.getByText('About these numbers', { selector: 'summary' }))
+    expect(notice).toBeVisible()
+    expect(screen.getByText('Execution P&L funding inclusion is unverified.')).toBeVisible()
+    expect(screen.getByText(operation.fundingAsOfUtc)).toBeVisible()
     expect(client.activityFills).toHaveBeenCalledWith(accountFixture.id, operation.id, expect.any(AbortSignal))
   })
 
@@ -43,7 +50,7 @@ describe('settled funding', () => {
     await userEvent.click(summary)
     const disclosure = summary.closest('details')!
     expect(within(disclosure).getByText('USDG')).toBeInTheDocument()
-    expect(within(disclosure).getByText(/cannot be attributed safely/)).toBeInTheDocument()
+    expect(within(disclosure).getByText('Before operation filters. Not attributed to operation results.')).toBeVisible()
     expect(screen.getAllByRole('button', { name: /Expand BTC operation/ })).toHaveLength(1)
   })
 

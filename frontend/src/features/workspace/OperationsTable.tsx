@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, Inbox } from 'lucide-react'
 import { Skeleton, SkeletonStatus } from '@/components/ui/skeleton'
 import { OperationDirection } from './OperationDirection'
 import { OperationFills } from './OperationFills'
+import { NominalUsdTag } from './CoverageBadge'
 import { duration, operationDates, operationPriceReturn, operationStatus, resultSign } from './activity-format'
 import { amount, money } from '@/lib/format'
 import './activity-operations.css'
@@ -83,13 +84,16 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
       {!compact && <td>{op.playId ? <span className="workspace-badge" title={op.playId}>Play {op.playId.slice(0, 8)}</span> : <span className="workspace-badge">{op.playAssociation === 'mixed' ? 'Mixed' : 'Unassigned'}</span>}</td>}
     </tr>{open && <tr id={`operation-${op.id}`}><td colSpan={compact ? 4 : 10} className="operation-expanded">
       {onPreview && <button className="text-action" aria-label={`Inspect ${op.contractId} retrospective eligibility`} onClick={() => onPreview(op)}>Inspect retrospective eligibility</button>}
-      <p className="workspace-scope-note operation-details">Entered {op.totalEnteredQuantity === null ? 'unknown' : amount(op.totalEnteredQuantity)} · Exited {op.totalExitedQuantity === null ? 'unknown' : amount(op.totalExitedQuantity)} · Remaining {op.openQuantity === null ? 'unknown' : amount(op.openQuantity)}. Venue-reported P&amp;L {money(op.reportedClosedPnlUsd)} ({op.pnlBasis}).</p>
+      <p className="workspace-scope-note operation-details">Entered {op.totalEnteredQuantity === null ? 'unknown' : amount(op.totalEnteredQuantity)} · Exited {op.totalExitedQuantity === null ? 'unknown' : amount(op.totalExitedQuantity)} · Remaining {op.openQuantity === null ? 'unknown' : amount(op.openQuantity)}</p>
       <dl className="operation-funding-summary">
-        <div><dt>{op.fundingStatus === 'complete' ? 'Settled funding' : 'Known settled funding'}</dt><dd><Result value={op.fundingNetUsd} /></dd></div>
+        <div><dt>{op.fundingStatus === 'complete' ? 'Settled funding' : 'Known settled funding'}</dt><dd><Result value={op.fundingNetUsd} /> <NominalUsdTag detail="Stablecoins at 1:1, with no FX/depeg valuation." /></dd></div>
         <div><dt>Total incl. funding</dt><dd>{op.totalResultUsd === null ? 'Unverified' : <Result value={op.totalResultUsd} />}</dd></div>
       </dl>
-      {op.fundingAsOfUtc !== null && <p className="workspace-scope-note">Funding coverage through <time dateTime={op.fundingAsOfUtc}>{op.fundingAsOfUtc}</time>. Positive received; negative paid. Nominal USD, no FX/depeg valuation.</p>}
-      {op.coverage.length > 0 && <ul className="operation-coverage">{op.coverage.map(reason => <li key={reason}>{reason}</li>)}</ul>}
+      <details className="operation-scope"><summary>About these numbers</summary>
+        <p className="workspace-scope-note">Venue-reported P&amp;L {money(op.reportedClosedPnlUsd)} ({op.pnlBasis}).</p>
+        {op.fundingAsOfUtc !== null && <p className="workspace-scope-note">Funding coverage through <time dateTime={op.fundingAsOfUtc}>{op.fundingAsOfUtc}</time>.</p>}
+        {op.coverage.length > 0 && <ul className="operation-coverage">{op.coverage.map(reason => <li key={reason}>{reason}</li>)}</ul>}
+      </details>
       <OperationFills api={api} operation={op} accounts={accounts} onReload={onReload} refreshGeneration={refreshGeneration} />
     </td></tr>}</Fragment>
   })}</tbody></table></div>
