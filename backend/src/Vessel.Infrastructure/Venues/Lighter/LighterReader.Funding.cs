@@ -81,7 +81,7 @@ public sealed partial class LighterReader
                 }
             }, cancellationToken);
         }
-        catch (VenueReadException)
+        catch (VenueReadException ex) when (ex is not VenueRateLimitException)
         {
             // Optional funding must not roll back an already valid ordinary snapshot/history read.
             // Never surface an upstream body, URL, token or arbitrary exception message.

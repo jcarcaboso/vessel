@@ -28,6 +28,9 @@ internal static class OperationFunding
         // Do not manufacture event ordering inside a boundary's precision bucket.
         var boundaryMilliseconds = boundaries.GroupBy(p => (p.Key.ContractKey, Millisecond: p.Key.At / 1_000_000))
             .ToDictionary(g => g.Key, g => g.SelectMany(p => p.Value).Distinct().ToList());
+        // Whole-second settlements may be coarser than fills (e.g. Lighter); precision is not inferred from venue names.
+        var boundarySeconds = boundaries.GroupBy(p => (p.Key.ContractKey, Second: p.Key.At / 1_000_000_000))
+            .ToDictionary(g => g.Key, g => g.SelectMany(p => p.Value).Distinct().ToList());
         foreach (var group in facts.FundingPayments.GroupBy(positions.Key))
         {
             var intervals = windows.GetValueOrDefault(group.Key) ?? [];
@@ -37,6 +40,8 @@ internal static class OperationFunding
                 var at = Time(payment);
                 var foundBoundary = payment.OccurredAtUnixNanoseconds is not null
                     ? boundaryMilliseconds.TryGetValue((group.Key, at / 1_000_000), out var sameTime)
+                    : at % 1_000_000_000 == 0
+                    ? boundarySeconds.TryGetValue((group.Key, at / 1_000_000_000), out sameTime)
                     : boundaries.TryGetValue((group.Key, at), out sameTime);
                 if (foundBoundary)
                 {

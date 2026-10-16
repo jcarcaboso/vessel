@@ -19,7 +19,9 @@ public sealed partial class WorkspaceStore
         {
             if (existing.TryGetValue(payment.SourceId, out var retained))
             {
-                if (retained.ContractId != payment.ContractId || retained.VenueContractId != payment.VenueContractId ||
+                // Canonical labels are derived from mutable catalogues; native identity is the retained fact.
+                if ((retained.VenueContractId is null && retained.ContractId != payment.ContractId) ||
+                    retained.VenueContractId != payment.VenueContractId ||
                     retained.Amount != payment.Amount || retained.Asset != payment.Asset || retained.OccurredAtUtc != payment.OccurredAtUtc ||
                     retained.OccurredAtUnixNanoseconds != payment.OccurredAtUnixNanoseconds)
                     throw new ProblemException(409, "A retained funding settlement conflicts with the venue response. No refresh changes were saved.");

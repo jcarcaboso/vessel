@@ -160,6 +160,41 @@ public sealed class FundingTests
             Assert.Single(page.UnassignedFundingPayments).OccurredAtUnixNanoseconds);
     }
 
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(100, false)]
+    public async Task Whole_second_funding_cannot_be_ordered_against_fractional_boundaries_in_that_second(
+        int paymentMilliseconds, bool ambiguous)
+    {
+        var close = Fill(10, "sell", "close", pnl: 10);
+        close.OccurredAtUtc = close.OccurredAtUtc.AddMilliseconds(250);
+        var open = Fill(10, "sell", "open");
+        open.OccurredAtUtc = open.OccurredAtUtc.AddMilliseconds(700);
+        var payment = Payment(2, minute: 10);
+        payment.OccurredAtUtc = payment.OccurredAtUtc.AddMilliseconds(paymentMilliseconds);
+        var service = Service(Facts([payment], fills:
+            [Fill(0, "buy", "open"), close, open, Fill(20, "buy", "close")]));
+        var page = await service.PageAsync(new(), default);
+        Assert.Equal(2, page.Operations.Count);
+        Assert.All(page.Operations, operation =>
+        {
+            Assert.Equal(ambiguous ? "partial" : "complete", operation.FundingStatus);
+            if (ambiguous) { Assert.Null(operation.FundingNetUsd); Assert.Null(operation.TotalResultUsd); }
+        });
+        if (ambiguous)
+        {
+            Assert.Equal(payment.SourceId, Assert.Single(page.UnassignedFundingPayments).SourceId);
+            foreach (var operation in page.Operations)
+                Assert.Empty((await service.FillsAsync(AccountId, operation.Id, default)).FundingPayments);
+        }
+        else
+        {
+            Assert.Empty(page.UnassignedFundingPayments);
+            Assert.Equal("2", Assert.Single(page.Operations, o => o.Direction == "long").FundingNetUsd);
+            Assert.Equal("0", Assert.Single(page.Operations, o => o.Direction == "short").FundingNetUsd);
+        }
+    }
+
     [Fact]
     public async Task Unique_funding_native_identity_resolves_legacy_fills_but_multiple_candidates_do_not()
     {

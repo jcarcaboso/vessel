@@ -107,6 +107,27 @@ public sealed class LighterFundingTests
     }
 
     [Fact]
+    public async Task Funding_rate_limit_reaches_the_shared_venue_backoff_without_refusing_the_credential()
+    {
+        var handler = new Handler
+        {
+            Funding = (_, _) =>
+            {
+                var response = Response("Private upstream body.", HttpStatusCode.TooManyRequests);
+                response.Headers.RetryAfter = new(System.TimeSpan.FromMinutes(10));
+                return response;
+            }
+        };
+        var credentials = new Credentials(Token);
+        var error = await Assert.ThrowsAsync<VenueRateLimitException>(() =>
+            Reader(handler, credentials).ReadFundingAsync(Account(), From, Now, default));
+        Assert.Equal(Now.AddMinutes(10), error.RetryAtUtc);
+        Assert.Empty(credentials.Refused);
+        Assert.DoesNotContain("Private", error.Message);
+        Assert.DoesNotContain(Token, error.Message);
+    }
+
+    [Fact]
     public async Task Settled_changes_keep_exact_signs_native_ids_collateral_and_retired_markets()
     {
         var rows = new[]

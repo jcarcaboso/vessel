@@ -203,6 +203,8 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                     catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
                         ex is OperationCanceledException && !ct.IsCancellationRequested)
                     {
+                        if (ex is VenueRateLimitException limited)
+                            await store.DeferVenueAsync(capture.Account.VenueId, limited.RetryAtUtc, time.GetUtcNow(), CancellationToken.None);
                         funding = new([], from, to, false,
                             "Funding history could not be refreshed. Retained payments are unchanged; missing funding is not zero.");
                     }

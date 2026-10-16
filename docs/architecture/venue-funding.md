@@ -47,8 +47,12 @@ work only after revalidating the lease, settings, source and credential revision
 PostgreSQL `numeric` amounts, source ID, canonical and native instrument,
 asset, account/owner and timestamp. A unique owner/account/source key makes
 repeated or concurrent refreshes idempotent. Repeated source identities with
-different normalized facts cause a conflict and roll back the whole refresh;
-they never overwrite retained history. Original adapter JSON is not persisted
+different immutable facts cause a conflict and roll back the whole refresh;
+they never overwrite retained history. A derived canonical label may change
+with a catalogue rename when the native contract identity is unchanged: keep
+the retained label rather than rejecting the account refresh. Legacy facts
+without native identity still require an unchanged canonical key.
+Original adapter JSON is not persisted
 or exposed. RISEx native Unix-nanosecond timestamps have a separate nullable
 `bigint` column because PostgreSQL timestamps have only microsecond precision;
 the API sends that integer as a string, never a JavaScript number.
@@ -62,7 +66,9 @@ a long refresh gap; the settlements remain visible as partial history.** Add
 multiple coverage intervals only when that limitation needs removing.
 
 Funding outages do not discard a valid ordinary snapshot/fill refresh.
-Previously retained funding facts remain and the failure is explicit. Cancellation
+Previously retained funding facts remain and the failure is explicit. Rate limits
+preserve public facts but persist the shared venue backoff, skipping subsequent
+orders and deferring other accounts on that venue. Caller cancellation
 during the funding read saves neither snapshot nor settlements. As in the existing
 monitor Refresh path, cancellation during a later optional order read does not
 undo already committed public refresh facts. Disabling hides funding with account activity; deleting
@@ -83,11 +89,20 @@ Every operation sharing an ambiguous boundary is marked uncertain. A settlement
 at an opening, close or flip timestamp stays unassigned. Native-nanosecond
 settlements sharing a boundary's millisecond bucket are also uncertain:
 historical execution imports can have only millisecond precision, so finer
-funding timestamps must not invent ordering. Unique legacy native identities
+funding timestamps must not invent ordering. Whole-second payments without a
+native-nanosecond timestamp are conservatively treated as second-precision:
+every opening/closing boundary in that second is uncertain. This handles
+Lighter's coarse funding timestamps without inventing ordering against its
+millisecond fills; exact-second payments from other venues may be conservative
+too. Other payments with fractional-second timestamps use exact-time boundaries.
+Unique legacy native identities
 can resolve through fills, snapshots **or funding**; multiple native markets
 sharing a canonical key remain uncertain.
 Activity list/detail reads and retrospective previews use the same funding-aware
 identity resolver, so selecting an operation preserves its constituent grouping.
+Scheduled and Play checks can advance the latest observation without reading
+funding. An open operation can then become partial until the next owner refresh;
+retained payments are not removed or counted as a verified zero.
 
 All sums use `ExactAmount` integer arithmetic. Supported stablecoins pool
 nominally 1:1 with no FX/depeg valuation. Other assets stay in the settlement

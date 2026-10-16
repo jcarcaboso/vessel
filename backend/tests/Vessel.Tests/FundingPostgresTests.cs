@@ -17,6 +17,7 @@ public sealed class FundingPostgresTests
         public string VenueId => "hyperliquid";
         public bool FailFunding, CancelFunding;
         public int FundingReads;
+        public DateTimeOffset? FundingRetryAtUtc;
         public decimal Amount = -0.1234567890123456789012345678m;
         public DateTimeOffset Observation = At;
         public VenueFundingReadResult? Funding;
@@ -31,6 +32,7 @@ public sealed class FundingPostgresTests
             if (BeforeFunding is not null) await BeforeFunding(ct);
             ct.ThrowIfCancellationRequested();
             if (CancelFunding) throw new OperationCanceledException(ct);
+            if (FundingRetryAtUtc is { } retryAt) throw new VenueRateLimitException(retryAt);
             if (FailFunding) throw new VenueReadException("Provider secret must not appear.");
             return Funding ?? new([new("funding-1", "BTC", "1", Amount, "USDC", At.AddDays(-1),
                 "Raw payload must not be stored")], from, to, true, "Synthetic settled funding.", FundingFacts.Excluded);
@@ -86,8 +88,12 @@ public sealed class FundingPostgresTests
         }
     }
 
-    [PostgresFact]
-    public async Task Conflicting_funding_identity_rolls_back_the_entire_refresh_without_overwriting_facts()
+    [PostgresTheory]
+    [InlineData("amount")]
+    [InlineData("native")]
+    [InlineData("asset")]
+    [InlineData("time")]
+    public async Task Conflicting_funding_identity_rolls_back_the_entire_refresh_without_overwriting_facts(string field)
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid(); var reader = new Reader(); Guid id;
@@ -96,7 +102,11 @@ public sealed class FundingPostgresTests
             id = await Account(db, owner); await Refresh(db, owner, reader, id);
         }
         var original = reader.Amount;
-        reader.Amount = 50; reader.Observation = At.AddHours(1);
+        reader.Observation = At.AddHours(1);
+        reader.Funding = new([new("funding-1", "RENAMED-BTC", field == "native" ? "2" : "1",
+            field == "amount" ? 50 : original, field == "asset" ? "USDG" : "USDC",
+            At.AddDays(-1).AddMilliseconds(field == "time" ? 1 : 0), "{}")],
+            reader.Observation.AddDays(-30), reader.Observation, true, "Synthetic conflicting funding.");
         await using (var db = database.Context(owner))
         {
             var error = await Assert.ThrowsAsync<ProblemException>(() => Refresh(db, owner, reader, id));
@@ -104,11 +114,76 @@ public sealed class FundingPostgresTests
         }
         await using (var db = database.Context(owner))
         {
-            Assert.Equal(original, (await db.FundingPayments.SingleAsync()).Amount);
+            var payment = await db.FundingPayments.SingleAsync();
+            Assert.Equal(original, payment.Amount); Assert.Equal("BTC", payment.ContractId);
+            Assert.Equal("1", payment.VenueContractId); Assert.Equal("USDC", payment.Asset);
+            Assert.Equal(At.AddDays(-1), payment.OccurredAtUtc);
             Assert.Equal(At, (await db.Snapshots.SingleAsync()).ObservedAtUtc);
             Assert.Equal(At, (await db.FundingStates.SingleAsync()).CoveredToUtc);
         }
     }
+
+    [PostgresTheory]
+    [InlineData("1")]
+    [InlineData(null)]
+    public async Task Derived_canonical_rename_preserves_native_settlement_but_legacy_identity_conflicts(string? native)
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var reader = new Reader(); Guid id;
+        VenueFundingReadResult Result(string contract) => new(
+            [new("funding-1", contract, native, reader.Amount, "USDC", At.AddDays(-1), "{}")],
+            reader.Observation.AddDays(-30), reader.Observation, true, "Synthetic settled funding.", FundingFacts.Excluded);
+        reader.Funding = Result("BTC");
+        await using (var db = database.Context(owner))
+        {
+            id = await Account(db, owner); await Refresh(db, owner, reader, id);
+        }
+        reader.Observation = At.AddHours(1);
+        reader.Funding = Result("RENAMED-BTC");
+        await using (var db = database.Context(owner))
+        {
+            if (native is null)
+                Assert.Equal(502, (await Assert.ThrowsAsync<ProblemException>(() => Refresh(db, owner, reader, id))).StatusCode);
+            else await Refresh(db, owner, reader, id);
+        }
+        await using (var db = database.Context(owner))
+        {
+            var retained = await db.FundingPayments.SingleAsync();
+            Assert.Equal("BTC", retained.ContractId); Assert.Equal(native, retained.VenueContractId);
+            Assert.Equal(reader.Amount, retained.Amount);
+            var expected = native is null ? At : reader.Observation;
+            Assert.Equal(expected, (await db.Snapshots.SingleAsync()).ObservedAtUtc);
+            Assert.Equal(expected, (await db.FundingStates.SingleAsync()).CoveredToUtc);
+        }
+    }
+
+    [PostgresFact]
+    public async Task Funding_rate_limit_keeps_public_refresh_but_defers_orders_and_other_accounts_on_the_venue()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var reader = new Reader { FundingRetryAtUtc = At.AddMinutes(10) };
+        var orders = new AccountHistoryOrders();
+        var venues = TestVenues.With(reader, orders);
+        await using var db = database.Context(owner);
+        var id = await Account(db, owner);
+        var other = new Account(Guid.NewGuid(), owner, "hyperliquid", "Other synthetic account");
+        other.Configure(null, "0x2222222222222222222222222222222222222222", null);
+        db.Accounts.Add(other); await db.SaveChangesAsync();
+        var clock = new Clock();
+        await MonitorTestPaths.RefreshAsync(db, owner, venues, id, time: clock);
+        Assert.Equal(At, (await db.Snapshots.SingleAsync()).ObservedAtUtc);
+        Assert.False((await db.FundingStates.SingleAsync()).LastReadComplete);
+        Assert.Empty(await db.FundingPayments.ToListAsync());
+        Assert.Equal(reader.FundingRetryAtUtc,
+            await new MonitorStore(db, TestUnitOfWork.For(db)).VenueRetryAtAsync("hyperliquid", default));
+        Assert.Equal(0, orders.Reads);
+        await Assert.ThrowsAsync<MonitorAdmissionException>(() =>
+            MonitorTestPaths.RefreshAsync(db, owner, venues, other.Id, time: clock));
+        Assert.Equal(1, reader.FundingReads);
+    }
+
+    private sealed class Clock : TimeProvider { public override DateTimeOffset GetUtcNow() => At; }
 
     [PostgresFact]
     public async Task Funding_failure_preserves_history_and_valid_snapshot_refresh_without_exposing_provider_errors()
