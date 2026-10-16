@@ -144,7 +144,7 @@ public sealed class MonitorDiscrepancyPostgresTests
     [PostgresFact]
     public async Task Step_four_migration_upgrades_layer_three_without_changing_imported_facts()
     {
-        await using var database = await DiscrepancyDatabase.Create("20261015072425_AccountMonitor");
+        await using var database = await DiscrepancyDatabase.Create("20261015072500_MessagingDeployments");
         var f = new DiscrepancyFixture(); await database.Seed(f);
         await using var scope = database.Scope(f);
         Assert.Equal("20261015073737_PlayDiscrepancies", (await scope.Db.Database.GetPendingMigrationsAsync()).First());
@@ -178,7 +178,7 @@ public sealed class MonitorDiscrepancyPostgresTests
         {
             await first.Evaluate(f.Observation());
             Assert.Empty(await first.Service.ReadAsync(f.Account.Id, null, default));
-            Assert.Empty((await first.Events.ReadAsync(0, 100, default)).Events);
+            Assert.Empty((await EventReads.ReadAsync(first.Db, 0, 100, default)).Events);
         }
         f.Advance(60);
         await using (var second = database.Scope(f))
@@ -188,9 +188,9 @@ public sealed class MonitorDiscrepancyPostgresTests
             Assert.Equal("position.excess", row.Kind);
             Assert.Equal("open", row.State);
             Assert.Equal("1", row.Details.GetProperty("expectedQuantity").GetString());
-            Assert.Single((await second.Events.ReadAsync(0, 100, default)).Events);
+            Assert.Single((await EventReads.ReadAsync(second.Db, 0, 100, default)).Events);
             await second.Service.DismissAsync(f.Account.Id, f.Play.Id, row.Id, "accepted exposure", default);
-            var events = (await second.Events.ReadAsync(0, 100, default)).Events;
+            var events = (await EventReads.ReadAsync(second.Db, 0, 100, default)).Events;
             Assert.Equal(2, events.Count);
             Assert.Equal("monitor", events[0].Source.Trigger);
             Assert.Equal("info", events[1].Severity);
@@ -201,7 +201,7 @@ public sealed class MonitorDiscrepancyPostgresTests
         {
             await restart.Evaluate(f.Observation());
             Assert.Equal("dismissed", Assert.Single(await restart.Service.ReadAsync(f.Account.Id, f.Play.Id, default)).State);
-            Assert.Equal(2, (await restart.Events.ReadAsync(0, 100, default)).Events.Count);
+            Assert.Equal(2, (await EventReads.ReadAsync(restart.Db, 0, 100, default)).Events.Count);
             var retained = await restart.Db.Fills.SingleAsync();
             Assert.Equal(f.Store.Fills[0].Quantity, retained.Quantity);
             Assert.Equal(f.Store.Fills[0].Side, retained.Side);
@@ -230,10 +230,10 @@ public sealed class MonitorDiscrepancyPostgresTests
             }, default));
         }
         await using var retry = database.Scope(f);
-        Assert.Empty((await retry.Events.ReadAsync(0, 100, default)).Events);
+        Assert.Empty((await EventReads.ReadAsync(retry.Db, 0, 100, default)).Events);
         Assert.Equal("candidate", (await retry.Db.Set<PlayDiscrepancy>().SingleAsync()).State);
         await retry.Evaluate(f.Observation());
-        Assert.Single((await retry.Events.ReadAsync(0, 100, default)).Events);
+        Assert.Single((await EventReads.ReadAsync(retry.Db, 0, 100, default)).Events);
         Assert.Equal("open", (await retry.Db.Set<PlayDiscrepancy>().SingleAsync()).State);
     }
 
@@ -248,7 +248,7 @@ public sealed class MonitorDiscrepancyPostgresTests
         await Task.WhenAll(a.Evaluate(f.Observation()), b.Evaluate(f.Observation()));
         await using var read = database.Scope(f);
         Assert.Single(await read.Db.Set<PlayDiscrepancy>().ToListAsync());
-        Assert.Single((await read.Events.ReadAsync(0, 100, default)).Events);
+        Assert.Single((await EventReads.ReadAsync(read.Db, 0, 100, default)).Events);
         var original = await read.Db.Set<PlayDiscrepancy>().SingleAsync();
         read.Db.Add(new PlayDiscrepancy { OwnerId = original.OwnerId, AccountId = original.AccountId,
             Kind = original.Kind, SubjectKey = original.SubjectKey, ContractId = original.ContractId,
@@ -278,7 +278,7 @@ public sealed class MonitorDiscrepancyPostgresTests
         await using (var read = database.Scope(f))
         {
             Assert.Equal("open", (await read.Db.Set<PlayDiscrepancy>().SingleAsync()).State);
-            Assert.Single((await read.Events.ReadAsync(0, 100, default)).Events);
+            Assert.Single((await EventReads.ReadAsync(read.Db, 0, 100, default)).Events);
         }
         await using (var invalidAccount = database.Scope(f))
             Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => invalidAccount.Service.DismissAsync(Guid.NewGuid(), null, id, null, default))).StatusCode);
@@ -298,7 +298,7 @@ public sealed class MonitorDiscrepancyPostgresTests
         await using var second = database.Scope(f);
         Assert.True((await second.Evaluate(f.Observation())).Incomplete);
         Assert.Empty(await second.Service.ReadAsync(f.Account.Id, null, default));
-        Assert.Empty((await second.Events.ReadAsync(0, 100, default)).Events);
+        Assert.Empty((await EventReads.ReadAsync(second.Db, 0, 100, default)).Events);
     }
 }
 
@@ -343,15 +343,15 @@ internal sealed class DiscrepancyDatabaseScope : IAsyncDisposable
 {
     public VesselDbContext Db { get; }
     public UnitOfWork Work { get; }
-    public PlayEventStore Events { get; }
+    public VesselEventStore Events { get; }
     public MonitorDiscrepancyStore Store { get; }
     public MonitorDiscrepancyService Service { get; }
     public DiscrepancyDatabaseScope(string connection, DiscrepancyFixture f, Guid owner)
     {
-        var capture = new PlayEventMutationCapture();
+        var capture = new VesselEventMutationCapture();
         Db = new(new DbContextOptionsBuilder<VesselDbContext>().UseNpgsql(connection)
             .AddInterceptors(capture).Options, new CoreOwner(owner));
-        Events = new(Db, capture, new DiscrepancyOutbox(), Options.Create(new PlayEventSettings()), NullLogger<PlayEventStore>.Instance);
+        Events = new(Db, capture, new DiscrepancyOutbox(), Options.Create(new VesselEventSettings()), NullLogger<VesselEventStore>.Instance);
         Work = new(Db, [Events]); Store = new(Db, Work);
         Service = new(Store, Work, new CoreOwner(owner), Events, new(), f.Clock);
     }
@@ -361,9 +361,9 @@ internal sealed class DiscrepancyDatabaseScope : IAsyncDisposable
         return await Service.EvaluateAsync(evaluation, default);
     }, default);
     public ValueTask DisposeAsync() => Db.DisposeAsync();
-    private sealed class DiscrepancyOutbox : IPlayEventOutbox
+    private sealed class DiscrepancyOutbox : IVesselEventOutbox
     {
-        public Task<IReadOnlyList<EventEnvelopeReference>> StageAsync(PlayEvent message, CancellationToken ct) => Task.FromResult<IReadOnlyList<EventEnvelopeReference>>([]);
+        public Task StageAsync(VesselEvent message, CancellationToken ct) => Task.CompletedTask;
         public Task StageAsync(MonitorAccountCommand command, CancellationToken ct) => Task.CompletedTask;
         public Task FlushAsync(CancellationToken ct) => Task.CompletedTask;
         public void Reset() { }

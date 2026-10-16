@@ -121,7 +121,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             var now = time.GetUtcNow();
             if (!account.IsEnabled || account.SourceId is null || !EligibleVenue(account.VenueId) ||
                 !await store.EligibleAsync(accountId, now, ct))
-                throw new ProblemException(409, "This account has no eligible venue Plays or pending linked orders.");
+                throw new ProblemException(409, "This account has no eligible venue Plays, pending linked orders or discrepancy work.");
             row.ReleaseAbandonedRefresh(now);
             var retry = await RetryAfterAsync(account.VenueId, row, now, ct);
             if (retry > 0) throw new MonitorAdmissionException(retry);

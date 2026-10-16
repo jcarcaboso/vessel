@@ -88,7 +88,7 @@ public sealed class MonitorDiscrepancyRound4Tests
         Assert.Equal("unverifiable", unverifiable.Data.GetProperty("outcome").GetString());
         Assert.Equal(lastObserved, unverifiable.Data.GetProperty("lastObservedAtUtc").GetDateTimeOffset());
         Assert.Equal(row.UnverifiableAtUtc, unverifiable.Data.GetProperty("unverifiableAtUtc").GetDateTimeOffset());
-        Assert.Contains("discrepancy.unverifiable", PlayEventValues.Types);
+        Assert.Contains("discrepancy.unverifiable", VesselEventValues.Types);
         // A fresh decision clears the announced candidate's outcome; its clearance is then published too.
         f.Retired = false; f.Position = 0; f.Advance(60); await f.Evaluate();
         Assert.Equal("resolved", row.State);
@@ -148,8 +148,8 @@ public sealed class MonitorDiscrepancyRound4PostgresTests
         Assert.Null(row.ResolvedAtUtc);
         var state = (await monitor.FindAsync(f.Account.Id, default))!;
         Assert.Null(state.NextRunAtUtc);
-        Assert.False(await monitor.EligibleAsync(f.Account.Id, default));
-        var events = (await scope.Events.ReadAsync(0, 100, default)).Events.Where(x => x.Type.StartsWith("discrepancy.")).ToArray();
+        Assert.False(await monitor.EligibleAsync(f.Account.Id, f.Clock.Now, default));
+        var events = (await EventReads.ReadAsync(scope.Db, 0, 100, default)).Events.Where(x => x.Type.StartsWith("discrepancy.")).ToArray();
         var unverifiable = Assert.Single(events);
         Assert.Equal(("discrepancy.unverifiable", "warning", $"discrepancy:{row.Id}:{row.Revision}:unverifiable"),
             (unverifiable.Type, unverifiable.Severity, unverifiable.DedupKey));
@@ -178,6 +178,7 @@ public sealed class MonitorDiscrepancyRound4PostgresTests
     private sealed class NoCredentials : IAccountCredentialReader
     {
         public Task<string?> ReadAsync(Guid accountId, CancellationToken ct) => Task.FromResult<string?>(null);
+        public Task<CredentialAttempt?> ReadAttemptAsync(Guid accountId, CancellationToken ct) => Task.FromResult<CredentialAttempt?>(null);
         public Task MarkRefusedAsync(Guid accountId, string attemptedRevision, CancellationToken ct) => Task.CompletedTask;
     }
     private sealed class NoCommands : IMonitorCommandSink

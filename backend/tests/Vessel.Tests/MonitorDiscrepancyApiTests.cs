@@ -42,7 +42,7 @@ public sealed class MonitorDiscrepancyApiTests
             var row = await read.Db.Set<PlayDiscrepancy>().SingleAsync();
             Assert.Equal("dismissed", row.State);
             Assert.Equal("accepted for now", row.Note);
-            var events = (await read.Events.ReadAsync(0, 100, default)).Events;
+            var events = (await EventReads.ReadAsync(read.Db, 0, 100, default)).Events;
             Assert.Equal(2, events.Count);
             Assert.Equal("dismissed", events[1].Data.GetProperty("resolution").GetString());
         }
@@ -73,6 +73,6 @@ public sealed class MonitorDiscrepancyApiTests
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync($"/api/accounts/{f.Account.Id}/discrepancies/{id}/dismiss", new { })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync($"/api/plays/{f.Play.Id}/discrepancies/{id}/dismiss", new { })).StatusCode);
         await using var read = database.Scope(f);
-        Assert.Empty((await read.Events.ReadAsync(0, 100, default)).Events);
+        Assert.Empty((await EventReads.ReadAsync(read.Db, 0, 100, default)).Events);
     }
 }

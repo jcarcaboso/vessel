@@ -176,7 +176,7 @@ public sealed class MonitorDiscrepancyRound3PostgresTests
             PendingSinceUtc = null, LastObservedAtUtc = f.Clock.Now };
         await using (var seed = database.Scope(f)) { seed.Db.Add(row); await seed.Db.SaveChangesAsync(); }
         await using (var scope = database.Scope(f))
-            Assert.True(await new MonitorStore(scope.Db, scope.Work).EligibleAsync(f.Account.Id, default));
+            Assert.True(await new MonitorStore(scope.Db, scope.Work).EligibleAsync(f.Account.Id, f.Clock.Now, default));
         await using (var scope = database.Scope(f))
         {
             (await scope.Db.Set<PlayDiscrepancy>().SingleAsync()).UnverifiableAtUtc = f.Clock.Now;
@@ -184,7 +184,7 @@ public sealed class MonitorDiscrepancyRound3PostgresTests
             await scope.Db.SaveChangesAsync();
         }
         await using (var scope = database.Scope(f))
-            Assert.False(await new MonitorStore(scope.Db, scope.Work).EligibleAsync(f.Account.Id, default));
+            Assert.False(await new MonitorStore(scope.Db, scope.Work).EligibleAsync(f.Account.Id, f.Clock.Now, default));
     }
 
     [PostgresFact] // Finding 3: the outcome is persisted.
@@ -242,7 +242,7 @@ public sealed class MonitorDiscrepancyRound3PostgresTests
         var row = await scope.Db.Set<PlayDiscrepancy>().SingleAsync(x => x.Kind == "position.excess");
         Assert.NotNull(row.PendingFingerprint);
         Assert.Equal(dismissed ? "dismissed" : "resolved", row.State);
-        Assert.NotNull(await scope.Db.Set<MonitorExitWatch>().SingleAsync(x => x.ResolvedAtUtc != null));
+        Assert.NotNull(await scope.Db.Set<MonitorExitWatch>().SingleAsync(x => x.EndedAtUtc != null));
         Assert.NotNull((await monitor.FindAsync(f.Account.Id, default))!.NextRunAtUtc);
         // The re-confirmation run reopens it.
         f.Advance(61);
@@ -270,6 +270,7 @@ public sealed class MonitorDiscrepancyRound3PostgresTests
     private sealed class NoCredentials : IAccountCredentialReader
     {
         public Task<string?> ReadAsync(Guid accountId, CancellationToken ct) => Task.FromResult<string?>(null);
+        public Task<CredentialAttempt?> ReadAttemptAsync(Guid accountId, CancellationToken ct) => Task.FromResult<CredentialAttempt?>(null);
         public Task MarkRefusedAsync(Guid accountId, string attemptedRevision, CancellationToken ct) => Task.CompletedTask;
     }
     private sealed class NoCommands : IMonitorCommandSink

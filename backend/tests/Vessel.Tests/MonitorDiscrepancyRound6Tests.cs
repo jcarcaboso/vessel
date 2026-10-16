@@ -32,6 +32,8 @@ public sealed class MonitorDiscrepancyRound6Tests
         var reader = new Reader(f);
         var (monitor, coordinator) = Create(scope, f, reader);
         Assert.True(await coordinator.RunAsync(await coordinator.AdmitRefreshAsync(f.Account.Id, "owner", default), default));
+        // A refresh never schedules checks; discovery does, for the discrepancy work alone.
+        await coordinator.DiscoverAsync(["hyperliquid"], f.Clock.Now, default);
         reader.Frozen = f.Observation().Read.Sync;
         // Hyperliquid stamps snapshots with the upstream clearinghouseState.time, not local receive time.
         f.Advance((int)TimeSpan.FromDays(7).TotalSeconds + 60);
@@ -40,7 +42,7 @@ public sealed class MonitorDiscrepancyRound6Tests
         var row = await scope.Db.Set<PlayDiscrepancy>().SingleAsync();
         Assert.NotNull(row.UnverifiableAtUtc);
         Assert.Equal("candidate", row.State);
-        Assert.False(await monitor.EligibleAsync(f.Account.Id, default));
+        Assert.False(await monitor.EligibleAsync(f.Account.Id, f.Clock.Now, default));
         Assert.Null((await monitor.FindAsync(f.Account.Id, default))!.NextRunAtUtc);
         f.Advance(660);
         Assert.Empty(await monitor.ClaimDueAsync("scheduler", f.Clock.Now, 2, default));
@@ -55,6 +57,8 @@ public sealed class MonitorDiscrepancyRound6Tests
         var reader = new Reader(f);
         var (monitor, coordinator) = Create(scope, f, reader);
         Assert.True(await coordinator.RunAsync(await coordinator.AdmitRefreshAsync(f.Account.Id, "owner", default), default));
+        // A refresh never schedules checks; discovery does, for the discrepancy work alone.
+        await coordinator.DiscoverAsync(["hyperliquid"], f.Clock.Now, default);
         reader.Failing = true; f.Advance(660);
         Assert.False(await coordinator.RunAsync(Assert.Single(await monitor.ClaimDueAsync("scheduler", f.Clock.Now, 2, default)), default));
         reader.Failing = false; f.Advance(60);
@@ -72,6 +76,8 @@ public sealed class MonitorDiscrepancyRound6Tests
         var reader = new Reader(f);
         var (monitor, coordinator) = Create(scope, f, reader);
         Assert.True(await coordinator.RunAsync(await coordinator.AdmitRefreshAsync(f.Account.Id, "owner", default), default));
+        // A refresh never schedules checks; discovery does, for the discrepancy work alone.
+        await coordinator.DiscoverAsync(["hyperliquid"], f.Clock.Now, default);
         f.Advance(660);
         var refresh = await coordinator.AdmitRefreshAsync(f.Account.Id, "owner", default);
         await using var other = database.Scope(f);
@@ -179,6 +185,7 @@ public sealed class MonitorDiscrepancyRound6Tests
     private sealed class NoCredentials : IAccountCredentialReader
     {
         public Task<string?> ReadAsync(Guid id, CancellationToken ct) => Task.FromResult<string?>(null);
+        public Task<CredentialAttempt?> ReadAttemptAsync(Guid id, CancellationToken ct) => Task.FromResult<CredentialAttempt?>(null);
         public Task MarkRefusedAsync(Guid id, string revision, CancellationToken ct) => Task.CompletedTask;
     }
     private sealed class NoCommands : IMonitorCommandSink

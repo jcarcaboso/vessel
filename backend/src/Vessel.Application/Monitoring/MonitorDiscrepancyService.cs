@@ -11,7 +11,7 @@ namespace Vessel.Application.Monitoring;
 
 /// <summary>Observes discrepancies only; never changes executions, links or Play status.</summary>
 public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore store, IUnitOfWork work,
-    IJournalOwnerContext owner, IPlayEventSink events, MonitorOptions options, TimeProvider clock) : IMonitorEvaluator
+    IJournalOwnerContext owner, IVesselEventSink events, MonitorOptions options, TimeProvider clock) : IMonitorEvaluator
 {
     public static readonly TimeSpan ConfirmationDelay = DiscrepancyLifecycle.ConfirmationDelay;
 

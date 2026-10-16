@@ -47,6 +47,8 @@ public sealed class MonitorDiscrepancyRound7Tests
         var reader = new Reader(f);
         var (_, initial) = Create(scope, f, reader);
         Assert.True(await initial.RunAsync(await initial.AdmitRefreshAsync(f.Account.Id, "owner", default), default));
+        // A refresh never schedules checks; discovery does, for the discrepancy work alone.
+        await initial.DiscoverAsync(["hyperliquid"], f.Clock.Now, default);
         var frozen = f.Observation().Read.Sync;
         f.Advance(660);
         var probe = new Probe(scope.Service);
@@ -69,7 +71,7 @@ public sealed class MonitorDiscrepancyRound7Tests
         if (mode == "check-settings-change") reader.BeforeRead = change;
         if (mode == "refresh-final-discard") orders.BeforeRead = change;
         var deferred = mode.EndsWith("-deferred");
-        if (deferred) await monitor.DeferVenueAsync("hyperliquid", f.Clock.Now.AddMinutes(10), default);
+        if (deferred) await monitor.DeferVenueAsync("hyperliquid", f.Clock.Now.AddMinutes(10), f.Clock.Now, default);
         if (mode == "refresh-deferred") await Assert.ThrowsAsync<MonitorAdmissionException>(() => coordinator.RunAsync(lease, default));
         else if (mode.EndsWith("-cancel"))
         {
@@ -97,19 +99,21 @@ public sealed class MonitorDiscrepancyRound7Tests
         var reader = new Reader(f);
         var (monitor, coordinator) = Create(scope, f, reader);
         Assert.True(await coordinator.RunAsync(await coordinator.AdmitRefreshAsync(f.Account.Id, "owner", default), default));
+        // A refresh never schedules checks; discovery does, for the discrepancy work alone.
+        await coordinator.DiscoverAsync(["hyperliquid"], f.Clock.Now, default);
         f.Advance(7 * 24 * 60 * 60 + 60);
         var lease = Assert.Single(await monitor.ClaimDueAsync("scheduler", f.Clock.Now, 2, default));
-        await monitor.DeferVenueAsync("hyperliquid", f.Clock.Now.AddMinutes(10), default);
+        await monitor.DeferVenueAsync("hyperliquid", f.Clock.Now.AddMinutes(10), f.Clock.Now, default);
         Assert.False(await coordinator.RunAsync(lease, default));
         Assert.Equal(1, reader.Calls); // Only the initial owner refresh performed a read.
         var row = await scope.Db.Set<PlayDiscrepancy>().SingleAsync();
         Assert.NotNull(row.UnverifiableAtUtc);
         Assert.Equal("candidate", row.State);
         // Eligibility is recomputed: with no work left, the deferred check is not kept pending.
-        Assert.False(await monitor.EligibleAsync(f.Account.Id, default));
+        Assert.False(await monitor.EligibleAsync(f.Account.Id, f.Clock.Now, default));
         var state = (await monitor.FindAsync(f.Account.Id, default))!;
         Assert.Equal(("idle", null, null), (state.ManualState, state.LeaseHolder, state.NextRunAtUtc));
-        Assert.Single((await scope.Events.ReadAsync(0, 100, default)).Events, x => x.Type == "discrepancy.unverifiable");
+        Assert.Single((await EventReads.ReadAsync(scope.Db, 0, 100, default)).Events, x => x.Type == "discrepancy.unverifiable");
     }
 
     [PostgresFact]
@@ -123,13 +127,15 @@ public sealed class MonitorDiscrepancyRound7Tests
         var reader = new Reader(f);
         var (monitor, coordinator) = Create(scope, f, reader);
         Assert.True(await coordinator.RunAsync(await coordinator.AdmitRefreshAsync(f.Account.Id, "owner", default), default));
+        // A refresh never schedules checks; discovery does, for the discrepancy work alone.
+        await coordinator.DiscoverAsync(["hyperliquid"], f.Clock.Now, default);
         f.Advance(660);
         var lease = Assert.Single(await monitor.ClaimDueAsync("scheduler", f.Clock.Now, 2, default));
-        await monitor.DeferVenueAsync("hyperliquid", f.Clock.Now.AddMinutes(10), default);
+        await monitor.DeferVenueAsync("hyperliquid", f.Clock.Now.AddMinutes(10), f.Clock.Now, default);
         Assert.False(await coordinator.RunAsync(lease, default));
         var pending = (await monitor.FindAsync(f.Account.Id, default))!;
         Assert.Equal(("pending", null, lease.RequestId), (pending.ManualState, pending.LeaseHolder, pending.RequestId));
-        Assert.True(await monitor.EligibleAsync(f.Account.Id, default));
+        Assert.True(await monitor.EligibleAsync(f.Account.Id, f.Clock.Now, default));
         var row = await scope.Db.Set<PlayDiscrepancy>().SingleAsync();
         Assert.Null(row.UnverifiableAtUtc);
         Assert.Equal(since, row.PendingSinceUtc); // Not interrupted: nothing was attempted.
@@ -188,6 +194,7 @@ public sealed class MonitorDiscrepancyRound7Tests
     private sealed class NoCredentials : IAccountCredentialReader
     {
         public Task<string?> ReadAsync(Guid id, CancellationToken ct) => Task.FromResult<string?>(null);
+        public Task<CredentialAttempt?> ReadAttemptAsync(Guid id, CancellationToken ct) => Task.FromResult<CredentialAttempt?>(null);
         public Task MarkRefusedAsync(Guid id, string revision, CancellationToken ct) => Task.CompletedTask;
     }
     private sealed class NoCommands : IMonitorCommandSink

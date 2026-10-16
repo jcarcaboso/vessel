@@ -154,14 +154,14 @@ public sealed class MonitorDiscrepancyRound2PostgresTests
         var request = await coordinator.RequestAsync(f.Account.Id, default);
         var lease = (await monitor.ClaimAsync(f.Account.Id, request.RequestId, "worker", f.Clock.Now, default))!;
         Assert.True(await coordinator.RunAsync(lease, default));
-        Assert.NotNull(await scope.Db.Set<MonitorExitWatch>().SingleAsync(x => x.ResolvedAtUtc != null));
+        Assert.NotNull(await scope.Db.Set<MonitorExitWatch>().SingleAsync(x => x.EndedAtUtc != null));
         Assert.Equal("candidate", (await scope.Db.Set<PlayDiscrepancy>().SingleAsync(x => x.Kind == "position.excess")).State);
         Assert.NotNull((await monitor.FindAsync(f.Account.Id, default))!.NextRunAtUtc);
 
         f.Advance(61);
         var confirmation = Assert.Single(await monitor.ClaimDueAsync("scheduler", f.Clock.Now, 2, default));
         Assert.True(await coordinator.RunAsync(confirmation, default));
-        var opened = (await scope.Events.ReadAsync(0, 100, default)).Events.Where(x => x.Type == "discrepancy.opened").ToArray();
+        var opened = (await EventReads.ReadAsync(scope.Db, 0, 100, default)).Events.Where(x => x.Type == "discrepancy.opened").ToArray();
         Assert.Equal("position.excess", Assert.Single(opened).Data.GetProperty("kind").GetString());
 
         // The open warning keeps Check available until fresh evidence clears it.
@@ -179,10 +179,10 @@ public sealed class MonitorDiscrepancyRound2PostgresTests
         async Task Collect()
         {
             await using var read = database.Scope(f);
-            types.AddRange((await read.Events.ReadAsync(0, 100, default)).Events
+            types.AddRange((await EventReads.ReadAsync(read.Db, 0, 100, default)).Events
                 .Where(x => x.Type.StartsWith("discrepancy.")).Select(x => x.Type));
             // Prune delivered history, as retention does; dedup keys stay.
-            await read.Db.Database.ExecuteSqlRawAsync("DELETE FROM play_events");
+            await read.Db.Database.ExecuteSqlRawAsync("DELETE FROM events");
         }
         async Task Run() { await using var scope = database.Scope(f); await scope.Evaluate(f.Observation()); }
         await Run(); f.Advance(60); await Run(); await Collect();
@@ -197,7 +197,7 @@ public sealed class MonitorDiscrepancyRound2PostgresTests
         Assert.Equal(["discrepancy.opened", "discrepancy.resolved", "discrepancy.opened", "discrepancy.resolved"], types);
         await using var check = database.Scope(f);
         var row = await check.Db.Set<PlayDiscrepancy>().SingleAsync(x => x.Kind == "position.missing");
-        var keys = await check.Db.Database.SqlQueryRaw<string>("SELECT dedup_key AS \"Value\" FROM play_event_dedup WHERE dedup_key LIKE 'discrepancy:%'").ToListAsync();
+        var keys = await check.Db.Database.SqlQueryRaw<string>("SELECT dedup_key AS \"Value\" FROM event_dedup WHERE dedup_key LIKE 'discrepancy:%'").ToListAsync();
         Assert.Equal(new[] { $"discrepancy:{row.Id}:1:opened", $"discrepancy:{row.Id}:2:resolved", $"discrepancy:{row.Id}:3:opened",
             $"discrepancy:{row.Id}:4:dismissed" }.Order(), keys.Order());
     }
@@ -222,6 +222,7 @@ public sealed class MonitorDiscrepancyRound2PostgresTests
     private sealed class NoCredentials : IAccountCredentialReader
     {
         public Task<string?> ReadAsync(Guid accountId, CancellationToken ct) => Task.FromResult<string?>(null);
+        public Task<CredentialAttempt?> ReadAttemptAsync(Guid accountId, CancellationToken ct) => Task.FromResult<CredentialAttempt?>(null);
         public Task MarkRefusedAsync(Guid accountId, string attemptedRevision, CancellationToken ct) => Task.CompletedTask;
     }
     private sealed class NoCommands : IMonitorCommandSink

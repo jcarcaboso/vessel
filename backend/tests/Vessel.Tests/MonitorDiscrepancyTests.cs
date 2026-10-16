@@ -507,11 +507,11 @@ internal sealed class DiscrepancyClock : TimeProvider
     public DateTimeOffset Now = DateTimeOffset.Parse("2026-10-15T12:00:00Z");
     public override DateTimeOffset GetUtcNow() => Now;
 }
-internal sealed class DiscrepancyEvents : IPlayEventSink
+internal sealed class DiscrepancyEvents : IVesselEventSink
 {
-    public List<PlayEventDraft> Items { get; } = [];
-    public Task AppendAsync(PlayEventDraft draft, CancellationToken ct) { Items.Add(draft); return Task.CompletedTask; }
-    public void SetRun(Guid runId, string trigger) { }
+    public List<VesselEventDraft> Items { get; } = [];
+    public Task AppendAsync(VesselEventDraft draft, CancellationToken ct) { Items.Add(draft); return Task.CompletedTask; }
+    public Task SetRunAsync(Guid runId, string trigger, CancellationToken ct) => Task.CompletedTask;
     public Task EnsureMonitoringBaselineAsync(Guid accountId, CancellationToken ct) => Task.CompletedTask;
 }
 internal sealed class DiscrepancyMemoryStore : IMonitorDiscrepancyStore

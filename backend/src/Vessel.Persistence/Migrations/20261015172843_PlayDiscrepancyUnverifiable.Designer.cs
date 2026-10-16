@@ -250,9 +250,6 @@ namespace Vessel.Persistence.Migrations
                     b.Property<bool>("HasHistoryGap")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("IntervalSeconds")
-                        .HasColumnType("integer");
-
                     b.Property<DateTimeOffset?>("LastAttemptAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -297,6 +294,9 @@ namespace Vessel.Persistence.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
+                    b.Property<long>("StateRevision")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Trigger")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -312,9 +312,9 @@ namespace Vessel.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_monitor_generation", "\"Generation\" >= 0");
 
-                            t.HasCheckConstraint("CK_monitor_interval", "\"IntervalSeconds\" BETWEEN 60 AND 3600");
-
                             t.HasCheckConstraint("CK_monitor_manual_state", "\"ManualState\" IN ('idle','pending','running')");
+
+                            t.HasCheckConstraint("CK_monitor_state_revision", "\"StateRevision\" >= 0");
                         });
                 });
 
@@ -326,6 +326,9 @@ namespace Vessel.Persistence.Migrations
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("EndedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("LinkRevisionAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -334,20 +337,27 @@ namespace Vessel.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("Outcome")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<Guid>("OwnerId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("PlayId")
                         .HasColumnType("uuid");
 
-                    b.Property<DateTimeOffset?>("ResolvedAtUtc")
+                    b.Property<DateTimeOffset>("StartedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("LinkId");
 
-                    b.HasIndex("OwnerId", "AccountId", "ResolvedAtUtc");
+                    b.HasIndex("OwnerId", "AccountId", "EndedAtUtc");
 
-                    b.ToTable("monitor_exit_watches", (string)null);
+                    b.ToTable("monitor_exit_watches", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_monitor_exit_watch_outcome", "\"Outcome\" IS NULL OR \"Outcome\" IN ('terminal','absent','unverifiable')");
+                        });
                 });
 
             modelBuilder.Entity("Vessel.Domain.Monitoring.MonitorHeartbeat", b =>

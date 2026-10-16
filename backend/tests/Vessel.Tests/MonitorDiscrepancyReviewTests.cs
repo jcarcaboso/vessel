@@ -241,7 +241,8 @@ public sealed class MonitorDiscrepancyReviewPostgresTests
             // Every linked order of settled and recent has a resolved, current watch; watched has none.
             foreach (var link in await scope.Db.OrderLinks.Where(x => x.PlayId == settled.Id || x.PlayId == recent.Id).ToListAsync())
                 scope.Db.Add(new MonitorExitWatch { LinkId = link.Id, OwnerId = link.OwnerId, AccountId = link.AccountId, PlayId = link.PlayId,
-                    OrderId = link.OrderId, LinkRevisionAtUtc = link.UpdatedAtUtc, ResolvedAtUtc = f.Clock.Now.AddHours(-1) });
+                    OrderId = link.OrderId, LinkRevisionAtUtc = link.UpdatedAtUtc, StartedAtUtc = link.UpdatedAtUtc,
+                    EndedAtUtc = f.Clock.Now.AddHours(-1), Outcome = MonitorWatchOutcomes.Absent });
             await scope.Db.SaveChangesAsync();
         }
         await using var read = database.Scope(f);
@@ -266,13 +267,13 @@ public sealed class MonitorDiscrepancyReviewPostgresTests
         await database.Seed(f);
         await using var scope = database.Scope(f);
         var store = new MonitorStore(scope.Db, scope.Work);
-        Assert.True(await store.EligibleAsync(f.Account.Id, default));
+        Assert.True(await store.EligibleAsync(f.Account.Id, f.Clock.Now, default));
         await scope.Work.ExecuteAsync(async () =>
         {
-            await store.ResolveExitsAsync(f.Account.Id, new([], f.Clock.Now, "Fresh absence", OpenOrdersComplete: true), default);
+            await store.UpdateWatchesAsync(f.Account.Id, new([], f.Clock.Now, "Fresh absence", OpenOrdersComplete: true), f.Clock.Now, default);
             await scope.Work.SaveChangesAsync(default);
             return true;
         }, default);
-        Assert.False(await store.EligibleAsync(f.Account.Id, default));
+        Assert.False(await store.EligibleAsync(f.Account.Id, f.Clock.Now, default));
     }
 }

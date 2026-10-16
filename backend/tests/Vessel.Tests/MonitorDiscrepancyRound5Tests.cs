@@ -80,7 +80,7 @@ public sealed class MonitorDiscrepancyRound5Tests
             {
                 await second.Store.LockAsync(f.Account.Id, default);
                 var monitor = new MonitorStore(second.Db, second.Work);
-                await monitor.ResolveExitsAsync(f.Account.Id, f.Observation().Read.Orders!, default);
+                await monitor.UpdateWatchesAsync(f.Account.Id, f.Observation().Read.Orders!, f.Clock.Now, default);
                 await second.Work.SaveChangesAsync(default);
                 return await second.Service.EvaluateAsync(f.Observation(), default);
             }, default);
@@ -102,12 +102,12 @@ public sealed class MonitorDiscrepancyRound5Tests
             fourth.Db.AddRange(f.Store.Orders.Where(x => x.OrderId == "new-entry"));
             fourth.Db.AddRange(f.Store.Fills.Where(x => x.OrderId == "new-entry"));
             await fourth.Db.SaveChangesAsync();
-            Assert.True(await new MonitorStore(fourth.Db, fourth.Work).EligibleAsync(f.Account.Id, default));
+            Assert.True(await new MonitorStore(fourth.Db, fourth.Work).EligibleAsync(f.Account.Id, f.Clock.Now, default));
             await fourth.Work.ExecuteAsync(async () =>
             {
                 await fourth.Store.LockAsync(f.Account.Id, default);
                 var monitor = new MonitorStore(fourth.Db, fourth.Work);
-                await monitor.ResolveExitsAsync(f.Account.Id, f.Observation().Read.Orders!, default);
+                await monitor.UpdateWatchesAsync(f.Account.Id, f.Observation().Read.Orders!, f.Clock.Now, default);
                 await fourth.Work.SaveChangesAsync(default);
                 return await fourth.Service.EvaluateAsync(f.Observation(), default);
             }, default);
@@ -156,7 +156,7 @@ public sealed class MonitorDiscrepancyRound5Tests
         var row = await scope.Db.Set<PlayDiscrepancy>().SingleAsync();
         Assert.NotNull(row.UnverifiableAtUtc);
         Assert.Equal("unverifiable", row.PublishedTransition);
-        Assert.False(await monitor.EligibleAsync(f.Account.Id, default));
+        Assert.False(await monitor.EligibleAsync(f.Account.Id, f.Clock.Now, default));
     }
 
     [PostgresFact] // P2: an owner refreshing at every cooldown end cannot starve an overdue scheduled check.
@@ -174,6 +174,10 @@ public sealed class MonitorDiscrepancyRound5Tests
             await evaluator.EvaluateAsync(f.Observation(), default);
             return true;
         }, default);
+        // Discovery schedules the check for the candidate alone; refreshes never move its due time.
+        await coordinator.DiscoverAsync(["hyperliquid"], f.Clock.Now, default);
+        // The check is overdue and past the confirmation delay before the refreshes start.
+        f.Advance(60);
         var scheduled = 0;
         for (var i = 0; i < 20 && scheduled == 0; i++)
         {
@@ -222,6 +226,7 @@ public sealed class MonitorDiscrepancyRound5Tests
     private sealed class NoCredentials : IAccountCredentialReader
     {
         public Task<string?> ReadAsync(Guid accountId, CancellationToken ct) => Task.FromResult<string?>(null);
+        public Task<CredentialAttempt?> ReadAttemptAsync(Guid accountId, CancellationToken ct) => Task.FromResult<CredentialAttempt?>(null);
         public Task MarkRefusedAsync(Guid accountId, string attemptedRevision, CancellationToken ct) => Task.CompletedTask;
     }
     private sealed class NoCommands : IMonitorCommandSink
