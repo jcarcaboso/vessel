@@ -20,7 +20,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
     {
         var account = await db.Accounts.AsNoTracking().SingleOrDefaultAsync(a => a.Id == accountId, ct);
         if (account is null) return null;
-        var purpose = account.VenueId + "-read-token";
+        var purpose = VenueCredentialPurpose.ReadToken(account.VenueId);
         var credential = await db.AccountCredentials.AsNoTracking()
             .SingleOrDefaultAsync(c => c.AccountId == accountId && c.Purpose == purpose, ct);
         var revision = credential is null ? null : CredentialAttempt.RevisionOf(credential);
@@ -160,7 +160,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
         var credentials = (await db.AccountCredentials.AsNoTracking().Where(c => ids.Contains(c.AccountId)).ToListAsync(ct))
             .ToLookup(c => c.AccountId);
         return rows.Select(r => new MonitorCandidate(r.Id, r.VenueId, r.Monitorable, r.Active || r.Watching || r.Awaiting, r.Expired,
-            credentials[r.Id].Where(c => c.Purpose == r.VenueId + "-read-token").Select(CredentialAttempt.RevisionOf).FirstOrDefault(),
+            credentials[r.Id].Where(c => c.Purpose == VenueCredentialPurpose.ReadToken(r.VenueId)).Select(CredentialAttempt.RevisionOf).FirstOrDefault(),
             r.Row)).ToArray();
     }
 

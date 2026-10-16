@@ -1,4 +1,5 @@
 using Vessel.Application.Venues;
+using Vessel.Application.Credentials;
 using Vessel.Infrastructure.Venues.Common;
 
 namespace Vessel.Infrastructure.Venues.Lighter;
@@ -73,7 +74,7 @@ public sealed class LighterExchange
     /// <summary>Named HTTP client; one per exchange so base addresses and handlers never mix.</summary>
     public string ClientName => VenueId;
     /// <summary>The purpose the credential services derive for this venue; tokens for the two exchanges are bound separately.</summary>
-    public string CredentialPurpose => VenueId + "-read-token";
+    public string CredentialPurpose => VenueCredentialPurpose.ReadToken(VenueId);
 
     internal StrictJson Json { get; }
 

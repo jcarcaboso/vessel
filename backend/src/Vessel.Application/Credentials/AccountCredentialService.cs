@@ -91,5 +91,5 @@ public sealed class AccountCredentialService(
         return new(vault.IsConfigured, new(credential.Scope, credential.ExpiresAt, credential.LastVerifiedAt, status));
     }
 
-    private static string Purpose(Account account) => account.VenueId + "-read-token";
+    private static string Purpose(Account account) => VenueCredentialPurpose.ReadToken(account.VenueId);
 }
