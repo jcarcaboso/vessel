@@ -94,7 +94,8 @@ const decimalLength = 160
 /** Rows one expanded operation may return; the earliest are kept. */
 export const operationFillLimit = 1_000
 export const activityPageSizeLimit = 100
-const facetLimit = 10_000
+// The server returns complete scoped coverage and facets, unbounded like the retained history they describe.
+const unbounded = Number.POSITIVE_INFINITY
 
 /** `{GUID}:long` or `:short`, as Activity and retrospective previews identify an operation. */
 export const isOperationId = (v: unknown): v is string =>
@@ -203,8 +204,8 @@ export function isActivityPage(value: unknown, query?: ActivityQuery): value is 
     query !== undefined && value.pageSize !== query.pageSize ||
     !isCount(value.totalCount) || !isCount(value.scopeCount) || value.totalCount > value.scopeCount || !isCount(value.retainedFillCount) ||
     !isIsoTimestamp(value.asOfUtc) || !isFilledText(value.version, 256) || !isFilledText(value.scopeNote, 4000) ||
-    !isListOf(value.coverage, isCoverage, facetLimit) || !isRecord(value.facets) ||
-    !isListOf(value.facets.accountIds, isGuid, facetLimit) || !isListOf(value.facets.contracts, c => isFilledText(c, 128), facetLimit)) return false
+    !isListOf(value.coverage, isCoverage, unbounded) || !isRecord(value.facets) ||
+    !isListOf(value.facets.accountIds, isGuid, unbounded) || !isListOf(value.facets.contracts, c => isFilledText(c, 128), unbounded)) return false
   const { page, pageSize, totalCount } = value
   const pages = Math.max(1, Math.ceil(totalCount / pageSize))
   if (page > pages || value.operations.length !== Math.max(0, Math.min(pageSize, totalCount - (page - 1) * pageSize))) return false

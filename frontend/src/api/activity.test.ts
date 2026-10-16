@@ -90,6 +90,11 @@ describe('activity API', () => {
       await expect(createWorkspaceApi('token').activity(first)).rejects.toMatchObject({ kind: 'invalid-response' })
     }
   })
+  it('accepts complete scope-wide coverage however long it is', async () => {
+    const coverage = Array.from({ length: 10_001 }, (_, n) => ({ accountId: accountFixture.id, contractId: `C${n}`, notice: 'Snapshot predates retained fills.' }))
+    response({ ...activityFixture, coverage })
+    await expect(createWorkspaceApi('token').activity(first)).resolves.toMatchObject({ coverage: { length: 10_001 } })
+  })
   it('rejects missing page fields, foreign coverage identities and duplicated operations', async () => {
     for (const key of Object.keys(activityFixture)) {
       const document = structuredClone(activityFixture); delete (document as unknown as Record<string, unknown>)[key]; response(document)
