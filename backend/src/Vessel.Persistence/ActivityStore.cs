@@ -24,11 +24,13 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         var ids = accounts.Select(a => a.Id).ToArray();
         var fills = await db.Fills.Where(f => ids.Contains(f.AccountId)).AsNoTracking().ToListAsync(ct);
         var snapshots = await db.Snapshots.Where(s => ids.Contains(s.AccountId)).Include(s => s.Positions).AsNoTracking().ToListAsync(ct);
+        var funding = await db.FundingPayments.Where(p => ids.Contains(p.AccountId)).AsNoTracking().ToListAsync(ct);
+        var fundingStates = await db.FundingStates.Where(s => ids.Contains(s.AccountId)).AsNoTracking().ToListAsync(ct);
         var links = await db.OrderLinks.Where(l => ids.Contains(l.AccountId) && l.State == OrderLinkState.Linked).AsNoTracking().ToListAsync(ct);
         var byOrder = links.ToDictionary(l => (l.AccountId, l.OrderId), l => l.PlayId);
         var playIds = fills.Where(f => byOrder.ContainsKey((f.AccountId, f.OrderId)))
             .ToDictionary(f => f.Id, f => byOrder[(f.AccountId, f.OrderId)]);
         await transaction.CommitAsync(ct);
-        return new(accounts, fills, snapshots, playIds);
+        return new(accounts, fills, snapshots, playIds) { FundingPayments = funding, FundingStates = fundingStates };
     }
 }

@@ -35,6 +35,13 @@ export interface ActivityOperation {
   stablecoinFeesNominalUsd: string
   otherFees: { token: string; amount: string }[]
   netResultUsd: string | null
+  /** Combined result only when funding coverage and the execution P&L funding basis are verified. */
+  totalResultUsd: string | null
+  fundingNetUsd: string | null
+  fundingStatus: 'complete' | 'partial' | 'unavailable'
+  fundingPnlBasis: 'included' | 'excluded' | 'unknown'
+  fundingAsOfUtc: string | null
+  fundingPaymentCount: number
   pnlBasis: 'gross' | 'net-of-fee' | 'mixed'
   playId: string | null
   playAssociation: 'linked' | 'unassigned' | 'mixed'
@@ -46,6 +53,18 @@ export interface OperationWithFills extends ActivityOperation {
   omittedFillCount: number
 }
 export interface ActivityCoverage { accountId: string; contractId: string | null; notice: string }
+export interface FundingPayment {
+  id: string
+  accountId: string
+  sourceId: string
+  contractId: string
+  venueContractId: string | null
+  occurredAtUtc: string
+  occurredAtUnixNanoseconds: string | null
+  /** Positive is received, negative is paid. */
+  amount: string
+  asset: string
+}
 export interface ActivityPage {
   operations: ActivityOperation[]
   page: number
@@ -62,8 +81,16 @@ export interface ActivityPage {
   facets: { accountIds: string[]; contracts: string[] }
   coverage: ActivityCoverage[]
   scopeNote: string
+  unassignedFundingPayments: FundingPayment[]
+  omittedUnassignedFundingPaymentCount: number
 }
-export interface ActivityFills { operationId: string; fills: OperationFill[]; omittedFillCount: number }
+export interface ActivityFills {
+  operationId: string
+  fills: OperationFill[]
+  omittedFillCount: number
+  fundingPayments: FundingPayment[]
+  omittedFundingPaymentCount: number
+}
 
 export const activityPeriods = ['all', '7', '30', '90', 'custom'] as const
 export type ActivityPeriod = typeof activityPeriods[number]
@@ -96,6 +123,11 @@ export const operationFillLimit = 1_000
 export const activityPageSizeLimit = 100
 // The server returns complete scoped coverage and facets, unbounded like the retained history they describe.
 const unbounded = Number.POSITIVE_INFINITY
+export const isFundingPayment = (v: unknown): v is FundingPayment =>
+  isRecord(v) && isGuid(v.id) && isGuid(v.accountId) && isFilledText(v.sourceId, 128) &&
+  isFilledText(v.contractId, 128) && isNullOr(v.venueContractId, x => isFilledText(x, 128)) &&
+  isIsoTimestamp(v.occurredAtUtc) && isNullOr(v.occurredAtUnixNanoseconds, x => typeof x === 'string' && /^(0|[1-9][0-9]{0,18})$/.test(x) && BigInt(x) <= 9223372036854775807n) &&
+  isPlainDecimal(v.amount, decimalLength) && isFilledText(v.asset, 64)
 
 /** `{GUID}:long` or `:short`, as Activity and retrospective previews identify an operation. */
 export const isOperationId = (v: unknown): v is string =>
@@ -154,6 +186,11 @@ export function isActivityOperation(op: unknown): op is ActivityOperation {
     !['entryOrderCount', 'exitOrderCount', 'fillCount'].every(k => isCount(op[k])) ||
     !isPlainDecimal(op.reportedClosedPnlUsd, decimalLength) || !isNullOr(op.grossClosedPnlUsd, x => isPlainDecimal(x, decimalLength)) ||
     !isPlainDecimal(op.stablecoinFeesNominalUsd, decimalLength) || !isNullOr(op.netResultUsd, x => isPlainDecimal(x, decimalLength)) ||
+    !isNullOr(op.totalResultUsd, x => isPlainDecimal(x, decimalLength)) || !isNullOr(op.fundingNetUsd, x => isPlainDecimal(x, decimalLength)) ||
+    !['complete', 'partial', 'unavailable'].includes(String(op.fundingStatus)) ||
+    !['included', 'excluded', 'unknown'].includes(String(op.fundingPnlBasis)) ||
+    !isNullOr(op.fundingAsOfUtc, isIsoTimestamp) || !isCount(op.fundingPaymentCount) ||
+    op.totalResultUsd !== null && (op.fundingPnlBasis === 'unknown' || op.fundingStatus !== 'complete') ||
     !['gross', 'net-of-fee', 'mixed'].includes(String(op.pnlBasis)) || !isNullOr(op.playId, isGuid) ||
     !['linked', 'unassigned', 'mixed'].includes(String(op.playAssociation)) || !isListOf(op.coverage, n => isFilledText(n, 2000), 100) ||
     !Array.isArray(op.otherFees) || !op.otherFees.every(f => isRecord(f) && isFilledText(f.token, 64) && isPlainDecimal(f.amount, decimalLength)) ||
@@ -205,6 +242,7 @@ export function isActivityPage(value: unknown, query?: ActivityQuery): value is 
     !isCount(value.totalCount) || !isCount(value.scopeCount) || value.totalCount > value.scopeCount || !isCount(value.retainedFillCount) ||
     !isIsoTimestamp(value.asOfUtc) || !isFilledText(value.version, 256) || !isFilledText(value.scopeNote, 4000) ||
     !isListOf(value.coverage, isCoverage, unbounded) || !isRecord(value.facets) ||
+    !isListOf(value.unassignedFundingPayments, isFundingPayment, 100) || !isCount(value.omittedUnassignedFundingPaymentCount) ||
     !isListOf(value.facets.accountIds, isGuid, unbounded) || !isListOf(value.facets.contracts, c => isFilledText(c, 128), unbounded)) return false
   const { page, pageSize, totalCount } = value
   const pages = Math.max(1, Math.ceil(totalCount / pageSize))
@@ -223,12 +261,15 @@ export function isActivityPage(value: unknown, query?: ActivityQuery): value is 
   }
   const only = query?.accountId ?? (query?.scope?.startsWith('account:') ? query.scope.slice(8) : undefined)
   return only === undefined || (value.coverage as ActivityCoverage[]).every(c => same(c.accountId, only)) &&
+    (value.unassignedFundingPayments as FundingPayment[]).every(p => same(p.accountId, only)) &&
     (value.facets.accountIds as string[]).every(id => same(id, only))
 }
 
 /** One operation's rows on expand: chronological, from the requested account, at most 1,000. */
 export function isActivityFills(value: unknown, accountId: string, operationId: string): value is ActivityFills {
   if (!isRecord(value) || value.operationId !== operationId || !isCount(value.omittedFillCount) ||
+    !isListOf(value.fundingPayments, p => isFundingPayment(p) && same(p.accountId, accountId), operationFillLimit) ||
+    !isCount(value.omittedFundingPaymentCount) ||
     !areOperationFills(value.fills, accountId, null, operationFillLimit) || value.fills.length + value.omittedFillCount === 0) return false
   let previous = Number.NEGATIVE_INFINITY
   for (const part of value.fills) {

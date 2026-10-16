@@ -92,3 +92,7 @@
    appears in view instead of pushing the scroll position down past itself. */
 .activity-list { overflow-anchor: none; }
 .activity-changed { align-items: center; }
+.operation-funding-summary { display: flex; flex-wrap: wrap; gap: 16px 32px; margin: 16px 0; }
+.operation-funding-summary dt { color: var(--muted-foreground); font-size: 12px; }
+.operation-funding-summary dd { margin: 4px 0 0; font-variant-numeric: tabular-nums; }
+.funding-payments-table { margin-block: 12px; }

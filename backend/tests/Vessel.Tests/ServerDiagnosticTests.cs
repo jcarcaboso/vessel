@@ -151,6 +151,22 @@ public sealed class ServerDiagnosticTests
         Assert.DoesNotContain("ConnectionStrings", factory.Logs.Entries.Single().Text);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Missing_database_configuration_does_not_depend_on_the_throwing_method(bool wrapped)
+    {
+        Exception error = new Vessel.Persistence.MissingDatabaseConfigurationException();
+        if (wrapped) error = new InvalidOperationException(Secret, error);
+        await using var factory = new DiagnosticFactory(error);
+        using var client = factory.AuthorizedClient();
+        using var response = await client.GetAsync($"/api/accounts/{PrivateId}");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var output = await response.Content.ReadAsStringAsync() + Assert.Single(factory.Logs.Entries).Text;
+        Assert.DoesNotContain("ConnectionStrings", output);
+        Assert.DoesNotContain(Secret, output);
+    }
+
     [Fact]
     public async Task Unreachable_database_through_real_EF_is_a_503_without_framework_error_logs()
     {

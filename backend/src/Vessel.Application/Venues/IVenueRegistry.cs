@@ -11,6 +11,7 @@ public interface IVenueRegistry
     IReadOnlyList<VenueDescriptor> Descriptors { get; }
     VenueDescriptor? Descriptor(string venueId);
     IPerpetualVenueReader? Reader(string venueId);
+    IVenueFundingReader? Funding(string venueId) => Reader(venueId) as IVenueFundingReader;
     IVenueOrderReader? Orders(string venueId);
     ICandleReader? Candles(string venueId);
     IMarketContextReader? MarketContext(string venueId);

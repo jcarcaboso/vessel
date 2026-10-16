@@ -106,7 +106,32 @@ describe('shared API request pipeline', () => {
     await expect(api.checkPlayExecution(savedPlayFixture.summary.id)).rejects.toThrow()
     await expect(api.discoverAccounts('lighter', `0x${'a'.repeat(40)}`)).rejects.toThrow()
     await api.evidenceImage(savedPlayFixture.summary.id)
-    expect(timeout.mock.calls.map(call => call[1])).toEqual([8_000, 10_000, 15_000, 25_000, 30_000, 45_000, 30_000, 60_000])
+    expect(timeout.mock.calls.map(call => call[1])).toEqual([8_000, 10_000, 15_000, 25_000, 90_000, 120_000, 30_000, 60_000])
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each(['sync', 'execution check'] as const)('allows %s to finish its sequential venue reads', async kind => {
+    vi.useFakeTimers()
+    let finish!: (response: Response) => void
+    let signal!: AbortSignal
+    vi.stubGlobal('fetch', vi.fn((_path: string, init: RequestInit) => new Promise<Response>((resolve, reject) => {
+      finish = resolve
+      signal = init.signal!
+      signal.addEventListener('abort', () => reject(new Error('private transport detail')), { once: true })
+    })))
+    const api = createWorkspaceApi('token')
+    const response = kind === 'sync' ? accountFixture : {
+      playId: savedPlayFixture.summary.id, status: savedPlayFixture.summary.status, tracked: false,
+      reason: 'No imported tracking.', checkedAtUtc: null,
+      totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
+      entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Facts only.', issues: [],
+    }
+    const request = kind === 'sync' ? api.sync(accountFixture.id) : api.checkPlayExecution(savedPlayFixture.summary.id)
+    const result = request.then(value => ({ value }), error => ({ error }))
+    await vi.advanceTimersByTimeAsync(kind === 'sync' ? 65_000 : 85_000)
+    expect(signal.aborted).toBe(false)
+    finish(new Response(JSON.stringify(response)))
+    expect(await result).toEqual({ value: response })
     expect(vi.getTimerCount()).toBe(0)
   })
 

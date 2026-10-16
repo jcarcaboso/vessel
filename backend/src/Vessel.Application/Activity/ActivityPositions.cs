@@ -14,13 +14,16 @@ internal sealed class ActivityPositions
     private readonly Dictionary<ActivityContractKey, ExactAmount?> quantities = [];
     private readonly Dictionary<(Guid AccountId, string ContractId), ActivityContractKey[]> nativeCandidates;
 
-    public ActivityPositions(IReadOnlyList<ImportedFill> fills, IReadOnlyList<AccountSnapshot> snapshots)
+    public ActivityPositions(IReadOnlyList<ImportedFill> fills, IReadOnlyList<AccountSnapshot> snapshots,
+        IReadOnlyList<FundingPayment>? funding = null)
     {
         Snapshots = snapshots.ToDictionary(s => s.AccountId);
         nativeCandidates = fills.Where(f => f.VenueContractId is not null)
             .Select(f => (f.AccountId, f.ContractId, Key: new ActivityContractKey(f.AccountId, f.VenueContractId!, true)))
             .Concat(Snapshots.Values.SelectMany(s => s.Positions.Where(p => p.VenueContractId is not null)
                 .Select(p => (s.AccountId, p.ContractId, Key: new ActivityContractKey(s.AccountId, p.VenueContractId!, true)))))
+            .Concat((funding ?? []).Where(p => p.VenueContractId is not null)
+                .Select(p => (p.AccountId, p.ContractId, Key: new ActivityContractKey(p.AccountId, p.VenueContractId!, true))))
             .GroupBy(p => (p.AccountId, p.ContractId))
             .ToDictionary(g => g.Key, g => g.Select(p => p.Key).Distinct().ToArray());
         foreach (var fill in fills)
@@ -49,6 +52,7 @@ internal sealed class ActivityPositions
     }
 
     public ActivityContractKey Key(ImportedFill fill) => Key(fill.AccountId, fill.ContractId, fill.VenueContractId);
+    public ActivityContractKey Key(FundingPayment payment) => Key(payment.AccountId, payment.ContractId, payment.VenueContractId);
 
     private ActivityContractKey Key(Guid accountId, string contractId, string? nativeId) => nativeId is not null
         ? new(accountId, nativeId, true)

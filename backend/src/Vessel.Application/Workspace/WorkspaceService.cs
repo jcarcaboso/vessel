@@ -339,6 +339,27 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
                 await store.SaveAsync(ct);
                 return true;
             }
+            if (venues.Funding(account.VenueId) is { } fundingReader)
+            {
+                // Inclusive millisecond bounds, shared by all adapters. No unbounded backfill or durable job.
+                var to = DateTimeOffset.FromUnixTimeMilliseconds(result.Snapshot.ObservedAtUtc.ToUnixTimeMilliseconds());
+                var from = to.AddDays(-30);
+                VenueFundingReadResult funding;
+                try
+                {
+                    funding = await fundingReader.ReadFundingAsync(account, from, to, ct);
+                    ct.ThrowIfCancellationRequested();
+                    VenueFundingChecks.Validate(funding, from, to);
+                }
+                catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
+                    ex is OperationCanceledException && !ct.IsCancellationRequested)
+                {
+                    // A funding outage must not discard a valid position/execution refresh.
+                    funding = new([], from, to, false,
+                        "Funding history could not be refreshed. Retained payments are unchanged; missing funding is not zero.");
+                }
+                result = result with { Funding = funding };
+            }
             await store.SaveRefreshAsync(account, result, ct);
             return false;
         }, ct);

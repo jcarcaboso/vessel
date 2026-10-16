@@ -5,7 +5,11 @@ using Vessel.Domain.Workspace;
 namespace Vessel.Application.Activity;
 
 public sealed record ActivityFacts(IReadOnlyList<Account> Accounts, IReadOnlyList<ImportedFill> Fills,
-    IReadOnlyList<AccountSnapshot> Snapshots, IReadOnlyDictionary<Guid, Guid> FillPlayIds);
+    IReadOnlyList<AccountSnapshot> Snapshots, IReadOnlyDictionary<Guid, Guid> FillPlayIds)
+{
+    public IReadOnlyList<FundingPayment> FundingPayments { get; init; } = [];
+    public IReadOnlyList<AccountFundingState> FundingStates { get; init; } = [];
+}
 public interface IActivityStore
 {
     // All retained facts, not the overview's most recent 100; owner-scoped and enabled accounts only.
@@ -14,6 +18,8 @@ public interface IActivityStore
 }
 public sealed record OperationFillDto(FillDto Fill, string Role, string Quantity, string Fee, string ClosedPnlUsd);
 public sealed record OperationFeeDto(string Token, string Amount);
+public sealed record OperationFundingDto(Guid Id, Guid AccountId, string SourceId, string ContractId, string? VenueContractId,
+    DateTimeOffset OccurredAtUtc, string Amount, string Asset, string? OccurredAtUnixNanoseconds);
 public sealed record ActivityOperationDto(string Id, Guid AccountId, string ContractId, string? Direction, string Status,
     DateTimeOffset? OpenedAtUtc, DateTimeOffset? ClosedAtUtc, DateTimeOffset LastOccurredAtUtc,
     string? Quantity, string? TotalEnteredQuantity, string? TotalExitedQuantity, string? OpenQuantity,
@@ -24,6 +30,13 @@ public sealed record ActivityOperationDto(string Id, Guid AccountId, string Cont
 {
     // Comparable before-fee P&L for display. The venue-reported facts above remain unchanged.
     public string? GrossClosedPnlUsd { get; init; }
+    public string? TotalResultUsd { get; init; }
+    public string? FundingNetUsd { get; init; }
+    public string FundingStatus { get; init; } = "unavailable";
+    public string FundingPnlBasis { get; init; } = FundingFacts.Unknown;
+    public DateTimeOffset? FundingAsOfUtc { get; init; }
+    public int FundingPaymentCount { get; init; }
+    internal IReadOnlyList<FundingPayment> FundingPayments { get; init; } = [];
     // Internal partition identity, never the canonical display key or a serialized API field.
     internal ActivityContractKey ContractKey { get; init; }
 }
@@ -38,10 +51,20 @@ public sealed record ActivityOperationSummaryDto(string Id, Guid AccountId, stri
     string? NetResultUsd, string PnlBasis, Guid? PlayId, string PlayAssociation,
     IReadOnlyList<string> Coverage, string? GrossClosedPnlUsd)
 {
+    public string? TotalResultUsd { get; init; }
+    public string? FundingNetUsd { get; init; }
+    public string FundingStatus { get; init; } = "unavailable";
+    public string FundingPnlBasis { get; init; } = FundingFacts.Unknown;
+    public DateTimeOffset? FundingAsOfUtc { get; init; }
+    public int FundingPaymentCount { get; init; }
     public static ActivityOperationSummaryDto From(ActivityOperationDto o) => new(o.Id, o.AccountId, o.ContractId, o.Direction, o.Status,
         o.OpenedAtUtc, o.ClosedAtUtc, o.LastOccurredAtUtc, o.Quantity, o.TotalEnteredQuantity, o.TotalExitedQuantity, o.OpenQuantity,
         o.AverageEntryPrice, o.AverageExitPrice, o.EntryOrderCount, o.ExitOrderCount, o.FillCount, o.ReportedClosedPnlUsd,
-        o.StablecoinFeesNominalUsd, o.OtherFees, o.NetResultUsd, o.PnlBasis, o.PlayId, o.PlayAssociation, o.Coverage, o.GrossClosedPnlUsd);
+        o.StablecoinFeesNominalUsd, o.OtherFees, o.NetResultUsd, o.PnlBasis, o.PlayId, o.PlayAssociation, o.Coverage, o.GrossClosedPnlUsd)
+    {
+        TotalResultUsd = o.TotalResultUsd, FundingNetUsd = o.FundingNetUsd, FundingStatus = o.FundingStatus,
+        FundingPnlBasis = o.FundingPnlBasis, FundingAsOfUtc = o.FundingAsOfUtc, FundingPaymentCount = o.FundingPaymentCount
+    };
 }
 public sealed record ActivityFacetsDto(IReadOnlyList<Guid> AccountIds, IReadOnlyList<string> Contracts);
 /// <summary>
@@ -50,10 +73,18 @@ public sealed record ActivityFacetsDto(IReadOnlyList<Guid> AccountIds, IReadOnly
 /// </summary>
 public sealed record ActivityPageDto(IReadOnlyList<ActivityOperationSummaryDto> Operations, int Page, int PageSize, int TotalCount,
     int ScopeCount, int RetainedFillCount, DateTimeOffset AsOfUtc, string Version, ActivityFacetsDto Facets,
-    IReadOnlyList<ActivityCoverageDto> Coverage, string ScopeNote);
+    IReadOnlyList<ActivityCoverageDto> Coverage, string ScopeNote)
+{
+    public IReadOnlyList<OperationFundingDto> UnassignedFundingPayments { get; init; } = [];
+    public int OmittedUnassignedFundingPaymentCount { get; init; }
+}
 /// <summary>Query-string values exactly as sent; <see cref="ActivityService"/> validates them.</summary>
 public sealed record ActivityQuery(Guid? AccountId = null, string? Scope = null, string? Account = null, string? Portfolio = null,
     string? Contract = null, string? Direction = null, string? Status = null, string? Period = null, string? From = null,
     string? To = null, string? Page = null, string? PageSize = null);
 /// <summary>One operation's constituent rows, chronological, earliest kept when capped.</summary>
-public sealed record OperationFillsDto(string OperationId, IReadOnlyList<OperationFillDto> Fills, int OmittedFillCount);
+public sealed record OperationFillsDto(string OperationId, IReadOnlyList<OperationFillDto> Fills, int OmittedFillCount)
+{
+    public IReadOnlyList<OperationFundingDto> FundingPayments { get; init; } = [];
+    public int OmittedFundingPaymentCount { get; init; }
+}

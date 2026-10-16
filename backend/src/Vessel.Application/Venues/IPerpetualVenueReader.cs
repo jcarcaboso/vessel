@@ -91,7 +91,10 @@ public sealed record PerpetualVenueReadResult(
     VenueSnapshot Snapshot,
     IReadOnlyList<VenueInstrument> Instruments,
     IReadOnlyList<VenueFill> Fills,
-    string HistoryNotice);
+    string HistoryNotice)
+{
+    public VenueFundingReadResult? Funding { get; init; }
+}
 
 public sealed class VenueReadException(string message) : Exception(message);
 

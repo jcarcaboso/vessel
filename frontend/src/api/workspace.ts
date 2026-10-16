@@ -492,7 +492,8 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     },
     deletePlay: id => call(playPath(id), { ...playRequest, validate: none, method: 'DELETE' }),
     playExecution: (id, signal) => call(`${playPath(id)}/execution`, { ...playRequest, validate: isPlayExecution, ...withSignal(signal) }),
-    checkPlayExecution: (id, signal) => call(`${playPath(id)}/execution/check`, { ...playRequest, validate: isPlayExecution, method: 'POST', ...withSignal(signal), timeout: 45_000 }),
+    // History, funding, orders and tick metadata each allow 20s, before reconciliation/persistence.
+    checkPlayExecution: (id, signal) => call(`${playPath(id)}/execution/check`, { ...playRequest, validate: isPlayExecution, method: 'POST', ...withSignal(signal), timeout: 120_000 }),
     linkOrder: (id, link) => call(`${playPath(id)}/execution/links`, { ...playRequest, validate: isPlayExecution, method: 'POST', body: JSON.stringify(link) }),
     unlinkOrder: (id, linkId) => {
       if (!isGuid(linkId)) return Promise.reject(new ApiError('invalid-response', 'The link identifier is invalid.'))
@@ -593,7 +594,8 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     },
     snapshot: (id, signal) => call(`${accountPath(id)}/snapshot`, { ...workspaceRequest, validate: snapshot, ...withSignal(signal) }),
     fills: (id, signal) => call(`${accountPath(id)}/fills`, { ...workspaceRequest, validate: (v): v is ImportedFill[] => Array.isArray(v) && v.every(isImportedFill), ...withSignal(signal) }),
-    sync: (id, signal) => call(`${accountPath(id)}/sync`, { ...workspaceRequest, validate: account, method: 'POST', ...withSignal(signal), timeout: 30_000, badGateway: 'The venue refresh failed. Previous account data is still available.' }),
+    // History, funding and order retention each allow 20s; leave room for account locking and persistence.
+    sync: (id, signal) => call(`${accountPath(id)}/sync`, { ...workspaceRequest, validate: account, method: 'POST', ...withSignal(signal), timeout: 90_000, badGateway: 'The venue refresh failed. Previous account data is still available.' }),
   }
   return api
 }

@@ -6,6 +6,9 @@ using Microsoft.Extensions.Logging;
 
 namespace Vessel.Persistence;
 
+public sealed class MissingDatabaseConfigurationException()
+    : InvalidOperationException("ConnectionStrings__Vessel is required for persistence.");
+
 public static class DependencyInjection
 {
     public static IServiceCollection AddVesselPersistence(this IServiceCollection services, IConfiguration config)
@@ -15,7 +18,7 @@ public static class DependencyInjection
         {
             var connection = config.GetConnectionString("Vessel");
             if (string.IsNullOrWhiteSpace(connection))
-                throw new InvalidOperationException("ConnectionStrings__Vessel is required for persistence.");
+                throw new MissingDatabaseConfigurationException();
             options.UseNpgsql(connection).ConfigureWarnings(warnings => warnings.Log(
                 // These Error events embed exception text, the database name and host:port.
                 // The API records request failures with a safe event, so keep them at Debug.
