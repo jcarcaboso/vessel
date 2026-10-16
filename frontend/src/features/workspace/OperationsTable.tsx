@@ -31,13 +31,15 @@ export function OperationsSkeleton({ compact = false, rows }: { compact?: boolea
   </table></SkeletonStatus>
 }
 
-export function OperationsTable({ operations, accounts, compact = false, onPreview, api, onReload }: {
+export function OperationsTable({ operations, accounts, compact = false, onPreview, api, onReload, refreshGeneration = 0 }: {
   operations: ActivityOperation[]; accounts: BrokerAccount[]; compact?: boolean
   onPreview?: (operation: ActivityOperation) => void
   /** Reads an expanded operation's executions. */
   api: WorkspaceApi
   /** Reloads Activity when an expanded operation no longer exists. */
   onReload?: () => void
+  /** Changes with every accepted Activity response, so expanded operations re-read their executions. */
+  refreshGeneration?: number
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const toggle = (id: string) => setExpanded(previous => {
@@ -65,7 +67,7 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
       {onPreview && <button className="text-action" aria-label={`Inspect ${op.contractId} retrospective eligibility`} onClick={() => onPreview(op)}>Inspect retrospective eligibility</button>}
       <p className="workspace-scope-note operation-details">Entered {op.totalEnteredQuantity === null ? 'unknown' : amount(op.totalEnteredQuantity)} · Exited {op.totalExitedQuantity === null ? 'unknown' : amount(op.totalExitedQuantity)} · Remaining {op.openQuantity === null ? 'unknown' : amount(op.openQuantity)}. Venue-reported P&amp;L {money(op.reportedClosedPnlUsd)} ({op.pnlBasis}).</p>
       {op.coverage.length > 0 && <ul className="operation-coverage">{op.coverage.map(reason => <li key={reason}>{reason}</li>)}</ul>}
-      <OperationFills api={api} operation={op} accounts={accounts} onReload={onReload} />
+      <OperationFills api={api} operation={op} accounts={accounts} onReload={onReload} refreshGeneration={refreshGeneration} />
     </td></tr>}</Fragment>
   })}</tbody></table></div>
 }

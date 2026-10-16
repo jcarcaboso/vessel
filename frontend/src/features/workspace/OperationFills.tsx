@@ -8,13 +8,15 @@ import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { ActivityTable } from './ActivityTable'
 
 /** An expanded operation's executions, read on demand. A 404 means the history changed under the page. */
-export function OperationFills({ api, operation, accounts, onReload }: {
+export function OperationFills({ api, operation, accounts, onReload, refreshGeneration = 0 }: {
   api: WorkspaceApi; operation: ActivityOperation; accounts: BrokerAccount[]; onReload?: (() => void) | undefined
+  /** Changes with every accepted Activity response; per-execution Play associations can change without the row's facts. */
+  refreshGeneration?: number
 }) {
   const [retry, setRetry] = useState(0)
   const { accountId, id } = operation
-  // Re-read when the row's facts change under a reload, not on every render.
-  const key = JSON.stringify([accountId, id, operation.fillCount, operation.lastOccurredAtUtc, operation.playId, operation.playAssociation, retry])
+  // Re-read on every accepted Activity response and when the row's facts change, not on every render.
+  const key = JSON.stringify([accountId, id, operation.fillCount, operation.lastOccurredAtUtc, operation.playId, operation.playAssociation, refreshGeneration, retry])
   const [result, setResult] = useState<{ api: WorkspaceApi; key: string; fills?: ActivityFills; error?: string; changed?: boolean } | null>(null)
   useEffect(() => {
     const controller = new AbortController()

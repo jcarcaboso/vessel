@@ -34,7 +34,9 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
   const list = state ?? localState
   const setList = onStateChange ?? setLocalState
   const [retry, setRetry] = useState(0)
-  const [result, setResult] = useState<{ api: WorkspaceApi; key: string; page: ActivityPage | null; error: string | null } | null>(null)
+  // `requested` is the request that produced the result; `key` is the request it answers, which differs when the
+  // server clamped the page. `generation` counts accepted pages so expanded rows re-read their executions.
+  const [result, setResult] = useState<{ api: WorkspaceApi; key: string; requested: string; page: ActivityPage | null; error: string | null; generation: number } | null>(null)
   // The version of the first page read for these filters; a later page with another version means Activity changed.
   const [baseline, setBaseline] = useState<{ api: WorkspaceApi; key: string; version: string; changed: boolean } | null>(null)
   const [selection, setSelection] = useState<{ accountId: string; operationId: string } | null>(null)
@@ -60,19 +62,32 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
   const query = useMemo(() => JSON.parse(queryKey) as ActivityQuery, [queryKey])
   const key = JSON.stringify([queryKey, reloadGeneration, retry])
   const listKey = JSON.stringify([{ ...query, page: undefined }, reloadGeneration, retry])
+  const adopted = useRef<string | null>(null)
   useEffect(() => {
+    const skip = adopted.current === key
+    adopted.current = null
+    if (skip) return
     const controller = new AbortController()
     api.activity(query, controller.signal).then(page => {
       if (controller.signal.aborted) return
-      setResult({ api, key, page, error: null })
+      // The request a clamped page answers, so adopting it into the list state does not read it again.
+      const answered = page.page === query.page ? key : JSON.stringify([JSON.stringify({ ...query, page: page.page }), reloadGeneration, retry])
+      setResult(current => ({ api, key: answered, requested: key, page, error: null, generation: (current?.generation ?? 0) + 1 }))
       setBaseline(current => current?.api !== api || current.key !== listKey || page.page === 1 ? { api, key: listKey, version: page.version, changed: false }
         : current.version === page.version ? current : { ...current, changed: true })
     }).catch(cause => {
-      if (!controller.signal.aborted) setResult({ api, key, page: null, error: errorMessage(cause, 'Operations could not be loaded.') })
+      if (!controller.signal.aborted) setResult(current => ({ api, key, requested: key, page: null, error: errorMessage(cause, 'Operations could not be loaded.'), generation: current?.generation ?? 0 }))
     })
     return () => controller.abort()
-  }, [api, query, key, listKey])
-  const pending = result === null || result.api !== api || result.key !== key
+  }, [api, query, key, listKey, reloadGeneration, retry])
+  // A page past the end comes back clamped: keep the page actually shown, so later growth does not jump back.
+  // Only the response to the current request may write, and the adopted page is not requested again.
+  useEffect(() => {
+    if (compact || result === null || result.api !== api || result.requested !== key || result.key === key || result.page === null) return
+    adopted.current = result.key
+    setList({ ...list, page: result.page.page })
+  }, [api, compact, key, list, result, setList])
+  const pending = result === null || result.api !== api || result.key !== key && result.requested !== key
   const skeleton = useDelayedFlag(pending && previous === null)
   const changed = baseline?.api === api && baseline.key === listKey && baseline.changed
   const update = (field: keyof Filters, value: string) => setList({ ...list, filters: { ...filters, [field]: value }, page: 1 })
@@ -105,7 +120,7 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
         ? `Showing ${count.format(shown.operations.length)} of ${count.format(shown.totalCount)} operations.`
         : `Showing ${count.format(shown.totalCount)} of ${count.format(shown.scopeCount)} operations.`}</p>
       <div ref={top} className={pending ? 'operations-results list-refetching' : 'operations-results'} aria-busy={pending || undefined}>
-        <OperationsTable api={api} operations={shown.operations} accounts={accounts} compact={compact} onReload={reloadActivity} onPreview={operation => {
+        <OperationsTable api={api} operations={shown.operations} accounts={accounts} compact={compact} refreshGeneration={result?.generation ?? 0} onReload={reloadActivity} onPreview={operation => {
           trigger.current = window.document.activeElement instanceof HTMLElement ? window.document.activeElement : null
           setSelection({ accountId: operation.accountId, operationId: operation.id })
         }} />

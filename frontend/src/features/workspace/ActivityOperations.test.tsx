@@ -25,9 +25,9 @@ const numbered = (count: number, from = 0) => Array.from({ length: count }, (_, 
   lastOccurredAtUtc: new Date(Date.parse('2026-10-12T10:00:00Z') - (from + n) * 60_000).toISOString() }))
 const lastQuery = (activity: ReturnType<typeof vi.fn>) => activity.mock.calls.at(-1)![0] as ActivityQuery
 /** A list whose page and filters live outside it, as the shell keeps them for Activity. */
-function Shelled({ api, initial = initialActivityState, onState }: { api: WorkspaceApi; initial?: ActivityListState; onState?: (state: ActivityListState) => void }) {
+function Shelled({ api, initial = initialActivityState, onState, reloadGeneration = 0 }: { api: WorkspaceApi; initial?: ActivityListState; onState?: (state: ActivityListState) => void; reloadGeneration?: number }) {
   const [state, setState] = useState(initial)
-  return <ActivityOperations api={api} accounts={[accountFixture, otherAccount]} portfolios={[portfolioFixture]} filters state={state}
+  return <ActivityOperations api={api} accounts={[accountFixture, otherAccount]} portfolios={[portfolioFixture]} filters state={state} reloadGeneration={reloadGeneration}
     onStateChange={next => { setState(next); onState?.(next) }} />
 }
 const deferred = <T,>() => {
@@ -308,6 +308,64 @@ describe('activity loading, filters and pages', () => {
     await waitFor(() => expect(lastQuery(activity)).toEqual({ page: 1, pageSize: 25 }))
     await waitFor(() => expect(screen.queryByText('Activity changed')).not.toBeInTheDocument())
     expect(await within(screen.getByRole('table')).findByText('CONTRACT-0')).toBeInTheDocument()
+  })
+  it('re-reads expanded executions on every accepted reload, even when the row facts are unchanged', async () => {
+    const mixed = { ...operationFixture, playAssociation: 'mixed' as const }
+    const activity = vi.fn().mockResolvedValue(activityPage([mixed]))
+    const linked = 'dddddddd-1234-1234-1234-123456789abc'
+    const activityFills = vi.fn().mockResolvedValueOnce(activityFillsFixture)
+      .mockResolvedValue({ ...activityFillsFixture, fills: [{ ...activityFillsFixture.fills[0]!, fill: { ...activityFillFixture, playId: linked } }] })
+    const api = client(activity, activityFills)
+    const view = render(<ActivityOperations api={api} accounts={[accountFixture]} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Expand BTC operation' }))
+    await waitFor(() => expect(activityFills).toHaveBeenCalledTimes(1))
+    // A shell reload: the operation stays mixed with the same count, time and version, but an execution moved Play.
+    view.rerender(<ActivityOperations api={api} accounts={[accountFixture]} reloadGeneration={1} />)
+    await waitFor(() => expect(activity).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(activityFills).toHaveBeenCalledTimes(2))
+    // The Activity reload button and Retry after a failure re-read them as well.
+    activity.mockRejectedValueOnce(new Error('outage'))
+    view.rerender(<ActivityOperations api={api} accounts={[accountFixture]} reloadGeneration={2} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry operations' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Expand BTC operation' }))
+    await waitFor(() => expect(activityFills).toHaveBeenCalledTimes(3))
+    expect(activityFills).toHaveBeenCalledTimes(3)
+  })
+  it('keeps the page the server clamped to, without reading it again, so later growth does not jump back', async () => {
+    let total = 30
+    const activity = vi.fn().mockImplementation((query: ActivityQuery) => {
+      const last = Math.max(1, Math.ceil(total / query.pageSize)), page = Math.min(query.page, last)
+      return Promise.resolve(activityPage(numbered(Math.min(query.pageSize, total - (page - 1) * query.pageSize), (page - 1) * query.pageSize),
+        { page, pageSize: query.pageSize, totalCount: total }))
+    })
+    const states: ActivityListState[] = []
+    const api = client(activity)
+    const view = render(<Shelled api={api} initial={{ ...initialActivityState, page: 5 }} onState={state => states.push(state)} />)
+    expect(await screen.findByText('26–30 of 30')).toBeInTheDocument()
+    await waitFor(() => expect(states.at(-1)?.page).toBe(2))
+    expect(activity.mock.calls.map(([query]) => (query as ActivityQuery).page)).toEqual([5])
+    // History grows past the old requested page; a reload stays on the page that was shown.
+    total = 200
+    view.rerender(<Shelled api={api} initial={{ ...initialActivityState, page: 5 }} onState={state => states.push(state)} reloadGeneration={1} />)
+    await waitFor(() => expect(lastQuery(activity)).toEqual({ page: 2, pageSize: 25 }))
+    expect(await screen.findByText('26–50 of 200')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await waitFor(() => expect(lastQuery(activity)).toEqual({ page: 3, pageSize: 25 }))
+    expect(await screen.findByText('51–75 of 200')).toBeInTheDocument()
+  })
+  it('ignores a clamped answer to a request that is no longer current', async () => {
+    const late = deferred<ActivityPage>()
+    const activity = vi.fn().mockImplementation((query: ActivityQuery) => query.page === 5 ? late.promise
+      : Promise.resolve(activityPage(numbered(25), { totalCount: 60 })))
+    const states: ActivityListState[] = []
+    render(<Shelled api={client(activity)} initial={{ ...initialActivityState, page: 5 }} onState={state => states.push(state)} />)
+    await waitFor(() => expect(activity).toHaveBeenCalledTimes(1))
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Direction' }), 'long')
+    await act(async () => late.resolve(activityPage(numbered(5, 25), { page: 2, totalCount: 30 })))
+    await waitFor(() => expect(lastQuery(activity)).toEqual({ direction: 'long', page: 1, pageSize: 25 }))
+    expect(await screen.findByText('1–25 of 60')).toBeInTheDocument()
+    expect(states.every(state => state.page !== 2)).toBe(true)
+    expect(activity).toHaveBeenCalledTimes(2)
   })
   it('asks Overview for five scoped rows without a pager', async () => {
     const operations = numbered(5)
