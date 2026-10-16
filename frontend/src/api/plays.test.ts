@@ -15,9 +15,10 @@ const other = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 describe('Plays list API', () => {
   it('builds view, search, scope and page parameters', () => {
     expect(playListPath({ view: 'progress' })).toBe('/api/plays?view=progress')
-    expect(playListPath({ view: 'closed', q: '  BTC breakout ', scope: 'all', page: 2, pageSize: 50 })).toBe('/api/plays?q=BTC+breakout&view=closed&page=2&pageSize=50')
+    expect(playListPath({ view: 'closed', q: '  BTC breakout ', scope: 'all', page: 2, pageSize: 50 })).toBe('/api/plays?q=BTC+breakout&scope=all&view=closed&page=2&pageSize=50')
     expect(playListPath({ view: 'drafts', q: '   ', scope: `account:${accountFixture.id}`, pageSize: 5 })).toBe(`/api/plays?scope=account%3A${accountFixture.id}&view=drafts&pageSize=5`)
     expect(playCountsPath({})).toBe('/api/plays/counts')
+    expect(playCountsPath({ scope: 'all' })).toBe('/api/plays/counts?scope=all')
     expect(playCountsPath({ q: '50%_off', scope: 'unassigned' })).toBe('/api/plays/counts?q=50%25_off&scope=unassigned')
   })
   it.each([

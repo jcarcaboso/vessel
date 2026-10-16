@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Common;
 using Vessel.Application.Plays;
@@ -15,15 +16,18 @@ public sealed class PlayStore(VesselDbContext db) : IPlayStore
         _ => Task.FromResult(true)
     };
 
-    public Task<int> CountAsync(PlayListView view, PlayListFilter filter, CancellationToken ct) => View(Rows(filter), view).CountAsync(ct);
-
-    public Task<List<PlayListRow>> ListAsync(PlayListView view, PlayListFilter filter, int skip, int take, CancellationToken ct)
+    // Count, clamp and rows share one snapshot, so a concurrent close or delete never returns a total its rows contradict.
+    public async Task<PlayListPage> PageAsync(PlayListView view, PlayListFilter filter, int page, int pageSize, CancellationToken ct)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
         var rows = View(Rows(filter), view);
+        var total = await rows.CountAsync(ct);
+        page = ListPaging.Clamp(page, pageSize, total);
+        if (total == 0) return new(0, page, []);
         var ordered = view is PlayListView.Drafts or PlayListView.Progress or PlayListView.All
             ? rows.OrderByDescending(x => x.UpdatedAtUtc).ThenBy(x => x.Id)
             : rows.OrderByDescending(x => x.EndedAtUtc).ThenByDescending(x => x.UpdatedAtUtc).ThenBy(x => x.Id);
-        return ordered.Skip(skip).Take(take).ToListAsync(ct);
+        return new(total, page, await ordered.Skip(ListPaging.Skip(page, pageSize)).Take(pageSize).ToListAsync(ct));
     }
 
     public async Task<List<PlayCountRow>> CountsAsync(PlayListFilter filter, CancellationToken ct) =>

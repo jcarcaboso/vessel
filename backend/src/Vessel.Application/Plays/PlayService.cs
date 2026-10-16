@@ -23,12 +23,10 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var listView = View(view);
         var (requested, size) = ListPaging.Parse(page, pageSize);
         var filter = await Filter(search, scope, ct);
-        var total = await store.CountAsync(listView, filter, ct);
         // Unpaged views are one page: the whole view up to 200 rows, or an explicit smaller size such as Overview's 5.
         if (listView is PlayListView.Drafts or PlayListView.Progress) (requested, size) = (1, string.IsNullOrEmpty(pageSize) ? MaxUnpagedPlays : size);
-        requested = ListPaging.Clamp(requested, size, total);
-        var rows = total == 0 ? [] : await store.ListAsync(listView, filter, ListPaging.Skip(requested, size), size, ct);
-        return new(rows.Select(Summary).ToList(), ViewName(listView), requested, size, total);
+        var result = await store.PageAsync(listView, filter, requested, size, ct);
+        return new(result.Rows.Select(Summary).ToList(), ViewName(listView), result.Page, size, result.TotalCount);
     }
 
     public async Task<PlayCountsDto> CountsAsync(string? search, string? scope, CancellationToken ct)

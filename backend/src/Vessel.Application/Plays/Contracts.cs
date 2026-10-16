@@ -49,8 +49,12 @@ public sealed record PlayCountsDto(int Drafts, int Progress, int Review, int Rev
 /// </summary>
 public enum PlayListView { Drafts, Progress, Review, Reviewed, Closed, Cancelled, All }
 
-/// <summary>Search is a trimmed, case-insensitive substring of title or instrument; the scope keeps enabled accounts only.</summary>
-/// <summary>A null scope is the Plays page: every owner Play, including those on disabled accounts.</summary>
+public sealed record PlayListPage(int TotalCount, int Page, List<PlayListRow> Rows);
+
+/// <summary>
+/// Search is a trimmed, case-insensitive substring of title or instrument. A scope keeps its enabled accounts only;
+/// a null scope is the Plays page: every owner Play, including those on disabled accounts.
+/// </summary>
 public sealed record PlayListFilter(string? Search, ListScope? Scope);
 
 /// <summary>Summary columns only. Plan, drawings and review text are never read for a list.</summary>
@@ -93,9 +97,11 @@ public interface IPlayStore
 {
     /// <summary>Whether the scope's portfolio or account exists for this owner; <c>all</c> and <c>unassigned</c> always do.</summary>
     Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct);
-    Task<int> CountAsync(PlayListView view, PlayListFilter filter, CancellationToken ct);
-    /// <summary>Ordered summary rows of one view: updated desc for Drafts, In progress and All; ended desc, updated desc otherwise; then ID.</summary>
-    Task<List<PlayListRow>> ListAsync(PlayListView view, PlayListFilter filter, int skip, int take, CancellationToken ct);
+    /// <summary>
+    /// One consistent page of a view: the exact total, the requested page clamped to it and its ordered summary rows
+    /// (updated desc for Drafts, In progress and All; ended desc, updated desc otherwise; then ID), read from one snapshot.
+    /// </summary>
+    Task<PlayListPage> PageAsync(PlayListView view, PlayListFilter filter, int page, int pageSize, CancellationToken ct);
     Task<List<PlayCountRow>> CountsAsync(PlayListFilter filter, CancellationToken ct);
     Task<Play?> FindAsync(Guid id, CancellationToken ct);
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);

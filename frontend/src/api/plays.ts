@@ -171,7 +171,8 @@ function listParams(q: string | undefined, scope: string | undefined) {
   const params = new URLSearchParams()
   const search = q?.trim() ?? ''
   if (search) { if (search.length > playSearchLength) invalidPlayQuery(); params.set('q', search) }
-  if (scope !== undefined && scope !== 'all') { if (!validOverviewScope(scope)) invalidPlayQuery(); params.set('scope', scope) }
+  // Without a scope the Plays page keeps Plays on disabled accounts; any scope, even `all`, keeps enabled accounts only.
+  if (scope !== undefined) { if (!validOverviewScope(scope)) invalidPlayQuery(); params.set('scope', scope) }
   return params
 }
 const isPageNumber = (v: unknown): v is number => isCount(v) && v >= 1

@@ -55,15 +55,20 @@ internal sealed class MemoryPlayStore(Guid owner) : IPlayStore
             PlayListView.Cancelled => p.Status == PlayStatus.Cancelled,
             _ => true
         });
-    public Task<int> CountAsync(PlayListView view, PlayListFilter filter, CancellationToken ct) => Task.FromResult(Listed(view, filter).Count());
-    public Task<List<PlayListRow>> ListAsync(PlayListView view, PlayListFilter filter, int skip, int take, CancellationToken ct) =>
-        Task.FromResult(Listed(view, filter).OrderByDescending(p => p.UpdatedAtUtc).ThenBy(p => p.Id).Skip(skip).Take(take).Select(p => new PlayListRow
+    public Task<PlayListPage> PageAsync(PlayListView view, PlayListFilter filter, int page, int pageSize, CancellationToken ct)
+    {
+        var total = Listed(view, filter).Count();
+        page = ListPaging.Clamp(page, pageSize, total);
+        return Task.FromResult(new PlayListPage(total, page, Rows(view, filter, ListPaging.Skip(page, pageSize), pageSize)));
+    }
+    private List<PlayListRow> Rows(PlayListView view, PlayListFilter filter, int skip, int take) =>
+        Listed(view, filter).OrderByDescending(p => p.UpdatedAtUtc).ThenBy(p => p.Id).Skip(skip).Take(take).Select(p => new PlayListRow
         {
             Id = p.Id, Title = p.Title, Status = p.Status, AccountId = p.AccountId, VenueId = p.VenueId, ContractId = p.ContractId,
             InstrumentSource = p.InstrumentSource, Direction = p.Direction, PlanRevision = p.PlanRevision, Version = p.Version,
             CancelReason = p.CancelReason, CreatedAtUtc = p.CreatedAtUtc, UpdatedAtUtc = p.UpdatedAtUtc, PlannedAtUtc = p.PlannedAtUtc,
             EndedAtUtc = p.EndedAtUtc, HasReview = p.HasReview, Origin = p.Origin, ReviewedAtUtc = p.ReviewedAtUtc
-        }).ToList());
+        }).ToList();
     public Task<List<PlayCountRow>> CountsAsync(PlayListFilter filter, CancellationToken ct) => Task.FromResult(Listed(PlayListView.All, filter)
         .GroupBy(p => (p.Status, Reviewed: p.HasReview || p.ReviewedAtUtc != null)).Select(g => new PlayCountRow(g.Key.Status, g.Key.Reviewed, g.Count())).ToList());
     public Task<Play?> FindAsync(Guid id, CancellationToken ct) => Task.FromResult(Plays.SingleOrDefault(p => p.Id == id && p.OwnerId == owner));
