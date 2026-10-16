@@ -307,8 +307,13 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    # `compose up --wait` rejects a service without a healthcheck; the verifier reports only that its process is alive.
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 6
     restart: unless-stopped
   rabbitmq:
     environment:

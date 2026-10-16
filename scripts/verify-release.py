@@ -114,9 +114,14 @@ class Check:
     depends_on:
       migrate:
         condition: service_completed_successfully
-    # The heartbeat file belongs to the monitor module.
+    # The heartbeat file belongs to the monitor module, so this host reports only that its process is alive.
+    # `compose up --wait` rejects a service without a healthcheck, so it cannot simply be disabled.
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 6
     restart: unless-stopped
   rabbitmq:
     environment:
