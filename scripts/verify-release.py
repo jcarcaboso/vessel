@@ -293,7 +293,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         self.expect(self.request('/api/events?after=not-a-cursor')[0] == 400,
                     'invalid event cursor is rejected', 'monitor')
         before = self.json('/api/events?limit=200')
-        self.expect(isinstance(before['nextCursor'], str) and re.fullmatch(r'[0-9a-f]{32}\.(0|[1-9][0-9]*)', before['nextCursor']) is not None,
+        self.expect(isinstance(before['nextCursor'], str) and re.fullmatch(r'0|[0-9a-f]{32}\.(0|[1-9][0-9]*)', before['nextCursor']) is not None,
                     'event cursor is an opaque {epoch}.{sequence} string', 'monitor')
         self.expect(all(set(event['subject']) == {'accountId', 'venueId', 'contractId', 'playId', 'entryId', 'levelId', 'discrepancyId'}
                         for event in before['events']), 'event subjects keep explicit nulls', 'monitor')
@@ -358,7 +358,9 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
                         break
             self.expect(any(item.get('id') == expected_id for item in received),
                         'SSE catch-up delivers the committed event without a venue read', 'monitor')
-            self.expect(resume is not None and resume.startswith(after.split('.')[0] + '.'),
+            # A fresh owner starts from cursor 0; once events exist every resume cursor names the stream epoch.
+            self.expect(resume is not None and re.fullmatch(r'[0-9a-f]{32}\.[1-9][0-9]*', resume) is not None and
+                        (after == '0' or resume.split('.')[0] == after.split('.')[0]),
                         'SSE event frames carry their resume cursor in the stream epoch', 'monitor')
         finally:
             connection.close()
