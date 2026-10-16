@@ -222,7 +222,11 @@ function Shell({ system, disconnect, api }: ShellProps) {
     setPlaysSession(next)
     navigate('plays')
   }
-  const { refreshing, refreshProgress, sync, refreshAll, cancel: cancelRefresh } = useAccountRefresh({ api, refreshable, reload, notify })
+  const { refreshing, refreshProgress, sync, refreshAll, enqueue, cancel: cancelRefresh } = useAccountRefresh({ api, refreshable, reload, notify })
+  const accountCreated = (account?: BrokerAccount) => {
+    reload()
+    if (account && account.isEnabled !== false && venues.can(account.venueId, 'sync')) enqueue(account)
+  }
   const disconnectSession = () => {
     const current = exitState.current
     if (current?.api !== api || current.work !== playsLifetime.work) return
@@ -305,7 +309,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
       </main>
     </div>
     <CreatePortfolioDialog open={portfolioDialog} onOpenChange={setPortfolioDialog} api={api} accounts={accounts} portfolios={portfolios} onCreated={created} />
-    <CreateAccountDialog open={accountDialog} onOpenChange={setAccountDialog} api={api} portfolios={portfolios} accounts={accounts} onCreated={reload} />
+    <CreateAccountDialog open={accountDialog} onOpenChange={setAccountDialog} api={api} portfolios={portfolios} accounts={accounts} onCreated={accountCreated} />
     {managedPortfolio && <ManagePortfolioDialog key={managedPortfolio.id} portfolio={managedPortfolio} accounts={accounts} portfolios={portfolios} focusAccounts={focusPortfolioAccounts} onStale={reload} api={api} onClose={() => setManagedPortfolioId(null)} onChanged={managementChanged} />}
     {managedAccount && <ManageAccountDialog key={managedAccount.id} account={managedAccount} portfolios={portfolios} api={api} onClose={() => setManagedAccountId(null)} onChanged={managementChanged} onStale={reload} />}
   </div>

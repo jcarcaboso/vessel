@@ -10,6 +10,7 @@ import type { ActivityQuery } from '@/api/activity'
 import { ApplicationShell } from './ApplicationShell'
 import { activityFillsFixture, activityFixture, activityPage, operationFixture } from '@/test/activity-fixture'
 import { retrospectiveFixture, retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
+import { discoveryFixture, indexAccount, indexVenue } from '@/test/account-access-fixture'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
@@ -662,6 +663,39 @@ describe('Main application shell', () => {
     await waitFor(() => expect(client.createAccount).toHaveBeenCalledWith({ portfolioId: null, name: 'Unassigned manual', venueId: 'manual' }))
     expect(client.createPortfolio).not.toHaveBeenCalled()
     expect(client.sync).not.toHaveBeenCalled()
+  })
+  it('queues an initial venue sync after adding an account and keeps it running after the dialog closes', async () => {
+    let finish!: () => void
+    const client = api({
+      createAccount: vi.fn().mockResolvedValue({ ...accountFixture, venueId: 'hyperliquid' }),
+      sync: vi.fn().mockImplementation(() => new Promise<void>(resolve => { finish = resolve })),
+    })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Add your first account' }))
+    await userEvent.type(screen.getByLabelText('Account name'), 'New wallet')
+    await userEvent.type(screen.getByLabelText('Public wallet address'), `0x${'ab'.repeat(20)}`)
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add account' }))
+    await waitFor(() => expect(client.sync).toHaveBeenCalledExactlyOnceWith(accountFixture.id, expect.any(AbortSignal)))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await act(async () => finish())
+    await screen.findByText('1 of 1 accounts refreshed.')
+  })
+  it.each(['lighter', 'lighter-rh'])('automatically refreshes a newly imported %s account', async venueId => {
+    const venue = { ...indexVenue, id: venueId }
+    const client = api({
+      discoverAccounts: vi.fn().mockResolvedValue({ ...discoveryFixture, venueId }),
+      createAccount: vi.fn().mockResolvedValue({ ...indexAccount, venueId }),
+    })
+    const system = { ...systemFixture, venues: [venue, ...systemFixture.venues.filter(v => v.id !== venueId)] }
+    render(<ApplicationShell system={system} disconnect={vi.fn()} api={client} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Add your first account' }))
+    await userEvent.type(screen.getByLabelText('Public wallet address'), discoveryFixture.address)
+    await userEvent.click(screen.getByRole('button', { name: 'Find wallet' }))
+    await userEvent.click(await screen.findByRole('checkbox', { name: /Main account.*9007199254740993/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Import selected (1)' }))
+    await waitFor(() => expect(client.sync).toHaveBeenCalledExactlyOnceWith(indexAccount.id, expect.any(AbortSignal)))
+    expect(client.saveAccountCredential).not.toHaveBeenCalled()
+    expect(client.createAccount).toHaveBeenCalledTimes(1)
   })
   it('creates a manual account without fabricating an unavailable balance', async () => {
     const client = api({ overview: vi.fn().mockResolvedValue({ ...emptyOverview, portfolios: [portfolioFixture] }) })

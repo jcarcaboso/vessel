@@ -9,7 +9,7 @@ The default frontend opens a Graphite application shell with Overview, Portfolio
 - Overview uses known nominal values and persisted account/snapshot/execution counts. Empty states use setup guidance, not invented performance.
 - Portfolios and accounts can be created through the authenticated API. New accounts belong to one portfolio; legacy unassigned heads remain valid.
 - Accounts can be manual with optional value or Hyperliquid with a public address. Lighter and Quantfury remain deferred.
-- Account detail reads latest snapshots and recent fills. Refresh is explicitly requested, not a background job.
+- Account detail reads latest snapshots and recent fills. October 16: account creation queues one initial bounded refresh in the browser session; later refreshes are explicitly requested. No durable background job or history backfill.
 - Fills remain unassigned to plays and have no fabricated thesis. Retrospective editing is deferred.
 - Mobile navigation supports keyboard close and background inertness. Tables scroll internally.
 - The token stays in a session client closure, not storage, URLs or build assets. Disconnect releases it; the password field clears after connection.

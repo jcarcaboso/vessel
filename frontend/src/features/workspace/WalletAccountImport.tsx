@@ -17,7 +17,7 @@ type ImportResult = { account?: BrokerAccount; message: string }
 
 type ImportProps = {
   venueId: string; api: WorkspaceApi; portfolios: Portfolio[]; accounts: BrokerAccount[]
-  onCreated: () => void; onBusy: (busy: boolean) => void; onClose: () => void
+  onCreated: (account?: BrokerAccount) => void; onBusy: (busy: boolean) => void; onClose: () => void
 }
 
 export function WalletAccountImport(props: ImportProps) {
@@ -111,7 +111,7 @@ function WalletImportSession({ venueId, api, portfolios, accounts, onCreated, on
           account = await api.createAccount({ venueId, sourceId: candidate.sourceId, name: names[candidate.sourceId]!.trim(),
             portfolioId: target.portfolioId })
           if (!alive.current) return
-          setCreated(previous => [...previous, account]); onCreated()
+          setCreated(previous => [...previous, account])
         } catch (cause) {
           if (!alive.current) return
           if (target.created) setError('The new portfolio was created and kept. It remains selected. Find wallet again before retrying imports; a duplicate portfolio will not be created.')
@@ -134,6 +134,8 @@ function WalletImportSession({ venueId, api, portfolios, accounts, onCreated, on
           }
         }
         setResults(previous => ({ ...previous, [candidate.sourceId]: { account, message } }))
+        // Start the initial read only after optional credential verification/storage has settled.
+        onCreated(account)
       }
       setSelected([])
     } catch (cause) { if (alive.current) setError(errorMessage(cause, 'Could not create the portfolio. No accounts were imported.')) }
@@ -203,7 +205,7 @@ function WalletImportSession({ venueId, api, portfolios, accounts, onCreated, on
         </details>}
       <div className="credential-actions">
         <Button type="button" variant="outline" disabled={pending} onClick={() => { discoveryRequest.current?.abort(); setToken(''); onClose() }}>Done</Button>
-        <Button type="submit" disabled={pending || importable.length === 0} title="Creates account records only; Refresh account later reads current state and bounded recent fills">{pending && !loadingNames ? 'Importing…' : `Import selected${importable.length ? ` (${importable.length})` : ''}`}</Button>
+        <Button type="submit" disabled={pending || importable.length === 0} title="Adds accounts and queues one initial refresh of current state and bounded recent executions, not complete lifetime history">{pending && !loadingNames ? 'Importing…' : `Import selected${importable.length ? ` (${importable.length})` : ''}`}</Button>
       </div>
     </form>}
     {error && <p className="error" role="alert">{error}</p>}
