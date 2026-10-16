@@ -311,8 +311,14 @@ services:
                             capture_output=True, text=True).stdout.strip()
 
     def rabbit(self, *args):
-        return json.loads(self.compose('exec', '-T', 'rabbitmq', 'rabbitmqctl', '--quiet', *args, '--formatter', 'json',
-                                       capture_output=True, text=True).stdout or '[]')
+        # rabbitmqctl can answer 69 (node temporarily unavailable) on a busy host; retry briefly before failing.
+        for attempt in range(6):
+            result = self.compose('exec', '-T', 'rabbitmq', 'rabbitmqctl', '--quiet', *args, '--formatter', 'json',
+                                  capture_output=True, text=True, check=False)
+            if result.returncode == 0:
+                return json.loads(result.stdout or '[]')
+            time.sleep(3)
+        raise StepFailed(f'rabbitmqctl {args[0]} failed ({result.returncode}): {result.stderr[-200:]}')
 
     def broker_app_user(self):
         # Least privilege, as documented: the hosts can only use vessel.* names and declare nothing they need.
