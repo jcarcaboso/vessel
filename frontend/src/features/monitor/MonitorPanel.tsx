@@ -105,6 +105,7 @@ export function MonitorDiscrepancies({ discrepancies, busy, onDismiss }: {
 }
 
 const watchStates = { watching: 'Watching', resolved: 'No longer resting', unverifiable: 'Unverifiable' } as const
+const watchRoles = { entry: 'Entry', stop: 'Stop', target: 'Target', exit: 'Exit' } as const
 
 /** Linked orders of an ended Play that the monitor keeps checking until the venue shows they no longer rest. */
 export function MonitorWatches({ watches }: { watches: MonitorWatch[] }) {
@@ -113,7 +114,7 @@ export function MonitorWatches({ watches }: { watches: MonitorWatch[] }) {
     <h3>Watched orders</h3>
     <p className="muted">After a Play ends, its linked orders are checked until the venue reports them filled, cancelled or no longer open.</p>
     <ul>{watches.map(watch => <li key={watch.linkId}>
-      <div><strong>Order {watch.orderId}</strong>
+      <div><strong>{watchRoles[watch.role]} order {watch.orderId}</strong>
         <span className="monitor-badge" data-watch={watch.state}>{watchStates[watch.state]}</span></div>
       <small>Watched since {time(watch.startedAtUtc)}{watch.endedAtUtc ? ` · ended ${time(watch.endedAtUtc)}` : ''}</small>
       {watch.state === 'unverifiable' && <p className="monitor-unverifiable">

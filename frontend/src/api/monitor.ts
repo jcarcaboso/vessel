@@ -26,6 +26,7 @@ export interface MonitorWatch {
   linkId: string
   playId: string
   orderId: string
+  role: 'entry' | 'stop' | 'target' | 'exit'
   /** `unverifiable` is persistent: the watch lifetime passed without proof, which never claims the order is gone. */
   state: 'watching' | 'resolved' | 'unverifiable'
   startedAtUtc: string
@@ -96,7 +97,7 @@ export const isMonitorDiscrepancy = (v: unknown): v is MonitorDiscrepancy => obj
   (v.outcome === null ? v.unverifiableAtUtc === null && v.state !== 'candidate' : v.outcome === 'unverifiable' && date(v.unverifiableAtUtc))
 
 export const isMonitorWatch = (v: unknown): v is MonitorWatch => object(v) && id(v.linkId) && id(v.playId) && id(v.orderId) &&
-  ['watching', 'resolved', 'unverifiable'].includes(v.state as string) && date(v.startedAtUtc) &&
+  ['entry', 'stop', 'target', 'exit'].includes(v.role as string) && ['watching', 'resolved', 'unverifiable'].includes(v.state as string) && date(v.startedAtUtc) &&
   (v.state === 'watching' ? v.endedAtUtc === null : nullableDate(v.endedAtUtc))
 
 export const isAccountMonitor = (v: unknown): v is AccountMonitor => object(v) && id(v.accountId) &&

@@ -11,8 +11,6 @@ interface RequestOptions {
   notFound?: string
   badGateway?: string
   tooMany?: string
-  /** Appends the server's Retry-After wait, in whole seconds, to a 429 message. */
-  retryAfter?: boolean
   safeError?: string
   noContent?: string
   invalidJson?: string
@@ -36,8 +34,6 @@ async function httpError(response: Response, options: RequestOptions): Promise<A
       else if (response.status === 429 && isRecord(problem) && isText(problem.title, 500) && problem.title.trim()) detail = problem.title
     } catch { /* Keep the safe default for non-JSON proxy responses. */ }
   }
-  const wait = response.status === 429 && options.retryAfter ? response.headers.get('Retry-After') : null
-  if (wait && /^\d{1,6}$/.test(wait) && Number(wait) > 0) detail += ` Try again in ${Number(wait)} ${Number(wait) === 1 ? 'second' : 'seconds'}.`
   if (response.status === 404) detail = options.notFound ?? 'This account or portfolio is no longer available.'
   if (response.status === 503) detail = 'The service is unavailable. Check the database and server configuration.'
   const reference = response.headers.get('X-Correlation-ID')

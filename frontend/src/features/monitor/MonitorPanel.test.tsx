@@ -194,15 +194,17 @@ describe('monitor controls', () => {
   it('lists watched orders of an ended Play with a persistent unverifiable state', () => {
     const base = { playId: discrepancyFixture.playId!, startedAtUtc: '2026-10-14T10:00:00Z' }
     const view = render(<MonitorWatches watches={[
-      { ...base, linkId: 'l-1', orderId: 'exit-1', state: 'watching', endedAtUtc: null },
-      { ...base, linkId: 'l-2', orderId: 'exit-2', state: 'resolved', endedAtUtc: '2026-10-15T10:00:00Z' },
-      { ...base, linkId: 'l-3', orderId: 'entry-3', state: 'unverifiable', endedAtUtc: '2026-10-21T10:00:00Z' },
+      { ...base, linkId: 'l-1', orderId: 'exit-1', role: 'stop', state: 'watching', endedAtUtc: null },
+      { ...base, linkId: 'l-2', orderId: 'exit-2', role: 'target', state: 'resolved', endedAtUtc: '2026-10-15T10:00:00Z' },
+      // A resting entry of a Cancelled Play is watched like an exit.
+      { ...base, linkId: 'l-3', orderId: 'entry-3', role: 'entry', state: 'unverifiable', endedAtUtc: '2026-10-21T10:00:00Z' },
     ]} />)
     expect(screen.getByRole('region', { name: 'Watched orders' })).toBeInTheDocument()
     expect(screen.getByText('Watching')).toHaveAttribute('data-watch', 'watching')
     expect(screen.getByText('No longer resting')).toHaveAttribute('data-watch', 'resolved')
     expect(screen.getByText('Unverifiable')).toHaveAttribute('data-watch', 'unverifiable')
     expect(screen.getAllByText(/may still rest at the venue/)).toHaveLength(1)
+    expect(screen.getByText('Entry order entry-3')).toBeInTheDocument()
     view.rerender(<MonitorWatches watches={[]} />)
     expect(screen.queryByRole('region', { name: 'Watched orders' })).not.toBeInTheDocument()
   })

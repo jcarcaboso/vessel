@@ -46,13 +46,15 @@ describe('monitor contract', () => {
     expect(isMonitorDiscrepancy(older)).toBe(false)
   })
   it('validates watched orders and keeps a watching order open-ended', () => {
-    const watch = { linkId: 'link-1', playId: savedPlayFixture.summary.id, orderId: 'exit-1', state: 'unverifiable',
+    const watch = { linkId: 'link-1', playId: savedPlayFixture.summary.id, orderId: 'exit-1', role: 'stop', state: 'unverifiable',
       startedAtUtc: '2026-10-14T10:00:00Z', endedAtUtc: '2026-10-21T10:00:00Z' }
     expect(isMonitorWatch(watch)).toBe(true)
     expect(isMonitorWatch({ ...watch, endedAtUtc: null })).toBe(true)
     expect(isMonitorWatch({ ...watch, state: 'watching' })).toBe(false)
     expect(isMonitorWatch({ ...watch, state: 'watching', endedAtUtc: null })).toBe(true)
     expect(isMonitorWatch({ ...watch, state: 'gone' })).toBe(false)
+    expect(isMonitorWatch({ ...watch, role: 'entry' })).toBe(true)
+    expect(isMonitorWatch({ ...watch, role: 'protection' })).toBe(false)
   })
   it('ignores malformed frames and unsupported event types', () => {
     const cursor = eventCursor('10')

@@ -250,7 +250,7 @@ public sealed class MonitorEndToEndTests
         var unverifiable = JsonSerializer.SerializeToElement(new MonitorDiscrepancyDto(Guid.NewGuid(), fixture.AccountId, fixture.BtcPlay,
             "BTC", "position.missing", "warning", "candidate", fixture.Clock.GetUtcNow(), null, null, null, null,
             JsonSerializer.SerializeToElement(new { venueQuantity = "0", playQuantity = "0.1" }), "unverifiable", fixture.Clock.GetUtcNow()), json);
-        var watch = JsonSerializer.SerializeToElement(new MonitorWatchDto(Guid.NewGuid(), fixture.BtcPlay, "exit-order", "unverifiable",
+        var watch = JsonSerializer.SerializeToElement(new MonitorWatchDto(Guid.NewGuid(), fixture.BtcPlay, "exit-order", "stop", "unverifiable",
             fixture.Clock.GetUtcNow(), fixture.Clock.GetUtcNow()), json);
         var document = new JsonObject
         {
