@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting;
 using Npgsql;
 using Vessel.Application.Common;
 using Vessel.Application.Venues;
@@ -171,6 +172,11 @@ public sealed class ServerDiagnosticTests
     private sealed class DiagnosticFactory(Exception? error, bool cancelCaller = false, string? connection = null) : WebApplicationFactory<Program>
     {
         public CaptureLoggerProvider Logs { get; } = new();
+        protected override IHost CreateHost(IHostBuilder builder)
+        {
+            VesselEventTestHosting.ConfigureBootstrap(builder);
+            return base.CreateHost(builder);
+        }
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
@@ -184,6 +190,7 @@ public sealed class ServerDiagnosticTests
             builder.ConfigureLogging(logging => logging.ClearProviders().SetMinimumLevel(LogLevel.Error).AddProvider(Logs));
             builder.ConfigureServices(services =>
             {
+                VesselEventTestHosting.ConfigureServices(services);
                 if (error is not null)
                 {
                     services.AddSingleton<IWorkspaceStore>(new ThrowingStore(error));
