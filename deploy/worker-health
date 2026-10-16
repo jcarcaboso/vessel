@@ -1,9 +1,16 @@
 #!/bin/sh
-set -eu
+# Healthy only while the scheduler keeps completing productive passes. The worker writes
+# "<unix seconds> <timeout seconds>" (Vessel:Monitor:HeartbeatTimeout) after each one.
+set -euf
 file="${Vessel__Monitor__HeartbeatFile:-/tmp/vessel-worker-heartbeat}"
 test -r "$file" || exit 1
-heartbeat="$(cat "$file")"
+# The file has no trailing newline; split its two fields without read's end-of-file status.
+set -- $(cat "$file")
+test "$#" -eq 2 || exit 1
+heartbeat="$1"
+timeout="$2"
 case "$heartbeat" in ''|*[!0-9]*) exit 1 ;; esac
+case "$timeout" in ''|*[!0-9]*) exit 1 ;; esac
 now="$(date +%s)"
 age="$((now - heartbeat))"
-test "$age" -ge 0 && test "$age" -le 90
+test "$age" -ge 0 && test "$age" -le "$timeout"
