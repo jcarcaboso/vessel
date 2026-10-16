@@ -404,6 +404,8 @@ Subscription handlers in this stack are database-only. The Notification Hub late
 
 Event-subscription and command listeners use Wolverine's inline listener mode, not the durable inbox: a 6.50 durable-inbox listener persists and settles the broker delivery before the handler runs, and on RabbitMQ 4.3 a nack does not count towards `x-delivery-limit`. The durable outbox stays. A pinned-version integration test proves this behavior.
 
+Wolverine models a RabbitMQ queue as one endpoint with one mode for both directions, so a host never publishes to a command queue it listens to: the API publishes `MonitorAccountCommand` through the durable outbox, and a worker running the monitor module only listens inline and refuses to stage that command. Registering both sides on one host made Wolverine warn about conflicting modes and keep whichever it applied last. A broker test asserts each host's mode and that startup logs no conflict.
+
 | Outcome | Database | Broker delivery |
 |---|---|---|
 | Success | Effects and terminal receipt commit together | Ack after commit |

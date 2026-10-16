@@ -8,6 +8,9 @@ using Vessel.Messaging.Modules.Monitor;
 using Vessel.Messaging.Modules.Verification;
 using Vessel.Worker;
 using Wolverine;
+using Wolverine.Configuration;
+using Wolverine.Runtime;
+using Wolverine.Runtime.Routing;
 
 namespace Vessel.Tests;
 
@@ -103,6 +106,47 @@ public sealed class WorkerHostTests
         Assert.Equal(1u, await broker.ReadyAsync(MessagingTopology.DeadLetterQueue(queue)));
     }
 
+    [VesselEventRabbitFact]
+    public async Task Command_queue_is_published_durably_by_the_api_and_listened_inline_by_its_module()
+    {
+        await using var broker = await BrokerScope.CreateAsync();
+        await broker.ProvisionAsync();
+        var logs = new StartupLogs();
+        var api = broker.Build(MessagingHosting.ApiDeployment, [], logs);
+        await api.StartAsync();
+        using var worker = Worker(broker, MonitorModule.ModuleName, logs: logs);
+        await worker.StartAsync();
+        var queue = new Uri($"rabbitmq://queue/{broker.Topology.CommandQueue(MonitorModule.ModuleName)}");
+
+        // The API only publishes: through the durable outbox, never inline.
+        var published = Endpoint(api, queue);
+        Assert.False(published.IsListener);
+        Assert.Equal(EndpointMode.Durable, published.Mode);
+        Assert.Contains(Routes(api), route => route == queue);
+
+        // The worker only listens, inline, so a delivery is acknowledged after the handler settles. It declares no
+        // publishing side for the same endpoint, so no second mode request can replace this one.
+        var listened = Endpoint(worker, queue);
+        Assert.True(listened.IsListener);
+        Assert.Equal(EndpointMode.Inline, listened.Mode);
+        Assert.DoesNotContain(Routes(worker), route => route == queue);
+        // Nothing in the worker may stage the command it consumes: it would bypass the API's durable outbox.
+        await using (var scope = worker.Services.CreateAsyncScope())
+        {
+            var outbox = scope.ServiceProvider.GetRequiredService<Vessel.Persistence.Events.IVesselEventOutbox>();
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                outbox.StageAsync(new MonitorAccountCommand(Guid.CreateVersion7(), Guid.NewGuid(), broker.Owner, "manual"), default));
+            Assert.Contains("consumes", error.Message);
+        }
+        await worker.StopAsync();
+        await api.StopAsync();
+
+        // Wolverine validates every listener at startup and warns when both sides asked for different modes.
+        Assert.Contains(logs.Messages, m => m.Category.StartsWith("Wolverine", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs.Messages, m => m.Text.Contains("Conflicting endpoint mode", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs.Messages, m => m.Level >= LogLevel.Warning && m.Text.Contains("commands.", StringComparison.Ordinal));
+    }
+
     [PostgresFact]
     public async Task Review_M2_heartbeat_advances_only_after_a_productive_scheduling_pass()
     {
@@ -154,7 +198,14 @@ public sealed class WorkerHostTests
         return host;
     }
 
-    private static IHost Worker(BrokerScope broker, string module, string? deployment = null)
+    private static Wolverine.Configuration.Endpoint Endpoint(IHost host, Uri uri) =>
+        host.Services.GetRequiredService<IWolverineRuntime>().Options.Transports.TryGetEndpoint(uri)
+        ?? throw new InvalidOperationException($"No endpoint {uri}.");
+
+    private static Uri[] Routes(IHost host) => host.Services.GetRequiredService<IWolverineRuntime>()
+        .RoutingFor(typeof(MonitorAccountCommand)).Routes.OfType<MessageRoute>().Select(r => r.Uri).ToArray();
+
+    private static IHost Worker(BrokerScope broker, string module, string? deployment = null, ILoggerProvider? logs = null)
     {
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
         builder.Configuration.AddConfiguration(broker.Configuration);
@@ -166,8 +217,28 @@ public sealed class WorkerHostTests
             ["Vessel:Monitor:HeartbeatFile"] = Path.Combine(Path.GetTempPath(), "vessel-worker-test-" + Guid.NewGuid().ToString("N"))
         });
         builder.Logging.ClearProviders();
+        if (logs is not null) builder.Logging.AddProvider(logs);
         WorkerHost.Configure(builder);
         return builder.Build();
+    }
+
+    private sealed class StartupLogs : ILoggerProvider
+    {
+        private readonly List<(string Category, LogLevel Level, string Text)> messages = [];
+        public IReadOnlyList<(string Category, LogLevel Level, string Text)> Messages { get { lock (messages) return messages.ToArray(); } }
+        public ILogger CreateLogger(string categoryName) => new Logger(this, categoryName);
+        public void Dispose() { }
+
+        private sealed class Logger(StartupLogs logs, string category) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => true;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                lock (logs.messages) logs.messages.Add((category, logLevel, formatter(state, exception)));
+            }
+        }
     }
 
     private static IConfiguration Configuration(Dictionary<string, string?> values) =>
