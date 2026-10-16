@@ -846,6 +846,14 @@ public sealed class MonitorPostgresTests
         Assert.Equal(("idle", "idle"), (row.ManualState, row.State));
         Assert.Null(row.NextRunAtUtc);
         Assert.Null(row.LeaseHolder);
+        // The settlement starts the manual cooldown: an immediately restored account is still cooling down.
+        Assert.Equal(clock.Now + new MonitorOptions().ManualCooldown, row.NextManualAllowedAtUtc);
+        db.ChangeTracker.Clear();
+        (await db.Accounts.SingleAsync()).UpdateSettings("Restored", null, true);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var refused = await Assert.ThrowsAsync<MonitorAdmissionException>(() => coordinator.RequestAsync(id, default));
+        Assert.InRange(refused.RetryAfter, 1, (int)new MonitorOptions().ManualCooldown.TotalSeconds);
     }
 
     [PostgresFact]

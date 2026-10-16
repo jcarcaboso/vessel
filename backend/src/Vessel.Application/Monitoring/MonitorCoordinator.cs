@@ -75,7 +75,9 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                         // lost its source, is settled here instead of staying pending forever: an unclaimed request,
                         // or a running lease whose worker died. A still-valid lease keeps its fence.
                         if (monitorable || row.ManualState == "running" && row.LeaseUntilUtc > now) return false;
-                        row.Release();
+                        // Settled like any superseded run, so the manual cooldown starts; the unmonitorable account
+                        // is then left idle with no scheduled run.
+                        row.Supersede(now, options.ManualCooldown, MonitorOptions.FirstRetry);
                         row.Idle();
                         // Hook: for an owner Check (Trigger "manual") the event layer emits monitor.run-completed
                         // with outcome "superseded" here, keyed by row.RequestId.
