@@ -120,7 +120,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
 
     /// <summary>Outstanding, still verifiable discrepancy work: a (re-)confirmation or an open warning.</summary>
     private IQueryable<PlayDiscrepancy> AwaitingDiscrepancies => db.Set<PlayDiscrepancy>().Where(d => d.UnverifiableAtUtc == null &&
-        (d.State == "candidate" || d.State == "open" || d.PendingFingerprint != null));
+        (d.State == DiscrepancyLifecycle.Candidate || d.State == DiscrepancyLifecycle.Open || d.PendingFingerprint != null));
 
     /// <summary>
     /// Outstanding discrepancy work keeps the account checked, even after its last Play or watch ends: a (re-)confirmation
@@ -129,10 +129,9 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
     /// </summary>
     private async Task<bool> AwaitsDiscrepancyAsync(Guid accountId, CancellationToken ct)
     {
-        static bool Awaits(PlayDiscrepancy d) => d.UnverifiableAtUtc is null && (d.State is "candidate" or "open" || d.PendingFingerprint is not null);
         var local = db.ChangeTracker.Entries<PlayDiscrepancy>()
             .Where(e => e.Entity.AccountId == accountId && e.State != EntityState.Deleted).Select(e => e.Entity).ToArray();
-        if (local.Any(Awaits)) return true;
+        if (local.Any(x => x.HasWork)) return true;
         var tracked = local.Select(x => x.Id).ToArray();
         return await AwaitingDiscrepancies.AnyAsync(d => d.AccountId == accountId && !tracked.Contains(d.Id), ct);
     }

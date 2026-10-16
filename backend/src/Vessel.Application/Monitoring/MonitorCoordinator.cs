@@ -309,6 +309,8 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                     account.RecordOrderHistoryNotice(read.OrderError);
                     await workspace.SaveAsync(ct);
                 }
+                // Refresh performs no lifecycle reconciliation, but still runs discrepancy expiry housekeeping.
+                if (evaluator is not null) await evaluator.ExpireAsync(account, lease.RequestId, lease.Trigger, ct);
                 row.LastObservationAtUtc = read.Sync.Snapshot.ObservedAtUtc;
                 row.LastOrdersObservationAtUtc = read.Orders?.ObservedAtUtc ?? row.LastOrdersObservationAtUtc;
                 row.CompleteRefresh(now, options.ManualCooldown);
