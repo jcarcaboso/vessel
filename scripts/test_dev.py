@@ -111,6 +111,60 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
                                  environment["Vessel__Messaging__RabbitMqUri"])
                 self.assertEqual({}, dev.frontend_environment())
 
+    def test_api_and_worker_modes_require_broker_credentials_before_starting_anything(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text("ConnectionStrings__Vessel=test-connection\n")
+            with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True), \
+                    patch.object(dev.subprocess, "run") as run, patch.object(dev.subprocess, "Popen") as popen:
+                for mode in ["run", "api", "worker", "migrate"]:
+                    with self.subTest(mode=mode), patch.object(dev.sys, "argv", ["dev.py", mode]):
+                        with self.assertRaises(SystemExit) as stopped:
+                            dev.main()
+                        self.assertIn("RABBITMQ_USER", str(stopped.exception))
+                run.assert_not_called()
+                popen.assert_not_called()
+
+    def test_dev_modes_start_postgres_and_rabbitmq_then_the_api_or_monitor_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text(
+                "ConnectionStrings__Vessel=test-connection\nVessel__Auth__Token=test-token\n"
+                "RABBITMQ_USER=local-user\nRABBITMQ_PASSWORD=local-password\n"
+            )
+            started = []
+
+            class Process:
+                pid = 0
+                returncode = 0
+                def poll(self):
+                    return 0
+                def wait(self, timeout=None):
+                    return 0
+
+            def popen(command, **kwargs):
+                started.append((command, kwargs["env"]))
+                return Process()
+            with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True), \
+                    patch.object(dev.sys, "argv", ["dev.py", "api"]), \
+                    patch.object(dev.subprocess, "run") as run, patch.object(dev.subprocess, "Popen", side_effect=popen), \
+                    patch.object(dev.signal, "signal"):
+                with self.assertRaises(SystemExit):
+                    dev.main()
+                run.assert_called_once_with(dev.SERVICES, cwd=root, check=True)
+                self.assertEqual(["dotnet", "run", "--project", "backend/src/Vessel.Api"], started[0][0])
+                self.assertEqual("amqp://local-user:local-password@127.0.0.1:55672/",
+                                 started[0][1]["Vessel__Messaging__RabbitMqUri"])
+            started.clear()
+            with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True), \
+                    patch.object(dev.sys, "argv", ["dev.py", "worker"]), \
+                    patch.object(dev.subprocess, "run"), patch.object(dev.subprocess, "Popen", side_effect=popen), \
+                    patch.object(dev.signal, "signal"):
+                with self.assertRaises(SystemExit):
+                    dev.main()
+                self.assertEqual([["dotnet", "run", "--project", "backend/src/Vessel.Worker", "--no-launch-profile"]],
+                                 [command for command, _ in started])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -56,6 +56,25 @@ def configuration():
     return env
 
 
+# The API and worker cannot start without PostgreSQL and RabbitMQ; both bind loopback only.
+SERVICES = ["docker", "compose", "up", "--detach", "--wait", "postgres", "rabbitmq"]
+
+
+def require_broker(env):
+    if not any(configuration_key(key) == "vessel:messaging:rabbitmquri" and value for key, value in env.items()):
+        raise SystemExit("Set private RABBITMQ_USER and RABBITMQ_PASSWORD in the ignored root .env first.")
+
+
+def start_services():
+    # Compose reads the ignored root .env itself; nothing secret is passed on the command line.
+    if os.environ.get("Vessel_DEV_SKIP_SERVICES") == "1":
+        return
+    try:
+        subprocess.run(SERVICES, cwd=ROOT, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        raise SystemExit("Could not start the local PostgreSQL and RabbitMQ services with Docker Compose.") from None
+
+
 def configuration_key(key):
     # .NET accepts both separators, ignores case and strips these host prefixes.
     key = key.casefold()
@@ -94,7 +113,10 @@ def verification_environment():
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "run"
     env = configuration()
+    if mode in ["migrate", "run", "api", "worker", "lan"]:
+        require_broker(env)
     if mode == "migrate":
+        start_services()
         subprocess.run(["dotnet", "tool", "restore"], cwd=ROOT / "backend", env=env, check=True)
         subprocess.run(
             ["dotnet", "ef", "database", "update", "--project", "src/Vessel.Persistence"],
@@ -119,6 +141,7 @@ def main():
     token = env.get("Vessel__Auth__Token", "")
     if not token or token.startswith("replace-"):
         raise SystemExit("Set a private Vessel__Auth__Token in root .env or process environment first.")
+    start_services()
     processes = []
     def stop(*_):
         raise KeyboardInterrupt
@@ -146,7 +169,7 @@ def main():
                 cwd=ROOT, env=frontend_environment(), start_new_session=True,
             ))
             print(f"Frontend: http://{host}:5180 · API: http://127.0.0.1:5080", flush=True)
-            print("Worker runs separately. Stop with Ctrl+C; PostgreSQL and RabbitMQ remain mounted.", flush=True)
+            print("The worker runs the monitor module. Stop with Ctrl+C; PostgreSQL and RabbitMQ keep running.", flush=True)
         while True:
             for process in processes:
                 if process.poll() is not None:

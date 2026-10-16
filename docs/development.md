@@ -96,6 +96,8 @@ pnpm broker:up
 
 The development service binds **only `127.0.0.1:55432`**. It uses PostgreSQL 18 and a named volume. These database credentials and privileges are for local development, not a production security configuration.
 
+`pnpm dev`, `pnpm dev:api`, `pnpm dev:worker` and `pnpm db:migrate` start both services with `docker compose up --wait` first (set `Vessel_DEV_SKIP_SERVICES=1` to manage them yourself), and stop early when the broker credentials are missing, because the API and worker cannot start without the broker. `pnpm dev` runs the API, the worker (the `monitor` module, `Vessel__Worker__Modules`) and the frontend; `pnpm dev:api` runs the API alone, so the monitor shows as offline.
+
 RabbitMQ binds AMQP to `127.0.0.1:55672` and management to `127.0.0.1:55673`. Its credentials stay in the API/worker environment, never Vite. The development runner constructs the connection from `RABBITMQ_USER` and `RABBITMQ_PASSWORD`; an explicit `Vessel__Messaging__RabbitMqUri` overrides it. The production Compose file does not publish AMQP.
 
 Set the backend connection in your process environment or secret manager:
@@ -110,7 +112,7 @@ Do not commit the populated value. Migrations are deliberate:
 pnpm db:migrate
 ```
 
-Neither API nor worker migrates at startup. `pnpm db:migrate` applies EF migrations, then runs the worker's explicit `provision` command for both Wolverine schemas and durable broker bindings. It requires both local services to be running. The active-Play account/instrument index remains non-unique, with composite owner constraints.
+Neither API nor worker migrates or provisions at startup. `pnpm db:migrate` starts both local services if needed, applies EF migrations, then runs the API binary's explicit `provision-messaging` command: envelope storage and the schema registration of every deployment (`api` and `monitor`), the broker topology of every module and insert-only subscription registrations. A host whose schema was provisioned for other modules refuses to start. The active-Play account/instrument index remains non-unique, with composite owner constraints.
 
 ## API and token
 
