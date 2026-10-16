@@ -467,6 +467,7 @@ The API also projects `stale` when a `live` row's last success is older than twi
 | Does | Imports snapshot, fills and orders; fences older results | Also reconciles links and lifecycle, updates watches and gaps, evaluates discrepancies |
 | Leaves alone | Monitor state, backoff, last success, consecutive failures, gap evidence, due time | — |
 | Refused or abandoned | Answered to the owner (429 or 502); never replayed by the worker; a crashed API's lease is released, not replayed | Pending requests survive restarts |
+| Interrupted by the caller (request abort, shutdown, lost lease renewal) | Lease released with the cooldown; no venue sync failure is recorded (the account keeps its sync status). If the snapshot was already applied, the order-coverage notice records that the order check did not complete. Venue deadlines and `HttpClient` timeouts are not caller cancellation and still record a sync failure | Superseded, not failed |
 
 ### Watches
 

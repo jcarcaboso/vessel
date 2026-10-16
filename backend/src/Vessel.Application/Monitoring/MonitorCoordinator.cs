@@ -275,8 +275,9 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         }
         catch (OperationCanceledException)
         {
-            // An interrupted run (shutdown or a lost lease) is not a failure; the next run repeats the work.
-            if (refresh) await FailAsync(lease, capture, false, "", CancellationToken.None, snapshotApplied);
+            // An interrupted run (request abort, shutdown or a lost lease) is not a failure; the next run repeats the
+            // work. A refresh still releases its lease with the cooldown, but records no venue sync failure.
+            if (refresh) await FailAsync(lease, capture, false, "", CancellationToken.None, snapshotApplied, interrupted: true);
             else await SupersedeAsync(lease, CancellationToken.None);
             throw;
         }
@@ -405,7 +406,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         }, ct), ct);
 
     private Task<bool> FailAsync(MonitorLease lease, MonitorCapture expected, bool credential, string error, CancellationToken ct,
-        bool snapshotApplied = false) =>
+        bool snapshotApplied = false, bool interrupted = false) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>
         {
             var refresh = lease.Trigger == "refresh";
@@ -423,7 +424,8 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 {
                     if (snapshotApplied)
                         account.RecordOrderHistoryNotice("Public account data refreshed; order coverage is unavailable because the order check did not complete.");
-                    else account.RecordSyncFailure();
+                    // Caller cancellation interrupted the read: the venue did not fail, so keep the sync status.
+                    else if (!interrupted) account.RecordSyncFailure();
                 }
                 row.CompleteRefresh(now, options.ManualCooldown);
                 await ApplyVenueBudgetAsync(account.VenueId, row, ct);
