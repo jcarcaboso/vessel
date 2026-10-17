@@ -67,7 +67,7 @@ public sealed class AccountOrderHistoryTests
         Assert.Equal(1, orders.Reads);
         Assert.Equal(h.Account.Id, orders.Account!.Id);
         await using var verify = h.Context();
-        Assert.Equal(orders.Result.Orders.Select(o => o.OrderId).Order(), (await verify.Orders.Select(o => o.OrderId).ToListAsync()).Order());
+        Assert.Equal(orders.Result.Orders.Select(o => o.OrderId).Order(), (await verify.Orders.Select(o => o.ExternalOrderId).ToListAsync()).Order());
         Assert.Empty(await verify.OrderLinks.ToListAsync());
         Assert.Empty(await verify.Plays.ToListAsync());
     }

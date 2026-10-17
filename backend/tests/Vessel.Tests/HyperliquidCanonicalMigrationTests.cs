@@ -124,11 +124,16 @@ public sealed class HyperliquidCanonicalMigrationTests
         using var switchedDrawing = JsonDocument.Parse(plays[risex].Drawings);
         Assert.Equal("retained", switchedDrawing.RootElement.GetProperty("hyperliquid:1000PEPE")[0].GetProperty("id").GetString());
         Assert.True(switchedDrawing.RootElement.TryGetProperty("risex:kPEPE", out _));
-        var fill = await db.Fills.SingleAsync(f => f.AccountId == account && f.SourceFillId == "kPEPE");
+        // Historical columns ("OrderId" before the order identity change), read without today's model.
+        var fill = await db.Database.SqlQueryRaw<MigratedFill>("""
+            SELECT "ContractId", "VenueContractId", "Price", "Quantity" FROM imported_fills WHERE "AccountId" = {0} AND "SourceFillId" = 'kPEPE'
+            """, account).SingleAsync();
         Assert.Equal(("1000PEPE", "kPEPE", 0.0012300m, 123m), (fill.ContractId, fill.VenueContractId, fill.Price, fill.Quantity));
-        var order = await db.Orders.SingleAsync(o => o.AccountId == account && o.OrderId == "kPEPE");
+        var order = await db.Database.SqlQueryRaw<MigratedOrder>("""
+            SELECT "ContractId", "VenueContractId" FROM imported_orders WHERE "AccountId" = {0} AND "OrderId" = 'kPEPE'
+            """, account).SingleAsync();
         Assert.Equal(("1000PEPE", "kPEPE"), (order.ContractId, order.VenueContractId));
-        Assert.Equal("kPEPE", await db.OrderLinks.Select(l => l.OrderId).SingleAsync());
+        Assert.Equal("kPEPE", await db.Database.SqlQueryRaw<string>("""SELECT "OrderId" AS "Value" FROM play_order_links""").SingleAsync());
         Assert.Equal("1000PEPE", await db.Database.SqlQueryRaw<string>(
             """SELECT "ContractId" AS "Value" FROM account_positions WHERE "VenueContractId" = 'kPEPE'""").SingleAsync());
         Assert.Equal(2, await db.Database.SqlQueryRaw<int>(
@@ -136,6 +141,8 @@ public sealed class HyperliquidCanonicalMigrationTests
     }
 
     private sealed record MigratedPlay(Guid Id, string? ContractId, string Plan, string Drawings);
+    private sealed record MigratedFill(string ContractId, string? VenueContractId, decimal Price, decimal Quantity);
+    private sealed record MigratedOrder(string ContractId, string? VenueContractId);
 
     [PostgresFact]
     public async Task Canonical_migration_rejects_drawing_collisions_without_overwriting_or_partial_rewrites()

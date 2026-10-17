@@ -82,7 +82,7 @@ public static class ManualLedger
                     projection.Add(new(entry ? OrderLinkRole.Entry : OrderLinkRole.Exit, new ImportedFill
                     {
                         Id = row.Id, OwnerId = play.OwnerId, AccountId = play.AccountId, ContractId = play.ContractId!,
-                        SourceFillId = row.Id.ToString(), OrderId = $"manual:{row.Id}", Direction = row.Source,
+                        SourceFillId = row.Id.ToString(), ExternalOrderId = $"manual:{row.Id}", Direction = row.Source,
                         Side = row.Side, PositionEffect = entry ? ExecutionFacts.Open : ExecutionFacts.Close,
                         Quantity = quantity, Price = price, Fee = fee, FeeToken = row.FeeCurrency ?? "",
                         FeeBasis = known ? ExecutionFacts.FeeReported : "unknown", PnlBasis = ExecutionFacts.PnlGross,

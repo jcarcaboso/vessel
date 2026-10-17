@@ -118,7 +118,7 @@ public sealed class MonitorDiscrepancyRound4PostgresTests
             PlayDocuments.Serialize(plan), f.Clock.Now.AddHours(-1));
         play.MarkPlanned(f.Clock.Now.AddMinutes(-30));
         f.Store.Plays.Add(play);
-        f.Store.Links.Add(new(play, "late-entry", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-25)));
+        f.Store.Links.Add(f.Link(play, "late-entry", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-25)));
         play.Cancel(CancelReason.ChangedMind, null, f.Clock.Now.AddMinutes(-10));
         await database.Seed(f);
         f.VenueOrders.Add(new("late-entry", "BTC", "buy", "Limit", 100, null, false, false, 1, 0, f.Clock.Now.AddMinutes(-25),

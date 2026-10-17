@@ -259,7 +259,7 @@ All tables have `OwnerId` and composite owner foreign keys. Entity mappings live
 | `account_credentials` | `AccountCredential` | Sealed token (key ID, nonce, ciphertext, tag), scope and expiry. Cascades with the account. |
 | `account_snapshots`, `account_positions`, `account_stablecoins` | `AccountSnapshot`, … | Latest observation only. Perpetual state and wallet have independent observation times. |
 | `imported_fills` | `ImportedFill` | Normalized execution facts. Unique `(OwnerId, AccountId, ContractId, SourceFillId)`. Check constraints mirror `ExecutionFacts`. |
-| `imported_orders` | `ImportedOrder` | Latest known state of each venue order. Unique per account and order ID. |
+| `imported_orders` | `ImportedOrder` | Latest known state of each venue order. Unique per owner, account, canonical contract and `ExternalOrderId`; Play order links reference its internal `Id` (`ImportedOrderId`) through a composite owner/account foreign key, and fills belong to it by the same external key (see [order identity](order-identity.md)). |
 | `plays` | `Play` | Plan and drawings as `jsonb`, `Direction` kept in step with the plan for lists, status, origin (planned or retrospective), structured review, `Version`. |
 | `play_plan_revisions`, `play_status_changes`, `play_review_revisions` | | Append-only history. |
 | `play_order_links` | `PlayOrderLink` | Order ↔ plan level, state Linked/Suggested/Dismissed. A partial unique index allows one Linked row per order. |

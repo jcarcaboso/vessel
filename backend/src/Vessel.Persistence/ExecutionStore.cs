@@ -26,36 +26,40 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
     }
     // Orders are read-only for every consumer; UpsertOrdersAsync loads its own tracked rows.
     public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct) =>
-        db.Orders.Where(o => o.AccountId == accountId).OrderBy(o => o.PlacedAtUtc).ThenBy(o => o.OrderId).AsNoTracking().ToListAsync(ct);
+        db.Orders.Where(o => o.AccountId == accountId).OrderBy(o => o.PlacedAtUtc).ThenBy(o => o.ExternalOrderId).AsNoTracking().ToListAsync(ct);
 
-    public async Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<string> orderIds,
+    public async Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<Guid> orderIds,
         IReadOnlyDictionary<string, DateTimeOffset> placedSince, CancellationToken ct)
     {
-        var ids = orderIds.Distinct(StringComparer.Ordinal).ToArray();
+        var ids = orderIds.Distinct().ToArray();
         var contracts = placedSince.Keys.ToArray();
         if (ids.Length == 0 && contracts.Length == 0) return [];
         var query = db.Orders.Where(o => o.AccountId == accountId);
-        if (contracts.Length == 0) query = query.Where(o => ids.Contains(o.OrderId));
+        if (contracts.Length == 0) query = query.Where(o => ids.Contains(o.Id));
         else
         {
             // SQL narrows to the contracts from their earliest time; the shared rule below applies each contract's own time.
             var from = placedSince.Values.Min().ToUniversalTime();
-            query = query.Where(o => ids.Contains(o.OrderId) || contracts.Contains(o.ContractId) && o.PlacedAtUtc >= from);
+            query = query.Where(o => ids.Contains(o.Id) || contracts.Contains(o.ContractId) && o.PlacedAtUtc >= from);
         }
-        var rows = await query.OrderBy(o => o.PlacedAtUtc).ThenBy(o => o.OrderId).AsNoTracking().ToListAsync(ct);
+        var rows = await query.OrderBy(o => o.PlacedAtUtc).ThenBy(o => o.ExternalOrderId).AsNoTracking().ToListAsync(ct);
         return rows.Where(o => IPlayExecutionStore.IncludesOrder(o, orderIds, placedSince)).ToList();
     }
+
+    public Task<ImportedOrder?> OrderAsync(Guid accountId, string contractId, string externalOrderId, CancellationToken ct) =>
+        db.Orders.Where(o => o.AccountId == accountId && o.ContractId == contractId && o.ExternalOrderId == externalOrderId)
+            .AsNoTracking().SingleOrDefaultAsync(ct);
 
     public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, CancellationToken ct) =>
         db.OrderLinks.Where(l => l.AccountId == accountId).OrderBy(l => l.CreatedAtUtc).ThenBy(l => l.Id).ToListAsync(ct);
 
-    public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, IReadOnlyCollection<string> orderIds, IReadOnlyCollection<Guid> playIds,
+    public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, IReadOnlyCollection<Guid> orderIds, IReadOnlyCollection<Guid> playIds,
         CancellationToken ct)
     {
-        var ids = orderIds.Distinct(StringComparer.Ordinal).ToArray();
+        var ids = orderIds.Distinct().ToArray();
         var playList = playIds.Distinct().ToArray();
         if (ids.Length == 0 && playList.Length == 0) return Task.FromResult(new List<PlayOrderLink>());
-        return db.OrderLinks.Where(l => l.AccountId == accountId && (ids.Contains(l.OrderId) || playList.Contains(l.PlayId)))
+        return db.OrderLinks.Where(l => l.AccountId == accountId && (ids.Contains(l.ImportedOrderId) || playList.Contains(l.PlayId)))
             .OrderBy(l => l.CreatedAtUtc).ThenBy(l => l.Id).ToListAsync(ct);
     }
 
@@ -66,31 +70,54 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
     public Task<PlayOrderLink?> LinkAsync(Guid accountId, Guid playId, Guid linkId, CancellationToken ct) =>
         db.OrderLinks.SingleOrDefaultAsync(l => l.Id == linkId && l.AccountId == accountId && l.PlayId == playId, ct);
 
-    public async Task<HashSet<string>> LinkedOrderIdsAsync(Guid accountId, CancellationToken ct) =>
-        (await db.OrderLinks.Where(l => l.AccountId == accountId && l.State == OrderLinkState.Linked).Select(l => l.OrderId)
-            .Distinct().ToListAsync(ct)).ToHashSet(StringComparer.Ordinal);
-    public Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct) =>
-        db.Fills.Where(f => f.AccountId == accountId && orderIds.Contains(f.OrderId)).OrderBy(f => f.OccurredAtUtc).ThenBy(f => f.Id)
-            .AsNoTracking().ToListAsync(ct);
+    public async Task<HashSet<Guid>> LinkedOrderIdsAsync(Guid accountId, CancellationToken ct) =>
+        (await db.OrderLinks.Where(l => l.AccountId == accountId && l.State == OrderLinkState.Linked).Select(l => l.ImportedOrderId)
+            .Distinct().ToListAsync(ct)).ToHashSet();
+    public async Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<OrderKey> orders, CancellationToken ct)
+    {
+        var keys = orders.Where(k => k.AccountId == accountId).ToHashSet();
+        if (keys.Count == 0) return [];
+        // SQL narrows by external ID; the shared OrderKey rule below keeps only each key's own contract.
+        var external = keys.Select(k => k.ExternalOrderId).Distinct(StringComparer.Ordinal).ToArray();
+        var contracts = keys.Select(k => k.ContractId).Distinct(StringComparer.Ordinal).ToArray();
+        var rows = await db.Fills.Where(f => f.AccountId == accountId && external.Contains(f.ExternalOrderId) && contracts.Contains(f.ContractId))
+            .OrderBy(f => f.OccurredAtUtc).ThenBy(f => f.Id).AsNoTracking().ToListAsync(ct);
+        return rows.Where(f => keys.Contains(OrderKey.Of(f))).ToList();
+    }
     public void Add(PlayOrderLink link) { unitOfWork.RequireActive(); db.OrderLinks.Add(link); }
     public void Add(PlayStatusChange change) { unitOfWork.RequireActive(); db.StatusChanges.Add(change); }
 
     public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset observedAt, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
-        var ids = orders.Select(o => o.OrderId).Distinct().ToList();
-        var known = await db.Orders.Where(o => o.AccountId == account.Id && ids.Contains(o.OrderId)).ToDictionaryAsync(o => o.OrderId, ct);
+        // External identity is (contract, venue order ID): the same venue ID on another contract is another order.
+        var ids = orders.Select(o => o.OrderId).Distinct(StringComparer.Ordinal).ToList();
+        var known = (await db.Orders.Where(o => o.AccountId == account.Id && ids.Contains(o.ExternalOrderId)).ToListAsync(ct))
+            .ToDictionary(o => (o.ContractId, o.ExternalOrderId));
+        // A known order never moves to another native market. Checked before any change, so a refusal saves nothing.
+        foreach (var group in orders.GroupBy(o => (o.ContractId, o.OrderId)))
+        {
+            var natives = group.Select(o => o.VenueContractId)
+                .Append(known.TryGetValue(group.Key, out var retained) ? retained.VenueContractId : null)
+                .OfType<string>().Distinct(StringComparer.Ordinal).Count();
+            if (natives > 1) throw new VenueReadException("The venue reported a known order on a different market. No order changes were saved.");
+        }
         foreach (var order in orders)
         {
-            if (!known.TryGetValue(order.OrderId, out var row))
+            if (!known.TryGetValue((order.ContractId, order.OrderId), out var row))
             {
-                row = new ImportedOrder { Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, OrderId = order.OrderId };
+                row = new ImportedOrder
+                {
+                    Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id,
+                    ContractId = order.ContractId, ExternalOrderId = order.OrderId
+                };
                 db.Orders.Add(row);
-                known[order.OrderId] = row;
+                known[(order.ContractId, order.OrderId)] = row;
             }
             // An older status never replaces a newer one.
             else if (order.StatusAtUtc < row.StatusAtUtc) continue;
-            row.ContractId = order.ContractId;
-            row.VenueContractId = order.VenueContractId;
+            // ContractId is identity and is never rewritten.
+            // An observation without a native ID keeps the established one, so a later mismatch is still refused.
+            row.VenueContractId = order.VenueContractId ?? row.VenueContractId;
             row.Side = order.Side;
             row.OrderType = order.OrderType;
             row.LimitPrice = order.LimitPrice;

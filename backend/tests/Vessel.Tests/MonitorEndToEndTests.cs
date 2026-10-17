@@ -431,11 +431,18 @@ public sealed class MonitorEndToEndTests
             var btc = Planned(account, "BTC");
             var eth = Planned(account, "ETH");
             eth.MarkOpen("Pre-watch position", Clock.GetUtcNow().AddDays(-1));
-            db.AddRange(account, btc, eth,
-                new PlayOrderLink(eth, "eth-entry", OrderLinkRole.Entry, "entry-1", null,
-                    OrderLinkState.Linked, OrderLinkSource.Owner, Clock.GetUtcNow().AddDays(-1)),
-                new PlayOrderLink(eth, "eth-stop", OrderLinkRole.Stop, "entry-1", "stop-1",
-                    OrderLinkState.Linked, OrderLinkSource.Owner, Clock.GetUtcNow().AddDays(-1)));
+            // The pre-watch orders were retained by an earlier import, as links require; the venue reads keep them current.
+            var old = Clock.GetUtcNow().AddDays(-1);
+            var ethEntry = TestOrders.For(eth, "eth-entry");
+            ethEntry.LimitPrice = 200; ethEntry.PlacedAtUtc = ethEntry.StatusAtUtc = ethEntry.ObservedAtUtc = old;
+            var ethStop = TestOrders.For(eth, "eth-stop", "sell", "open");
+            ethStop.OrderType = "Stop Market"; ethStop.LimitPrice = 190; ethStop.TriggerPrice = 190; ethStop.ReduceOnly = true;
+            ethStop.PlacedAtUtc = ethStop.StatusAtUtc = ethStop.ObservedAtUtc = old;
+            db.AddRange(account, btc, eth, ethEntry, ethStop,
+                new PlayOrderLink(eth, ethEntry, OrderLinkRole.Entry, "entry-1", null,
+                    OrderLinkState.Linked, OrderLinkSource.Owner, old),
+                new PlayOrderLink(eth, ethStop, OrderLinkRole.Stop, "entry-1", "stop-1",
+                    OrderLinkState.Linked, OrderLinkSource.Owner, old));
             await db.SaveChangesAsync();
             AccountId = account.Id; BtcPlay = btc.Id; EthPlay = eth.Id;
         }

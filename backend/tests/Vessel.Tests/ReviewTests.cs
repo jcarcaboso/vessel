@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Common;
 using Vessel.Application.Plays;
@@ -55,7 +56,7 @@ internal sealed class ReviewFixture : IReviewStore
         ImportedFill Fill(bool opening) => new()
         {
             Id = Guid.NewGuid(), OwnerId = Owner, AccountId = account.Id, ContractId = instrument,
-            SourceFillId = Guid.NewGuid().ToString(), OrderId = Guid.NewGuid().ToString(), TransactionHash = "",
+            SourceFillId = Guid.NewGuid().ToString(), ExternalOrderId = Guid.NewGuid().ToString(), TransactionHash = "",
             Side = opening ? ExecutionFacts.Buy : ExecutionFacts.Sell, Direction = "",
             PositionEffect = opening ? ExecutionFacts.Open : ExecutionFacts.Close,
             Quantity = 1, Price = opening ? entryPrice : entryPrice + net,
@@ -303,7 +304,10 @@ public sealed class ReviewTests
                 foreach (var linked in facts.Fills)
                 {
                     db.Fills.Add(linked.Fill);
-                    db.OrderLinks.Add(new PlayOrderLink(facts.Play, linked.Fill.OrderId, linked.Role,
+                    // Links reference retained orders; each order here executed exactly its one fill.
+                    var order = TestOrders.For(facts.Play, linked.Fill.ExternalOrderId, linked.Fill.Side, size: linked.Fill.Quantity);
+                    db.Orders.Add(order);
+                    db.OrderLinks.Add(new PlayOrderLink(facts.Play, order, linked.Role,
                         linked.Role == OrderLinkRole.Entry ? "e" : null, null, OrderLinkState.Linked, OrderLinkSource.Owner, ReviewClock.Now));
                 }
             }
@@ -314,7 +318,7 @@ public sealed class ReviewTests
             db.Fills.Add(new ImportedFill
             {
                 Id = Guid.NewGuid(), OwnerId = f.Owner, AccountId = owned.Play.AccountId, ContractId = "ETH",
-                SourceFillId = "unlinked", OrderId = "unlinked", Side = ExecutionFacts.Buy, Direction = "",
+                SourceFillId = "unlinked", ExternalOrderId = "unlinked", Side = ExecutionFacts.Buy, Direction = "",
                 Quantity = 1, Price = 100, FeeToken = "USDC", TransactionHash = "", OccurredAtUtc = ReviewClock.Now,
             });
             await db.SaveChangesAsync();
@@ -338,12 +342,12 @@ public sealed class ReviewTests
             ImportedOrder Order(string id, decimal size) => new()
             {
                 Id = Guid.NewGuid(), OwnerId = f.Owner, AccountId = owned.Play.AccountId, ContractId = "BTC",
-                OrderId = id, Side = ExecutionFacts.Buy, OrderType = "Limit", LimitPrice = 100,
+                ExternalOrderId = id, Side = ExecutionFacts.Buy, OrderType = "Limit", LimitPrice = 100,
                 OriginalSize = size, RemainingSize = 0, PlacedAtUtc = ReviewClock.Now.AddDays(-2),
                 Status = "filled", VenueStatus = "filled", StatusAtUtc = ReviewClock.Now, ObservedAtUtc = ReviewClock.Now,
             };
-            var known = Order(owned.Fills[0].Fill.OrderId, 2);
-            db.Orders.Add(known);
+            var known = await db.Orders.SingleAsync(o => o.AccountId == owned.Play.AccountId && o.ExternalOrderId == owned.Fills[0].Fill.ExternalOrderId);
+            known.OriginalSize = 2;
             await db.SaveChangesAsync();
             var service = new ReviewService(new ReviewStore(db, new SizingStore(db, TestUnitOfWork.For(db))), new ReviewClock());
             var partial = await service.GetAsync(new(), default);
@@ -351,7 +355,7 @@ public sealed class ReviewTests
             known.OriginalSize = 1;
             var missing = Order("executed-with-no-retained-fills", 1);
             db.Orders.Add(missing);
-            db.OrderLinks.Add(new PlayOrderLink(owned.Play, missing.OrderId, OrderLinkRole.Entry, "e", null,
+            db.OrderLinks.Add(new PlayOrderLink(owned.Play, missing, OrderLinkRole.Entry, "e", null,
                 OrderLinkState.Linked, OrderLinkSource.Owner, ReviewClock.Now));
             await db.SaveChangesAsync();
             var absent = await service.GetAsync(new(), default);

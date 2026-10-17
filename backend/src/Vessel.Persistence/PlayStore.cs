@@ -101,8 +101,11 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
         return ids.ToHashSet(StringComparer.Ordinal);
     }
     public void Add(Play play) { unitOfWork.RequireActive(); db.Plays.Add(play); }
-    public Task<List<PlayOrderLink>> LinkedPlanReferencesAsync(Guid playId, CancellationToken ct) =>
-        db.OrderLinks.Where(l => l.PlayId == playId && l.State == OrderLinkState.Linked).AsNoTracking().ToListAsync(ct);
+    public async Task<List<LinkedPlanReference>> LinkedPlanReferencesAsync(Guid playId, CancellationToken ct) =>
+        (await db.OrderLinks.Where(l => l.PlayId == playId && l.State == OrderLinkState.Linked)
+            .Join(db.Orders, l => new { l.OwnerId, l.AccountId, Id = l.ImportedOrderId }, o => new { o.OwnerId, o.AccountId, o.Id },
+                (l, o) => new { Link = l, o.ExternalOrderId })
+            .AsNoTracking().ToListAsync(ct)).Select(x => new LinkedPlanReference(x.Link, x.ExternalOrderId)).ToList();
     public void Add(PlayPlanRevision revision) { unitOfWork.RequireActive(); db.PlanRevisions.Add(revision); }
     public void Add(PlayStatusChange change) { unitOfWork.RequireActive(); db.StatusChanges.Add(change); }
     public void Add(PlayReviewRevision revision) { unitOfWork.RequireActive(); db.ReviewRevisions.Add(revision); }

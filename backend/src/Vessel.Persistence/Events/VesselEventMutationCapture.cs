@@ -10,7 +10,10 @@ public sealed class VesselEventMutationCapture : SaveChangesInterceptor
 {
     internal List<PlayStatusChange> StatusChanges { get; } = [];
     internal List<LinkMutation> Links { get; } = [];
-    internal HashSet<(Guid AccountId, string OrderId)> FillOrders { get; } = [];
+    /// <summary>Orders with added fills, by external identity: a fill carries no order reference.</summary>
+    internal HashSet<(Guid AccountId, string ContractId, string ExternalOrderId)> FillOrders { get; } = [];
+    /// <summary>Orders of changed links, by internal ID; resolved to their external identity at capture.</summary>
+    internal HashSet<(Guid AccountId, Guid ImportedOrderId)> LinkOrders { get; } = [];
 
     public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
         InterceptionResult<int> result, CancellationToken cancellationToken = default)
@@ -47,25 +50,25 @@ public sealed class VesselEventMutationCapture : SaveChangesInterceptor
             if (entry.State == EntityState.Modified && previous == current &&
                 entry.OriginalValues.GetValue<OrderLinkSource>(nameof(link.Source)) == link.Source) continue;
             VesselEventSql.RequireTransaction(db);
-            Links.Add(new(Guid.CreateVersion7(), link.Id, link.AccountId, link.PlayId, link.OrderId, link.Role,
+            Links.Add(new(Guid.CreateVersion7(), link.Id, link.AccountId, link.PlayId, link.ImportedOrderId, link.Role,
                 link.EntryId, link.LevelId, previous, current, link.Source, link.UpdatedAtUtc));
-            FillOrders.Add((link.AccountId, link.OrderId));
+            LinkOrders.Add((link.AccountId, link.ImportedOrderId));
         }
         foreach (var entry in db.ChangeTracker.Entries<ImportedFill>().Where(e => e.State == EntityState.Added))
         {
             VesselEventSql.RequireTransaction(db);
             if (entry.Entity.OwnerId != db.CurrentOwnerId) throw new UnauthorizedAccessException();
-            FillOrders.Add((entry.Entity.AccountId, entry.Entity.OrderId));
+            FillOrders.Add((entry.Entity.AccountId, entry.Entity.ContractId, entry.Entity.ExternalOrderId));
         }
         // v1 observes venue fills. Manual P1 facts/corrections emit their resulting status changes only.
     }
 
     internal void Clear()
     {
-        StatusChanges.Clear(); Links.Clear(); FillOrders.Clear();
+        StatusChanges.Clear(); Links.Clear(); FillOrders.Clear(); LinkOrders.Clear();
     }
 
-    internal sealed record LinkMutation(Guid ChangeId, Guid LinkId, Guid AccountId, Guid PlayId, string OrderId,
+    internal sealed record LinkMutation(Guid ChangeId, Guid LinkId, Guid AccountId, Guid PlayId, Guid ImportedOrderId,
         OrderLinkRole Role, string? EntryId, string? LevelId, string? Previous, string Current,
         OrderLinkSource Source, DateTimeOffset OccurredAt);
 }

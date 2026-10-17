@@ -30,13 +30,13 @@ public sealed class MonitorDiscrepancyPostgresTests
         f.Fill("retro-out-fill", "retro-out", 1, f.Clock.Now.AddMinutes(-2), "sell", ExecutionFacts.Close);
         foreach (var orderId in new[] { "retro-in", "retro-out" })
             f.Store.Orders.Add(new ImportedOrder { Id = Guid.NewGuid(), OwnerId = f.Account.OwnerId,
-                AccountId = f.Account.Id, ContractId = "BTC", OrderId = orderId,
+                AccountId = f.Account.Id, ContractId = "BTC", ExternalOrderId = orderId,
                 Side = orderId == "retro-in" ? "buy" : "sell", OrderType = "Limit", LimitPrice = 100,
                 OriginalSize = 1, RemainingSize = 0, Status = "filled", VenueStatus = "filled",
                 PlacedAtUtc = f.Clock.Now.AddMinutes(-5), StatusAtUtc = f.Clock.Now.AddMinutes(-2),
                 ObservedAtUtc = f.Clock.Now });
-        f.Store.Links.Add(new(retro, "retro-in", OrderLinkRole.Entry, "retrospective", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now));
-        f.Store.Links.Add(new(retro, "retro-out", OrderLinkRole.Exit, null, null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now));
+        f.Store.Links.Add(f.Link(retro, "retro-in", OrderLinkRole.Entry, "retrospective", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now));
+        f.Store.Links.Add(f.Link(retro, "retro-out", OrderLinkRole.Exit, null, null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now));
         await database.Seed(f);
         await using (var first = database.Scope(f)) await first.Evaluate(f.Observation());
         f.Advance(60);
@@ -62,7 +62,7 @@ public sealed class MonitorDiscrepancyPostgresTests
         var f = new DiscrepancyFixture();
         var retro = AddRetrospectivePlay(f);
         f.Fill("extra", "extra-order", 1, f.Clock.Now.AddMinutes(-2));
-        f.Store.Links.Add(new(retro, "extra-order", OrderLinkRole.Entry, "retrospective", null,
+        f.Store.Links.Add(f.Link(retro, "extra-order", OrderLinkRole.Entry, "retrospective", null,
             OrderLinkState.Suggested, OrderLinkSource.Automatic, f.Clock.Now));
         await database.Seed(f);
         await using (var first = database.Scope(f)) await first.Evaluate(f.Observation());
@@ -74,7 +74,8 @@ public sealed class MonitorDiscrepancyPostgresTests
             await second.Work.ExecuteAsync(async () =>
             {
                 await second.Store.LockAsync(f.Account.Id, default);
-                (await second.Db.OrderLinks.SingleAsync(x => x.OrderId == "extra-order")).Dismiss(f.Clock.Now);
+                var extra = await second.Db.Orders.SingleAsync(x => x.ExternalOrderId == "extra-order");
+                (await second.Db.OrderLinks.SingleAsync(x => x.ImportedOrderId == extra.Id)).Dismiss(f.Clock.Now);
                 return true;
             }, default);
         }
@@ -101,10 +102,14 @@ public sealed class MonitorDiscrepancyPostgresTests
             await second.Evaluate(f.Observation());
             Assert.Contains(await second.Service.ReadAsync(f.Account.Id, null, default), x => x.Kind == "fill.unlinked" && x.State == "open");
             // Seed historical assignments directly, as in Seed, without generating 10,000 fixture events.
-            second.Db.OrderLinks.AddRange(Enumerable.Range(0, 10000).Select(i => new PlayOrderLink(
-                retro, "historical-" + i, OrderLinkRole.Entry, "retrospective", null,
+            var historical = Enumerable.Range(0, 10000).Select(i => TestOrders.For(retro, "historical-" + i)).ToList();
+            second.Db.Orders.AddRange(historical);
+            second.Db.OrderLinks.AddRange(historical.Select(order => new PlayOrderLink(
+                retro, order, OrderLinkRole.Entry, "retrospective", null,
                 OrderLinkState.Suggested, OrderLinkSource.Automatic, f.Clock.Now)));
-            second.Db.OrderLinks.Add(new(retro, "extra-order", OrderLinkRole.Entry, "retrospective", null,
+            var extra = TestOrders.For(retro, "extra-order");
+            second.Db.Orders.Add(extra);
+            second.Db.OrderLinks.Add(new(retro, extra, OrderLinkRole.Entry, "retrospective", null,
                 OrderLinkState.Suggested, OrderLinkSource.Automatic, f.Clock.Now));
             await second.Db.SaveChangesAsync();
         }
@@ -118,8 +123,9 @@ public sealed class MonitorDiscrepancyPostgresTests
                 var facts = await third.Store.LoadAsync(f.Account.Id, f.Clock.Now, [], default);
                 Assert.True(facts.Complete);
                 Assert.True(facts.AssignmentLinksComplete);
-                Assert.Contains(facts.AssignmentLinks!, x => x.OrderId == "extra-order");
-                Assert.DoesNotContain(facts.AssignmentLinks!, x => x.OrderId.StartsWith("historical-"));
+                var external = facts.Orders.ToDictionary(x => x.Id, x => x.ExternalOrderId);
+                Assert.Contains(facts.AssignmentLinks!, x => external[x.ImportedOrderId] == "extra-order");
+                Assert.DoesNotContain(facts.AssignmentLinks!, x => !external.ContainsKey(x.ImportedOrderId) || external[x.ImportedOrderId].StartsWith("historical-"));
                 return true;
             }, default);
             Assert.False((await third.Evaluate(f.Observation())).Incomplete);
@@ -145,16 +151,29 @@ public sealed class MonitorDiscrepancyPostgresTests
     public async Task Step_four_migration_upgrades_layer_three_without_changing_imported_facts()
     {
         await using var database = await DiscrepancyDatabase.Create("20261016110200_MessagingDeployments");
-        var f = new DiscrepancyFixture(); await database.Seed(f);
+        var f = new DiscrepancyFixture();
+        var fill = f.Store.Fills[0];
         await using var scope = database.Scope(f);
+        scope.Db.Add(f.Account); scope.Db.Add(f.Play);
+        await scope.Db.SaveChangesAsync();
+        // Imported facts in this historical schema's columns ("OrderId" before the order identity change).
+        await scope.Db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO imported_fills ("Id", "OwnerId", "AccountId", "ContractId", "SourceFillId", "Side", "Direction", "PositionEffect",
+                "Price", "Quantity", "Fee", "FeeToken", "FeeBasis", "ClosedPnlUsd", "PnlBasis", "OccurredAtUtc", "OrderId", "TransactionHash")
+            VALUES ({fill.Id}, {fill.OwnerId}, {fill.AccountId}, {fill.ContractId}, {fill.SourceFillId}, {fill.Side}, {fill.Direction},
+                {fill.PositionEffect}, {fill.Price}, {fill.Quantity}, 0, 'USDC', 'reported', 0, 'gross', {fill.OccurredAtUtc}, {fill.ExternalOrderId}, 'synthetic')
+            """);
         Assert.Equal("20261016110300_PlayDiscrepancies", (await scope.Db.Database.GetPendingMigrationsAsync()).First());
         // Step four: the discrepancy table and its unverifiable outcome column.
         await scope.Db.GetService<IMigrator>().MigrateAsync("20261016110400_PlayDiscrepancyUnverifiable");
         Assert.Empty(await scope.Db.Set<PlayDiscrepancy>().ToListAsync());
-        Assert.Equal(f.Store.Fills[0].Quantity, (await scope.Db.Fills.SingleAsync()).Quantity);
+        Assert.Equal(fill.Quantity, await scope.Db.Database.SqlQueryRaw<decimal>("""SELECT "Quantity" AS "Value" FROM imported_fills""").SingleAsync());
         Assert.Equal(f.Play.Status, (await scope.Db.Plays.SingleAsync()).Status);
-        await scope.Db.Database.MigrateAsync();
-        Assert.Empty(await scope.Db.Database.GetPendingMigrationsAsync());
+        await scope.Db.GetService<IMigrator>().MigrateAsync("20261016174509_FundingPayments");
+        // The order identity change has no backfill: it refuses a database that still holds imported facts.
+        Assert.Equal(["20261017091636_OrderIdentity"], await scope.Db.Database.GetPendingMigrationsAsync());
+        var refused = await Assert.ThrowsAsync<PostgresException>(() => scope.Db.Database.MigrateAsync());
+        Assert.Equal("P0001", refused.SqlState);
     }
 
     [PostgresFact]

@@ -289,10 +289,11 @@ public sealed partial class MonitorPostgresTests
         var play = new Play(Guid.NewGuid(), await db.Accounts.SingleAsync(),
             new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue, "{}", now.AddMinutes(-10));
         play.MarkPlanned(now.AddMinutes(-9));
-        var link = new PlayOrderLink(play, "stop-1", OrderLinkRole.Stop, "entry-1", "stop-1",
+        var order = TestOrders.For(play, "stop-1", "sell", "open");
+        var link = new PlayOrderLink(play, order, OrderLinkRole.Stop, "entry-1", "stop-1",
             OrderLinkState.Linked, OrderLinkSource.Owner, now.AddMinutes(-8));
         play.Cancel(CancelReason.ChangedMind, null, now);
-        db.AddRange(play, link);
+        db.AddRange(play, order, link);
         await db.SaveChangesAsync();
         var work = TestUnitOfWork.For(db); var store = new MonitorStore(db, work);
         Assert.True(await store.EligibleAsync(id, DateTimeOffset.UtcNow, default));
@@ -799,10 +800,11 @@ public sealed partial class MonitorPostgresTests
         var play = new Play(Guid.NewGuid(), await db.Accounts.SingleAsync(),
             new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue, "{}", now.AddMinutes(-10));
         play.MarkPlanned(now.AddMinutes(-9));
-        var link = new PlayOrderLink(play, "entry-order", OrderLinkRole.Entry, "entry-1", null,
+        var order = TestOrders.For(play, "entry-order", "buy", "open");
+        var link = new PlayOrderLink(play, order, OrderLinkRole.Entry, "entry-1", null,
             OrderLinkState.Linked, OrderLinkSource.Owner, now.AddMinutes(-8));
         play.Cancel(CancelReason.ChangedMind, null, now);
-        db.AddRange(play, link);
+        db.AddRange(play, order, link);
         await db.SaveChangesAsync();
         var work = TestUnitOfWork.For(db); var store = new MonitorStore(db, work);
         // The cancelled Play has no active Plays beside it: only the resting entry keeps the account monitored.
@@ -1022,10 +1024,11 @@ public sealed partial class MonitorPostgresTests
         var play = new Play(Guid.NewGuid(), await db.Accounts.SingleAsync(),
             new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue, "{}", now.AddMinutes(-10));
         play.MarkPlanned(now.AddMinutes(-9));
-        var link = new PlayOrderLink(play, "stop-1", OrderLinkRole.Stop, "entry-1", "stop-1",
+        var order = TestOrders.For(play, "stop-1", "sell", "open");
+        var link = new PlayOrderLink(play, order, OrderLinkRole.Stop, "entry-1", "stop-1",
             OrderLinkState.Linked, OrderLinkSource.Owner, now.AddMinutes(-8));
         play.Cancel(CancelReason.ChangedMind, null, now);
-        db.AddRange(play, link);
+        db.AddRange(play, order, link);
         await db.SaveChangesAsync();
         return (play, link);
     }

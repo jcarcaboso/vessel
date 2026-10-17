@@ -423,7 +423,7 @@ public sealed partial class EventSubscriptionTests
             {
                 Id = Guid.NewGuid(), OwnerId = runtime.Owner, AccountId = account.Id, ContractId = "BTC", SourceFillId = "f1",
                 Side = "buy", Direction = "Open Long", PositionEffect = "open", Price = 100, Quantity = 0.5m,
-                Fee = 0, FeeToken = "USDC", ClosedPnlUsd = 0, OccurredAtUtc = DateTimeOffset.UtcNow, OrderId = "o1", TransactionHash = "synthetic"
+                Fee = 0, FeeToken = "USDC", ClosedPnlUsd = 0, OccurredAtUtc = DateTimeOffset.UtcNow, ExternalOrderId = "o1", TransactionHash = "synthetic"
             });
             await seed.SaveChangesAsync();
         }

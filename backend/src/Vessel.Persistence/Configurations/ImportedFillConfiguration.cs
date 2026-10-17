@@ -21,6 +21,8 @@ internal sealed class ImportedFillConfiguration : IEntityTypeConfiguration<Impor
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => new { x.OwnerId, x.AccountId, x.ContractId, x.SourceFillId }).IsUnique();
         builder.HasIndex(x => new { x.OwnerId, x.OccurredAtUtc });
+        // A fill belongs to the order with the same account, contract and external order ID (LinkedFills, OrderKey).
+        builder.HasIndex(x => new { x.OwnerId, x.AccountId, x.ContractId, x.ExternalOrderId });
         builder.Property(x => x.ContractId).HasMaxLength(128);
         builder.Property(x => x.SourceFillId).HasMaxLength(128);
         builder.Property(x => x.VenueContractId).HasMaxLength(128);
@@ -30,7 +32,7 @@ internal sealed class ImportedFillConfiguration : IEntityTypeConfiguration<Impor
         builder.Property(x => x.FeeBasis).HasMaxLength(32);
         builder.Property(x => x.PnlBasis).HasMaxLength(16);
         builder.Property(x => x.FeeToken).HasMaxLength(64);
-        builder.Property(x => x.OrderId).HasMaxLength(128);
+        builder.Property(x => x.ExternalOrderId).HasMaxLength(128);
         builder.Property(x => x.TransactionHash).HasMaxLength(256);
     }
 }

@@ -208,7 +208,7 @@ public sealed class SizingAggregateOverflowTests
         ImportedFill Fill(string side, decimal closed, int minutes) => new()
         {
             Id = Guid.NewGuid(), Price = 1, Quantity = 1, ClosedPnlUsd = closed, Fee = 0, FeeToken = "USDC", PnlBasis = ExecutionFacts.PnlGross,
-            OccurredAtUtc = planned.AddMinutes(minutes), OrderId = "o" + minutes, ContractId = "BTC", SourceFillId = "f" + minutes, Side = side,
+            OccurredAtUtc = planned.AddMinutes(minutes), ExternalOrderId = "o" + minutes, ContractId = "BTC", SourceFillId = "f" + minutes, Side = side,
             PositionEffect = ExecutionFacts.Unknown, Direction = "", TransactionHash = "",
         };
         return new ClosedPlayFacts(play, [revision],

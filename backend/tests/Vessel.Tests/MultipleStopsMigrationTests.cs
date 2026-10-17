@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Vessel.Application.Plays;
 using Vessel.Domain.Plays;
 
@@ -38,7 +40,8 @@ public sealed class MultipleStopsMigrationTests
                    ({targetLink}, {owner}, {play}, {account}, '13', 'Target', 'entry-1', 'target-1', 'Linked', 'Automatic', now(), now())
             """);
 
-        await db.Database.MigrateAsync();
+        // The order identity change refuses retained links, so this data migration is checked just before it.
+        await db.GetService<IMigrator>().MigrateAsync(TestOrders.BeforeOrderIdentity);
 
         var stored = await db.Plays.SingleAsync();
         var plan = PlayDocuments.Normalize(PlayDocuments.Read(stored.Plan));
@@ -48,9 +51,13 @@ public sealed class MultipleStopsMigrationTests
         var revision = PlayDocuments.Read((await db.PlanRevisions.SingleAsync()).Plan);
         Assert.Equal("stop-1", revision.Entries[0].Stops.Single().Id);
 
-        var links = await db.OrderLinks.ToDictionaryAsync(l => l.Id);
-        Assert.Equal(("stop|entry-1|stop-1", OrderLinkRole.Stop), (links[stopLink].LevelKey, links[stopLink].Role));
-        Assert.Equal("target|entry-1|target-1", links[targetLink].LevelKey);
+        var links = await db.Database.SqlQueryRaw<MigratedLink>("""SELECT "Id", "Role", "EntryId", "LevelId" FROM play_order_links""")
+            .ToDictionaryAsync(l => l.Id);
+        string Key(MigratedLink link) => PlayOrderLink.Key(Enum.Parse<OrderLinkRole>(link.Role), link.EntryId, link.LevelId);
+        Assert.Equal(("stop|entry-1|stop-1", "Stop"), (Key(links[stopLink]), links[stopLink].Role));
+        Assert.Equal("target|entry-1|target-1", Key(links[targetLink]));
         Assert.False(db.Database.HasPendingModelChanges());
     }
+
+    private sealed record MigratedLink(Guid Id, string Role, string? EntryId, string? LevelId);
 }

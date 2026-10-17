@@ -22,7 +22,8 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
                 .ToHashSet(StringComparer.Ordinal);
             using var history = await ReadJsonAsync(new { type = "historicalOrders", user = publicAddress }, token);
             using var open = await ReadJsonAsync(new { type = "frontendOpenOrders", user = publicAddress, dex = "" }, token);
-            var orders = new Dictionary<string, VenueOrder>(StringComparer.Ordinal);
+            // Keyed by (canonical contract, oid): the same venue ID on another contract is another order.
+            var orders = new Dictionary<(string ContractId, string OrderId), VenueOrder>();
             var updates = Array(history.RootElement);
             if (updates.GetArrayLength() > MaxOrders) throw new VenueReadException(InvalidResponse);
             foreach (var update in updates.EnumerateArray())
@@ -30,13 +31,13 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
                 var raw = Text(Property(update, "status"), 64);
                 var order = ReadOrder(Property(update, "order"), contracts, latestTimestamp, raw, Normalize(raw),
                     Timestamp(Property(update, "statusTimestamp"), latestTimestamp));
-                if (order is not null && (!orders.TryGetValue(order.OrderId, out var known) || order.StatusAtUtc >= known.StatusAtUtc))
-                    orders[order.OrderId] = order;
+                if (order is not null && (!orders.TryGetValue((order.ContractId, order.OrderId), out var known) || order.StatusAtUtc >= known.StatusAtUtc))
+                    orders[(order.ContractId, order.OrderId)] = order;
             }
             var book = Array(open.RootElement);
             if (book.GetArrayLength() > MaxOrders) throw new VenueReadException(InvalidResponse);
             var openOrdersComplete = book.GetArrayLength() < MaxOrders;
-            var openIds = new HashSet<string>(StringComparer.Ordinal);
+            var openIds = new HashSet<(string ContractId, string OrderId)>();
             var observed = timeProvider.GetUtcNow();
             foreach (var item in book.EnumerateArray())
             {
@@ -44,8 +45,8 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
                 var order = ReadOrder(item, contracts, latestTimestamp, "open", VenueOrderStatus.Open, observed);
                 if (order is not null)
                 {
-                    if (!openIds.Add(order.OrderId)) openOrdersComplete = false;
-                    orders[order.OrderId] = order;
+                    if (!openIds.Add((order.ContractId, order.OrderId))) openOrdersComplete = false;
+                    orders[(order.ContractId, order.OrderId)] = order;
                 }
                 else if (IsPrimaryContract(Text(Property(item, "coin")))) openOrdersComplete = false;
                 // Nested children are not projected by ReadOrder. Never claim their absence.

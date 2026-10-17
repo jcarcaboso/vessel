@@ -19,7 +19,7 @@ public sealed class ActivityOperationsTests
         Id = Guid.NewGuid(), OwnerId = Owner, AccountId = AccountId, ContractId = "BTC", Side = side,
         Direction = "Display text must not control aggregation", PositionEffect = effect, Quantity = quantity, Price = price,
         ClosedPnlUsd = pnl, Fee = fee, FeeToken = token, PnlBasis = basis, FeeBasis = "reported",
-        OccurredAtUtc = Start.AddMinutes(n), OrderId = order ?? n.ToString(), SourceFillId = n.ToString(), TransactionHash = ""
+        OccurredAtUtc = Start.AddMinutes(n), ExternalOrderId = order ?? n.ToString(), SourceFillId = n.ToString(), TransactionHash = ""
     };
 
     [Fact]

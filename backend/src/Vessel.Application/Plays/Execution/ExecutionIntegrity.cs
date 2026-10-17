@@ -77,9 +77,9 @@ public static class ExecutionIntegrity
         var problems = incompleteOrders.Distinct().Order(StringComparer.Ordinal)
             .Select(id => $"Order {id} is filled at the venue, but not all of its executions are retained yet.").ToList();
         var direction = entrySide == ExecutionFacts.Buy ? "long" : "short";
-        problems.AddRange(fills.Where(f => Contradicts(f.Role, entrySide, f.Fill)).GroupBy(f => (f.Fill.OrderId, Entry: f.Role == OrderLinkRole.Entry))
-            .OrderBy(g => g.Key.OrderId, StringComparer.Ordinal).Select(g =>
-                $"Order {g.Key.OrderId} has {string.Join(", ", g.Select(f => $"{f.Fill.Side} {f.Fill.PositionEffect}").Distinct())} fills, " +
+        problems.AddRange(fills.Where(f => Contradicts(f.Role, entrySide, f.Fill)).GroupBy(f => (f.Fill.ExternalOrderId, f.Fill.ContractId, Entry: f.Role == OrderLinkRole.Entry))
+            .OrderBy(g => g.Key.ExternalOrderId, StringComparer.Ordinal).ThenBy(g => g.Key.ContractId, StringComparer.Ordinal).Select(g =>
+                $"Order {g.Key.ExternalOrderId} has {string.Join(", ", g.Select(f => $"{f.Fill.Side} {f.Fill.PositionEffect}").Distinct())} fills, " +
                 $"so it cannot be an {(g.Key.Entry ? "entry" : "exit")} of this {direction} play."));
         var counted = fills.Where(f => !Contradicts(f.Role, entrySide, f.Fill)).ToList();
         if (Quantity(counted.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill))

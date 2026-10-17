@@ -66,7 +66,7 @@ public sealed class MonitorDiscrepancyRound5Tests
             PlayDocuments.Serialize(plan), f.Clock.Now.AddHours(-1));
         play.MarkPlanned(f.Clock.Now.AddMinutes(-30));
         f.Store.Plays.Add(play);
-        f.Store.Links.Add(new(play, "entry", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-25)));
+        f.Store.Links.Add(f.Link(play, "entry", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-25)));
         play.Cancel(CancelReason.ChangedMind, null, f.Clock.Now.AddMinutes(-10));
         var resting = new Vessel.Application.Venues.VenueOrder("entry", "BTC", "buy", "Limit", 100, null, false, false,
             1, 1, f.Clock.Now.AddMinutes(-25), Vessel.Application.Venues.VenueOrderStatus.Open, "open", f.Clock.Now);
@@ -99,8 +99,8 @@ public sealed class MonitorDiscrepancyRound5Tests
         {
             fourth.Db.Add(active);
             fourth.Db.AddRange(f.Store.Links.Where(x => x.PlayId == active.Id));
-            fourth.Db.AddRange(f.Store.Orders.Where(x => x.OrderId == "new-entry"));
-            fourth.Db.AddRange(f.Store.Fills.Where(x => x.OrderId == "new-entry"));
+            fourth.Db.AddRange(f.Store.Orders.Where(x => x.ExternalOrderId == "new-entry"));
+            fourth.Db.AddRange(f.Store.Fills.Where(x => x.ExternalOrderId == "new-entry"));
             await fourth.Db.SaveChangesAsync();
             Assert.True(await new MonitorStore(fourth.Db, fourth.Work).EligibleAsync(f.Account.Id, f.Clock.Now, default));
             await fourth.Work.ExecuteAsync(async () =>

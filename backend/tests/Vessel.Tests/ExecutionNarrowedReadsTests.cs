@@ -36,8 +36,8 @@ public sealed class ExecutionNarrowedReadsTests
         public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset observedAt, CancellationToken ct) =>
             inner.UpsertOrdersAsync(account, orders, observedAt, ct);
         public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, CancellationToken ct) => inner.LinksAsync(accountId, ct);
-        public Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct) =>
-            inner.FillsAsync(accountId, orderIds, ct);
+        public Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<OrderKey> orders, CancellationToken ct) =>
+            inner.FillsAsync(accountId, orders, ct);
         public void Add(PlayOrderLink link) => inner.Add(link);
         public void Add(PlayStatusChange change) => inner.Add(change);
         public Task SaveAsync(CancellationToken ct) => inner.SaveAsync(ct);
@@ -55,7 +55,7 @@ public sealed class ExecutionNarrowedReadsTests
         public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => inner.AccountAsync(id, ct);
         public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct) => inner.ActivePlaysAsync(accountId, ct);
         public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct) { FullReads = true; return inner.OrdersAsync(accountId, ct); }
-        public async Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<string> orderIds,
+        public async Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<Guid> orderIds,
             IReadOnlyDictionary<string, DateTimeOffset> placedSince, CancellationToken ct)
         {
             var rows = await inner.OrdersAsync(accountId, orderIds, placedSince, ct);
@@ -65,20 +65,22 @@ public sealed class ExecutionNarrowedReadsTests
         public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset observedAt, CancellationToken ct) =>
             inner.UpsertOrdersAsync(account, orders, observedAt, ct);
         public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, CancellationToken ct) { FullReads = true; return inner.LinksAsync(accountId, ct); }
-        public async Task<List<PlayOrderLink>> LinksAsync(Guid accountId, IReadOnlyCollection<string> orderIds, IReadOnlyCollection<Guid> playIds,
+        public async Task<List<PlayOrderLink>> LinksAsync(Guid accountId, IReadOnlyCollection<Guid> orderIds, IReadOnlyCollection<Guid> playIds,
             CancellationToken ct)
         {
             var rows = await inner.LinksAsync(accountId, orderIds, playIds, ct);
             Links += rows.Count;
             return rows;
         }
+        public Task<ImportedOrder?> OrderAsync(Guid accountId, string contractId, string externalOrderId, CancellationToken ct) =>
+            inner.OrderAsync(accountId, contractId, externalOrderId, ct);
         public Task<List<PlayOrderLink>> PlayLinksAsync(Guid accountId, Guid playId, CancellationToken ct) => inner.PlayLinksAsync(accountId, playId, ct);
         public Task<PlayOrderLink?> LinkAsync(Guid accountId, Guid playId, Guid linkId, CancellationToken ct) => inner.LinkAsync(accountId, playId, linkId, ct);
-        public Task<HashSet<string>> LinkedOrderIdsAsync(Guid accountId, CancellationToken ct) => inner.LinkedOrderIdsAsync(accountId, ct);
-        public Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct)
+        public Task<HashSet<Guid>> LinkedOrderIdsAsync(Guid accountId, CancellationToken ct) => inner.LinkedOrderIdsAsync(accountId, ct);
+        public Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<OrderKey> orders, CancellationToken ct)
         {
-            FillOrderIds += orderIds.Count;
-            return inner.FillsAsync(accountId, orderIds, ct);
+            FillOrderIds += orders.Count;
+            return inner.FillsAsync(accountId, orders, ct);
         }
         public void Add(PlayOrderLink link) => inner.Add(link);
         public void Add(PlayStatusChange change) => inner.Add(change);
@@ -108,7 +110,7 @@ public sealed class ExecutionNarrowedReadsTests
     private static ImportedOrder Order(Account account, string id, string contract, string side, decimal price, int minute,
         string status = "open", bool reduceOnly = false, decimal size = 1) => new()
     {
-        Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, OrderId = id, ContractId = contract, Side = side,
+        Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, ExternalOrderId = id, ContractId = contract, Side = side,
         OrderType = "Limit", LimitPrice = price, ReduceOnly = reduceOnly, OriginalSize = size, RemainingSize = status == "open" ? size : 0,
         PlacedAtUtc = T0.AddMinutes(minute), Status = status, VenueStatus = status, StatusAtUtc = T0.AddMinutes(minute),
         ObservedAtUtc = T0.AddMinutes(minute),
@@ -117,7 +119,7 @@ public sealed class ExecutionNarrowedReadsTests
     private static ImportedFill Fill(Account account, string orderId, string contract, string side, string effect, decimal price, int minute) => new()
     {
         Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, ContractId = contract, SourceFillId = orderId + "-fill-" + minute,
-        OrderId = orderId, Side = side, Direction = "", PositionEffect = effect, Price = price, Quantity = 1, Fee = 0, FeeToken = "USDC",
+        ExternalOrderId = orderId, Side = side, Direction = "", PositionEffect = effect, Price = price, Quantity = 1, Fee = 0, FeeToken = "USDC",
         ClosedPnlUsd = 0, OccurredAtUtc = T0.AddMinutes(minute), TransactionHash = "",
     };
 
@@ -132,14 +134,14 @@ public sealed class ExecutionNarrowedReadsTests
         return play;
     }
 
-    private static PlayOrderLink Link(Play play, string orderId, OrderLinkRole role, OrderLinkState state, int minute,
+    private static PlayOrderLink Link(Play play, ImportedOrder order, OrderLinkRole role, OrderLinkState state, int minute,
         OrderLinkSource source = OrderLinkSource.Owner) =>
-        new(play, orderId, role, role == OrderLinkRole.Exit ? null : "entry-1", role is OrderLinkRole.Stop ? "stop-1" : role is OrderLinkRole.Target ? "target-1" : null,
+        new(play, order, role, role == OrderLinkRole.Exit ? null : "entry-1", role is OrderLinkRole.Stop ? "stop-1" : role is OrderLinkRole.Target ? "target-1" : null,
             state, source, T0.AddMinutes(minute));
 
     /// <summary>
     /// Two active Plays on BTC, an open Play-to-be on ETH whose manual entry predates it, a Closed BTC Play holding an order
-    /// that matches the active levels, a Cancelled ETH Play holding a BTC order, and unrelated DOGE history.
+    /// that matches the active levels, a Cancelled BTC Play holding a BTC order, and unrelated DOGE history.
     /// </summary>
     private static async Task<Seeded> Seed(int unrelated = 0)
     {
@@ -157,12 +159,13 @@ public sealed class ExecutionNarrowedReadsTests
         var first = Planned(db, account, First, "BTC", 10);
         var second = Planned(db, account, Second, "BTC", 10);
         var eth = Planned(db, account, Eth, "ETH", 30);
-        var cancelled = Planned(db, account, Cancelled, "ETH", 1);
+        var cancelled = Planned(db, account, Cancelled, "BTC", 1);
         db.Add(cancelled.Cancel(CancelReason.Other, null, T0.AddMinutes(2)));
-        db.Orders.AddRange(
+        var orders = new List<ImportedOrder>
+        {
             // Placed after the active BTC Plays were created and on their entry level, but linked to the Closed Play.
             Order(account, "closed-entry", "BTC", "buy", 100, 11, "filled"),
-            // On the active entry level, but linked by the Cancelled ETH Play.
+            // On the active entry level, but linked by the Cancelled Play.
             Order(account, "btc-by-eth", "BTC", "buy", 100, 15),
             // Ambiguous between both active BTC Plays; First declined it twice over (a suggested and a dismissed row).
             Order(account, "declined", "BTC", "buy", 100, 20),
@@ -176,7 +179,10 @@ public sealed class ExecutionNarrowedReadsTests
             Order(account, "eth-entry", "ETH", "buy", 100, 25, "filled"),
             Order(account, "eth-exit", "ETH", "sell", 105, 40, "filled", reduceOnly: true),
             Order(account, "sol-order", "SOL", "buy", 100, 26),
-            Order(other, "other-btc", "BTC", "buy", 100, 24));
+            Order(other, "other-btc", "BTC", "buy", 100, 24),
+        };
+        db.Orders.AddRange(orders);
+        var o = orders.Where(x => x.AccountId == account.Id).ToDictionary(x => x.ExternalOrderId);
         for (var i = 0; i < unrelated; i++)
             db.Orders.Add(Order(account, $"doge-{i}", "DOGE", "buy", 100, 20 + i % 30, "filled"));
         db.Fills.AddRange(
@@ -186,15 +192,13 @@ public sealed class ExecutionNarrowedReadsTests
         for (var i = 0; i < unrelated; i++)
             db.Fills.Add(Fill(account, $"doge-{i}", "DOGE", "buy", "open", 100, 20 + i % 30));
         db.OrderLinks.AddRange(
-            Link(closed, "closed-entry", OrderLinkRole.Entry, OrderLinkState.Linked, 12),
-            Link(cancelled, "btc-by-eth", OrderLinkRole.Entry, OrderLinkState.Linked, 16),
-            Link(first, "declined", OrderLinkRole.Entry, OrderLinkState.Suggested, 20, OrderLinkSource.Automatic),
-            Link(first, "declined", OrderLinkRole.Entry, OrderLinkState.Dismissed, 21),
-            Link(first, "suggested", OrderLinkRole.Entry, OrderLinkState.Dismissed, 21),
-            Link(second, "suggested", OrderLinkRole.Entry, OrderLinkState.Suggested, 21, OrderLinkSource.Automatic),
-            // First also suggests the SOL order, so its execution shows an order from another contract.
-            Link(first, "sol-order", OrderLinkRole.Entry, OrderLinkState.Suggested, 26, OrderLinkSource.Automatic),
-            Link(eth, "eth-entry", OrderLinkRole.Entry, OrderLinkState.Linked, 31));
+            Link(closed, o["closed-entry"], OrderLinkRole.Entry, OrderLinkState.Linked, 12),
+            Link(cancelled, o["btc-by-eth"], OrderLinkRole.Entry, OrderLinkState.Linked, 16),
+            Link(first, o["declined"], OrderLinkRole.Entry, OrderLinkState.Suggested, 20, OrderLinkSource.Automatic),
+            Link(first, o["declined"], OrderLinkRole.Entry, OrderLinkState.Dismissed, 21),
+            Link(first, o["suggested"], OrderLinkRole.Entry, OrderLinkState.Dismissed, 21),
+            Link(second, o["suggested"], OrderLinkRole.Entry, OrderLinkState.Suggested, 21, OrderLinkSource.Automatic),
+            Link(eth, o["eth-entry"], OrderLinkRole.Entry, OrderLinkState.Linked, 31));
         await db.SaveChangesAsync();
         return new(database, owner, account, other);
     }
@@ -214,8 +218,9 @@ public sealed class ExecutionNarrowedReadsTests
         {
             foreach (var id in new[] { Closed, First, Second, Eth, Cancelled })
                 outcome.Add(Normalized(await Service(db, Store(db, narrowed)).GetAsync(id, default)));
+            var external = await db.Orders.AsNoTracking().ToDictionaryAsync(o => o.Id, o => o.ExternalOrderId);
             outcome.AddRange((await db.OrderLinks.AsNoTracking().ToListAsync())
-                .Select(l => $"{l.PlayId}|{l.OrderId}|{l.LevelKey}|{l.State}|{l.Source}").Order(StringComparer.Ordinal));
+                .Select(l => $"{l.PlayId}|{external[l.ImportedOrderId]}|{l.LevelKey}|{l.State}|{l.Source}").Order(StringComparer.Ordinal));
             outcome.AddRange((await db.Plays.AsNoTracking().ToListAsync()).OrderBy(p => p.Id).Select(p => $"{p.Id}|{p.Status}"));
         }
         return outcome;
@@ -238,7 +243,8 @@ public sealed class ExecutionNarrowedReadsTests
             await Reconcile(db, Service(db, Store(db, narrowed: true)), seeded.Account);
         await using var verify = seeded.Database.Context(seeded.Owner);
         var links = await verify.OrderLinks.AsNoTracking().ToListAsync();
-        string[] Held(string order) => links.Where(l => l.OrderId == order)
+        var external = await verify.Orders.AsNoTracking().ToDictionaryAsync(o => o.Id, o => o.ExternalOrderId);
+        string[] Held(string order) => links.Where(l => external[l.ImportedOrderId] == order)
             .Select(l => $"{(l.PlayId == First ? "first" : l.PlayId == Second ? "second" : l.PlayId == Closed ? "closed" : l.PlayId == Eth ? "eth" : "cancelled")}:{l.State}")
             .Order(StringComparer.Ordinal).ToArray();
 
@@ -249,7 +255,7 @@ public sealed class ExecutionNarrowedReadsTests
         Assert.Equal(["first:Dismissed", "first:Suggested", "second:Linked"], Held("declined"));
         // The existing suggestion is the row that becomes linked; no new row is added.
         Assert.Equal(["first:Dismissed", "second:Linked"], Held("suggested"));
-        Assert.Equal(OrderLinkSource.Automatic, links.Single(l => l.OrderId == "suggested" && l.PlayId == Second).Source);
+        Assert.Equal(OrderLinkSource.Automatic, links.Single(l => external[l.ImportedOrderId] == "suggested" && l.PlayId == Second).Source);
         // Ambiguous between two active Plays on one instrument: suggestions only.
         Assert.Equal(["first:Suggested", "second:Suggested"], Held("ambiguous"));
         Assert.Empty(Held("old-btc"));
@@ -273,13 +279,12 @@ public sealed class ExecutionNarrowedReadsTests
         var service = Service(db, Store(db, narrowed: true));
 
         var first = await service.GetAsync(First, default);
-        // Its SOL suggestion keeps its order details although the Play trades BTC.
-        var sol = Assert.Single(first.Suggestions, s => s.Order?.OrderId == "sol-order");
-        Assert.Equal("buy", sol.Order!.Side);
+        // An order on another contract never belongs to a BTC Play, not even as a suggestion.
+        Assert.DoesNotContain(first.Suggestions, s => s.Order?.OrderId == "sol-order");
         // Unlinked: BTC orders placed since the Play was created that no Play of the account has linked.
         Assert.Equal(["resting", "ambiguous", "suggested", "declined"], first.UnlinkedOrders.Select(o => o.OrderId));
 
-        // The Cancelled ETH Play still shows its linked BTC order.
+        // The Cancelled Play still shows its linked order.
         var cancelled = await service.GetAsync(Cancelled, default);
         Assert.Equal("btc-by-eth", Assert.Single(cancelled.Links).Order!.OrderId);
         // The ETH Play's manual entry predates it and still shows with its fill.
@@ -295,9 +300,10 @@ public sealed class ExecutionNarrowedReadsTests
         Guid secondSuggestion, closedLink, dismissed;
         await using (var db = seeded.Database.Context(seeded.Owner))
         {
-            secondSuggestion = (await db.OrderLinks.SingleAsync(l => l.PlayId == Second && l.OrderId == "suggested")).Id;
+            var suggested = (await db.Orders.SingleAsync(o => o.ExternalOrderId == "suggested")).Id;
+            secondSuggestion = (await db.OrderLinks.SingleAsync(l => l.PlayId == Second && l.ImportedOrderId == suggested)).Id;
             closedLink = (await db.OrderLinks.SingleAsync(l => l.PlayId == Closed)).Id;
-            dismissed = (await db.OrderLinks.SingleAsync(l => l.PlayId == First && l.OrderId == "suggested")).Id;
+            dismissed = (await db.OrderLinks.SingleAsync(l => l.PlayId == First && l.ImportedOrderId == suggested)).Id;
         }
         async Task<int> Status(Func<PlayExecutionService, Task> action, Guid? owner = null)
         {
@@ -391,14 +397,15 @@ public sealed class ExecutionNarrowedReadsTests
         {
             // An eligible SOL round trip, an AVAX round trip with an order linked to a Play, and an ARB round trip whose exit
             // has no order record, beside the seeded linked ETH round trip and open BTC and DOGE positions.
+            var avaxOut = Order(account, "avax-out", "AVAX", "sell", 110, 51, "filled");
             db.Orders.AddRange(Order(account, "sol-in", "SOL", "buy", 100, 50, "filled"), Order(account, "sol-out", "SOL", "sell", 110, 51, "filled"),
-                Order(account, "avax-in", "AVAX", "buy", 100, 50, "filled"), Order(account, "avax-out", "AVAX", "sell", 110, 51, "filled"),
+                Order(account, "avax-in", "AVAX", "buy", 100, 50, "filled"), avaxOut,
                 Order(account, "arb-in", "ARB", "buy", 100, 50, "filled"));
             db.Fills.AddRange(Fill(account, "sol-in", "SOL", "buy", "open", 100, 50), Fill(account, "sol-out", "SOL", "sell", "close", 110, 51),
                 Fill(account, "avax-in", "AVAX", "buy", "open", 100, 50), Fill(account, "avax-out", "AVAX", "sell", "close", 110, 51),
                 Fill(account, "arb-in", "ARB", "buy", "open", 100, 50), Fill(account, "arb-out", "ARB", "sell", "close", 110, 51));
-            var closed = await db.Plays.SingleAsync(p => p.Id == Closed);
-            db.OrderLinks.Add(Link(closed, "avax-out", OrderLinkRole.Exit, OrderLinkState.Linked, 52));
+            var avax = Planned(db, account, Guid.NewGuid(), "AVAX", 49);
+            db.OrderLinks.Add(Link(avax, avaxOut, OrderLinkRole.Exit, OrderLinkState.Linked, 52));
             await db.SaveChangesAsync();
         }
         List<ActivityOperationSummaryDto> operations;

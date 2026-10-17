@@ -44,7 +44,7 @@ public sealed class ExecutionMatcherTests
     private static ImportedOrder Order(string side, decimal price, decimal? trigger = null, string type = "Limit", bool reduceOnly = false,
         string contract = "BTC", DateTimeOffset? placed = null) => new()
     {
-        OrderId = "1", ContractId = contract, Side = side, OrderType = type, LimitPrice = price, TriggerPrice = trigger,
+        ExternalOrderId = "1", ContractId = contract, Side = side, OrderType = type, LimitPrice = price, TriggerPrice = trigger,
         ReduceOnly = reduceOnly, PlacedAtUtc = placed ?? Created.AddMinutes(1), Status = "open", VenueStatus = "open",
     };
 
@@ -128,7 +128,7 @@ public sealed class ExecutionMatcherTests
 
     private static ImportedFill Executed(string side, string effect, int seconds) => new()
     {
-        OrderId = "1", ContractId = "BTC", SourceFillId = "f" + seconds, Side = side, Direction = "", PositionEffect = effect, Price = 100, Quantity = 1,
+        ExternalOrderId = "1", ContractId = "BTC", SourceFillId = "f" + seconds, Side = side, Direction = "", PositionEffect = effect, Price = 100, Quantity = 1,
         FeeToken = "USDC", TransactionHash = "", OccurredAtUtc = Created.AddSeconds(seconds),
     };
 

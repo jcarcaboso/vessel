@@ -39,12 +39,14 @@ public sealed class OverviewSummaryPostgresTests
                     LastAttemptFromUtc = now.AddDays(-30), LastAttemptToUtc = now, Notice = "Synthetic funding coverage." });
                 var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("manual", "BTC"), InstrumentSource.Manual, "{}", now);
                 db.Plays.Add(play);
-                db.OrderLinks.Add(new PlayOrderLink(play, "order", OrderLinkRole.Entry, "entry", null, OrderLinkState.Linked, OrderLinkSource.Owner, now));
+                var order = TestOrders.For(play, "order");
+                db.Orders.Add(order);
+                db.OrderLinks.Add(new PlayOrderLink(play, order, OrderLinkRole.Entry, "entry", null, OrderLinkState.Linked, OrderLinkSource.Owner, now));
                 // More than the overview fill display limit, including for unrelated accounts.
                 for (var i = 0; i < 120; i++)
                     db.Fills.Add(new ImportedFill { Id = Guid.NewGuid(), OwnerId = actor, AccountId = account.Id, ContractId = "BTC",
                         SourceFillId = i.ToString(), Side = "buy", PositionEffect = "open", Direction = "Fixture", Price = 100,
-                        Quantity = 1, FeeToken = "USDC", OccurredAtUtc = now.AddMinutes(-i), OrderId = "order", TransactionHash = "" });
+                        Quantity = 1, FeeToken = "USDC", OccurredAtUtc = now.AddMinutes(-i), ExternalOrderId = "order", TransactionHash = "" });
             }
             await db.SaveChangesAsync();
         }
@@ -97,7 +99,7 @@ public sealed class OverviewSummaryPostgresTests
                     db.Fills.Add(new ImportedFill { Id = Guid.NewGuid(), OwnerId = owner, AccountId = a.Id, ContractId = "BTC",
                         SourceFillId = close ? "close" : "open", Side = close ? "sell" : "buy", PositionEffect = close ? "close" : "open",
                         Direction = "Fixture", Price = 100, Quantity = 1, Fee = 0.0000000000000000000000000001m, FeeToken = "USDC",
-                        ClosedPnlUsd = close ? 10 : 0, OccurredAtUtc = close ? now : now.AddHours(-1), OrderId = close ? "close" : "open", TransactionHash = "" });
+                        ClosedPnlUsd = close ? 10 : 0, OccurredAtUtc = close ? now : now.AddHours(-1), ExternalOrderId = close ? "close" : "open", TransactionHash = "" });
             await db.SaveChangesAsync();
         }
         await using (var db = database.Context(foreignOwner)) { db.Portfolios.Add(foreignPortfolio); db.Accounts.Add(foreign); await db.SaveChangesAsync(); }

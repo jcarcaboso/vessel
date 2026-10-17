@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Changed (breaking)
+
+- Order identity: Play order links now reference Vessel's internal order ID,
+  and a venue order ID is unique per account and instrument rather than per
+  account. Fills belong to an order by account, instrument and venue order ID,
+  so a fill can never be attributed to a Play on another instrument. The same
+  venue ID on two instruments becomes two orders, and an order reported on a
+  different native market fails closed instead of being overwritten. The
+  `execution.filled` dedup key uses the internal order ID. API and event
+  payloads keep the venue `orderId`. See
+  [docs/architecture/order-identity.md](docs/architecture/order-identity.md).
+- **Database:** the `OrderIdentity` migration has no backfill and refuses to
+  run when imported orders, fills or Play order links exist. Recreate the
+  database before applying it.
+
 ## 0.2.0 - October 16, 2026
 
 Release notes: [docs/releases/v0.2.0.md](docs/releases/v0.2.0.md).

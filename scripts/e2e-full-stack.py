@@ -866,8 +866,12 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         missing = self.discrepancies(self.p2, 'protection.missing')
         self.expect(missing[0]['state'] in ('dismissed', 'resolved'), 'P2 dismissed discrepancy stays closed after the exit', missing)
         # A one-hour WatchLifetime is the shortest allowed; age only this watch's start (synthetic time control).
-        changed = self.sql('UPDATE monitor_exit_watches SET "StartedAtUtc" = "StartedAtUtc" - interval \'2 hours\' '
-                           f'WHERE "PlayId" = \'{self.p1}\' AND "OrderId" = \'{self.p1_orders["stop2"]}\' RETURNING "LinkId"')
+        # A watch identifies its order through its link; the link references the order by internal ID.
+        changed = self.sql('UPDATE monitor_exit_watches w SET "StartedAtUtc" = w."StartedAtUtc" - interval \'2 hours\' '
+                           'FROM play_order_links l JOIN imported_orders o ON o."OwnerId" = l."OwnerId" '
+                           'AND o."AccountId" = l."AccountId" AND o."Id" = l."ImportedOrderId" '
+                           f'WHERE l."Id" = w."LinkId" AND w."PlayId" = \'{self.p1}\' '
+                           f'AND o."ExternalOrderId" = \'{self.p1_orders["stop2"]}\' RETURNING w."LinkId"')
         self.expect(len(changed.split()) == 1, 'synthetic time control ages the stop watch past WatchLifetime', changed)
         self.until(mark, lambda: [w['state'] for w in self.watch(self.p1, self.p1_orders['stop2'])] == ['unverifiable'], 'unverifiable watch')
         self.expect(self.watch(self.p1, self.p1_orders['stop2'])[0]['endedAtUtc'], 'the unverifiable watch is persistent and ended')

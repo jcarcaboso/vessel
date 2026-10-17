@@ -370,5 +370,5 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             "Venue stablecoin wallet only: supported stablecoin token identities, nominal USD-pegged units, no FX/depeg adjustment. Available is total minus held; it is not guaranteed withdrawal capacity or perpetual free margin. Other assets, EVM wallets and lending/borrow accounting are excluded. Perpetual margin is not added again.");
     private static FillDto ToDto(ImportedFill f) => new(f.Id, f.AccountId, f.ContractId, f.Side, f.Direction, ExactDecimal.Format(f.Price),
         ExactDecimal.Format(f.Quantity), ExactDecimal.Format(f.Fee), f.FeeToken, ExactDecimal.Format(f.ClosedPnlUsd), f.OccurredAtUtc,
-        f.OrderId, f.SourceFillId, f.TransactionHash, f.PositionEffect, f.FeeBasis, f.PnlBasis);
+        f.ExternalOrderId, f.SourceFillId, f.TransactionHash, f.PositionEffect, f.FeeBasis, f.PnlBasis);
 }

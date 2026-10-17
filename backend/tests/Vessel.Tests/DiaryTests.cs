@@ -342,13 +342,13 @@ public sealed class DiaryPostgresTests
         decimal price, int seconds, decimal pnl = 0) => new()
     {
         Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, ContractId = "BTC",
-        SourceFillId = id, OrderId = order, Side = side, Direction = effect, PositionEffect = effect,
+        SourceFillId = id, ExternalOrderId = order, Side = side, Direction = effect, PositionEffect = effect,
         Quantity = quantity, Price = price, Fee = 0, FeeToken = "USDC", ClosedPnlUsd = pnl,
         OccurredAtUtc = At.AddSeconds(seconds), TransactionHash = ""
     };
     internal static ImportedOrder Order(Account account, string id, string side, decimal quantity) => new()
     {
-        Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, ContractId = "BTC", OrderId = id,
+        Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, ContractId = "BTC", ExternalOrderId = id,
         Side = side, OrderType = "limit", LimitPrice = 100, OriginalSize = quantity, RemainingSize = 0,
         PlacedAtUtc = At, Status = "filled", VenueStatus = "filled", StatusAtUtc = At.AddSeconds(2), ObservedAtUtc = At.AddSeconds(3)
     };
@@ -429,7 +429,7 @@ public sealed class DiaryPostgresTests
             preview = await Service(db).PreviewAsync(account.Id, (await ActivityTestSupport.Activity(db).PageAsync(account.Id)).Operations[0].Id, default);
         await using (var db = database.Context(owner))
         {
-            (await db.Orders.SingleAsync(o => o.OrderId == "x")).OriginalSize = 2; await db.SaveChangesAsync();
+            (await db.Orders.SingleAsync(o => o.ExternalOrderId == "x")).OriginalSize = 2; await db.SaveChangesAsync();
         }
         await using var writing = database.Context(owner);
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => Service(writing).CreateRetrospectiveAsync(
@@ -484,7 +484,7 @@ public sealed class DiaryPostgresTests
             seed.Plays.Add(play); seed.StatusChanges.Add(status); seed.PlanRevisions.Add(revision);
             var order = Order(account, "pending", "buy", 1); order.Status = "open"; order.RemainingSize = 1;
             seed.Orders.Add(order);
-            seed.OrderLinks.Add(new(play, "pending", OrderLinkRole.Entry, "entry-1", null, OrderLinkState.Linked, OrderLinkSource.Owner, At));
+            seed.OrderLinks.Add(new(play, order, OrderLinkRole.Entry, "entry-1", null, OrderLinkState.Linked, OrderLinkSource.Owner, At));
             await seed.SaveChangesAsync();
         }
         // An unfilled linked entry is already protected.
@@ -640,10 +640,11 @@ public sealed class DiaryPostgresTests
             var (change, revision) = plan.MarkPlanned(At);
             seed.Plays.Add(plan); seed.StatusChanges.Add(change); seed.PlanRevisions.Add(revision);
             plan.MarkOpen("Imported", At); plan.MarkClosed("Imported", At.AddSeconds(1));
-            seed.OrderLinks.AddRange(new PlayOrderLink(plan, "e", OrderLinkRole.Entry, "entry-1", null, OrderLinkState.Linked, OrderLinkSource.Owner, At),
-                new PlayOrderLink(plan, "x", OrderLinkRole.Exit, null, null, OrderLinkState.Linked, OrderLinkSource.Owner, At));
+            var (entry, exit) = (Order(account, "e", "buy", 2), Order(account, "x", "sell", 1));
+            seed.OrderLinks.AddRange(new PlayOrderLink(plan, entry, OrderLinkRole.Entry, "entry-1", null, OrderLinkState.Linked, OrderLinkSource.Owner, At),
+                new PlayOrderLink(plan, exit, OrderLinkRole.Exit, null, null, OrderLinkState.Linked, OrderLinkSource.Owner, At));
             seed.Fills.AddRange(Imported(account, "e", "e", "buy", "open", 1, 100, 0), Imported(account, "x", "x", "sell", "close", 1, 110, 1, 10));
-            seed.Orders.AddRange(Order(account, "e", "buy", 2), Order(account, "x", "sell", 1)); await seed.SaveChangesAsync();
+            seed.Orders.AddRange(entry, exit); await seed.SaveChangesAsync();
         }
         await using var reading = database.Context(owner);
         var service = new ReviewService(new ReviewStore(reading, new SizingStore(reading, TestUnitOfWork.For(reading))), TimeProvider.System);

@@ -169,7 +169,7 @@ public sealed class DiaryArithmeticRegressionTests
     {
         var f = new DiaryArithmeticFixture("hyperliquid", direction);
         f.AddOperation(direction);
-        var opening = f.Orders.Single(o => o.OrderId == "in");
+        var opening = f.Orders.Single(o => o.ExternalOrderId == "in");
         opening.ReduceOnly = reduceOnly;
         opening.IsPositionTpsl = positionTpsl;
         var operation = OperationAggregator.Aggregate(f.Fills).Single();
@@ -192,7 +192,7 @@ public sealed class DiaryArithmeticRegressionTests
         var operation = OperationAggregator.Aggregate(f.Fills).Single();
         var preview = await f.Service.PreviewAsync(f.Account.Id, operation.Id, default);
         Assert.True(preview.Eligible);
-        f.Orders.Single(o => o.OrderId == "in").IsPositionTpsl = true;
+        f.Orders.Single(o => o.ExternalOrderId == "in").IsPositionTpsl = true;
         var before = f.Snapshot();
         var error = await Assert.ThrowsAsync<ProblemException>(() => f.Service.CreateRetrospectiveAsync(
             new(Guid.NewGuid(), f.Account.Id, operation.Id, preview.Fingerprint, "Retrospective"), default));
@@ -210,7 +210,7 @@ public sealed class DiaryArithmeticRegressionTests
     {
         var f = new DiaryArithmeticFixture("hyperliquid", direction);
         f.AddOperation(direction);
-        var exit = f.Orders.Single(o => o.OrderId == "out");
+        var exit = f.Orders.Single(o => o.ExternalOrderId == "out");
         exit.IsPositionTpsl = true;
         exit.ReduceOnly = true;
         var before = JsonSerializer.Serialize(new { f.Fills, f.Orders });
@@ -337,7 +337,8 @@ public sealed class DiaryArithmeticRegressionTests
         var created = await f.Service.CreateRetrospectiveAsync(
             new(Guid.NewGuid(), f.Account.Id, operation.Id, preview.Fingerprint, "BTC retrospective"), default);
         Assert.Equal("closed", created.Summary.Status);
-        Assert.DoesNotContain(f.Plays.Links, link => link.OrderId == "eth-in");
+        // Links reference the operation's own BTC orders only.
+        Assert.All(f.Plays.Links, link => Assert.Contains(f.Orders, o => o.Id == link.ImportedOrderId && o.ContractId == "BTC"));
         Assert.Equal(originals, JsonSerializer.Serialize(f.Fills));
     }
 
@@ -453,7 +454,7 @@ public sealed class DiaryArithmeticRegressionTests
         }
         public ImportedFill Fill(string order, string side, string effect, int seconds, decimal price, decimal pnl = 0) =>
             new() { Id = Guid.NewGuid(), OwnerId = Account.OwnerId, AccountId = Account.Id, ContractId = "BTC",
-                SourceFillId = order + "-fill", OrderId = order, Side = side, PositionEffect = effect, Quantity = 1,
+                SourceFillId = order + "-fill", ExternalOrderId = order, Side = side, PositionEffect = effect, Quantity = 1,
                 Price = price, ClosedPnlUsd = pnl, Fee = 0, FeeToken = "USDC", FeeBasis = ExecutionFacts.FeeReported,
                 PnlBasis = ExecutionFacts.PnlGross, Direction = "", TransactionHash = "", OccurredAtUtc = At.AddSeconds(seconds) };
         public void AddOperation(string direction)
@@ -462,7 +463,7 @@ public sealed class DiaryArithmeticRegressionTests
             Fills.Add(Fill("out", direction == "long" ? "sell" : "buy", "close", 1, direction == "long" ? 110 : 90, 10));
             foreach (var fill in Fills)
                 Orders.Add(new() { Id = Guid.NewGuid(), OwnerId = Account.OwnerId, AccountId = Account.Id, ContractId = "BTC",
-                    OrderId = fill.OrderId, Side = fill.Side, OriginalSize = 1, RemainingSize = 0, OrderType = "Limit",
+                    ExternalOrderId = fill.ExternalOrderId, Side = fill.Side, OriginalSize = 1, RemainingSize = 0, OrderType = "Limit",
                     LimitPrice = fill.Price, Status = "filled", VenueStatus = "filled", PlacedAtUtc = At,
                     StatusAtUtc = fill.OccurredAtUtc, ObservedAtUtc = At.AddSeconds(2) });
         }
@@ -487,8 +488,8 @@ public sealed class DiaryArithmeticRegressionTests
         }
         public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => Plays.AccountAsync(id, ct);
         public Task<List<Play>> ActivePlaysAsync(Guid id, CancellationToken ct) => Task.FromResult(Plays.Plays.Where(p => p.AccountId == id).ToList());
-        public Task<List<ImportedFill>> FillsAsync(Guid id, IReadOnlyCollection<string> ids, CancellationToken ct) =>
-            Task.FromResult(Fills.Where(f => f.AccountId == id && ids.Contains(f.OrderId)).ToList());
+        public Task<List<ImportedFill>> FillsAsync(Guid id, IReadOnlyCollection<OrderKey> orders, CancellationToken ct) =>
+            Task.FromResult(Fills.Where(f => f.AccountId == id && orders.Contains(OrderKey.Of(f))).ToList());
         public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
         public Task SaveAsync(CancellationToken ct) => Plays.SaveAsync(ct);
         public Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct) =>

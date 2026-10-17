@@ -61,7 +61,7 @@ public sealed class OverviewSummaryTests
         {
             Id = Guid.NewGuid(), OwnerId = owner, AccountId = a.Id, ContractId = "contract-" + n, Side = side, PositionEffect = effect,
             Direction = "Display only", Quantity = 1, Price = 100, ClosedPnlUsd = result, Fee = cost, FeeToken = feeToken,
-            PnlBasis = basis, OccurredAtUtc = at, OrderId = "order-" + n + side, SourceFillId = "fill-" + n + side, TransactionHash = ""
+            PnlBasis = basis, OccurredAtUtc = at, ExternalOrderId = "order-" + n + side, SourceFillId = "fill-" + n + side, TransactionHash = ""
         };
         if (!incomplete) store.Fills.Add(Fill("buy", "open", close.AddMinutes(-1), 0, 0));
         store.Fills.Add(Fill("sell", "close", close, pnl, fee));

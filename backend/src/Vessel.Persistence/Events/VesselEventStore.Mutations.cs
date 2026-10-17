@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Vessel.Application.Common;
 using Vessel.Application.Events;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
@@ -23,13 +24,19 @@ public sealed partial class VesselEventStore
         var linkIds = mutations.Links.Select(l => l.LinkId).Distinct().ToList();
         var finalStates = linkIds.Count == 0 ? [] : await db.OrderLinks.Where(l => linkIds.Contains(l.Id))
             .Select(l => new { l.Id, l.State }).ToDictionaryAsync(l => l.Id, l => l.State, ct);
+        // A link's order is immutable and always retained; payloads keep its external ID.
+        var linkOrderIds = mutations.LinkOrders.Select(x => x.ImportedOrderId).Distinct().ToArray();
+        var linkOrders = linkOrderIds.Length == 0 ? [] : await db.Orders.Where(o => linkOrderIds.Contains(o.Id))
+            .AsNoTracking().ToDictionaryAsync(o => o.Id, ct);
         foreach (var link in mutations.Links)
         {
+            var order = linkOrders.GetValueOrDefault(link.ImportedOrderId)
+                ?? throw new InvalidOperationException("Captured link order not found.");
             var account = await lookups.AccountAsync(link.AccountId, ct);
             var play = await lookups.PlayAsync(link.PlayId, ct)
                 ?? throw new InvalidOperationException("Captured link Play not found.");
             var subject = new VesselEventSubject(link.AccountId, account.VenueId, play.ContractId, link.PlayId, link.EntryId, link.LevelId);
-            var source = new VesselEventSource(link.Source == OrderLinkSource.Owner ? "owner" : trigger, [link.OrderId]);
+            var source = new VesselEventSource(link.Source == OrderLinkSource.Owner ? "owner" : trigger, [order.ExternalOrderId]);
             var data = VesselEventJson.Element(new
             {
                 linkId = link.LinkId, previous = link.Previous, current = link.Current,
@@ -44,7 +51,7 @@ public sealed partial class VesselEventStore
                 drafts.Add(new("execution.link-changed", runId, $"link-change:{link.ChangeId}", "info",
                     link.OccurredAt, detected, subject, source, data, Timeliness(link.OccurredAt, detected), relevance));
         }
-        drafts.AddRange(await CaptureFillsAsync(lookups, detected, ct));
+        drafts.AddRange(await CaptureFillsAsync(lookups, linkOrders, detected, ct));
         foreach (var change in mutations.StatusChanges)
         {
             var play = await lookups.PlayAsync(change.PlayId, ct);
@@ -76,31 +83,33 @@ public sealed partial class VesselEventStore
         var fallback = change.OccurredAtUtc;
         if (play.InstrumentSource != InstrumentSource.Venue || change.Source != StatusChangeSource.Venue ||
             change.To is not (PlayStatus.Open or PlayStatus.Closed)) return fallback;
-        var links = await db.OrderLinks.Where(l => l.PlayId == play.Id && l.State == OrderLinkState.Linked).ToListAsync(ct);
-        var ids = links.Select(l => l.OrderId).ToArray();
-        var fills = await db.Fills.Where(f => f.AccountId == play.AccountId && f.ContractId == play.ContractId &&
-            ids.Contains(f.OrderId)).ToListAsync(ct);
-        var facts = links.SelectMany(l => fills.Where(f => f.OrderId == l.OrderId)
+        var rows = await db.LinkedOrders(db.OrderLinks.Where(l => l.PlayId == play.Id && l.State == OrderLinkState.Linked)).ToListAsync(ct);
+        var links = rows.Select(r => r.Link).ToList();
+        var orders = rows.Select(r => r.Order).DistinctBy(o => o.Id).ToList();
+        var orderOf = orders.ToDictionary(o => o.Id);
+        var fills = (await db.FillsOf(db.Orders.Where(o => orderOf.Keys.Contains(o.Id)))
+            .Where(f => f.AccountId == play.AccountId && f.ContractId == play.ContractId).ToListAsync(ct)).ToLookup(OrderKey.Of);
+        var facts = links.SelectMany(l => fills[OrderKey.Of(orderOf[l.ImportedOrderId])]
             .Select(f => new LinkedFill(l.Role, f))).ToList();
         if (facts.Any(f => f.Fill.Quantity <= 0)) return fallback;
         var side = ExecutionIntegrity.EntrySide(PlayDocuments.Read(play.Plan));
         var counted = facts.Where(f => !ExecutionIntegrity.Contradicts(f.Role, side, f.Fill)).ToList();
         var entries = counted.Where(f => f.Role == OrderLinkRole.Entry).ToList();
         if (entries.Count == 0) return fallback;
-        var orders = await db.Orders.Where(o => o.AccountId == play.AccountId && ids.Contains(o.OrderId)).ToListAsync(ct);
-        var incomplete = orders.Where(o => ExecutionIntegrity.MissingExecutions(o, fills.Where(f => f.OrderId == o.OrderId)))
-            .Select(o => o.OrderId).ToHashSet(StringComparer.Ordinal);
+        var incompleteOrders = orders.Where(o => ExecutionIntegrity.MissingExecutions(o, fills[OrderKey.Of(o)])).ToList();
+        var incomplete = incompleteOrders.Select(o => o.ExternalOrderId).ToHashSet(StringComparer.Ordinal);
+        var incompleteIds = incompleteOrders.Select(o => o.Id).ToHashSet();
         DateTimeOffset occurred;
         if (change.To == PlayStatus.Open)
         {
             // A partial resting order is valid evidence. Known missing executions cannot establish the first fill.
-            if (links.Any(l => l.Role == OrderLinkRole.Entry && incomplete.Contains(l.OrderId))) return fallback;
+            if (links.Any(l => l.Role == OrderLinkRole.Entry && incompleteIds.Contains(l.ImportedOrderId))) return fallback;
             occurred = entries.Min(f => f.Fill.OccurredAtUtc);
         }
         else
         {
-            var entryOrders = links.Where(l => l.Role == OrderLinkRole.Entry).Select(l => l.OrderId).ToHashSet(StringComparer.Ordinal);
-            if (orders.Any(o => entryOrders.Contains(o.OrderId) && o.Status == "open") ||
+            var entryOrders = links.Where(l => l.Role == OrderLinkRole.Entry).Select(l => l.ImportedOrderId).ToHashSet();
+            if (orders.Any(o => entryOrders.Contains(o.Id) && o.Status == "open") ||
                 !ExecutionIntegrity.Settled(new(play, [], facts, incomplete))) return fallback;
             occurred = counted.Where(f => f.Role != OrderLinkRole.Entry).Max(f => f.Fill.OccurredAtUtc);
         }
@@ -114,11 +123,15 @@ public sealed partial class VesselEventStore
     /// round trip. Claims cover exactly what per-order capture claimed (baselined accounts, linked orders, fills on
     /// the Play's contract), including historical, pre-baseline and contradictory fills whose events are suppressed.
     /// </summary>
-    private async Task<List<VesselEventDraft>> CaptureFillsAsync(CaptureLookups lookups, DateTimeOffset detected,
-        CancellationToken ct)
+    private async Task<List<VesselEventDraft>> CaptureFillsAsync(CaptureLookups lookups, IReadOnlyDictionary<Guid, ImportedOrder> linkOrders,
+        DateTimeOffset detected, CancellationToken ct)
     {
         var drafts = new List<VesselEventDraft>();
-        var affected = mutations.FillOrders.OrderBy(x => x.AccountId).ThenBy(x => x.OrderId, StringComparer.Ordinal).ToList();
+        // Orders are identified by account, contract and external ID; a changed link contributes its order's identity.
+        var affected = mutations.FillOrders.Select(x => new OrderKey(x.AccountId, x.ContractId, x.ExternalOrderId))
+            .Concat(mutations.LinkOrders.Select(x => linkOrders.GetValueOrDefault(x.ImportedOrderId)).OfType<ImportedOrder>().Select(OrderKey.Of))
+            .Distinct().OrderBy(x => x.AccountId).ThenBy(x => x.ExternalOrderId, StringComparer.Ordinal)
+            .ThenBy(x => x.ContractId, StringComparer.Ordinal).ToList();
         if (affected.Count == 0) return drafts;
         var baselines = new Dictionary<Guid, DateTimeOffset>();
         await using (var command = VesselEventSql.TransactionCommand(db, """
@@ -131,38 +144,42 @@ public sealed partial class VesselEventStore
         if (affected.Count == 0) return drafts;
 
         var accountIds = affected.Select(x => x.AccountId).Distinct().ToArray();
-        var orderIds = affected.Select(x => x.OrderId).Distinct(StringComparer.Ordinal).ToArray();
+        var externalIds = affected.Select(x => x.ExternalOrderId).Distinct(StringComparer.Ordinal).ToArray();
         var wanted = affected.ToHashSet();
-        // A linked link is unique per (owner, account, order); the candidate read may over-fetch across accounts.
-        var links = (await db.OrderLinks.Where(l => accountIds.Contains(l.AccountId) && orderIds.Contains(l.OrderId) &&
+        // The candidate read may over-fetch across accounts and contracts; the OrderKey rule keeps the wanted orders.
+        var retained = (await db.Orders.Where(o => accountIds.Contains(o.AccountId) && externalIds.Contains(o.ExternalOrderId))
+                .ToListAsync(ct)).Where(o => wanted.Contains(OrderKey.Of(o))).ToDictionary(OrderKey.Of);
+        var retainedIds = retained.Values.Select(o => o.Id).ToArray();
+        // A linked link is unique per (owner, order).
+        var links = retainedIds.Length == 0 ? [] : (await db.OrderLinks.Where(l => retainedIds.Contains(l.ImportedOrderId) &&
                 l.State == OrderLinkState.Linked).ToListAsync(ct))
-            .Where(l => wanted.Contains((l.AccountId, l.OrderId)))
-            .GroupBy(l => (l.AccountId, l.OrderId)).ToDictionary(g => g.Key, g => g.Single());
-        var linked = affected.Where(links.ContainsKey).ToList();
+            .GroupBy(l => l.ImportedOrderId).ToDictionary(g => g.Key, g => g.Single());
+        var linked = affected.Where(x => retained.TryGetValue(x, out var order) && links.ContainsKey(order.Id)).ToList();
         if (linked.Count == 0) return drafts;
 
-        await lookups.LoadPlaysAsync(linked.Select(x => links[x].PlayId), ct);
+        await lookups.LoadPlaysAsync(linked.Select(x => links[retained[x].Id].PlayId), ct);
         var linkedAccounts = linked.Select(x => x.AccountId).Distinct().ToArray();
-        var linkedOrders = linked.Select(x => x.OrderId).Distinct(StringComparer.Ordinal).ToArray();
-        // Within each (account, order) the database order is the per-order read's (occurred, source fill id) order.
-        var candidates = await db.Fills.Where(f => linkedAccounts.Contains(f.AccountId) && linkedOrders.Contains(f.OrderId))
-            .OrderBy(f => f.AccountId).ThenBy(f => f.OrderId).ThenBy(f => f.OccurredAtUtc).ThenBy(f => f.SourceFillId)
+        var linkedOrders = linked.Select(x => x.ExternalOrderId).Distinct(StringComparer.Ordinal).ToArray();
+        // Within each order the database order is the per-order read's (occurred, source fill id) order.
+        var candidates = await db.Fills.Where(f => linkedAccounts.Contains(f.AccountId) && linkedOrders.Contains(f.ExternalOrderId))
+            .OrderBy(f => f.AccountId).ThenBy(f => f.ExternalOrderId).ThenBy(f => f.OccurredAtUtc).ThenBy(f => f.SourceFillId)
             .ToListAsync(ct);
-        var byOrder = candidates.GroupBy(f => (f.AccountId, f.OrderId)).ToDictionary(g => g.Key, g => g.ToList());
-        var orders = new List<(PlayOrderLink Link, Play Play, List<ImportedFill> Fills)>();
+        var byOrder = candidates.GroupBy(OrderKey.Of).ToDictionary(g => g.Key, g => g.ToList());
+        var orders = new List<(PlayOrderLink Link, ImportedOrder Order, Play Play, List<ImportedFill> Fills)>();
         foreach (var key in linked)
         {
-            var link = links[key];
+            var order = retained[key];
+            var link = links[order.Id];
             var play = await lookups.PlayAsync(link.PlayId, ct)
                 ?? throw new InvalidOperationException("Linked Play not found.");
             var fills = byOrder.TryGetValue(key, out var rows) ? rows.Where(f => f.ContractId == play.ContractId).ToList() : [];
-            if (fills.Count != 0) orders.Add((link, play, fills));
+            if (fills.Count != 0) orders.Add((link, order, play, fills));
         }
         if (orders.Count == 0) return drafts;
 
         var claimed = await ClaimFillsAsync(orders.SelectMany(o => o.Fills), ct);
-        var emitting = new List<(PlayOrderLink Link, Play Play, List<ImportedFill> Fills, List<ImportedFill> New)>();
-        foreach (var (link, play, fills) in orders)
+        var emitting = new List<(PlayOrderLink Link, ImportedOrder Order, Play Play, List<ImportedFill> Fills, List<ImportedFill> New)>();
+        foreach (var (link, order, play, fills) in orders)
         {
             // Retrospective creation links history, not a new watched execution.
             var historical = play.Origin == PlayOrigin.Retrospective;
@@ -172,19 +189,13 @@ public sealed partial class VesselEventStore
             // Integrity rules match the existing lifecycle, not the venue's raw side vocabulary.
             var side = ExecutionIntegrity.EntrySide(PlayDocuments.Read(play.Plan));
             newlyClaimed.RemoveAll(f => ExecutionIntegrity.Contradicts(link.Role, side, f));
-            if (newlyClaimed.Count != 0) emitting.Add((link, play, fills, newlyClaimed));
+            if (newlyClaimed.Count != 0) emitting.Add((link, order, play, fills, newlyClaimed));
         }
         if (emitting.Count == 0) return drafts;
 
-        var emittingAccounts = emitting.Select(o => o.Link.AccountId).Distinct().ToArray();
-        var emittingOrders = emitting.Select(o => o.Link.OrderId).Distinct(StringComparer.Ordinal).ToArray();
-        var venueOrders = (await db.Orders.Where(o => emittingAccounts.Contains(o.AccountId) && emittingOrders.Contains(o.OrderId))
-            .ToListAsync(ct)).GroupBy(o => (o.AccountId, o.OrderId)).ToDictionary(g => g.Key, g => g.ToList());
-        foreach (var (link, play, fills, newlyClaimed) in emitting)
+        foreach (var (link, order, play, fills, newlyClaimed) in emitting)
         {
             var accountId = link.AccountId;
-            var orderId = link.OrderId;
-            var order = venueOrders.TryGetValue((accountId, orderId), out var matches) ? matches.SingleOrDefault() : null;
             var account = await lookups.AccountAsync(accountId, ct);
             var side = ExecutionIntegrity.EntrySide(PlayDocuments.Read(play.Plan));
             var counted = fills.Where(f => !ExecutionIntegrity.Contradicts(link.Role, side, f)).ToList();
@@ -194,16 +205,17 @@ public sealed partial class VesselEventStore
             {
                 role = link.Role.ToString().ToLowerInvariant(), side = newlyClaimed[0].Side,
                 filledQuantity = VesselEventValues.Sum(newlyClaimed.Select(f => f.Quantity)), cumulativeQuantity = cumulative,
-                remainingQuantity = order is null ? null : VesselEventValues.Exact(order.RemainingSize),
+                remainingQuantity = VesselEventValues.Exact(order.RemainingSize),
                 averagePrice = VesselEventValues.AveragePrice(counted.Select(f => (f.Price, f.Quantity))),
                 sourceFillCount = newlyClaimed.Count, sourceFillIdsComplete = newlyClaimed.Count <= 200,
                 // A venue's "filled" status alone does not prove all executions are retained.
-                complete = order is not null && order.Status == "filled" && !ExecutionIntegrity.MissingExecutions(order, counted)
+                complete = order.Status == "filled" && !ExecutionIntegrity.MissingExecutions(order, counted)
             });
-            drafts.Add(new("execution.filled", runId, $"order:{accountId}:{orderId}:filled:{cumulative}",
+            // The external ID alone collides across contracts, so the dedup key uses the internal order ID.
+            drafts.Add(new("execution.filled", runId, $"order:{accountId}:{order.Id}:filled:{cumulative}",
                 link.Role == OrderLinkRole.Stop ? "warning" : "info", occurred, detected,
                 new(accountId, account.VenueId, play.ContractId, play.Id, link.EntryId, link.LevelId),
-                new(trigger, [orderId], newlyClaimed.Take(200).Select(f => f.SourceFillId).ToArray()), data,
+                new(trigger, [order.ExternalOrderId], newlyClaimed.Take(200).Select(f => f.SourceFillId).ToArray()), data,
                 Timeliness(occurred, detected), play.Status is PlayStatus.Closed or PlayStatus.Cancelled ? "superseded" : "current"));
         }
         return drafts;
@@ -239,10 +251,9 @@ public sealed partial class VesselEventStore
 
     private async Task<JsonElement> ClosedDataAsync(Play play, CancellationToken ct)
     {
-        var links = await db.OrderLinks.Where(l => l.PlayId == play.Id && l.State == OrderLinkState.Linked).ToListAsync(ct);
-        var orders = links.Select(l => l.OrderId).ToArray();
-        var imported = await db.Fills.Where(f => f.AccountId == play.AccountId && orders.Contains(f.OrderId)).ToListAsync(ct);
-        var facts = links.SelectMany(l => imported.Where(f => f.OrderId == l.OrderId).Select(f => (Role: l.Role, Fill: f))).ToList();
+        var facts = (await db.LinkedFills(db.OrderLinks.Where(l => l.PlayId == play.Id && l.State == OrderLinkState.Linked))
+            .Where(x => x.Fill.AccountId == play.AccountId).Select(x => new { x.Link.Role, x.Fill }).ToListAsync(ct))
+            .Select(x => (x.Role, x.Fill)).ToList();
         if (play.InstrumentSource == InstrumentSource.Manual)
         {
             var rows = await db.ManualExecutions.Where(f => f.PlayId == play.Id).ToListAsync(ct);

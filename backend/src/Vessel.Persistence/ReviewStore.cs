@@ -27,8 +27,10 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
         var first = await fills.Select(f => (DateTimeOffset?)f.OccurredAtUtc).MinAsync(ct);
         var from = ReviewService.From(query.Period, asOf);
         var unassigned = await fills.CountAsync(f => (from == null || f.OccurredAtUtc > from) &&
-            !db.OrderLinks.Any(l => l.AccountId == f.AccountId && l.OrderId == f.OrderId &&
-                l.State == OrderLinkState.Linked && db.Plays.Any(p => p.Id == l.PlayId && p.ContractId == f.ContractId)), ct);
+            !db.OrderLinks.Any(l => l.AccountId == f.AccountId && l.State == OrderLinkState.Linked &&
+                db.Orders.Any(o => o.OwnerId == l.OwnerId && o.AccountId == l.AccountId && o.Id == l.ImportedOrderId &&
+                    o.ContractId == f.ContractId && o.ExternalOrderId == f.ExternalOrderId) &&
+                db.Plays.Any(p => p.Id == l.PlayId && p.ContractId == f.ContractId)), ct);
         await transaction.CommitAsync(ct);
         return new(portfolios, accounts, closed, open, unassigned, first, incomplete);
     }
