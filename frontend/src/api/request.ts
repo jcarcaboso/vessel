@@ -23,7 +23,7 @@ export interface SessionGeneration {
 
 /** Copy for an answer discarded because the session changed meanwhile. A write may still have been applied. */
 export const sessionChangedRead = 'Your session changed in another tab. Try again.'
-export const sessionChangedWrite = 'Your session changed in another tab. This change may already be saved; Vessel reloads your workspace so you can check before trying again.'
+export const sessionChangedWrite = 'Your session changed in another tab. This change may already be saved; check before trying again.'
 
 /**
  * A 401 or 403 answer, with the ProblemDetails `code` when a cookie call received one. `generation` is the session
