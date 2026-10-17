@@ -129,6 +129,18 @@ describe('account menu', () => {
     expect(disconnect).toHaveBeenCalledOnce()
   })
 
+  it('returns focus to the owner card on Escape, and moves it to Sessions when chosen', async () => {
+    const { user } = await mount()
+    const trigger = screen.getByRole('button', { name: /^Sam Rivera, account menu/ })
+    await user.click(trigger)
+    await screen.findByRole('menu')
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(trigger).toHaveFocus())
+    await user.click(trigger)
+    await user.click(await screen.findByRole('menuitem', { name: /Sessions/ }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Sessions' })).toHaveFocus())
+  })
+
   it('shows operators a disabled Users & invitations item until its page exists', async () => {
     const { user } = await mount('operator')
     await user.click(screen.getByRole('button', { name: /^Sam Rivera, account menu/ }))

@@ -67,6 +67,15 @@ const pages = [
 /** `identity` is present in Wallet mode only; Token mode keeps the owner card that disconnects at once. */
 type ShellProps = { system: SystemInfo; disconnect: () => void; api: WorkspaceApi; identity?: ShellIdentity }
 
+/** Focuses an element of a page that may still be loading, for up to a second. */
+function focusWhenShown(id: string, tries = 20) {
+  window.setTimeout(() => {
+    const element = document.getElementById(id)
+    if (element) element.focus()
+    else if (tries > 1) focusWhenShown(id, tries - 1)
+  }, 50)
+}
+
 /** The log line above each page title: today's date, with a greeting on the Overview. */
 function logLine(page: Page, owner: string, now = new Date()) {
   const date = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' }).format(now)
@@ -317,7 +326,7 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
         <a href="#settings" className={`shell-nav-item ${page === 'settings' ? 'active' : ''}`} aria-label="Settings" title="Settings" aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} aria-hidden="true" /><span className="sidebar-copy">Settings</span></a>
         {identity ? <AccountMenu identity={identity} onSignOut={disconnectSession}
           onProfile={() => { setSettingsTab('profile'); navigate('settings') }}
-          onSessions={() => { setSettingsTab('profile'); navigate('settings'); window.setTimeout(() => document.getElementById('sessions-heading')?.focus(), 0) }} />
+          onSessions={() => { setSettingsTab('profile'); navigate('settings'); focusWhenShown('sessions-heading') }} />
           : <button className="owner-card" onClick={disconnectSession} aria-label={`Disconnect ${system.owner.displayName}'s session`} title={`Disconnect ${system.owner.displayName}'s browser session`}><span className="owner-avatar" aria-hidden="true">{system.owner.displayName.slice(0, 1).toUpperCase()}</span><span className="sidebar-copy"><strong>{system.owner.displayName}</strong></span><LogOut size={15} aria-hidden="true" /></button>}
       </div>
     </aside>

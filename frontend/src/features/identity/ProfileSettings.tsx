@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { LogOut, Monitor, Pencil, Plus, Smartphone, Trash2 } from 'lucide-react'
 import { createPublicAuthApi, displayNameLimit, walletLabelLimit, type SessionRow, type StepUpAction, type WalletDto } from '@/api/auth'
 import { ApiError, errorMessage } from '@/api/errors'
@@ -10,6 +10,7 @@ import { InfoTip } from '@/components/ui/info-tip'
 import { Input } from '@/components/ui/input'
 import { UserAvatar } from './IdentityParts'
 import { validDisplayName, validLabel } from './profile-rules'
+import { focusedControl, openDialog, returnFocus } from './return-focus'
 import { signingMeaning } from './SignInScreen'
 import type { ShellIdentity } from './types'
 import { WalletSignFlow } from './WalletSignFlow'
@@ -27,7 +28,8 @@ function ago(at: string, now = Date.now()) {
 }
 const mobile = (agent: string | null) => !!agent && /\b(iOS|iPhone|iPad|Android)\b/i.test(agent)
 
-type StepUpRequest = { action: StepUpAction; target?: WalletDto; resolve: (done: boolean) => void }
+/** `opener` is what had focus when the step-up opened, usually a control in the dialog underneath. */
+type StepUpRequest = { action: StepUpAction; target?: WalletDto; opener: HTMLElement | null; resolve: (done: boolean) => void }
 
 /**
  * Settings → Profile & sign-in in Wallet mode (mockup screens 8–9): display name, sign-in wallets and sessions.
@@ -45,6 +47,10 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
   const [stepUp, setStepUp] = useState<StepUpRequest | null>(null)
   const [linking, setLinking] = useState(false)
   const [removing, setRemoving] = useState<WalletDto | null>(null)
+  // These dialogs open from state, so they remember where focus goes back to.
+  const linkButton = useRef<HTMLButtonElement>(null)
+  const walletsHeading = useRef<HTMLHeadingElement>(null)
+  const removeOpener = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -55,7 +61,7 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
   }, [auth, reloadKey])
 
   const requestStepUp = useCallback((action: StepUpAction, target?: WalletDto) => new Promise<boolean>(resolve => {
-    setStepUp({ action, ...target ? { target } : {}, resolve })
+    setStepUp({ action, ...target ? { target } : {}, opener: focusedControl(), resolve })
   }), [])
   const finishStepUp = (done: boolean) => { stepUp?.resolve(done); setStepUp(null) }
 
@@ -72,6 +78,8 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
     try {
       const done = await withStepUp('wallet.remove', wallet, () => auth.removeWallet(wallet.id))
       if (done === null) return
+      // The row is about to go; land on the list instead.
+      removeOpener.current = walletsHeading.current
       setRemoving(null)
       // The server revoked this wallet's sessions; when that includes this tab, leave now.
       if (wallet.current) { identity.endSession(); return }
@@ -91,12 +99,12 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
     <div className="profile-split">
       <section className="shell-panel profile-section" aria-labelledby="wallets-title">
         <header>
-          <h2 id="wallets-title">Sign-in wallets <InfoTip label="About sign-in wallets">Any of these wallets can sign in to this journal. They are not venue accounts and don't import trading history. {signingMeaning}</InfoTip></h2>
-          <Button variant="outline" size="sm" onClick={() => setLinking(true)} disabled={!wallets}><Plus size={15} aria-hidden="true" />Link wallet</Button>
+          <h2 id="wallets-title" ref={walletsHeading} tabIndex={-1}>Sign-in wallets <InfoTip label="About sign-in wallets">Any of these wallets can sign in to this journal. They are not venue accounts and don't import trading history. {signingMeaning}</InfoTip></h2>
+          <Button ref={linkButton} variant="outline" size="sm" onClick={() => setLinking(true)} disabled={!wallets}><Plus size={15} aria-hidden="true" />Link wallet</Button>
         </header>
         {wallets === null && !loadError ? <p className="muted profile-loading" role="status">Loading sign-in wallets…</p>
           : <ul className="profile-rows">{linked.map(wallet => <WalletRow key={wallet.id} wallet={wallet} only={linked.length === 1} auth={auth}
-            onRemove={() => setRemoving(wallet)} onChanged={reload} />)}</ul>}
+            onRemove={() => { removeOpener.current = focusedControl(); setRemoving(wallet) }} onChanged={reload} />)}</ul>}
       </section>
       <section className="shell-panel profile-section" aria-labelledby="sessions-heading">
         <header>
@@ -122,7 +130,7 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
     <div className="profile-sign-out"><Button variant="outline" onClick={onSignOut}><LogOut size={15} aria-hidden="true" />Sign out</Button></div>
 
     {removing && <Dialog open onOpenChange={next => { if (!next) setRemoving(null) }}>
-      <DialogContent className="workspace-dialog">
+      <DialogContent className="workspace-dialog" onCloseAutoFocus={event => returnFocus(() => removeOpener.current, () => walletsHeading.current)(event)}>
         <DialogHeader><DialogTitle>Remove sign-in wallet?</DialogTitle>
           <DialogDescription>{removing.current
             ? 'This wallet signed in this session. Removing it signs you out here and on every device it signed in.'
@@ -133,6 +141,7 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
       </DialogContent>
     </Dialog>}
     {linking && <LinkWalletDialog identity={identity} wallets={linked} onStepUp={() => requestStepUp('wallet.link')}
+      onCloseAutoFocus={event => returnFocus(() => linkButton.current, () => walletsHeading.current)(event)}
       onClose={() => setLinking(false)} onLinked={() => { setLinking(false); notify({ tone: 'success', message: 'Wallet linked. It can now sign in to this journal.' }); reload() }} />}
     {stepUp && <StepUpDialog identity={identity} wallets={linked} request={stepUp} onFinish={finishStepUp} />}
   </div>
@@ -219,8 +228,10 @@ function StepUpDialog({ identity, wallets, request, onFinish }: {
   identity: ShellIdentity; wallets: readonly WalletDto[]; request: StepUpRequest; onFinish: (done: boolean) => void
 }) {
   const accept = useMemo(() => linkedOnly(wallets), [wallets])
+  // Back to the control that asked, or else to the dialog underneath.
+  const onCloseAutoFocus = useMemo(() => returnFocus(() => request.opener, openDialog), [request.opener])
   return <Dialog open onOpenChange={next => { if (!next) onFinish(false) }}>
-    <DialogContent className="workspace-dialog identity-dialog">
+    <DialogContent className="workspace-dialog identity-dialog" onCloseAutoFocus={onCloseAutoFocus}>
       <DialogHeader><DialogTitle>Confirm with a linked wallet</DialogTitle>
         <DialogDescription>{stepUpCopy[request.action](request.target)}</DialogDescription></DialogHeader>
       <WalletSignFlow purpose="Confirm" accept={accept}
@@ -232,8 +243,9 @@ function StepUpDialog({ identity, wallets, request, onFinish }: {
 }
 
 /** Mockup screen 9: a step-up from a linked wallet, then a signature from the new wallet with its own statement. */
-function LinkWalletDialog({ identity, wallets, onStepUp, onClose, onLinked }: {
+function LinkWalletDialog({ identity, wallets, onStepUp, onClose, onLinked, onCloseAutoFocus }: {
   identity: ShellIdentity; wallets: readonly WalletDto[]; onStepUp: () => Promise<boolean>; onClose: () => void; onLinked: () => void
+  onCloseAutoFocus: (event: Event) => void
 }) {
   const [phase, setPhase] = useState<'confirm' | 'link'>('confirm')
   const [label, setLabel] = useState('')
@@ -241,7 +253,7 @@ function LinkWalletDialog({ identity, wallets, onStepUp, onClose, onLinked }: {
   const accept = useMemo(() => linkedOnly(wallets), [wallets])
   const [confirmedWith, setConfirmedWith] = useState<string | null>(null)
   return <Dialog open onOpenChange={next => { if (!next) onClose() }}>
-    <DialogContent className="workspace-dialog identity-dialog">
+    <DialogContent className="workspace-dialog identity-dialog" onCloseAutoFocus={onCloseAutoFocus}>
       <DialogHeader><DialogTitle>Link another wallet</DialogTitle>
         <DialogDescription>{phase === 'confirm' ? 'First, sign with a wallet already linked to this journal.'
           : `Confirmed${confirmedWith ? ` with ${confirmedWith}` : ''}. Now sign with the wallet you want to add.`}</DialogDescription></DialogHeader>

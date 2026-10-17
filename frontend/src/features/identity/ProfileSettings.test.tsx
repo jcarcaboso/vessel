@@ -121,6 +121,41 @@ describe('Profile & sign-in', () => {
     expect(sent('/api/auth/wallets')[0]!.body).toEqual({ challengeId: challengeFixture().challengeId, signature, label: 'Phone' })
   })
 
+  describe('focus', () => {
+    it('returns to Link wallet when its dialog closes with Escape', async () => {
+      const { user } = mount()
+      const link = await screen.findByRole('button', { name: 'Link wallet' })
+      await waitFor(() => expect(link).toBeEnabled())
+      await user.click(link)
+      await screen.findByRole('dialog', { name: 'Link another wallet' })
+      await user.keyboard('{Escape}')
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      await waitFor(() => expect(link).toHaveFocus())
+    })
+
+    it('returns to the row\'s Remove button when the removal dialog is cancelled', async () => {
+      const { user } = mount()
+      const remove = (await screen.findAllByRole('button', { name: /Remove/ }))[1]!
+      await user.click(remove)
+      await user.click(await screen.findByRole('button', { name: 'Cancel' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      await waitFor(() => expect(remove).toHaveFocus())
+    })
+
+    it('returns from a nested step-up to the dialog underneath', async () => {
+      routes[`DELETE /api/auth/wallets/${secondWalletFixture.id}`] = () => problem(403, 'step-up-required')
+      const { user } = mount()
+      await user.click((await screen.findAllByRole('button', { name: /Remove/ }))[1]!)
+      const removal = await screen.findByRole('dialog', { name: 'Remove sign-in wallet?' })
+      const confirm = within(removal).getByRole('button', { name: 'Remove wallet' })
+      await user.click(confirm)
+      await screen.findByRole('dialog', { name: 'Confirm with a linked wallet' })
+      await user.keyboard('{Escape}')
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Confirm with a linked wallet' })).not.toBeInTheDocument())
+      await waitFor(() => expect(removal.contains(document.activeElement)).toBe(true))
+    })
+  })
+
   describe('when the step-up grant lapses before the new wallet signs', () => {
     const phone = '0x19B4c7aE02F3d81e6C5a9b0D2E7f4A3c8D1e0a53'
     const linked = { ...secondWalletFixture, id: '7f3a1c9e-2b4d-4e8f-a6c0-5d9e1b3f7a24', address: phone, label: null }
@@ -147,6 +182,8 @@ describe('Profile & sign-in', () => {
       routes['POST /api/auth/wallets'] = [() => problem(403, 'step-up-required'), () => json(linked, 201)]
       const { user } = mount()
       const dialog = await linkUntilRefused(user)
+      // The nested step-up hands focus back to the link dialog.
+      await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
       await user.click(await within(dialog).findByRole('button', { name: 'Sign with Rabby Wallet' }))
       await waitFor(() => expect(sent('/api/auth/wallets')).toHaveLength(2))
       expect(sent('/api/auth/wallets/challenge')).toHaveLength(2)

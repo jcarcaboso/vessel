@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { DropdownMenu } from 'radix-ui'
 import { ChevronsUpDown, LogOut, Monitor, UserRound, UsersRound } from 'lucide-react'
 import { SourceChip } from '@/components/accounts/AccountIdentity'
@@ -16,6 +16,8 @@ export function AccountMenu({ identity, onProfile, onSessions, onSignOut }: {
   const [open, setOpen] = useState(false)
   const [sessions, setSessions] = useState<number | null>(null)
   const auth = identity.auth
+  // An item that moves focus elsewhere (Sessions) keeps the menu from sending it back to the owner card.
+  const movesFocus = useRef(false)
   useEffect(() => {
     if (!open) return
     const controller = new AbortController()
@@ -31,13 +33,14 @@ export function AccountMenu({ identity, onProfile, onSessions, onSignOut }: {
       </button>
     </DropdownMenu.Trigger>
     <DropdownMenu.Portal>
-      <DropdownMenu.Content className="account-menu" side="top" align="start" sideOffset={8} collisionPadding={12}>
+      <DropdownMenu.Content className="account-menu" side="top" align="start" sideOffset={8} collisionPadding={12}
+        onCloseAutoFocus={event => { if (movesFocus.current) { movesFocus.current = false; event.preventDefault() } }}>
         <div className="account-menu-head">
           <UserAvatar name={user.displayName} address={wallet.address} size="lg" />
           <span><strong>{user.displayName}</strong><small><SourceChip source={wallet.address} />{identity.walletName && <>via {identity.walletName}</>}</small></span>
         </div>
         <DropdownMenu.Item className="account-menu-item" onSelect={onProfile}><UserRound size={16} aria-hidden="true" />Profile &amp; sign-in</DropdownMenu.Item>
-        <DropdownMenu.Item className="account-menu-item" onSelect={onSessions}><Monitor size={16} aria-hidden="true" />Sessions
+        <DropdownMenu.Item className="account-menu-item" onSelect={() => { movesFocus.current = true; onSessions() }}><Monitor size={16} aria-hidden="true" />Sessions
           {sessions !== null && <span className="identity-pill" aria-label={`${sessions} active`}>{sessions}</span>}</DropdownMenu.Item>
         {user.role === 'operator' && <DropdownMenu.Item className="account-menu-item" disabled>
           <UsersRound size={16} aria-hidden="true" />Users &amp; invitations<span className="identity-pill">Soon</span></DropdownMenu.Item>}
