@@ -223,12 +223,14 @@ internal static class Isolated
     /// <summary>
     /// Sends the same request with the other owner's ID and with a random unknown ID. Both must answer the same status
     /// and the same body: ProblemDetails <c>title</c>, <c>detail</c>, <c>code</c> and everything else except the
-    /// per-response <c>traceId</c> (the <c>X-Correlation-ID</c> header is not compared). Returns the shared status.
+    /// per-response <c>traceId</c> (the <c>X-Correlation-ID</c> header is not compared). A response may echo the ID the
+    /// caller sent, so each body is compared with its own ID replaced. Returns the shared status.
     /// </summary>
     public static async Task<HttpStatusCode> SameAsUnknown(Owner caller, Guid foreign, Func<Guid, HttpRequestMessage> request)
     {
+        var unknown = Guid.NewGuid();
         using var foreignRequest = request(foreign);
-        using var unknownRequest = request(Guid.NewGuid());
+        using var unknownRequest = request(unknown);
         using var foreignResponse = await caller.Http.SendAsync(foreignRequest);
         using var unknownResponse = await caller.Http.SendAsync(unknownRequest);
         var foreignBody = await foreignResponse.Content.ReadAsStringAsync();
@@ -237,8 +239,7 @@ internal static class Isolated
         Assert.True(foreignResponse.StatusCode == unknownResponse.StatusCode,
             $"{what}: foreign ID answered {(int)foreignResponse.StatusCode} ({foreignBody}), unknown ID {(int)unknownResponse.StatusCode} ({unknownBody}).");
         Assert.Equal(unknownResponse.Content.Headers.ContentType?.MediaType, foreignResponse.Content.Headers.ContentType?.MediaType);
-        Assert.Equal(WithoutTrace(unknownBody), WithoutTrace(foreignBody));
-        Assert.DoesNotContain(foreign.ToString(), foreignBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(Comparable(unknownBody, unknown), Comparable(foreignBody, foreign));
         return foreignResponse.StatusCode;
     }
 
@@ -249,12 +250,12 @@ internal static class Isolated
     public static Func<Guid, HttpRequestMessage> Request(HttpMethod method, Func<Guid, string> path, Func<Guid, object?>? body = null) =>
         id => new(method, path(id)) { Content = body?.Invoke(id) is { } content ? JsonContent.Create(content) : null };
 
-    private static string WithoutTrace(string body)
+    private static string Comparable(string body, Guid sent)
     {
         if (body.Length == 0) return body;
         var node = JsonNode.Parse(body);
         if (node is JsonObject problem) problem.Remove("traceId");
-        return node?.ToJsonString() ?? "null";
+        return (node?.ToJsonString() ?? "null").Replace(sent.ToString("D"), "{sent-id}", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The body contains none of the other owner's IDs or markers.</summary>
