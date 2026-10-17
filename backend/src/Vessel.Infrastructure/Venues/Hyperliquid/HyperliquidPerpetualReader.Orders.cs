@@ -12,9 +12,9 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
     private const string OrdersNotice =
         "Primary perpetual orders only. Order history is the latest 2,000 status updates; older orders are not available.";
 
-    public Task<VenueOrderReadResult> ReadOrdersAsync(string publicAddress, CancellationToken cancellationToken)
+    public Task<VenueOrderReadResult> ReadOrdersAsync(string sourceId, CancellationToken cancellationToken)
     {
-        EvmAddress.Require(publicAddress);
+        var publicAddress = EvmAddress.Require(sourceId);
         var latestTimestamp = Math.Min(253402300799999L, timeProvider.GetUtcNow().ToUnixTimeMilliseconds() + 300000);
         return ReadBoundedAsync(async token =>
         {

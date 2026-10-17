@@ -55,7 +55,7 @@ public sealed record TrackRecord(int ClosedPlays, int DecidedPlays, int Window, 
     /// The decimal mean when the decimal sum fits; otherwise the exact sum over the count, rounded once. The mean of
     /// representable terms is itself representable, so an overflowing intermediate sum never fails the record.
     /// </summary>
-    private static decimal Average(IReadOnlyList<decimal> values)
+    private static decimal Average(List<decimal> values)
     {
         try
         {

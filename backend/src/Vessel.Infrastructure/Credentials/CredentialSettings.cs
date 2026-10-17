@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
@@ -33,6 +34,11 @@ public static class CredentialRegistration
 
 internal sealed class CredentialKeyRing(string? activeKeyId, Dictionary<string, byte[]> keys) : IDisposable
 {
+    private static readonly JsonSerializerOptions StrictJson =
+        new() { UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow };
+    private static readonly SearchValues<char> KeyIdCharacters =
+        SearchValues.Create("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_");
+
     internal string? ActiveKeyId => activeKeyId;
     internal Dictionary<string, byte[]> Keys => keys;
 
@@ -57,7 +63,7 @@ internal sealed class CredentialKeyRing(string? activeKeyId, Dictionary<string, 
                 try
                 {
                     settings = JsonSerializer.Deserialize<CredentialSettings>(bytes,
-                        new JsonSerializerOptions { UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow })
+                        StrictJson)
                         ?? throw new CredentialStorageException();
                     if (settings.KeyFile is not null) throw new CredentialStorageException();
                 }
@@ -72,7 +78,7 @@ internal sealed class CredentialKeyRing(string? activeKeyId, Dictionary<string, 
                 throw new CredentialStorageException();
             foreach (var (id, value) in settings.Keys)
             {
-                if (id.Length is < 1 or > 64 || id.AsSpan().IndexOfAnyExcept("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") >= 0)
+                if (id.Length is < 1 or > 64 || id.AsSpan().IndexOfAnyExcept(KeyIdCharacters) >= 0)
                     throw new CredentialStorageException();
                 var key = Convert.FromBase64String(value);
                 decoded.Add(id, key);

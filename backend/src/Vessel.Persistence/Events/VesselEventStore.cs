@@ -23,11 +23,11 @@ public sealed partial class VesselEventStore(VesselDbContext db, VesselEventMuta
     private Guid runId = Guid.CreateVersion7();
     private string trigger = "owner";
 
-    public Task SetRunAsync(Guid id, string source, CancellationToken cancellationToken) => VesselEventSql.ParticipateAsync(db, () =>
+    public Task SetRunAsync(Guid runId, string trigger, CancellationToken cancellationToken) => VesselEventSql.ParticipateAsync(db, () =>
     {
-        if (id == Guid.Empty || source is not ("owner" or "monitor"))
+        if (runId == Guid.Empty || trigger is not ("owner" or "monitor"))
             throw new ArgumentException("Invalid event run.");
-        runId = id; trigger = source;
+        this.runId = runId; this.trigger = trigger;
         return Task.CompletedTask;
     }, cancellationToken);
 

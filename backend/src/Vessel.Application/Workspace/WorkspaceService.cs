@@ -330,7 +330,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     /// spot ledgers, so perps equity and the wallet total add up. Supported stablecoins only; other assets are excluded.
     /// </summary>
     // Keep individual ledger amounts until the exact display sum; decimal addition can round within one account.
-    private static IReadOnlyList<decimal>? Balance(Account a, AccountSnapshot? s)
+    private static List<decimal>? Balance(Account a, AccountSnapshot? s)
     {
         if (a.VenueId == VenueDescriptor.ManualId) return a.ManualAccountValueUsd is { } manual ? [manual] : null;
         if (s is null) return null;
@@ -349,7 +349,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         return s.AvailableMarginUsd is not null ? "margin" : s.WithdrawableUsd is not null ? "withdrawable" : null;
     }
 
-    private IReadOnlyList<decimal>? AvailableBalance(Account a, AccountSnapshot? s) => AvailableSource(a, s) switch
+    private List<decimal>? AvailableBalance(Account a, AccountSnapshot? s) => AvailableSource(a, s) switch
     {
         "wallet" => s!.Stablecoins.Select(balance => balance.Available).ToList(),
         "margin" => [s!.AvailableMarginUsd!.Value],

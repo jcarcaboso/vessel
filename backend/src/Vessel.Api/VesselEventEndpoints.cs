@@ -95,16 +95,19 @@ public static class VesselEventEndpoints
     }
 
     // The page cursor already names the epoch; an accepted request cursor keeps its own sequence.
+    // Both parses always succeed: StreamAsync rejected an invalid request cursor with 400 before reading, and
+    // the page cursor is produced by the server's own VesselEventCursor.Format. The results are discarded deliberately.
     private static string Accepted(string? after, string next)
     {
-        VesselEventCursor.TryParse(after, out var requested);
-        VesselEventCursor.TryParse(next, out var page);
+        _ = VesselEventCursor.TryParse(after, out var requested);
+        _ = VesselEventCursor.TryParse(next, out var page);
         return VesselEventCursor.Format(page.Epoch, requested.Sequence);
     }
 
+    // The page cursor is server-produced (VesselEventCursor.Format), so the parse always succeeds.
     private static string Resume(string pageCursor, string sequence)
     {
-        VesselEventCursor.TryParse(pageCursor, out var page);
+        _ = VesselEventCursor.TryParse(pageCursor, out var page);
         return VesselEventCursor.Format(page.Epoch, long.Parse(sequence, System.Globalization.CultureInfo.InvariantCulture));
     }
 

@@ -6,7 +6,7 @@ namespace Vessel.Application.Venues;
 public interface IVenueOrderReader
 {
     string VenueId { get; }
-    Task<VenueOrderReadResult> ReadOrdersAsync(string publicAddress, CancellationToken cancellationToken);
+    Task<VenueOrderReadResult> ReadOrdersAsync(string sourceId, CancellationToken cancellationToken);
     Task<VenueOrderReadResult> ReadOrdersAsync(Account account, CancellationToken cancellationToken) =>
         ReadOrdersAsync(account.SourceId ?? throw new VenueReadException("Account source is unavailable."), cancellationToken);
 }

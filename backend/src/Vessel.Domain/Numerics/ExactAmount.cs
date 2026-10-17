@@ -29,6 +29,10 @@ public readonly record struct ExactAmount(BigInteger Units) : IComparable<ExactA
     public static ExactAmount operator -(ExactAmount a) => new(-a.Units);
     public ExactAmount Abs() => new(BigInteger.Abs(Units));
     public int CompareTo(ExactAmount other) => Units.CompareTo(other.Units);
+    public static bool operator <(ExactAmount a, ExactAmount b) => a.Units < b.Units;
+    public static bool operator <=(ExactAmount a, ExactAmount b) => a.Units <= b.Units;
+    public static bool operator >(ExactAmount a, ExactAmount b) => a.Units > b.Units;
+    public static bool operator >=(ExactAmount a, ExactAmount b) => a.Units >= b.Units;
     /// <summary>A 56-place notional over a quantity, rounded half away from zero to 28 places; null for a zero quantity.</summary>
     public static string? Average(BigInteger notional, ExactAmount quantity)
     {

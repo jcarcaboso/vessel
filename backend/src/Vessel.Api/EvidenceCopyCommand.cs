@@ -18,7 +18,7 @@ public static class EvidenceCopyCommand
         Originals, database records and active-provider configuration are never changed.
         """;
 
-    public static async Task<int> RunAsync(string[] args, TextWriter output, CancellationToken ct = default, bool toLocal = false)
+    public static async Task<int> RunAsync(string[] args, TextWriter output, bool toLocal = false, CancellationToken ct = default)
     {
         if (args is ["--help"])
         {

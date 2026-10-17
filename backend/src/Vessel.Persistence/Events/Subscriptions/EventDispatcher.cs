@@ -174,8 +174,11 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
         };
     }
 
+    // The scalar result of pg_advisory_xact_lock_shared is void; callers only await the lock, so Task is the contract.
+#pragma warning disable CA1859
     private Task LockRetentionSharedAsync(CancellationToken ct) =>
         VesselEventSql.ScalarAsync(db, "SELECT pg_advisory_xact_lock_shared(@key)", ct, ("key", VesselEventSql.RetentionLock(db.CurrentOwnerId)));
+#pragma warning restore CA1859
 
     private async Task<(long Sequence, string Type, DateTimeOffset? ExpiresAt, string Payload, long Floor)?> RetainedAsync(
         Guid eventId, CancellationToken ct)

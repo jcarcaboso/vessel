@@ -133,7 +133,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
             throw new ProblemException(400, "A correction requires a plain reason, up to 2000 characters.");
     }
 
-    private async Task<ManualExecutionsDto> ManualResult(Play play, IReadOnlyList<ManualExecution> rows, CancellationToken ct)
+    private async Task<ManualExecutionsDto> ManualResult(Play play, List<ManualExecution> rows, CancellationToken ct)
     {
         var ledger = ManualLedger.Calculate(play, rows);
         var history = await diary.ManualHistoryAsync(play.Id, ct);

@@ -77,7 +77,7 @@ public interface IWorkspaceStore
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);
     Task<MarketDataAccount?> MarketDataAccountAsync(Guid id, CancellationToken ct);
     Task<AccountSnapshot?> SnapshotAsync(Guid id, CancellationToken ct);
-    Task<bool> SourceExistsAsync(string venueId, string address, CancellationToken ct);
+    Task<bool> SourceExistsAsync(string venueId, string sourceId, CancellationToken ct);
     Task<List<AccountSnapshot>> SnapshotsAsync(CancellationToken ct);
     Task<List<ImportedFill>> FillsAsync(Guid? accountId, int limit, CancellationToken ct);
     Task<int> FillCountAsync(CancellationToken ct);
