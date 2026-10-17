@@ -23,8 +23,9 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
         var snapshotAt = observation.Read.Sync.Snapshot.ObservedAtUtc;
         var recent = now - MonitorOptions.Lease;
         // Positive evidence admits a terminal Play's subject even from a partial book: an old entry reported resting.
+        // The same venue ID on another contract is another order, so the key is (contract, external ID).
         var resting = observation.Read.Orders?.Orders.Where(x => x.Status == Venues.VenueOrderStatus.Open)
-            .Select(x => x.OrderId).Distinct(StringComparer.Ordinal).ToArray() ?? [];
+            .Select(x => new OrderKey(observation.Account.Id, x.ContractId, x.OrderId)).Distinct().ToArray() ?? [];
         var facts = await store.LoadAsync(observation.Account.Id, snapshotAt > recent ? snapshotAt : recent, resting, ct);
         var records = (await store.RecordsAsync(observation.Account.Id, ct)).ToDictionary(x => (x.Kind, x.SubjectKey));
         var scan = Observe(observation, facts, now);

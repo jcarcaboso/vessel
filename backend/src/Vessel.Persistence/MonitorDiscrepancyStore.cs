@@ -27,7 +27,7 @@ public sealed class MonitorDiscrepancyStore(VesselDbContext db, UnitOfWork work)
         var accounts = await db.Accounts.FromSqlInterpolated($"SELECT * FROM accounts WHERE \"Id\" = {accountId} AND \"OwnerId\" = {db.CurrentOwnerId} FOR UPDATE").ToListAsync(ct);
         if (accounts.Count != 1) throw new ProblemException(404, "Account not found.");
     }
-    public async Task<MonitorDiscrepancyFacts> LoadAsync(Guid accountId, DateTimeOffset recentSince, IReadOnlyCollection<string> restingOrderIds,
+    public async Task<MonitorDiscrepancyFacts> LoadAsync(Guid accountId, DateTimeOffset recentSince, IReadOnlyCollection<OrderKey> restingOrders,
         CancellationToken ct)
     {
         work.RequireActive();
@@ -35,7 +35,14 @@ public sealed class MonitorDiscrepancyStore(VesselDbContext db, UnitOfWork work)
         // account row lock, which every Play writer takes first (PlayStore.WithPlayLockAsync, ExecutionStore), so the
         // Play rows need no lock of their own here.
         var watches = db.Set<MonitorExitWatch>();
-        var resting = restingOrderIds.ToArray();
+        // SQL narrows by external ID; the OrderKey rule keeps only the account's orders on the reported contract, so an
+        // order with the same venue ID on another contract never admits its terminal Play.
+        var restingKeys = restingOrders.Where(x => x.AccountId == accountId).ToHashSet();
+        var restingExternal = restingKeys.Select(x => x.ExternalOrderId).Distinct(StringComparer.Ordinal).ToArray();
+        Guid[] resting = restingExternal.Length == 0 ? [] : (await db.Orders.AsNoTracking()
+                .Where(o => o.AccountId == accountId && restingExternal.Contains(o.ExternalOrderId))
+                .Select(o => new { o.Id, o.AccountId, o.ContractId, o.ExternalOrderId }).ToListAsync(ct))
+            .Where(o => restingKeys.Contains(new OrderKey(o.AccountId, o.ContractId, o.ExternalOrderId))).Select(o => o.Id).ToArray();
         var records = db.Set<PlayDiscrepancy>();
         var plays = await db.Plays.Where(p => p.AccountId == accountId && p.InstrumentSource == InstrumentSource.Venue &&
                 p.Origin == PlayOrigin.Planned && p.Status != PlayStatus.Draft &&
@@ -49,8 +56,7 @@ public sealed class MonitorDiscrepancyStore(VesselDbContext db, UnitOfWork work)
                     records.Any(d => d.AccountId == accountId && d.PlayId == p.Id && (d.State == DiscrepancyLifecycle.Candidate ||
                         d.State == DiscrepancyLifecycle.Open || d.PendingFingerprint != null ||
                         d.PublishedTransition == DiscrepancyLifecycle.Opened || d.PublishedTransition == DiscrepancyLifecycle.Unverifiable)) ||
-                    db.OrderLinks.Any(l => l.PlayId == p.Id && l.State == OrderLinkState.Linked && db.Orders.Any(o =>
-                        o.OwnerId == l.OwnerId && o.AccountId == l.AccountId && o.Id == l.ImportedOrderId && resting.Contains(o.ExternalOrderId)))))
+                    db.OrderLinks.Any(l => l.PlayId == p.Id && l.State == OrderLinkState.Linked && resting.Contains(l.ImportedOrderId))))
             .OrderBy(x => x.Id).ToListAsync(ct);
         var ids = plays.Select(x => x.Id).ToArray();
         var links = await db.OrderLinks.Where(x => x.AccountId == accountId && ids.Contains(x.PlayId))
