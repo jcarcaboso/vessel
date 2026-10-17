@@ -71,7 +71,7 @@ public sealed class RateLimitTests
     }
 
     [Fact]
-    public void Step_up_and_link_limits_share_the_authenticating_session_not_the_IP()
+    public void Step_up_and_link_limits_have_independent_session_buckets_not_IP_buckets()
     {
         using var limits = new IdentityRateLimits();
         var context = new DefaultHttpContext();
@@ -79,10 +79,24 @@ public sealed class RateLimitTests
         context.Request.Path = "/api/auth/step-up/challenge";
         context.User = new(new ClaimsIdentity([new Claim(SessionAuthentication.SessionClaim, Guid.NewGuid().ToString())], SessionAuthentication.SchemeName));
         for (var i = 0; i < 10; i++) using (var lease = limits.Requests.AttemptAcquire(context)) Assert.True(lease.IsAcquired);
-        context.Request.Path = "/api/auth/wallets";
+        context.Request.Path = "/api/auth/step-up";
         context.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.3");
-        using (var lease = limits.Requests.AttemptAcquire(context)) Assert.False(lease.IsAcquired);
+        using (var lease = limits.Requests.AttemptAcquire(context))
+        {
+            Assert.False(lease.IsAcquired);
+            Assert.InRange(IdentityRateLimits.RetryAfter(lease), 1, 600);
+        }
+        context.Request.Path = "/api/auth/wallets";
+        for (var i = 0; i < 10; i++) using (var lease = limits.Requests.AttemptAcquire(context)) Assert.True(lease.IsAcquired);
+        context.Request.Path = "/api/auth/wallets/challenge";
+        using (var lease = limits.Requests.AttemptAcquire(context))
+        {
+            Assert.False(lease.IsAcquired);
+            Assert.InRange(IdentityRateLimits.RetryAfter(lease), 1, 600);
+        }
         context.User = new(new ClaimsIdentity([new Claim(SessionAuthentication.SessionClaim, Guid.NewGuid().ToString())], SessionAuthentication.SchemeName));
+        using (var lease = limits.Requests.AttemptAcquire(context)) Assert.True(lease.IsAcquired);
+        context.Request.Path = "/api/auth/step-up/challenge";
         using (var lease = limits.Requests.AttemptAcquire(context)) Assert.True(lease.IsAcquired);
     }
 }
