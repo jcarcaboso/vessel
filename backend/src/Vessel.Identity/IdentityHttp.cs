@@ -30,9 +30,9 @@ public static class IdentityHttp
                 if (!Guid.TryParse(request.Headers["X-Vessel-User"], out var supplied) || supplied.ToString() != user)
                     throw IdentityErrors.Error(401, "session-user-mismatch");
             }
-            if ((isPublic && HttpMethods.IsPost(request.Method)) ||
-                (signedIn && request.Path.StartsWithSegments("/api") &&
-                    request.Method is "POST" or "PUT" or "PATCH" or "DELETE"))
+            var unsafeMethod = !HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method) &&
+                !HttpMethods.IsOptions(request.Method) && !HttpMethods.IsTrace(request.Method);
+            if (unsafeMethod && (isPublic || (signedIn && request.Path.StartsWithSegments("/api"))))
             {
                 if (!settings.AcceptsOrigin(request.Headers.Origin.ToString())) throw IdentityErrors.Error(403, "origin-rejected");
                 if (request.Headers.TryGetValue("Sec-Fetch-Site", out var site) && site != "same-origin")
@@ -64,10 +64,9 @@ public static class IdentityHttp
         {
             var request = await BodyAsync<ChallengeRequest>(context);
             var binding = cookies.BindingToken(context);
-            var reused = IdentityTokens.Valid(binding);
-            binding = reused ? binding! : IdentityTokens.Create();
+            binding = IdentityTokens.Valid(binding) ? binding! : IdentityTokens.Create();
             var challenge = await service.ChallengeAsync(request.Address, context.Request.Headers.Origin.ToString(), binding, context.RequestAborted);
-            if (!reused) cookies.SetBinding(context, binding);
+            cookies.SetBinding(context, binding);
             return Results.Ok(challenge);
         }).AllowAnonymous();
         group.MapPost("/verify", async (HttpContext context, IdentityService service, IdentityCookies cookies) =>

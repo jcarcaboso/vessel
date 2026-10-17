@@ -134,7 +134,7 @@ public sealed class IdentityApiTests
         Assert.Equal(secure, cookie.Contains("; secure", StringComparison.Ordinal));
         Assert.DoesNotContain("domain=", cookie);
         var second = await client.PostAsJsonAsync("/api/auth/challenge", new { address = key.GetPublicAddress() });
-        Assert.False(second.Headers.Contains("Set-Cookie"));
+        Assert.Equal(cookie, second.Headers.GetValues("Set-Cookie").Single());
         var challenge = (await first.Content.ReadFromJsonAsync<ChallengeDto>())!;
         var verify = await client.PostAsJsonAsync("/api/auth/verify", new { challengeId = challenge.ChallengeId,
             signature = IdentityDatabase.Sign(key, challenge.Message), remember });
@@ -148,6 +148,36 @@ public sealed class IdentityApiTests
         client.DefaultRequestHeaders.Add("Origin", "null");
         client.DefaultRequestHeaders.Add("X-Vessel-User", owner.User.Id.ToString());
         await IdentityHttpTest.Code(await client.DeleteAsync("/api/unknown-write"), 403, "origin-rejected");
+    }
+
+    [PostgresFact]
+    public async Task A_late_challenge_renews_the_same_binding_and_verifies_after_the_original_cookie_expired()
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        var key = EthECKey.GenerateKey();
+        var owner = await database.SeedAsync(key);
+        await using var factory = IdentityHttpTest.Factory(database, owner.User.Id);
+        using var client = factory.CreateClient(new() { BaseAddress = new("https://vessel.test"), HandleCookies = false });
+        client.DefaultRequestHeaders.Add("Origin", "https://vessel.test");
+        client.DefaultRequestHeaders.Add("X-Vessel-Request", "1");
+        var first = await client.PostAsJsonAsync("/api/auth/challenge", new { address = key.GetPublicAddress() });
+        var binding = Microsoft.Net.Http.Headers.SetCookieHeaderValue.Parse(first.Headers.GetValues("Set-Cookie").Single());
+        var originalExpiry = database.Clock.Now + binding.MaxAge!.Value;
+        client.DefaultRequestHeaders.Add("Cookie", $"{binding.Name}={binding.Value}");
+        database.Clock.Now = database.Clock.Now.AddMinutes(6);
+        var retry = await client.PostAsJsonAsync("/api/auth/challenge", new { address = key.GetPublicAddress() });
+        var renewed = Microsoft.Net.Http.Headers.SetCookieHeaderValue.Parse(retry.Headers.GetValues("Set-Cookie").Single());
+        Assert.Equal(binding.Value, renewed.Value);
+        Assert.Equal(TimeSpan.FromMinutes(10), renewed.MaxAge);
+        var renewedExpiry = database.Clock.Now + renewed.MaxAge!.Value;
+        var challenge = (await retry.Content.ReadFromJsonAsync<ChallengeDto>())!;
+        database.Clock.Now = database.Clock.Now.AddMinutes(4.5);
+        // Model the browser's Max-Age using the same fake clock as challenge verification.
+        Assert.True(database.Clock.Now > originalExpiry && database.Clock.Now < renewedExpiry);
+        var verified = await client.PostAsJsonAsync("/api/auth/verify", new { challengeId = challenge.ChallengeId,
+            signature = IdentityDatabase.Sign(key, challenge.Message), remember = false });
+        Assert.Equal(HttpStatusCode.OK, verified.StatusCode);
+        Assert.Equal("signed-in", (await verified.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("status").GetString());
     }
 
     [PostgresFact]
@@ -193,6 +223,51 @@ public sealed class IdentityApiTests
         if (value is not null) client.DefaultRequestHeaders.Add(header, value);
         await IdentityHttpTest.Code(await client.PostAsJsonAsync("/api/auth/challenge", new { address = EthECKey.GenerateKey().GetPublicAddress() }),
             403, code);
+    }
+
+    [PostgresTheory]
+    [InlineData("post", "/api/auth/sign-out")]
+    [InlineData("delete", "/api/auth/sign-out")]
+    [InlineData("PROPFIND", "/api/auth/sign-out")]
+    [InlineData("post", "/api/accounts/11111111-1111-1111-1111-111111111111")]
+    [InlineData("delete", "/api/accounts/11111111-1111-1111-1111-111111111111")]
+    [InlineData("PROPFIND", "/api/accounts/11111111-1111-1111-1111-111111111111")]
+    public async Task Guard_checks_lowercase_and_unusual_unsafe_methods_on_auth_and_journal_routes(string method, string path)
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        var key = EthECKey.GenerateKey();
+        var owner = await database.SeedAsync(key);
+        await using var factory = IdentityHttpTest.Factory(database, owner.User.Id);
+        using var client = IdentityHttpTest.Client(factory);
+        var session = await IdentityHttpTest.SignInAsync(client, key);
+        HttpRequestMessage Request() => new(new HttpMethod(method), path)
+        {
+            Content = JsonContent.Create(new { expectedSessionId = session.Session.Id })
+        };
+        client.DefaultRequestHeaders.Remove("Origin");
+        using (var missingOrigin = Request())
+            await IdentityHttpTest.Code(await client.SendAsync(missingOrigin), 403, "origin-rejected");
+        client.DefaultRequestHeaders.Add("Origin", "https://vessel.test");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-Site", "cross-site");
+        using (var crossSite = Request())
+            await IdentityHttpTest.Code(await client.SendAsync(crossSite), 403, "csrf-rejected");
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/session")).StatusCode);
+        await using var db = database.CreateDbContext();
+        Assert.Null((await db.Sessions.SingleAsync()).RevokedAt);
+    }
+
+    [PostgresTheory]
+    [InlineData("post")]
+    [InlineData("delete")]
+    [InlineData("PROPFIND")]
+    public async Task Public_auth_routes_guard_every_unsafe_method_even_without_a_session(string method)
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        await using var factory = IdentityHttpTest.Factory(database, Guid.NewGuid());
+        using var client = IdentityHttpTest.Client(factory);
+        client.DefaultRequestHeaders.Remove("Origin");
+        using var request = new HttpRequestMessage(new HttpMethod(method), "/api/auth/challenge");
+        await IdentityHttpTest.Code(await client.SendAsync(request), 403, "origin-rejected");
     }
 
     [PostgresFact]
