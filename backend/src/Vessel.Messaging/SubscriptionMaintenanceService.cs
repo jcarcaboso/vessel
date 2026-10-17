@@ -2,19 +2,22 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Vessel.Persistence.Events;
+using Vessel.Application.Ownership;
 using Vessel.Persistence.Events.Subscriptions;
 
 namespace Vessel.Messaging;
 
 /// <summary>
 /// Worker maintenance: catch-up for the subscriptions this host runs, every
-/// <see cref="EventSubscriptionLimits.CatchUpInterval"/>, and the owner's retention sweep hourly. Replica-safe:
+/// <see cref="EventSubscriptionLimits.CatchUpInterval"/>, and retention for every retained owner hourly. Replica-safe:
 /// receipts and the low-water mark are claimed in PostgreSQL and floor decisions are serialized per owner.
 /// Registered by a worker host, never by the API.
 /// </summary>
-public sealed class SubscriptionMaintenanceService(MessagingHost host, IServiceScopeFactory scopes,
+public sealed class SubscriptionMaintenanceService(MessagingHost host, IOwnerScopeFactory scopes,
+    IJournalOwnerDirectory owners, SystemEventSubscriptionStore store, TimeProvider time,
     ILogger<SubscriptionMaintenanceService> logger, IEnumerable<IMaintenanceHeartbeat> heartbeats) : BackgroundService
 {
+    private readonly Dictionary<string, Guid?> continuations = new(StringComparer.Ordinal);
     private static readonly TimeSpan RetentionInterval = TimeSpan.FromHours(1);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -25,13 +28,12 @@ public sealed class SubscriptionMaintenanceService(MessagingHost host, IServiceS
         var retentionDue = DateTimeOffset.MinValue;
         do
         {
-            if (DateTimeOffset.UtcNow >= retentionDue)
+            if (time.GetUtcNow() >= retentionDue)
             {
-                retentionDue = DateTimeOffset.UtcNow + RetentionInterval;
+                retentionDue = time.GetUtcNow() + RetentionInterval;
                 try
                 {
-                    await using var scope = scopes.CreateAsyncScope();
-                    await scope.ServiceProvider.GetRequiredService<EventRetention>().RunAsync(stoppingToken);
+                    await RunRetentionAsync(stoppingToken);
                 }
                 catch (Exception error) when (!stoppingToken.IsCancellationRequested)
                 {
@@ -43,8 +45,7 @@ public sealed class SubscriptionMaintenanceService(MessagingHost host, IServiceS
             {
                 try
                 {
-                    await using var scope = scopes.CreateAsyncScope();
-                    await scope.ServiceProvider.GetRequiredService<EventCatchUp>().RunAsync(subscription, stoppingToken);
+                    await RunCatchUpAsync(subscription, stoppingToken);
                 }
                 catch (Exception error) when (!stoppingToken.IsCancellationRequested)
                 {
@@ -64,6 +65,51 @@ public sealed class SubscriptionMaintenanceService(MessagingHost host, IServiceS
                     }
                 }
         } while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+
+    public async Task RunRetentionAsync(CancellationToken ct)
+    {
+        Guid? after = null;
+        while (true)
+        {
+            var page = await store.RetentionOwnersAsync(after, ct);
+            if (page.Count == 0) return;
+            foreach (var owner in page)
+            {
+                after = owner;
+                try
+                {
+                    await using var scope = scopes.Create(owner);
+                    await scope.Services.GetRequiredService<EventRetention>().RunAsync(ct);
+                }
+                catch (Exception error) when (!ct.IsCancellationRequested)
+                {
+                    logger.LogWarning("Event retention for owner {OwnerId} failed with {ErrorType}.", owner, error.GetType().Name);
+                }
+            }
+        }
+    }
+
+    public async Task RunCatchUpAsync(EventSubscription subscription, CancellationToken ct)
+    {
+        continuations.TryGetValue(subscription.Name, out var after);
+        var page = await store.CatchUpOwnersAsync(subscription, after, time.GetUtcNow(), ct);
+        foreach (var owner in page)
+        {
+            continuations[subscription.Name] = owner;
+            if (await owners.StatusAsync(owner, ct) != JournalOwnerStatus.Active) continue;
+            try
+            {
+                await using var scope = scopes.Create(owner);
+                await scope.Services.GetRequiredService<EventCatchUp>().RunAsync(subscription, ct);
+            }
+            catch (Exception error) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning("Catch-up for subscription {Subscription}, owner {OwnerId} failed with {ErrorType}.",
+                    subscription.Name, owner, error.GetType().Name);
+            }
+        }
+        if (page.Count < 100) continuations[subscription.Name] = null;
     }
 }
 

@@ -49,8 +49,7 @@ public static class MessagingProvisioning
         {
             foreach (var subscription in registry.Modules.SelectMany(m => m.Subscriptions))
             {
-                await using var scope = provider.CreateAsyncScope();
-                var created = await scope.ServiceProvider.GetRequiredService<EventSubscriptionRegistry>()
+                var created = await provider.GetRequiredService<SystemEventSubscriptionStore>()
                     .RegisterAsync(subscription, cancellationToken);
                 (created ? registered : existing).Add(subscription.Name);
             }
@@ -68,38 +67,53 @@ public static class MessagingProvisioning
         registry ??= VesselModuleRegistry.From(settings);
         bool removed;
         await using (var provider = RegistrationServices(configuration))
-        await using (var scope = provider.CreateAsyncScope())
-            removed = await scope.ServiceProvider.GetRequiredService<EventSubscriptionRegistry>().DeregisterAsync(subscription, cancellationToken);
+            removed = await provider.GetRequiredService<SystemEventSubscriptionStore>().DeregisterAsync(subscription, cancellationToken);
         await new MessagingTopology(settings, registry).DeleteSubscriptionQueueAsync(subscription, cancellationToken);
         return removed;
     }
 
     /// <summary>The bounded admin retry for a compiled-in subscription's failed receipts.</summary>
     public static async Task<int> RetryFailedAsync(IConfiguration configuration, string subscription, int limit, int extraAttempts,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Guid? ownerId, bool allOwners)
     {
+        if (allOwners == ownerId.HasValue || ownerId == Guid.Empty)
+            throw new ArgumentException("Specify --owner <guid> or --all-owners.");
         var settings = MessagingHosting.Settings(configuration);
         var definition = VesselModuleRegistry.From(settings).Modules.SelectMany(m => m.Subscriptions)
             .SingleOrDefault(s => s.Name == subscription) ?? throw new InvalidOperationException("Unknown subscription.");
+        if (limit is < 1 or > 1000 || extraAttempts < 1 || extraAttempts > definition.Limits.MaxAdminRetryBudget)
+            throw new ArgumentOutOfRangeException(nameof(extraAttempts), "The admin retry budget is bounded.");
         await using var provider = RegistrationServices(configuration);
-        await using var scope = provider.CreateAsyncScope();
-        return await scope.ServiceProvider.GetRequiredService<EventReceiptAdmin>()
-            .RetryFailedAsync(definition, limit, extraAttempts, cancellationToken);
+        var scopes = provider.GetRequiredService<IOwnerScopeFactory>();
+        var store = provider.GetRequiredService<SystemEventSubscriptionStore>();
+        var total = 0;
+        Guid? after = null;
+        do
+        {
+            var page = ownerId is { } owner ? new[] { owner } : await store.RetentionOwnersAsync(after, cancellationToken);
+            if (page.Count == 0) break;
+            foreach (var id in page)
+            {
+                await using var scope = scopes.Create(id);
+                total += await scope.Services.GetRequiredService<EventReceiptAdmin>()
+                    .RetryFailedAsync(definition, limit, extraAttempts, cancellationToken);
+                after = id;
+            }
+        } while (allOwners);
+        return total;
     }
 
     private static ServiceProvider RegistrationServices(IConfiguration configuration)
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton<IJournalOwnerContext>(new ConfiguredOwner(JournalOwner.Parse(configuration[JournalOwner.ConfigurationKey])));
+        services.AddScoped<IJournalOwnerContext, AssignedOwnerContext>();
         services.AddVesselPersistence(configuration);
         services.AddVesselEvents(configuration);
         // Registration and admin paths append no events; nothing is published from here.
         services.AddScoped<IVesselEventOutbox, NoPublication>();
         return services.BuildServiceProvider();
     }
-
-    private sealed record ConfiguredOwner(Guid OwnerId) : IJournalOwnerContext;
 
     private sealed class NoPublication : IVesselEventOutbox
     {

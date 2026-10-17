@@ -17,6 +17,7 @@ public sealed class EventReceiptAdmin(VesselDbContext db, UnitOfWork work, TimeP
             // cannot be published over the receipts it reopens, and a published floor excludes them here.
             await VesselEventSql.ScalarAsync(db, "SELECT pg_advisory_xact_lock_shared(@key)", cancellationToken,
                 ("key", VesselEventSql.RetentionLock(db.CurrentOwnerId)));
+            if (!await SubscriptionProgress.LockRegistrationAsync(db, subscription, cancellationToken)) return 0;
             return await VesselEventSql.ExecuteAsync(db, """
             UPDATE event_receipts r SET state='pending',max_attempts=r.attempts+@extra,next_attempt_at=@now,settled_at=NULL
             WHERE (r.owner_id,r.subscription,r.event_id) IN (

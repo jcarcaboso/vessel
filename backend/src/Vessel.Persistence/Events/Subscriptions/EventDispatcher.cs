@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Vessel.Application.Events;
+using Vessel.Application.Ownership;
 
 namespace Vessel.Persistence.Events.Subscriptions;
 
@@ -13,6 +14,8 @@ public enum DispatchOutcome
     /// <summary>Terminal: attempt cap, unsupported version, unreadable payload or a permanent handler failure.</summary>
     Failed,
     InvalidOwner,
+    /// <summary>No new handling while suspended; discovery resumes after restore.</summary>
+    Suspended,
     /// <summary>Neither a retained event nor a dedup identity: whatever the message claims, it is not ours.</summary>
     Unknown,
     /// <summary>Pruned (dedup identity only) or retained below the retention floor. Not recorded as handled.</summary>
@@ -38,7 +41,7 @@ public readonly record struct DispatchResult(DispatchOutcome Outcome)
 /// back and the attempt is recorded in the same transaction, so the receipt lock is never released in between.
 /// </summary>
 public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServiceProvider services,
-    TimeProvider time, ILogger<EventDispatcher> logger)
+    TimeProvider time, ILogger<EventDispatcher> logger, IJournalOwnerDirectory owners)
 {
     private static readonly string[] Terminal = ["delivered", "skipped", "expired", "failed"];
 
@@ -48,6 +51,8 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
         // The scope's owner was fixed before the context was resolved. A message never chooses it.
         if (ownerId == Guid.Empty || ownerId != db.CurrentOwnerId || eventId == Guid.Empty)
             return new(DispatchOutcome.InvalidOwner);
+        var eligibility = await EligibilityAsync(cancellationToken);
+        if (eligibility is { } outcome) return new(outcome);
         var attempt = new Attempt();
         try
         {
@@ -60,6 +65,8 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
             // The whole unit rolled back; record the attempt in a new transaction so it still counts towards the cap.
             logger.LogWarning("Subscription {Subscription} could not commit event {EventId} ({ErrorType}).",
                 subscription.Name, eventId, error.GetType().Name);
+            eligibility = await EligibilityAsync(cancellationToken);
+            if (eligibility is { } failureOutcome) return new(failureOutcome);
             return new(await work.ExecuteAsync(() => RecordFailureAsync(subscription, eventId, attempt.ObservedAttempts,
                 error, cancellationToken), cancellationToken));
         }
@@ -69,12 +76,14 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
         DispatchTrigger trigger, Attempt attempt, CancellationToken ct)
     {
         await LockRetentionSharedAsync(ct);
+        var responsible = await SubscriptionProgress.InitializeAsync(db, subscription, ct);
+        if (responsible is null) return DispatchOutcome.NotResponsible;
         var retained = await RetainedAsync(eventId, ct);
         if (retained is null)
             return await KnownIdentityAsync(eventId, ct) ? DispatchOutcome.Historical : DispatchOutcome.Unknown;
         var (sequence, type, expiresAt, payload, floor) = retained.Value;
         if (sequence <= floor) return DispatchOutcome.Historical;
-        if (!await ResponsibleAsync(subscription, sequence, type, ct)) return DispatchOutcome.NotResponsible;
+        if (sequence <= responsible || !subscription.Matches(type)) return DispatchOutcome.NotResponsible;
 
         await VesselEventSql.ExecuteAsync(db, """
             INSERT INTO event_receipts(owner_id,subscription,event_id,sequence,state,attempts,max_attempts,next_attempt_at,created_at)
@@ -125,8 +134,10 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
         Exception error, CancellationToken ct)
     {
         await LockRetentionSharedAsync(ct);
+        if (!await SubscriptionProgress.LockRegistrationAsync(db, subscription, ct)) return DispatchOutcome.NotResponsible;
         if (await RetainedAsync(eventId, ct) is not { } retained || retained.Sequence <= retained.Floor)
             return DispatchOutcome.Historical;
+        if (!await ResponsibleAsync(subscription, retained.Sequence, retained.Type, ct)) return DispatchOutcome.NotResponsible;
         var now = time.GetUtcNow();
         await VesselEventSql.ExecuteAsync(db, """
             INSERT INTO event_receipts(owner_id,subscription,event_id,sequence,state,attempts,max_attempts,next_attempt_at,created_at)
@@ -201,22 +212,17 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
         await VesselEventSql.ScalarAsync(db, "SELECT 1 FROM event_dedup WHERE owner_id=@owner AND event_id=@id LIMIT 1",
             ct, ("owner", db.CurrentOwnerId), ("id", eventId)) is not null;
 
-    private async Task<bool> ResponsibleAsync(EventSubscription subscription, long sequence, string type, CancellationToken ct)
-    {
-        await using var command = VesselEventSql.TransactionCommand(db, """
-            SELECT responsible_from,filter_fingerprint FROM event_subscriptions
-            WHERE owner_id=@owner AND name=@name FOR KEY SHARE
-            """, ("owner", db.CurrentOwnerId), ("name", subscription.Name));
-        await using var row = await command.ExecuteReaderAsync(ct);
-        if (!await row.ReadAsync(ct)) return false;
-        if (row.GetString(1) != subscription.Fingerprint)
+    private async Task<bool> ResponsibleAsync(EventSubscription subscription, long sequence, string type, CancellationToken ct) =>
+        subscription.Matches(type) && await SubscriptionProgress.InitializeAsync(db, subscription, ct) is { } responsible &&
+        sequence > responsible;
+
+    private async Task<DispatchOutcome?> EligibilityAsync(CancellationToken ct) =>
+        await owners.StatusAsync(db.CurrentOwnerId, ct) switch
         {
-            // Registrations are immutable; a host built with a different filter must not settle receipts.
-            logger.LogWarning("Subscription {Subscription} is registered with a different filter; not dispatching.", subscription.Name);
-            return false;
-        }
-        return sequence > row.GetInt64(0) && subscription.Matches(type);
-    }
+            JournalOwnerStatus.Active => null,
+            JournalOwnerStatus.Suspended => DispatchOutcome.Suspended,
+            _ => DispatchOutcome.InvalidOwner
+        };
 
     private async Task<(string State, int Attempts, int MaxAttempts, DateTimeOffset NextAttemptAt)?> LockReceiptAsync(
         string subscription, Guid eventId, bool skipLocked, CancellationToken ct)

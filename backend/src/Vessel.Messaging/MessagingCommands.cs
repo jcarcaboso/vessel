@@ -17,8 +17,8 @@ public static class MessagingCommands
         Usage: dotnet Vessel.Api.dll provision-messaging
                dotnet Vessel.Api.dll rotate-event-epoch
                dotnet Vessel.Api.dll deregister-event-subscription <name>
-               dotnet Vessel.Api.dll retry-event-receipts <name> [--limit 1-1000] [--attempts n]
-        Reads ConnectionStrings__Vessel, Vessel__Auth__OwnerId and Vessel__Messaging__* from server configuration.
+               dotnet Vessel.Api.dll retry-event-receipts <name> (--owner <guid> | --all-owners) [--limit 1-1000] [--attempts n]
+        Reads ConnectionStrings__Vessel and Vessel__Messaging__* from server configuration.
         provision-messaging runs after the EF migrations: envelope storage for every deployment, the broker topology
         of every module and insert-only subscription registrations. Restore procedure: stop every host, restore the
         database, rotate-event-epoch, provision-messaging, then start the hosts.
@@ -56,8 +56,8 @@ public static class MessagingCommands
                     await output.WriteLineAsync(removed ? $"Deregistered subscription {name}; its receipts and queue were removed."
                         : $"Subscription {name} was not registered; its queue was removed if present.");
                     return 0;
-                case ["retry-event-receipts", var name, .. var options] when Options(options, out var limit, out var attempts):
-                    var retried = await MessagingProvisioning.RetryFailedAsync(configuration, name, limit, attempts, ct);
+                case ["retry-event-receipts", var name, .. var options] when Options(options, out var limit, out var attempts, out var owner, out var allOwners):
+                    var retried = await MessagingProvisioning.RetryFailedAsync(configuration, name, limit, attempts, ct, owner, allOwners);
                     await output.WriteLineAsync($"Returned {retried} failed receipt(s) of {name} to pending with {attempts} more attempt(s).");
                     return 0;
                 default:
@@ -74,21 +74,31 @@ public static class MessagingCommands
         }
     }
 
-    private static bool Options(string[] options, out int limit, out int attempts)
+    private static bool Options(string[] options, out int limit, out int attempts, out Guid? owner, out bool allOwners)
     {
-        limit = 100; attempts = 3;
-        for (var i = 0; i < options.Length; i += 2)
+        limit = 100; attempts = 3; owner = null; allOwners = false;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < options.Length; i++)
         {
-            if (i + 1 >= options.Length || !int.TryParse(options[i + 1], NumberStyles.None, CultureInfo.InvariantCulture, out var value))
-                return false;
-            switch (options[i])
+            var option = options[i];
+            if (!seen.Add(option)) return false;
+            if (option == "--all-owners") { allOwners = true; continue; }
+            if (++i >= options.Length) return false;
+            if (option == "--owner")
+            {
+                if (!Guid.TryParse(options[i], out var id) || id == Guid.Empty) return false;
+                owner = id;
+                continue;
+            }
+            if (!int.TryParse(options[i], NumberStyles.None, CultureInfo.InvariantCulture, out var value)) return false;
+            switch (option)
             {
                 case "--limit": limit = value; break;
                 case "--attempts": attempts = value; break;
                 default: return false;
             }
         }
-        return true;
+        return allOwners != owner.HasValue && limit is >= 1 and <= 1000 && attempts >= 1;
     }
 
     private static string List(IReadOnlyList<string> names) => names.Count == 0 ? "none" : string.Join(", ", names);
