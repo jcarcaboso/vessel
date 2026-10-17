@@ -49,6 +49,28 @@ public sealed class OperatorReadinessTests
         Assert.Equal(command != "suspend", await database.Sessions().StillValidAsync(session.Session.Session.Id, default));
     }
 
+    [PostgresTheory]
+    [InlineData("suspend")]
+    [InlineData("demote")]
+    public async Task Members_and_walletless_operators_change_while_no_operator_has_a_wallet(string command)
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        var owner = await database.SeedAsync(EthECKey.GenerateKey());
+        var walletless = await database.SeedAsync(EthECKey.GenerateKey());
+        var member = await database.SeedAsync(EthECKey.GenerateKey(), role: "member");
+        await using (var setup = database.CreateDbContext())
+            await setup.Wallets.Where(x => x.UserId == owner.User.Id || x.UserId == walletless.User.Id).ExecuteDeleteAsync();
+        var config = database.Configuration(owner.User.Id);
+        Assert.Equal(0, await IdentityCommands.RunAsync([command, "--user", walletless.User.Id.ToString()], config, true, new StringWriter()));
+        if (command == "suspend")
+            Assert.Equal(0, await IdentityCommands.RunAsync([command, "--user", member.User.Id.ToString()], config, true, new StringWriter()));
+        await using var state = database.CreateDbContext();
+        var changed = await state.Users.SingleAsync(x => x.Id == walletless.User.Id);
+        Assert.Equal(command == "suspend" ? "suspended" : "active", changed.Status);
+        Assert.Equal(command == "demote" ? "member" : "operator", changed.Role);
+        if (command == "suspend") Assert.Equal("suspended", (await state.Users.SingleAsync(x => x.Id == member.User.Id)).Status);
+    }
+
     [PostgresFact]
     public async Task Concurrent_suspensions_keep_one_active_operator_with_a_wallet()
     {

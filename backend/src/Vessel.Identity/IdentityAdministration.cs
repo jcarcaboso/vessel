@@ -82,7 +82,7 @@ public static partial class IdentityCommands
                     case "revoke-sessions":
                         return await RevokeSessionsAsync(db, id, "operator", now, ct);
                     case "suspend":
-                        if (user.Status == "active" && !await HasActiveOperatorWithWalletAsync(db, id, ct))
+                        if (await IsLastActiveOperatorWithWalletAsync(db, user, ct))
                         { await output.WriteLineAsync("Suspension would leave no active operator with a linked wallet."); return -1; }
                         await RevokeSessionsAsync(db, id, "suspended", now, ct);
                         if (user.Status == "suspended") return 0;
@@ -98,7 +98,7 @@ public static partial class IdentityCommands
                         break;
                     case "demote":
                         if (user.Role != "operator") return 0;
-                        if (user.Status == "active" && !await HasActiveOperatorWithWalletAsync(db, id, ct))
+                        if (await IsLastActiveOperatorWithWalletAsync(db, user, ct))
                         { await output.WriteLineAsync("The last active operator with a linked wallet cannot be demoted."); return -1; }
                         user.Role = "member";
                         break;
@@ -117,6 +117,12 @@ public static partial class IdentityCommands
             return 3;
         }
     }
+
+    // Only a user who is one of the active operators with a wallet can remove the last of them; members and
+    // wallet-less operators can always be suspended or demoted, even while no such operator exists.
+    private static async Task<bool> IsLastActiveOperatorWithWalletAsync(IdentityDbContext db, IdentityUser user, CancellationToken ct) =>
+        user.Status == "active" && user.Role == "operator" && await db.Wallets.AnyAsync(wallet => wallet.UserId == user.Id, ct) &&
+        !await HasActiveOperatorWithWalletAsync(db, user.Id, ct);
 
     private static Task<bool> HasActiveOperatorWithWalletAsync(IdentityDbContext db, Guid? excludingUser, CancellationToken ct) =>
         db.Users.AnyAsync(user => (excludingUser == null || user.Id != excludingUser) &&
