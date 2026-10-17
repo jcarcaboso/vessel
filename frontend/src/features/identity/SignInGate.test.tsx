@@ -6,7 +6,7 @@ import { channelBus } from '@/test/session-channel'
 import { systemFixture } from '@/test/system-fixture'
 import { lastWalletKey } from './wallets/discovery'
 import type { WalletProvider } from './wallets/provider'
-import { noticeKey, notices } from './session'
+import { landingKey, noticeKey, notices, workspaceNotices } from './session'
 import { SignInGate } from './SignInGate'
 
 const address = walletFixture.address
@@ -105,6 +105,73 @@ describe('session probe', () => {
     const { user } = mount()
     await user.click(await screen.findByRole('button', { name: 'Retry' }))
     expect(sent('/api/auth/session')).toHaveLength(2)
+  })
+})
+
+describe('notices and the reload boundary', () => {
+  function mountShell(bus = channelBus(), navigate = vi.fn()) {
+    const view = render(<SignInGate registration="invitation" originAccepted channels={bus.factory} navigate={navigate}>
+      {(_system, _disconnect, _api, identity) => <div><p>Shell for {identity.session.user.displayName}</p>
+        {identity.notice && <p role="status">{identity.notice}</p>}
+        <button type="button" onClick={() => identity.noticePresented?.()}>Presented</button></div>}
+    </SignInGate>)
+    return { ...view, navigate, user: userEvent.setup() }
+  }
+
+  it('hands the notice to the workspace when the reload finds another person signed in, and keeps it until shown', async () => {
+    sessionStorage.setItem(noticeKey, notices.otherUser)
+    routes['/api/auth/session'] = () => json(sessionFixture)
+    const { user } = mountShell()
+    expect(await screen.findByText(workspaceNotices[notices.otherUser])).toHaveAttribute('role', 'status')
+    expect(screen.getByText(/^Shell for Sam Rivera/)).toBeVisible()
+    expect(sessionStorage.getItem(noticeKey)).toBe(notices.otherUser)
+    await user.click(screen.getByRole('button', { name: 'Presented' }))
+    await waitFor(() => expect(screen.queryByText(workspaceNotices[notices.otherUser])).not.toBeInTheDocument())
+    expect(sessionStorage.getItem(noticeKey)).toBeNull()
+  })
+
+  it('does not repeat a notice the sign-in card already showed', async () => {
+    sessionStorage.setItem(noticeKey, notices.ended)
+    const { user } = mountShell()
+    expect(await screen.findByText(notices.ended)).toBeVisible()
+    await user.click(await screen.findByRole('button', { name: /Rabby Wallet/ }))
+    await user.click(await screen.findByRole('button', { name: 'Sign with Rabby Wallet' }))
+    expect(await screen.findByText(/^Shell for Sam Rivera/)).toBeVisible()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('reloads onto the chooser when the session fails before the workspace is shown, and the next load does not loop', async () => {
+    routes['/api/auth/session'] = () => json(sessionFixture)
+    routes['/api/system'] = () => problem(401, 'session-revoked')
+    const first = mountShell()
+    await waitFor(() => expect(first.navigate).toHaveBeenCalledOnce())
+    expect(sessionStorage.getItem(landingKey)).toBe('sign-in')
+    expect(sessionStorage.getItem(noticeKey)).toBe(notices.ended)
+    first.unmount()
+    // The reload: the cookie still opens the probe, so only the marker keeps this from coming back here.
+    const probes = sent('/api/auth/session').length
+    const second = mountShell()
+    expect(await screen.findByRole('heading', { name: 'Sign in to Vessel' })).toBeVisible()
+    expect(screen.getByText(notices.ended)).toBeVisible()
+    expect(sent('/api/auth/session')).toHaveLength(probes)
+    expect(second.navigate).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem(landingKey)).toBeNull()
+    second.unmount()
+    // The marker is one-shot: a later load probes as usual.
+    mountShell()
+    await waitFor(() => expect(sent('/api/auth/session')).toHaveLength(probes + 1))
+  })
+
+  it('reloads onto the chooser from the suspended screen', async () => {
+    routes['/api/auth/session'] = () => problem(403, 'user-suspended')
+    const first = mountShell()
+    await first.user.click(await screen.findByRole('button', { name: 'Use another wallet' }))
+    expect(first.navigate).toHaveBeenCalledOnce()
+    expect(sessionStorage.getItem(landingKey)).toBe('sign-in')
+    first.unmount()
+    mountShell()
+    expect(await screen.findByRole('heading', { name: 'Sign in to Vessel' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Journal suspended' })).not.toBeInTheDocument()
   })
 })
 

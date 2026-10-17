@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createSessionAuthApi } from '@/api/auth'
 import { emitApiEvent } from '@/api/events'
 import { createWorkspaceApi } from '@/api/workspace'
-import { noticeKey, notices, SessionController } from '@/features/identity/session'
+import { noticeKey, notices, SessionController, workspaceNotices } from '@/features/identity/session'
 import type { ShellIdentity } from '@/features/identity/types'
 import { createPlaysSession, type PlaysSession } from '@/features/plays/saved'
 import { secondWalletFixture, sessionFixture, sessionRowsFixture, walletFixture } from '@/test/identity-fixture'
@@ -88,7 +88,17 @@ describe('Wallet-mode session teardown in the shell', () => {
   })
 })
 
-describe('session changes in the workspace', () => {
+describe('session notices in the workspace', () => {
+  it('shows a notice the reload left, as a dismissible status, and only then marks it shown', async () => {
+    const noticePresented = vi.fn()
+    const { user } = await mount('member', { notice: workspaceNotices[notices.otherUser], noticePresented })
+    const status = await screen.findByText(workspaceNotices[notices.otherUser])
+    expect(status.closest('[role="status"]')).not.toBeNull()
+    expect(noticePresented).toHaveBeenCalled()
+    await user.click(within(status.closest('[role="status"]') as HTMLElement).getByRole('button', { name: 'Dismiss notification' }))
+    await waitFor(() => expect(screen.queryByText(workspaceNotices[notices.otherUser])).not.toBeInTheDocument())
+  })
+
   it('reloads the workspace and says why when a write was answered under a session another tab replaced', async () => {
     const { api, navigate } = await mount()
     const overviews = vi.mocked(api.overview).mock.calls.length

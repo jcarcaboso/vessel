@@ -159,6 +159,13 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
     notify({ tone: 'info', key: 'session-changed', message: 'Your session changed in another tab. Vessel reloaded your workspace; check your last change before trying again.' })
     reload()
   }), [api, notify, reload])
+  const startupNotice = identity?.notice ?? null
+  const noticePresented = identity?.noticePresented
+  useEffect(() => {
+    if (!startupNotice) return
+    notify({ tone: 'info', key: 'session-notice', message: startupNotice, duration: null })
+    noticePresented?.()
+  }, [startupNotice, noticePresented, notify])
   // Links from notifications go through the shell's own navigation; a missing account gets a short notice.
   const notificationLink = useRef<(link: NotificationLink) => void>(() => {})
   const inApp = useInAppNotifications({ api, active: disconnectedApi !== api, onLink: link => notificationLink.current(link),

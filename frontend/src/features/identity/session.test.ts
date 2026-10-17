@@ -3,7 +3,7 @@ import { ApiError } from '@/api/errors'
 import { createWorkspaceApi } from '@/api/workspace'
 import { sessionFixture } from '@/test/identity-fixture'
 import { channelBus } from '@/test/session-channel'
-import { noticeKey, notices, SessionController, takeNotice } from './session'
+import { landingKey, noticeKey, notices, SessionController, takeLanding, takeNotice } from './session'
 
 const otherUser = '0d4f7c2a-9b1e-4e63-8a05-2c7b9d1f3e68'
 const newSession = 'c7a2e9f4-1d3b-4b6a-9e85-3f0c2d7a1b96'
@@ -58,12 +58,28 @@ describe('forced teardown', () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it('returns to sign-in without reloading when the workspace was never shown', () => {
-    const navigate = vi.fn(), onEndedEarly = vi.fn()
-    const controller = new SessionController({ session: sessionFixture, channels: channelBus().factory, navigate, onEndedEarly })
+  it('still reloads when the workspace was never shown, marking the next load to skip the probe', () => {
+    const navigate = vi.fn()
+    const controller = new SessionController({ session: sessionFixture, channels: channelBus().factory, navigate })
     controller.handleFailure({ status: 401 })
-    expect(onEndedEarly).toHaveBeenCalledWith(notices.ended)
-    expect(navigate).not.toHaveBeenCalled()
+    // The stores already switched to this user, so the page reloads; the marker keeps it from probing into a loop.
+    expect(navigate).toHaveBeenCalledOnce()
+    expect(sessionStorage.getItem(landingKey)).toBe('sign-in')
+    expect(sessionStorage.getItem(noticeKey)).toBe(notices.ended)
+    expect(takeLanding()).toBe(true)
+    expect(takeLanding()).toBe(false)
+  })
+
+  it('reloads a live tab without the landing marker, so the next load probes', () => {
+    const { controller } = live()
+    controller.handleFailure({ status: 401 })
+    expect(sessionStorage.getItem(landingKey)).toBeNull()
+  })
+
+  it('marks only its own landing value', () => {
+    sessionStorage.setItem(landingKey, 'elsewhere')
+    expect(takeLanding()).toBe(false)
+    expect(sessionStorage.getItem(landingKey)).toBeNull()
   })
 
   it('only accepts its own notices', () => {
@@ -76,14 +92,23 @@ describe('forced teardown', () => {
 describe('voluntary sign-out', () => {
   it('signs out the expected session, tells other tabs and reloads', async () => {
     const { controller, bus, navigate } = live()
-    const other = new SessionController({ session: sessionFixture, channels: bus.factory, navigate: vi.fn() })
+    const otherNavigate = vi.fn()
+    const other = new SessionController({ session: sessionFixture, channels: bus.factory, navigate: otherNavigate })
+    other.markLive()
     const signOut = vi.fn().mockResolvedValue(undefined)
     await controller.signOut({ signOut })
     expect(signOut).toHaveBeenCalledWith(sessionFixture.session.id)
     expect(bus.posted).toEqual([{ type: 'signed-out', userId: sessionFixture.user.id, sessionId: sessionFixture.session.id }])
     expect(navigate).toHaveBeenCalledOnce()
-    expect(sessionStorage.getItem(noticeKey)).toBeNull()
+    // The other tab shares the session that ended (its own notice lands in its own sessionStorage in a browser).
+    expect(otherNavigate).toHaveBeenCalledOnce()
     other.dispose()
+  })
+
+  it('leaves no notice in the tab that signed out', async () => {
+    const { controller } = live()
+    await controller.signOut({ signOut: vi.fn().mockResolvedValue(undefined) })
+    expect(sessionStorage.getItem(noticeKey)).toBeNull()
   })
 
   it('reloads without broadcasting when the cookie belongs to another session (409 session-changed)', async () => {

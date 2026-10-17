@@ -8,14 +8,14 @@ import { clearCandleCache } from '@/features/market/candleCache'
 import { scopePreferences } from '@/lib/preference-scope'
 import { SignInBrand, StateCard } from './IdentityParts'
 import { SignInScreen } from './SignInScreen'
-import { notices, SessionController, takeNotice, type SessionChannelFactory } from './session'
+import { clearNotice, notices, readNotice, reloadToSignIn, SessionController, takeLanding, workspaceNotices, type Notice, type SessionChannelFactory } from './session'
 import type { ShellIdentity } from './types'
 import type { BrowserWallet } from './wallets/discovery'
 
 type Ready = { session: SessionDto; system: SystemInfo; api: WorkspaceApi; controller: SessionController; walletName: string | null }
 type GateState =
   | { kind: 'probing' }
-  | { kind: 'sign-in'; notice: string | null }
+  | { kind: 'sign-in' }
   | { kind: 'loading' }
   | { kind: 'ready'; ready: Ready }
   | { kind: 'failed'; message: string; retry: { session: SessionDto; walletName: string | null } | null }
@@ -37,14 +37,23 @@ interface SignInGateProps {
 
 /**
  * Wallet mode's first screen. It probes the session with the public call kind: a 200 opens the workspace, and a
- * 401 shows sign-in and never reloads (a teardown's reload lands here, so reloading again would loop).
+ * 401 shows sign-in and never reloads (a teardown's reload lands here, so reloading again would loop). A load
+ * marked by `reloadToSignIn` shows the chooser without probing.
+ *
+ * A teardown's notice stays stored until a screen shows it: the sign-in card, or the workspace when the probe
+ * finds that another tab signed in meanwhile.
  */
 export function SignInGate({ registration, originAccepted, children, channels, navigate, publicApi }: SignInGateProps) {
   const api = useMemo(() => publicApi ?? createPublicAuthApi(), [publicApi])
-  const [state, setState] = useState<GateState>({ kind: 'probing' })
-  const [notice] = useState(takeNotice)
+  const [landing] = useState(takeLanding)
+  const [state, setState] = useState<GateState>(() => landing ? { kind: 'sign-in' } : { kind: 'probing' })
+  // Cleared once the sign-in card or the workspace has shown it.
+  const [notice, setNotice] = useState<Notice | null>(readNotice)
   const controllerRef = useRef<SessionController | null>(null)
   useEffect(() => () => { controllerRef.current?.dispose() }, [])
+  const signingIn = state.kind === 'sign-in'
+  useEffect(() => { if (signingIn && notice) clearNotice() }, [signingIn, notice])
+  const noticePresented = useCallback(() => { setNotice(null); clearNotice() }, [])
 
   const enter = useCallback(async (session: SessionDto, fresh: boolean, walletName: string | null) => {
     setState({ kind: 'loading' })
@@ -54,7 +63,6 @@ export function SignInGate({ registration, originAccepted, children, channels, n
     const controller: SessionController = new SessionController({
       session, ...channels ? { channels } : {}, ...navigate ? { navigate } : {},
       onSuspended: () => { controller.dispose(); setState({ kind: 'suspended' }) },
-      onEndedEarly: ended => setState({ kind: 'sign-in', notice: ended }),
     })
     controllerRef.current = controller
     if (fresh) controller.announceSignIn()
@@ -75,20 +83,22 @@ export function SignInGate({ registration, originAccepted, children, channels, n
   const settleProbe = useCallback((result: { session: SessionDto } | { cause: unknown }) => {
     if ('session' in result) { void enter(result.session, false, null); return }
     const { cause } = result
-    if (cause instanceof ApiError && cause.status === 401) setState({ kind: 'sign-in', notice })
+    if (cause instanceof ApiError && cause.status === 401) setState({ kind: 'sign-in' })
     else if (cause instanceof ApiError && cause.code === 'user-suspended') setState({ kind: 'suspended' })
     else setState({ kind: 'failed', message: errorMessage(cause, 'Vessel is unreachable.'), retry: null })
-  }, [enter, notice])
+  }, [enter])
   const probe = useCallback((signal: AbortSignal) => {
     api.session(signal).then(session => ({ session }), (cause: unknown) => ({ cause }))
       .then(result => { if (!signal.aborted) settleProbe(result) })
   }, [api, settleProbe])
 
   useEffect(() => {
+    // The landing marker means the chooser is already showing.
+    if (landing) return
     const controller = new AbortController()
     probe(controller.signal)
     return () => controller.abort()
-  }, [probe])
+  }, [landing, probe])
 
   const ready = state.kind === 'ready' ? state.ready : null
   const signOut = useCallback((current: Ready) => {
@@ -97,22 +107,23 @@ export function SignInGate({ registration, originAccepted, children, channels, n
     current.controller.signOut(createSessionAuthApi(current.controller.credentials(), current.controller.handleFailure))
       .catch((cause: unknown) => setState({ kind: 'sign-out-failed', ready: current, message: errorMessage(cause, 'Sign-out did not complete.') }))
   }, [])
+  const controller = ready?.controller ?? null
+  const auth = useMemo(() => controller && createSessionAuthApi(controller.credentials(), controller.handleFailure), [controller])
   const identity = useMemo<ShellIdentity | null>(() => {
-    if (!ready) return null
-    const { controller } = ready
+    if (!ready || !controller || !auth) return null
     return {
-      session: ready.session, walletName: ready.walletName,
-      auth: createSessionAuthApi(controller.credentials(), controller.handleFailure),
+      session: ready.session, walletName: ready.walletName, auth,
+      notice: notice ? workspaceNotices[notice] : null, noticePresented,
       registerExitState: clear => controller.registerExitState(clear),
       onProfile: (user: UserDto) => setState(current => current.kind !== 'ready' ? current : { kind: 'ready', ready: {
         ...current.ready, session: { ...current.ready.session, user }, system: { ...current.ready.system, owner: { ...current.ready.system.owner, displayName: user.displayName } } } }),
       endSession: () => controller.teardown(notices.ended),
     }
-  }, [ready])
+  }, [ready, controller, auth, notice, noticePresented])
 
   if (state.kind === 'ready' && identity) return children(state.ready.system, () => signOut(state.ready), state.ready.api, identity)
-  if (state.kind === 'sign-in') return <SignInScreen api={api} registration={registration} originAccepted={originAccepted} notice={state.notice}
-    onSignedIn={(session: SessionDto, wallet: BrowserWallet) => { void enter(session, true, wallet.name) }} />
+  if (state.kind === 'sign-in') return <SignInScreen api={api} registration={registration} originAccepted={originAccepted} notice={notice}
+    onSignedIn={(session: SessionDto, wallet: BrowserWallet) => { setNotice(null); void enter(session, true, wallet.name) }} />
   return <main className="connection-page sign-in-page">
     <section className="panel connection-card sign-in-card" aria-labelledby="gate-title">
       <div className="sign-in-head"><SignInBrand /></div>
@@ -125,7 +136,7 @@ export function SignInGate({ registration, originAccepted, children, channels, n
           else { setState({ kind: 'probing' }); probe(new AbortController().signal) }
         } }]}>{state.message}</StateCard></>}
       {state.kind === 'suspended' && <><h1 id="gate-title" className="sr-only">Vessel</h1>
-        <StateCard icon={<Lock size={16} />} tone="bad" title="Journal suspended" actions={[{ label: 'Use another wallet', onClick: () => window.location.reload() }]}>
+        <StateCard icon={<Lock size={16} />} tone="bad" title="Journal suspended" actions={[{ label: 'Use another wallet', onClick: () => reloadToSignIn(navigate) }]}>
           The operator of this server has suspended this journal. Contact them to restore access.</StateCard></>}
       {state.kind === 'sign-out-failed' && <><h1 id="gate-title" className="sr-only">Vessel</h1>
         <StateCard icon={<Plug size={16} />} tone="warn" title="Sign-out did not complete" actions={[

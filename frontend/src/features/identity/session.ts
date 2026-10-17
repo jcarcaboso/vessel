@@ -4,6 +4,8 @@ import { isGuid, isRecord } from '@/api/guards'
 import type { ApiCredentials, AuthFailure, SessionGeneration } from '@/api/request'
 
 export const noticeKey = 'vessel:device:notice'
+/** A one-shot `sign-in` marker: the next load shows the wallet chooser without probing the session. Nothing else. */
+export const landingKey = 'vessel:device:landing'
 export const sessionChannelName = 'vessel-session'
 
 /** The only notices the sign-in screen shows after a reload; anything else in the key is ignored. */
@@ -12,19 +14,54 @@ export const notices = {
   otherUser: 'Signed in as someone else in another tab.',
   signedOutElsewhere: 'You signed out in another tab.',
 } as const
-type Notice = typeof notices[keyof typeof notices]
+export type Notice = typeof notices[keyof typeof notices]
+
+/** The same notices when the reload found a signed-in session after all, shown over the workspace. */
+export const workspaceNotices: Record<Notice, string> = {
+  [notices.ended]: 'Your earlier session in this tab ended.',
+  [notices.otherUser]: notices.otherUser,
+  [notices.signedOutElsewhere]: notices.signedOutElsewhere,
+}
 
 export function writeNotice(notice: Notice) {
   try { sessionStorage.setItem(noticeKey, notice) } catch { /* The reload still happens, without the explanation. */ }
 }
 
-/** Reads and removes the notice left by a teardown, so it shows once. */
-export function takeNotice(): Notice | null {
+/** The notice left by a teardown, if any. It stays stored until `clearNotice`, once a screen has shown it. */
+export function readNotice(): Notice | null {
   try {
     const value = sessionStorage.getItem(noticeKey)
-    sessionStorage.removeItem(noticeKey)
     return (Object.values(notices) as string[]).includes(value ?? '') ? value as Notice : null
   } catch { return null }
+}
+
+export function clearNotice() {
+  try { sessionStorage.removeItem(noticeKey) } catch { /* Shown again on the next load at worst. */ }
+}
+
+/** Reads and removes the notice, for a screen that shows it at once. */
+export function takeNotice(): Notice | null {
+  const notice = readNotice()
+  clearNotice()
+  return notice
+}
+
+/** Reads and removes the landing marker, so only the next load skips the session probe. */
+export function takeLanding(): boolean {
+  try {
+    const value = sessionStorage.getItem(landingKey)
+    sessionStorage.removeItem(landingKey)
+    return value === 'sign-in'
+  } catch { return false }
+}
+
+/**
+ * Reloads onto the wallet chooser. The marker stops a cookie that still opens the probe (but fails later, or belongs
+ * to a suspended journal) from landing on the same screen again; without storage the probe simply runs.
+ */
+export function reloadToSignIn(navigate: (url: string) => void = url => window.location.replace(url)) {
+  try { sessionStorage.setItem(landingKey, 'sign-in') } catch { /* The probe decides instead. */ }
+  navigate(signInUrl())
 }
 
 /** `{type, userId, sessionId}` on `BroadcastChannel("vessel-session")`. It carries IDs only, never cookies or names. */
@@ -58,8 +95,6 @@ export interface SessionControllerOptions {
   navigate?: (url: string) => void
   /** `user-suspended`: the gate swaps the workspace for the suspended screen. */
   onSuspended?: () => void
-  /** A teardown before the workspace is shown: the gate returns to sign-in instead of reloading. */
-  onEndedEarly?: (notice: Notice) => void
 }
 
 /**
@@ -102,7 +137,7 @@ export class SessionController {
     return { kind: 'session', userId: this.userId, sessionId: this.sessionIdValue, generation: this.sessionGeneration }
   }
 
-  /** The workspace is on screen; from now on a teardown reloads the page. */
+  /** The workspace is on screen; until then a teardown reloads onto the wallet chooser, which skips the probe. */
   markLive() { this.live = true }
 
   /** The shell registers how to drop its unsaved-work exit state, so a forced teardown never prompts. */
@@ -118,17 +153,16 @@ export class SessionController {
     else if (failure.code === 'user-suspended') this.options.onSuspended?.()
   }
 
-  /** Forced teardown: leave the notice, drop the exit state so `beforeunload` never asks, then replace the page. */
+  /**
+   * Forced teardown: leave the notice, drop the exit state so `beforeunload` never asks, then replace the page. The
+   * stores already switched to this user, so even a teardown before the workspace is shown reloads; it lands on the
+   * chooser, because the probe that let it in would only let it in again.
+   */
   teardown(notice: Notice) {
     if (this.ended) return
     this.ended = true
-    if (!this.live) {
-      this.dispose()
-      this.options.onEndedEarly?.(notice)
-      return
-    }
     writeNotice(notice)
-    this.leave()
+    this.leave(!this.live)
   }
 
   /** Tells other tabs this tab signed in. */
@@ -184,9 +218,10 @@ export class SessionController {
     try { this.channel?.postMessage(message) } catch { /* Other tabs learn on their next request. */ }
   }
 
-  private leave() {
+  private leave(toChooser = false) {
     for (const clear of [...this.exitStates]) clear()
     this.dispose()
-    this.navigate(signInUrl())
+    if (toChooser) reloadToSignIn(this.navigate)
+    else this.navigate(signInUrl())
   }
 }
