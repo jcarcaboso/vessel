@@ -12,8 +12,8 @@ namespace Vessel.Tests;
 /// </summary>
 internal sealed class MonitorWorkerOnline(IMonitorStore inner, TimeProvider clock) : IMonitorStore
 {
-    public Task<MonitorHeartbeat?> HeartbeatAsync(CancellationToken ct) =>
-        Task.FromResult<MonitorHeartbeat?>(new() { WorkerId = "test-worker", HeartbeatAtUtc = clock.GetUtcNow() });
+    public Task<ServerMonitorHeartbeat?> HeartbeatAsync(CancellationToken ct) =>
+        Task.FromResult<ServerMonitorHeartbeat?>(new("monitor", clock.GetUtcNow()));
 
     public Task<MonitorCapture?> CaptureAsync(Guid accountId, CancellationToken ct) => inner.CaptureAsync(accountId, ct);
     public Task<IReadOnlyList<(MonitorAccount Row, string VenueId)>> SummaryAsync(IReadOnlyCollection<string> venueIds,
@@ -23,8 +23,6 @@ internal sealed class MonitorWorkerOnline(IMonitorStore inner, TimeProvider cloc
     public Task<IReadOnlyDictionary<string, DateTimeOffset>> VenueRetriesAsync(CancellationToken ct) => inner.VenueRetriesAsync(ct);
     public Task DeferVenueAsync(string venueId, DateTimeOffset retryAtUtc, DateTimeOffset now, CancellationToken ct) =>
         inner.DeferVenueAsync(venueId, retryAtUtc, now, ct);
-    public Task RecordHeartbeatAsync(string workerId, DateTimeOffset now, CancellationToken ct) =>
-        inner.RecordHeartbeatAsync(workerId, now, ct);
     public Task<IReadOnlyList<MonitorCandidate>> DiscoveryCandidatesAsync(IReadOnlyCollection<string> venueIds, DateTimeOffset now,
         Guid? after, int limit, CancellationToken ct) => inner.DiscoveryCandidatesAsync(venueIds, now, after, limit, ct);
     public Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct) => inner.EligibleAsync(accountId, now, ct);
@@ -32,12 +30,13 @@ internal sealed class MonitorWorkerOnline(IMonitorStore inner, TimeProvider cloc
         inner.LockedAsync(accountId, action, ct);
     public Task<IReadOnlyList<MonitorLease>> ClaimDueAsync(string workerId, DateTimeOffset now, int limit, CancellationToken ct) =>
         inner.ClaimDueAsync(workerId, now, limit, ct);
-    public Task<MonitorLease?> ClaimAsync(Guid accountId, Guid requestId, string workerId, DateTimeOffset now, CancellationToken ct) =>
+    public Task<MonitorLease?> ClaimAsync(Guid accountId, Guid? requestId, string workerId, DateTimeOffset now, CancellationToken ct) =>
         inner.ClaimAsync(accountId, requestId, workerId, now, ct);
     public Task<bool> RenewAsync(MonitorLease lease, DateTimeOffset now, CancellationToken ct) => inner.RenewAsync(lease, now, ct);
     public Task UpdateWatchesAsync(Guid accountId, VenueOrderReadResult? orders, DateTimeOffset now, CancellationToken ct) =>
         inner.UpdateWatchesAsync(accountId, orders, now, ct);
     public Task<IReadOnlyList<MonitorWatchDto>> WatchesAsync(Guid playId, DateTimeOffset now, CancellationToken ct) =>
         inner.WatchesAsync(playId, now, ct);
-    public Task<bool> ReadCapacityAsync(DateTimeOffset now, CancellationToken ct) => inner.ReadCapacityAsync(now, ct);
+    public Task<bool> OwnerAtCapacityAsync(DateTimeOffset now, CancellationToken ct) => inner.OwnerAtCapacityAsync(now, ct);
+    public Task<bool> ReadCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct) => inner.ReadCapacityAsync(venueId, now, ct);
 }

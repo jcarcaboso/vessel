@@ -147,7 +147,7 @@ public sealed class MonitorDiscrepancyRound2PostgresTests
         f.VenueOrders.Add(new("late-entry", "BTC", "buy", "Limit", 100, null, false, false, 1, 0, f.Clock.Now.AddMinutes(-25),
             VenueOrderStatus.Filled, "filled", f.Clock.Now.AddMinutes(-2)));
         await using var scope = database.Scope(f);
-        var monitor = new MonitorStore(scope.Db, scope.Work);
+        var monitor = MonitorTestPaths.Store(scope.Db, scope.Work);
         var coordinator = new MonitorCoordinator(new MonitorWorkerOnline(monitor, f.Clock), new WorkspaceStore(scope.Db, scope.Work), new NoImporter(),
             TestVenues.With(new FixedReader(f), new FixedOrders(f)), new NoCredentials(), scope.Work, scope.Events, new NoCommands(),
             new CoreOwner(f.Account.OwnerId), new MonitorOptions(), f.Clock, scope.Service);

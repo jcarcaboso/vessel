@@ -69,6 +69,17 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/MonitorStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             "Vessel.Persistence/PlayStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             "Vessel.Persistence/WorkspaceStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
+            // B2: reviewed system discovery/state, transactional venue count and budget-lock statements.
+            "Vessel.Persistence/JournalOwnerInventory.cs|224d4132892dc7a2d9f090925029b0bafa3c3636d763383faf76b9f6e4f7f430",
+            "Vessel.Persistence/MonitorStore.cs|11fb326c24d434a2b59624a7e4a796561d98ef3e2291f2682033d47b113996e3",
+            "Vessel.Persistence/MonitorStore.cs|5d0a1ed4c9cf1315a1cb064478718b843e28efcb64c8bb63578411302ca9e1be",
+            "Vessel.Persistence/MonitorStore.cs|4cdf0d457e452c410504de7d72021658f940c2990df9f6e9f6ce45d6d4754663",
+            "Vessel.Persistence/SystemMonitorStore.cs|1cd1f17e277bff89a153a80dda2ec28cafa3f044bf78bc984247080c95a9a4e6",
+            "Vessel.Persistence/ServerStateStore.cs|40c74c937dd0eb512282090d98087bea4726000d71185d726dbbdd89e80b5b51",
+            "Vessel.Persistence/ServerStateStore.cs|4de6036152e376cb02952ca7410a4db74f2a434f16091e168cf64995f90293f8",
+            "Vessel.Persistence/ServerStateStore.cs|ee73f5478e13936ed833caed3737b495efb924b2d70cbf4c9d46ca0f8ff1593a",
+            "Vessel.Persistence/ServerStateStore.cs|6973e58fc649dacc48f32b3733651715ab8955080a0b79a97ecf85be116dc12c",
+            "Vessel.Persistence/ServerStateStore.cs|e6dc41ee45eddfeaad9785f33c42534223f79ae4627170351a604402d4b9f9fb",
         ];
         var actual = new List<string>();
         foreach (var path in Sources().Where(p => !p.Contains("/Migrations/", StringComparison.Ordinal)))

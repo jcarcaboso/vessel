@@ -17,6 +17,9 @@ internal static class MonitorTestPaths
 {
     public const string RefreshFailed = "The venue refresh failed or was superseded by changed account settings. Try again later.";
 
+    public static MonitorStore Store(VesselDbContext db, UnitOfWork work, MonitorOptions? options = null) =>
+        new(db, work, MonitorServerState.For(db), new Vessel.Application.Ownership.ConfiguredOwnerDirectory(db.CurrentOwnerId), options);
+
     public static MonitorOptions Options() => new() { ManualCooldown = TimeSpan.Zero };
 
     public static PlayExecutionService Execution(VesselDbContext db, IVenueRegistry venues,
@@ -30,7 +33,7 @@ internal static class MonitorTestPaths
         var work = TestUnitOfWork.For(db);
         var options = Options();
         time ??= TimeProvider.System;
-        return new(new MonitorWorkerOnline(new MonitorStore(db, work, options), time), new WorkspaceStore(db, work), Execution(db, venues, credentials, time), venues,
+        return new(new MonitorWorkerOnline(MonitorTestPaths.Store(db, work, options), time), new WorkspaceStore(db, work), Execution(db, venues, credentials, time), venues,
             credentials ?? new NoCredentials(), work, new NoEvents(), new NoCommands(), new CoreOwner(owner), options, time);
     }
 
@@ -58,7 +61,7 @@ internal static class MonitorTestPaths
         var view = new MonitorExecutionView(new PlayStore(db, work), new WorkspaceStore(db, work), venues, coordinator);
         var accepted = await view.RequestAsync(playId, ct);
         var accountId = accepted.Monitor.AccountId;
-        var lease = await new MonitorStore(db, work, Options()).ClaimAsync(accountId, accepted.RequestId, "test-worker",
+        var lease = await MonitorTestPaths.Store(db, work, Options()).ClaimAsync(accountId, accepted.RequestId, "test-worker",
             time.GetUtcNow(), ct) ?? throw new InvalidOperationException("The accepted check could not be claimed.");
         if (!await coordinator.RunAsync(lease, ct) && expectCompleted)
             throw new InvalidOperationException("The monitor check failed or was superseded.");

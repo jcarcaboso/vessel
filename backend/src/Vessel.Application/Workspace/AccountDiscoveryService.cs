@@ -1,3 +1,4 @@
+using Vessel.Application.Monitoring;
 using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Venues;
@@ -15,7 +16,7 @@ public sealed class CredentialDiscoveryRequest
     public string? Token { get; init; }
 }
 
-public sealed class AccountDiscoveryService(IWorkspaceStore accounts, IJournalOwnerContext owner, IVenueRegistry venues)
+public sealed class AccountDiscoveryService(IWorkspaceStore accounts, IJournalOwnerContext owner, IVenueRegistry venues, AccountReadPolicy reads)
 {
     public Task<AccountDiscoveryDto> DiscoverAsync(string venueId, string? address, CancellationToken ct) =>
         DiscoverCoreAsync(venueId, address, null, ct);
@@ -36,6 +37,7 @@ public sealed class AccountDiscoveryService(IWorkspaceStore accounts, IJournalOw
             throw new ProblemException(400, "This venue does not support account discovery.");
         if (!AccountSource.IsEvmAddress(address)) throw new ProblemException(400, "A 42-character public hexadecimal address is required.");
         var discovery = venues.Discovery(venueId) ?? throw new ProblemException(503, "Venue discovery is unavailable.");
+        await reads.AdmitAsync(owner.OwnerId, venueId, ct);
         IReadOnlyList<VenueAccountCandidate> found;
         try
         {
@@ -49,6 +51,7 @@ public sealed class AccountDiscoveryService(IWorkspaceStore accounts, IJournalOw
                 found.Select(c => c.SourceId).Distinct().Count() != found.Count)
                 throw new VenueReadException("Invalid discovery response.");
         }
+        catch (VenueRateLimitException limited) { throw await reads.LimitedAsync(venueId, limited); }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (VenueCredentialRejectedException) when (token is not null)
         {

@@ -122,8 +122,13 @@ public sealed class EndpointTransportTests
     {
         var owner = Guid.NewGuid();
         var discovery = new SecurityDiscovery([new("123", "Main", "main")]);
-        await using var factory = new CoreApiFactory(owner, new MemoryWorkspaceStore(owner),
-            configure: services => services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry(discovery)));
+        var clock = new ManualTime(SecurityFixture.Now);
+        await using var factory = new CoreApiFactory(owner, new MemoryWorkspaceStore(owner), configure: services =>
+        {
+            services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry(discovery));
+            services.AddSingleton<Vessel.Application.Monitoring.IServerStateStore>(new MonitorServerState());
+            services.AddSingleton<TimeProvider>(clock);
+        });
         factory.UseKestrel(0);
         using var client = factory.CreateClient();
         const string path = "/api/venues/index-fixture/accounts/credential";
@@ -153,6 +158,8 @@ public sealed class EndpointTransportTests
             Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
             Assert.True(accepted.Headers.CacheControl?.NoStore);
             await accepted.Content.ReadAsStringAsync();
+            // Keep this transport stress test inside the real ten-attempts-per-minute quota.
+            clock.Advance(TimeSpan.FromSeconds(6));
         }
     }
 

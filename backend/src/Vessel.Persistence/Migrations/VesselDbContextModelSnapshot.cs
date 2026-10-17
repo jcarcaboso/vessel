@@ -305,6 +305,9 @@ namespace Vessel.Persistence.Migrations
 
                     b.HasIndex("OwnerId", "NextRunAtUtc");
 
+                    b.HasIndex("NextRunAtUtc", "OwnerId", "AccountId")
+                        .HasDatabaseName("IX_monitor_accounts_due");
+
                     b.ToTable("monitor_accounts", null, t =>
                         {
                             t.HasCheckConstraint("CK_monitor_generation", "\"Generation\" >= 0");
@@ -350,42 +353,6 @@ namespace Vessel.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_monitor_exit_watch_outcome", "\"Outcome\" IS NULL OR \"Outcome\" IN ('terminal','absent','unverifiable')");
                         });
-                });
-
-            modelBuilder.Entity("Vessel.Domain.Monitoring.MonitorHeartbeat", b =>
-                {
-                    b.Property<Guid>("OwnerId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("HeartbeatAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("WorkerId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.HasKey("OwnerId");
-
-                    b.ToTable("monitor_heartbeats", (string)null);
-                });
-
-            modelBuilder.Entity("Vessel.Domain.Monitoring.MonitorVenueBudget", b =>
-                {
-                    b.Property<Guid>("OwnerId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("VenueId")
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<DateTimeOffset>("RetryAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("OwnerId", "VenueId");
-
-                    b.ToTable("monitor_venue_budgets", (string)null);
                 });
 
             modelBuilder.Entity("Vessel.Domain.Monitoring.PlayDiscrepancy", b =>

@@ -18,7 +18,7 @@ public sealed class MonitorRunExecutor(IOwnerScopeFactory scopes, IJournalOwnerC
     MonitorCoordinator coordinator, TimeProvider time)
 {
     /// <summary>
-    /// The owner's account Refresh: the same admission gate and two-read budget as checks, then the run on the
+    /// The owner's account Refresh: the same admission gate, owner and venue budgets as checks, then the run on the
     /// API's own lease. It never leaves work pending for the worker, and its outcome leaves check scheduling alone.
     /// </summary>
     /// <returns>False when the venue read failed or changed settings superseded it.</returns>
@@ -27,6 +27,7 @@ public sealed class MonitorRunExecutor(IOwnerScopeFactory scopes, IJournalOwnerC
 
     public async Task<bool> RunAsync(MonitorLease lease, CancellationToken ct)
     {
+        if (lease.OwnerId != owner.OwnerId) throw new InvalidOperationException("A monitor lease belongs to another owner.");
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var renewing = RenewAsync(lease, linked);
         try { return await coordinator.RunAsync(lease, linked.Token); }
@@ -44,7 +45,7 @@ public sealed class MonitorRunExecutor(IOwnerScopeFactory scopes, IJournalOwnerC
             using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1), time);
             while (await timer.WaitForNextTickAsync(cancellation.Token))
             {
-                await using var scope = scopes.Create(owner.OwnerId);
+                await using var scope = scopes.Create(lease.OwnerId);
                 if (!await scope.Services.GetRequiredService<IMonitorStore>()
                     .RenewAsync(lease, time.GetUtcNow(), cancellation.Token))
                 {

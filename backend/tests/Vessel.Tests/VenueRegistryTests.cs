@@ -57,12 +57,12 @@ public sealed class VenueRegistryTests
 
         // A duplicate registration no longer fails the use case; it reads through the registry's choice.
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var found = await new AccountDiscoveryService(store, new CoreOwner(owner), registry)
+        var found = await new AccountDiscoveryService(store, new CoreOwner(owner), registry, MonitorServerState.Reads())
             .DiscoverAsync(SecurityFixture.Venue.Id, SecurityFixture.Address, default);
         Assert.Equal("Last", Assert.Single(found.Accounts).Name);
         var account = SecurityFixture.Account(owner); store.Accounts.Add(account);
         using var vault = SecurityFixture.Vault();
-        await new AccountCredentialService(store, new SecurityCredentialStore(), new CoreOwner(owner), registry, vault, SecurityFixture.Clock, TestUnitOfWork.None)
+        await new AccountCredentialService(store, new SecurityCredentialStore(), new CoreOwner(owner), registry, vault, SecurityFixture.Clock, TestUnitOfWork.None, MonitorServerState.Reads(time: SecurityFixture.Clock))
             .PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
         Assert.Null(firstVerifier.ReceivedToken); Assert.Equal(SecurityFixture.Token, lastVerifier.ReceivedToken);
     }

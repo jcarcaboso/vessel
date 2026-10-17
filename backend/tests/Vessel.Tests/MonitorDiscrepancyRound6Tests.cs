@@ -81,7 +81,7 @@ public sealed class MonitorDiscrepancyRound6Tests
         f.Advance(660);
         var refresh = await coordinator.AdmitRefreshAsync(f.Account.Id, "owner", default);
         await using var other = database.Scope(f);
-        var otherMonitor = new MonitorStore(other.Db, other.Work);
+        var otherMonitor = MonitorTestPaths.Store(other.Db, other.Work);
         Assert.Empty(await otherMonitor.ClaimDueAsync("other-worker", f.Clock.Now, 2, default));
         Assert.True(await coordinator.RunAsync(refresh, default));
         f.Advance(1); // Give the next source snapshot an independent observation timestamp.
@@ -98,7 +98,7 @@ public sealed class MonitorDiscrepancyRound6Tests
     [PostgresFact]
     public async Task Migration_backfills_confirmed_records_without_revealing_hidden_history()
     {
-        await using var database = await DiscrepancyDatabase.Create();
+        await using var database = await DiscrepancyDatabase.Create("20261017120000_ServerEventSubscriptions");
         var f = Untracked(); await database.Seed(f);
         await using var scope = database.Scope(f);
         var shapes = new[] { ("open", true), ("resolved", true), ("dismissed", true), ("candidate", false), ("resolved", false) };
@@ -153,7 +153,7 @@ public sealed class MonitorDiscrepancyRound6Tests
     }
     private static (MonitorStore, MonitorCoordinator) Create(DiscrepancyDatabaseScope scope, DiscrepancyFixture f, Reader reader)
     {
-        var monitor = new MonitorStore(scope.Db, scope.Work);
+        var monitor = MonitorTestPaths.Store(scope.Db, scope.Work);
         return (monitor, new(monitor, new WorkspaceStore(scope.Db, scope.Work), new NoImporter(),
             TestVenues.With(reader, new Orders(f)), new NoCredentials(), scope.Work, scope.Events, new NoCommands(),
             new CoreOwner(f.Account.OwnerId), new MonitorOptions(), f.Clock, scope.Service));

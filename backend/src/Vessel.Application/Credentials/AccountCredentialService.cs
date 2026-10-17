@@ -1,3 +1,4 @@
+using Vessel.Application.Monitoring;
 using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Venues;
@@ -9,7 +10,7 @@ namespace Vessel.Application.Credentials;
 
 public sealed class AccountCredentialService(
     IWorkspaceStore accounts, IAccountCredentialStore credentials, IJournalOwnerContext owner,
-    IVenueRegistry venues, ICredentialVault vault, TimeProvider time, IUnitOfWork unitOfWork)
+    IVenueRegistry venues, ICredentialVault vault, TimeProvider time, IUnitOfWork unitOfWork, AccountReadPolicy reads)
 {
     // Read-only: no row lock, so opening Manage account does not wait behind a running refresh.
     public async Task<AccountCredentialDto> GetAsync(Guid id, CancellationToken ct)
@@ -43,11 +44,13 @@ public sealed class AccountCredentialService(
         // 2. Venue verification, with nothing open.
         if (unitOfWork.IsActive)
             throw new InvalidOperationException("Credential verification calls the venue and cannot run inside a unit of work or transaction.");
+        await reads.AdmitAsync(owner.OwnerId, account.VenueId, ct);
         VerifiedVenueCredential verified;
         try
         {
             verified = await verifier.VerifyAsync(sourceId, token, ct);
         }
+        catch (VenueRateLimitException limited) { throw await reads.LimitedAsync(account.VenueId, limited); }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception)
         {

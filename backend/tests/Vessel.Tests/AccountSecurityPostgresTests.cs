@@ -109,7 +109,7 @@ public sealed class AccountSecurityPostgresTests
         await using (var seed = database.Context(owner)) { seed.Accounts.Add(account); await seed.SaveChangesAsync(); }
         await using var writerDb = database.Context(owner); await using var managementDb = database.Context(owner);
         using var vault = SecurityFixture.Vault(); var verifier = new BlockingVerifier();
-        var writer = new AccountCredentialService(new WorkspaceStore(writerDb, TestUnitOfWork.For(writerDb)), new AccountCredentialStore(writerDb, TestUnitOfWork.For(writerDb)), new CoreOwner(owner), SecurityFixture.Registry(verifier), vault, SecurityFixture.Clock, TestUnitOfWork.For(writerDb));
+        var writer = new AccountCredentialService(new WorkspaceStore(writerDb, TestUnitOfWork.For(writerDb)), new AccountCredentialStore(writerDb, TestUnitOfWork.For(writerDb)), new CoreOwner(owner), SecurityFixture.Registry(verifier), vault, SecurityFixture.Clock, TestUnitOfWork.For(writerDb), MonitorServerState.Reads(writerDb, SecurityFixture.Clock));
         var saving = writer.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
         await verifier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var management = new WorkspaceService(new WorkspaceStore(managementDb, TestUnitOfWork.For(managementDb)), new CoreOwner(owner), SecurityFixture.Registry(), TestUnitOfWork.For(managementDb));
@@ -139,7 +139,7 @@ public sealed class AccountSecurityPostgresTests
         await reader.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         // The refresh holds its monitor lease, not the account row, while the venue read is outstanding.
         var verifier = new BlockingVerifier(); verifier.Release.SetResult();
-        var writer = new AccountCredentialService(new WorkspaceStore(writeDb, TestUnitOfWork.For(writeDb)), new AccountCredentialStore(writeDb, TestUnitOfWork.For(writeDb)), new CoreOwner(owner), SecurityFixture.Registry(reader, verifier), vault, SecurityFixture.Clock, TestUnitOfWork.For(writeDb));
+        var writer = new AccountCredentialService(new WorkspaceStore(writeDb, TestUnitOfWork.For(writeDb)), new AccountCredentialStore(writeDb, TestUnitOfWork.For(writeDb)), new CoreOwner(owner), SecurityFixture.Registry(reader, verifier), vault, SecurityFixture.Clock, TestUnitOfWork.For(writeDb), MonitorServerState.Reads(writeDb, SecurityFixture.Clock));
         try { await writer.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default).WaitAsync(TimeSpan.FromSeconds(5)); }
         finally { reader.Release.TrySetResult(); }
         Assert.True(verifier.Entered.Task.IsCompleted);

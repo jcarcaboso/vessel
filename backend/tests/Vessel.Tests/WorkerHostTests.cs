@@ -215,20 +215,22 @@ public sealed class WorkerHostTests
                 Assert.Equal(2, parts.Length);
                 Assert.Equal("90", parts[1]);
                 await using var db = database.Context(owner);
-                Assert.NotNull(await new Vessel.Persistence.MonitorStore(db, TestUnitOfWork.For(db)).HeartbeatAsync(default));
+                Assert.NotNull(await MonitorTestPaths.Store(db, TestUnitOfWork.For(db)).HeartbeatAsync(default));
             }
             // Discovery cannot run: the pass is not productive, so neither heartbeat advances.
             await File.WriteAllTextAsync(file, "1 90");
             using (var broken = Scheduler("Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused", owner, file, out var scheduler))
-                await scheduler.TickAsync(default);
+                await Assert.ThrowsAnyAsync<Exception>(() => scheduler.TickAsync(default));
             Assert.Equal("1 90", await File.ReadAllTextAsync(file));
             // The heartbeat file cannot be written: the database heartbeat is not recorded either.
             var other = Guid.NewGuid();
             var missing = Path.Combine(Path.GetTempPath(), "vessel-missing-" + Guid.NewGuid().ToString("N"), "heartbeat");
+            await using var beforeContext = database.Context(owner);
+            var before = await MonitorServerState.For(beforeContext).HeartbeatAsync(default);
             using (var unwritable = Scheduler(database.ConnectionString, other, missing, out var scheduler))
                 await Assert.ThrowsAnyAsync<IOException>(() => scheduler.TickAsync(default));
             await using var foreign = database.Context(other);
-            Assert.Null(await new Vessel.Persistence.MonitorStore(foreign, TestUnitOfWork.For(foreign)).HeartbeatAsync(default));
+            Assert.Equal(before, await MonitorServerState.For(foreign).HeartbeatAsync(default));
         }
         finally { File.Delete(file); }
     }

@@ -200,6 +200,7 @@ public sealed class AccountSecurityApiTests
     {
         services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry(verifier ?? new(),
             discovery ?? new SecurityDiscovery([new("9223372036854775807", "Main", "main")])));
+        services.AddSingleton<Vessel.Application.Monitoring.IServerStateStore>(new MonitorServerState());
         services.AddSingleton<ICredentialVault>(vault); services.AddSingleton<IAccountCredentialStore>(credentials);
         services.AddSingleton(SecurityFixture.Clock);
         if (logs is not null) services.AddLogging(b => b.AddProvider(logs));

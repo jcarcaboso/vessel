@@ -25,6 +25,8 @@ public static class DependencyInjection
             return NpgsqlDataSource.Create(connection);
         });
         services.TryAddSingleton<IJournalOwnerInventory, JournalOwnerInventory>();
+        services.TryAddSingleton<Vessel.Application.Monitoring.IServerStateStore, ServerStateStore>();
+        services.TryAddSingleton<Vessel.Application.Monitoring.ISystemMonitorStore, SystemMonitorStore>();
         // Resolve only when persistence is consumed. Metadata and liveness do not open a database.
         services.AddDbContext<VesselDbContext>(options =>
         {

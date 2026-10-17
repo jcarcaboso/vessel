@@ -154,21 +154,6 @@ public sealed class MonitorAccount : IOwned
     }
 }
 
-public sealed class MonitorHeartbeat : IOwned
-{
-    public Guid OwnerId { get; set; }
-    public string WorkerId { get; set; } = null!;
-    public DateTimeOffset HeartbeatAtUtc { get; set; }
-}
-
-/// <summary>A venue throttle applies to every account of this owner, across API and worker processes.</summary>
-public sealed class MonitorVenueBudget : IOwned
-{
-    public Guid OwnerId { get; set; }
-    public string VenueId { get; set; } = null!;
-    public DateTimeOffset RetryAtUtc { get; set; }
-}
-
 public static class MonitorWatchOutcomes
 {
     /// <summary>A read reported the order filled, cancelled or rejected.</summary>

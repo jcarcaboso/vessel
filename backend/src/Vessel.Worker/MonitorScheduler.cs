@@ -82,14 +82,16 @@ internal static class MonitorSchedulerLoop
 
 /// <summary>
 /// Every <see cref="MonitorOptions.SchedulerTick"/>, or early when a command arrives: discover accounts, claim due
-/// rows and run at most two. The heartbeat row and file advance only after such a productive pass.
+/// rows and run up to the configured process concurrency. The heartbeat row and file advance only after such a productive pass.
 /// TimeProvider and registry are normal DI inputs, including in isolated integration hosts.
 /// </summary>
 public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirectory owners, TimeProvider time, MonitorOptions options,
-    MonitorWakeup wakeup, ILogger<MonitorScheduler> logger) : BackgroundService
+    MonitorWakeup wakeup, ILogger<MonitorScheduler> logger, ISystemMonitorStore candidates, IServerStateStore server,
+    WorkerSettings worker) : BackgroundService
 {
     private readonly string workerId = Guid.NewGuid().ToString("N");
     private readonly List<Task> running = [];
+    private DueMonitorKey? continuation;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -105,8 +107,11 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
     public async Task TickAsync(CancellationToken ct)
     {
         running.RemoveAll(t => t.IsCompleted);
+        var statuses = new Dictionary<Guid, JournalOwnerStatus>();
+        var failed = new HashSet<Guid>();
+        var productive = new HashSet<Guid>();
+        var sawActiveOwner = false;
         Guid? after = null;
-        var productive = new List<Guid>();
         while (true)
         {
             var page = await owners.ActiveOwnersAsync(after, 100, ct);
@@ -116,71 +121,83 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
                 after = owner;
                 try
                 {
-                    if (await owners.StatusAsync(owner, ct) != JournalOwnerStatus.Active) continue;
-                    await using (var scope = scopes.Create(owner))
-                    {
-                        var now = time.GetUtcNow();
-                        var venues = scope.Services.GetRequiredService<IVenueRegistry>();
-                        await scope.Services.GetRequiredService<MonitorCoordinator>().DiscoverAsync(venues.Descriptors
-                            .Where(v => v.Capabilities is { Sync: true, Orders: true }).Select(v => v.Id).ToArray(), now, ct);
-                        if (running.Count < 2 && await owners.StatusAsync(owner, ct) == JournalOwnerStatus.Active)
-                        {
-                            var leases = await scope.Services.GetRequiredService<IMonitorStore>()
-                                .ClaimDueAsync(workerId, now, 2 - running.Count, ct);
-                            foreach (var lease in leases) running.Add(RunAsync(owner, lease, ct));
-                        }
-                    }
+                    if (await StatusAsync(owner) != JournalOwnerStatus.Active) continue;
+                    sawActiveOwner = true;
+                    await using var scope = scopes.Create(owner);
+                    var venues = scope.Services.GetRequiredService<IVenueRegistry>();
+                    await scope.Services.GetRequiredService<MonitorCoordinator>().DiscoverAsync(venues.Descriptors
+                        .Where(v => v.Capabilities is { Sync: true, Orders: true }).Select(v => v.Id).ToArray(), time.GetUtcNow(), ct);
                     productive.Add(owner);
                 }
                 catch (Exception error) when (error is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
-                    logger.LogWarning("Monitor scheduling for owner {OwnerId} failed with {ErrorType}. Later owners will still be checked.",
-                        owner, error.GetType().Name);
+                    productive.Remove(owner);
+                    failed.Add(owner);
+                    Warn(owner, error);
                 }
             }
         }
-        // Only a completed discovery and claim pass is productive; liveness alone is not health.
-        await HeartbeatAsync(productive, ct);
+        var capped = new HashSet<Guid>();
+        while (running.Count < options.WorkerConcurrency)
+        {
+            var page = await candidates.DueCandidatesAsync(continuation, 100, ct);
+            if (page.Count == 0) { continuation = null; break; }
+            foreach (var candidate in page)
+            {
+                continuation = candidate.Key;
+                var owner = candidate.OwnerId;
+                try
+                {
+                    if (failed.Contains(owner) || capped.Contains(owner) || await StatusAsync(owner) != JournalOwnerStatus.Active) continue;
+                    await using var scope = scopes.Create(owner);
+                    var store = scope.Services.GetRequiredService<IMonitorStore>();
+                    if (await store.OwnerAtCapacityAsync(time.GetUtcNow(), ct)) { capped.Add(owner); continue; }
+                    // Claim rechecks status, deadlines and both budgets, locking just this account and venue.
+                    if (await store.ClaimAsync(candidate.AccountId, null, workerId, time.GetUtcNow(), ct) is { } lease)
+                        running.Add(RunAsync(owner, lease, ct));
+                }
+                catch (Exception error) when (error is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    productive.Remove(owner);
+                    failed.Add(owner);
+                    Warn(owner, error);
+                }
+                if (running.Count >= options.WorkerConcurrency) break;
+            }
+        }
+        // An empty/all-suspended directory or no due accounts is healthy: the pass still did real discovery.
+        // If every active owner's work failed, do not turn mere scheduler liveness into a healthy monitor.
+        if (productive.Count > 0 || !sawActiveOwner && failed.Count == 0) await HeartbeatAsync(ct);
+
+        async Task<JournalOwnerStatus> StatusAsync(Guid owner)
+        {
+            if (!statuses.TryGetValue(owner, out var status)) statuses.Add(owner, status = await owners.StatusAsync(owner, ct));
+            return status;
+        }
     }
 
-    private async Task HeartbeatAsync(List<Guid> productive, CancellationToken ct)
+    private void Warn(Guid owner, Exception error) =>
+        logger.LogWarning("Monitor scheduling for owner {OwnerId} failed with {ErrorType}. Later owners will still be checked.",
+            owner, error.GetType().Name);
+
+    private async Task HeartbeatAsync(CancellationToken ct)
     {
-        if (productive.Count == 0) return;
         var file = options.HeartbeatFile;
         var now = time.GetUtcNow();
         try
         {
-            // "<unix seconds> <timeout seconds>": the health script needs no configuration of its own.
-            // No secrets or account information in this file.
+            // "<unix seconds> <timeout seconds>": health needs no configuration or journal information.
             var temporary = file + "." + workerId + ".new";
             await File.WriteAllTextAsync(temporary, string.Create(CultureInfo.InvariantCulture,
                 $"{now.ToUnixTimeSeconds()} {(long)options.HeartbeatTimeout.TotalSeconds}"), ct);
             File.Move(temporary, file, overwrite: true);
+            await server.RecordHeartbeatAsync(worker.Deployment!, now, ct);
         }
         catch
         {
-            // Neither the container nor the API may report a worker healthy whose heartbeat cannot be recorded.
             try { File.Delete(file); } catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
             throw;
         }
-        var recorded = false;
-        foreach (var owner in productive)
-        {
-            try
-            {
-                await using (var scope = scopes.Create(owner))
-                    await scope.Services.GetRequiredService<IMonitorStore>().RecordHeartbeatAsync(workerId, now, ct);
-                recorded = true;
-            }
-            catch (Exception error) when (error is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                logger.LogWarning("Monitor heartbeat for owner {OwnerId} failed with {ErrorType}. Later owners will still be recorded.",
-                    owner, error.GetType().Name);
-            }
-        }
-        // One owner's failure cannot erase another's successful heartbeat.
-        if (!recorded)
-            try { File.Delete(file); } catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
     }
 
     private async Task RunAsync(Guid owner, MonitorLease lease, CancellationToken ct)

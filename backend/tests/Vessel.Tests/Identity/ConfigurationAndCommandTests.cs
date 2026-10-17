@@ -48,8 +48,8 @@ public sealed class ConfigurationAndCommandTests
     {
         var settings = IdentitySettings.Read(Config(new() { ["Vessel:Identity:Origins:0"] = "https://VESSEL.test:443/" }), false);
         Assert.Equal("https://vessel.test", Assert.Single(settings.Origins));
-        Assert.Equal("Closed", settings.Registration);
-        Assert.False(IdentityRegistrationGate.MultiOwnerReady);
+        Assert.Equal("Invitation", settings.Registration);
+        Assert.True(IdentityRegistrationGate.MultiOwnerReady);
         var token = IdentitySettings.Read(Config(new()
         {
             ["Vessel:Auth:Mode"] = "Token", ["Vessel:Auth:OwnerId"] = null, ["Vessel:Identity:Origins:0"] = null

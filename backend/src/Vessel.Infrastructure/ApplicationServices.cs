@@ -58,6 +58,11 @@ public static class ApplicationServices
         options.Validate();
         services.AddSingleton(options);
         services.TryAddSingleton(TimeProvider.System);
+        var deployments = configuration.GetSection("Vessel:Messaging:Deployments").GetChildren().ToArray();
+        services.AddSingleton(new MonitorDeployments(deployments.Length == 0 ? ["monitor"] : deployments
+            .Where(d => d.GetChildren().Any(m => m.Value == "monitor")).Select(d => d.Key).ToArray()));
+        services.TryAddSingleton<UserReadLimits>();
+        services.AddScoped<AccountReadPolicy>();
         services.AddScoped<MonitorDiscrepancyService>();
         services.AddScoped<IMonitorEvaluator>(sp => sp.GetRequiredService<MonitorDiscrepancyService>());
         services.AddScoped<IMonitorImporter>(sp => sp.GetRequiredService<PlayExecutionService>());
