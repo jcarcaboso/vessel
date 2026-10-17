@@ -13,7 +13,7 @@ namespace Vessel.Messaging;
 /// Registered by a worker host, never by the API.
 /// </summary>
 public sealed class SubscriptionMaintenanceService(MessagingHost host, IServiceScopeFactory scopes,
-    ILogger<SubscriptionMaintenanceService> logger) : BackgroundService
+    ILogger<SubscriptionMaintenanceService> logger, IEnumerable<IMaintenanceHeartbeat> heartbeats) : BackgroundService
 {
     private static readonly TimeSpan RetentionInterval = TimeSpan.FromHours(1);
 
@@ -38,6 +38,7 @@ public sealed class SubscriptionMaintenanceService(MessagingHost host, IServiceS
                     logger.LogWarning("Event retention failed with {ErrorType}.", error.GetType().Name);
                 }
             }
+            var productive = true;
             foreach (var subscription in host.RunningSubscriptions)
             {
                 try
@@ -47,10 +48,30 @@ public sealed class SubscriptionMaintenanceService(MessagingHost host, IServiceS
                 }
                 catch (Exception error) when (!stoppingToken.IsCancellationRequested)
                 {
+                    productive = false;
                     logger.LogWarning("Catch-up for subscription {Subscription} failed with {ErrorType}.",
                         subscription.Name, error.GetType().Name);
                 }
             }
+            // Only a pass in which every catch-up succeeded is productive; liveness alone is not health.
+            if (productive)
+                foreach (var heartbeat in heartbeats)
+                {
+                    try { await heartbeat.BeatAsync(stoppingToken); }
+                    catch (Exception error) when (!stoppingToken.IsCancellationRequested)
+                    {
+                        logger.LogWarning("A maintenance heartbeat failed with {ErrorType}.", error.GetType().Name);
+                    }
+                }
         } while (await timer.WaitForNextTickAsync(stoppingToken));
     }
+}
+
+/// <summary>
+/// A module's health signal, written after each maintenance pass in which every catch-up the host runs succeeded.
+/// It must clear its own signal when it cannot record it, so a stuck host never looks healthy.
+/// </summary>
+public interface IMaintenanceHeartbeat
+{
+    Task BeatAsync(CancellationToken cancellationToken);
 }

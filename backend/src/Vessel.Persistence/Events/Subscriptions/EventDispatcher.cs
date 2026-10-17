@@ -183,10 +183,13 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
     private async Task<(long Sequence, string Type, DateTimeOffset? ExpiresAt, string Payload, long Floor)?> RetainedAsync(
         Guid eventId, CancellationToken ct)
     {
+        // The key-share lock keeps the event until this transaction ends: an account deletion waits for the dispatch
+        // instead of removing the event between this lookup and its receipt insert.
         await using var command = VesselEventSql.TransactionCommand(db, """
             SELECT e.sequence,e.type,e.expires_at,e.payload::text,c.retention_floor
             FROM events e JOIN event_cursors c ON c.owner_id=e.owner_id
             WHERE e.owner_id=@owner AND e.event_id=@id
+            FOR KEY SHARE OF e
             """, ("owner", db.CurrentOwnerId), ("id", eventId));
         await using var row = await command.ExecuteReaderAsync(ct);
         if (!await row.ReadAsync(ct)) return null;

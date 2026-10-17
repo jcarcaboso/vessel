@@ -8,6 +8,8 @@ using Vessel.Infrastructure;
 using Vessel.Messaging;
 using Vessel.Messaging.Modules;
 using Vessel.Messaging.Modules.Monitor;
+using Vessel.Messaging.Modules.Notifications;
+using Vessel.Persistence.Notifications;
 using Vessel.Persistence;
 
 namespace Vessel.Worker;
@@ -91,6 +93,11 @@ public static class WorkerModules
                 services.AddSingleton<MonitorWakeup>();
                 services.AddSingleton<IMonitorWakeup>(sp => sp.GetRequiredService<MonitorWakeup>());
                 services.AddHostedService<MonitorScheduler>();
+                break;
+            case NotificationsModule.ModuleName:
+                services.AddVesselNotifications(configuration);
+                services.AddSingleton<IMaintenanceHeartbeat, NotificationHeartbeat>();
+                services.AddHostedService<NotificationRetentionService>();
                 break;
         }
     }

@@ -37,7 +37,7 @@ public sealed class WorkerHostTests
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
         builder.Configuration.AddConfiguration(Configuration(new()
         {
-            ["Vessel:Worker:Modules:0"] = "notifications",
+            ["Vessel:Worker:Modules:0"] = "nonexistent",
             ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1",
             ["ConnectionStrings:Vessel"] = "Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused"
         }));
@@ -51,12 +51,13 @@ public sealed class WorkerHostTests
         var settings = new MessagingSettings { Verification = true };
         var registry = Vessel.Messaging.Modules.VesselModuleRegistry.From(settings);
         var defaults = settings.DeploymentModules(registry);
-        Assert.Equal(["api", "monitor", "verification"], defaults.Keys);
+        Assert.Equal(["api", "monitor", "notifications", "verification"], defaults.Keys);
+        Assert.Equal(["notifications"], defaults["notifications"]);
         Assert.Empty(defaults["api"]);
         Assert.Equal(["monitor"], defaults["monitor"]);
         settings.Deployments["monitor"] = ["verification", "monitor"];
         Assert.Equal(["monitor", "verification"], settings.DeploymentModules(registry)["monitor"]);
-        settings.Deployments["monitor"] = ["notifications"];
+        settings.Deployments["monitor"] = ["nonexistent"];
         Assert.Throws<InvalidOperationException>(() => settings.DeploymentModules(registry));
         settings.Deployments.Clear();
         settings.Deployments["api"] = ["monitor"];
