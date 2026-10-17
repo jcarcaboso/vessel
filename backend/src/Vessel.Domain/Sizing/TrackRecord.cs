@@ -1,4 +1,3 @@
-using System.Globalization;
 using Vessel.Domain.Common;
 using Vessel.Domain.Numerics;
 
@@ -53,8 +52,8 @@ public sealed record TrackRecord(int ClosedPlays, int DecidedPlays, int Window, 
     }
 
     /// <summary>
-    /// The decimal mean when the decimal sum fits; otherwise the exact sum over the count. The mean of representable
-    /// terms is itself representable, so an overflowing intermediate sum never fails the record.
+    /// The decimal mean when the decimal sum fits; otherwise the exact sum over the count, rounded once. The mean of
+    /// representable terms is itself representable, so an overflowing intermediate sum never fails the record.
     /// </summary>
     private static decimal Average(IReadOnlyList<decimal> values)
     {
@@ -65,9 +64,7 @@ public sealed record TrackRecord(int ClosedPlays, int DecidedPlays, int Window, 
         catch (OverflowException)
         {
             var sum = values.Aggregate(default(ExactAmount), (total, value) => total + ExactAmount.From(value));
-            var mean = ExactAmount.Average(sum.Units * ExactAmount.From(1).Units, ExactAmount.From(values.Count))!;
-            // Beyond decimal precision the parse rounds to the nearest representable value; magnitude cannot exceed the largest term.
-            return decimal.Parse(mean, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture);
+            return sum.ToDecimal(values.Count);
         }
     }
 
