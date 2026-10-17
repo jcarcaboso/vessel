@@ -36,6 +36,16 @@ public sealed class DiaryStore(VesselDbContext db, UnitOfWork unitOfWork) : IDia
         db.Orders.Where(o => o.AccountId == accountId).AsNoTracking().ToListAsync(ct);
     public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, CancellationToken ct) =>
         db.OrderLinks.Where(l => l.AccountId == accountId).AsNoTracking().ToListAsync(ct);
+    public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct)
+    {
+        var ids = orderIds.ToArray();
+        return db.Orders.Where(o => o.AccountId == accountId && ids.Contains(o.OrderId)).AsNoTracking().ToListAsync(ct);
+    }
+    public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct)
+    {
+        var ids = orderIds.ToArray();
+        return db.OrderLinks.Where(l => l.AccountId == accountId && ids.Contains(l.OrderId)).AsNoTracking().ToListAsync(ct);
+    }
     public void Add(ManualExecution execution) { unitOfWork.RequireActive(); db.ManualExecutions.Add(execution); }
     public void Add(ManualExecutionHistory history) { unitOfWork.RequireActive(); db.ManualExecutionHistory.Add(history); }
     public void Add(DiaryRequest request) { unitOfWork.RequireActive(); db.DiaryRequests.Add(request); }

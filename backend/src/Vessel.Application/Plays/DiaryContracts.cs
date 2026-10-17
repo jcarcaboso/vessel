@@ -39,6 +39,12 @@ public interface IDiaryStore
     Task<ActivityFacts> ActivityAsync(Guid accountId, CancellationToken ct);
     Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct);
     Task<List<PlayOrderLink>> LinksAsync(Guid accountId, CancellationToken ct);
+    /// <summary>Read-only orders of the account with one of <paramref name="orderIds"/>.</summary>
+    async Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct) =>
+        (await OrdersAsync(accountId, ct)).Where(o => orderIds.Contains(o.OrderId)).ToList();
+    /// <summary>Read-only links of the account in any state on one of <paramref name="orderIds"/>.</summary>
+    async Task<List<PlayOrderLink>> LinksAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct) =>
+        (await LinksAsync(accountId, ct)).Where(l => orderIds.Contains(l.OrderId)).ToList();
     void Add(ManualExecution execution);
     void Add(ManualExecutionHistory history);
     void Add(DiaryRequest request);
