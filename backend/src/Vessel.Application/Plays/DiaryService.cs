@@ -1,4 +1,5 @@
 using Vessel.Application.Workspace;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -8,6 +9,7 @@ using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
 using Vessel.Application.Venues;
 using Vessel.Application.Ownership;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 
@@ -171,9 +173,11 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
 
         var ids = operation.Fills.Select(f => f.Fill.Id).ToHashSet();
         var operationOrders = operation.Fills.ToLookup(f => Key(f.Fill));
+        // Operations are per account and contract, so every order key is on the operation's contract: the same venue ID
+        // on another contract is another order, and neither its fills nor its order row nor its links are read here.
         var orderKeys = operationOrders.Select(g => g.Key).ToHashSet();
         // Include every retained fill of the involved orders, also those outside the selected operation.
-        var relevant = facts.Fills.Where(f => orderKeys.Contains(OrderKey.Of(f))).ToList();
+        var relevant = facts.Fills.Where(f => f.ContractId == operation.ContractId && orderKeys.Contains(OrderKey.Of(f))).ToList();
         var fillsByOrder = relevant.ToLookup(OrderKey.Of);
         var own = relevant.Where(f => ids.Contains(f.Id)).ToDictionary(f => f.Id);
         // Only the operation's orders and their links are read; retained fills above stay whole-order evidence.
@@ -217,9 +221,10 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
             if (order is not null && ExecutionIntegrity.RoleConflict(role, retrospectivePlan, order, fills) is { } conflict)
                 reasons.Add($"Order {orderId}: {conflict}");
         }
+        // An explicit, stable projection of what eligibility and creation read, never whole entities.
         var fingerprint = Hash(new { account.Id, account.OwnerId, account.IsEnabled, account.SettingsRevision, operation,
-            fills = relevant.OrderBy(f => f.Id), orders = orders.Values.OrderBy(o => o.ExternalOrderId, StringComparer.Ordinal).ThenBy(o => o.ContractId, StringComparer.Ordinal),
-            links = links.OrderBy(l => l.Id) });
+            fills = relevant.OrderBy(f => f.Id).Select(FillPrint), orders = orders.Values.OrderBy(o => o.Id).Select(OrderPrint),
+            links = links.OrderBy(l => l.Id).Select(LinkPrint) });
         return new(reasons.Count == 0, BoundedReasons(reasons), fingerprint, bounded, RetrospectiveNotice);
     }
 
@@ -282,6 +287,28 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
 
     /// <summary>The order of an operation fill, by the shared <see cref="OrderKey"/> rule.</summary>
     private static OrderKey Key(FillDto fill) => new(fill.AccountId, fill.ContractId, fill.OrderId);
+
+    private static string Time(DateTimeOffset value) => value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+
+    private static object FillPrint(ImportedFill f) => new
+    {
+        f.Id, f.OwnerId, f.AccountId, f.ContractId, f.VenueContractId, f.SourceFillId, f.ExternalOrderId, f.Side, f.PositionEffect,
+        Price = ExactDecimal.Format(f.Price), Quantity = ExactDecimal.Format(f.Quantity), Fee = ExactDecimal.Format(f.Fee), f.FeeToken,
+        f.FeeBasis, ClosedPnlUsd = ExactDecimal.Format(f.ClosedPnlUsd), f.PnlBasis, OccurredAtUtc = Time(f.OccurredAtUtc)
+    };
+
+    private static object OrderPrint(ImportedOrder o) => new
+    {
+        o.Id, o.OwnerId, o.AccountId, o.ContractId, o.VenueContractId, o.ExternalOrderId, o.Side, o.OrderType,
+        LimitPrice = ExactDecimal.Format(o.LimitPrice), TriggerPrice = ExactDecimal.Format(o.TriggerPrice), o.ReduceOnly, o.IsPositionTpsl,
+        OriginalSize = ExactDecimal.Format(o.OriginalSize), RemainingSize = ExactDecimal.Format(o.RemainingSize),
+        PlacedAtUtc = Time(o.PlacedAtUtc), o.Status, StatusAtUtc = Time(o.StatusAtUtc)
+    };
+
+    private static object LinkPrint(PlayOrderLink l) => new
+    {
+        l.Id, l.PlayId, l.ImportedOrderId, Role = l.Role.ToString(), l.EntryId, l.LevelId, State = l.State.ToString()
+    };
 
     private static string Hash(object payload) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload, Json))));
 
