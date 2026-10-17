@@ -149,6 +149,7 @@ public sealed class IdentityAccountService(IdentityTransaction transactions, IDb
         {
             var wallet = await db.Wallets.SingleOrDefaultAsync(x => x.UserId == current.User.Id && x.Id == id, ct)
                 ?? throw IdentityErrors.Error(404, "not-found");
+            await IdentityWalletRemoval.RequireRemovableAsync(db, wallet, ct);
             await RequireGrantAsync(db, current, "wallet.remove", id.ToString(), now, ct);
             await IdentityWalletRemoval.RemoveAsync(db, wallet, now, ct);
             IdentityWalletRemoval.ClearGrant(current.Session);
@@ -211,9 +212,15 @@ public sealed class IdentityAccountService(IdentityTransaction transactions, IDb
 internal static class IdentityWalletRemoval
 {
     // Both callers hold the user's row lock in the identity transaction.
+    internal static async Task RequireRemovableAsync(IdentityDbContext db, UserWallet wallet, CancellationToken ct)
+    {
+        // Keeping every user's last wallet also keeps an active operator's last sign-in wallet.
+        if (await db.Wallets.CountAsync(x => x.UserId == wallet.UserId, ct) <= 1) throw IdentityErrors.Error(409, "last-wallet");
+    }
+
     internal static async Task RemoveAsync(IdentityDbContext db, UserWallet wallet, DateTimeOffset now, CancellationToken ct)
     {
-        if (await db.Wallets.CountAsync(x => x.UserId == wallet.UserId, ct) <= 1) throw IdentityErrors.Error(409, "last-wallet");
+        await RequireRemovableAsync(db, wallet, ct);
         await db.Sessions.Where(x => x.UserId == wallet.UserId && x.StepUpWalletId == wallet.Id).ExecuteUpdateAsync(update => update
             .SetProperty(x => x.StepUpAction, (string?)null).SetProperty(x => x.StepUpTarget, (string?)null)
             .SetProperty(x => x.StepUpWalletId, (Guid?)null).SetProperty(x => x.StepUpExpiresAt, (DateTimeOffset?)null), ct);

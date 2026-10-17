@@ -200,6 +200,44 @@ public sealed class AccountManagementTests
         Assert.Single(await state.Wallets.ToListAsync());
     }
 
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Last_wallet_removal_precedes_step_up_and_preserves_any_existing_grant(bool hasOtherGrant)
+    {
+        await using var db = await IdentityDatabase.CreateAsync();
+        var key = EthECKey.GenerateKey();
+        var owner = await db.SeedAsync(key);
+        var spare = await AddWallet(db, owner.User.Id, EthECKey.GenerateKey());
+        await using var factory = IdentityHttpTest.Factory(db, owner.User.Id);
+        using var client = IdentityHttpTest.Client(factory);
+        var session = await IdentityHttpTest.SignInAsync(client, key);
+        Assert.Equal(2, (await Success<WalletDto[]>(await client.GetAsync("/api/auth/wallets"))).Length);
+        if (hasOtherGrant)
+        {
+            var step = await Success<ChallengeDto>(await client.PostAsJsonAsync("/api/auth/step-up/challenge",
+                new { action = "wallet.link", address = key.GetPublicAddress() }));
+            await NoContent(await client.PostAsJsonAsync("/api/auth/step-up",
+                new { challengeId = step.ChallengeId, signature = IdentityDatabase.Sign(key, step.Message) }));
+        }
+        // Another tab invalidates the displayed list while this session stays live.
+        Assert.Equal(0, await IdentityCommands.RunAsync(["unbind-wallet", "--wallet", spare.Id.ToString()],
+            db.Configuration(owner.User.Id), true, new StringWriter()));
+        var response = await client.DeleteAsync($"/api/auth/wallets/{owner.Wallet.Id}");
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.True(response.Headers.CacheControl?.NoStore);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("last-wallet", problem.GetProperty("code").GetString());
+        Assert.False(problem.TryGetProperty("action", out _));
+        await Success<SessionDto>(await client.GetAsync("/api/auth/session"));
+        await using var state = db.CreateDbContext();
+        Assert.Single(await state.Wallets.ToListAsync());
+        var unchanged = await state.Sessions.SingleAsync(x => x.Id == session.Session.Id);
+        Assert.Null(unchanged.RevokedAt);
+        Assert.Equal(hasOtherGrant ? "wallet.link" : null, unchanged.StepUpAction);
+        Assert.Equal(hasOtherGrant ? owner.Wallet.Id : (Guid?)null, unchanged.StepUpWalletId);
+    }
+
     [PostgresFact]
     public async Task Concurrent_removal_of_two_remaining_wallets_keeps_one_and_revokes_only_removed_wallet_sessions()
     {
