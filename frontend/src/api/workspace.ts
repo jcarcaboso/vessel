@@ -440,7 +440,8 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
   /**
    * Runs one stream under the current session generation. A newer generation aborts it, so no frame read under the
    * old one reaches the caller, and opens it again under the new one; `open` reads only its own signal. The end of the
-   * session aborts it for good: it settles quietly and never reopens.
+   * session aborts it for good: it settles quietly and never reopens, even while its header read, a session call that
+   * then never settles, is still pending.
    */
   async function generationBound(signal: AbortSignal, open: (signal: AbortSignal) => Promise<void>) {
     if (!generation) return open(signal)
@@ -448,11 +449,15 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     while (!signal.aborted && !ended.aborted) {
       const changed = new AbortController()
       const unsubscribe = generation.subscribe(() => changed.abort())
+      let quit!: () => void
+      const over = new Promise<void>(resolve => { quit = resolve })
+      ended.addEventListener('abort', quit, { once: true })
       try {
-        await open(AbortSignal.any([signal, changed.signal, ended]))
+        await Promise.race([open(AbortSignal.any([signal, changed.signal, ended])), over])
       } catch (cause) {
         if (signal.aborted || !changed.signal.aborted && !ended.aborted) throw cause
       } finally {
+        ended.removeEventListener('abort', quit)
         unsubscribe()
       }
       if (!changed.signal.aborted) return

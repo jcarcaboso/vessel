@@ -190,6 +190,13 @@ describe('after the session ends', () => {
     const promise = new Promise<T>(settle => { resolve = settle })
     return { promise, resolve }
   }
+  /** Whether a promise has settled once pending timers and microtasks have run. */
+  async function settles(promise: Promise<unknown>) {
+    let settled = false
+    promise.then(() => { settled = true }, () => { settled = true })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    return settled
+  }
   /** Another tab first adopts a newer session of the same user, then someone else signs in there. */
   function sameUserThenOther(bus: ReturnType<typeof channelBus>) {
     bus.send({ type: 'signed-in', userId: sessionFixture.user.id, sessionId: newSession })
@@ -213,7 +220,7 @@ describe('after the session ends', () => {
     sameUserThenOther(bus)
     expect(navigate).toHaveBeenCalledOnce()
     pending.resolve(json('old'))
-    await expect(result).rejects.toMatchObject({ name: 'AbortError' })
+    expect(await settles(result)).toBe(false)
     expect(fetch).toHaveBeenCalledOnce()
     expect(failures).not.toHaveBeenCalled()
     expect(changed).not.toHaveBeenCalled()
@@ -240,7 +247,7 @@ describe('after the session ends', () => {
     ['a voluntary sign-out', tab => tab.controller.signOut({ signOut: vi.fn().mockResolvedValue(undefined) })],
     ['another person\'s sign-in', tab => tab.bus.send({ type: 'signed-in', userId: otherUser, sessionId: newSession })],
     ['disposal', tab => tab.controller.dispose()],
-  ])('after %s, aborts what is in flight, sends nothing more and never asks the shell to reload', async (_, end) => {
+  ])('after %s, aborts what is in flight, sends nothing more, settles nothing and never asks the shell to reload', async (_, end) => {
     const tab = live()
     const credentials = tab.controller.credentials()
     const events: ApiEvent[] = []
@@ -257,9 +264,70 @@ describe('after the session ends', () => {
     await end(tab)
     expect(credentials.generation!.ended.aborted).toBe(true)
     expect(sent?.aborted).toBe(true)
-    await expect(write).rejects.toMatchObject({ name: 'AbortError' })
-    await expect(api.overview()).rejects.toMatchObject({ name: 'AbortError' })
+    expect(await settles(write)).toBe(false)
+    expect(await settles(api.overview())).toBe(false)
     expect(fetch).toHaveBeenCalledOnce()
     expect(events).toEqual([])
+  })
+
+  it('leaves a call made after the session ended pending without fetching', async () => {
+    const { controller } = live()
+    const fetch = vi.fn(async () => json('never sent'))
+    vi.stubGlobal('fetch', fetch)
+    const call = createApiCall(controller.credentials(), vi.fn(), vi.fn())
+    controller.dispose()
+    vi.useFakeTimers()
+    try {
+      let settled = false
+      call('/api/example', { timeout: 1_000, validate: isText }).then(() => { settled = true }, () => { settled = true })
+      await vi.runAllTimersAsync()
+      expect(settled).toBe(false)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { vi.useRealTimers() }
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('leaves a call in flight when the session ends pending and aborts its fetch', async () => {
+    const { controller, bus } = live()
+    let sent: AbortSignal | null | undefined
+    const failures = vi.fn(), changed = vi.fn()
+    vi.stubGlobal('fetch', vi.fn((_path: string, init: RequestInit) => {
+      sent = init.signal
+      return new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
+    }))
+    const result = createApiCall(controller.credentials(), failures, changed)('/api/example', { timeout: 1_000, validate: isText })
+    await waitFor(() => expect(sent).toBeDefined())
+    bus.send({ type: 'signed-in', userId: otherUser, sessionId: newSession })
+    expect(sent?.aborted).toBe(true)
+    expect(await settles(result)).toBe(false)
+    expect(failures).not.toHaveBeenCalled()
+    expect(changed).not.toHaveBeenCalled()
+  })
+
+  it('still rejects a caller\'s own abort while the session lasts', async () => {
+    const { controller } = live()
+    vi.stubGlobal('fetch', vi.fn((_path: string, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))))
+    const stop = new AbortController()
+    const result = createWorkspaceApi(controller.credentials(), controller.handleFailure).overview(stop.signal)
+    stop.abort()
+    await expect(result).rejects.toMatchObject({ kind: 'unavailable' })
+    expect(controller.sessionGeneration.ended.aborted).toBe(false)
+    controller.dispose()
+  })
+
+  it('settles a generation-bound stream quietly when the session ends before its headers arrive', async () => {
+    const { controller, bus } = live()
+    const fetch = vi.fn((_path: string, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))))
+    vi.stubGlobal('fetch', fetch)
+    const api = createWorkspaceApi(controller.credentials(), controller.handleFailure)
+    const market = api.marketStream(accountId, { instrument: 'BTC', interval: '1h' }, new AbortController().signal, vi.fn())
+    const monitor = api.monitorStream('0', new AbortController().signal, vi.fn())
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+    bus.send({ type: 'signed-in', userId: otherUser, sessionId: newSession })
+    await expect(market).resolves.toBeUndefined()
+    await expect(monitor).resolves.toBeUndefined()
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 })

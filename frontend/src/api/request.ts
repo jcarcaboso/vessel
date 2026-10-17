@@ -21,14 +21,18 @@ export interface SessionGeneration {
   subscribe(listener: () => void): () => void
   /**
    * Aborts once the tab's session is over: a teardown, a sign-out, another person's sign-in or disposal. From then on
-   * nothing is sent, retried, published or reopened; pending calls reject with a quiet `AbortError`.
+   * nothing is sent, retried, published or reopened; pending and later calls never settle.
    */
   readonly ended: AbortSignal
 }
 
-/** The quiet rejection of a call whose session ended while the page leaves; callers treat it like their own abort. */
-export function sessionEndedError() {
-  return new DOMException('The session ended.', 'AbortError')
+/**
+ * What a session call returns once its session has ended. The page is always leaving then (teardown, sign-out and
+ * another person's sign-in replace it; disposal without navigation unmounts the workspace), so no caller may report
+ * a failure, toast or reload. Each call gets its own promise holding nothing, so it is collected with its caller.
+ */
+function afterSessionEnded(): Promise<never> {
+  return new Promise<never>(() => {})
 }
 
 /** Copy for an answer discarded because the session changed meanwhile. A write may still have been applied. */
@@ -146,7 +150,8 @@ function discard(outcome: Outcome<unknown>) {
  * generation is dropped with its 401 or 403: a read (GET without a body) is sent once more under the current
  * generation, and anything else rejects with `session-changed` and calls `onSessionChanged`, since the server may
  * already have applied it. Once the session has ended, nothing more is sent or published: in-flight requests are
- * aborted and every call rejects with `sessionEndedError`, without reporting failures or session changes.
+ * aborted, their bodies freed, and every call stays pending for good, without reporting failures or session changes.
+ * A caller's own abort still rejects as before.
  */
 export function createApiCall(credentials: string | ApiCredentials, onUnauthorized?: (failure: AuthFailure) => void, onSessionChanged?: () => void) {
   const kind: ApiCredentials = typeof credentials === 'string' ? { kind: 'bearer', token: credentials } : credentials
@@ -205,12 +210,12 @@ export function createApiCall(credentials: string | ApiCredentials, onUnauthoriz
   return async function call<T>(path: string, options: Options<T>): Promise<T> {
     const read = (options.method ?? 'GET') === 'GET' && options.body === undefined
     for (let attempt = 0; ; attempt++) {
-      if (source?.ended.aborted) throw sessionEndedError()
+      if (source?.ended.aborted) return afterSessionEnded()
       const generation = source?.current()
       const outcome = await send(path, options)
       if (source?.ended.aborted) {
         discard(outcome)
-        throw sessionEndedError()
+        return afterSessionEnded()
       }
       if (source && generation !== source.current()) {
         discard(outcome)
