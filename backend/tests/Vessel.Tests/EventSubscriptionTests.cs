@@ -364,17 +364,27 @@ public sealed partial class EventSubscriptionTests
         Assert.True(await runtime.RegisterAsync(module.Subscriptions[0]));
         var pending = await runtime.AppendAsync(Draft("maintained"));
         runtime.Clock.Advance(TimeSpan.FromMinutes(1));
+        var heartbeat = new CountingHeartbeat();
         var service = new SubscriptionMaintenanceService(new MessagingHost("maintained", runtime.Owner, [module]),
-            runtime.Scopes, Microsoft.Extensions.Logging.Abstractions.NullLogger<SubscriptionMaintenanceService>.Instance);
+            runtime.Scopes, Microsoft.Extensions.Logging.Abstractions.NullLogger<SubscriptionMaintenanceService>.Instance, [heartbeat]);
         await service.StartAsync(default);
         try
         {
-            for (var attempt = 0; attempt < 40 && (await runtime.StatusAsync()).Single().LowWaterMark == 0; attempt++)
+            for (var attempt = 0; attempt < 40 && ((await runtime.StatusAsync()).Single().LowWaterMark == 0 || heartbeat.Beats == 0); attempt++)
                 await Task.Delay(250);
         }
         finally { await service.StopAsync(default); }
         Assert.Equal(("delivered", 1), await runtime.ReceiptAsync(module.Subscriptions[0], pending.Id));
         Assert.Equal(1, (await runtime.StatusAsync()).Single().LowWaterMark);
+        // A productive pass (every catch-up succeeded) beats the module heartbeats.
+        Assert.True(heartbeat.Beats > 0);
+    }
+
+    private sealed class CountingHeartbeat : IMaintenanceHeartbeat
+    {
+        private int beats;
+        public int Beats => Volatile.Read(ref beats);
+        public Task BeatAsync(CancellationToken cancellationToken) { Interlocked.Increment(ref beats); return Task.CompletedTask; }
     }
 
     // B7: a restored database is detected even after new writes reach the client's former sequence.

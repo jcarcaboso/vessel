@@ -171,7 +171,7 @@ public sealed class MonitorDiscrepancyPostgresTests
         Assert.Equal(f.Play.Status, (await scope.Db.Plays.SingleAsync()).Status);
         await scope.Db.GetService<IMigrator>().MigrateAsync("20261016174509_FundingPayments");
         // The order identity change has no backfill: it refuses a database that still holds imported facts.
-        Assert.Equal(["20261017091636_OrderIdentity"], await scope.Db.Database.GetPendingMigrationsAsync());
+        Assert.Equal("20261017091636_OrderIdentity", (await scope.Db.Database.GetPendingMigrationsAsync()).First());
         var refused = await Assert.ThrowsAsync<PostgresException>(() => scope.Db.Database.MigrateAsync());
         Assert.Equal("P0001", refused.SqlState);
     }

@@ -185,8 +185,10 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             if (request.ExpectedRevision != account.SettingsRevision)
                 throw new ProblemException(409, "Account settings changed. Reload the current settings before saving.");
             await ValidatePortfolio(request.PortfolioId, ct);
+            var wasEnabled = account.IsEnabled;
             account.UpdateSettings(request.Name, request.PortfolioId, request.IsEnabled);
             await store.SaveAsync(ct);
+            if (wasEnabled != account.IsEnabled) await store.AccountVisibilityChangedAsync(id, account.IsEnabled, ct);
             return ToDto(account, await store.SnapshotAsync(id, ct));
         }, ct), ct), ct);
     }

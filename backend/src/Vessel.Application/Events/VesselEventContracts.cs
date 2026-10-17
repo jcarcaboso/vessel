@@ -81,6 +81,6 @@ public static class VesselEventValues
     [
         "play.opened", "play.closed", "play.status-changed", "execution.filled", "link.needs-confirmation",
         "execution.link-changed", "discrepancy.opened", "discrepancy.resolved", "discrepancy.unverifiable",
-        "monitor.state-changed", "monitor.run-completed", "credential.expiring"
+        "monitor.state-changed", "monitor.run-completed", "credential.expiring", "notification.test-requested"
     ];
 }

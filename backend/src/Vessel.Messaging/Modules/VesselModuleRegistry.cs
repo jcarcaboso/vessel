@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Vessel.Messaging.Modules.Monitor;
+using Vessel.Messaging.Modules.Notifications;
 using Vessel.Messaging.Modules.Verification;
 
 namespace Vessel.Messaging.Modules;
@@ -26,7 +27,8 @@ public sealed class VesselModuleRegistry
 
     /// <summary>Compiled-in modules; the verification module only when <c>Vessel:Messaging:Verification</c> is set.</summary>
     public static VesselModuleRegistry From(MessagingSettings settings) =>
-        new(settings.Verification ? [new MonitorModule(), new VerificationModule()] : [new MonitorModule()]);
+        new(settings.Verification ? [new MonitorModule(), new NotificationsModule(), new VerificationModule()]
+            : [new MonitorModule(), new NotificationsModule()]);
 
     public static VesselModuleRegistry From(IConfiguration configuration) =>
         From(MessagingHosting.Settings(configuration));

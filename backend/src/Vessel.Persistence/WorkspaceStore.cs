@@ -84,6 +84,9 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
             DELETE FROM event_baselines WHERE owner_id={account.OwnerId} AND account_id={account.Id};
             DELETE FROM event_fills WHERE owner_id={account.OwnerId} AND account_id={account.Id};
             """, ct);
+        // After the events: their receipts were waited for first, so the notification cursor is never held while a
+        // dispatcher that needs it holds a receipt this deletion waits on.
+        await Notifications.NotificationStore.AccountDeletedAsync(db, account.Id, ct);
         // Bulk deletes do not update EF's tracker. Detach only this account's deleted
         // facts so a context that previously refreshed it cannot sever required FKs.
         foreach (var entry in db.ChangeTracker.Entries().ToList())
@@ -103,6 +106,12 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         }
         db.Accounts.Remove(account);
         await unitOfWork.SaveChangesAsync(ct);
+        return true;
+    }, ct);
+
+    public Task AccountVisibilityChangedAsync(Guid accountId, bool enabled, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
+    {
+        await Notifications.NotificationStore.AccountVisibilityChangedAsync(db, accountId, enabled, DateTimeOffset.UtcNow, ct);
         return true;
     }, ct);
 

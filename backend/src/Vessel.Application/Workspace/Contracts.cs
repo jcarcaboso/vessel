@@ -72,6 +72,11 @@ public sealed record MarketDataAccount(bool IsEnabled, string VenueId);
 
 public interface IWorkspaceStore
 {
+    /// <summary>
+    /// An account was disabled or enabled under the account locks: disabling withdraws its unread notifications and
+    /// hides them, enabling shows them again. Stores without notifications ignore it.
+    /// </summary>
+    Task AccountVisibilityChangedAsync(Guid accountId, bool enabled, CancellationToken ct) => Task.CompletedTask;
     Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct);
     Task<List<Account>> AccountsAsync(CancellationToken ct);
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);
