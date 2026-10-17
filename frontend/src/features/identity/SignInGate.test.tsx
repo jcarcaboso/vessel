@@ -244,6 +244,32 @@ describe('wallet sign-in', () => {
     expect(JSON.parse(sent('/api/auth/challenge').at(-1)!.init.body as string)).toEqual({ address: other })
   })
 
+  it('locks the remember choice once signing starts, so verify sends what the box shows', async () => {
+    let release!: (value: unknown) => void
+    wallet = walletProvider(() => new Promise(resolve => { release = resolve }))
+    const { user } = mount()
+    await user.click(await screen.findByRole('button', { name: /Rabby Wallet/ }))
+    const remember = await screen.findByRole('checkbox', { name: 'Keep me signed in on this device' })
+    await user.click(remember)
+    await user.click(screen.getByRole('button', { name: 'Sign with Rabby Wallet' }))
+    expect(await screen.findByRole('button', { name: /Waiting for Rabby Wallet/ })).toBeDisabled()
+    expect(remember).toBeDisabled()
+    await user.click(remember)
+    expect(remember).toBeChecked()
+    release(signature)
+    expect(await screen.findByText(/^Shell for Sam Rivera/)).toBeVisible()
+    expect(JSON.parse(sent('/api/auth/verify')[0]!.init.body as string)).toMatchObject({ remember: true })
+  })
+
+  it('unlocks the remember choice when the wallet declines', async () => {
+    wallet = walletProvider(() => Promise.reject(Object.assign(new Error('private'), { code: 4001 })))
+    const { user } = mount()
+    await user.click(await screen.findByRole('button', { name: /Rabby Wallet/ }))
+    await user.click(await screen.findByRole('button', { name: 'Sign with Rabby Wallet' }))
+    await user.click(await screen.findByRole('button', { name: 'Try again' }))
+    expect(await screen.findByRole('checkbox', { name: 'Keep me signed in on this device' })).toBeEnabled()
+  })
+
   it('discards a signature that arrives after the person cancelled', async () => {
     let release!: (value: unknown) => void
     wallet = walletProvider(() => new Promise(resolve => { release = resolve }))

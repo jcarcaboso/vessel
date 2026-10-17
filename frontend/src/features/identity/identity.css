@@ -90,6 +90,7 @@
 
 .sign-in-remember { display: flex; align-items: center; gap: 8px; width: fit-content; font-size: var(--text-sm); color: var(--muted-foreground); cursor: pointer; }
 .sign-in-remember input { width: 15px; height: 15px; margin: 0; accent-color: var(--ring); }
+.sign-in-remember:has(input:disabled) { cursor: default; opacity: .6; }
 
 .sign-in-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .sign-in-actions.is-split { justify-content: space-between; margin-top: 20px; }

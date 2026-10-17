@@ -220,7 +220,8 @@ function Signing({ state, remember, onRemember, onSign, onCancel, onExpired }: {
       <Identity wallet={wallet} address={address}><Button variant="ghost" size="sm" onClick={onCancel}>Change</Button></Identity>
       {challenge ? <MessagePreview message={challenge.message} purpose="Sign-In with Ethereum" seconds={seconds} />
         : <p className="muted" role="status">Preparing the message…</p>}
-      <label className="sign-in-remember"><input type="checkbox" checked={remember} onChange={event => onRemember(event.target.checked)} />Keep me signed in on this device</label>
+      {/* Locked from Sign until the flow ends, so what verify sends is what the box shows. */}
+      <label className="sign-in-remember"><input type="checkbox" checked={remember} disabled={waiting} onChange={event => onRemember(event.target.checked)} />Keep me signed in on this device</label>
       <div className="sign-in-actions">
         <Button size="lg" className="sign-in-primary" onClick={onSign} disabled={!challenge || waiting} aria-busy={waiting}>
           {waiting ? <><span className="identity-spinner" aria-hidden="true" />Waiting for {wallet.name}…</> : `Sign with ${wallet.name}`}
