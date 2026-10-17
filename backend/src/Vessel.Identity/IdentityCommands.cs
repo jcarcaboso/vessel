@@ -106,6 +106,7 @@ public static partial class IdentityCommands
                         if (await IdentityTransaction.LockUserAsync(db, userId, ct) is null) return false;
                         var existing = await db.Wallets.SingleOrDefaultAsync(x => x.Address == address, ct);
                         if (existing is not null) return existing.UserId == userId;
+                        await IdentityLimits.RequireWalletCapacityAsync(db, userId, ct);
                         db.Wallets.Add(new UserWallet { Id = Guid.NewGuid(), UserId = userId, Address = address, Label = label, AddedAt = DateTimeOffset.UtcNow });
                         return true;
                     }, ct);
@@ -131,6 +132,11 @@ public static partial class IdentityCommands
                 default:
                     return await RunAdministrationAsync(args[0], options, keepActive, configuration, factory, transactions, output, verify, ct);
             }
+        }
+        catch (ProblemException error) when (error.Code == "wallet-limit")
+        {
+            await output.WriteLineAsync(error.Message);
+            return 3;
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {

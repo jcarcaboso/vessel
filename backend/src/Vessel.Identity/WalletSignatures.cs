@@ -124,6 +124,7 @@ public static class IdentityErrors
         {
             "identity-unavailable" => "The identity service is unavailable. Try again later.",
             "rate-limited" => "Too many requests. Try again later.",
+            "wallet-limit" => $"A user may have at most {IdentityLimits.MaxWalletsPerUser} linked wallets.",
             _ => "The identity request could not be completed."
         }, code, retryAfter);
 }

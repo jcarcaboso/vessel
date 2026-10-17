@@ -115,6 +115,7 @@ public sealed class IdentityAccountService(IdentityTransaction transactions, IDb
         var address = WalletSignatures.NormalizeAddress(request.Address);
         return WithSessionAsync(authenticated, async (db, current, now) =>
         {
+            await IdentityLimits.RequireWalletCapacityAsync(db, current.User.Id, ct);
             await RequireGrantAsync(db, current, "wallet.link", null, now, ct);
             // No lookup of the new address: ownership is disclosed only after its valid signature.
             return await ChallengeAsync(db, current, address, origin, "link", "wallet.link", null, null, now, ct);
@@ -128,6 +129,7 @@ public sealed class IdentityAccountService(IdentityTransaction transactions, IDb
         {
             var challenge = await ChallengeAsync(db, current, request.ChallengeId, origin, "link", now, ct);
             if (challenge.Action != "wallet.link" || challenge.Target is not null) throw IdentityErrors.Error(400, "challenge-invalid");
+            await IdentityLimits.RequireWalletCapacityAsync(db, current.User.Id, ct);
             await RequireGrantAsync(db, current, "wallet.link", null, now, ct);
             signatures.Verify(challenge.Message, challenge.Address, request.Signature);
             var existing = await db.Wallets.SingleOrDefaultAsync(x => x.Address == challenge.Address, ct);
