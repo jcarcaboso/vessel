@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
 using Vessel.Application.Events;
+using Vessel.Application.Notifications;
 using Vessel.Application.Ownership;
 using Vessel.Application.Workspace;
 using Vessel.Persistence.Events;
@@ -23,16 +24,35 @@ public static class VesselEventEndpoints
             NoStore(context);
             return Results.Ok(await reader.ReadAsync(after, limit ?? 100, ct));
         });
-        group.MapGet("/stream", StreamAsync);
+        group.MapGet("/stream", (string? after, string? notificationsAfter, IVesselEventReader reader, IJournalOwnerContext owner,
+            IOptions<VesselEventSettings> settings, IOptions<JsonOptions> json, HttpContext context) =>
+            StreamAsync(after, reader, owner, settings, json, context, notificationsAfter,
+                notificationsAfter is null ? null : context.RequestServices.GetRequiredService<NotificationService>().FeedAsync));
         return endpoints;
     }
 
+    /// <summary>Notification rows drained per poll, so neither feed can starve the other.</summary>
+    internal const int NotificationBatch = 50;
+
+    public static Task StreamAsync(string? after, IVesselEventReader reader, IJournalOwnerContext owner,
+        IOptions<VesselEventSettings> settings, IOptions<JsonOptions> json, HttpContext context) =>
+        StreamAsync(after, reader, owner, settings, json, context, null, null);
+
+    /// <summary>
+    /// One owner stream for both feeds. Events keep their frames and SSE <c>id:</c> resume cursors. With
+    /// <paramref name="notificationsAfter"/>, a <c>notifications</c> frame (ready or reset, the unread count and the
+    /// channel switch) follows the status, and each changed notification is a <c>notification</c> frame whose cursor
+    /// travels in its data, never in the <c>id:</c> line. The two cursors and their resets are independent.
+    /// </summary>
     public static async Task StreamAsync(string? after, IVesselEventReader reader, IJournalOwnerContext owner,
-        IOptions<VesselEventSettings> settings, IOptions<JsonOptions> json, HttpContext context)
+        IOptions<VesselEventSettings> settings, IOptions<JsonOptions> json, HttpContext context, string? notificationsAfter,
+        Func<string?, int, CancellationToken, Task<NotificationFeed>>? notifications)
     {
         NoStore(context);
         if (!VesselEventCursor.TryParse(after, out _))
             throw new ProblemException(400, "Invalid event cursor.");
+        if (notificationsAfter is not null && (notifications is null || !NotificationCursor.TryParse(notificationsAfter, out _)))
+            throw new ProblemException(400, "Invalid notification cursor.");
         if (!TryAcquire(owner.OwnerId))
         {
             context.Response.Headers.RetryAfter = "5";
@@ -42,8 +62,10 @@ public static class VesselEventEndpoints
         var ct = context.RequestAborted;
         try
         {
-            // Validate/query before committing SSE headers so normal errors remain ProblemDetails.
+            // Validate/query both feeds before committing SSE headers so normal errors remain ProblemDetails.
             var page = await reader.ReadAsync(after, 200, ct);
+            var feed = notifications is null ? null : await notifications(notificationsAfter, NotificationBatch, ct);
+            var notificationCursor = notificationsAfter;
             context.Response.ContentType = "text/event-stream; charset=utf-8";
             context.Response.Headers["X-Accel-Buffering"] = "no";
             context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
@@ -65,6 +87,13 @@ public static class VesselEventEndpoints
             var started = time.GetTimestamp();
             var lifetime = settings.Value.StreamMaxLifetime;
             TimeSpan Remaining() => lifetime - time.GetElapsedTime(started);
+            if (feed is not null)
+                await Frame("notifications", new
+                {
+                    state = feed.ResetRequired ? "reset" : "ready",
+                    nextCursor = feed.ResetRequired ? feed.NextCursor : notificationsAfter,
+                    unreadCount = feed.UnreadCount, enabled = feed.Enabled
+                });
             while (!ct.IsCancellationRequested)
             {
                 // A reset means reload state, not replay popups from retained history.
@@ -75,7 +104,21 @@ public static class VesselEventEndpoints
                         await Frame("event", message, Resume(page.NextCursor, message.Sequence));
                     }
                 cursor = page.NextCursor;
-                if (page.Events.Count < 200)
+                var notificationsBehind = false;
+                if (feed is not null)
+                {
+                    if (!feed.ResetRequired)
+                        foreach (var item in feed.Items)
+                        {
+                            // The same bounded lifetime: the browser resumes from the last notification frame it received.
+                            if (Remaining() <= TimeSpan.Zero) return;
+                            await Frame("notification", new { cursor = item.Cursor, unreadCount = feed.UnreadCount, enabled = feed.Enabled,
+                                notification = item.Notification });
+                        }
+                    notificationCursor = feed.NextCursor;
+                    notificationsBehind = feed.Items.Count == NotificationBatch;
+                }
+                if (page.Events.Count < 200 && !notificationsBehind)
                 {
                     await context.Response.WriteAsync(": keepalive\n\n", ct);
                     await context.Response.Body.FlushAsync(ct);
@@ -88,6 +131,13 @@ public static class VesselEventEndpoints
                 page = await reader.ReadAsync(cursor, 200, ct);
                 if (page.ResetRequired)
                     await Frame("status", new { state = "reset", nextCursor = page.NextCursor });
+                if (notifications is not null)
+                {
+                    feed = await notifications(notificationCursor, NotificationBatch, ct);
+                    if (feed.ResetRequired)
+                        await Frame("notifications", new { state = "reset", nextCursor = feed.NextCursor,
+                            unreadCount = feed.UnreadCount, enabled = feed.Enabled });
+                }
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
