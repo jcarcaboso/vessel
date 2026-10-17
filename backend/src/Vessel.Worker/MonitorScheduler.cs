@@ -7,6 +7,8 @@ using Vessel.Application.Monitoring;
 using Vessel.Application.Venues;
 using Vessel.Persistence;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Vessel.Tests")]
+
 namespace Vessel.Worker;
 
 /// <summary>Coalesces command wake-ups into at most one early scheduling pass.</summary>
@@ -14,9 +16,67 @@ public sealed class MonitorWakeup : IMonitorWakeup
 {
     private readonly Channel<bool> signals = Channel.CreateBounded<bool>(new BoundedChannelOptions(1)
         { FullMode = BoundedChannelFullMode.DropWrite });
+    private int pendingWaiters;
     public void Wake() => signals.Writer.TryWrite(true);
-    internal ValueTask<bool> WaitAsync(CancellationToken ct) => signals.Reader.WaitToReadAsync(ct);
+
+    /// <summary>Waiters created by <see cref="WaitAsync"/> that have not completed yet (diagnostics and tests).</summary>
+    internal int PendingWaiters => Volatile.Read(ref pendingWaiters);
+
+    /// <summary>
+    /// A task that completes once a wake is available (or <paramref name="ct"/> is cancelled). Each call registers a
+    /// channel waiter that stays until a wake or cancellation, so callers keep one across timer ticks.
+    /// </summary>
+    internal Task<bool> WaitAsync(CancellationToken ct)
+    {
+        var wait = signals.Reader.WaitToReadAsync(ct);
+        if (wait.IsCompleted) return wait.AsTask();
+        Interlocked.Increment(ref pendingWaiters);
+        var task = wait.AsTask();
+        _ = task.ContinueWith(static (_, state) => ((MonitorWakeup)state!).WaiterCompleted(), this,
+            CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        return task;
+    }
+
     internal void Consume() => signals.Reader.TryRead(out _);
+    private void WaiterCompleted() => Interlocked.Decrement(ref pendingWaiters);
+}
+
+/// <summary>
+/// The scheduler's loop: one pass at start, then one per timer tick, and one early pass when a wake arrives
+/// (a wake during a pass causes exactly one more pass). The wake waiter is kept across timer ticks and replaced only
+/// once it has completed, so timer-only ticks never accumulate channel waiters.
+/// </summary>
+internal static class MonitorSchedulerLoop
+{
+    public static async Task RunAsync(TimeProvider time, TimeSpan period, MonitorWakeup wakeup,
+        Func<CancellationToken, Task> pass, Action<Exception> failed, CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(period, time);
+        var tick = Task.FromResult(true);
+        Task<bool>? wake = null;
+        try
+        {
+            while (true)
+            {
+                if (tick.IsCompleted)
+                {
+                    if (!await tick) break;
+                    tick = timer.WaitForNextTickAsync(stoppingToken).AsTask();
+                }
+                wakeup.Consume();
+                try { await pass(stoppingToken); }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+                catch (Exception error) { failed(error); }
+                // A waiter that completed before this pass's Consume() is stale: replace it. A fresh waiter completes
+                // at once if a wake arrived during the pass, otherwise it waits (across timer ticks) for the next wake.
+                if (wake is { IsCompleted: true }) wake = null;
+                wake ??= wakeup.WaitAsync(stoppingToken);
+                await Task.WhenAny(tick, wake);
+                stoppingToken.ThrowIfCancellationRequested();
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+    }
 }
 
 /// <summary>
@@ -32,29 +92,12 @@ public sealed class MonitorScheduler(IServiceScopeFactory scopes, TimeProvider t
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(MonitorOptions.SchedulerTick, time);
-        var tick = Task.FromResult(true);
         try
         {
-            while (true)
-            {
-                if (tick.IsCompleted)
-                {
-                    if (!await tick) break;
-                    tick = timer.WaitForNextTickAsync(stoppingToken).AsTask();
-                }
-                wakeup.Consume();
-                try { await TickAsync(stoppingToken); }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
-                catch (Exception error)
-                {
-                    logger.LogWarning("Monitor scheduling failed with {ErrorType}. It will retry on the next tick.", error.GetType().Name);
-                }
-                await Task.WhenAny(tick, wakeup.WaitAsync(stoppingToken).AsTask());
-                stoppingToken.ThrowIfCancellationRequested();
-            }
+            await MonitorSchedulerLoop.RunAsync(time, MonitorOptions.SchedulerTick, wakeup, TickAsync,
+                error => logger.LogWarning("Monitor scheduling failed with {ErrorType}. It will retry on the next tick.",
+                    error.GetType().Name), stoppingToken);
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         finally { await Task.WhenAll(running); }
     }
 

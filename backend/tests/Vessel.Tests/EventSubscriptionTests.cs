@@ -16,7 +16,7 @@ using Vessel.Persistence.Events.Subscriptions;
 namespace Vessel.Tests;
 
 /// <summary>Subscription runtime against PostgreSQL: registration, the one dispatcher, catch-up, retention, epoch.</summary>
-public sealed class EventSubscriptionTests
+public sealed partial class EventSubscriptionTests
 {
     private static readonly EventSubscriptionLimits Fixed = new() { RetryJitter = 0, DiscoveryGrace = TimeSpan.Zero };
 
