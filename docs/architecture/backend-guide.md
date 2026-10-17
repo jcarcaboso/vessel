@@ -260,6 +260,7 @@ Several requests, API processes and workers can touch the same account at once: 
 | last | `event_cursors` row `FOR UPDATE` | Event sequence allocation just before commit (`VesselEventStore.BeforeCommitAsync`), held until commit |
 | — | Advisory `vessel-evidence:{play}` | Evidence count limit (`EvidenceStore.AddAsync`) |
 | — | Owner retention advisory key (`VesselEventSql.RetentionLock`) | Exclusive for retention floor publication; shared for subscription dispatch and admin receipt retries, before the receipt row lock |
+| — | Account row `FOR KEY SHARE` | The monitoring baseline's short unit before a Refresh or Check reads a venue, so an account deletion waits for it or the baseline finds no account (`VesselEventStore.EnsureMonitoringBaselineAsync`) |
 | — | `events` row `FOR KEY SHARE` | Subscription dispatch looks the event up with it and holds it until commit, so an account deletion waits instead of removing the event before its receipt is written (`EventDispatcher`) |
 | — | Advisory `{owner}:notification-run:{run}:{account}`, `…:notification-subject:{subject}`, `…:notification-test:{event}`, then `notification_cursors` row `FOR UPDATE` | The hub, inside a dispatch; the API's read, read-all and preference writes take the cursor row only. Account disable and deletion take it after their account lock and, for deletion, after the account's events |
 

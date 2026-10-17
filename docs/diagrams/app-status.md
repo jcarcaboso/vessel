@@ -66,7 +66,7 @@ flowchart TD
         API -->|"Check wake-up (request recorded in PostgreSQL)"| Broker
         Broker -->|"vessel.commands.monitor"| Monitor
     end
-    Browser -->|"Authenticated HTTP; one SSE stream"| API
+    Browser -->|"Authenticated HTTP; the event stream; a market stream per live chart"| API
     API -->|"Responses, events, notifications, market events"| Browser
     Adapters -->|"Read-only HTTP"| Venues["External venues<br/>Hyperliquid, RISEx, Lighter"]
     HL["Hyperliquid public market stream"] -->|"WebSocket observations"| Relay
