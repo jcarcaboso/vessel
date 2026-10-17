@@ -120,4 +120,52 @@ describe('Profile & sign-in', () => {
     expect(sent('/api/auth/wallets/challenge')[0]!.body).toEqual({ address: account })
     expect(sent('/api/auth/wallets')[0]!.body).toEqual({ challengeId: challengeFixture().challengeId, signature, label: 'Phone' })
   })
+
+  describe('when the step-up grant lapses before the new wallet signs', () => {
+    const phone = '0x19B4c7aE02F3d81e6C5a9b0D2E7f4A3c8D1e0a53'
+    const linked = { ...secondWalletFixture, id: '7f3a1c9e-2b4d-4e8f-a6c0-5d9e1b3f7a24', address: phone, label: null }
+    async function linkUntilRefused(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(await screen.findByRole('button', { name: 'Link wallet' }))
+      const dialog = await screen.findByRole('dialog', { name: 'Link another wallet' })
+      await user.click(await within(dialog).findByRole('button', { name: /Rabby Wallet/ }))
+      await user.click(await within(dialog).findByRole('button', { name: 'Sign with Rabby Wallet' }))
+      await within(dialog).findByText(/Now sign with the wallet you want to add/)
+      account = phone
+      await user.click(await within(dialog).findByRole('button', { name: /Rabby Wallet/ }))
+      await user.click(await within(dialog).findByRole('button', { name: 'Sign with Rabby Wallet' }))
+      // 403 step-up-required at completion: confirm again with the linked wallet.
+      await screen.findByRole('dialog', { name: 'Confirm with a linked wallet' })
+      account = walletFixture.address
+      await confirmWithRabby(user)
+      account = phone
+      return dialog
+    }
+
+    it('confirms again, then signs a fresh link message instead of the spent one', async () => {
+      let issued = 0
+      routes['POST /api/auth/wallets/challenge'] = init => json({ ...challengeFixture(JSON.parse(init.body as string).address), challengeId: issued++ ? 'e2c4b6a8-1d3f-4a5b-9c7d-0e1f2a3b4c5d' : challengeFixture().challengeId })
+      routes['POST /api/auth/wallets'] = [() => problem(403, 'step-up-required'), () => json(linked, 201)]
+      const { user } = mount()
+      const dialog = await linkUntilRefused(user)
+      await user.click(await within(dialog).findByRole('button', { name: 'Sign with Rabby Wallet' }))
+      await waitFor(() => expect(sent('/api/auth/wallets')).toHaveLength(2))
+      expect(sent('/api/auth/wallets/challenge')).toHaveLength(2)
+      expect(sent('/api/auth/wallets').map(call => (call.body as { challengeId: string }).challengeId))
+        .toEqual([challengeFixture().challengeId, 'e2c4b6a8-1d3f-4a5b-9c7d-0e1f2a3b4c5d'])
+      expect(sent('/api/auth/step-up/challenge')).toHaveLength(2)
+      expect(await screen.findByText('Wallet linked. It can now sign in to this journal.')).toBeVisible()
+    })
+
+    it('steps up only once per attempt', async () => {
+      routes['POST /api/auth/wallets/challenge'] = init => json(challengeFixture(JSON.parse(init.body as string).address))
+      routes['POST /api/auth/wallets'] = () => problem(403, 'step-up-required')
+      const { user } = mount()
+      const dialog = await linkUntilRefused(user)
+      await user.click(await within(dialog).findByRole('button', { name: 'Sign with Rabby Wallet' }))
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent('Confirm with a wallet already linked to this journal to continue.')
+      expect(sent('/api/auth/wallets')).toHaveLength(2)
+      expect(sent('/api/auth/step-up/challenge')).toHaveLength(2)
+      expect(screen.queryByRole('dialog', { name: 'Confirm with a linked wallet' })).not.toBeInTheDocument()
+    })
+  })
 })

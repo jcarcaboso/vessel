@@ -17,6 +17,8 @@ type Flow =
   | { step: 'preparing'; wallet: BrowserWallet; address: string }
   | { step: 'ready'; wallet: BrowserWallet; address: string; challenge: Challenge; waiting: boolean }
   | { step: 'completing'; wallet: BrowserWallet; address: string }
+  // Not watched: the person may switch the wallet to a linked account to confirm.
+  | { step: 'stepping-up'; wallet: BrowserWallet; address: string }
   | { step: 'failed'; wallet: BrowserWallet | null; address: string | null; message: string }
 
 export interface WalletSignFlowProps {
@@ -26,7 +28,11 @@ export interface WalletSignFlowProps {
   accept?: (address: string) => string | null
   requestChallenge: (address: string, signal: AbortSignal) => Promise<Challenge>
   complete: (challenge: Challenge, signature: string, signal: AbortSignal) => Promise<void>
-  /** A `step-up-required` answer to the challenge request opens the step-up; when it succeeds the request is retried once. */
+  /**
+   * A `step-up-required` answer opens the step-up, once per attempt. At the challenge request, the request is then
+   * retried; at completion (the grant lapsed while the wallet signed) the spent challenge is replaced by a fresh one
+   * for the person to sign again.
+   */
   onStepUp?: () => Promise<boolean>
   onDone: () => void
   onCancel: () => void
@@ -51,14 +57,27 @@ export function WalletSignFlow({ purpose, accept, requestChallenge, complete, on
     return run.current
   }, [])
   useEffect(() => () => run.current.controller.abort(), [])
+  // Whether this attempt already used its one step-up; a new attempt (connect, Try again) resets it.
+  const steppedUp = useRef(false)
   const fail = useCallback((wallet: BrowserWallet | null, address: string | null, error: SignInError) =>
     setFlow({ step: 'failed', wallet, address, message: flowErrorText(error) }), [setFlow])
+
+  const stepUpNeeded = useCallback((error: unknown) =>
+    !!onStepUp && !steppedUp.current && error instanceof ApiError && error.code === 'step-up-required', [onStepUp])
+  /** The attempt's one step-up; false (with the failure shown) when it was declined or the run was replaced. */
+  const stepUp = useCallback(async (current: typeof run.current, wallet: BrowserWallet, address: string) => {
+    steppedUp.current = true
+    setFlow({ step: 'stepping-up', wallet, address })
+    const done = await onStepUp!()
+    if (run.current !== current) return false
+    if (!done) setFlow({ step: 'failed', wallet, address, message: 'Confirm with a wallet already linked to this journal to continue.' })
+    return done
+  }, [onStepUp, setFlow])
 
   const prepare = useCallback(async (current: typeof run.current, wallet: BrowserWallet, address: string) => {
     setFlow({ step: 'preparing', wallet, address })
     const refused = accept?.(address)
     if (refused) { setFlow({ step: 'failed', wallet, address, message: refused }); return }
-    let steppedUp = false
     for (;;) {
       try {
         const challenge = await requestChallenge(address, current.controller.signal)
@@ -69,20 +88,19 @@ export function WalletSignFlow({ purpose, accept, requestChallenge, complete, on
         return
       } catch (error) {
         if (run.current !== current) return
-        if (!steppedUp && onStepUp && error instanceof ApiError && error.code === 'step-up-required') {
-          steppedUp = true
-          if (await onStepUp() && run.current === current) continue
-          if (run.current === current) setFlow({ step: 'failed', wallet, address, message: 'Confirm with a wallet already linked to this journal to continue.' })
+        if (stepUpNeeded(error)) {
+          if (await stepUp(current, wallet, address)) continue
           return
         }
         fail(wallet, address, signInError(error))
         return
       }
     }
-  }, [accept, fail, onStepUp, requestChallenge, setFlow])
+  }, [accept, fail, requestChallenge, setFlow, stepUpNeeded, stepUp])
 
   const connect = useCallback(async (wallet: BrowserWallet) => {
     const current = begin()
+    steppedUp.current = false
     setFlow({ step: 'connecting', wallet })
     try {
       const address = await requestAccount(wallet.provider)
@@ -104,7 +122,10 @@ export function WalletSignFlow({ purpose, accept, requestChallenge, complete, on
       await complete(challenge, signature, current.controller.signal)
       if (run.current === current) onDone()
     } catch (error) {
-      if (run.current === current) fail(wallet, address, signInError(error))
+      if (run.current !== current) return
+      // The server consumed or refused this challenge: confirm again, then sign a fresh one.
+      if (stepUpNeeded(error)) { if (await stepUp(current, wallet, address)) await prepare(current, wallet, address); return }
+      fail(wallet, address, signInError(error))
     }
   }
 
@@ -145,19 +166,21 @@ export function WalletSignFlow({ purpose, accept, requestChallenge, complete, on
     <span className="identity-row-meta"><strong>{flow.wallet.name}</strong>{'address' in flow && flow.address && <span><SourceChip source={flow.address} /></span>}</span>
     <Button variant="ghost" size="sm" onClick={back}>Change</Button>
   </div>
-  return <div className="sign-flow" aria-busy={flow.step === 'connecting' || flow.step === 'preparing' || flow.step === 'completing'}>
+  return <div className="sign-flow" aria-busy={flow.step === 'connecting' || flow.step === 'preparing' || flow.step === 'completing' || flow.step === 'stepping-up'}>
     {identity}
     {flow.step === 'connecting' && <p className="muted" role="status">Approve the connection request in {flow.wallet.name}. Vessel only reads your address.</p>}
     {flow.step === 'preparing' && <p className="muted" role="status">Preparing the message…</p>}
     {flow.step === 'ready' && <ReadyMessage key={flow.challenge.challengeId} challenge={flow.challenge} purpose={purpose} onExpired={expire} />}
     {flow.step === 'ready' && children}
     {flow.step === 'completing' && <p className="muted" role="status">Checking the signature…</p>}
+    {flow.step === 'stepping-up' && <p className="muted" role="status">Confirm with a linked wallet to continue.</p>}
     {flow.step === 'failed' && <p className="error" role="alert">{flow.message}</p>}
     <div className="sign-in-actions">
       {flow.step === 'ready' && <Button className="sign-in-primary" onClick={() => { void sign() }} disabled={flow.waiting} aria-busy={flow.waiting}>
         {flow.waiting ? <><span className="identity-spinner" aria-hidden="true" />Waiting for {flow.wallet.name}…</> : `Sign with ${flow.wallet.name}`}</Button>}
       {flow.step === 'failed' && flow.wallet && <Button className="sign-in-primary" onClick={() => {
         const wallet = flow.wallet!
+        steppedUp.current = false
         if (flow.address) void prepare(begin(), wallet, flow.address)
         else void connect(wallet)
       }}>Try again</Button>}
