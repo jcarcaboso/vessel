@@ -191,7 +191,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var linked = await store.LinkedPlanReferencesAsync(play.Id, ct);
         if ((filled.Count > 0 || linked.Count > 0) && next.Direction != current.Direction)
             throw new ProblemException(409, $"This play has entry fills or linked orders, so it stays {current.Direction}. Start a new play for the opposite idea.");
-        foreach (var link in linked.Where(l => l.Role is OrderLinkRole.Stop or OrderLinkRole.Target))
+        foreach (var (link, externalOrderId) in linked.Where(l => l.Link.Role is OrderLinkRole.Stop or OrderLinkRole.Target))
         {
             var oldEntry = current.Entries.FirstOrDefault(e => e.Id == link.EntryId);
             var nextEntry = next.Entries.FirstOrDefault(e => e.Id == link.EntryId);
@@ -200,7 +200,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             if (nextEntry is null || nextLevel is null || nextLevel != oldLevel || nextEntry.Price != oldEntry?.Price ||
                 nextEntry.Share != oldEntry?.Share ||
                 next.Leverage != current.Leverage && oldLevel?.Unit == "percent")
-                throw new ProblemException(409, $"Order {link.OrderId} still references this plan level. Unlink it before changing or removing the level.");
+                throw new ProblemException(409, $"Order {externalOrderId} still references this plan level. Unlink it before changing or removing the level.");
         }
         var before = current.Entries.ToDictionary(e => e.Id);
         foreach (var id in filled)

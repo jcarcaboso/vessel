@@ -140,7 +140,7 @@ public sealed class MonitorDiscrepancyRound2PostgresTests
             PlayDocuments.Serialize(plan), f.Clock.Now.AddHours(-1));
         play.MarkPlanned(f.Clock.Now.AddMinutes(-30));
         f.Store.Plays.Add(play);
-        f.Store.Links.Add(new(play, "late-entry", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-25)));
+        f.Store.Links.Add(f.Link(play, "late-entry", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-25)));
         play.Cancel(CancelReason.ChangedMind, null, f.Clock.Now.AddMinutes(-10));
         await database.Seed(f);
         // The entry filled after cancellation: its watch resolves, but the venue now holds untracked exposure.

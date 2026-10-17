@@ -110,7 +110,8 @@ public interface IPlayStore
     Task<List<PlayReviewRevision>> ReviewsAsync(Guid playId, CancellationToken ct);
     /// <summary>Entries referenced by linked orders or manual facts; their price, share and existence are fixed.</summary>
     Task<IReadOnlySet<string>> FilledEntryIdsAsync(Guid playId, CancellationToken ct);
-    Task<List<PlayOrderLink>> LinkedPlanReferencesAsync(Guid playId, CancellationToken ct);
+    /// <summary>Linked orders of the Play with the venue's order ID, for the owner's messages.</summary>
+    Task<List<LinkedPlanReference>> LinkedPlanReferencesAsync(Guid playId, CancellationToken ct);
     void Add(Play play);
     void Add(PlayPlanRevision revision);
     void Add(PlayStatusChange change);
@@ -126,3 +127,6 @@ public interface IPlayStore
     /// <summary>Deletes the Play with its evidence records and returns the evidence object keys to remove.</summary>
     Task<IReadOnlyList<string>> DeleteAsync(Play play, CancellationToken ct);
 }
+
+/// <summary>A linked order that fixes a plan level, with its venue order ID.</summary>
+public sealed record LinkedPlanReference(PlayOrderLink Link, string ExternalOrderId);

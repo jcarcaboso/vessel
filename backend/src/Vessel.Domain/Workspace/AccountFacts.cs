@@ -95,7 +95,8 @@ public sealed class ImportedFill : IOwned
     public decimal ClosedPnlUsd { get; set; }
     public string PnlBasis { get; set; } = ExecutionFacts.PnlGross;
     public DateTimeOffset OccurredAtUtc { get; set; }
-    public string OrderId { get; set; } = null!;
+    /// <summary>The venue's order ID. A fill belongs to the order with the same account, contract and external ID.</summary>
+    public string ExternalOrderId { get; set; } = null!;
     public string TransactionHash { get; set; } = null!;
 }
 
@@ -109,7 +110,8 @@ public sealed class ImportedOrder : IOwned
     public string ContractId { get; set; } = null!;
     /// <summary>The venue's own identifier when it differs from the key, e.g. a numeric market ID.</summary>
     public string? VenueContractId { get; set; }
-    public string OrderId { get; set; } = null!;
+    /// <summary>The venue's order ID; unique per account and contract.</summary>
+    public string ExternalOrderId { get; set; } = null!;
     /// <summary><see cref="ExecutionFacts.Buy"/> or <see cref="ExecutionFacts.Sell"/>.</summary>
     public string Side { get; set; } = null!;
     public string OrderType { get; set; } = null!;

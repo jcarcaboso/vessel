@@ -14,7 +14,7 @@ public sealed class FundingTests
         Id = Guid.NewGuid(), OwnerId = Owner, AccountId = AccountId, SourceFillId = Guid.NewGuid().ToString(),
         ContractId = "BTC", VenueContractId = native, Side = side, PositionEffect = effect, Direction = "fixture",
         Price = 100, Quantity = 1, Fee = 0.1m, FeeToken = "USDC", ClosedPnlUsd = pnl,
-        OccurredAtUtc = At.AddMinutes(minute), OrderId = Guid.NewGuid().ToString(), TransactionHash = ""
+        OccurredAtUtc = At.AddMinutes(minute), ExternalOrderId = Guid.NewGuid().ToString(), TransactionHash = ""
     };
     private static FundingPayment Payment(decimal amount, int minute = 5, string native = "1", string asset = "USDC") => new()
     {

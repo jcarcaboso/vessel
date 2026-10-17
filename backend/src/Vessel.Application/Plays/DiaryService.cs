@@ -170,16 +170,17 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
                 bounded, RetrospectiveNotice);
 
         var ids = operation.Fills.Select(f => f.Fill.Id).ToHashSet();
-        var operationOrders = operation.Fills.ToLookup(f => f.Fill.OrderId, StringComparer.Ordinal);
-        var orderIds = operationOrders.Select(g => g.Key).ToHashSet(StringComparer.Ordinal);
+        var operationOrders = operation.Fills.ToLookup(f => Key(f.Fill));
+        var orderKeys = operationOrders.Select(g => g.Key).ToHashSet();
         // Include every retained fill of the involved orders, also those outside the selected operation.
-        var relevant = facts.Fills.Where(f => orderIds.Contains(f.OrderId)).ToList();
-        var fillsByOrder = relevant.ToLookup(f => f.OrderId, StringComparer.Ordinal);
+        var relevant = facts.Fills.Where(f => orderKeys.Contains(OrderKey.Of(f))).ToList();
+        var fillsByOrder = relevant.ToLookup(OrderKey.Of);
         var own = relevant.Where(f => ids.Contains(f.Id)).ToDictionary(f => f.Id);
         // Only the operation's orders and their links are read; retained fills above stay whole-order evidence.
-        var orders = (await diary.OrdersAsync(accountId, orderIds, ct)).Where(o => orderIds.Contains(o.OrderId))
-            .ToDictionary(o => o.OrderId, StringComparer.Ordinal);
-        var links = (await diary.LinksAsync(accountId, orderIds, ct)).Where(l => orderIds.Contains(l.OrderId)).ToList();
+        var orders = (await diary.OrdersAsync(accountId, orderKeys, ct)).Where(o => orderKeys.Contains(OrderKey.Of(o)))
+            .ToDictionary(OrderKey.Of);
+        var orderIds = orders.Values.Select(o => o.Id).ToHashSet();
+        var links = (await diary.LinksAsync(accountId, orderIds, ct)).Where(l => orderIds.Contains(l.ImportedOrderId)).ToList();
         var retrospectivePlan = new PlayPlanDocument(operation.Direction ?? "long", "margin", "", "0", null, [],
             new PlanNotes("", "", "", ""));
         List<string> reasons = [];
@@ -195,10 +196,11 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
             reasons.Add("Some fills have unknown or flip position effects.");
         if (own.Values.Any(f => f.Quantity <= 0 || f.Price <= 0 || f.OccurredAtUtc > time.GetUtcNow()))
             reasons.Add("Some retained fills have nonpositive amounts/prices or future timestamps.");
-        foreach (var orderId in orderIds.Order(StringComparer.Ordinal))
+        foreach (var key in orderKeys.OrderBy(k => k.ExternalOrderId, StringComparer.Ordinal).ThenBy(k => k.ContractId, StringComparer.Ordinal))
         {
-            var fills = fillsByOrder[orderId].ToList();
-            var order = orders.GetValueOrDefault(orderId);
+            var orderId = key.ExternalOrderId;
+            var fills = fillsByOrder[key].ToList();
+            var order = orders.GetValueOrDefault(key);
             if (string.IsNullOrWhiteSpace(orderId) || order is null)
                 reasons.Add($"Order {orderId} has no retained order record; execution completeness cannot be checked.");
             else if (ExecutionIntegrity.MissingExecutions(order, fills))
@@ -211,12 +213,12 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
                 fills.Any(f => f.AccountId != account.Id || f.OwnerId != account.OwnerId || f.ContractId != operation.ContractId ||
                     order.VenueContractId is not null && f.VenueContractId is not null && order.VenueContractId != f.VenueContractId)))
                 reasons.Add($"Order {orderId} identity or role contradicts its executions.");
-            var role = operationOrders[orderId].First().Role == "entry" ? OrderLinkRole.Entry : OrderLinkRole.Exit;
+            var role = operationOrders[key].First().Role == "entry" ? OrderLinkRole.Entry : OrderLinkRole.Exit;
             if (order is not null && ExecutionIntegrity.RoleConflict(role, retrospectivePlan, order, fills) is { } conflict)
                 reasons.Add($"Order {orderId}: {conflict}");
         }
         var fingerprint = Hash(new { account.Id, account.OwnerId, account.IsEnabled, account.SettingsRevision, operation,
-            fills = relevant.OrderBy(f => f.Id), orders = orders.Values.OrderBy(o => o.OrderId),
+            fills = relevant.OrderBy(f => f.Id), orders = orders.Values.OrderBy(o => o.ExternalOrderId, StringComparer.Ordinal).ThenBy(o => o.ContractId, StringComparer.Ordinal),
             links = links.OrderBy(l => l.Id) });
         return new(reasons.Count == 0, BoundedReasons(reasons), fingerprint, bounded, RetrospectiveNotice);
     }
@@ -240,8 +242,13 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
             var review = play.Annotate(request.Title ?? "", "{}", request.Review ?? "", now);
             plays.Add(play);
             if (review is not null) plays.Add(review);
-            foreach (var order in preview.Operation.Fills.GroupBy(f => f.Fill.OrderId))
-                diary.Add(new PlayOrderLink(play, order.Key, order.First().Role == "entry" ? OrderLinkRole.Entry : OrderLinkRole.Exit,
+            // Eligibility proved every order is retained; links reference their internal IDs.
+            var operationOrders = preview.Operation.Fills.GroupBy(f => Key(f.Fill)).ToList();
+            var retained = (await diary.OrdersAsync(account.Id, operationOrders.Select(g => g.Key).ToList(), ct)).ToDictionary(OrderKey.Of);
+            foreach (var order in operationOrders)
+                diary.Add(new PlayOrderLink(play, retained.GetValueOrDefault(order.Key) ?? throw new ProblemException(409,
+                        "The retained operation changed since preview. Reload and review it again."),
+                    order.First().Role == "entry" ? OrderLinkRole.Entry : OrderLinkRole.Exit,
                     order.First().Role == "entry" ? "retrospective" : null, null, OrderLinkState.Linked, OrderLinkSource.Owner, now));
             await plays.SaveAsync(ct);
             return PlayService.ToDto(play);
@@ -272,6 +279,9 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
             await plays.SaveAsync(ct);
             return result;
         }, ct), ct);
+
+    /// <summary>The order of an operation fill, by the shared <see cref="OrderKey"/> rule.</summary>
+    private static OrderKey Key(FillDto fill) => new(fill.AccountId, fill.ContractId, fill.OrderId);
 
     private static string Hash(object payload) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload, Json))));
 

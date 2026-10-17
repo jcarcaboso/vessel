@@ -138,7 +138,7 @@ public sealed class MonitorDiscrepancyReviewTests
     public async Task One_order_without_a_planned_price_does_not_make_drift_unknown()
     {
         var f = new DiscrepancyFixture();
-        f.Store.Links.Add(new(f.Play, "orphan-level", OrderLinkRole.Target, "e", "removed-by-revision", OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-15)));
+        f.Store.Links.Add(f.Link(f.Play, "orphan-level", OrderLinkRole.Target, "e", "removed-by-revision", OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-15)));
         f.VenueOrders.Add(new("orphan-level", "BTC", "sell", "Trigger", 130, 130, true, false, .1m, .1m, f.Clock.Now.AddMinutes(-15), VenueOrderStatus.Open, "open", f.Clock.Now));
         f.Stop(o => o with { TriggerPrice = 80m }); // A real drift on a priced level.
         await f.Confirm();
@@ -153,7 +153,7 @@ public sealed class MonitorDiscrepancyReviewTests
         var f = new DiscrepancyFixture { Position = 0 };
         f.Play.MarkClosed("fixture", f.Clock.Now.AddMinutes(-1));
         f.VenueOrders.Clear();
-        f.Store.Links.Add(new(f.Play, "late-entry", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-15)));
+        f.Store.Links.Add(f.Link(f.Play, "late-entry", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-15)));
         f.VenueOrders.Add(new("late-entry", "BTC", "buy", "Limit", 100, null, false, false, 1, 1, f.Clock.Now.AddMinutes(-15), VenueOrderStatus.Open, "open", f.Clock.Now));
         await f.Confirm();
         var row = Assert.Single(f.Store.Rows, x => x.PlayId == f.Play.Id && x.State == "open");
@@ -180,7 +180,7 @@ public sealed class MonitorDiscrepancyReviewTests
     {
         var f = new DiscrepancyFixture { Position = 2, ObservationOffset = TimeSpan.FromSeconds(-30) };
         var closing = f.AddPlay("long", 1);
-        f.Store.Links.Add(new(closing, "closing-exit", OrderLinkRole.Stop, "e", "s", OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-15)));
+        f.Store.Links.Add(f.Link(closing, "closing-exit", OrderLinkRole.Stop, "e", "s", OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-15)));
         f.Fill("closing-exit-fill", "closing-exit", 1, f.Clock.Now.AddSeconds(-10), "sell", ExecutionFacts.Close);
         closing.MarkClosed("fixture", f.Clock.Now.AddSeconds(-5));
         Assert.True((await f.Evaluate()).Incomplete);
@@ -241,7 +241,7 @@ public sealed class MonitorDiscrepancyReviewPostgresTests
             // Every linked order of settled and recent has a resolved, current watch; watched has none.
             foreach (var link in await scope.Db.OrderLinks.Where(x => x.PlayId == settled.Id || x.PlayId == recent.Id).ToListAsync())
                 scope.Db.Add(new MonitorExitWatch { LinkId = link.Id, OwnerId = link.OwnerId, AccountId = link.AccountId, PlayId = link.PlayId,
-                    OrderId = link.OrderId, LinkRevisionAtUtc = link.UpdatedAtUtc, StartedAtUtc = link.UpdatedAtUtc,
+                    LinkRevisionAtUtc = link.UpdatedAtUtc, StartedAtUtc = link.UpdatedAtUtc,
                     EndedAtUtc = f.Clock.Now.AddHours(-1), Outcome = MonitorWatchOutcomes.Absent });
             await scope.Db.SaveChangesAsync();
         }

@@ -44,26 +44,28 @@ public sealed class MonitorDiscrepancyStore(VesselDbContext db, UnitOfWork work)
                     // Same terminal watch as MonitorStore: a linked order whose current watch has not ended. Its run
                     // records lifetime expiry before evaluation; positive resting evidence still admits it below.
                     db.OrderLinks.Any(l => l.PlayId == p.Id && l.State == OrderLinkState.Linked && !watches.Any(e =>
-                        e.LinkId == l.Id && e.EndedAtUtc != null && e.LinkRevisionAtUtc >= l.UpdatedAtUtc && e.OrderId == l.OrderId)) ||
+                        e.LinkId == l.Id && e.EndedAtUtc != null && e.LinkRevisionAtUtc >= l.UpdatedAtUtc)) ||
                     // Evaluation membership, independent of scheduling: tracked records, even unverifiable ones.
                     records.Any(d => d.AccountId == accountId && d.PlayId == p.Id && (d.State == DiscrepancyLifecycle.Candidate ||
                         d.State == DiscrepancyLifecycle.Open || d.PendingFingerprint != null ||
                         d.PublishedTransition == DiscrepancyLifecycle.Opened || d.PublishedTransition == DiscrepancyLifecycle.Unverifiable)) ||
-                    db.OrderLinks.Any(l => l.PlayId == p.Id && l.State == OrderLinkState.Linked && resting.Contains(l.OrderId))))
+                    db.OrderLinks.Any(l => l.PlayId == p.Id && l.State == OrderLinkState.Linked && db.Orders.Any(o =>
+                        o.OwnerId == l.OwnerId && o.AccountId == l.AccountId && o.Id == l.ImportedOrderId && resting.Contains(o.ExternalOrderId)))))
             .OrderBy(x => x.Id).ToListAsync(ct);
         var ids = plays.Select(x => x.Id).ToArray();
         var links = await db.OrderLinks.Where(x => x.AccountId == accountId && ids.Contains(x.PlayId))
             .OrderBy(x => x.Id).ToListAsync(ct);
         var linked = links.Where(x => x.State == OrderLinkState.Linked).ToArray();
-        var orderIds = linked.Select(x => x.OrderId).Distinct().ToArray();
-        var orders = await db.Orders.Where(x => x.AccountId == accountId && orderIds.Contains(x.OrderId)).ToListAsync(ct);
-        var fills = await db.Fills.Where(x => x.AccountId == accountId && orderIds.Contains(x.OrderId))
-            .OrderBy(x => x.Id).AsNoTracking().ToListAsync(ct);
+        var orderIds = linked.Select(x => x.ImportedOrderId).Distinct().ToArray();
+        var linkedOrders = db.Orders.Where(x => x.AccountId == accountId && orderIds.Contains(x.Id));
+        var orders = await linkedOrders.ToListAsync(ct);
+        var ordersById = orders.ToDictionary(x => x.Id);
+        var fills = await db.FillsOf(linkedOrders).OrderBy(x => x.Id).AsNoTracking().ToListAsync(ct);
         // Unlinked-fill candidates: fills on an Open Play's instrument after the earliest linked entry fill there.
         var open = plays.Where(x => x.Status == PlayStatus.Open && x.ContractId is not null).ToDictionary(x => x.Id, x => x.ContractId!);
-        var entries = linked.Where(x => x.Role == OrderLinkRole.Entry && open.ContainsKey(x.PlayId))
-            .ToLookup(x => x.OrderId, x => open[x.PlayId], StringComparer.Ordinal);
-        var earliest = fills.SelectMany(f => entries[f.OrderId].Select(contract => (Contract: contract, f.OccurredAtUtc)))
+        var entries = linked.Where(x => x.Role == OrderLinkRole.Entry && open.ContainsKey(x.PlayId) && ordersById.ContainsKey(x.ImportedOrderId))
+            .ToLookup(x => OrderKey.Of(ordersById[x.ImportedOrderId]), x => open[x.PlayId]);
+        var earliest = fills.SelectMany(f => entries[OrderKey.Of(f)].Select(contract => (Contract: contract, f.OccurredAtUtc)))
             .GroupBy(x => x.Contract, StringComparer.Ordinal).ToDictionary(x => x.Key, x => x.Min(y => y.OccurredAtUtc), StringComparer.Ordinal);
         var loaded = fills.Select(x => x.Id).ToHashSet();
         var truncated = new HashSet<string>(StringComparer.Ordinal);
@@ -75,10 +77,16 @@ public sealed class MonitorDiscrepancyStore(VesselDbContext db, UnitOfWork work)
             fills.AddRange(candidates.Where(x => loaded.Add(x.Id)));
         }
         // Assignment is account-wide (retrospective Plays included), but only the loaded fills' orders matter.
-        var fillOrders = fills.Select(x => x.OrderId).Distinct().ToArray();
-        var assignments = await db.OrderLinks.Where(x => x.AccountId == accountId && fillOrders.Contains(x.OrderId) &&
-                (x.State == OrderLinkState.Linked || x.State == OrderLinkState.Suggested))
-            .OrderBy(x => x.Id).AsNoTracking().ToListAsync(ct);
-        return new(plays, links, orders, fills, true, assignments, true, truncated);
+        // SQL narrows by external ID; the OrderKey rule keeps only links whose order has a loaded fill's own contract.
+        var fillKeys = fills.Select(OrderKey.Of).ToHashSet();
+        var fillOrders = fillKeys.Select(x => x.ExternalOrderId).Distinct(StringComparer.Ordinal).ToArray();
+        var assigned = (await db.LinkedOrders(db.OrderLinks.Where(x => x.AccountId == accountId &&
+                    (x.State == OrderLinkState.Linked || x.State == OrderLinkState.Suggested)))
+                .Where(x => fillOrders.Contains(x.Order.ExternalOrderId))
+                .OrderBy(x => x.Link.Id).AsNoTracking().ToListAsync(ct))
+            .Where(x => fillKeys.Contains(OrderKey.Of(x.Order))).ToList();
+        // The checks resolve each assignment's order by internal ID, so its order comes with the facts.
+        orders.AddRange(assigned.Select(x => x.Order).Where(x => !ordersById.ContainsKey(x.Id)).DistinctBy(x => x.Id));
+        return new(plays, links, orders, fills, true, assigned.Select(x => x.Link).ToList(), true, truncated);
     }
 }

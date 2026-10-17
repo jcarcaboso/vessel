@@ -264,15 +264,15 @@ public static class OperationAggregator
                 if (NominalStablecoins.Contains(fill.FeeToken)) netFees += fee;
                 else if (!fee.Units.IsZero) unsupportedNetFee = true;
             }
-            if (role == "entry") { entered += quantity; entryNotional += quantity.Units * ExactAmount.From(fill.Price).Units; if (!string.IsNullOrWhiteSpace(fill.OrderId)) entries.Add(fill.OrderId); }
-            if (role == "exit") { exited += quantity; exitNotional += quantity.Units * ExactAmount.From(fill.Price).Units; if (!string.IsNullOrWhiteSpace(fill.OrderId)) exits.Add(fill.OrderId); }
+            if (role == "entry") { entered += quantity; entryNotional += quantity.Units * ExactAmount.From(fill.Price).Units; if (!string.IsNullOrWhiteSpace(fill.ExternalOrderId)) entries.Add(fill.ExternalOrderId); }
+            if (role == "exit") { exited += quantity; exitNotional += quantity.Units * ExactAmount.From(fill.Price).Units; if (!string.IsNullOrWhiteSpace(fill.ExternalOrderId)) exits.Add(fill.ExternalOrderId); }
             parts.Add(new(fill, role, quantity, fee, closedPnl, play));
         }
         public ActivityOperationDto Build(ExactAmount position)
         {
             if (unsupportedGrossFee) Coverage.Add("Net result is unknown: a gross fill has a fee in a token outside the nominal stablecoin list; no fee conversion is performed.");
             if (unsupportedNetFee) Coverage.Add("Before-fee P&L is unknown: a net-of-fee fill has a fee in a token outside the nominal stablecoin list; no fee conversion is performed.");
-            if (parts.Any(p => string.IsNullOrWhiteSpace(p.Fill.OrderId))) Coverage.Add("Some order IDs are missing; distinct order counts include known IDs only.");
+            if (parts.Any(p => string.IsNullOrWhiteSpace(p.Fill.ExternalOrderId))) Coverage.Add("Some order IDs are missing; distinct order counts include known IDs only.");
             var association = plays.Count == 0 ? "unassigned" : plays.Count == 1 && !unassigned ? "linked" : "mixed";
             var stableFees = fees.Where(f => NominalStablecoins.Contains(f.Key)).Aggregate(default(ExactAmount), (sum, f) => sum + f.Value);
             return new($"{first.Id}:{(sign > 0 ? "long" : "short")}", first.AccountId, first.ContractId,
@@ -303,7 +303,7 @@ public static class OperationAggregator
                 var part = parts[index]; var fill = part.Fill;
                 return new(new(fill.Id, fill.AccountId, fill.ContractId, fill.Side, fill.Direction,
                     ExactAmount.From(fill.Price).ToString(), ExactAmount.From(fill.Quantity).ToString(), ExactAmount.From(fill.Fee).ToString(),
-                    fill.FeeToken, ExactAmount.From(fill.ClosedPnlUsd).ToString(), fill.OccurredAtUtc, fill.OrderId, fill.SourceFillId,
+                    fill.FeeToken, ExactAmount.From(fill.ClosedPnlUsd).ToString(), fill.OccurredAtUtc, fill.ExternalOrderId, fill.SourceFillId,
                     fill.TransactionHash, fill.PositionEffect, fill.FeeBasis, fill.PnlBasis, part.PlayId),
                     part.Role, part.Quantity.ToString(), part.Fee.ToString(), part.ClosedPnl.ToString());
             }

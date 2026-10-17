@@ -22,8 +22,10 @@ internal sealed class MemoryExecutionStore(MemoryPlayStore plays) : IPlayExecuti
     public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset observedAt, CancellationToken ct) =>
         throw new NotSupportedException();
     public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, CancellationToken ct) => Task.FromResult(Links.Where(l => l.AccountId == accountId).ToList());
-    public Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct) =>
-        Task.FromResult(Fills.Where(f => f.AccountId == accountId && orderIds.Contains(f.OrderId)).OrderBy(f => f.OccurredAtUtc).ToList());
+    public Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<OrderKey> orders, CancellationToken ct) =>
+        Task.FromResult(Fills.Where(f => f.AccountId == accountId && orders.Contains(OrderKey.Of(f))).OrderBy(f => f.OccurredAtUtc).ToList());
+    /// <summary>The retained order with this venue ID, for building links in tests.</summary>
+    public ImportedOrder Order(string externalOrderId) => Orders.Single(o => o.ExternalOrderId == externalOrderId);
     public void Add(PlayOrderLink link) => Links.Add(link);
     public void Add(PlayStatusChange change) => plays.Add(change);
     public Task SaveAsync(CancellationToken ct) => Task.CompletedTask;
@@ -64,7 +66,7 @@ public sealed class ExecutionIntegrityTests
     {
         store.Orders.Add(new()
         {
-            Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, OrderId = id, ContractId = "BTC", Side = side,
+            Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, ExternalOrderId = id, ContractId = "BTC", Side = side,
             OrderType = "Limit", LimitPrice = price, ReduceOnly = reduceOnly, OriginalSize = size, RemainingSize = status == "open" ? size : 0,
             PlacedAtUtc = Created.AddMinutes(minute), Status = status, VenueStatus = status, StatusAtUtc = Created.AddMinutes(minute),
             ObservedAtUtc = Created.AddMinutes(minute),
@@ -75,7 +77,7 @@ public sealed class ExecutionIntegrityTests
     private ImportedFill Fill(string orderId, string side, string effect, decimal price, decimal quantity, int minute, decimal pnl = 0) => new()
     {
         Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, ContractId = "BTC", SourceFillId = Guid.NewGuid().ToString("N"),
-        OrderId = orderId, Side = side, Direction = "", PositionEffect = effect, Price = price, Quantity = quantity, Fee = 0, FeeToken = "USDC",
+        ExternalOrderId = orderId, Side = side, Direction = "", PositionEffect = effect, Price = price, Quantity = quantity, Fee = 0, FeeToken = "USDC",
         ClosedPnlUsd = pnl, OccurredAtUtc = Created.AddMinutes(minute), TransactionHash = "",
     };
 
@@ -98,7 +100,7 @@ public sealed class ExecutionIntegrityTests
         var execution = await Service.GetAsync(play.Id, default);
         Assert.Equal(("open", "1", "0", "1"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity,
             execution.Totals.OpenQuantity));
-        Assert.Equal(["in"], store.Links.Select(l => l.OrderId));
+        Assert.Equal([store.Order("in").Id], store.Links.Select(l => l.ImportedOrderId));
 
         // A reducing fill on the exit side is an exit.
         Add("out", "sell", 110, 5, fills: Fill("out", "sell", "close", 110, 1, 6, pnl: 10));
@@ -161,7 +163,7 @@ public sealed class ExecutionIntegrityTests
     {
         // A resting buy at the entry price links automatically; it later fills by closing an earlier short.
         Add("cover", "buy", 100, 1, fills: Fill("cover", "buy", "close", 100, 1, 2, pnl: 4));
-        store.Links.Add(new PlayOrderLink(play, "cover", OrderLinkRole.Entry, "entry-1", null, OrderLinkState.Linked, OrderLinkSource.Automatic, Created));
+        store.Links.Add(new PlayOrderLink(play, store.Order("cover"), OrderLinkRole.Entry, "entry-1", null, OrderLinkState.Linked, OrderLinkSource.Automatic, Created));
         Add("out", "sell", 110, 3, fills: Fill("out", "sell", "close", 110, 1, 4, pnl: 10));
         var execution = await Link("out", "target");
         Assert.Equal(("planned", "0", "1", "0"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity,
@@ -184,7 +186,8 @@ public sealed class ExecutionIntegrityTests
         Assert.Equal(("closed", 2, "0"), (execution.Status, execution.Links.Count, execution.Totals.OpenQuantity));
         Assert.All(store.Links, l => Assert.Equal(OrderLinkState.Linked, l.State));
 
-        var suggestion = new PlayOrderLink(play, "late", OrderLinkRole.Exit, null, null, OrderLinkState.Suggested, OrderLinkSource.Automatic, Created);
+        Add("late", "sell", 120, 5, status: "open");
+        var suggestion = new PlayOrderLink(play, store.Order("late"), OrderLinkRole.Exit, null, null, OrderLinkState.Suggested, OrderLinkSource.Automatic, Created);
         store.Links.Add(suggestion);
         await Service.UnlinkAsync(play.Id, suggestion.Id, default);
         Assert.Equal(OrderLinkState.Dismissed, suggestion.State);

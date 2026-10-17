@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Tests;
@@ -29,15 +31,19 @@ public sealed class NormalizedExecutionFactsMigrationTests
                 VALUES ({Guid.NewGuid()}, {owner}, {account}, 'BTC', {id}, {side}, 'Limit', 100, false, false, 1, 1, now(), 'open', 'open', now(), now())
                 """);
 
-        await db.Database.MigrateAsync();
+        // The order identity change refuses retained facts, so this data migration is checked just before it.
+        await db.GetService<IMigrator>().MigrateAsync(TestOrders.BeforeOrderIdentity);
 
-        var fills = await db.Fills.ToDictionaryAsync(f => f.SourceFillId);
+        var fills = await db.Database.SqlQueryRaw<MigratedFill>("""
+            SELECT "SourceFillId", "Side", "PositionEffect", "Direction", "FeeBasis", "PnlBasis" FROM imported_fills
+            """).ToDictionaryAsync(f => f.SourceFillId);
         Assert.Equal((ExecutionFacts.Buy, ExecutionFacts.Open, "Open Long"), (fills["1"].Side, fills["1"].PositionEffect, fills["1"].Direction));
         Assert.Equal((ExecutionFacts.Sell, ExecutionFacts.Close), (fills["2"].Side, fills["2"].PositionEffect));
         Assert.Equal((ExecutionFacts.Sell, ExecutionFacts.Flip), (fills["3"].Side, fills["3"].PositionEffect));
         Assert.Equal((ExecutionFacts.Buy, ExecutionFacts.Unknown), (fills["4"].Side, fills["4"].PositionEffect));
         Assert.All(fills.Values, f => Assert.Equal((ExecutionFacts.FeeReported, ExecutionFacts.PnlGross), (f.FeeBasis, f.PnlBasis)));
-        var orders = await db.Orders.ToDictionaryAsync(o => o.OrderId);
+        var orders = await db.Database.SqlQueryRaw<MigratedOrder>("""SELECT "OrderId", "Side" FROM imported_orders""")
+            .ToDictionaryAsync(o => o.OrderId);
         Assert.Equal((ExecutionFacts.Buy, ExecutionFacts.Sell), (orders["10"].Side, orders["11"].Side));
         Assert.False(db.Database.HasPendingModelChanges());
 
@@ -45,4 +51,7 @@ public sealed class NormalizedExecutionFactsMigrationTests
         await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.Database.ExecuteSqlRawAsync(
             "UPDATE imported_fills SET \"Side\" = 'B' WHERE \"SourceFillId\" = '1'"));
     }
+
+    private sealed record MigratedFill(string SourceFillId, string Side, string PositionEffect, string Direction, string FeeBasis, string PnlBasis);
+    private sealed record MigratedOrder(string OrderId, string Side);
 }

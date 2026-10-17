@@ -200,7 +200,7 @@ public sealed class MonitorDiscrepancyTests
             case "wrong-native": f.Store.Fills[0].VenueContractId = "different"; break;
             case "shared-order":
                 var another = f.AddPlay("long", 1);
-                f.Store.Links.Add(new(another, "entry", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now));
+                f.Store.Links.Add(f.Link(another, "entry", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now));
                 break;
         }
         Assert.True((await f.Evaluate()).Incomplete);
@@ -215,8 +215,8 @@ public sealed class MonitorDiscrepancyTests
         var shortPlay = f.AddPlay("short", 1);
         await f.Confirm();
         Assert.DoesNotContain(f.Store.Rows, x => x.Kind.StartsWith("position.") && x.State == "open");
-        f.Store.Fills.Single(x => x.OrderId == shortPlay.Id.ToString()).Quantity = .5m;
-        f.Store.Orders.Single(x => x.OrderId == shortPlay.Id.ToString()).OriginalSize = .5m;
+        f.Store.Fills.Single(x => x.ExternalOrderId == shortPlay.Id.ToString()).Quantity = .5m;
+        f.Store.Orders.Single(x => x.ExternalOrderId == shortPlay.Id.ToString()).OriginalSize = .5m;
         f.Position = .50000001m;
         f.Advance(60); await f.Confirm();
         Assert.DoesNotContain(f.Store.Rows, x => x.Kind.StartsWith("position.") && x.State == "open");
@@ -321,7 +321,7 @@ public sealed class MonitorDiscrepancyTests
         var f = new DiscrepancyFixture(); f.Fill("extra", "extra-order", 1, f.Clock.Now.AddMinutes(-2));
         await f.Confirm(); var row = f.Store.Rows.Single(x => x.Kind == "fill.unlinked");
         f.Advance(60); await f.Evaluate(); Assert.Equal("open", row.State);
-        f.Store.Links.Add(new(f.Play, "extra-order", OrderLinkRole.Entry, "e", null, OrderLinkState.Suggested, OrderLinkSource.Automatic, f.Clock.Now));
+        f.Store.Links.Add(f.Link(f.Play, "extra-order", OrderLinkRole.Entry, "e", null, OrderLinkState.Suggested, OrderLinkSource.Automatic, f.Clock.Now));
         f.Advance(60); await f.Confirm(); Assert.Equal("resolved", row.State);
     }
 
@@ -338,7 +338,7 @@ public sealed class MonitorDiscrepancyTests
         f.Store.AssignmentLinksComplete = true;
         f.Advance(60); await f.Confirm();
         var row = Assert.Single(await f.Service.ReadAsync(f.Account.Id, null, default), x => x.Kind == "fill.unlinked" && x.State == "open");
-        f.Store.Links.Add(new(f.Play, "extra-order", OrderLinkRole.Entry, "e", null,
+        f.Store.Links.Add(f.Link(f.Play, "extra-order", OrderLinkRole.Entry, "e", null,
             OrderLinkState.Suggested, OrderLinkSource.Automatic, f.Clock.Now));
         f.Store.AssignmentLinksComplete = false;
         f.Advance(60);
@@ -355,10 +355,11 @@ public sealed class MonitorDiscrepancyTests
         var f = new DiscrepancyFixture();
         f.Stop(o => o with { Status = VenueOrderStatus.Canceled });
         var stop = f.VenueOrders.Single();
-        f.Store.Orders.Add(new() { Id = Guid.NewGuid(), OwnerId = f.Account.OwnerId, AccountId = f.Account.Id,
-            OrderId = stop.OrderId, ContractId = stop.ContractId, Side = stop.Side, OrderType = stop.OrderType,
-            Status = "canceled", VenueStatus = "canceled", RemainingSize = 1, OriginalSize = 1, TriggerPrice = 90,
-            LimitPrice = 90, StatusAtUtc = stop.StatusAtUtc, ObservedAtUtc = stop.StatusAtUtc });
+        // The linked stop's retained row records the cancellation.
+        var retained = f.Store.Orders.Single(x => x.ExternalOrderId == stop.OrderId && x.ContractId == stop.ContractId);
+        (retained.Side, retained.OrderType, retained.Status, retained.VenueStatus) = (stop.Side, stop.OrderType, "canceled", "canceled");
+        (retained.RemainingSize, retained.OriginalSize, retained.TriggerPrice, retained.LimitPrice) = (1, 1, 90, 90);
+        (retained.StatusAtUtc, retained.ObservedAtUtc) = (stop.StatusAtUtc, stop.StatusAtUtc);
         await f.Confirm();
         var row = f.Store.Rows.Single(x => x.Kind == "protection.cancelled");
         f.VenueOrders.Clear();
@@ -406,10 +407,12 @@ public sealed class MonitorDiscrepancyTests
         await f.Confirm();
         var row = f.Store.Rows.Single(x => x.Kind == "position.excess");
         await f.Service.DismissAsync(f.Account.Id, null, row.Id, null, default);
-        f.Store.Links.RemoveAll(x => x.OrderId == "entry");
-        f.Store.Links.Add(new(f.Play, "replacement", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now));
-        f.Store.Fills[0].OrderId = "replacement";
-        f.Store.Orders[0].OrderId = "replacement";
+        f.Store.Links.RemoveAll(x => x.ImportedOrderId == f.Store.Orders[0].Id);
+        f.Store.Fills[0].ExternalOrderId = "replacement";
+        // A different order: a new internal ID with the replacement's venue ID.
+        f.Store.Orders[0].Id = Guid.NewGuid();
+        f.Store.Orders[0].ExternalOrderId = "replacement";
+        f.Store.Links.Add(f.Link(f.Play, "replacement", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now));
         f.Advance(60); await f.Confirm();
         Assert.Equal("open", row.State);
     }
@@ -473,23 +476,46 @@ internal sealed class DiscrepancyFixture
         var play = new Play(Guid.NewGuid(), Account, new("hyperliquid", "BTC"), InstrumentSource.Venue, PlayDocuments.Serialize(plan), Clock.Now.AddHours(-1));
         play.MarkPlanned(Clock.Now.AddMinutes(-30)); play.MarkOpen("fixture", Clock.Now.AddMinutes(-20)); Store.Plays.Add(play);
         entryOrder ??= play.Id.ToString();
-        Store.Links.Add(new(play, entryOrder, OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, Clock.Now.AddMinutes(-25)));
         var side = direction == "long" ? "buy" : "sell";
         Fill(entryOrder + "-fill", entryOrder, quantity, Clock.Now.AddMinutes(-20), side);
-        Store.Orders.Add(new() { Id = Guid.NewGuid(), OwnerId = Account.OwnerId, AccountId = Account.Id, ContractId = "BTC", OrderId = entryOrder,
+        Store.Orders.Add(new() { Id = Guid.NewGuid(), OwnerId = Account.OwnerId, AccountId = Account.Id, ContractId = "BTC", ExternalOrderId = entryOrder,
             Side = side, OrderType = "Limit", OriginalSize = quantity, Status = "filled", VenueStatus = "filled", PlacedAtUtc = Clock.Now.AddMinutes(-25),
             StatusAtUtc = Clock.Now.AddMinutes(-20), ObservedAtUtc = Clock.Now.AddMinutes(-20), LimitPrice = 100 });
+        Store.Links.Add(Link(play, entryOrder, OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, Clock.Now.AddMinutes(-25)));
         return play;
     }
+    /// <summary>
+    /// The retained order with this venue ID, created on the Play's contract if missing: links reference retained orders.
+    /// A created order rests unfilled on the side its role implies.
+    /// </summary>
+    public ImportedOrder Retained(Play play, string id, OrderLinkRole role, decimal quantity = 1, decimal price = 100,
+        string type = "Limit", bool reduceOnly = false)
+    {
+        var existing = Store.Orders.FirstOrDefault(o => o.AccountId == play.AccountId && o.ContractId == play.ContractId && o.ExternalOrderId == id);
+        if (existing is not null) return existing;
+        var entrySide = PlayDocuments.Read(play.Plan).Direction == "long" ? "buy" : "sell";
+        var order = new ImportedOrder { Id = Guid.NewGuid(), OwnerId = play.OwnerId, AccountId = play.AccountId, ContractId = play.ContractId!,
+            ExternalOrderId = id, Side = role == OrderLinkRole.Entry ? entrySide : entrySide == "buy" ? "sell" : "buy", OrderType = type,
+            LimitPrice = price, TriggerPrice = type == "Limit" ? null : price, ReduceOnly = reduceOnly, OriginalSize = quantity, RemainingSize = quantity,
+            Status = "open", VenueStatus = "open", PlacedAtUtc = Clock.Now.AddMinutes(-15), StatusAtUtc = Clock.Now.AddMinutes(-15),
+            ObservedAtUtc = Clock.Now.AddMinutes(-15) };
+        Store.Orders.Add(order);
+        return order;
+    }
+    /// <summary>A link to the retained order with this venue ID (see <see cref="Retained"/>).</summary>
+    public PlayOrderLink Link(Play play, string id, OrderLinkRole role, string? entryId, string? levelId, OrderLinkState state,
+        OrderLinkSource source, DateTimeOffset at) =>
+        new(play, Retained(play, id, role), role, entryId, levelId, state, source, at);
     public void AddOrder(string id, OrderLinkRole role, decimal quantity, decimal price)
     {
-        Store.Links.Add(new(Play, id, role, "e", role == OrderLinkRole.Stop ? "s" : "t", OrderLinkState.Linked, OrderLinkSource.Owner, Clock.Now.AddMinutes(-15)));
+        Retained(Play, id, role, quantity, price, role == OrderLinkRole.Stop ? "Stop Market" : "Take Profit Market", true);
+        Store.Links.Add(Link(Play, id, role, "e", role == OrderLinkRole.Stop ? "s" : "t", OrderLinkState.Linked, OrderLinkSource.Owner, Clock.Now.AddMinutes(-15)));
         VenueOrders.Add(new(id, "BTC", "sell", role == OrderLinkRole.Stop ? "Stop Market" : "Take Profit Market", price, price, true, false,
             quantity, quantity, Clock.Now.AddMinutes(-15), VenueOrderStatus.Open, "open", Clock.Now));
     }
     public void Fill(string id, string order, decimal quantity, DateTimeOffset at, string side = "buy", string effect = ExecutionFacts.Open) => Store.Fills.Add(new()
     {
-        Id = Guid.NewGuid(), OwnerId = Account.OwnerId, AccountId = Account.Id, ContractId = "BTC", SourceFillId = id, OrderId = order,
+        Id = Guid.NewGuid(), OwnerId = Account.OwnerId, AccountId = Account.Id, ContractId = "BTC", SourceFillId = id, ExternalOrderId = order,
         Side = side, Direction = side, PositionEffect = effect, Quantity = quantity, Price = 100, OccurredAtUtc = at, FeeToken = "USDC", TransactionHash = "synthetic"
     });
     public void Stop(Func<VenueOrder, VenueOrder> change) { var index = VenueOrders.FindIndex(x => x.OrderId == "stop"); VenueOrders[index] = change(VenueOrders[index]); }

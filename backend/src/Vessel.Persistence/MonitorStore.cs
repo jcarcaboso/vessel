@@ -7,6 +7,7 @@ using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Monitoring;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence;
 
@@ -90,6 +91,8 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
     private sealed class TerminalExit
     {
         public PlayOrderLink Link { get; init; } = null!;
+        /// <summary>The link's order; immutable, so the watch identifies it through the link.</summary>
+        public ImportedOrder Order { get; init; } = null!;
         public DateTimeOffset? EndedAtUtc { get; init; }
     }
 
@@ -100,14 +103,15 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
     private IQueryable<TerminalExit> TerminalLinks =>
         from l in db.OrderLinks
         join p in db.Plays on l.PlayId equals p.Id
+        join o in db.Orders on new { l.OwnerId, l.AccountId, Id = l.ImportedOrderId } equals new { o.OwnerId, o.AccountId, o.Id }
         where l.State == OrderLinkState.Linked &&
             p.InstrumentSource == InstrumentSource.Venue && p.Origin == PlayOrigin.Planned &&
             (p.Status == PlayStatus.Closed || p.Status == PlayStatus.Cancelled)
-        select new TerminalExit { Link = l, EndedAtUtc = p.EndedAtUtc };
+        select new TerminalExit { Link = l, Order = o, EndedAtUtc = p.EndedAtUtc };
 
     /// <summary>Terminal Plays' linked orders whose current link revision has no ended watch.</summary>
     private IQueryable<TerminalExit> Watching => TerminalLinks.Where(x => !Exits.Any(e => e.LinkId == x.Link.Id &&
-        e.EndedAtUtc != null && e.LinkRevisionAtUtc >= x.Link.UpdatedAtUtc && e.OrderId == x.Link.OrderId));
+        e.EndedAtUtc != null && e.LinkRevisionAtUtc >= x.Link.UpdatedAtUtc));
 
     public async Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct)
     {
@@ -253,19 +257,18 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
         var watches = await Exits.Where(e => e.AccountId == accountId).ToDictionaryAsync(e => e.LinkId, ct);
         foreach (var exit in links)
         {
-            var (link, ended) = (exit.Link, exit.EndedAtUtc);
+            var (link, order, ended) = (exit.Link, exit.Order, exit.EndedAtUtc);
             var started = ended > link.UpdatedAtUtc ? ended.Value : link.UpdatedAtUtc;
             if (!watches.TryGetValue(link.Id, out var watch))
             {
                 watch = new() { LinkId = link.Id, OwnerId = link.OwnerId, AccountId = accountId, PlayId = link.PlayId,
-                    OrderId = link.OrderId, LinkRevisionAtUtc = link.UpdatedAtUtc, StartedAtUtc = started };
+                    LinkRevisionAtUtc = link.UpdatedAtUtc, StartedAtUtc = started };
                 db.Add(watch);
             }
-            if (watch.LinkRevisionAtUtc < link.UpdatedAtUtc || watch.OrderId != link.OrderId)
+            if (watch.LinkRevisionAtUtc < link.UpdatedAtUtc)
             {
                 // A relinked order is a new watch with its own lifetime.
                 watch.LinkRevisionAtUtc = link.UpdatedAtUtc;
-                watch.OrderId = link.OrderId;
                 watch.StartedAtUtc = started;
                 watch.EndedAtUtc = null;
                 watch.Outcome = null;
@@ -274,7 +277,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
             // Closing during this import does not make an earlier order observation fresh after closure.
             if (orders is not null && orders.ObservedAtUtc > link.UpdatedAtUtc && !(ended >= orders.ObservedAtUtc))
             {
-                var current = orders.Orders.FirstOrDefault(o => o.OrderId == link.OrderId);
+                var current = orders.Orders.FirstOrDefault(o => o.ContractId == order.ContractId && o.OrderId == order.ExternalOrderId);
                 // Reads combine order history with the current book. Only a current-book row (observed with the read)
                 // establishes a resting order; a historical Open row is not evidence that it still rests.
                 var resting = current is { Status: VenueOrderStatus.Open } && current.StatusAtUtc == orders.ObservedAtUtc;
@@ -310,11 +313,11 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
         var links = await TerminalLinks.AsNoTracking().Where(x => x.Link.PlayId == playId).ToListAsync(ct);
         var ids = links.Select(x => x.Link.Id).ToArray();
         var watches = await Exits.AsNoTracking().Where(e => ids.Contains(e.LinkId)).ToDictionaryAsync(e => e.LinkId, ct);
-        return links.OrderBy(x => x.Link.OrderId, StringComparer.Ordinal).Select(x =>
+        return links.OrderBy(x => x.Order.ExternalOrderId, StringComparer.Ordinal).Select(x =>
         {
             var started = x.EndedAtUtc > x.Link.UpdatedAtUtc ? x.EndedAtUtc.Value : x.Link.UpdatedAtUtc;
             var watch = watches.GetValueOrDefault(x.Link.Id);
-            if (watch is not null && (watch.LinkRevisionAtUtc < x.Link.UpdatedAtUtc || watch.OrderId != x.Link.OrderId)) watch = null;
+            if (watch is not null && watch.LinkRevisionAtUtc < x.Link.UpdatedAtUtc) watch = null;
             var state = watch?.Outcome switch
             {
                 MonitorWatchOutcomes.Unverifiable => "unverifiable",
@@ -322,7 +325,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
                 // Past its lifetime but not yet recorded by a run: still never "resolved".
                 _ => started <= cutoff ? "unverifiable" : "watching"
             };
-            return new MonitorWatchDto(x.Link.Id, x.Link.PlayId, x.Link.OrderId, x.Link.Role.ToString().ToLowerInvariant(), state, watch?.StartedAtUtc ?? started, watch?.EndedAtUtc);
+            return new MonitorWatchDto(x.Link.Id, x.Link.PlayId, x.Order.ExternalOrderId, x.Link.Role.ToString().ToLowerInvariant(), state, watch?.StartedAtUtc ?? started, watch?.EndedAtUtc);
         }).ToArray();
     }
 }

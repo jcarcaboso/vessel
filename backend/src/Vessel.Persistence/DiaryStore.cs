@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Activity;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
@@ -27,24 +28,28 @@ public sealed class DiaryStore(VesselDbContext db, UnitOfWork unitOfWork) : IDia
         var fills = await db.Fills.Where(f => f.AccountId == accountId).AsNoTracking().ToListAsync(ct);
         var snapshots = await db.Snapshots.Where(s => s.AccountId == accountId).Include(s => s.Positions).AsNoTracking().ToListAsync(ct);
         var funding = await db.FundingPayments.Where(p => p.AccountId == accountId).AsNoTracking().ToListAsync(ct);
-        var links = await db.OrderLinks.Where(l => l.AccountId == accountId && l.State == OrderLinkState.Linked).AsNoTracking().ToListAsync(ct);
-        var byOrder = links.ToDictionary(l => l.OrderId, l => l.PlayId);
-        return new(accounts, fills, snapshots, fills.Where(f => byOrder.ContainsKey(f.OrderId)).ToDictionary(f => f.Id, f => byOrder[f.OrderId]))
+        var links = await db.LinkedOrders(db.OrderLinks.Where(l => l.AccountId == accountId && l.State == OrderLinkState.Linked))
+            .Select(x => new { x.Order.AccountId, x.Order.ContractId, x.Order.ExternalOrderId, x.Link.PlayId }).AsNoTracking().ToListAsync(ct);
+        var byOrder = links.ToDictionary(l => new OrderKey(l.AccountId, l.ContractId, l.ExternalOrderId), l => l.PlayId);
+        return new(accounts, fills, snapshots, fills.Where(f => byOrder.ContainsKey(OrderKey.Of(f))).ToDictionary(f => f.Id, f => byOrder[OrderKey.Of(f)]))
         { FundingPayments = funding };
     }
     public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct) =>
         db.Orders.Where(o => o.AccountId == accountId).AsNoTracking().ToListAsync(ct);
     public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, CancellationToken ct) =>
         db.OrderLinks.Where(l => l.AccountId == accountId).AsNoTracking().ToListAsync(ct);
-    public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct)
+    public async Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<OrderKey> orders, CancellationToken ct)
     {
-        var ids = orderIds.ToArray();
-        return db.Orders.Where(o => o.AccountId == accountId && ids.Contains(o.OrderId)).AsNoTracking().ToListAsync(ct);
+        var keys = orders.Where(k => k.AccountId == accountId).ToHashSet();
+        var ids = keys.Select(k => k.ExternalOrderId).Distinct(StringComparer.Ordinal).ToArray();
+        // SQL narrows by external ID; the shared OrderKey rule keeps only each key's own contract.
+        return (await db.Orders.Where(o => o.AccountId == accountId && ids.Contains(o.ExternalOrderId)).AsNoTracking().ToListAsync(ct))
+            .Where(o => keys.Contains(OrderKey.Of(o))).ToList();
     }
-    public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct)
+    public Task<List<PlayOrderLink>> LinksAsync(Guid accountId, IReadOnlyCollection<Guid> orderIds, CancellationToken ct)
     {
         var ids = orderIds.ToArray();
-        return db.OrderLinks.Where(l => l.AccountId == accountId && ids.Contains(l.OrderId)).AsNoTracking().ToListAsync(ct);
+        return db.OrderLinks.Where(l => l.AccountId == accountId && ids.Contains(l.ImportedOrderId)).AsNoTracking().ToListAsync(ct);
     }
     public void Add(ManualExecution execution) { unitOfWork.RequireActive(); db.ManualExecutions.Add(execution); }
     public void Add(ManualExecutionHistory history) { unitOfWork.RequireActive(); db.ManualExecutionHistory.Add(history); }

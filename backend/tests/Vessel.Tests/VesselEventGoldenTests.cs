@@ -38,13 +38,13 @@ public sealed partial class VesselEventGoldenTests
             """{"linkId":"<id>","previous":null,"current":"suggested","role":"entry","source":"automatic"}""", "current" },
         { 3, "execution.link-changed", "link-change:<id>", "info", "\"entry-1\"", """{"trigger":"owner","orderIds":["entry"],"fillIds":null}""",
             """{"linkId":"<id>","previous":"suggested","current":"linked","role":"entry","source":"owner"}""", "current" },
-        { 4, "execution.filled", "order:<account>:entry:filled:0.5", "info", "\"entry-1\"", """{"trigger":"monitor","orderIds":["entry"],"fillIds":["e1"]}""",
+        { 4, "execution.filled", "order:<account>:<entry-order>:filled:0.5", "info", "\"entry-1\"", """{"trigger":"monitor","orderIds":["entry"],"fillIds":["e1"]}""",
             """{"role":"entry","side":"buy","filledQuantity":"0.5","cumulativeQuantity":"0.5","remainingQuantity":"0","averagePrice":"100","sourceFillCount":1,"sourceFillIdsComplete":true,"complete":true}""", "current" },
         { 5, "play.opened", "play:<play>:opened", "info", "null", """{"trigger":"monitor","orderIds":null,"fillIds":null}""",
             """{"previous":"planned","current":"open","source":"venue","reason":null}""", "current" },
         { 6, "execution.link-changed", "link-change:<id>", "info", "null", """{"trigger":"monitor","orderIds":["exit"],"fillIds":null}""",
             """{"linkId":"<id>","previous":null,"current":"linked","role":"exit","source":"automatic"}""", "current" },
-        { 7, "execution.filled", "order:<account>:exit:filled:0.5", "info", "null", """{"trigger":"monitor","orderIds":["exit"],"fillIds":["x1"]}""",
+        { 7, "execution.filled", "order:<account>:<exit-order>:filled:0.5", "info", "null", """{"trigger":"monitor","orderIds":["exit"],"fillIds":["x1"]}""",
             """{"role":"exit","side":"sell","filledQuantity":"0.5","cumulativeQuantity":"0.5","remainingQuantity":"0","averagePrice":"101","sourceFillCount":1,"sourceFillIdsComplete":true,"complete":true}""", "superseded" },
         { 8, "play.closed", "play:<play>:closed", "info", "null", """{"trigger":"monitor","orderIds":null,"fillIds":null}""",
             """{"enteredQuantity":"0.5","exitedQuantity":"0.5","closedPnlUsd":"0.5","closedPnlBasis":"gross","fees":[{"token":"USDC","amount":"0.01"}]}""", "current" }
@@ -91,6 +91,8 @@ public sealed partial class VesselEventGoldenTests
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         var now = DateTimeOffset.UtcNow;
+        // The execution.filled dedup key names the internal order ID: a venue ID alone collides across contracts.
+        var (entryOrder, exitOrder) = (Order(owner, account.Id, "entry", "buy", now), Order(owner, account.Id, "exit", "sell", now));
         await using (var seed = database.Context(owner))
         {
             seed.Accounts.Add(account); seed.Plays.Add(play);
@@ -112,8 +114,8 @@ public sealed partial class VesselEventGoldenTests
         await work.ExecuteAsync(async () =>
         {
             await store.SetRunAsync(Guid.CreateVersion7(), "monitor", default);
-            db.Orders.Add(Order(owner, account.Id, "entry", "buy", now));
-            db.OrderLinks.Add(new(await db.Plays.SingleAsync(), "entry", OrderLinkRole.Entry, "entry-1", null,
+            db.Orders.Add(entryOrder);
+            db.OrderLinks.Add(new(await db.Plays.SingleAsync(), entryOrder, OrderLinkRole.Entry, "entry-1", null,
                 OrderLinkState.Suggested, OrderLinkSource.Automatic, now));
             return true;
         }, default);
@@ -133,19 +135,21 @@ public sealed partial class VesselEventGoldenTests
         {
             await store.SetRunAsync(Guid.CreateVersion7(), "monitor", default);
             var stored = await db.Plays.SingleAsync();
-            db.Orders.Add(Order(owner, account.Id, "exit", "sell", now));
-            db.OrderLinks.Add(new(stored, "exit", OrderLinkRole.Exit, null, null, OrderLinkState.Linked, OrderLinkSource.Automatic, now));
+            db.Orders.Add(exitOrder);
+            db.OrderLinks.Add(new(stored, exitOrder, OrderLinkRole.Exit, null, null, OrderLinkState.Linked, OrderLinkSource.Automatic, now));
             db.Fills.Add(Fill(owner, account.Id, "exit", "x1", "sell", 101, DateTimeOffset.UtcNow));
             db.StatusChanges.Add(stored.MarkClosed("Exit filled", now));
             return true;
         }, default);
         var page = await EventReads.ReadAsync(db, 0, 200, default);
-        return page.Events.Select(e => Normalize(JsonSerializer.Serialize(e, VesselEventJson.Options), owner, account.Id, play.Id)).ToList();
+        return page.Events.Select(e => Normalize(JsonSerializer.Serialize(e, VesselEventJson.Options), owner, account.Id, play.Id,
+            entryOrder.Id, exitOrder.Id)).ToList();
     }
 
-    private static JsonNode Normalize(string json, Guid owner, Guid account, Guid play)
+    private static JsonNode Normalize(string json, Guid owner, Guid account, Guid play, Guid entryOrder, Guid exitOrder)
     {
-        json = json.Replace(owner.ToString(), "<owner>").Replace(account.ToString(), "<account>").Replace(play.ToString(), "<play>");
+        json = json.Replace(owner.ToString(), "<owner>").Replace(account.ToString(), "<account>").Replace(play.ToString(), "<play>")
+            .Replace(entryOrder.ToString(), "<entry-order>").Replace(exitOrder.ToString(), "<exit-order>");
         json = Guids().Replace(json, "<id>");
         return JsonNode.Parse(Times().Replace(json, "\"<time>\""))!;
     }
@@ -157,7 +161,7 @@ public sealed partial class VesselEventGoldenTests
 
     private static ImportedOrder Order(Guid owner, Guid account, string id, string side, DateTimeOffset now) => new()
     {
-        Id = Guid.NewGuid(), OwnerId = owner, AccountId = account, ContractId = "BTC", OrderId = id, Side = side,
+        Id = Guid.NewGuid(), OwnerId = owner, AccountId = account, ContractId = "BTC", ExternalOrderId = id, Side = side,
         OrderType = "limit", OriginalSize = 0.5m, RemainingSize = 0, Status = "filled", VenueStatus = "filled",
         PlacedAtUtc = now.AddMinutes(-1), StatusAtUtc = now, ObservedAtUtc = now
     };
@@ -167,7 +171,7 @@ public sealed partial class VesselEventGoldenTests
         Id = Guid.NewGuid(), OwnerId = owner, AccountId = account, ContractId = "BTC", SourceFillId = id, Side = side,
         Direction = side == "buy" ? "Open Long" : "Close Long", PositionEffect = side == "buy" ? "open" : "close",
         Price = price, Quantity = 0.5m, Fee = 0.005m, FeeToken = "USDC", ClosedPnlUsd = side == "buy" ? 0 : 0.5m,
-        OccurredAtUtc = now, OrderId = order, TransactionHash = "synthetic"
+        OccurredAtUtc = now, ExternalOrderId = order, TransactionHash = "synthetic"
     };
 
     private sealed class NoOutbox : IVesselEventOutbox

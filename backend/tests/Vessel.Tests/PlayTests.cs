@@ -76,7 +76,11 @@ internal sealed class MemoryPlayStore(Guid owner) : IPlayStore
     public Task<List<PlayPlanRevision>> RevisionsAsync(Guid playId, CancellationToken ct) => Task.FromResult(Revisions.Where(r => r.PlayId == playId).ToList());
     public Task<List<PlayStatusChange>> StatusChangesAsync(Guid playId, CancellationToken ct) => Task.FromResult(Changes.Where(c => c.PlayId == playId).ToList());
     public Task<List<PlayReviewRevision>> ReviewsAsync(Guid playId, CancellationToken ct) => Task.FromResult(Reviews.Where(c => c.PlayId == playId).ToList());
-    public Task<List<PlayOrderLink>> LinkedPlanReferencesAsync(Guid playId, CancellationToken ct) => Task.FromResult(Links.Where(l => l.PlayId == playId && l.State == OrderLinkState.Linked).ToList());
+    /// <summary>Venue order IDs of linked orders, by internal ID; a link without one shows its internal ID.</summary>
+    public Dictionary<Guid, string> ExternalOrderIds { get; } = [];
+    public Task<List<LinkedPlanReference>> LinkedPlanReferencesAsync(Guid playId, CancellationToken ct) => Task.FromResult(Links
+        .Where(l => l.PlayId == playId && l.State == OrderLinkState.Linked)
+        .Select(l => new LinkedPlanReference(l, ExternalOrderIds.GetValueOrDefault(l.ImportedOrderId) ?? l.ImportedOrderId.ToString())).ToList());
     public void Add(Play play) => Plays.Add(play);
     public void Add(PlayPlanRevision revision) => Revisions.Add(revision);
     public void Add(PlayStatusChange change) => Changes.Add(change);

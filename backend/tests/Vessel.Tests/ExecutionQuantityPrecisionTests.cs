@@ -151,7 +151,7 @@ public sealed class ExecutionQuantityPrecisionTests
         Assert.All(result.Issues, issue => Assert.Contains("not all of its executions are retained", issue));
         Assert.All(result.Links, link => Assert.Equal(retained, link.FilledQuantity));
         Assert.All(f.Store.Orders, order =>
-            Assert.True(ExecutionIntegrity.MissingExecutions(order, f.Store.Fills.Where(fill => fill.OrderId == order.OrderId))));
+            Assert.True(ExecutionIntegrity.MissingExecutions(order, f.Store.Fills.Where(fill => fill.ExternalOrderId == order.ExternalOrderId))));
         Assert.False(ExecutionIntegrity.Settled(f.Facts with { IncompleteOrders = ["in", "out"] }));
     }
 
@@ -292,8 +292,8 @@ public sealed class ExecutionQuantityPrecisionTests
         db.PlanRevisions.AddRange(f.Plays.Revisions);
         db.Orders.AddRange(f.Store.Orders);
         db.Fills.AddRange(f.Store.Fills);
-        db.OrderLinks.AddRange(f.Fills.DistinctBy(fill => fill.Fill.OrderId).Select(fill => new PlayOrderLink(
-            f.Play, fill.Fill.OrderId, fill.Role, fill.Role == OrderLinkRole.Entry ? "entry-1" : null, null,
+        db.OrderLinks.AddRange(f.Fills.DistinctBy(fill => fill.Fill.ExternalOrderId).Select(fill => new PlayOrderLink(
+            f.Play, f.Store.Orders.Single(o => o.ExternalOrderId == fill.Fill.ExternalOrderId), fill.Role, fill.Role == OrderLinkRole.Entry ? "entry-1" : null, null,
             OrderLinkState.Linked, OrderLinkSource.Owner, At)));
         await db.SaveChangesAsync();
     }
@@ -331,16 +331,16 @@ public sealed class ExecutionQuantityPrecisionTests
             var fill = new ImportedFill
             {
                 Id = Guid.NewGuid(), OwnerId = Account.OwnerId, AccountId = Account.Id, ContractId = "BTC",
-                SourceFillId = "fill-" + Fills.Count, OrderId = orderId, Side = side, Direction = "",
+                SourceFillId = "fill-" + Fills.Count, ExternalOrderId = orderId, Side = side, Direction = "",
                 PositionEffect = entry ? ExecutionFacts.Open : ExecutionFacts.Close, Price = price, Quantity = quantity,
                 Fee = 0, FeeToken = "USDC", ClosedPnlUsd = pnl, OccurredAtUtc = At.AddMinutes(minute), TransactionHash = "",
             };
             Fills.Add(new(role, fill));
             Store.Fills.Add(fill);
-            if (Store.Orders.All(o => o.OrderId != orderId))
+            if (Store.Orders.All(o => o.ExternalOrderId != orderId))
                 Store.Orders.Add(new()
                 {
-                    Id = Guid.NewGuid(), OwnerId = Account.OwnerId, AccountId = Account.Id, OrderId = orderId,
+                    Id = Guid.NewGuid(), OwnerId = Account.OwnerId, AccountId = Account.Id, ExternalOrderId = orderId,
                     ContractId = "BTC", Side = side, OrderType = "Limit", LimitPrice = price, OriginalSize = quantity,
                     PlacedAtUtc = At, Status = "filled", VenueStatus = "filled", StatusAtUtc = At, ObservedAtUtc = At,
                 });
@@ -350,8 +350,8 @@ public sealed class ExecutionQuantityPrecisionTests
         public async Task<PlayExecutionDto> LinkAll()
         {
             PlayExecutionDto? result = null;
-            foreach (var fill in Fills.DistinctBy(f => f.Fill.OrderId))
-                result = await Service.LinkAsync(Play.Id, new(fill.Fill.OrderId,
+            foreach (var fill in Fills.DistinctBy(f => f.Fill.ExternalOrderId))
+                result = await Service.LinkAsync(Play.Id, new(fill.Fill.ExternalOrderId,
                     fill.Role == OrderLinkRole.Entry ? "entry" : "exit", fill.Role == OrderLinkRole.Entry ? "entry-1" : null), default);
             return result!;
         }

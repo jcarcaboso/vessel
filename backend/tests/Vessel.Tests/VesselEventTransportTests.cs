@@ -183,6 +183,7 @@ public sealed class VesselEventTransportTests
         await using (var seed = broker.Database.Context(broker.Owner))
         {
             seed.Accounts.Add(account); seed.Plays.Add(play);
+            seed.Orders.Add(TestOrders.For(play, "order-1", status: "open"));
             await seed.SaveChangesAsync();
         }
         var api = await broker.StartAsync(MessagingHosting.ApiDeployment);
@@ -192,7 +193,7 @@ public sealed class VesselEventTransportTests
             var db = scope.ServiceProvider.GetRequiredService<VesselDbContext>();
             await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().ExecuteAsync(async () =>
             {
-                db.OrderLinks.Add(new(await db.Plays.SingleAsync(), "order-1", OrderLinkRole.Entry, "entry-1", null,
+                db.OrderLinks.Add(new(await db.Plays.SingleAsync(), await db.Orders.SingleAsync(), OrderLinkRole.Entry, "entry-1", null,
                     OrderLinkState.Linked, OrderLinkSource.Owner, DateTimeOffset.UtcNow));
                 return true;
             }, default);

@@ -45,11 +45,14 @@ public sealed class UnitOfWorkTests
             await accounts.AddAccountAsync(account, default);
             var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
             plays.Add(play);
-            executions.Add(new PlayOrderLink(play, "order", OrderLinkRole.Entry, "entry-1", null,
+            // The linked order is an imported fact; links reference it by internal ID.
+            var order = TestOrders.For(play, "order");
+            db.Orders.Add(order);
+            executions.Add(new PlayOrderLink(play, order, OrderLinkRole.Entry, "entry-1", null,
                 OrderLinkState.Linked, OrderLinkSource.Owner, DateTimeOffset.UnixEpoch));
             diary.Add(new DiaryRequest { Id = Guid.NewGuid(), OwnerId = owner, PayloadHash = "hash", Response = "{}" });
             Assert.Same(account, await executions.AccountAsync(account.Id, default));
-            Assert.Equal(4, db.ChangeTracker.Entries().Count());
+            Assert.Equal(5, db.ChangeTracker.Entries().Count());
             return true;
         }, default);
         await using var other = provider.CreateAsyncScope();

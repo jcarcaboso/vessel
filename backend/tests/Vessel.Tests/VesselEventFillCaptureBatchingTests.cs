@@ -20,7 +20,8 @@ namespace Vessel.Tests;
 /// </summary>
 public sealed class VesselEventFillCaptureBatchingTests
 {
-    private const string Migration = "20261016110000_VesselEvents";
+    /// <summary>The current schema: links reference orders by internal ID.</summary>
+    private const string? Migration = null;
 
     [VesselEventPostgresFact]
     public async Task Mixed_orders_claim_exactly_as_before_and_emit_only_watched_fills_in_order()
@@ -58,7 +59,8 @@ public sealed class VesselEventFillCaptureBatchingTests
         }, default);
 
         var events = (await EventReads.ReadAsync(scope.Db, before, 200, default)).Events;
-        Assert.Equal(["order:" + account.Id + ":entry:filled:0.75", "order:" + account.Id + ":exit:filled:0.5"],
+        var orders = await scope.Db.Orders.AsNoTracking().ToDictionaryAsync(o => o.ExternalOrderId, o => o.Id);
+        Assert.Equal(["order:" + account.Id + ":" + orders["entry"] + ":filled:0.75", "order:" + account.Id + ":" + orders["exit"] + ":filled:0.5"],
             events.Select(e => e.DedupKey).ToArray());
         Assert.All(events, e => Assert.Equal("execution.filled", e.Type));
         // Fills keep the per-order (occurred, source fill id) order; the contradictory sell is claimed, not counted.
@@ -186,7 +188,7 @@ public sealed class VesselEventFillCaptureBatchingTests
             Assert.DoesNotContain((await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events, e => e.Type == "execution.filled");
             Assert.Equal(["BTC/old"], await ClaimsAsync(database, owner));
         }
-        // The baseline read and the linked-order read; per-order capture issued two commands per order.
+        // The baseline read and the order read (no retained order, so no link read); per-order capture issued two commands per order.
         Assert.Equal([2, 2], counts);
     }
 
@@ -209,7 +211,20 @@ public sealed class VesselEventFillCaptureBatchingTests
         return (account, play, retro);
     }
 
-    private static void Link(VesselDbContext db, Play play, string order, OrderLinkRole role) =>
+    /// <summary>Links the retained order with this venue ID on the Play's contract, retaining a minimal one first if needed.</summary>
+    private static void Link(VesselDbContext db, Play play, string order, OrderLinkRole role)
+    {
+        var retained = db.Orders.Local.FirstOrDefault(o => o.AccountId == play.AccountId && o.ContractId == play.ContractId && o.ExternalOrderId == order)
+            ?? db.Orders.FirstOrDefault(o => o.AccountId == play.AccountId && o.ContractId == play.ContractId && o.ExternalOrderId == order);
+        if (retained is null)
+        {
+            retained = TestOrders.For(play, order, role == OrderLinkRole.Entry ? "buy" : "sell", "open");
+            db.Orders.Add(retained);
+        }
+        LinkOrder(db, play, retained, role);
+    }
+
+    private static void LinkOrder(VesselDbContext db, Play play, ImportedOrder order, OrderLinkRole role) =>
         db.OrderLinks.Add(new(play, order, role, role == OrderLinkRole.Entry ? "entry-1" : null, null,
             OrderLinkState.Linked, OrderLinkSource.Owner, DateTimeOffset.UtcNow));
 
@@ -218,7 +233,7 @@ public sealed class VesselEventFillCaptureBatchingTests
     {
         Id = Guid.NewGuid(), OwnerId = owner, AccountId = account, ContractId = contract, SourceFillId = id,
         Side = side, Direction = effect == "close" ? "Close Long" : "Open Long", PositionEffect = effect, Price = 100,
-        Quantity = quantity, Fee = 0, FeeToken = "USDC", ClosedPnlUsd = 0, OccurredAtUtc = occurred, OrderId = order,
+        Quantity = quantity, Fee = 0, FeeToken = "USDC", ClosedPnlUsd = 0, OccurredAtUtc = occurred, ExternalOrderId = order,
         TransactionHash = "synthetic"
     };
 

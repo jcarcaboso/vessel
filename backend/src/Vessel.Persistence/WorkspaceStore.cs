@@ -215,7 +215,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 ClosedPnlUsd = f.ClosedPnlUsd,
                 PnlBasis = f.PnlBasis,
                 OccurredAtUtc = f.OccurredAtUtc.ToUniversalTime(),
-                OrderId = f.OrderId,
+                ExternalOrderId = f.OrderId,
                 TransactionHash = f.TransactionHash
             });
         }

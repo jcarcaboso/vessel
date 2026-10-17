@@ -17,7 +17,7 @@ public sealed class ActivityOperationsPostgresTests
         Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, ContractId = "BTC", Side = n % 2 == 0 ? "buy" : "sell",
         PositionEffect = n % 2 == 0 ? "open" : "close", Direction = "fixture", Quantity = 1, Price = 100,
         FeeToken = "USDC", Fee = 0.01m, ClosedPnlUsd = n % 2 == 0 ? 0 : 1, PnlBasis = "gross", FeeBasis = "reported",
-        SourceFillId = n.ToString(), OrderId = n.ToString(), TransactionHash = "", OccurredAtUtc = At.AddMinutes(n)
+        SourceFillId = n.ToString(), ExternalOrderId = n.ToString(), TransactionHash = "", OccurredAtUtc = At.AddMinutes(n)
     };
 
     [PostgresFact]
@@ -94,8 +94,10 @@ public sealed class ActivityOperationsPostgresTests
             var play = new Play(Guid.NewGuid(), account, new Vessel.Domain.Markets.PerpetualInstrument("manual", "BTC"), InstrumentSource.Manual, "{}", At);
             playId = play.Id;
             db.Plays.Add(play);
-            db.OrderLinks.AddRange(new PlayOrderLink(play, "0", OrderLinkRole.Entry, "e1", null, OrderLinkState.Linked, OrderLinkSource.Owner, At),
-                new PlayOrderLink(play, "1", OrderLinkRole.Exit, null, null, OrderLinkState.Linked, OrderLinkSource.Owner, At));
+            var (entry, exit) = (TestOrders.For(play, "0"), TestOrders.For(play, "1", "sell"));
+            db.Orders.AddRange(entry, exit);
+            db.OrderLinks.AddRange(new PlayOrderLink(play, entry, OrderLinkRole.Entry, "e1", null, OrderLinkState.Linked, OrderLinkSource.Owner, At),
+                new PlayOrderLink(play, exit, OrderLinkRole.Exit, null, null, OrderLinkState.Linked, OrderLinkSource.Owner, At));
             await db.SaveChangesAsync();
         }
         await using (var db = database.Context(otherOwner)) { db.Accounts.Add(foreign); db.Fills.Add(Fill(foreign, 0)); await db.SaveChangesAsync(); }

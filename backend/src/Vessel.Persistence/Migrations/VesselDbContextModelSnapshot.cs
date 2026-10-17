@@ -329,11 +329,6 @@ namespace Vessel.Persistence.Migrations
                     b.Property<DateTimeOffset>("LinkRevisionAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("OrderId")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
                     b.Property<string>("Outcome")
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
@@ -767,14 +762,12 @@ namespace Vessel.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<Guid>("ImportedOrderId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("LevelId")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
-
-                    b.Property<string>("OrderId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
 
                     b.Property<Guid>("OwnerId")
                         .HasColumnType("uuid");
@@ -802,12 +795,14 @@ namespace Vessel.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("OwnerId", "PlayId");
-
-                    b.HasIndex("OwnerId", "AccountId", "OrderId")
+                    b.HasIndex("OwnerId", "ImportedOrderId")
                         .IsUnique()
                         .HasDatabaseName("UX_play_order_links_linked_order")
                         .HasFilter("\"State\" = 'Linked'");
+
+                    b.HasIndex("OwnerId", "PlayId");
+
+                    b.HasIndex("OwnerId", "AccountId", "ImportedOrderId");
 
                     b.ToTable("play_order_links", (string)null);
                 });
@@ -1187,6 +1182,11 @@ namespace Vessel.Persistence.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<string>("ExternalOrderId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<decimal>("Fee")
                         .HasColumnType("numeric");
 
@@ -1202,11 +1202,6 @@ namespace Vessel.Persistence.Migrations
 
                     b.Property<DateTimeOffset>("OccurredAtUtc")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("OrderId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
 
                     b.Property<Guid>("OwnerId")
                         .HasColumnType("uuid");
@@ -1250,6 +1245,8 @@ namespace Vessel.Persistence.Migrations
 
                     b.HasIndex("OwnerId", "OccurredAtUtc");
 
+                    b.HasIndex("OwnerId", "AccountId", "ContractId", "ExternalOrderId");
+
                     b.HasIndex("OwnerId", "AccountId", "ContractId", "SourceFillId")
                         .IsUnique();
 
@@ -1279,6 +1276,11 @@ namespace Vessel.Persistence.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<string>("ExternalOrderId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<bool>("IsPositionTpsl")
                         .HasColumnType("boolean");
 
@@ -1287,11 +1289,6 @@ namespace Vessel.Persistence.Migrations
 
                     b.Property<DateTimeOffset>("ObservedAtUtc")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("OrderId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
 
                     b.Property<string>("OrderType")
                         .IsRequired()
@@ -1340,7 +1337,7 @@ namespace Vessel.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("OwnerId", "AccountId", "OrderId")
+                    b.HasIndex("OwnerId", "AccountId", "ContractId", "ExternalOrderId")
                         .IsUnique();
 
                     b.ToTable("imported_orders", null, t =>
@@ -1482,6 +1479,13 @@ namespace Vessel.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("OwnerId", "PlayId")
                         .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Vessel.Domain.Workspace.ImportedOrder", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId", "ImportedOrderId")
+                        .HasPrincipalKey("OwnerId", "AccountId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

@@ -144,7 +144,7 @@ public sealed class SizingServiceTests
         string pnlBasis = ExecutionFacts.PnlGross, string side = ExecutionFacts.Buy, string effect = ExecutionFacts.Unknown) => new()
     {
         Id = Guid.NewGuid(), Price = price, Quantity = quantity, ClosedPnlUsd = pnl, Fee = fee, FeeToken = token, PnlBasis = pnlBasis,
-        OccurredAtUtc = Planned.AddMinutes(30 + minutes), OrderId = "o", ContractId = "BTC", SourceFillId = "f", Side = side, PositionEffect = effect,
+        OccurredAtUtc = Planned.AddMinutes(30 + minutes), ExternalOrderId = "o", ContractId = "BTC", SourceFillId = "f", Side = side, PositionEffect = effect,
         Direction = "", TransactionHash = "",
     };
 

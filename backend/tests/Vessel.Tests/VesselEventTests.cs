@@ -83,7 +83,7 @@ public sealed class VesselEventTests
     [VesselEventPostgresFact]
     public async Task Owner_cursor_is_commit_ordered_not_a_nontransactional_sequence()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var firstGate = new CommitGate();
         var secondGate = new CommitGate();
@@ -121,7 +121,7 @@ public sealed class VesselEventTests
     [VesselEventPostgresFact]
     public async Task Rollback_removes_event_dedup_cursor_and_buffered_sends_and_flush_errors_do_not_fail_commit()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var scope = new EventScope(database, owner);
         scope.Outbox.FailStage = true;
@@ -145,7 +145,7 @@ public sealed class VesselEventTests
     [VesselEventPostgresFact]
     public async Task Intermediate_status_saves_are_captured_once_and_rolled_back_mutations_do_not_replay()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic");
         await using var scope = new EventScope(database, owner);
@@ -183,7 +183,7 @@ public sealed class VesselEventTests
     [VesselEventPostgresFact]
     public async Task Durable_baseline_and_fill_identity_prevent_pre_watch_reread_and_relink_replay()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
@@ -202,10 +202,12 @@ public sealed class VesselEventTests
             return true;
         }, default);
         PlayOrderLink? link = null;
+        var order = TestOrders.For(play, "order", status: "open");
         await scope.ExecuteAsync(async () =>
         {
             var stored = await scope.Db.Plays.SingleAsync();
-            link = new(stored, "order", OrderLinkRole.Entry, "entry-1", null,
+            scope.Db.Orders.Add(order);
+            link = new(stored, order, OrderLinkRole.Entry, "entry-1", null,
                 OrderLinkState.Linked, OrderLinkSource.Owner, DateTimeOffset.UtcNow);
             scope.Db.OrderLinks.Add(link);
             return true;
@@ -222,7 +224,7 @@ public sealed class VesselEventTests
         await scope.ExecuteAsync(() => { scope.Db.OrderLinks.Remove(link!); return Task.FromResult(true); }, default);
         await scope.ExecuteAsync(async () =>
         {
-            scope.Db.OrderLinks.Add(new(await scope.Db.Plays.SingleAsync(), "order", OrderLinkRole.Entry, "entry-1", null,
+            scope.Db.OrderLinks.Add(new(await scope.Db.Plays.SingleAsync(), order, OrderLinkRole.Entry, "entry-1", null,
                 OrderLinkState.Linked, OrderLinkSource.Owner, DateTimeOffset.UtcNow));
             return true;
         }, default);
@@ -232,7 +234,7 @@ public sealed class VesselEventTests
     [VesselEventPostgresFact]
     public async Task Manual_fact_corrections_do_not_masquerade_as_venue_fill_events()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var scope = new EventScope(database, owner);
         await scope.ExecuteAsync(() =>
@@ -260,7 +262,7 @@ public sealed class VesselEventTests
     [VesselEventPostgresFact]
     public async Task Read_path_resolves_without_any_broker_runtime_and_foreign_subject_writes_roll_back()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var foreign = Guid.NewGuid();
         var foreignAccount = new Account(Guid.NewGuid(), foreign, "manual", "Foreign");
@@ -297,7 +299,7 @@ public sealed class VesselEventTests
     [VesselEventPostgresFact]
     public async Task Late_open_superseded_by_close_carries_exact_closed_data_and_paused_warning()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var scope = new EventScope(database, owner);
         await scope.ExecuteAsync(async () =>
@@ -328,7 +330,7 @@ public sealed class VesselEventTests
     {
         foreach (var interval in new[] { 20, 30 })
         {
-            await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+            await using var database = await CoreDatabase.CreateAsync();
             var owner = Guid.NewGuid();
             var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             var first = now.AddMinutes(-interval * 4);
@@ -376,7 +378,7 @@ public sealed class VesselEventTests
     [VesselEventPostgresFact]
     public async Task Partial_entry_uses_known_source_time_but_incomplete_settlement_keeps_mutation_time()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         var first = now.AddHours(-2);
@@ -398,7 +400,7 @@ public sealed class VesselEventTests
         await scope.ExecuteAsync(async () =>
         {
             var play = await scope.Db.Plays.SingleAsync();
-            (await scope.Db.Orders.SingleAsync(o => o.OrderId == "entry")).Status = "canceled";
+            (await scope.Db.Orders.SingleAsync(o => o.ExternalOrderId == "entry")).Status = "canceled";
             // A mutation with incomplete facts cannot justify inventing a source closure timestamp.
             scope.Db.StatusChanges.Add(play.MarkClosed("Synthetic mutation with missing source facts", now));
             return true;
@@ -413,7 +415,7 @@ public sealed class VesselEventTests
     [VesselEventPostgresFact]
     public async Task Manual_lifecycle_keeps_action_time_not_backdated_manual_execution_time()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         await using var scope = new EventScope(database, owner);
@@ -449,22 +451,23 @@ public sealed class VesselEventTests
     private static void AddOrder(VesselDbContext db, Play play, string id, OrderLinkRole role,
         decimal size, decimal remaining, string status, DateTimeOffset now)
     {
-        db.OrderLinks.Add(new(play, id, role, role == OrderLinkRole.Entry ? "entry-1" : null, null,
-            OrderLinkState.Linked, OrderLinkSource.Automatic, now));
-        db.Orders.Add(new()
+        var order = new ImportedOrder
         {
             Id = Guid.NewGuid(), OwnerId = play.OwnerId, AccountId = play.AccountId, ContractId = play.ContractId!,
-            OrderId = id, Side = role == OrderLinkRole.Entry ? "buy" : "sell", OrderType = "limit",
+            ExternalOrderId = id, Side = role == OrderLinkRole.Entry ? "buy" : "sell", OrderType = "limit",
             OriginalSize = size, RemainingSize = remaining, Status = status, VenueStatus = status,
             PlacedAtUtc = now.AddDays(-1), StatusAtUtc = now, ObservedAtUtc = now
-        });
+        };
+        db.Orders.Add(order);
+        db.OrderLinks.Add(new(play, order, role, role == OrderLinkRole.Entry ? "entry-1" : null, null,
+            OrderLinkState.Linked, OrderLinkSource.Automatic, now));
     }
 
     private static ImportedFill VenueFill(Play play, string order, string id, decimal quantity,
         DateTimeOffset occurred, bool exit = false)
     {
         var fill = Fill(play.OwnerId, play.AccountId, id, occurred);
-        fill.OrderId = order; fill.Quantity = quantity;
+        fill.ExternalOrderId = order; fill.Quantity = quantity;
         if (exit) { fill.Side = "sell"; fill.PositionEffect = "close"; fill.Direction = "Close Long"; }
         return fill;
     }
@@ -473,7 +476,7 @@ public sealed class VesselEventTests
     {
         Id = Guid.NewGuid(), OwnerId = owner, AccountId = account, ContractId = "BTC", SourceFillId = id,
         Side = "buy", Direction = "Open Long", PositionEffect = "open", Price = 100, Quantity = 0.5m,
-        Fee = 0, FeeToken = "USDC", ClosedPnlUsd = 0, OccurredAtUtc = now, OrderId = "order", TransactionHash = "synthetic"
+        Fee = 0, FeeToken = "USDC", ClosedPnlUsd = 0, OccurredAtUtc = now, ExternalOrderId = "order", TransactionHash = "synthetic"
     };
 
     private sealed class FakeOutbox : IVesselEventOutbox

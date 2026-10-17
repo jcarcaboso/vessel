@@ -1,4 +1,5 @@
 using Vessel.Domain.Common;
+using Vessel.Domain.Workspace;
 
 namespace Vessel.Domain.Plays;
 
@@ -17,7 +18,8 @@ public sealed class PlayOrderLink : IOwned
     public Guid OwnerId { get; private set; }
     public Guid PlayId { get; private set; }
     public Guid AccountId { get; private set; }
-    public string OrderId { get; private set; } = null!;
+    /// <summary>The internal ID of the linked <see cref="ImportedOrder"/>; immutable.</summary>
+    public Guid ImportedOrderId { get; private set; }
     public OrderLinkRole Role { get; private set; }
     /// <summary>Plan entry ID; null for an unplanned exit.</summary>
     public string? EntryId { get; private set; }
@@ -29,18 +31,21 @@ public sealed class PlayOrderLink : IOwned
     public DateTimeOffset UpdatedAtUtc { get; private set; }
     private PlayOrderLink() { }
 
-    public PlayOrderLink(Play play, string orderId, OrderLinkRole role, string? entryId, string? levelId,
+    public PlayOrderLink(Play play, ImportedOrder order, OrderLinkRole role, string? entryId, string? levelId,
         OrderLinkState state, OrderLinkSource source, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(play);
-        ArgumentException.ThrowIfNullOrWhiteSpace(orderId);
+        ArgumentNullException.ThrowIfNull(order);
+        if (order.OwnerId != play.OwnerId || order.AccountId != play.AccountId
+            || !string.Equals(order.ContractId, play.ContractId, StringComparison.Ordinal))
+            throw new DomainRuleException("The order belongs to another account or instrument than the play.");
         if ((role == OrderLinkRole.Exit) != (entryId is null) || (role is OrderLinkRole.Stop or OrderLinkRole.Target) != (levelId is not null))
             throw new ArgumentException("The level does not fit the link role.");
         Id = Guid.NewGuid();
         OwnerId = play.OwnerId;
         PlayId = play.Id;
         AccountId = play.AccountId;
-        OrderId = orderId;
+        ImportedOrderId = order.Id;
         Role = role;
         EntryId = entryId;
         LevelId = levelId;

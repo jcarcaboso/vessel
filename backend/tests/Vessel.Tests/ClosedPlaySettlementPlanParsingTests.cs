@@ -25,7 +25,7 @@ public sealed class ClosedPlaySettlementPlanParsingTests
     private static ImportedFill Fill(string side, decimal price, decimal pnl, int minutes) => new()
     {
         Id = Guid.NewGuid(), Price = price, Quantity = 2, ClosedPnlUsd = pnl, Fee = 0.1m, FeeToken = "USDC", PnlBasis = ExecutionFacts.PnlGross,
-        OccurredAtUtc = Planned.AddMinutes(minutes), OrderId = "o" + minutes, ContractId = "BTC", SourceFillId = "f" + minutes, Side = side,
+        OccurredAtUtc = Planned.AddMinutes(minutes), ExternalOrderId = "o" + minutes, ContractId = "BTC", SourceFillId = "f" + minutes, Side = side,
         PositionEffect = ExecutionFacts.Unknown, Direction = "", TransactionHash = "",
     };
 

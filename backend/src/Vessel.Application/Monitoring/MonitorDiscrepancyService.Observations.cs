@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Text.Json;
 using Vessel.Domain.Numerics;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
@@ -58,28 +59,36 @@ public sealed partial class MonitorDiscrepancyService
         var positionsFresh = Fresh(snapshotAt) && sync.PositionsComplete;
         var ordersFresh = orders is not null && Fresh(orders.ObservedAtUtc);
         // Current-book adapters stamp open rows with the read time. Historical Open statuses are not current evidence.
-        var currentOrders = orders?.Orders.GroupBy(x => x.OrderId).Where(x => x.Count() == 1).ToDictionary(x => x.Key, x => x.Single()) ?? [];
-        var duplicateOrders = orders?.Orders.GroupBy(x => x.OrderId).Any(x => x.Count() != 1) == true;
+        // A venue order ID is unique per contract, so current rows are keyed by contract and external ID.
+        var currentOrders = orders?.Orders.GroupBy(x => (x.ContractId, x.OrderId)).Where(x => x.Count() == 1).ToDictionary(x => x.Key, x => x.Single()) ?? [];
+        var duplicateOrders = orders?.Orders.GroupBy(x => (x.ContractId, x.OrderId)).Any(x => x.Count() != 1) == true;
+        // Links reference retained orders by internal ID; fills belong to an order by its OrderKey.
+        var ordersById = facts.Orders.Where(x => x.OwnerId == owner.OwnerId && x.AccountId == observation.Account.Id)
+            .GroupBy(x => x.Id).ToDictionary(x => x.Key, x => x.First());
+        ImportedOrder? Retained(PlayOrderLink link) => ordersById.GetValueOrDefault(link.ImportedOrderId);
+        string External(PlayOrderLink link) => Retained(link)?.ExternalOrderId ?? "";
         var allLinks = facts.Links.Where(x => x.OwnerId == owner.OwnerId && x.AccountId == observation.Account.Id).ToArray();
-        var assignmentsComplete = facts.AssignmentLinksComplete && facts.AssignmentLinks is not null;
+        var assignmentLinks = (facts.AssignmentLinks ?? []).Where(x => x.OwnerId == owner.OwnerId && x.AccountId == observation.Account.Id &&
+            x.State is OrderLinkState.Linked or OrderLinkState.Suggested).ToArray();
+        // An assignment whose order was not loaded cannot say which fills it covers.
+        var assignmentsComplete = facts.AssignmentLinksComplete && facts.AssignmentLinks is not null &&
+            assignmentLinks.All(x => Retained(x) is not null);
         scan.Incomplete |= !assignmentsComplete;
-        var assigned = (facts.AssignmentLinks ?? []).Where(x => x.OwnerId == owner.OwnerId && x.AccountId == observation.Account.Id &&
-            x.State is OrderLinkState.Linked or OrderLinkState.Suggested).Select(x => x.OrderId).ToHashSet(StringComparer.Ordinal);
+        var assigned = assignmentLinks.Select(Retained).OfType<ImportedOrder>().Select(OrderKey.Of).ToHashSet();
         var retainedFills = facts.Fills.Where(x => x.OwnerId == owner.OwnerId && x.AccountId == observation.Account.Id).ToArray();
-        var fillsByOrder = retainedFills.ToLookup(x => x.OrderId, StringComparer.Ordinal);
+        var fillsByOrder = retainedFills.ToLookup(OrderKey.Of);
         var fillsByContract = retainedFills.ToLookup(x => x.ContractId, StringComparer.Ordinal);
-        var retainedOrders = facts.Orders.Where(x => x.OwnerId == owner.OwnerId && x.AccountId == observation.Account.Id)
-            .ToLookup(x => x.OrderId, StringComparer.Ordinal);
         var linked = allLinks.Where(x => x.State == OrderLinkState.Linked).ToArray();
         var linksByPlay = linked.ToLookup(x => x.PlayId);
-        var shared = linked.GroupBy(x => x.OrderId).Where(g => g.Count() != 1).Select(x => x.Key).ToHashSet();
+        var shared = linked.GroupBy(x => x.ImportedOrderId).Where(g => g.Count() != 1).Select(x => x.Key).ToHashSet();
         var instrumentsByContract = sync.Instruments.ToLookup(x => x.ContractId, StringComparer.Ordinal);
         var truncatedFills = facts.TruncatedFillContracts ?? new HashSet<string>();
         // Bounded history falling out of the read does not erase an already retained cancellation.
         // Only rows actually in this current read can establish a resting order.
-        VenueOrder? Order(string id) => currentOrders.GetValueOrDefault(id) ?? RetainedOrder(retainedOrders[id].SingleOrDefault());
+        VenueOrder? Order(PlayOrderLink link) => Retained(link) is not { } retained ? null :
+            currentOrders.GetValueOrDefault((retained.ContractId, retained.ExternalOrderId)) ?? RetainedOrder(retained);
         bool Resting(VenueOrder? order) => order is { Status: VenueOrderStatus.Open } &&
-            currentOrders.ContainsKey(order.OrderId) && order.StatusAtUtc == at;
+            currentOrders.ContainsKey((order.ContractId, order.OrderId)) && order.StatusAtUtc == at;
 
         var plays = new List<PlayFacts>();
         foreach (var play in facts.Plays.Where(x => x.OwnerId == owner.OwnerId && x.AccountId == observation.Account.Id &&
@@ -95,16 +104,17 @@ public sealed partial class MonitorDiscrepancyService
             }
             var instrument = instruments[0];
             var plan = PlayDocuments.Read(play.Plan);
-            var links = linksByPlay[play.Id].OrderBy(x => x.OrderId, StringComparer.Ordinal).ToArray();
-            var linkMap = links.GroupBy(x => x.OrderId).ToDictionary(x => x.Key, x => x.First());
-            var fills = linkMap.Values.SelectMany(l => fillsByOrder[l.OrderId].Select(f => new LinkedFill(l.Role, f))).ToArray();
-            var fillsOf = fills.ToLookup(x => x.Fill.OrderId, x => x.Fill, StringComparer.Ordinal);
-            var knownOrders = linkMap.Keys.SelectMany(id => retainedOrders[id]).ToArray();
-            var missing = knownOrders.Where(x => ExecutionIntegrity.MissingExecutions(x, fillsOf[x.OrderId])).Select(x => x.OrderId);
-            var valid = !links.Any(x => shared.Contains(x.OrderId)) &&
+            var links = linksByPlay[play.Id].OrderBy(External, StringComparer.Ordinal).ToArray();
+            var linkMap = links.GroupBy(x => x.ImportedOrderId).ToDictionary(x => x.Key, x => x.First());
+            var fills = linkMap.Values.SelectMany(l => Retained(l) is { } order ? fillsByOrder[OrderKey.Of(order)].Select(f => new LinkedFill(l.Role, f)) : [])
+                .ToArray();
+            var fillsOf = fills.ToLookup(x => OrderKey.Of(x.Fill), x => x.Fill);
+            var knownOrders = linkMap.Keys.Select(ordersById.GetValueOrDefault).OfType<ImportedOrder>().ToArray();
+            var missing = knownOrders.Where(x => ExecutionIntegrity.MissingExecutions(x, fillsOf[OrderKey.Of(x)])).Select(x => x.ExternalOrderId);
+            var valid = !links.Any(x => shared.Contains(x.ImportedOrderId)) &&
                 fills.All(x => Same(instrument, x.Fill.ContractId, x.Fill.VenueContractId) && x.Fill.Quantity > 0 && ExecutionFacts.IsSide(x.Fill.Side)) &&
                 knownOrders.All(x => Same(instrument, x.ContractId, x.VenueContractId) &&
-                    ExecutionIntegrity.RoleConflict(linkMap[x.OrderId].Role, plan, x, fillsOf[x.OrderId]) is null) &&
+                    ExecutionIntegrity.RoleConflict(linkMap[x.Id].Role, plan, x, fillsOf[OrderKey.Of(x)]) is null) &&
                 ExecutionIntegrity.Problems(ExecutionIntegrity.EntrySide(plan), fills, missing).Count == 0;
             var counted = fills.Where(x => !ExecutionIntegrity.Contradicts(x.Role, ExecutionIntegrity.EntrySide(plan), x.Fill)).ToArray();
             var entered = counted.Where(x => x.Role == OrderLinkRole.Entry).ToArray();
@@ -146,8 +156,8 @@ public sealed partial class MonitorDiscrepancyService
             object Details(int limit) => new { playIds = ids.Take(limit).ToArray(), playCount = ids.Length, nativeContractId = Native(instrument),
                 expectedQuantity = expected.ToString(), venueQuantity = actual.ToString(),
                 plays = involved.Take(limit).Select(x => new { playId = x.Play.Id, direction = x.Plan.Direction, quantity = x.Quantity.ToString(),
-                    orders = x.Fills.GroupBy(f => (f.Fill.OrderId, f.Role)).OrderBy(g => g.Key.OrderId, StringComparer.Ordinal)
-                        .Select(g => new { orderId = g.Key.OrderId, role = g.Key.Role.ToString(),
+                    orders = x.Fills.GroupBy(f => (f.Fill.ExternalOrderId, f.Role)).OrderBy(g => g.Key.ExternalOrderId, StringComparer.Ordinal)
+                        .Select(g => new { orderId = g.Key.ExternalOrderId, role = g.Key.Role.ToString(),
                             quantity = ExecutionIntegrity.Quantity(g.Select(f => f.Fill)).ToString() }).ToArray() }).ToArray() };
             // Displayed Plays are bounded; the fingerprint covers all of them. InvolvedPlayIds keeps the complete list.
             var details = Details(MaxListedPlays);
@@ -155,7 +165,7 @@ public sealed partial class MonitorDiscrepancyService
             foreach (var type in PositionKinds.Where(x => x != "fill.unlinked"))
                 scan.Add(new(type, Subject(instrument), null, instrument.ContractId, Native(instrument), Severity(type), valid ? type == kind : null, snapshotAt, ids, details, identity));
             var earliest = involved.Where(x => x.FirstEntry is not null).Select(x => x.FirstEntry!.Value).DefaultIfEmpty(DateTimeOffset.MaxValue).Min();
-            var after = fillsByContract[instrument.ContractId].Where(x => x.OccurredAtUtc > earliest && !assigned.Contains(x.OrderId)).ToArray();
+            var after = fillsByContract[instrument.ContractId].Where(x => x.OccurredAtUtc > earliest && !assigned.Contains(OrderKey.Of(x))).ToArray();
             var unlinked = after.Where(x => Same(instrument, x.ContractId, x.VenueContractId)).OrderBy(x => x.SourceFillId, StringComparer.Ordinal).ToArray();
             // A retained positive fact remains unlinked even after leaving the bounded recent venue window.
             // Linking/suggestion is local evidence of resolution; absence from recent fills never is.
@@ -166,7 +176,7 @@ public sealed partial class MonitorDiscrepancyService
             scan.Add(new("fill.unlinked", Subject(instrument), null, instrument.ContractId, Native(instrument), "warning", fillKnown ? unlinked.Length > 0 : null,
                 snapshotAt, ids, new { playIds = ids.Take(MaxListedPlays).ToArray(), playCount = ids.Length, nativeContractId = Native(instrument), count = unlinked.Length,
                     totalQuantity = ExecutionIntegrity.Quantity(unlinked).ToString(), fills = unlinked.Take(MaxListedFills).Select(x => new {
-                        fillId = x.SourceFillId, orderId = x.OrderId, side = x.Side, quantity = ExactAmount.From(x.Quantity).ToString() }).ToArray() },
+                        fillId = x.SourceFillId, orderId = x.ExternalOrderId, side = x.Side, quantity = ExactAmount.From(x.Quantity).ToString() }).ToArray() },
                 new { fillIds = unlinked.Select(x => x.SourceFillId).ToArray() }));
         }
         foreach (var play in plays) ObservePlay(play, comparisons.GetValueOrDefault(play.Instrument.ContractId));
@@ -177,14 +187,14 @@ public sealed partial class MonitorDiscrepancyService
         // Only an actual linked stop on this account and native contract; a whole-position target, or a take-profit
         // linked with the Stop role, never protects.
         IEnumerable<string> WholeStopSides(PlayFacts p, OrderMechanism mechanism) => p.Links.Where(l => l.Role == OrderLinkRole.Stop)
-            .Select(l => Order(l.OrderId)).Where(order => order is { IsPositionTpsl: true } && Resting(order) &&
+            .Select(Order).Where(order => order is { IsPositionTpsl: true } && Resting(order) &&
                 Same(p.Instrument, order.ContractId, order.VenueContractId) && OrderMechanics.Classify(order) == mechanism)
             .Select(order => order!.Side).Distinct(StringComparer.Ordinal);
 
         void ObservePlay(PlayFacts p, PositionFacts? position)
         {
             var play = p.Play;
-            var scoped = p.Links.Select(l => (Link: l, Order: Order(l.OrderId))).ToArray();
+            var scoped = p.Links.Select(l => (Link: l, Order: Order(l))).ToArray();
             var identityKnown = scoped.All(x => x.Order is null || Same(p.Instrument, x.Order.ContractId, x.Order.VenueContractId));
             var knownOrders = ordersFresh && !duplicateOrders && identityKnown &&
                 scoped.All(x => x.Order is null || x.Order.StatusAtUtc <= at);
@@ -233,13 +243,13 @@ public sealed partial class MonitorDiscrepancyService
             var details = new { playIds = new[] { play.Id }, nativeContractId = Native(p.Instrument), quantity = p.Valid ? p.Quantity.ToString() : null,
                 stopQuantity = Covered(stops, false, false).ToString(), targetQuantity = Covered(targets, false, false).ToString(),
                 stopCoverage = ownWholeStop || siblingWholeStop ? stopCoverageKnown ? "whole-position" : "unknown" : "orders",
-                orders = scoped.Where(x => x.Link.Role is OrderLinkRole.Stop or OrderLinkRole.Target).Select(x => new { orderId = x.Link.OrderId, role = x.Link.Role.ToString(), level = x.Link.LevelKey,
+                orders = scoped.Where(x => x.Link.Role is OrderLinkRole.Stop or OrderLinkRole.Target).Select(x => new { orderId = External(x.Link), role = x.Link.Role.ToString(), level = x.Link.LevelKey,
                     status = x.Order?.Status.ToString(), resting = Resting(x.Order),
                     remainingQuantity = x.Order is null ? null : ExactAmount.From(x.Order.RemainingSize).ToString(),
                     wholePosition = x.Order?.IsPositionTpsl, price = x.Order is null ? null : ExactAmount.From(x.Order.ActingPrice).ToString() }).ToArray() };
             // The fingerprint covers the quantities and orders involved, not prices or display fields.
             object Identity(OrderLinkRole[] roles) => new { quantity = details.quantity, orders = scoped.Where(x => roles.Contains(x.Link.Role))
-                .Select(x => new { orderId = x.Link.OrderId, role = x.Link.Role.ToString(), status = x.Order?.Status.ToString(), resting = Resting(x.Order),
+                .Select(x => new { orderId = External(x.Link), role = x.Link.Role.ToString(), status = x.Order?.Status.ToString(), resting = Resting(x.Order),
                     remainingQuantity = x.Order is null ? null : ExactAmount.From(x.Order.RemainingSize).ToString(), wholePosition = x.Order?.IsPositionTpsl }).ToArray() };
             var protection = Identity([OrderLinkRole.Stop, OrderLinkRole.Target]);
             void Add(string kind, bool? present, bool undecidable = false, object? data = null, object? identity = null) => scan.Add(new(kind, "play:" + play.Id, play.Id,
@@ -249,11 +259,12 @@ public sealed partial class MonitorDiscrepancyService
             if (open && graceAt > at) scan.Next = Earlier(scan.Next, graceAt.Value);
 
             var cancelled = scoped.Where(x => x.Link.Role == OrderLinkRole.Stop && x.Order?.Status == VenueOrderStatus.Canceled).ToArray();
-            var filled = p.Fills.Select(x => x.Fill.OrderId).ToHashSet(StringComparer.Ordinal);
-            var cancelKnown = cancelled.All(x => filled.Contains(x.Link.OrderId) ||
+            var filled = p.Fills.Select(x => OrderKey.Of(x.Fill)).ToHashSet();
+            bool Filled(PlayOrderLink link) => Retained(link) is { } order && filled.Contains(OrderKey.Of(order));
+            var cancelKnown = cancelled.All(x => Filled(x.Link) ||
                 x.Order!.OriginalSize > 0 && x.Order.RemainingSize == x.Order.OriginalSize);
             bool? cancelledPresent = !open ? completeOrders ? false : null : !stopPresenceKnown ? null :
-                cancelled.All(x => filled.Contains(x.Link.OrderId)) ? false : !cancelKnown || !stopCoverageKnown ? null :
+                cancelled.All(x => Filled(x.Link)) ? false : !cancelKnown || !stopCoverageKnown ? null :
                 Compare(stopQuantity, p.Quantity, p.Instrument) < 0;
             // A cancelled stop explains the same gap; it supersedes missing and short protection.
             var superseded = cancelledPresent == true;
@@ -274,7 +285,7 @@ public sealed partial class MonitorDiscrepancyService
             Add("protection.orphaned", knownOrders && terminal && play.EndedAtUtc <= at && resting.Any(x => x.Link.Role is OrderLinkRole.Stop or OrderLinkRole.Target) ? true :
                 completeOrders && (!terminal || play.EndedAtUtc <= at) ? false : null);
             var entryDetails = new { playIds = new[] { play.Id }, nativeContractId = Native(p.Instrument),
-                orders = scoped.Where(x => x.Link.Role == OrderLinkRole.Entry).Select(x => new { orderId = x.Link.OrderId, level = x.Link.LevelKey,
+                orders = scoped.Where(x => x.Link.Role == OrderLinkRole.Entry).Select(x => new { orderId = External(x.Link), level = x.Link.LevelKey,
                     status = x.Order?.Status.ToString(), resting = Resting(x.Order),
                     remainingQuantity = x.Order is null ? null : ExactAmount.From(x.Order.RemainingSize).ToString(),
                     price = x.Order is null ? null : ExactAmount.From(x.Order.ActingPrice).ToString() }).ToArray() };
@@ -286,7 +297,7 @@ public sealed partial class MonitorDiscrepancyService
             var levels = ExecutionMatcher.Levels(p.Plan).ToDictionary(x => x.Key);
             var priced = resting.Where(x => x.Link.Role != OrderLinkRole.Exit).Select(x => (x.Link, Order: x.Order!,
                 Planned: levels.TryGetValue(x.Link.LevelKey, out var level) ? level.Price : null)).ToArray();
-            var levelRows = priced.Select(x => new { orderId = x.Link.OrderId, actualPrice = ExactAmount.From(x.Order.ActingPrice).ToString(),
+            var levelRows = priced.Select(x => new { orderId = External(x.Link), actualPrice = ExactAmount.From(x.Order.ActingPrice).ToString(),
                 plannedPrice = x.Planned is { } price ? ExactAmount.From(price).ToString() : null,
                 remainingQuantity = ExactAmount.From(x.Order.RemainingSize).ToString() }).ToArray();
             var drift = priced.Any(x => x.Planned is { } price && !ExecutionMatcher.Near(x.Order.ActingPrice, price, p.Instrument.PriceStep));
@@ -298,7 +309,7 @@ public sealed partial class MonitorDiscrepancyService
     }
 
     private static string Native(VenueInstrument i) => i.VenueContractId ?? i.ContractId;
-    private static VenueOrder? RetainedOrder(ImportedOrder? order) => order is null ? null : new(order.OrderId, order.ContractId,
+    private static VenueOrder? RetainedOrder(ImportedOrder? order) => order is null ? null : new(order.ExternalOrderId, order.ContractId,
         order.Side, order.OrderType, order.LimitPrice, order.TriggerPrice, order.ReduceOnly, order.IsPositionTpsl, order.OriginalSize,
         order.RemainingSize, order.PlacedAtUtc, Enum.TryParse<VenueOrderStatus>(order.Status, true, out var status) ? status : VenueOrderStatus.Other,
         order.VenueStatus, order.StatusAtUtc, order.VenueContractId);

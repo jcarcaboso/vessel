@@ -24,7 +24,7 @@ public sealed class VesselEventParticipationTests
     [VesselEventPostgresFact]
     public async Task Completed_beforecommit_hook_cannot_reenter_during_next_hook()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -57,7 +57,7 @@ public sealed class VesselEventParticipationTests
     [VesselEventPostgresFact]
     public async Task Completed_nested_callback_cannot_append_event_during_sibling()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
         var store = new VesselEventStore(db, new(), new Outbox(), Options.Create(new VesselEventSettings()), NullLogger<VesselEventStore>.Instance);
@@ -87,7 +87,7 @@ public sealed class VesselEventParticipationTests
     [VesselEventPostgresFact]
     public async Task Original_callback_cannot_commit_unobserved_play_transition_during_event_staging()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var capture = new VesselEventMutationCapture();
         await using var db = new VesselDbContext(new DbContextOptionsBuilder<VesselDbContext>().UseNpgsql(database.ConnectionString).AddInterceptors(capture).Options, new CoreOwner(owner));
@@ -129,7 +129,7 @@ public sealed class VesselEventParticipationTests
     [VesselEventPostgresFact]
     public async Task Raw_transaction_or_another_context_cannot_authorize_event_writes_or_run_metadata()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
         await using var other = database.Context(owner);
@@ -169,7 +169,7 @@ public sealed class VesselEventParticipationTests
     [VesselEventPostgresFact]
     public async Task Raw_save_cannot_seed_captured_lifecycle_changes_for_a_later_unit_of_work()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var capture = new VesselEventMutationCapture();
         await using var db = Context(database, owner, capture);
@@ -198,7 +198,7 @@ public sealed class VesselEventParticipationTests
     [VesselEventPostgresFact]
     public async Task Evidence_upload_with_event_capture_keeps_object_io_outside_database_transaction()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic");
         var play = TestPlays.Create(account, new("manual", "BTC"));
@@ -234,7 +234,7 @@ public sealed class VesselEventParticipationTests
     [InlineData("rolled-back")]
     public async Task Closed_callback_cannot_change_run_metadata_in_active_or_later_transaction(string origin)
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var capture = new VesselEventMutationCapture();
         await using var db = Context(database, owner, capture);
@@ -313,7 +313,7 @@ public sealed class VesselEventParticipationTests
     [InlineData("command")]
     public async Task Event_admission_during_final_save_poisons_transaction_even_when_rejection_is_swallowed(string action)
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var gate = new SaveGate();
         await using var db = Context(database, owner, gate);
@@ -342,7 +342,7 @@ public sealed class VesselEventParticipationTests
     [VesselEventPostgresFact]
     public async Task Rollback_closes_inherited_event_and_run_metadata_admission_before_database_rollback_yields()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var gate = new RollbackGate();
         await using var db = Context(database, owner, gate);
@@ -373,7 +373,7 @@ public sealed class VesselEventParticipationTests
     [InlineData("command")]
     public async Task Unawaited_async_event_write_closes_its_lease_and_cannot_escape_rollback(string action)
     {
-        await using var database = await CoreDatabase.CreateAsync("20261016110000_VesselEvents");
+        await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var account = new Account(Guid.NewGuid(), owner, "manual", "Existing");
         await using (var seed = database.Context(owner))

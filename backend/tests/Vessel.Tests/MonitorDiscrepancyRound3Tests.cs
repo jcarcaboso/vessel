@@ -36,7 +36,7 @@ public sealed class MonitorDiscrepancyRound3Tests
         f.Store.Plays.Clear(); f.Store.Links.Clear(); f.Store.Orders.Clear(); f.Store.Fills.Clear(); f.VenueOrders.Clear();
         var first = f.AddPlay("short", 1, "entry");
         f.AddPlay("short", 1);
-        f.Store.Links.Add(new(first, "stop", OrderLinkRole.Stop, "e", "s", OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-15)));
+        f.Store.Links.Add(f.Link(first, "stop", OrderLinkRole.Stop, "e", "s", OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-15)));
         f.VenueOrders.Add(new("stop", "BTC", "buy", "Stop Market", 110, 110, true, true, 0, 0, f.Clock.Now.AddMinutes(-15), VenueOrderStatus.Open, "open", f.Clock.Now));
         await f.Confirm();
         Assert.DoesNotContain(f.Store.Rows, x => x.Kind == "protection.missing");
@@ -73,7 +73,7 @@ public sealed class MonitorDiscrepancyRound3Tests
         Assert.Equal(OrderMechanism.UnknownTrigger, OrderMechanics.Classify("Trigger", true));
         Assert.Equal(OrderMechanism.Plain, OrderMechanics.Classify("Limit", false));
         var plan = new PlayPlanDocument("long", "quantity", "1", "1", null, [], new("", "", "", ""));
-        ImportedOrder Order(string type) => new() { OrderId = "o", ContractId = "BTC", Side = "sell", OrderType = type, TriggerPrice = 120,
+        ImportedOrder Order(string type) => new() { ExternalOrderId = "o", ContractId = "BTC", Side = "sell", OrderType = type, TriggerPrice = 120,
             LimitPrice = 120, ReduceOnly = true, OriginalSize = 1, RemainingSize = 1, Status = "open", VenueStatus = "open" };
         Assert.NotNull(ExecutionIntegrity.RoleConflict(OrderLinkRole.Stop, plan, Order("take-profit"), []));
         Assert.NotNull(ExecutionIntegrity.RoleConflict(OrderLinkRole.Stop, plan, Order("Take Profit Market"), []));
@@ -220,7 +220,7 @@ public sealed class MonitorDiscrepancyRound3PostgresTests
             PlayDocuments.Serialize(plan), f.Clock.Now.AddHours(-1));
         play.MarkPlanned(f.Clock.Now.AddMinutes(-30));
         f.Store.Plays.Add(play);
-        f.Store.Links.Add(new(play, "late-entry", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-25)));
+        f.Store.Links.Add(f.Link(play, "late-entry", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-25)));
         play.Cancel(CancelReason.ChangedMind, null, f.Clock.Now.AddMinutes(-10));
         f.VenueOrders.Add(new("late-entry", "BTC", "buy", "Limit", 100, null, false, false, 1, 0, f.Clock.Now.AddMinutes(-25),
             VenueOrderStatus.Filled, "filled", f.Clock.Now.AddMinutes(-2)));

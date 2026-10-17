@@ -393,7 +393,7 @@ public sealed class ManualLedgerPrecisionTests
         public Task<List<Play>> ActivePlaysAsync(Guid id, CancellationToken ct) => Task.FromResult(Plays.Plays.ToList());
         public Task<List<ImportedOrder>> OrdersAsync(Guid id, CancellationToken ct) => Task.FromResult(new List<ImportedOrder>());
         public Task<List<PlayOrderLink>> LinksAsync(Guid id, CancellationToken ct) => Task.FromResult(Plays.Links.ToList());
-        public Task<List<ImportedFill>> FillsAsync(Guid id, IReadOnlyCollection<string> orders, CancellationToken ct) => Task.FromResult(new List<ImportedFill>());
+        public Task<List<ImportedFill>> FillsAsync(Guid id, IReadOnlyCollection<OrderKey> orders, CancellationToken ct) => Task.FromResult(new List<ImportedFill>());
         public Task<ActivityFacts> ActivityAsync(Guid id, CancellationToken ct) => throw new NotSupportedException();
         public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset at, CancellationToken ct) => throw new NotSupportedException();
         public Task SaveAsync(CancellationToken ct) => Plays.SaveAsync(ct);

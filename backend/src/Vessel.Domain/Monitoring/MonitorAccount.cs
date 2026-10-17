@@ -189,7 +189,6 @@ public sealed class MonitorExitWatch : IOwned
     public Guid OwnerId { get; set; }
     public Guid AccountId { get; set; }
     public Guid PlayId { get; set; }
-    public string OrderId { get; set; } = null!;
     public DateTimeOffset LinkRevisionAtUtc { get; set; }
     /// <summary>When this link revision came under watch: the later of the Play's end and the link change.</summary>
     public DateTimeOffset StartedAtUtc { get; set; }
