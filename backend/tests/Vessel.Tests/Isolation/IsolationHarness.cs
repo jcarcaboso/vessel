@@ -10,6 +10,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Vessel.Application.Credentials;
 using Vessel.Application.MarketData;
+using Vessel.Application.Plays;
+using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
@@ -118,8 +120,7 @@ public sealed class IsolationApi : IAsyncLifetime
         factory = new CoreApiFactory(Guid.NewGuid(), connection: database.ConnectionString, settings: new()
         {
             ["Vessel:Evidence:Storage:Local:RootPath"] = evidenceRoot,
-            ["Vessel:Events:StreamPollSeconds"] = "1",
-            ["Vessel:Monitor:ManualCooldown"] = "00:00:00"
+            ["Vessel:Events:StreamPollSeconds"] = "1"
         }, configure: services =>
         {
             services.AddAuthentication().AddScheme<AuthenticationSchemeOptions, TestOwnerAuthHandler>(TestOwnerAuthHandler.SchemeName, _ => { });
@@ -147,9 +148,11 @@ public sealed class IsolationApi : IAsyncLifetime
     /// <summary>Two fresh journal owners on this server.</summary>
     internal (Owner A, Owner B) Owners() => (Owner(), Owner());
 
-    internal Owner Owner()
+    internal Owner Owner() => Owner(Guid.NewGuid());
+
+    /// <summary>A client for a known owner, such as one whose rows a fixture seeded directly.</summary>
+    internal Owner Owner(Guid id)
     {
-        var id = Guid.NewGuid();
         var client = Factory.CreateClient();
         // A stream answered where a 404 was expected must fail the case, not hang the run.
         client.Timeout = TimeSpan.FromSeconds(30);
@@ -199,6 +202,21 @@ internal sealed record Owner(Guid Id, HttpClient Http)
     {
         var account = await Post("/api/accounts", new CreateAccountRequest(portfolio, name, "hyperliquid", IsolationVenues.Address), HttpStatusCode.Created);
         return await Post($"/api/accounts/{account.GetProperty("id").GetGuid()}/sync");
+    }
+
+    /// <summary>
+    /// A planned Play on a synced account, opened and closed by explicitly linking the shared entry and exit orders.
+    /// Its status changes append the owner's <c>play.opened</c> and <c>play.closed</c> events.
+    /// </summary>
+    public async Task<Guid> ClosedPlay(Guid account, string title)
+    {
+        var draft = await Post("/api/plays", new CreatePlayRequest(account, "BTC", "venue", title, TestPlays.Plan()), HttpStatusCode.Created);
+        var id = draft.GetProperty("summary").GetProperty("id").GetGuid();
+        await Post($"/api/plays/{id}/status", new ChangePlayStatusRequest(draft.GetProperty("summary").GetProperty("version").GetInt64(), "planned"));
+        await Post($"/api/plays/{id}/execution/links", new LinkOrderRequest("entry", "entry", "entry-1"));
+        await Post($"/api/plays/{id}/execution/links", new LinkOrderRequest("exit", "exit"));
+        Assert.Equal("closed", (await GetJson($"/api/plays/{id}")).GetProperty("summary").GetProperty("status").GetString());
+        return id;
     }
 
     /// <summary>A Lighter-style account on the shared synthetic account index.</summary>

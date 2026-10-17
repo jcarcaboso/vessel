@@ -2,7 +2,6 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Plays;
-using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
 
 namespace Vessel.Tests.Isolation;
@@ -27,13 +26,7 @@ public sealed class ReadModelIsolationTests(IsolationApi api) : IClassFixture<Is
         var operation = Assert.Single((await owner.GetJson("/api/activity")).GetProperty("operations").EnumerateArray()).GetProperty("id").GetString()!;
         if (requestId is null)
         {
-            var draft = await owner.Post("/api/plays", new CreatePlayRequest(account, "BTC", "venue", Isolated.Marker("planned"), TestPlays.Plan()),
-                HttpStatusCode.Created);
-            var id = draft.GetProperty("summary").GetProperty("id").GetGuid();
-            await owner.Post($"/api/plays/{id}/status", new ChangePlayStatusRequest(draft.GetProperty("summary").GetProperty("version").GetInt64(), "planned"));
-            await owner.Post($"/api/plays/{id}/execution/links", new LinkOrderRequest("entry", "entry", "entry-1"));
-            await owner.Post($"/api/plays/{id}/execution/links", new LinkOrderRequest("exit", "exit"));
-            Assert.Equal("closed", (await owner.GetJson($"/api/plays/{id}")).GetProperty("summary").GetProperty("status").GetString());
+            var id = await owner.ClosedPlay(account, Isolated.Marker("planned"));
             return new(owner, portfolio, account, operation, id);
         }
         var preview = await owner.GetJson($"/api/activity/retrospective?accountId={account}&operationId={Uri.EscapeDataString(operation)}");
