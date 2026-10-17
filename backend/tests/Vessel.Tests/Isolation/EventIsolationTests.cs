@@ -58,7 +58,7 @@ public sealed class EventIsolationTests(IsolationApi api) : IClassFixture<Isolat
 
     [PostgresFact]
     [Covers("GET", "/api/events/stream")]
-    public async Task Event_streams_deliver_only_the_callers_events_and_cap_streams_per_owner()
+    public async Task Event_streams_deliver_only_the_callers_events()
     {
         var (a, b) = api.Owners();
         var (aAccount, aPlay) = await Journal(a);
@@ -74,8 +74,14 @@ public sealed class EventIsolationTests(IsolationApi api) : IClassFixture<Isolat
         }
         // B resuming from A's cursor still reads only B's events.
         Isolated.NoLeak(await Frames(b, $"/api/events/stream?after={Uri.EscapeDataString(aCursor)}", count: 0), aAccount, aPlay, a.Id);
+    }
 
-        // A's four open streams use A's cap only: A's fifth is refused, B still streams.
+    [PostgresFact]
+    [Covers("GET", "/api/events/stream")]
+    public async Task Event_stream_cap_is_per_owner()
+    {
+        // Fresh owners hold no stream slots, so no earlier case's disconnecting stream can be counted here.
+        var (a, b) = api.Owners();
         using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var open = new List<HttpResponseMessage>();
         try
@@ -86,6 +92,7 @@ public sealed class EventIsolationTests(IsolationApi api) : IClassFixture<Isolat
                 Assert.Equal(HttpStatusCode.OK, response.StatusCode);
                 open.Add(response);
             }
+            // A's four open streams use A's cap only: A's fifth is refused, B still streams.
             using var refused = await a.Http.GetAsync("/api/events/stream", cancel.Token);
             Assert.Equal(HttpStatusCode.TooManyRequests, refused.StatusCode);
             using var other = await b.Http.SendAsync(new(HttpMethod.Get, "/api/events/stream"), HttpCompletionOption.ResponseHeadersRead, cancel.Token);

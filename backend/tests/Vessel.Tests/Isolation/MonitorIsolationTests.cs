@@ -41,27 +41,30 @@ public sealed class MonitorIsolationTests(IsolationApi api) : IClassFixture<Isol
         var monitor = await a.GetJson($"/api/accounts/{account}/monitor");
         Assert.Equal(discrepancy, Assert.Single(monitor.GetProperty("discrepancies").EnumerateArray()).GetProperty("id").GetGuid());
         var paths = new[] { $"/api/accounts/{account}/monitor", $"/api/plays/{play}/execution", "/api/events" };
-        var before = await Isolated.State(a, paths);
+        var state = await Snapshot.Of(a, paths);
+        // After each attempt A's views and its stored discrepancy are unchanged.
+        async Task Attempt(Func<Task> attempt)
+        {
+            await state.After(attempt);
+            await using var read = api.Database.Context(a.Id);
+            Assert.NotEqual("dismissed", (await read.Set<PlayDiscrepancy>().SingleAsync(d => d.Id == discrepancy)).State);
+        }
 
         // B has its own discrepancy to dismiss, so every ID it holds is valid for itself.
         var (g, own) = await Confirmed();
         var b = api.Owner(g.Account.OwnerId);
         var note = new { note = "dismissed by b" };
-        await Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Post, id => $"/api/accounts/{id}/discrepancies/{discrepancy}/dismiss", _ => note));
-        await Isolated.NotFound(b, play, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{id}/discrepancies/{discrepancy}/dismiss", _ => note));
+        await Attempt(() => Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Post, id => $"/api/accounts/{id}/discrepancies/{discrepancy}/dismiss", _ => note)));
+        await Attempt(() => Isolated.NotFound(b, play, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{id}/discrepancies/{discrepancy}/dismiss", _ => note)));
         // A's discrepancy ID under B's own account and Play.
-        await Isolated.NotFound(b, discrepancy, Isolated.Request(HttpMethod.Post, id => $"/api/accounts/{g.Account.Id}/discrepancies/{id}/dismiss", _ => note));
-        await Isolated.NotFound(b, discrepancy, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{g.Play.Id}/discrepancies/{id}/dismiss", _ => note));
+        await Attempt(() => Isolated.NotFound(b, discrepancy, Isolated.Request(HttpMethod.Post, id => $"/api/accounts/{g.Account.Id}/discrepancies/{id}/dismiss", _ => note)));
+        await Attempt(() => Isolated.NotFound(b, discrepancy, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{g.Play.Id}/discrepancies/{id}/dismiss", _ => note)));
         // B's discrepancy ID under A's account and Play.
-        await Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Post, id => $"/api/accounts/{id}/discrepancies/{own}/dismiss", _ => note));
-        await Isolated.NotFound(b, play, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{id}/discrepancies/{own}/dismiss", _ => note));
-        Assert.Equal(before, await Isolated.State(a, paths));
-        await using (var read = api.Database.Context(a.Id))
-            Assert.NotEqual("dismissed", (await read.Set<PlayDiscrepancy>().SingleAsync(d => d.Id == discrepancy)).State);
+        await Attempt(() => Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Post, id => $"/api/accounts/{id}/discrepancies/{own}/dismiss", _ => note)));
+        await Attempt(() => Isolated.NotFound(b, play, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{id}/discrepancies/{own}/dismiss", _ => note)));
 
         // Each owner dismisses its own.
-        await b.Send(HttpMethod.Post, $"/api/plays/{g.Play.Id}/discrepancies/{own}/dismiss", note, HttpStatusCode.NoContent);
-        Assert.Equal(before, await Isolated.State(a, paths));
+        await Attempt(() => b.Send(HttpMethod.Post, $"/api/plays/{g.Play.Id}/discrepancies/{own}/dismiss", note, HttpStatusCode.NoContent));
         await a.Send(HttpMethod.Post, $"/api/accounts/{account}/discrepancies/{discrepancy}/dismiss", new { note = "dismissed by a" }, HttpStatusCode.NoContent);
         Isolated.NoLeak(await b.GetText("/api/events"), account, play, discrepancy, "dismissed by a");
         Isolated.NoLeak(await a.GetText("/api/events"), g.Account.Id, g.Play.Id, own, "dismissed by b");
@@ -88,25 +91,23 @@ public sealed class MonitorIsolationTests(IsolationApi api) : IClassFixture<Isol
         await Planned(a, account);
         await Planned(b, own);
         Assert.Equal(account, (await a.GetJson($"/api/accounts/{account}/monitor")).GetProperty("accountId").GetGuid());
-        var before = await Isolated.State(a, $"/api/accounts/{account}/monitor", "/api/monitor");
 
-        await Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Get, id => $"/api/accounts/{id}/monitor"));
-        await Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Post, id => $"/api/accounts/{id}/monitor/run"));
-        // No manual request was admitted for A's account.
-        Assert.Equal(before, await Isolated.State(a, $"/api/accounts/{account}/monitor", "/api/monitor"));
-        Assert.Equal([own], (await b.GetJson("/api/monitor")).GetProperty("accounts").EnumerateArray().Select(m => m.GetProperty("accountId").GetGuid()));
-        Assert.Equal([account], (await a.GetJson("/api/monitor")).GetProperty("accounts").EnumerateArray().Select(m => m.GetProperty("accountId").GetGuid()));
-
-        // Past the cooldown each refresh set, B's own request is admitted and pending for B only, and A's own
-        // request is still admitted.
+        // Past the cooldown each refresh set, before any attempt: a foreign request that reached A's account would be
+        // admitted, not hidden behind a cooldown that only the positive controls below have escaped.
         var now = api.Clock.Now;
         api.Clock.Now = now.AddMinutes(2);
         try
         {
-            var aIdle = await Isolated.State(a, $"/api/accounts/{account}/monitor", "/api/monitor");
-            var accepted = await b.Post($"/api/accounts/{own}/monitor/run", expected: HttpStatusCode.Accepted);
+            var state = await Snapshot.Of(a, $"/api/accounts/{account}/monitor", "/api/monitor");
+            await state.After(() => Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Get, id => $"/api/accounts/{id}/monitor")));
+            // No manual request is admitted for A's account.
+            await state.After(() => Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Post, id => $"/api/accounts/{id}/monitor/run")));
+            Assert.Equal([own], (await b.GetJson("/api/monitor")).GetProperty("accounts").EnumerateArray().Select(m => m.GetProperty("accountId").GetGuid()));
+            Assert.Equal([account], (await a.GetJson("/api/monitor")).GetProperty("accounts").EnumerateArray().Select(m => m.GetProperty("accountId").GetGuid()));
+
+            // B's own request, at the same clock, is admitted and pending for B only; A's own request is still admitted.
+            var accepted = await state.After(() => b.Post($"/api/accounts/{own}/monitor/run", expected: HttpStatusCode.Accepted));
             Assert.Equal("pending", accepted.GetProperty("monitor").GetProperty("manualState").GetString());
-            Assert.Equal(aIdle, await Isolated.State(a, $"/api/accounts/{account}/monitor", "/api/monitor"));
             var mine = await a.Post($"/api/accounts/{account}/monitor/run", expected: HttpStatusCode.Accepted);
             Assert.Equal(("pending", account), (mine.GetProperty("monitor").GetProperty("manualState").GetString(),
                 mine.GetProperty("monitor").GetProperty("accountId").GetGuid()));

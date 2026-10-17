@@ -60,18 +60,22 @@ public sealed class EvidenceIsolationTests(IsolationApi api) : IClassFixture<Iso
         await a.Send(HttpMethod.Patch, $"/api/evidence/{evidence}", new UpdateEvidenceNoteRequest(note));
         await a.Send(HttpMethod.Put, $"/api/evidence/{evidence}/markup", Box);
         Assert.Equal(evidence, Assert.Single((await a.GetJson($"/api/plays/{aPlay}/evidence")).EnumerateArray()).GetProperty("id").GetGuid());
-        var before = await Isolated.State(a, $"/api/plays/{aPlay}/evidence");
+        var state = await Snapshot.Of(a, $"/api/plays/{aPlay}/evidence");
+        // Each attempt is followed by A's metadata and A's original bytes.
+        async Task Attempt(Func<Task> attempt)
+        {
+            await state.After(attempt);
+            Assert.Equal(aBytes, await Content(a, evidence));
+        }
 
         var bPlay = await Play(b);
-        await Isolated.NotFound(b, aPlay, Isolated.Request(HttpMethod.Get, id => $"/api/plays/{id}/evidence"));
-        await Isolated.NotFound(b, aPlay, id => new(HttpMethod.Post, $"/api/plays/{id}/evidence") { Content = Form(EvidenceFixtures.Png, "into-a") });
-        await Isolated.NotFound(b, evidence, Isolated.Request(HttpMethod.Get, id => $"/api/evidence/{id}/content"));
-        await Isolated.NotFound(b, evidence, Isolated.Request(HttpMethod.Patch, id => $"/api/evidence/{id}", _ => new UpdateEvidenceNoteRequest("taken-by-b")));
-        await Isolated.NotFound(b, evidence, Isolated.Request(HttpMethod.Put, id => $"/api/evidence/{id}/markup", _ => Box with { Width = 20 }));
-        await Isolated.NotFound(b, evidence, Isolated.Request(HttpMethod.Delete, id => $"/api/evidence/{id}/markup"));
-        await Isolated.NotFound(b, evidence, Isolated.Request(HttpMethod.Delete, id => $"/api/evidence/{id}"));
-        Assert.Equal(before, await Isolated.State(a, $"/api/plays/{aPlay}/evidence"));
-        Assert.Equal(aBytes, await Content(a, evidence));
+        await Attempt(() => Isolated.NotFound(b, aPlay, Isolated.Request(HttpMethod.Get, id => $"/api/plays/{id}/evidence")));
+        await Attempt(() => Isolated.NotFound(b, aPlay, id => new(HttpMethod.Post, $"/api/plays/{id}/evidence") { Content = Form(EvidenceFixtures.Png, "into-a") }));
+        await Attempt(() => Isolated.NotFound(b, evidence, Isolated.Request(HttpMethod.Get, id => $"/api/evidence/{id}/content")));
+        await Attempt(() => Isolated.NotFound(b, evidence, Isolated.Request(HttpMethod.Patch, id => $"/api/evidence/{id}", _ => new UpdateEvidenceNoteRequest("taken-by-b"))));
+        await Attempt(() => Isolated.NotFound(b, evidence, Isolated.Request(HttpMethod.Put, id => $"/api/evidence/{id}/markup", _ => Box with { Width = 20 })));
+        await Attempt(() => Isolated.NotFound(b, evidence, Isolated.Request(HttpMethod.Delete, id => $"/api/evidence/{id}/markup")));
+        await Attempt(() => Isolated.NotFound(b, evidence, Isolated.Request(HttpMethod.Delete, id => $"/api/evidence/{id}")));
         Assert.Empty((await b.GetJson($"/api/plays/{bPlay}/evidence")).EnumerateArray());
 
         // Identical bytes uploaded by B are B's own object: deleting it leaves A's evidence and bytes intact.
@@ -79,9 +83,7 @@ public sealed class EvidenceIsolationTests(IsolationApi api) : IClassFixture<Iso
         Assert.NotEqual(evidence, copy);
         Assert.Equal(aBytes, await Content(b, copy));
         Isolated.NoLeak(await b.GetText($"/api/plays/{bPlay}/evidence"), evidence, note, aPlay);
-        await b.Send(HttpMethod.Delete, $"/api/evidence/{copy}", expected: HttpStatusCode.NoContent);
-        Assert.Equal(before, await Isolated.State(a, $"/api/plays/{aPlay}/evidence"));
-        Assert.Equal(aBytes, await Content(a, evidence));
+        await Attempt(() => b.Send(HttpMethod.Delete, $"/api/evidence/{copy}", expected: HttpStatusCode.NoContent));
         // A's own changes still apply.
         await a.Send(HttpMethod.Delete, $"/api/evidence/{evidence}/markup");
         await a.Send(HttpMethod.Delete, $"/api/evidence/{evidence}", expected: HttpStatusCode.NoContent);
