@@ -290,6 +290,37 @@ public sealed class MultiOwnerWorkerTests
     }
 
     [PostgresFact]
+    public async Task A_held_account_row_is_skipped_so_another_owner_is_claimed_without_waiting()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        foreach (var owner in new[] { fixture.First, fixture.Second })
+        {
+            await using var scope = fixture.Host.Services.GetRequiredService<IOwnerScopeFactory>().Create(owner);
+            await scope.Services.GetRequiredService<MonitorCoordinator>().DiscoverAsync(["hyperliquid"], fixture.Clock.GetUtcNow(), default);
+        }
+        await using var held = fixture.Database.Context(fixture.First);
+        await using var transaction = await held.Database.BeginTransactionAsync();
+        var accountId = fixture.Accounts[fixture.First];
+        await held.Database.ExecuteSqlInterpolatedAsync($"""
+            SELECT 1 FROM accounts WHERE "Id" = {accountId} FOR UPDATE
+            """);
+        var scheduler = fixture.Host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await scheduler.TickAsync(timeout.Token);
+        await fixture.Venue.Started(fixture.Second).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.DoesNotContain(fixture.First, fixture.Venue.Reads);
+        Assert.Contains(fixture.Second, fixture.Venue.Reads);
+        // The held lock is still active when the other owner's work has been admitted.
+        await transaction.RollbackAsync();
+        fixture.Venue.Release.TrySetResult();
+        await fixture.EventuallyAsync(async () =>
+        {
+            await using var db = fixture.Database.Context(fixture.Second);
+            return (await db.Set<MonitorAccount>().SingleAsync()).ManualState == "idle";
+        });
+    }
+
+    [PostgresFact]
     public async Task Venue_at_capacity_is_skipped_for_the_rest_of_the_tick_without_account_claim_locks()
     {
         await using var fixture = await Fixture.CreateAsync(firstAccounts: 3, secondAccounts: 3, venueConcurrency: 1);
