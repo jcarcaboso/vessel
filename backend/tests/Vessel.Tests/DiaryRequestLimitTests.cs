@@ -2,10 +2,44 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+using Vessel.Infrastructure.Auth;
 
 namespace Vessel.Tests;
 
-public sealed class DiaryRequestLimitTests
+/// <summary>
+/// One Kestrel host for the whole matrix: every case only sends requests that fail validation or authentication,
+/// so nothing persists. Each test gets its own HttpClient (and connections); the wrong-token limiter is the only
+/// cross-request state and is reset before each unauthorized case.
+/// </summary>
+public sealed class DiaryLimitHost : IAsyncDisposable
+{
+    private readonly LimiterClock limiterClock = new();
+    internal CoreApiFactory Factory { get; }
+
+    public DiaryLimitHost()
+    {
+        Factory = new CoreApiFactory(Guid.NewGuid(),
+            configure: services => services.AddSingleton(new AuthFailureLimiter(limiterClock)));
+        // TestServer does not enforce Kestrel's chunked request-body limit.
+        Factory.UseKestrel(0);
+        Factory.StartServer();
+    }
+
+    /// <summary>Moves the limiter past its window, so earlier wrong tokens never turn a 401 into a 429.</summary>
+    public void ForgetAuthFailures() => limiterClock.Advance(AuthFailureLimiter.Window + TimeSpan.FromSeconds(1));
+
+    public ValueTask DisposeAsync() => Factory.DisposeAsync();
+
+    private sealed class LimiterClock : TimeProvider
+    {
+        private long ticks = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
+        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref ticks), TimeSpan.Zero);
+        public void Advance(TimeSpan by) => Interlocked.Add(ref ticks, by.Ticks);
+    }
+}
+
+public sealed class DiaryRequestLimitTests(DiaryLimitHost host) : IClassFixture<DiaryLimitHost>
 {
     public static IEnumerable<object[]> Routes()
     {
@@ -34,10 +68,7 @@ public sealed class DiaryRequestLimitTests
     public async Task Authenticated_diary_limits_match_routes_before_binding(
         string method, string path, int limit, bool chunked)
     {
-        await using var factory = new CoreApiFactory(Guid.NewGuid());
-        // TestServer does not enforce Kestrel's chunked request-body limit.
-        factory.UseKestrel(0);
-        using var client = factory.AuthorizedClient();
+        using var client = host.Factory.AuthorizedClient();
 
         // Invalid JSON fields avoid persistence while proving this route matches.
         // Check the exact Content-Length boundary; leave room for chunk framing.
@@ -60,9 +91,8 @@ public sealed class DiaryRequestLimitTests
     public async Task Unauthorized_diary_requests_are_rejected_before_body_limits(
         string method, string path, int limit, bool chunked)
     {
-        await using var factory = new CoreApiFactory(Guid.NewGuid());
-        factory.UseKestrel(0);
-        using var client = factory.CreateClient();
+        host.ForgetAuthFailures();
+        using var client = host.Factory.CreateClient();
         foreach (var token in new[] { null, "invalid-test-token" })
         {
             client.DefaultRequestHeaders.Authorization = token is null

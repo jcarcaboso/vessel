@@ -12,8 +12,22 @@ using Vessel.Application.Venues;
 
 namespace Vessel.Tests;
 
-public sealed class CredentialTransportApiTests
+public sealed class CredentialTransportApiTests(CredentialTransportApiTests.RejectionHost host)
+    : IClassFixture<CredentialTransportApiTests.RejectionHost>
 {
+    /// <summary>
+    /// The legacy-rejection matrix's shared Production host from a remote peer. Every case is refused before any
+    /// read or write (401 without a token, 403/413 with one), and no case sends a wrong token to the limiter.
+    /// </summary>
+    public sealed class RejectionHost : IAsyncDisposable
+    {
+        internal CoreApiFactory Factory { get; } = new(Guid.NewGuid(), connection: "Host=unused.invalid;Database=synthetic",
+            environment: "Production",
+            configure: services => services.AddSingleton<IStartupFilter>(new Peer(IPAddress.Parse("192.0.2.10"))));
+
+        public ValueTask DisposeAsync() => Factory.DisposeAsync();
+    }
+
     [Theory]
     [InlineData("PUT", "/api/accounts/not-a-guid/credential", "http", 2, 403, "Credential entry requires HTTPS outside localhost.")]
     [InlineData("POST", "/api/accounts/11111111-1111-1111-1111-111111111111/credential", "http", 2, 403, "Credential entry requires HTTPS outside localhost.")]
@@ -26,10 +40,7 @@ public sealed class CredentialTransportApiTests
     public async Task Unmatched_and_wrong_method_requests_preserve_legacy_transport_rejections(
         string method, string path, string scheme, int bodyBytes, int status, string detail)
     {
-        await using var factory = new CoreApiFactory(Guid.NewGuid(), connection: "Host=unused.invalid;Database=synthetic",
-            environment: "Production",
-            configure: services => services.AddSingleton<IStartupFilter>(new Peer(IPAddress.Parse("192.0.2.10"))));
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        using var client = host.Factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri($"{scheme}://vessel.example.invalid"), AllowAutoRedirect = false
         });
