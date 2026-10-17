@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Plays;
@@ -166,7 +167,7 @@ public sealed class ReadModelIsolationTests(IsolationApi api) : IClassFixture<Is
         var (aOwner, bOwner) = api.Owners();
         var a = await Import(aOwner);
         var b = await Import(bOwner);
-        var aState = await Isolated.State(a.Owner, Reads(a));
+        var state = await Snapshot.Of((a.Owner, Reads(a)), (b.Owner, Reads(b)));
         var operation = Uri.EscapeDataString(a.Operation);
         var byAccount = new Func<Guid, string>[]
         {
@@ -180,7 +181,7 @@ public sealed class ReadModelIsolationTests(IsolationApi api) : IClassFixture<Is
             id => $"/api/review/exclusions?period=all&accountId={id}"
         };
         foreach (var path in byAccount)
-            await Isolated.SameAsUnknown(b.Owner, a.Account, Isolated.Request(HttpMethod.Get, path));
+            await state.After(() => Isolated.SameAsUnknown(b.Owner, a.Account, Isolated.Request(HttpMethod.Get, path)));
         var byPortfolio = new Func<Guid, string>[]
         {
             id => $"/api/activity?scope=portfolio:{id}",
@@ -190,17 +191,68 @@ public sealed class ReadModelIsolationTests(IsolationApi api) : IClassFixture<Is
             id => $"/api/review/exclusions?period=all&portfolio={id}"
         };
         foreach (var path in byPortfolio)
-            await Isolated.SameAsUnknown(b.Owner, a.Portfolio, Isolated.Request(HttpMethod.Get, path));
+            await state.After(() => Isolated.SameAsUnknown(b.Owner, a.Portfolio, Isolated.Request(HttpMethod.Get, path)));
         // The detail and scope reads that 404 for unknown accounts do so for foreign ones as well.
         foreach (var path in new[] { byAccount[0], byAccount[1], byAccount[3], byAccount[4], byAccount[5] })
-            await Isolated.NotFound(b.Owner, a.Account, Isolated.Request(HttpMethod.Get, path));
+            await state.After(() => Isolated.NotFound(b.Owner, a.Account, Isolated.Request(HttpMethod.Get, path)));
 
-        // A retrospective naming A's account creates nothing.
-        var bState = await Isolated.State(b.Owner, Reads(b));
-        await Isolated.NotFound(b.Owner, a.Account, Isolated.Request(HttpMethod.Post, _ => "/api/plays/retrospective",
-            id => new CreateRetrospectiveRequest(Guid.NewGuid(), id, a.Operation, "fingerprint", "taken-by-b")));
-        Assert.Equal(bState, await Isolated.State(b.Owner, Reads(b)));
-        Assert.Equal(aState, await Isolated.State(a.Owner, Reads(a)));
+        // A retrospective naming A's account creates nothing. Foreign operations under B's own account are covered by
+        // Foreign_operation_ids_under_an_owned_account_answer_like_unknown_ones.
+        await state.After(() => Isolated.NotFound(b.Owner, a.Account, Isolated.Request(HttpMethod.Post, _ => "/api/plays/retrospective",
+            id => new CreateRetrospectiveRequest(Guid.NewGuid(), id, a.Operation, "fingerprint", "taken-by-b")), AccountNotFound));
+    }
+
+    private const string AccountNotFound = "Account not found.";
+    private const string OperationNotFound = "Retained operation not found. Reload Activity.";
+
+    [PostgresFact]
+    [Covers("GET", "/api/activity/fills")]
+    [Covers("GET", "/api/activity/retrospective")]
+    [Covers("POST", "/api/plays/retrospective")]
+    public async Task Foreign_operation_ids_under_an_owned_account_answer_like_unknown_ones()
+    {
+        var (aOwner, b) = api.Owners();
+        var a = await Import(aOwner, Guid.NewGuid());
+        // B's own account on the same address: its operation has the same fills but its own ID, and is still eligible.
+        var account = (await b.SyncedVenueAccount(Isolated.Marker("venue-b"))).GetProperty("id").GetGuid();
+        var operation = Assert.Single((await b.GetJson("/api/activity")).GetProperty("operations").EnumerateArray()).GetProperty("id").GetString()!;
+        Assert.NotEqual(a.Operation, operation);
+        // An unknown operation ID of the same shape as A's: a fill identity and a direction.
+        var shape = new System.Text.RegularExpressions.Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(long|short)$");
+        Assert.Matches(shape, a.Operation);
+        var unknown = $"{Guid.NewGuid():D}:{a.Operation[(a.Operation.IndexOf(':') + 1)..]}";
+        Assert.Matches(shape, unknown);
+
+        // Positive controls: B's own account with B's own operation.
+        Assert.Equal(2, (await b.GetJson($"/api/activity/fills?accountId={account}&operationId={Uri.EscapeDataString(operation)}"))
+            .GetProperty("fills").GetArrayLength());
+        var preview = await b.GetJson($"/api/activity/retrospective?accountId={account}&operationId={Uri.EscapeDataString(operation)}");
+        Assert.True(preview.GetProperty("eligible").GetBoolean(), preview.GetRawText());
+        var fingerprint = preview.GetProperty("fingerprint").GetString()!;
+
+        // B's own account with A's operation, and with an unknown one: both refused by the operation lookup alike.
+        var bPaths = new[] { "/api/plays?view=all", "/api/plays/counts", "/api/activity", "/api/review?period=all" };
+        var state = await Snapshot.Of((a.Owner, Reads(a)), (b, bPaths));
+        var aState = await Snapshot.Of(a.Owner, Reads(a));
+        await state.After(() => Isolated.NotFound(b, a.Operation, unknown,
+            id => new(HttpMethod.Get, $"/api/activity/fills?accountId={account}&operationId={Uri.EscapeDataString(id)}"), OperationNotFound));
+        await state.After(() => Isolated.NotFound(b, a.Operation, unknown,
+            id => new(HttpMethod.Get, $"/api/activity/retrospective?accountId={account}&operationId={Uri.EscapeDataString(id)}"), OperationNotFound));
+        // Creating a retrospective Play from A's operation, with A's own fingerprint or B's: no Play for B, A unchanged.
+        foreach (var expected in new[] { a.Fingerprint!, fingerprint })
+            await state.After(() => Isolated.NotFound(b, a.Operation, unknown, id => new(HttpMethod.Post, "/api/plays/retrospective")
+            {
+                Content = JsonContent.Create(new CreateRetrospectiveRequest(Guid.NewGuid(), account, id, expected, "taken-by-b"))
+            }, OperationNotFound));
+
+        // Positive control: B's own retrospective, from its own operation, is the only Play B has afterwards.
+        var created = await b.Post("/api/plays/retrospective", new CreateRetrospectiveRequest(Guid.NewGuid(), account, operation, fingerprint,
+            Isolated.Marker("retrospective-b")));
+        var play = created.GetProperty("summary").GetProperty("id").GetGuid();
+        Assert.Equal([play], (await b.GetJson("/api/plays?view=all")).GetProperty("plays").EnumerateArray().Select(p => p.GetProperty("id").GetGuid()));
+        Assert.Equal(play, Assert.Single((await b.GetJson("/api/activity")).GetProperty("operations").EnumerateArray()).GetProperty("playId").GetGuid());
+        await aState.Unchanged();
+        Isolated.NoLeak(await b.GetText("/api/plays?view=all"), a.Play, a.Account, a.Operation);
     }
 
     [PostgresFact]
