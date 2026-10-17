@@ -23,7 +23,7 @@ October 17, 2026. The owner asked what replacing the shared API token with per-u
 | 1 | Choose a wallet. Detected browser wallets, last used first, then WalletConnect | ![](01-choose-wallet.png) |
 | 2 | Connecting. Waiting for the wallet's own approval; Cancel always available | ![](02-connecting.png) |
 | 3 | WalletConnect (later, only if its licence review passes). Vessel's own QR panel over the headless provider, with the relay disclosure | ![](03-walletconnect.png) |
-| 4 | Sign the message. Connected identity, message preview with countdown, domain check | ![](04-sign.png) |
+| 4 | Sign the message. Connected identity, message preview with countdown, "Keep me signed in on this device" (off by default). No domain tick: a phishing page would show the same one | ![](04-sign.png) |
 | 5 | Create your journal. Only after a valid signature from an unknown wallet; invitation field on invite-only servers | ![](05-create-journal.png) |
 | 6 | Edge states. Declined, expired, account switched, invitation needed, smart-contract wallet, rate-limited, no wallet, suspended, unreachable | ![](06-states.png) |
 | 7 | Account menu. The sidebar owner card opens a menu instead of disconnecting at once | ![](07-account-menu.png) |

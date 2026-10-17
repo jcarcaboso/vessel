@@ -190,6 +190,8 @@ svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor;
 .checks { display: grid; gap: 6px; font-size: var(--text-xs); color: var(--muted-foreground); }
 .checks span { display: flex; align-items: center; gap: 7px; }
 .checks svg.i { width: 14px; height: 14px; color: var(--positive); }
+.remember { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--muted-foreground); cursor: pointer; }
+.remember input { width: 15px; height: 15px; accent-color: var(--ring); margin: 0; }
 .timer { font-variant-numeric: tabular-nums; font-feature-settings: var(--figures); }
 .btnrow { display: flex; gap: 8px; }
 .btnrow .btn.primary { flex: 1; }
@@ -403,14 +405,14 @@ svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor;
 
 <span class="st">Sign in to Vessel. This is not a transaction and costs no gas.</span>
 
-URI: https://vessel.example.net
+URI: https://vessel.example.net/
 Version: 1
 Chain ID: 1
-Nonce: 9fK2mQ7xLp3Rt8Vw
-Issued At: 2026-10-17T09:41:12Z
-Expiration Time: 2026-10-17T09:46:12Z</pre>
+Nonce: 9fK2mQ7xLp3Rt8VwA4cHs1
+Issued At: 2026-10-17T09:41:12.000Z
+Expiration Time: 2026-10-17T09:46:12.000Z</pre>
           </div>
-          <div class="checks"><span><svg class="i" data-i="check"></svg>Domain matches this page</span></div>
+          <label class="remember"><input type="checkbox"> Keep me signed in on this device</label>
           <div class="btnrow"><button class="btn primary lg"><span class="spinner"></span>Waiting for Rabby…</button><button class="btn lg">Cancel</button></div>
         </div>
       </div>
@@ -449,11 +451,11 @@ Expiration Time: 2026-10-17T09:46:12Z</pre>
       <div class="state"><span class="badge warn"><svg class="i" data-i="clock"></svg></span><h3>Request expired</h3><p>Sign-in requests last five minutes. Start a new one.</p><div class="btnrow"><button class="btn sm primary">Start again</button></div></div>
       <div class="state"><span class="badge warn"><svg class="i" data-i="swap"></svg></span><h3>Wallet switched account</h3><p>Rabby now uses <span class="source-chip" data-src="0x19B4c7aE02F3d81e6C5a9b0D2E7f4A3c8D1e0a53"></span>. Sign with the address you connected, or start again with the new one.</p><div class="btnrow"><button class="btn sm primary">Use new address</button></div></div>
       <div class="state"><span class="badge info"><svg class="i" data-i="ticket"></svg></span><h3>Invitation needed</h3><p>This server only admits invited wallets. Ask its operator for a code.</p><div class="btnrow"><button class="btn sm primary">Enter code</button><button class="btn sm ghost">Other wallets</button></div></div>
-      <div class="state"><span class="badge bad"><svg class="i" data-i="ban"></svg></span><h3>Smart-contract wallet</h3><p>Safe and other smart accounts can't sign in yet. Use a regular wallet address.</p><div class="btnrow"><button class="btn sm ghost">Other wallets</button></div></div>
+      <div class="state"><span class="badge bad"><svg class="i" data-i="ban"></svg></span><h3>Signature not supported</h3><p>This signature format isn't supported yet, as with Safe and other smart accounts. Use a regular wallet address.</p><div class="btnrow"><button class="btn sm ghost">Other wallets</button></div></div>
       <div class="state"><span class="badge warn"><svg class="i" data-i="alert"></svg></span><h3>Too many attempts</h3><p>Wait a moment before trying again.</p><div class="btnrow"><button class="btn sm" disabled><span class="timer">Try again in 1:52</span></button></div></div>
       <div class="state"><span class="badge"><svg class="i" data-i="wallet"></svg></span><h3>No browser wallet found</h3><p>Install a wallet extension, or scan with a phone wallet.</p><div class="btnrow"><button class="btn sm primary"><svg class="i" data-i="qr"></svg>WalletConnect</button></div></div>
       <div class="state"><span class="badge bad"><svg class="i" data-i="lock"></svg></span><h3>Journal suspended</h3><p>The operator of this server has suspended this journal. Contact them to restore access.</p></div>
-      <div class="state"><span class="badge"><svg class="i" data-i="plug"></svg></span><h3>Vessel is unreachable</h3><p>The server didn't answer. Your wallet wasn't asked to sign anything.</p><div class="btnrow"><button class="btn sm primary">Retry</button></div></div>
+      <div class="state"><span class="badge"><svg class="i" data-i="plug"></svg></span><h3>Vessel is unreachable</h3><p>The server didn't answer. Check your connection and try again.</p><div class="btnrow"><button class="btn sm primary">Retry</button></div></div>
     </div>
   </section>
 
@@ -559,14 +561,14 @@ Expiration Time: 2026-10-17T09:46:12Z</pre>
 <pre><span class="hl">vessel.example.net</span> wants you to sign in with your Ethereum account:
 0xC41d82B07e9A3f5c6D0b1E2a4F8c7D3e9B5a0f3b
 
-<span class="st">Link this wallet to the Vessel journal of Sam Rivera.</span>
+<span class="st">Link this wallet to the Vessel journal signed in with 0x7A3f9C2e5b1D4a8F0c6E2b9D3a7F1e5C8b2D4caa. This is not a transaction.</span>
 
-URI: https://vessel.example.net/settings/sign-in
+URI: https://vessel.example.net/
 Version: 1
 Chain ID: 1
-Nonce: Qw4Zr9Lk2Hd7Xp5N
-Issued At: 2026-10-17T11:02:40Z
-Expiration Time: 2026-10-17T11:07:40Z</pre></div>
+Nonce: Qw4Zr9Lk2Hd7Xp5NbT3mV8
+Issued At: 2026-10-17T11:02:40.000Z
+Expiration Time: 2026-10-17T11:07:40.000Z</pre></div>
           <div class="field"><label for="wl">Label <small>· optional</small></label><input class="input" id="wl" value="Ledger"></div>
           <div class="btnrow"><button class="btn primary"><span class="spinner"></span>Waiting for MetaMask…</button><button class="btn">Cancel</button></div>
         </div>
@@ -641,7 +643,7 @@ Expiration Time: 2026-10-17T11:07:40Z</pre></div>
           <div><h1>Sign the message</h1><p class="lede">Return here after signing in your wallet app.</p></div>
           <div class="sheet">
             <div class="ident"><span class="wmark w-metamask" data-w="metamask"></span><span class="meta"><strong>MetaMask</strong><span class="row"><span class="source-chip" data-src="0x7A3f9C2e5b1D4a8F0c6E2b9D3a7F1e5C8b2D4caa"></span></span></span></div>
-            <div class="checks"><span><svg class="i" data-i="check"></svg>Domain matches this page</span><span><svg class="i" data-i="clock" style="color:var(--muted-foreground)"></svg>Expires in <span class="timer">4:31</span></span></div>
+            <div class="checks"><span><svg class="i" data-i="clock" style="color:var(--muted-foreground)"></svg>Expires in <span class="timer">4:31</span></span></div>
             <button class="btn primary lg block"><svg class="i" data-i="external"></svg>Open MetaMask to sign</button>
             <button class="btn lg block ghost">Cancel</button>
           </div>

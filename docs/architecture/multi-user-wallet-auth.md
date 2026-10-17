@@ -6,6 +6,17 @@ The owner asked what it would take to replace the shared API token with users wh
 
 The design proposal is in [`docs/design/wallet-sign-in/`](../design/wallet-sign-in/README.md), with the disposable page `prototype/wallet-sign-in.html`.
 
+**October 17 update:** the owner asked to start orchestrating the work with Opus and Sol agents. Both round-1 reviews returned "go with changes". Their corrections are in the [delivery contract](multi-user-delivery-contract.md), which supersedes this analysis wherever they differ. Among them:
+- a subscriber-side subscription algorithm;
+- owner scopes for every background scope;
+- a phase for wallet, session and step-up endpoints;
+- tab binding with `X-Vessel-User`;
+- revalidation of open streams;
+- a reset step after restore;
+- a second migration bundle and an `ensure-owner` step;
+- "keep me signed in" instead of one long default session;
+- 128-bit invitation codes.
+
 ## Summary
 
 - **Most of the data separation already exists.** Every journal entity is owner-scoped. `VesselDbContext` filters every query by owner and refuses saves that change an owner. Composite foreign keys stop cross-owner links, credential encryption binds the owner, and evidence keys start with the owner. A user can therefore be a journal owner: **the user ID is the owner ID**. Portfolios, accounts and Plays need no data-model change. The audit found no unique index that two users would collide on. The same Hyperliquid address, Lighter index or RISEx address, the same fill, order and funding IDs, and the same portfolio names can already exist under different owners, and existing PostgreSQL tests prove it.
@@ -157,12 +168,12 @@ vessel.example.net wants you to sign in with your Ethereum account:
 
 Sign in to Vessel. This is not a transaction and costs no gas.
 
-URI: https://vessel.example.net
+URI: https://vessel.example.net/
 Version: 1
 Chain ID: 1
-Nonce: 9fK2mQ7xLp3Rt8Vw
-Issued At: 2026-10-17T09:41:12Z
-Expiration Time: 2026-10-17T09:46:12Z
+Nonce: 9fK2mQ7xLp3Rt8VwA4cHs1
+Issued At: 2026-10-17T09:41:12.000Z
+Expiration Time: 2026-10-17T09:46:12.000Z
 ```
 
 - **Domain and URI** come from the request `Origin`, accepted only if it is in `Vessel:Identity:Origins`. Wallets compare the domain with the page, so a LAN address and a tailnet hostname are both listed. The `Host` header is never trusted.
