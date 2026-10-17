@@ -5,7 +5,7 @@ using Vessel.Application.Workspace;
 using Vessel.Application.Credentials;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Monitoring;
-using Vessel.Persistence;
+using Vessel.Infrastructure.Monitoring;
 
 namespace Vessel.Api;
 

@@ -1,33 +1,8 @@
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Vessel.Application.Monitoring;
-using Vessel.Application.Plays.Execution;
 
-namespace Vessel.Persistence;
-
-public static class MonitorRegistration
-{
-    public static IServiceCollection AddVesselMonitoring(this IServiceCollection services, IConfiguration configuration)
-    {
-        var options = new MonitorOptions();
-        configuration.GetSection("Vessel:Monitor").Bind(options);
-        options.Validate();
-        services.AddSingleton(options);
-        services.TryAddSingleton(TimeProvider.System);
-        services.AddScoped<IMonitorStore, MonitorStore>();
-        services.AddScoped<IMonitorDiscrepancyStore, MonitorDiscrepancyStore>();
-        services.AddScoped<MonitorDiscrepancyService>();
-        services.AddScoped<IMonitorEvaluator>(sp => sp.GetRequiredService<MonitorDiscrepancyService>());
-        services.AddScoped<IMonitorImporter>(sp => sp.GetRequiredService<PlayExecutionService>());
-        services.TryAddSingleton<IMonitorRunLog, MonitorRunLog>();
-        services.AddScoped<MonitorCoordinator>();
-        services.AddScoped<MonitorExecutionView>();
-        services.AddScoped<MonitorRunExecutor>();
-        return services;
-    }
-}
+namespace Vessel.Infrastructure.Monitoring;
 
 /// <summary>Logs a failed monitor run by request, account and trigger, with the exception type name only.</summary>
 public sealed class MonitorRunLog(ILogger<MonitorRunLog> logger) : IMonitorRunLog
@@ -37,7 +12,10 @@ public sealed class MonitorRunLog(ILogger<MonitorRunLog> logger) : IMonitorRunLo
             lease.RequestId, lease.Trigger, lease.AccountId, errorType);
 }
 
-/// <summary>Renew through separate scopes so the read and its DbContext are never used concurrently.</summary>
+/// <summary>
+/// Renew through separate scopes so the read and its DbContext are never used concurrently. It needs the
+/// container's scope factory, so it lives with the host-side adapters rather than in Application.
+/// </summary>
 public sealed class MonitorRunExecutor(IServiceScopeFactory scopes, MonitorCoordinator coordinator, TimeProvider time)
 {
     /// <summary>
