@@ -30,7 +30,7 @@ internal static class MonitorTestPaths
         var work = TestUnitOfWork.For(db);
         var options = Options();
         time ??= TimeProvider.System;
-        return new(new MonitorStore(db, work, options), new WorkspaceStore(db, work), Execution(db, venues, credentials, time), venues,
+        return new(new MonitorWorkerOnline(new MonitorStore(db, work, options), time), new WorkspaceStore(db, work), Execution(db, venues, credentials, time), venues,
             credentials ?? new NoCredentials(), work, new NoEvents(), new NoCommands(), new CoreOwner(owner), options, time);
     }
 

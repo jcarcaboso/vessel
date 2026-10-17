@@ -14,7 +14,7 @@ using Vessel.Persistence;
 
 namespace Vessel.Tests;
 
-public sealed class MonitorPostgresTests
+public sealed partial class MonitorPostgresTests
 {
     [PostgresFact]
     public async Task Rejected_order_credential_pauses_scheduled_monitoring_instead_of_generic_retry()
@@ -1062,7 +1062,7 @@ public sealed class MonitorPostgresTests
     {
         var work = TestUnitOfWork.For(db);
         options ??= new MonitorOptions();
-        return new(new MonitorStore(db, work, options), new WorkspaceStore(db, work), importer ?? new Importer(), TestVenues.With(reader, orders ?? new Orders()),
+        return new(new MonitorWorkerOnline(new MonitorStore(db, work, options), clock ?? TimeProvider.System), new WorkspaceStore(db, work), importer ?? new Importer(), TestVenues.With(reader, orders ?? new Orders()),
             new Credentials(), work, sink ?? new EventSink(), new Commands(), new CoreOwner(owner),
             options, clock ?? TimeProvider.System, log: log);
     }
