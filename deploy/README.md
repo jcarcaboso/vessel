@@ -413,20 +413,28 @@ configured timeout; `/app/worker-health` rejects a missing, malformed or older
 file. If the file cannot be written, the database heartbeat is not recorded
 either, so API monitor responses report the worker offline.
 
-A later Notification Hub worker is the same image with other modules, as a
-separate service that scales independently, for example:
+The Notification Hub runs as `worker-notifications`: the same image and entrypoint
+with `Vessel__Worker__Modules__0: notifications` in its own deployment
+(`wolverine_notifications`). It hosts the `notifications` subscription to every
+event type, writes in-app notifications in the receipt's own transaction, and
+deletes notifications older than `Vessel__Notifications__RetentionDays` (default
+90) hourly. It never opens venue tokens, so it gets no credential key ring. After
+each maintenance pass in which every catch-up succeeded it writes its own heartbeat
+row and the file `Vessel__Notifications__HeartbeatFile` (default
+`/tmp/vessel-notifications-heartbeat`); `/app/worker-health` reads that file when
+the worker's first module is `notifications`. The API reports it as
+`workerOnline` in `GET /api/notifications/head`, separately from the monitor.
 
-```yaml
-  worker-notifications:
-    image: skorcius/vessel:api-${VESSEL_VERSION}
-    entrypoint: ["/app/worker"]
-    environment:
-      # ... the worker service's database, owner and broker settings ...
-      Vessel__Worker__Modules__0: notifications
-```
-
-That module does not exist yet; Compose has no such service, and an unknown
-module name stops the worker.
+Provisioning registers the `notifications` subscription whichever services run.
+An installation that never starts `worker-notifications` keeps working without
+notifications: the subscription holds no receipts and becomes `lagging` once events
+age past `Vessel__Events__RetentionDays`. A notifications worker that ran and then
+stopped can leave pending receipts, which hold event retention until they settle;
+start it again, or stop it for good with
+`docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll deregister-event-subscription notifications`
+(the next provisioning registers it again while the module is compiled in). An
+explicit `Vessel__Messaging__Deployments` configuration needs a `notifications`
+entry.
 
 ### Monitor and broker settings
 
@@ -660,6 +668,19 @@ upgrade path: an installation with v0.2.0 data must be recreated (fresh
 database and evidence store) before applying it. See
 `docs/architecture/order-identity.md`.
 
+### After v0.2.0: the Notification Hub
+
+- Migration `20261017180000_NotificationHub` adds the notification tables and an
+  index on the events' run identity. `migrate` applies it, then provisions the
+  `notifications` deployment, queue, dead-letter queue and subscription.
+- Compose gains the `worker-notifications` service. Add it to any Compose override
+  that pins images, and to your own stop lists for upgrades, backups and restores.
+- Optional settings: `Vessel__Notifications__RetentionDays` (90), `MaxEventAge`
+  (7 days), `PopupWindow` (24 hours), `TestCooldown` (10 seconds),
+  `HeartbeatTimeout` and `HeartbeatFile`.
+
+Stop web, API and the workers, back up, then upgrade as usual.
+
 ### From v0.1.3 to v0.2.0 (the account monitor)
 
 This upgrade adds two services and new required settings. Its migrations sort
@@ -680,7 +701,7 @@ migration run. Before it:
   service, which must be healthy first; then `api` and the new `worker` start.
 - The restore procedure gains the mandatory `rotate-event-epoch` step below.
 
-Stop web, API and worker, back up, then follow the procedure below. A worker
+Stop web, API and the workers, back up, then follow the procedure below. A worker
 stopped during a run loses nothing: runs are idempotent and the next run repeats
 the work.
 
@@ -725,7 +746,7 @@ Back up first, read the changelog, and set `VESSEL_VERSION` to the chosen releas
 
 ```sh
 docker compose pull
-docker compose stop web api worker
+docker compose stop web api worker worker-notifications
 docker compose up -d
 docker compose ps -a
 ```
@@ -744,13 +765,13 @@ new schema is incompatible with the old image.
 ## Backups
 
 Keep backups private and test restores in an isolated installation. Stop web, API
-and worker to keep database references and evidence consistent, then (the RabbitMQ
+and both workers to keep database references and evidence consistent, then (the RabbitMQ
 volume is excluded: subscribers recover unsettled events from PostgreSQL):
 
 ```sh
 umask 077
 mkdir -p backups
-docker compose stop web api worker
+docker compose stop web api worker worker-notifications
 docker compose exec -T postgres pg_dump -U vessel -d vessel -Fc > backups/vessel.dump
 docker compose stop rustfs
 docker compose run --rm --no-deps -T --entrypoint tar rustfs \

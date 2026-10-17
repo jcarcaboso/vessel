@@ -35,7 +35,8 @@ def configuration():
             env[key] = values[key]
     for key, value in values.items():
         if configuration_key(key).startswith(("vessel:credentials:", "vessel:evidence:", "vessel:events:",
-                                              "vessel:messaging:", "vessel:monitor:", "vessel:worker:")):
+                                              "vessel:messaging:", "vessel:monitor:", "vessel:notifications:",
+                                              "vessel:worker:")):
             env[key] = value
     if not any(configuration_key(key) == "vessel:messaging:rabbitmquri" for key in env):
         user, password = values.get("RABBITMQ_USER"), values.get("RABBITMQ_PASSWORD")
@@ -147,6 +148,9 @@ def main():
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
     try:
+        if mode in ["run", "worker", "lan"]:
+            # Build once, then run the monitor and notifications workers from that build so they never race.
+            subprocess.run(["dotnet", "build", "backend/src/Vessel.Worker"], cwd=ROOT, env=env, check=True)
         api_command = ["dotnet", "run", "--project", "backend/src/Vessel.Api"]
         if mode == "lan":
             api_command += ["--configuration", "Release", "--no-build", "--no-launch-profile",
@@ -158,10 +162,16 @@ def main():
                 cwd=ROOT, env=env, start_new_session=True,
             ))
         if mode in ["run", "worker", "lan"]:
-            processes.append(subprocess.Popen(
-                ["dotnet", "run", "--project", "backend/src/Vessel.Worker", "--no-launch-profile"],
-                cwd=ROOT, env=env, start_new_session=True,
-            ))
+            worker = ["dotnet", "run", "--project", "backend/src/Vessel.Worker", "--no-build", "--no-launch-profile"]
+            processes.append(subprocess.Popen(worker, cwd=ROOT, env=env, start_new_session=True))
+            # The Notification Hub is its own deployment with its own heartbeat file.
+            processes.append(subprocess.Popen(worker, cwd=ROOT, env={
+                **env,
+                "Vessel__Worker__Modules__0": "notifications",
+                "Vessel__Worker__Deployment": "notifications",
+                "Vessel__Notifications__HeartbeatFile": env.get("Vessel__Notifications__HeartbeatFile",
+                                                                "/tmp/vessel-dev-notifications-heartbeat"),
+            }, start_new_session=True))
         if mode in ["run", "lan"]:
             # Do not give the frontend process database credentials or the API token.
             processes.append(subprocess.Popen(
@@ -169,7 +179,7 @@ def main():
                 cwd=ROOT, env=frontend_environment(), start_new_session=True,
             ))
             print(f"Frontend: http://{host}:5180 · API: http://127.0.0.1:5080", flush=True)
-            print("The worker runs the monitor module. Stop with Ctrl+C; PostgreSQL and RabbitMQ keep running.", flush=True)
+            print("Workers run the monitor and notifications modules. Stop with Ctrl+C; PostgreSQL and RabbitMQ keep running.", flush=True)
         while True:
             for process in processes:
                 if process.poll() is not None:
