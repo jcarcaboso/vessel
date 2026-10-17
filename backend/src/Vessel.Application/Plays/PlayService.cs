@@ -248,8 +248,10 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     private static string SourceName(InstrumentSource source) => source == InstrumentSource.Venue ? "venue" : "manual";
     private static string ReasonName(CancelReason reason) => reason == CancelReason.ChangedMind ? "changed-mind" : reason.ToString().ToLowerInvariant();
 
-    public static PlaySummaryDto Summary(Play play) => new(play.Id, play.Title, StatusName(play.Status), play.AccountId, play.VenueId,
-        play.ContractId, SourceName(play.InstrumentSource), PlayDocuments.Read(play.Plan).Direction, play.PlanRevision, play.Version,
+    public static PlaySummaryDto Summary(Play play) => Summary(play, PlayDocuments.Read(play.Plan).Direction);
+
+    private static PlaySummaryDto Summary(Play play, string direction) => new(play.Id, play.Title, StatusName(play.Status), play.AccountId, play.VenueId,
+        play.ContractId, SourceName(play.InstrumentSource), direction, play.PlanRevision, play.Version,
         play.CancelReason is { } reason ? ReasonName(reason) : null, play.CreatedAtUtc, play.UpdatedAtUtc, play.PlannedAtUtc, play.EndedAtUtc,
         play.HasReview, play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned", play.ReviewedAtUtc);
 
@@ -258,8 +260,11 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         play.CancelReason is { } reason ? ReasonName(reason) : null, play.CreatedAtUtc, play.UpdatedAtUtc, play.PlannedAtUtc, play.EndedAtUtc,
         play.HasReview, play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned", play.ReviewedAtUtc);
 
-    public static PlayDto ToDto(Play play) =>
-        new(Summary(play), PlayDocuments.Read(play.Plan), PlayDocuments.ReadDrawings(play.Drawings), play.Review, play.Answers);
+    public static PlayDto ToDto(Play play)
+    {
+        var plan = PlayDocuments.Read(play.Plan);
+        return new(Summary(play, plan.Direction), plan, PlayDocuments.ReadDrawings(play.Drawings), play.Review, play.Answers);
+    }
 
     [GeneratedRegex("^[A-Za-z0-9_-]{1,32}$")]
     private static partial Regex ContractPattern();

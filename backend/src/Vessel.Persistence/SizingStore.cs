@@ -41,6 +41,17 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
         return new(play, revisions, ledger.Projection, [], true, ledger.FeesComplete);
     }
 
+    public async Task<SizingSettings> SettingsForUpdateAsync(SizingSettings initial, CancellationToken ct)
+    {
+        unitOfWork.RequireActive();
+        if (initial.OwnerId != db.CurrentOwnerId) throw new InvalidOperationException("Sizing settings belong to the current owner.");
+        // A concurrent first write waits on the conflicting insert, then both read and lock the one committed row.
+        await db.Database.ExecuteSqlInterpolatedAsync($@"INSERT INTO sizing_settings(""OwnerId"", ""RiskPercent"", ""UpdatedAtUtc"")
+            VALUES({initial.OwnerId}, {initial.RiskPercent}, {initial.UpdatedAtUtc}) ON CONFLICT DO NOTHING", ct);
+        return await db.SizingSettings.FromSqlInterpolated(
+            $@"SELECT * FROM sizing_settings WHERE ""OwnerId"" = {db.CurrentOwnerId} FOR UPDATE").SingleAsync(ct);
+    }
+
     public void Add(SizingSettings settings) { unitOfWork.RequireActive(); db.SizingSettings.Add(settings); }
     public Task SaveAsync(CancellationToken ct) => unitOfWork.SaveChangesAsync(ct);
 }

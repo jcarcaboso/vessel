@@ -59,7 +59,7 @@ public static class PlayOutcomeCalculator
         var firstEntry = entries.Min(f => f.OccurredAtUtc);
         var revisions = facts.Revisions.OrderBy(r => r.Number).ToList();
         var plan = (revisions.LastOrDefault(r => r.CreatedAtUtc <= firstEntry) ?? revisions.FirstOrDefault())?.Plan ?? facts.Play.Plan;
-        decimal? risk = facts.Play.Origin != PlayOrigin.Retrospective && StopDistance(PlayDocuments.Read(plan)) is { } distance ? notional * distance : null;
+        decimal? risk = facts.Play.Origin != PlayOrigin.Retrospective && StopDistance(facts.ParsedPlan(plan)) is { } distance ? notional * distance : null;
         return new PlayOutcome(facts.Play.Id, closedAt, net, notional, risk, feesComplete);
     }
 
