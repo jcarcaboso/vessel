@@ -50,8 +50,10 @@ public sealed class AccountRouteSecurityTests
         }
     }
 
-    [PostgresFact]
-    public async Task The_per_session_step_up_link_limit_returns_retry_after_through_the_API_error_handler()
+    [PostgresTheory]
+    [InlineData("step-up", "wallets")]
+    [InlineData("wallets", "step-up")]
+    public async Task The_per_session_step_up_and_link_limits_are_independent_and_return_retry_after(string exhausted, string other)
     {
         await using var db = await IdentityDatabase.CreateAsync();
         var key = EthECKey.GenerateKey();
@@ -59,14 +61,23 @@ public sealed class AccountRouteSecurityTests
         await using var factory = IdentityHttpTest.Factory(db, owner.User.Id);
         using var first = IdentityHttpTest.Client(factory);
         await IdentityHttpTest.SignInAsync(first, key);
-        for (var i = 0; i < 10; i++)
-            Assert.Equal(HttpStatusCode.OK, (await first.PostAsJsonAsync("/api/auth/step-up/challenge", new { action = "wallet.link", address = key.GetPublicAddress() })).StatusCode);
-        var limited = await first.PostAsJsonAsync("/api/auth/wallets/challenge", new { address = key.GetPublicAddress() });
-        await IdentityHttpTest.Code(limited, 429, "rate-limited");
-        Assert.InRange(limited.Headers.RetryAfter!.Delta!.Value.TotalSeconds, 1, 600);
+        foreach (var bucket in new[] { exhausted, other })
+        {
+            // Both routes spend the same bucket, even when the body is invalid.
+            for (var i = 0; i < 10; i++)
+                await IdentityHttpTest.Code(await first.PostAsJsonAsync($"/api/auth/{bucket}" + (i % 2 == 0 ? "/challenge" : ""),
+                    new { }), 400, "request-invalid");
+            foreach (var suffix in new[] { "", "/challenge" })
+            {
+                var limited = await first.PostAsJsonAsync($"/api/auth/{bucket}{suffix}", new { });
+                await IdentityHttpTest.Code(limited, 429, "rate-limited");
+                Assert.InRange(limited.Headers.RetryAfter!.Delta!.Value.TotalSeconds, 1, 600);
+            }
+        }
         using var second = IdentityHttpTest.Client(factory);
         await IdentityHttpTest.SignInAsync(second, key);
-        Assert.Equal(HttpStatusCode.OK, (await second.PostAsJsonAsync("/api/auth/step-up/challenge", new { action = "wallet.link", address = key.GetPublicAddress() })).StatusCode);
+        foreach (var bucket in new[] { exhausted, other })
+            await IdentityHttpTest.Code(await second.PostAsJsonAsync($"/api/auth/{bucket}/challenge", new { }), 400, "request-invalid");
     }
 
     [PostgresFact]
