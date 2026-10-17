@@ -471,9 +471,9 @@ Recovery is subscriber-side; there is no producer-side republish loop.
 
 No durable production subscription is required yet. The no-op `monitor` event consumer is removed. Tests and the release check register a verification subscription, prove delivery, broker loss and catch-up, then deregister it. The release check provisions it with `Vessel:Messaging:Verification` on `migrate` and runs it in a separate `verifier` worker (deployment `verification`), so the default monitor worker keeps its production configuration; during a broker outage it checks that the API outbox holds the publication. The Notification Hub will be the first real subscription.
 
-### Notification Hub (future)
+### Notification Hub
 
-A separate plan: [Notification Hub and in-app popups](notification-hub-plan.md) (draft, October 17). Only its boundary is fixed here:
+Implemented on October 17 (PRs #62–#65) under its own plan: [Notification Hub and in-app popups](notification-hub-plan.md). The in-app channel is written in the hub's own transaction rather than through a provider queue; the queues below remain the design for external providers. The boundary fixed here:
 - **One subscription,** `notifications`. It owns per-owner rules (channels, minimum severity, event types), grouping by `runId`, the relevance and expiry rechecks at delivery, and a delivery record per notification and channel.
 - **Atomic hand-off.** In the transaction that settles its subscription receipt, the hub creates the durable pending work for each channel and its outbox message.
 - **Providers** consume `vessel.notify.<provider>` queues (`telegram`, `discord`, `in-app`), which are transport only: a provider recovers unsettled work from the hub's records, using stable delivery identities. Each implements an Application port such as `INotificationChannel`, with its own rate limits, retries and dead-letter queue.

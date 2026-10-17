@@ -6,16 +6,13 @@ advice. A chart reaching a price never proves that an order filled.
 
 ## Which version this describes
 
-This is a code snapshot dated October 14, 2026, checked against `d17f56a` on
-`t3/backend-architecture-review`. At this handoff, PR #38 is draft, its first two
-backend cleanup waves are integrated and Sol verification is complete after
-transport corrections. Later cleanup waves remain unfinished. These are checkout
-and review states, not a claim that this branch has merged or any version is deployed.
-
-The manual diary and retrospective workflows described below are present here.
-Frontend cleanup, background-monitor W0 and work in other worktrees are not part
-of this snapshot. Older discovery documents contain plans and historical limits;
-they are not a feature inventory.
+This describes `main` on October 17, 2026, after the Notification Hub merged
+(PRs #62–#65, `43ebaa0`) and the follow-up that locks an account while a Play is
+created on it. It covers the background monitor, venue funding, order identity,
+paged lists and in-app notifications. It is a description of the code, not a
+claim that any version is deployed; work in other branches is not included.
+Older discovery documents contain plans and historical limits; they are not a
+feature inventory.
 
 Start with the [four diagrams](diagrams/app-status.md). For backend internals,
 continue to the [backend guide](architecture/backend-guide.md). The
@@ -28,13 +25,14 @@ not a venue login. The token stays in memory and disconnect ends that session.
 
 | Screen | What works here |
 | --- | --- |
-| Overview | Scope balances, availability, recent imported operations and saved Plays to all accounts, a portfolio, Unassigned or one account. Group the Summary by portfolio or account and choose a realized-result period. |
-| Plays | Save ideas and plans, edit entries and exits, inspect executions, keep chart evidence, and write or amend a review. Filter the list by progress or review state. |
+| Overview | Scope balances, availability, an allocation of portfolio and account shares, recent imported operations and saved Plays to all accounts, a portfolio, Unassigned or one account. Group the Summary by portfolio or account and choose a realized-result period. |
+| Plays | Save ideas and plans, edit entries and exits, inspect executions and monitor findings, keep chart evidence, and write or amend a review. Tabs (Drafts, In progress, Needs review, Reviewed, Closed, Cancelled, All) carry server counts, with title and instrument search. |
 | Review | Inspect eligible saved closed-Play results by rolling period, portfolio, account or asset. Open contributing Plays and drill into exclusion reasons. |
 | Portfolios | Create optional groups with a name and built-in icon. Add, move or unlink accounts, including bulk membership changes. |
-| Accounts | Add manual or supported venue accounts, inspect balances and positions, refresh imports, manage credentials where needed, or disable an account. |
-| Activity | Inspect retained imported executions grouped into position operations. Expand the original facts, filter them, and preview an eligible operation for retrospective creation. |
-| Settings | Choose dark or light themes, customize colours and radius, or generate and save a named palette in this browser. Inspect connection and capability information. |
+| Accounts | Add manual or supported venue accounts, inspect balances and positions, refresh imports, ask for a monitor Check, manage credentials where needed, or disable an account. Group the list by venue or address. |
+| Activity | Inspect retained imported executions grouped into position operations, and settled funding payments. Filters and numbered pages run on the server; executions load when a row expands. Preview an eligible operation for retrospective creation. |
+| Notifications | Read in-app notifications about fills, order links, discrepancies, monitor health and credentials: Unread and All with counts, category and severity filters, links to the Play or account, Mark as read and Mark all as read. A red count on the sidebar entry (a bell on narrow screens) shows what is unread. |
+| Settings | Choose dark or light themes, customize colours and radius, or generate and save a named palette in this browser. Set notification preferences and send a test notification. Inspect connection and capability information. |
 
 One ordinary journey is Accounts, Refresh, Activity, then Plays or Review.
 Another starts with a new Play and records its reasoning before execution.
@@ -71,8 +69,11 @@ a stop is not a guaranteed maximum loss.
 
 Status, execution progress and review are separate. A saved Draft becomes
 Planned when the owner commits to it; its account and instrument become fixed.
-Later plan changes require a reason and append a revision. Recorded executions
-can move it through Open to Closed.
+Later plan changes require a reason and append a revision. Linked venue fills,
+found by the background monitor, or recorded manual executions move it through
+Open to Closed. The Execution tab shows the account's monitor state and any
+discrepancy it found, such as an open position without its stop; discrepancies
+are flagged for the owner, never corrected, and can be dismissed with a note.
 Closed and Cancelled are final; review and evidence can still change.
 
 Structured review records adherence, a mistake tag, a lesson and a next action
@@ -92,10 +93,12 @@ the current layout; [chart-plan](architecture/chart-plan.md) records its tools.
 | Manual execution | An explicit owner entry or exit on a saved manual-account Play | The owner recorded an execution, with time, side, quantity, price, source and known or unknown fees. It is not venue-confirmed. |
 | Market observation | Candles, market context or the live chart stream | A price was observed. It does not create fills, order links or execution-driven status changes. |
 
-Imported orders link to Play levels automatically only when the match is
-unambiguous. Ambiguity becomes a suggestion for the owner. Fills reach a Play
-through those order links, never merely because the account and asset match.
-Several active Plays can share an account and instrument.
+Monitor checks link imported orders to Play levels automatically only when the
+match is unambiguous. Ambiguity becomes a suggestion for the owner. Fills reach
+a Play through those order links, never merely because the account and asset
+match. A venue order keeps its own external identity per contract, and links
+point to Vessel's internal order record. Several active Plays can share an
+account and instrument.
 
 Manual executions use a chronological average-cost ledger for linear USD-quoted
 positions. Corrections require a reason and retain before/after values.
@@ -132,9 +135,14 @@ venue capabilities rather than assuming every venue provides the same data.
 | Manual | Owner-entered account and instrument | Optional account value and explicit Play executions; no venue imports | Placeholder; uploaded evidence remains usable |
 
 Lighter history excludes fee-bearing or unverified-fee fills and fills without
-reported PnL, with a coverage notice. Importing an account does not refresh its
-history automatically. A missing order token does not erase successful public
-balance/fill reads, but order completeness and linking remain limited.
+reported PnL, with a coverage notice. A missing order token does not erase
+successful public balance/fill reads, but order completeness and linking remain
+limited.
+
+Refresh also retains settled funding payments over a bounded 30-day window,
+as signed amounts with their native identities. Activity shows them beside the
+operations, attributed where the timing is unambiguous and unassigned
+otherwise. Funding never changes execution P&L, Review or sizing.
 
 Canonical instrument keys preserve multipliers, such as `1000PEPE`, while native
 venue contract IDs remain available for matching and trade links.
@@ -149,10 +157,11 @@ See [venue registration](../backend/src/Vessel.Infrastructure/DependencyInjectio
 
 | Location | Contents and lifetime |
 | --- | --- |
-| PostgreSQL | Accounts, portfolios, latest snapshots, retained fills/orders, saved Plays, plan/status/review history, order links, manual executions/corrections, diary retry records and sizing settings. Evidence notes/markup and encrypted venue credentials also live here. |
-| Server evidence directory | Original image bytes for saved Plays, behind the evidence API. The current object-store implementation is local filesystem, not S3. |
+| PostgreSQL | Accounts, portfolios, latest snapshots, retained fills/orders and funding payments, saved Plays, plan/status/review history, order links, manual executions/corrections, diary retry records and sizing settings. Also the monitor's state and discrepancies, the event log with its outbox and subscription receipts, notifications with their read state and preferences, evidence notes/markup and encrypted venue credentials. It is the record for all of them. |
+| Evidence object store | Original image bytes for saved Plays, behind the evidence API. A local directory by default; an S3-compatible service (RustFS in the Compose example) only when configured. |
+| RabbitMQ | Transport only: the `vessel.events` topic, one queue per subscription and module command queues. Losing it loses no record; subscribers catch up from PostgreSQL. |
 | Server configuration | Installation token and credential-encryption key ring. The key ring is outside the database and never sent to Vite or the browser. |
-| Browser memory | Connection token, unsaved edits/drawings/images, shell filters and scope, and the session candle cache. Navigation retains the draft; reload or disconnect discards unsaved work. |
+| Browser memory | Connection token, unsaved edits/drawings/images, shell filters and scope, the event and notification stream cursors, and the session candle cache. Navigation retains the draft; reload or disconnect discards unsaved work. |
 | Browser `localStorage` | Appearance and chart-view preferences only, including saved palettes and indicator settings. No token, execution history, candle history or Play draft. |
 | Server memory | Bounded public catalogue, candle and market-context caches, plus active market-stream subscriptions. These are not a durable candle archive. |
 
@@ -169,17 +178,22 @@ The [runtime diagram](diagrams/app-status.md#runtime-and-trust-boundaries),
 
 | Trigger | Current behaviour |
 | --- | --- |
-| Add/import account | Creates account records. Discovery is read-only; there is no automatic history refresh. |
-| Refresh account / Refresh all | Reads bounded venue state and fills, then retains available orders. Refresh all runs sequentially with progress and one result summary. This path does not assign orders to Plays. |
-| Open a tracked Play / Check execution | Checks venue orders and fills, reconciles links and derives status. While that Play editor is active, the browser repeats checks every 60 seconds when the tab is visible. |
+| Add/import account | Creates account records; discovery is read-only. The browser then queues one bounded initial refresh when the venue supports it. A failed refresh keeps the account. |
+| Refresh account / Refresh all | Reads bounded venue state, fills and funding, then retains available orders. Refresh all runs sequentially with progress and one result summary. This path does not link orders or change a Play's status. |
+| Monitor worker | Every 10 minutes by default (`Vessel:Monitor:Interval`), checks each enabled venue account with a Planned, Paused or Open Play, or with linked orders of an ended Play that may still rest: reads venue orders, fills and positions, links orders, derives status and flags discrepancies after a grace period. Every change is recorded as an event. |
+| Check | Asks the worker to run an account's check now. The answer is "accepted", not "done". It is refused while a run is pending or running, for 60 seconds after one completes, and when the worker is offline. |
+| Event stream | The browser keeps one authenticated stream. On an event it re-reads stored state; if the stream is down it polls the stored reads every 60 seconds. Opening a Play never reads venue orders or fills. |
+| Notifications worker | Turns events into in-app notifications under the owner's preferences: grouped per check run, withdrawn when superseded, shown as timed popups once across tabs and kept on the Notifications page. |
 | Open/switch/refresh chart | Loads or revalidates bounded candle windows. Manual Refresh bypasses reusable cached data. |
 | Live chart enabled | Hyperliquid data flows through one shared backend WebSocket and authenticated server-sent events. Reconnects can fall back to 15-second market-data polling. Hidden tabs pause the stream. |
 | Save, record/correct execution, confirm retrospective, review | Explicit owner writes. Version checks or preview fingerprints reject stale changes rather than silently overwriting them. |
 | Open Overview, Activity or Review | Reads retained facts and derives reports. Reporting does not sync a venue, assign executions or change a Play's status. |
 
-The market stream and execution polling are separate. Neither is an
-always-running background Play monitor. Closing the browser stops its polling.
-See [execution polling](../frontend/src/features/plays/usePlayExecution.ts),
+Monitor checks are periodic, not real time, and keep running with the browser
+closed. Market observations from the live chart never create fills or status
+changes. See the [monitor plan](architecture/play-monitor-plan.md),
+[messaging and workers](architecture/messaging-and-workers.md), the
+[Notification Hub plan](architecture/notification-hub-plan.md),
 [live market handling](../frontend/src/features/market/useLiveMarket.ts) and
 [cache rules](architecture/performance-plan.md).
 
@@ -204,10 +218,10 @@ or assume RISEx reported PnL excludes funding.
 
 | Not implemented in this checkout | What exists instead |
 | --- | --- |
-| Background Play monitoring and durable notification delivery | Browser execution checks and in-page feedback. W0 work elsewhere is not included. |
+| External notification channels, browser system notifications, price and drawing alerts | In-app notifications only: popups, the Notifications page and the unread count. |
+| Real-time execution tracking | Periodic monitor checks (10 minutes by default) and an on-demand Check with a cooldown. |
 | Strategy library, reusable strategy definitions and versions | Free-text strategy notes plus disposable discovery prototypes. |
-| Durable candle archive, backtesting and complete historical backfill | Bounded imports and memory caches. TimescaleDB is a direction, not a running component. |
-| S3-compatible evidence storage | An object-store interface with a local-filesystem implementation. |
+| Durable candle archive, backtesting and complete historical backfill | Bounded imports, a 30-day funding window and memory caches. TimescaleDB is a direction, not a running component. |
 | Multi-user onboarding or order execution | One configured owner and read-only venue access. No venue signing or trading. |
 
 The [backend review](architecture/backend-review.md) and

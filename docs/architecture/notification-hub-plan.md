@@ -1,6 +1,6 @@
 # Notification Hub and in-app notifications: development plan
 
-October 17, 2026. Status: **implementation authorized on October 17, 2026, with Sol (Codex) for design discussion and verification. The owner accepted the recommendations below provisionally, to be revisited once they can see it working, and added a Notifications page with an unread badge and timed popups.** Verified progress is recorded in [notification-hub-state.md](notification-hub-state.md).
+October 17, 2026. Status: **implemented and merged on October 17, 2026 (PRs #62–#65), with Sol (Codex) for design discussion and verification. The owner accepted the recommendations below provisionally, to be revisited once they can see it working, and added a Notifications page with an unread badge and timed popups.** Verified progress is recorded in [notification-hub-state.md](notification-hub-state.md).
 
 The owner asked to start the Notification Hub with in-app notifications. The [monitor plan](play-monitor-plan.md#notification-hub-future) fixed the boundary: one `notifications` subscription on the `vessel.events` topic, per-owner rules, grouping by `runId`, relevance and expiry checks at delivery, a delivery record per notification and channel, and providers that never change publishers or the event contract. This plan fills that boundary for the first channel, `in-app`: popups plus a Notifications page. Telegram, Discord and price or drawing alerts remain later work.
 

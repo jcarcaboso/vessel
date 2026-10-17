@@ -137,6 +137,9 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
         return result;
     }, ct);
 
+    public Task<T> WithAccountLockAsync<T>(Guid accountId, Func<Task<T>> action, CancellationToken ct) =>
+        new ExecutionStore(db, unitOfWork).WithAccountLockAsync(accountId, action, ct);
+
     public Task<IReadOnlyList<string>> DeleteAsync(Play play, CancellationToken ct) => unitOfWork.ParticipateAsync<IReadOnlyList<string>>(async () =>
     {
         var evidence = await db.Evidence.Where(x => x.PlayId == play.Id).ToListAsync(ct);

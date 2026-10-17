@@ -160,6 +160,84 @@ public sealed class DraftMovePostgresTests
     }
 
     [PostgresFact]
+    public async Task Creating_a_play_while_its_account_is_deleted_waits_and_returns_not_found()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var account = await SeedAccount(database, owner);
+        await using var deleting = database.Context(owner);
+        await using var creating = database.Context(owner);
+        await creating.Database.OpenConnectionAsync();
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var workspace = new WorkspaceStore(deleting, TestUnitOfWork.For(deleting));
+        // The deletion has removed the account but not committed when the creation starts.
+        var deletion = TestUnitOfWork.For(deleting).ExecuteAsync(() => workspace.WithManagementLockAsync(() => workspace.WithAccountLockAsync(account, async current =>
+        {
+            await workspace.DeleteAccountAsync(current, default);
+            reached.TrySetResult();
+            await release.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            return true;
+        }, default), default), default);
+        Task<PlayDto>? creation = null;
+        try
+        {
+            await reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            creation = Service(creating).CreateAsync(new(account, "BTC", "manual", "Racing", TestPlays.Plan()), default);
+            await WaitForLock(database, creating);
+        }
+        finally { release.TrySetResult(); }
+        await deletion.WaitAsync(TimeSpan.FromSeconds(10));
+        var error = await Assert.ThrowsAsync<ProblemException>(() => creation!.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(404, error.StatusCode);
+        await using var db = database.Context(owner);
+        Assert.Empty(await db.Plays.ToListAsync());
+    }
+
+    [PostgresFact]
+    public async Task Deleting_an_account_while_a_play_is_created_on_it_waits_and_is_refused()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var account = await SeedAccount(database, owner);
+        var gate = new BeforePlayInsert();
+        await using var creating = new VesselDbContext(new DbContextOptionsBuilder<VesselDbContext>()
+            .UseNpgsql(database.ConnectionString).AddInterceptors(gate).Options, new CoreOwner(owner));
+        await using var deleting = database.Context(owner);
+        await deleting.Database.OpenConnectionAsync();
+        var creation = Service(creating).CreateAsync(new(account, "BTC", "manual", "Racing", TestPlays.Plan()), default);
+        Task<bool>? deletion = null;
+        try
+        {
+            // The creation holds the account and is about to insert its Play.
+            await gate.Reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var workspace = new WorkspaceStore(deleting, TestUnitOfWork.For(deleting));
+            deletion = TestUnitOfWork.For(deleting).ExecuteAsync(() => workspace.WithManagementLockAsync(() => workspace.WithAccountLockAsync(account, async current =>
+            {
+                await workspace.DeleteAccountAsync(current, default);
+                return true;
+            }, default), default), default);
+            await Task.WhenAny(deletion, WaitForLock(database, deleting)).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally { gate.Release.TrySetResult(); }
+        var play = await creation.WaitAsync(TimeSpan.FromSeconds(10));
+        var error = await Assert.ThrowsAsync<ProblemException>(() => deletion!.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(409, error.StatusCode);
+        await using var db = database.Context(owner);
+        Assert.Equal(play.Summary.Id, Assert.Single(await db.Plays.ToListAsync()).Id);
+        Assert.Single(await db.Accounts.ToListAsync());
+    }
+
+    private static async Task<Guid> SeedAccount(CoreDatabase database, Guid owner)
+    {
+        await using var db = database.Context(owner);
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Racing");
+        db.Accounts.Add(account);
+        await db.SaveChangesAsync();
+        return account.Id;
+    }
+
+    [PostgresFact]
     public async Task A_second_move_with_a_stale_source_and_version_returns_conflict()
     {
         await using var database = await CoreDatabase.CreateAsync();
@@ -282,6 +360,21 @@ public sealed class DraftMovePostgresTests
             command.Parameters.AddWithValue("pid", pid);
             if (await command.ExecuteScalarAsync(timeout.Token) is string waitEvent) return waitEvent;
             await Task.Delay(10, timeout.Token);
+        }
+    }
+
+    // Gate a creation after its account lock, immediately before the Play insert.
+    private sealed class BeforePlayInsert : SaveChangesInterceptor
+    {
+        public TaskCompletionSource Reached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            Reached.TrySetResult();
+            await Release.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            return result;
         }
     }
 

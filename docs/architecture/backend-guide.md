@@ -1,6 +1,6 @@
 # Backend guide
 
-Start here if you are new to the Vessel backend. This guide explains how the code is organised, what each module does, how the modules work together and which rules hold everywhere. It describes the code as of October 17, 2026, after the background monitor, venue funding and the October 16–17 improvement pass. The contracts and state documents in this folder hold the detailed rules for each feature. Where this guide and the code disagree, the code wins; please fix the guide.
+Start here if you are new to the Vessel backend. This guide explains how the code is organised, what each module does, how the modules work together and which rules hold everywhere. It describes the code as of October 17, 2026, after the background monitor, venue funding, the October 16–17 improvement pass and the Notification Hub. The contracts and state documents in this folder hold the detailed rules for each feature. Where this guide and the code disagree, the code wins; please fix the guide.
 
 For a shorter tour of the whole app, start with [App today](../app-status.md). Read [`CONTEXT.md`](../../CONTEXT.md) for the product vocabulary. Improvement work is tracked in [`backend-review.md`](backend-review.md).
 
@@ -14,6 +14,7 @@ Vessel is a self-hosted, single-owner trading diary. The backend is an ASP.NET C
 - derives Activity (position round trips), Overview totals, Review metrics and sizing suggestions from those facts;
 - records funding payments as signed settlements beside the fills;
 - checks open Plays against the venue in a separate background worker and records every change as an event that the browser streams and RabbitMQ subscribers receive;
+- turns those events into in-app notifications in a second worker (the Notification Hub), which the browser reads as a feed on the same stream;
 - serves public market data (candles, market context, a live stream) and stores evidence images.
 
 It never places orders, never signs anything at a venue and never treats a price touch as a fill.
@@ -31,7 +32,7 @@ backend/
     Vessel.Infrastructure/    auth, credential vault, evidence storage, venue adapters, shared use-case registration
     Vessel.Messaging/         Wolverine/RabbitMQ adapter: outbox, topology, subscriptions, feature modules
     Vessel.Api/               composition root, middleware and HTTP endpoints
-    Vessel.Worker/            background host (monitor scheduler, subscription catch-up, event retention)
+    Vessel.Worker/            background host (monitor scheduler, notification hub, subscription catch-up, event retention)
   tests/Vessel.Tests/         one xUnit project: unit, API (WebApplicationFactory) and PostgreSQL tests
 ```
 
@@ -61,9 +62,9 @@ flowchart LR
 | Application | One folder per feature with its use-case service, request/response DTOs and the store port it needs. Venue ports and the `IVenueRegistry`. | SQL, EF types, `HttpClient` configuration, venue wire formats. |
 | Persistence | `VesselDbContext`, per-entity configurations, one store class per port, the `UnitOfWork`, the event store, dispatcher and retention (`Events/`), explicit migrations. Registers the context and stores. | Business rules beyond locking and storage. |
 | Infrastructure | Bearer authentication and owner context, AES-GCM credential vault, evidence object stores (local and S3-compatible), venue adapters and their caches. `ApplicationServices` (`AddVesselApplication()`, `AddVesselMonitoring()`): the use-case registrations both hosts share, and the host-side `Monitoring/MonitorRunExecutor`. | Use-case logic. |
-| Messaging | The only project that references Wolverine and RabbitMQ: the outbox behind `IVesselEventOutbox`, the `vessel.events` topic and subscription queues, provisioning commands, and feature modules (`Modules/Monitor`) that declare their own topology and hosted services. | Business decisions; Domain and Application never reference it. |
+| Messaging | The only project that references Wolverine and RabbitMQ: the outbox behind `IVesselEventOutbox`, the `vessel.events` topic and subscription queues, provisioning commands, and feature modules (`Modules/Monitor`, `Modules/Notifications`) that declare their own topology and hosted services. | Business decisions; Domain and Application never reference it. |
 | Api | `Program.cs` pipeline (calls the shared `AddVesselApplication()` and `AddVesselMonitoring()`), endpoint mapping files and transport rules for credentials, compression, forwarded headers and production configuration. | Business decisions. |
-| Worker | `Program.cs` (`WorkerHost`): the same shared registrations, then the modules in `Vessel:Worker:Modules` (default `["monitor"]`, whose `MonitorScheduler` claims due accounts) and subscription maintenance. Shipped in the API image with its own entrypoint. | HTTP endpoints. |
+| Worker | `Program.cs` (`WorkerHost`): the same shared registrations, then the modules in `Vessel:Worker:Modules` (default `["monitor"]`, whose `MonitorScheduler` claims due accounts; the `notifications` deployment runs `["notifications"]`) and subscription maintenance. Shipped in the API image with its own entrypoint. | HTTP endpoints. |
 
 ## How a request flows
 
@@ -101,6 +102,7 @@ Each Application folder is a feature. The table lists its entry point, what it r
 | Plays/Execution | `PlayExecutionService`, `ExecutionMatcher`, `ExecutionIntegrity` | `IPlayExecutionStore` | Retain venue orders, link orders to plan levels (automatically when unambiguous, otherwise as suggestions), move Plays to Open/Closed from linked fills. Called by Monitoring as its `IMonitorImporter`; the owner links and unlinks by hand. | [play-lifecycle](play-lifecycle.md) |
 | Monitoring | `MonitorCoordinator`, `MonitorDiscrepancyService`, `MonitorExecutionView` | `IMonitorStore`, `IMonitorDiscrepancyStore` | Account Refresh and Check admission, leases and the two-read budget, the run that imports facts and reconciles Plays, venue-versus-Play discrepancies and exit watches. | [play-monitor-plan](play-monitor-plan.md), [messaging-and-workers](messaging-and-workers.md) |
 | Events | `IVesselEventSink`, `IVesselEventReader`, `IVesselEventSubscriber` | (implemented in `Persistence/Events`) | Events appended in the same transaction as the change, read by the browser (`/api/events`, `/api/events/stream`) and delivered to subscriptions with receipts and catch-up. | [messaging-and-workers](messaging-and-workers.md) |
+| Notifications | `NotificationHub` (the `notifications` subscriber), `NotificationService`, `NotificationComposer` | `INotificationHubStore`, `INotificationStore` | Turns events into in-app notifications under the owner's preferences: groups a check run's events, withdraws superseded notifications, checks relevance at delivery and composes channel-neutral text. Serves the feed, popup claims, read state, preferences and test requests (`/api/notifications`), and adds notification frames to the event stream. | [notification-hub-plan](notification-hub-plan.md), [notification-hub-api-contract](notification-hub-api-contract.md) |
 | Diary | `DiaryService`, `ManualLedger` | `IDiaryStore` | Owner-entered manual executions with correction history, retrospective Plays from completed imported operations, idempotent writes by request ID. | [diary-completion-contract](diary-completion-contract.md) |
 | Activity | `ActivityService`, `OperationAggregator`, `OperationFunding` | `IActivityStore`, `IWorkspaceStore` | Turns retained fills into position round trips ("operations") with explicit coverage notices, and attributes funding payments to them when the timestamps allow. Filters, orders and pages them on the server (`GET /api/activity`); one operation's rows load on expand (`/api/activity/fills`). | [activity-operations](activity-operations.md), [list-paging](list-paging.md), [venue-funding](venue-funding.md) |
 | Overview | `OverviewSummaryService` | reuses Workspace and Activity | Scoped balance, availability, unrealized and realized summaries grouped by portfolio or account. | [core-workspace-contract](core-workspace-contract.md) |
@@ -199,6 +201,19 @@ The browser does not poll Check. It follows `/api/events/stream` (server-sent ev
 
 Every write use case runs in one `IUnitOfWork.ExecuteAsync`, which owns the only transaction and commit; stores and their lock helpers participate and never commit. Before commit, the event store captures link, fill and status changes and appends their events (and any staged commands) under the owner's `event_cursors` row lock, so an event exists only if its change committed. After commit, the outbox publishes once to the `vessel.events` topic; subscribers settle each delivery through a receipt in PostgreSQL and recover by catch-up from the database. Object-storage I/O refuses to start inside a unit. Details: [`messaging-and-workers.md`](messaging-and-workers.md).
 
+### Notifications
+
+The `notifications` worker deployment runs the `NotificationHub` as the `notifications` subscription (filter `#`), through the same dispatcher, receipts and catch-up as any subscriber. For each event it:
+
+1. withdraws earlier notifications that the event supersedes, for example a discrepancy that resolved;
+2. applies the owner's preferences (channel switch, minimum severity, categories) and the age limit;
+3. checks that the subject is still relevant, for example the discrepancy revision;
+4. composes the text, and writes the notification, its delivery and the owner's feed cursor and unread count in the dispatcher's transaction.
+
+Events of one check run (`play.*`, `execution.*`, `link.*`) are grouped per account and run under an advisory lock, with a bounded group size.
+
+The API reads that feed (`/api/notifications`) and sends `notification` frames on the existing event stream with their own cursor. A popup is claimed once per notification across tabs. There is no external channel yet. Details: [`notification-hub-plan.md`](notification-hub-plan.md) and the [API contract](notification-hub-api-contract.md).
+
 ### Plays and plans
 
 - A Play starts as a Draft. `PlayDocuments.Normalize` validates the plan (direction, sizing mode, whole-number leverage, entries with stops and targets, notes) and keeps every number as the exact text the owner typed.
@@ -237,14 +252,16 @@ Several requests, API processes and workers can touch the same account at once: 
 | --- | --- | --- |
 | 0 | Advisory `vessel-diary-request:{owner}:{requestId}` | Idempotent diary writes (`DiaryStore.WithRequestLockAsync`) |
 | 1 | Advisory `vessel-management:{owner}` | Portfolio/account grouping changes, Play moves between accounts (`WorkspaceStore.WithManagementLockAsync`, `PlayStore.WithPlayLockAsync`) |
-| 2 | Account row `FOR UPDATE` | Refresh and Check admission and apply, settings, delete, credential save (`MonitorStore.LockedAsync`, `WorkspaceStore.WithAccountLockAsync`, `ExecutionStore.WithAccountLockAsync`, `MonitorDiscrepancyStore`) |
+| 2 | Account row `FOR UPDATE` | Refresh and Check admission and apply, settings, delete, credential save, Play creation (`MonitorStore.LockedAsync`, `WorkspaceStore.WithAccountLockAsync`, `ExecutionStore.WithAccountLockAsync` through `PlayStore.WithAccountLockAsync`, `MonitorDiscrepancyStore`) |
 | 3 | `monitor_accounts` row `FOR UPDATE` | Monitor admission, claims, renewals and apply (`MonitorStore.LockedAsync`) |
 | 4 | Advisory `vessel-monitor-budget:{owner}` | The two-concurrent-reads budget (`MonitorStore.ReadCapacityAsync`) |
-| 5 | Advisory `vessel-execution:{account}` | Order linking and reconciliation (`ExecutionStore.WithAccountLockAsync`) |
+| 5 | Advisory `vessel-execution:{account}` | Order linking and reconciliation, Play creation (`ExecutionStore.WithAccountLockAsync`) |
 | 6 | Play row `FOR NO KEY UPDATE` | Play edits and status changes (`PlayStore.WithPlayLockAsync`, `ExecutionStore.ActivePlaysAsync`) |
 | last | `event_cursors` row `FOR UPDATE` | Event sequence allocation just before commit (`VesselEventStore.BeforeCommitAsync`), held until commit |
 | — | Advisory `vessel-evidence:{play}` | Evidence count limit (`EvidenceStore.AddAsync`) |
 | — | Owner retention advisory key (`VesselEventSql.RetentionLock`) | Exclusive for retention floor publication; shared for subscription dispatch and admin receipt retries, before the receipt row lock |
+| — | `events` row `FOR KEY SHARE` | Subscription dispatch looks the event up with it and holds it until commit, so an account deletion waits instead of removing the event before its receipt is written (`EventDispatcher`) |
+| — | Advisory `{owner}:notification-run:{run}:{account}`, `…:notification-subject:{subject}`, `…:notification-test:{event}`, then `notification_cursors` row `FOR UPDATE` | The hub, inside a dispatch; the API's read, read-all and preference writes take the cursor row only. Account disable and deletion take it after their account lock and, for deletion, after the account's events |
 
 The worker's `ClaimDueAsync` locks accounts with `SKIP LOCKED` in the same account-then-monitor order. The lock helpers require an active unit of work and join its transaction, so nested calls within a request share it. After acquiring a row lock, the store reloads the entity because the scoped `DbContext` may already track an older copy. Plays also use `Version` as an optimistic concurrency token, and account settings use `SettingsRevision`.
 
@@ -272,6 +289,7 @@ All tables have `OwnerId` and composite owner foreign keys. Entity mappings live
 | `play_discrepancies` | | Venue-versus-Play discrepancies and their lifecycle. |
 | `events`, `event_cursors`, `event_dedup`, `event_fills`, `event_baselines` | (SQL, `Persistence/Events`) | The event log, per-owner sequence and epoch, de-duplication and captured fill baselines. |
 | `event_subscriptions`, `event_receipts`, `messaging_deployments` | (SQL) | Subscription registrations, low-water marks and per-event receipts; provisioned deployments. |
+| `notifications`, `notification_sources`, `notification_deliveries`, `notification_cursors`, `notification_preferences`, `notification_heartbeats` | (SQL, `Persistence/Notifications`) | Composed notifications, the events behind each, the in-app delivery and its read state, the owner's feed sequence, unread count and reset version, preferences, and the hub's heartbeat. No foreign keys to accounts or Plays; account deletion removes them explicitly. |
 
 Migrations live in `Vessel.Persistence/Migrations` and are **never** applied at API startup. Apply them with `pnpm db:migrate` in development, or the `/app/migrate` bundle in the API image (see [`deploy/README.md`](../../deploy/README.md)).
 
@@ -295,6 +313,7 @@ Migrations live in `Vessel.Persistence/Migrations` and are **never** applied at 
 | `Vessel__Evidence__…` | Upload limits and storage (`Local` root by default, or `Provider=S3`). |
 | `Vessel__Monitor__…` | Check interval, protection grace, manual cooldown, heartbeat timeout, watch and unobservable lifetimes. |
 | `Vessel__Events__…` | Event retention days, stream poll interval and `StreamMaxLifetime`. |
+| `Vessel__Notifications__…` | Notification retention, maximum event age, popup window, run group limit, test cooldown and the hub's heartbeat timeout and file. |
 | `Vessel__Messaging__…`, `Vessel__Worker__…` | RabbitMQ URI and deployments; the worker's modules and deployment name. |
 | `Vessel__ForwardedHeaders__…` | Trusted proxies and networks. |
 
