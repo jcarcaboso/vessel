@@ -289,6 +289,42 @@ public sealed class MultiOwnerWorkerTests
         });
     }
 
+    [PostgresTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Manual_check_is_accepted_as_pending_when_the_owner_or_venue_is_at_capacity(bool ownerCapacity)
+    {
+        await using var fixture = await Fixture.CreateAsync(firstAccounts: 3, venueConcurrency: ownerCapacity ? 4 : 1);
+        var target = fixture.Accounts[fixture.First];
+        var busyOwner = ownerCapacity ? fixture.First : fixture.Second;
+        await using (var db = fixture.Database.Context(busyOwner))
+        {
+            var busyAccounts = await db.Accounts.Where(a => a.Id != target).ToListAsync();
+            foreach (var account in busyAccounts)
+            {
+                var row = new MonitorAccount { OwnerId = busyOwner, AccountId = account.Id };
+                var request = Guid.NewGuid();
+                row.Admit(request, "manual", fixture.Clock.GetUtcNow());
+                Assert.True(row.Claim(request, "another-process", fixture.Clock.GetUtcNow(), MonitorOptions.Lease));
+                db.Add(row);
+            }
+            await db.SaveChangesAsync();
+            Assert.Equal(ownerCapacity ? 2 : 1, busyAccounts.Count);
+        }
+        await using var scope = fixture.Host.Services.GetRequiredService<IOwnerScopeFactory>().Create(fixture.First);
+        var coordinator = scope.Services.GetRequiredService<MonitorCoordinator>();
+        var accepted = await coordinator.RequestAsync(target, default);
+        Assert.Equal("pending", accepted.Monitor.ManualState);
+        await using var check = fixture.Database.Context(fixture.First);
+        var pending = await check.Set<MonitorAccount>().SingleAsync(m => m.AccountId == target);
+        Assert.Equal(accepted.RequestId, pending.RequestId);
+        Assert.Equal("pending", pending.ManualState);
+        // Queueing is allowed, not execution: claiming still enforces both capacities.
+        Assert.Null(await scope.Services.GetRequiredService<IMonitorStore>().ClaimAsync(target, accepted.RequestId,
+            "worker", fixture.Clock.GetUtcNow(), default));
+        await Assert.ThrowsAsync<MonitorAdmissionException>(() => coordinator.RequestAsync(target, default));
+    }
+
     [PostgresFact]
     public async Task A_held_account_row_is_skipped_so_another_owner_is_claimed_without_waiting()
     {
