@@ -124,7 +124,7 @@ Subscription definitions (`EventSubscription`) live in Persistence because the d
 | `play.opened` | Mutation capture: Planned or Paused → Open | `info`; `warning` from Paused | `play:{playId}:opened` |
 | `play.closed` | Mutation capture: Open → Closed | `info` | `play:{playId}:closed` |
 | `play.status-changed` | Mutation capture: other status changes | `info` | `status-change:{statusChangeId}` |
-| `execution.filled` | Mutation capture: new linked fill quantity | `info`; `warning` for stops | `order:{accountId}:{orderId}:filled:{cumulativeQuantity}` |
+| `execution.filled` | Mutation capture: new linked fill quantity | `info`; `warning` for stops | `order:{accountId}:{importedOrderId}:filled:{cumulativeQuantity}` (internal order ID; payload `source.orderIds` stay venue IDs) |
 | `link.needs-confirmation` | Mutation capture: link became `suggested` | `warning` | `link:{linkId}:suggested` |
 | `execution.link-changed` | Mutation capture: other link changes | `info` | `link-change:{changeId}` |
 | `discrepancy.opened` | `MonitorDiscrepancyService` | per kind | `discrepancy:{id}:{revision}:opened` |

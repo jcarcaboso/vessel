@@ -651,6 +651,15 @@ unchanged and compresses static assets only.
 
 ## Upgrade
 
+### After v0.2.0: order identity (breaking, no upgrade path)
+
+The next release's `OrderIdentity` migration changes how orders, fills and
+Play order links are keyed and has **no backfill**. It refuses to run when
+the database holds imported orders, fills or links. There is no retained-data
+upgrade path: an installation with v0.2.0 data must be recreated (fresh
+database and evidence store) before applying it. See
+`docs/architecture/order-identity.md`.
+
 ### From v0.1.3 to v0.2.0 (the account monitor)
 
 This upgrade adds two services and new required settings. Its migrations sort
