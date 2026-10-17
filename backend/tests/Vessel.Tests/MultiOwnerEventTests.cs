@@ -5,21 +5,78 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Vessel.Application.Events;
 using Vessel.Application.Ownership;
 using Vessel.Domain.Accounts;
 using Vessel.Messaging;
+using Vessel.Messaging.Modules;
 using Vessel.Messaging.Modules.Verification;
 using Vessel.Persistence;
 using Vessel.Persistence.Events;
 using Vessel.Persistence.Events.Subscriptions;
+using Wolverine;
 
 namespace Vessel.Tests;
 
 public sealed class MultiOwnerEventTests
 {
+    [VesselEventPostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Incompatible_registration_is_inert_but_warns_unlike_an_absent_registration(bool changedModule)
+    {
+        await using var runtime = await OwnerEventRuntime.CreateAsync();
+        await runtime.RegisterAsync();
+        var message = await runtime.AppendAsync(runtime.First, "retained");
+        var incompatible = new EventSubscription(runtime.Subscription.Name, changedModule ? "different" : "tests",
+            changedModule ? ["#"] : ["monitor.#"]);
+        await using var scope = runtime.Scopes.Create(runtime.First);
+        var dispatcher = scope.Services.GetRequiredService<EventDispatcher>();
+        Assert.Equal(DispatchOutcome.NotResponsible,
+            (await dispatcher.DispatchAsync(new("absent", "tests", ["#"]), runtime.First, message.Id, DispatchTrigger.Live, default)).Outcome);
+        Assert.DoesNotContain(runtime.Logs.Messages, m => m.Level >= LogLevel.Warning);
+        Assert.Equal(DispatchOutcome.NotResponsible,
+            (await dispatcher.DispatchAsync(incompatible, runtime.First, message.Id, DispatchTrigger.Live, default)).Outcome);
+        Assert.Equal(-1, (await scope.Services.GetRequiredService<EventCatchUp>().RunAsync(incompatible, default)).LowWaterMark);
+        Assert.Contains(runtime.Logs.Messages, m => m.Level == LogLevel.Warning &&
+            m.Text.Contains(runtime.Subscription.Name, StringComparison.Ordinal) &&
+            m.Text.Contains("registered with a different filter", StringComparison.Ordinal));
+        Assert.Equal(0, await runtime.CountAsync("SELECT count(*) FROM event_subscriptions"));
+        Assert.Equal(0, await runtime.CountAsync("SELECT count(*) FROM event_receipts"));
+        Assert.Equal(0, runtime.Subscriber.Calls(message.Id));
+    }
+
+    [VesselEventPostgresFact]
+    public async Task Listener_acknowledges_directory_failure_without_receipt_and_catch_up_recovers_the_event()
+    {
+        var module = new VerificationModule();
+        await using var runtime = await OwnerEventRuntime.CreateAsync(subscription: module.Subscriptions.Single());
+        await runtime.RegisterAsync();
+        var message = await runtime.AppendAsync(runtime.Second, "directory-outage");
+        var topology = new MessagingTopology(new(), new VesselModuleRegistry([module]));
+        var host = new MessagingHost("verification", [module]);
+        runtime.Directory.Checking = (_, _) => throw new InvalidOperationException("Synthetic private directory failure");
+        await EventSubscriptionListener.Handle(message,
+            new Envelope { Destination = new Uri("rabbitmq://queue/" + topology.SubscriptionQueue(runtime.Subscription.Name)) },
+            host, topology, runtime.Scopes, runtime.Directory,
+            runtime.Services.GetRequiredService<ILogger<EventSubscriptionHandlerLog>>(), default);
+        Assert.Empty(await runtime.StatusAsync(runtime.Second));
+        Assert.Equal(0, await runtime.CountAsync("SELECT count(*) FROM event_receipts"));
+        Assert.Equal([runtime.Second], await runtime.Store.CatchUpOwnersAsync(runtime.Subscription, null, runtime.Clock.GetUtcNow(), default));
+        Assert.Contains(runtime.Logs.Messages, m => m.Level == LogLevel.Warning &&
+            m.Text.Contains("acknowledged after InvalidOperationException", StringComparison.Ordinal));
+        Assert.DoesNotContain(runtime.Logs.Messages, m => m.Text.Contains("Synthetic private", StringComparison.Ordinal));
+        runtime.Directory.Checking = null;
+        runtime.Clock.Advance(TimeSpan.FromMinutes(1));
+        var recovered = await runtime.CatchUpAsync(runtime.Second);
+        Assert.Equal((1, 1L), (recovered.Discovered, recovered.LowWaterMark));
+        Assert.Equal(1, runtime.Subscriber.Calls(message.Id));
+        Assert.Equal(1, await runtime.CountAsync("SELECT count(*) FROM event_receipts WHERE state='delivered'"));
+    }
+
     [VesselEventPostgresFact]
     public async Task First_events_of_new_owners_initialize_once_and_dispatch_concurrently_in_their_own_scope()
     {
@@ -332,8 +389,9 @@ public sealed class MultiOwnerEventTests
             new() { MaxAttempts = 1, RetryJitter = 0, DiscoveryGrace = TimeSpan.Zero }));
         await runtime.RegisterAsync();
         foreach (var owner in new[] { runtime.First, runtime.Second })
+        for (var index = 0; index < 2; index++)
         {
-            var message = await runtime.AppendAsync(owner, "retry");
+            var message = await runtime.AppendAsync(owner, $"retry-{index}");
             Assert.Equal(DispatchOutcome.Failed, (await runtime.DispatchAsync(owner, message.Id)).Outcome);
         }
         var output = new StringWriter();
@@ -341,11 +399,15 @@ public sealed class MultiOwnerEventTests
         Assert.Equal(2, await MessagingCommands.RunAsync(["retry-event-receipts", "verification", "--all-owners", "--owner",
             runtime.First.ToString()], runtime.Configuration, output));
         Assert.Equal(0, await MessagingCommands.RunAsync(["retry-event-receipts", "verification", "--owner",
-            runtime.First.ToString()], runtime.Configuration, output));
-        Assert.Equal(1, await runtime.CountAsync("SELECT count(*) FROM event_receipts WHERE state='failed'"));
-        Assert.Equal(0, await MessagingCommands.RunAsync(["retry-event-receipts", "verification", "--all-owners"],
+            runtime.First.ToString(), "--limit", "1"], runtime.Configuration, output));
+        Assert.Equal(3, await runtime.CountAsync("SELECT count(*) FROM event_receipts WHERE state='failed'"));
+        Assert.Equal(0, await MessagingCommands.RunAsync(["retry-event-receipts", "verification", "--all-owners", "--limit", "1"],
             runtime.Configuration, output));
-        Assert.Equal(2, await runtime.CountAsync("SELECT count(*) FROM event_receipts WHERE state='pending'"));
+        Assert.Equal(3, await runtime.CountAsync("SELECT count(*) FROM event_receipts WHERE state='pending'"));
+        Assert.Equal(1, await runtime.CountAsync("SELECT count(*) FROM event_receipts WHERE state='failed'"));
+        Assert.Equal(0, await MessagingCommands.RunAsync(["retry-event-receipts", "verification", "--all-owners", "--limit", "1"],
+            runtime.Configuration, output));
+        Assert.Equal(4, await runtime.CountAsync("SELECT count(*) FROM event_receipts WHERE state='pending'"));
     }
 
     private static async Task AssertNoSubscriberRowsAsync(OwnerEventRuntime runtime)
@@ -384,7 +446,7 @@ internal sealed class OwnerEventRuntime : IAsyncDisposable
             ["Vessel:Messaging:Verification"] = "true"
         }).Build();
         var services = new ServiceCollection();
-        services.AddLogging();
+        services.AddLogging(logging => logging.AddProvider(Logs));
         services.AddScoped<IJournalOwnerContext, AssignedOwnerContext>();
         services.AddSingleton<IJournalOwnerDirectory>(Directory);
         services.AddSingleton<TimeProvider>(Clock);
@@ -405,6 +467,7 @@ internal sealed class OwnerEventRuntime : IAsyncDisposable
     public EventSubscriptionTests.ManualClock Clock { get; } = new();
     public EventSubscriptionTests.GatedSubscriber Subscriber { get; } = new();
     public CommitFailureOnce CommitFailure { get; } = new();
+    public BackgroundWorkLogs Logs { get; } = new();
     public ServiceProvider Services { get; }
     public IConfiguration Configuration { get; }
     public IOwnerScopeFactory Scopes => Services.GetRequiredService<IOwnerScopeFactory>();

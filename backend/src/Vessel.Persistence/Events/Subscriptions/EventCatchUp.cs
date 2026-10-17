@@ -24,7 +24,7 @@ public sealed class EventCatchUp(VesselDbContext db, UnitOfWork work, EventDispa
         var initialized = await work.ExecuteAsync(async () =>
         {
             await LockRetentionAsync(cancellationToken);
-            return await SubscriptionProgress.InitializeAsync(db, subscription, cancellationToken) is not null;
+            return await SubscriptionProgress.InitializeAsync(db, subscription, logger, cancellationToken) is not null;
         }, cancellationToken);
         if (!initialized) return new(0, 0, -1);
         var types = EventSubscriptionRegistry.MatchingTypes(subscription);
@@ -77,7 +77,8 @@ public sealed class EventCatchUp(VesselDbContext db, UnitOfWork work, EventDispa
         return await work.ExecuteAsync(async () =>
         {
             await LockRetentionAsync(ct);
-            if (!await SubscriptionProgress.LockRegistrationAsync(db, subscription, ct)) return -1L;
+            if (await SubscriptionProgress.LockRegistrationAsync(db, subscription, logger, ct) != SubscriptionRegistration.Compatible)
+                return -1L;
             await using var locked = VesselEventSql.TransactionCommand(db, """
                 SELECT s.low_water_mark,s.responsible_from,c.sequence,c.retention_floor
                 FROM event_subscriptions s LEFT JOIN event_cursors c ON c.owner_id=s.owner_id

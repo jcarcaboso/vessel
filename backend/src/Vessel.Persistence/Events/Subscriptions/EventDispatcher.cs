@@ -76,7 +76,7 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
         DispatchTrigger trigger, Attempt attempt, CancellationToken ct)
     {
         await LockRetentionSharedAsync(ct);
-        var responsible = await SubscriptionProgress.InitializeAsync(db, subscription, ct);
+        var responsible = await SubscriptionProgress.InitializeAsync(db, subscription, logger, ct);
         if (responsible is null) return DispatchOutcome.NotResponsible;
         var retained = await RetainedAsync(eventId, ct);
         if (retained is null)
@@ -134,7 +134,8 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
         Exception error, CancellationToken ct)
     {
         await LockRetentionSharedAsync(ct);
-        if (!await SubscriptionProgress.LockRegistrationAsync(db, subscription, ct)) return DispatchOutcome.NotResponsible;
+        if (await SubscriptionProgress.LockRegistrationAsync(db, subscription, logger, ct) != SubscriptionRegistration.Compatible)
+            return DispatchOutcome.NotResponsible;
         if (await RetainedAsync(eventId, ct) is not { } retained || retained.Sequence <= retained.Floor)
             return DispatchOutcome.Historical;
         if (!await ResponsibleAsync(subscription, retained.Sequence, retained.Type, ct)) return DispatchOutcome.NotResponsible;
@@ -213,7 +214,7 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
             ct, ("owner", db.CurrentOwnerId), ("id", eventId)) is not null;
 
     private async Task<bool> ResponsibleAsync(EventSubscription subscription, long sequence, string type, CancellationToken ct) =>
-        subscription.Matches(type) && await SubscriptionProgress.InitializeAsync(db, subscription, ct) is { } responsible &&
+        subscription.Matches(type) && await SubscriptionProgress.InitializeAsync(db, subscription, logger, ct) is { } responsible &&
         sequence > responsible;
 
     private async Task<DispatchOutcome?> EligibilityAsync(CancellationToken ct) =>

@@ -30,6 +30,8 @@ public sealed class OwnerScopeArchitectureTests
         // SQL text hashes make an added statement (even in an approved file) require an inventory review.
         // Schema migrations are separately reviewed DDL, not runtime owner-scope bypasses.
         // Advisory locks on owner-derived or previously owner-validated entity keys are inventoried too.
+        // To add an entry, review the statement's scope, then copy its path|hash from this assertion's diff.
+        // Identity-lane SQL is added only after that lane is reviewed and stacked here.
         string[] reviewed =
         [
             "Vessel.Api/EvidenceCopyCommand.cs|c9b34ee7f02a2f083c971b5bcfd2b6dfb239af4970d91d8e56dc616d55a3d9c4",
@@ -41,7 +43,7 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/Events/Subscriptions/EventCatchUp.cs|7225f3f3ae3c860c6e54be3ec2ae2d6512c0728b4ac7d97355722ffff8a5fed6",
             "Vessel.Persistence/Events/Subscriptions/EventDispatcher.cs|7225f3f3ae3c860c6e54be3ec2ae2d6512c0728b4ac7d97355722ffff8a5fed6",
             "Vessel.Persistence/Events/Subscriptions/EventReceiptAdmin.cs|7225f3f3ae3c860c6e54be3ec2ae2d6512c0728b4ac7d97355722ffff8a5fed6",
-            "Vessel.Persistence/Events/Subscriptions/SubscriptionProgress.cs|422702f2f748afa20efa477381e5321703a39dbb7213bb880f0c203c9218478c",
+            "Vessel.Persistence/Events/Subscriptions/SubscriptionProgress.cs|29f0701052dbb3611ea20ace64fc9d2907dbdaedc4d05debf78bdb149406d60c",
             "Vessel.Persistence/Events/Subscriptions/SystemEventSubscriptionStore.cs|29f0701052dbb3611ea20ace64fc9d2907dbdaedc4d05debf78bdb149406d60c",
             "Vessel.Persistence/Events/Subscriptions/SystemEventSubscriptionStore.cs|33eb5f4699ea96d9ad88233bdce435edf6aac8de7ad25117b6e0983e0b899441",
             "Vessel.Persistence/Events/Subscriptions/SystemEventSubscriptionStore.cs|3cee12e62179e1aadd9bfcb5c7637482f84fa2b9659157b483e1643147ede685",

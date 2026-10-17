@@ -121,6 +121,8 @@ public sealed partial class EventSubscriptionTests
     {
         await using var runtime = await Runtime.CreateAsync();
         var raced = await runtime.RegisterNewAsync("raced");
+        var earlier = await runtime.AppendAsync(Draft("earlier"));
+        Assert.Equal(DispatchOutcome.Delivered, (await runtime.DispatchAsync(raced, earlier.Id)).Outcome);
         var slow = await runtime.AppendAsync(Draft("slow"));
         runtime.Clock.Advance(TimeSpan.FromMinutes(1));
         var live = runtime.DispatchAsync(raced, slow.Id);
@@ -130,8 +132,28 @@ public sealed partial class EventSubscriptionTests
         await Task.Delay(300);
         runtime.Subscriber.Release.TrySetResult();
         Assert.Equal(DispatchOutcome.Delivered, (await live).Outcome);
-        // First-row initialization may wait for live delivery, then see its settled receipt.
-        Assert.InRange((await catchUp).Discovered, 0, 1);
+        Assert.Equal(1, (await catchUp).Discovered);
+        Assert.Equal(1, runtime.Subscriber.Calls(earlier.Id));
+        Assert.Equal(1, runtime.Subscriber.Calls(slow.Id));
+        Assert.Equal(("delivered", 1), await runtime.ReceiptAsync(raced, slow.Id));
+    }
+
+    [VesselEventPostgresFact]
+    public async Task New_owner_initialization_waits_for_live_progress_then_observes_the_settled_receipt()
+    {
+        await using var runtime = await Runtime.CreateAsync();
+        var raced = await runtime.RegisterNewAsync("new-owner-raced");
+        Assert.Empty(await runtime.StatusAsync());
+        var slow = await runtime.AppendAsync(Draft("slow"));
+        runtime.Clock.Advance(TimeSpan.FromMinutes(1));
+        var live = runtime.DispatchAsync(raced, slow.Id);
+        await runtime.Subscriber.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var catchUp = runtime.CatchUpAsync(raced);
+        await Task.Delay(300);
+        Assert.False(catchUp.IsCompleted);
+        runtime.Subscriber.Release.TrySetResult();
+        Assert.Equal(DispatchOutcome.Delivered, (await live).Outcome);
+        Assert.Equal(0, (await catchUp).Discovered);
         Assert.Equal(1, runtime.Subscriber.Calls(slow.Id));
         Assert.Equal(("delivered", 1), await runtime.ReceiptAsync(raced, slow.Id));
     }

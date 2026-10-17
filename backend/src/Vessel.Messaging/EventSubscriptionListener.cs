@@ -36,22 +36,22 @@ public sealed class EventSubscriptionListener
             logger.LogWarning("Event {EventId} arrived on a queue this host does not run; dead-lettering.", message.Id);
             throw new EventDeadLetterException(DispatchOutcome.NotResponsible);
         }
-        var status = await owners.StatusAsync(message.OwnerId, cancellationToken);
-        if (status == JournalOwnerStatus.Suspended) return;
-        if (status != JournalOwnerStatus.Active)
-        {
-            logger.LogWarning("Event {EventId} for subscription {Subscription} names unknown owner {OwnerId}; dead-lettering.",
-                message.Id, subscription.Name, message.OwnerId);
-            throw new EventDeadLetterException(DispatchOutcome.InvalidOwner);
-        }
         DispatchResult result;
         try
         {
+            var status = await owners.StatusAsync(message.OwnerId, cancellationToken);
+            if (status == JournalOwnerStatus.Suspended) return;
+            if (status != JournalOwnerStatus.Active)
+            {
+                logger.LogWarning("Event {EventId} for subscription {Subscription} names unknown owner {OwnerId}; dead-lettering.",
+                    message.Id, subscription.Name, message.OwnerId);
+                throw new EventDeadLetterException(DispatchOutcome.InvalidOwner);
+            }
             await using var scope = scopes.Create(message.OwnerId);
             result = await scope.Services.GetRequiredService<EventDispatcher>()
                 .DispatchAsync(subscription, message.OwnerId, message.Id, DispatchTrigger.Live, cancellationToken);
         }
-        catch (Exception error)
+        catch (Exception error) when (error is not EventDeadLetterException)
         {
             // Including shutdown: the receipt (or its absence) is in PostgreSQL, so an ack loses nothing.
             logger.LogWarning("Event {EventId} for subscription {Subscription} was acknowledged after {ErrorType}; catch-up retries it.",
