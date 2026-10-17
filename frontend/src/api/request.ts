@@ -92,7 +92,7 @@ async function httpError(response: Response, options: RequestOptions, cookie: bo
   if (options.safeError) {
     // Only the code of a cookie call's 401 or 403 is read, so session handling still works; the body is never shown.
     const code = cookie && auth ? (await readProblem(response)).code : undefined
-    return new ApiError('http', options.safeError, response.status, undefined, code)
+    return new ApiError('http', options.safeError, response.status, retryAt(response), code)
   }
   if (options.httpError) return options.httpError(response)
   if (auth && !cookie) {

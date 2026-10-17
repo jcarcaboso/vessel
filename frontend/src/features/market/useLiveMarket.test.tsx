@@ -22,6 +22,20 @@ function setup() {
 afterEach(() => vi.restoreAllMocks())
 
 describe('live cache lifecycle', () => {
+  it('shows the stream admission wait and does not reconnect or poll after a 429', async () => {
+    vi.useFakeTimers()
+    const { reject, view, marketStream, callbacks } = setup()
+    try {
+      await act(async () => reject(new ApiError('http', 'Generic failure.', 429, new Date(Date.now() + 60_000).toISOString())))
+      expect(view.result.current).toMatchObject({ state: 'stale', notice: 'Too many requests. Wait 60 seconds before trying again.' })
+      await act(async () => { await vi.advanceTimersByTimeAsync(120_000) })
+      act(() => document.dispatchEvent(new Event('visibilitychange')))
+      expect(marketStream).toHaveBeenCalledOnce()
+      expect(callbacks.refreshCandles).not.toHaveBeenCalled()
+      expect(callbacks.refreshContext).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
+  })
+
   it.each(['reconnecting', 'stale'] as const)('revalidates after upstream %s → live without reopening SSE', state => {
     const { callbacks, status, marketStream } = setup()
     status('live'); status(state); status('live'); status('live')

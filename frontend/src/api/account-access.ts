@@ -1,4 +1,4 @@
-import { ApiError } from './errors'
+import { ApiError, rateLimitMessage } from './errors'
 
 /** Only the development build allows plaintext LAN entry. The API enforces its own environment. */
 export function credentialTransportAllowed(
@@ -25,7 +25,7 @@ export function credentialFailureMessage(cause: unknown, fallback = credentialSa
     case 404: return 'The account or credential endpoint is unavailable. Refresh the workspace and check that the frontend and API are on the same version.'
     case 409: return 'The account changed or is disabled. Refresh its settings and enable it before saving a token.'
     case 413: return 'The credential request is too large. Paste only the read-only token, up to 512 characters.'
-    case 429: return 'Too many requests. Wait a moment before trying the read-only token again.'
+    case 429: return rateLimitMessage(cause.retryAtUtc)
     case 502:
     case 503:
     case 504: return 'Credential verification or storage is unavailable. Retry later; if this persists, ask the operator to check the venue connection and server credential vault.'

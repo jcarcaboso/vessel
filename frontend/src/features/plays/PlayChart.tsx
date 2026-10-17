@@ -443,6 +443,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
     </div>
   </div>
   const notices = <>
+    {live.notice && <p className="chart-notice" role="status">{live.notice} Turn Live off and on to reconnect.</p>}
     {capture.message && <p className={capture.failed ? 'chart-notice' : 'chart-notice chart-notice-success'} role={capture.failed ? 'alert' : 'status'}>{capture.message}
       {!capture.failed && onShowEvidence && <> <button type="button" onClick={showEvidence}>Show</button></>}</p>}
     {data.status === 'ready' && data.error && <p className="chart-notice" role="alert">Refresh failed: {data.error} Showing the previous candles.</p>}
