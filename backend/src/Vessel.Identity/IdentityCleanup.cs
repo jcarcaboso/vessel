@@ -25,13 +25,16 @@ public sealed class IdentityCleanup(IDbContextFactory<IdentityDbContext> factory
 
     public async Task CleanAsync(CancellationToken ct)
     {
-        await using var db = await factory.CreateDbContextAsync(ct);
-        var now = clock.GetUtcNow();
-        // Preserve the full verification skew; cleanup must not shorten a challenge's accepted lifetime.
-        await db.Challenges.Where(x => x.ExpiresAt < now.AddSeconds(-30)).ExecuteDeleteAsync(ct);
-        await db.Registrations.Where(x => x.ExpiresAt < now).ExecuteDeleteAsync(ct);
-        var cutoff = now.AddDays(-30);
-        await db.Sessions.Where(x => x.RevokedAt < cutoff ||
-            x.IdleExpiresAt < cutoff || x.AbsoluteExpiresAt < cutoff).ExecuteDeleteAsync(ct);
+        await new IdentityTransaction(factory).RunAsync(async db =>
+        {
+            var now = clock.GetUtcNow();
+            // Preserve the full verification skew; cleanup must not shorten a challenge's accepted lifetime.
+            await db.Challenges.Where(x => x.ExpiresAt < now.AddSeconds(-30)).ExecuteDeleteAsync(ct);
+            await db.Registrations.Where(x => x.ExpiresAt < now).ExecuteDeleteAsync(ct);
+            var cutoff = now.AddDays(-30);
+            await db.Sessions.Where(x => x.RevokedAt < cutoff ||
+                x.IdleExpiresAt < cutoff || x.AbsoluteExpiresAt < cutoff).ExecuteDeleteAsync(ct);
+            return true;
+        }, ct);
     }
 }

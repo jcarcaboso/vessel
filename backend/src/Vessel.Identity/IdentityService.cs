@@ -13,10 +13,12 @@ public sealed class IdentityService(IdentityTransaction transactions, IdentitySe
         return await transactions.RunAsync(async db =>
         {
             var now = clock.GetUtcNow();
-            var oldest = await db.Challenges.Where(x => x.ConsumedAt == null).OrderBy(x => x.IssuedAt).ThenBy(x => x.Id)
-                .Select(x => x.Id).ToListAsync(ct);
-            if (oldest.Count >= 10000)
-                await db.Challenges.Where(x => oldest.Take(oldest.Count - 9999).Contains(x.Id)).ExecuteDeleteAsync(ct);
+            await db.Challenges.Where(x => x.ExpiresAt < now.AddSeconds(-30)).ExecuteDeleteAsync(ct);
+            var open = db.Challenges.Where(x => x.ConsumedAt == null);
+            var excess = await open.CountAsync(ct) - 9999;
+            if (excess > 0)
+                await open.Where(x => open.OrderBy(row => row.IssuedAt).ThenBy(row => row.Id)
+                    .Take(excess).Select(row => row.Id).Contains(x.Id)).ExecuteDeleteAsync(ct);
             var challenge = new AuthChallenge
             {
                 Id = Guid.NewGuid(), Address = normalized, Origin = origin, BindingHash = IdentityTokens.Hash(binding),
@@ -58,11 +60,12 @@ public sealed class IdentityService(IdentityTransaction transactions, IdentitySe
                 }
                 CheckRegistrationPolicy(challenge.Address);
                 var token = IdentityTokens.Create();
-                var oldest = await db.Registrations.Where(x => x.ConsumedAt == null).OrderBy(x => x.CreatedAt).ThenBy(x => x.Id)
-                    .Select(x => x.Id).ToListAsync(ct);
-                if (oldest.Count >= settings.MaxPendingRegistrations)
-                    await db.Registrations.Where(x => oldest.Take(oldest.Count - settings.MaxPendingRegistrations + 1).Contains(x.Id))
-                        .ExecuteDeleteAsync(ct);
+                await db.Registrations.Where(x => x.ExpiresAt <= now).ExecuteDeleteAsync(ct);
+                var open = db.Registrations.Where(x => x.ConsumedAt == null);
+                var excess = await open.CountAsync(ct) - settings.MaxPendingRegistrations + 1;
+                if (excess > 0)
+                    await open.Where(x => open.OrderBy(row => row.CreatedAt).ThenBy(row => row.Id)
+                        .Take(excess).Select(row => row.Id).Contains(x.Id)).ExecuteDeleteAsync(ct);
                 var expires = now.AddMinutes(10);
                 db.Registrations.Add(new PendingRegistration
                 {

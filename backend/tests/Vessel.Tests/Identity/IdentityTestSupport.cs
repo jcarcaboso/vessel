@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Nethereum.Signer;
@@ -21,11 +22,13 @@ internal sealed class IdentityDatabase(string connection, IdentitySchema schema)
     public string Connection => connection;
     public IdentitySchema Schema => schema;
     public IdentityClock Clock { get; } = new();
+    public IInterceptor? Interceptor { get; set; }
     public IdentitySettings Settings { get; set; } = new() { Schema = schema.Name, WalletMode = true, Origins = ["https://vessel.test"] };
     public IdentityDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<IdentityDbContext>();
         IdentityDbContext.Configure(options, connection, schema);
+        if (Interceptor is not null) options.AddInterceptors(Interceptor);
         return new(options.Options, schema);
     }
     public IdentityService Service() => new(new(this), Settings, new WalletSignatures(), Clock);
@@ -35,7 +38,8 @@ internal sealed class IdentityDatabase(string connection, IdentitySchema schema)
     {
         var connection = Environment.GetEnvironmentVariable("Vessel_TEST_POSTGRES") ?? throw new InvalidOperationException("Disposable PostgreSQL is required.");
         var schema = new IdentitySchema("identity_test_" + Guid.NewGuid().ToString("N"));
-        var database = new IdentityDatabase(new NpgsqlConnectionStringBuilder(connection) { Pooling = false }.ConnectionString, schema);
+        var database = new IdentityDatabase(new NpgsqlConnectionStringBuilder(connection)
+            { Pooling = false, ApplicationName = schema.Name }.ConnectionString, schema);
         try
         {
             await using var db = database.CreateDbContext();

@@ -1,4 +1,6 @@
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -101,16 +103,25 @@ public sealed class IdentityPersistenceTests
     {
         await using var database = await IdentityDatabase.CreateAsync();
         var key = EthECKey.GenerateKey();
-        var oldest = Guid.NewGuid();
+        var oldest = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var tied = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var expiredChallenge = Guid.NewGuid();
+        var expiredRegistration = Guid.NewGuid();
         await using (var db = database.CreateDbContext())
         {
             db.Challenges.AddRange(Enumerable.Range(0, 10000).Select(i => new AuthChallenge
             {
-                Id = i == 9999 ? oldest : Guid.NewGuid(), Address = key.GetPublicAddress().ToLowerInvariant(),
-                Origin = "https://vessel.test", IssuedAt = database.Clock.Now.AddSeconds(-i), ExpiresAt = database.Clock.Now.AddMinutes(5)
+                Id = i == 9999 ? oldest : i == 9998 ? tied : Guid.NewGuid(), Address = key.GetPublicAddress().ToLowerInvariant(),
+                Origin = "https://vessel.test", IssuedAt = database.Clock.Now.AddSeconds(i >= 9998 ? -9999 : -i),
+                ExpiresAt = database.Clock.Now.AddMinutes(5)
             }));
+            db.Challenges.Add(new AuthChallenge { Id = expiredChallenge, IssuedAt = database.Clock.Now, ExpiresAt = database.Clock.Now.AddSeconds(-31) });
+            db.Registrations.Add(new PendingRegistration { Id = expiredRegistration, TokenHash = [1],
+                CreatedAt = database.Clock.Now, ExpiresAt = database.Clock.Now });
             await db.SaveChangesAsync();
         }
+        var capture = new CaptureCommands();
+        database.Interceptor = capture;
         database.Settings = database.Settings with { Registration = "Open", MaxPendingRegistrations = 1 };
         var binding = IdentityTokens.Create();
         async Task<string> Pending()
@@ -125,6 +136,9 @@ public sealed class IdentityPersistenceTests
         {
             Assert.Equal(10000, await db.Challenges.CountAsync());
             Assert.False(await db.Challenges.AnyAsync(x => x.Id == oldest));
+            Assert.True(await db.Challenges.AnyAsync(x => x.Id == tied));
+            Assert.False(await db.Challenges.AnyAsync(x => x.Id == expiredChallenge));
+            Assert.False(await db.Registrations.AnyAsync(x => x.Id == expiredRegistration));
         }
         var second = await Pending();
         await Problem(() => database.Service().RegisterAsync(new(first, "Name", null, false), "https://vessel.test", binding, null, null, default),
@@ -132,6 +146,44 @@ public sealed class IdentityPersistenceTests
         await database.Service().RegisterAsync(new(second, "Name", null, false), "https://vessel.test", binding, null, null, default);
         await using var verify = database.CreateDbContext();
         Assert.Single(await verify.Registrations.ToListAsync());
+        foreach (var table in new[] { "auth_challenges", "pending_registrations" })
+        {
+            Assert.Contains(capture.Commands, sql => sql.Contains("SELECT count(*)", StringComparison.Ordinal) &&
+                sql.Contains(table, StringComparison.Ordinal));
+            Assert.Contains(capture.Commands, sql => sql.StartsWith("DELETE FROM", StringComparison.Ordinal) &&
+                sql.Contains(table, StringComparison.Ordinal) && sql.Contains("ORDER BY", StringComparison.Ordinal) &&
+                sql.Contains("LIMIT", StringComparison.Ordinal));
+        }
+    }
+
+    [PostgresFact]
+    public async Task Caps_preserve_challenge_skew_and_break_pending_timestamp_ties_by_id()
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        database.Settings = database.Settings with { Registration = "Open", MaxPendingRegistrations = 2 };
+        var key = EthECKey.GenerateKey();
+        var binding = IdentityTokens.Create();
+        var oldest = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var retained = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var skew = Guid.NewGuid();
+        await using (var db = database.CreateDbContext())
+        {
+            db.Challenges.Add(new AuthChallenge { Id = skew, ExpiresAt = database.Clock.Now.AddSeconds(-30) });
+            db.Registrations.AddRange(new[] { oldest, retained }.Select((id, index) => new PendingRegistration
+            {
+                Id = id, TokenHash = [(byte)index], CreatedAt = database.Clock.Now.AddMinutes(-1),
+                ExpiresAt = database.Clock.Now.AddMinutes(5)
+            }));
+            await db.SaveChangesAsync();
+        }
+        var challenge = await database.Service().ChallengeAsync(key.GetPublicAddress(), "https://vessel.test", binding, default);
+        await database.Service().VerifyAsync(new(challenge.ChallengeId, IdentityDatabase.Sign(key, challenge.Message), false),
+            "https://vessel.test", binding, null, null, default);
+        await using var verify = database.CreateDbContext();
+        Assert.True(await verify.Challenges.AnyAsync(x => x.Id == skew));
+        Assert.False(await verify.Registrations.AnyAsync(x => x.Id == oldest));
+        Assert.True(await verify.Registrations.AnyAsync(x => x.Id == retained));
+        Assert.Equal(2, await verify.Registrations.CountAsync());
     }
 
     [PostgresFact]
@@ -259,6 +311,101 @@ public sealed class IdentityPersistenceTests
         await cleanup.CleanAsync(default);
         Assert.Empty(await verify.Sessions.AsNoTracking().ToListAsync());
         Assert.False(await database.Sessions().StillValidAsync(issued.Session.Session.Id, default));
+    }
+
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Cleanup_waits_for_verify_or_register_to_commit_before_deleting_its_expired_row(bool register)
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        database.Settings = database.Settings with { Registration = "Open" };
+        var key = EthECKey.GenerateKey();
+        await database.SeedAsync(key);
+        var binding = IdentityTokens.Create();
+        var challenge = await database.Service().ChallengeAsync(key.GetPublicAddress(), "https://vessel.test", binding, default);
+        var token = IdentityTokens.Create();
+        if (register)
+        {
+            await using var db = database.CreateDbContext();
+            db.Registrations.Add(new PendingRegistration
+            {
+                Id = Guid.NewGuid(), TokenHash = IdentityTokens.Hash(token), Address = EthECKey.GenerateKey().GetPublicAddress().ToLowerInvariant(),
+                BindingHash = IdentityTokens.Hash(binding), Origin = "https://vessel.test",
+                CreatedAt = database.Clock.Now, ExpiresAt = database.Clock.Now.AddMinutes(10)
+            });
+            await db.SaveChangesAsync();
+        }
+        var pause = new PauseConsumption();
+        database.Interceptor = pause;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        Task mutation = register
+            ? database.Service().RegisterAsync(new(token, "Synthetic registration", null, false),
+                "https://vessel.test", binding, null, null, timeout.Token)
+            : database.Service().VerifyAsync(new(challenge.ChallengeId, IdentityDatabase.Sign(key, challenge.Message), false),
+                "https://vessel.test", binding, null, null, timeout.Token);
+        Task? cleanup = null;
+        try
+        {
+            await pause.Entered.Task.WaitAsync(timeout.Token);
+            database.Clock.Now = database.Clock.Now.AddMinutes(11);
+            cleanup = new IdentityCleanup(database, database.Clock, NullLogger<IdentityCleanup>.Instance).CleanAsync(timeout.Token);
+            // Observe the real PostgreSQL wait, not a timing-dependent delay.
+            await using var connection = new NpgsqlConnection(database.Connection);
+            await connection.OpenAsync(timeout.Token);
+            await using var waiting = new NpgsqlCommand("""
+                SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+                    WHERE application_name = @name AND wait_event = 'advisory')
+                """, connection);
+            waiting.Parameters.AddWithValue("name", database.Schema.Name);
+            while (!cleanup.IsCompleted && !Equals(await waiting.ExecuteScalarAsync(timeout.Token), true))
+                await Task.Delay(10, timeout.Token);
+            Assert.False(cleanup.IsCompleted, "Cleanup must wait for the identity transaction that is consuming the row.");
+        }
+        finally
+        {
+            pause.Resume.TrySetResult();
+            await mutation.WaitAsync(timeout.Token);
+            if (cleanup is not null) await cleanup.WaitAsync(timeout.Token);
+        }
+        await using var verify = database.CreateDbContext();
+        Assert.Empty(await verify.Challenges.ToListAsync());
+        Assert.Empty(await verify.Registrations.ToListAsync());
+        Assert.Single(await verify.Sessions.ToListAsync());
+    }
+
+    private sealed class PauseConsumption : SaveChangesInterceptor
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Resume { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context!.ChangeTracker.Entries().Any(entry =>
+                entry.Entity is AuthChallenge { ConsumedAt: not null } or PendingRegistration { ConsumedAt: not null }))
+            {
+                Entered.TrySetResult();
+                await Resume.Task.WaitAsync(cancellationToken);
+            }
+            return result;
+        }
+    }
+
+    private sealed class CaptureCommands : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = [];
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
+            InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(DbCommand command, CommandEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
     }
 
     private static async Task Problem(Func<Task> action, string code) =>
