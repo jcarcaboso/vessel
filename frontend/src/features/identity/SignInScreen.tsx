@@ -12,7 +12,7 @@ import { MessagePreview, SignInBrand, SignInSteps, StateCard, UserAvatar, Wallet
 import { readLastWallet, rememberWallet, type BrowserWallet } from './wallets/discovery'
 import { requestAccount, sameAddress, signMessage, watchWallet } from './wallets/provider'
 import { useBrowserWallets } from './wallets/useBrowserWallets'
-import { validDisplayName } from './profile-rules'
+import { cleanDisplayName } from './profile-rules'
 
 export const signingMeaning = 'Vessel asks your wallet to sign a text message. The signature proves you control the address; it cannot move funds or approve spending. Vessel never signs, sends or approves anything at a venue.'
 
@@ -110,7 +110,7 @@ export function SignInScreen({ api, registration, originAccepted, notice, onSign
     const current = begin()
     dispatch({ type: 'register' })
     try {
-      const created = await api.register({ registration: token, displayName: displayName.trim(), remember,
+      const created = await api.register({ registration: token, displayName, remember,
         ...invitation.trim() ? { invitation: invitation.trim() } : {} }, current.controller.signal)
       if (run.current !== current) return
       dispatch({ type: 'registered', session: created.session })
@@ -241,9 +241,10 @@ function CreateJournal({ state, onSubmit, onCancel }: {
   const error = local ?? state.error
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!validDisplayName(name)) setLocal({ field: 'displayName', message: `Use 1 to ${displayNameLimit} printable characters for the display name.` })
+    const displayName = cleanDisplayName(name)
+    if (displayName === undefined) setLocal({ field: 'displayName', message: `Use 1 to ${displayNameLimit} printable characters for the display name.` })
     else if (state.requiresInvitation && !code.trim()) setLocal({ field: 'invitation', message: 'Enter the invitation code from this server\'s operator.' })
-    else { setLocal(null); onSubmit(name, code) }
+    else { setLocal(null); onSubmit(displayName, code) }
   }
   const nameError = error?.field === 'displayName' ? error.message : null
   const codeError = error?.field === 'invitation' ? error.message : null

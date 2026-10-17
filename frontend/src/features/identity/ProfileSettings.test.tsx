@@ -121,6 +121,40 @@ describe('Profile & sign-in', () => {
     expect(sent('/api/auth/wallets')[0]!.body).toEqual({ challengeId: challengeFixture().challengeId, signature, label: 'Phone' })
   })
 
+  it('shows the server\'s label refusal on the label field', async () => {
+    routes['POST /api/auth/wallets/challenge'] = init => json(challengeFixture(JSON.parse(init.body as string).address))
+    routes['POST /api/auth/wallets'] = () => problem(400, 'label-invalid')
+    const { user } = mount()
+    await user.click(await screen.findByRole('button', { name: 'Link wallet' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Link another wallet' })
+    await user.click(await within(dialog).findByRole('button', { name: /Rabby Wallet/ }))
+    await user.click(await within(dialog).findByRole('button', { name: 'Sign with Rabby Wallet' }))
+    await within(dialog).findByText(/Now sign with the wallet you want to add/)
+    account = '0x19B4c7aE02F3d81e6C5a9b0D2E7f4A3c8D1e0a53'
+    await user.click(await within(dialog).findByRole('button', { name: /Rabby Wallet/ }))
+    await user.type(await within(dialog).findByLabelText(/Label/), 'Desk')
+    await user.click(within(dialog).getByRole('button', { name: 'Sign with Rabby Wallet' }))
+    await waitFor(() => expect(within(dialog).getByLabelText(/Label/)).toHaveAttribute('aria-invalid', 'true'))
+    expect(within(dialog).getByLabelText(/Label/)).toHaveAccessibleDescription('Use at most 40 printable characters for the label.')
+  })
+
+  it('refuses a label the server would refuse before asking it, and sends the trimmed form', async () => {
+    routes['PATCH /api/auth/wallets/' + secondWalletFixture.id] = () => json({ ...secondWalletFixture, label: 'Cold' })
+    const { user } = mount()
+    await user.click(await screen.findByRole('button', { name: 'Rename Ledger' }))
+    const input = screen.getByLabelText(`Label for ${secondWalletFixture.address}`)
+    const save = within(input.closest('form')!).getByRole('button', { name: 'Save' })
+    await user.clear(input)
+    await user.type(input, 'Co\u200bld')
+    await user.click(save)
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(sent(`/api/auth/wallets/${secondWalletFixture.id}`, 'PATCH')).toHaveLength(0)
+    await user.clear(input)
+    await user.type(input, '  Cold ')
+    await user.click(save)
+    await waitFor(() => expect(sent(`/api/auth/wallets/${secondWalletFixture.id}`, 'PATCH')[0]!.body).toEqual({ label: 'Cold' }))
+  })
+
   describe('focus', () => {
     it('returns to Link wallet when its dialog closes with Escape', async () => {
       const { user } = mount()

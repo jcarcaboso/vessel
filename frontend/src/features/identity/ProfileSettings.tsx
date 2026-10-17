@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { InfoTip } from '@/components/ui/info-tip'
 import { Input } from '@/components/ui/input'
 import { UserAvatar } from './IdentityParts'
-import { validDisplayName, validLabel } from './profile-rules'
+import { cleanDisplayName, cleanLabel } from './profile-rules'
 import { focusedControl, openDialog, returnFocus } from './return-focus'
 import { signingMeaning } from './SignInScreen'
 import type { ShellIdentity } from './types'
@@ -155,10 +155,11 @@ function ProfilePanel({ identity }: { identity: ShellIdentity }) {
   const { notify } = useNotifications()
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!validDisplayName(name)) { setError(`Use 1 to ${displayNameLimit} printable characters for the display name.`); return }
+    const displayName = cleanDisplayName(name)
+    if (displayName === undefined) { setError(`Use 1 to ${displayNameLimit} printable characters for the display name.`); return }
     setPending(true); setError(null)
     try {
-      identity.onProfile(await identity.auth.updateProfile(name.trim(), user.revision))
+      identity.onProfile(await identity.auth.updateProfile(displayName, user.revision))
       notify({ tone: 'success', message: 'Display name saved.' })
     } catch (cause) {
       setError(errorMessage(cause, 'The display name could not be saved.'))
@@ -189,9 +190,10 @@ function WalletRow({ wallet, only, auth, onRemove, onChanged }: {
   const name = wallet.label ?? 'Wallet'
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!validLabel(label)) { setError(`Use at most ${walletLabelLimit} printable characters for the label.`); return }
+    const cleaned = cleanLabel(label)
+    if (cleaned === undefined) { setError(`Use at most ${walletLabelLimit} printable characters for the label.`); return }
     try {
-      await auth.updateWallet(wallet.id, label.trim() || null)
+      await auth.updateWallet(wallet.id, cleaned)
       setEditing(false); setError(null); onChanged()
     } catch (cause) { setError(errorMessage(cause, 'The label could not be saved.')) }
   }
@@ -199,10 +201,11 @@ function WalletRow({ wallet, only, auth, onRemove, onChanged }: {
     <UserAvatar name={name} address={wallet.address} />
     <span className="profile-row-meta">
       {editing ? <form className="profile-label-form" onSubmit={event => { void save(event) }}>
-        <Input aria-label={`Label for ${wallet.address}`} value={label} onChange={event => setLabel(event.target.value)} maxLength={walletLabelLimit * 2} autoFocus />
+        <Input aria-label={`Label for ${wallet.address}`} value={label} onChange={event => setLabel(event.target.value)} maxLength={walletLabelLimit * 2} autoFocus
+          aria-invalid={error !== null} aria-describedby={error ? `label-error-${wallet.id}` : undefined} />
         <Button type="submit" size="sm">Save</Button><Button type="button" size="sm" variant="ghost" onClick={() => { setEditing(false); setLabel(wallet.label ?? ''); setError(null) }}>Cancel</Button>
       </form> : <strong>{name} <SourceChip source={wallet.address} /></strong>}
-      {error && <span className="error" role="alert">{error}</span>}
+      {error && <span id={`label-error-${wallet.id}`} className="error" role="alert">{error}</span>}
       <small>Added {day(wallet.addedAt)} · {wallet.current ? 'used for this session' : wallet.lastUsedAt ? `last used ${ago(wallet.lastUsedAt)}` : 'not used yet'}</small>
     </span>
     {wallet.current && <span className="identity-pill is-brand">This session</span>}
@@ -268,17 +271,24 @@ function LinkWalletDialog({ identity, wallets, onStepUp, onClose, onLinked, onCl
           accept={address => wallets.some(wallet => sameAddress(wallet.address, address)) ? 'This wallet is already linked to your journal. Switch to the wallet you want to add.' : null}
           requestChallenge={(address, signal) => identity.auth.walletChallenge(address, signal)}
           complete={async (challenge, signature, signal) => {
-            if (!validLabel(label)) {
+            const cleaned = cleanLabel(label)
+            if (cleaned === undefined) {
               setLabelError(`Use at most ${walletLabelLimit} printable characters for the label.`)
               throw new ApiError('http', `Use at most ${walletLabelLimit} printable characters for the label.`, 400, undefined, 'label-invalid')
             }
-            await identity.auth.linkWallet({ challengeId: challenge.challengeId, signature, ...label.trim() ? { label: label.trim() } : {} }, signal)
+            try {
+              await identity.auth.linkWallet({ challengeId: challenge.challengeId, signature, ...cleaned ? { label: cleaned } : {} }, signal)
+            } catch (cause) {
+              // The server decides; its refusal shows on the field too.
+              if (cause instanceof ApiError && cause.code === 'label-invalid') setLabelError(cause.message)
+              throw cause
+            }
           }}
           onDone={onLinked} onCancel={onClose}>
           <div className="identity-field"><label htmlFor="link-label">Label <small>· optional</small></label>
             <Input id="link-label" value={label} onChange={event => { setLabel(event.target.value); setLabelError(null) }} maxLength={walletLabelLimit * 2}
-              aria-invalid={labelError !== null} />
-            {labelError && <p className="error" role="alert">{labelError}</p>}</div>
+              aria-invalid={labelError !== null} aria-describedby={labelError ? 'link-label-error' : undefined} />
+            {labelError && <p id="link-label-error" className="error" role="alert">{labelError}</p>}</div>
         </WalletSignFlow>}
     </DialogContent>
   </Dialog>

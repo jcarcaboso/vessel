@@ -171,7 +171,8 @@ export function WalletSignFlow({ purpose, accept, requestChallenge, complete, on
     {flow.step === 'connecting' && <p className="muted" role="status">Approve the connection request in {flow.wallet.name}. Vessel only reads your address.</p>}
     {flow.step === 'preparing' && <p className="muted" role="status">Preparing the message…</p>}
     {flow.step === 'ready' && <ReadyMessage key={flow.challenge.challengeId} challenge={flow.challenge} purpose={purpose} onExpired={expire} />}
-    {flow.step === 'ready' && children}
+    {/* Still editable after a refusal (a label the server refused), before Try again asks for a fresh message. */}
+    {(flow.step === 'ready' || flow.step === 'failed' && flow.address) && children}
     {flow.step === 'completing' && <p className="muted" role="status">Checking the signature…</p>}
     {flow.step === 'stepping-up' && <p className="muted" role="status">Confirm with a linked wallet to continue.</p>}
     {flow.step === 'failed' && <p className="error" role="alert">{flow.message}</p>}
