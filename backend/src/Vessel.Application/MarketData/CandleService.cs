@@ -53,7 +53,6 @@ public sealed class CandleService(IWorkspaceStore store, IVenueRegistry venues, 
         if (venues.Candles(account.VenueId) is not { } reader)
             throw new ProblemException(502, VenueFailure);
 
-        if (refresh == "true") cache.AdmitRefresh(owner?.OwnerId ?? Guid.Empty, $"{account.VenueId}|{instrument}|{interval}");
         VenueInstrument market;
         try
         {
@@ -66,6 +65,8 @@ public sealed class CandleService(IWorkspaceStore store, IVenueRegistry venues, 
         {
             throw new ProblemException(502, VenueFailure);
         }
+
+        if (refresh == "true") cache.AdmitRefresh(owner?.OwnerId ?? Guid.Empty, $"{account.VenueId}|{instrument}|{interval}");
 
         var to = endTime ?? now.ToUnixTimeMilliseconds() / CacheBucketMs * CacheBucketMs;
         var from = Math.Max(0, to - MaxCandles * step);
