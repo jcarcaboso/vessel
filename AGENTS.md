@@ -58,6 +58,8 @@ October 16, 2026: the owner asked that Activity and Plays stay usable as history
 
 October 16, 2026: account creation now queues one initial bounded refresh in the browser, superseding the original no-automatic-refresh rule above. Follow the initial account refresh section of `docs/architecture/account-management-contract.md`: capability-driven, sequential and shell-owned, after any optional credential save attempt; failures keep the account. Disconnect, unmount or API replacement discards the session queue. No durable jobs, retries, broader history coverage or deployment is implied.
 
+October 17, 2026: the owner asked to analyse replacing the shared API token with users who register and sign in with an EVM wallet (Sign-In with Ethereum, optional WalletConnect), in a separate frontend and backend module, with fully separate journals per user, and to add the wallet selector to the design. The analysis and phased plan are in `docs/architecture/multi-user-wallet-auth.md`; the screens are `prototype/wallet-sign-in.html` with captures in `docs/design/wallet-sign-in/`. It is a draft with open owner decisions (D1–D12) and authorizes no implementation. Keep the user ID equal to the existing owner GUID (credential encryption binds it); the audit found no owner-less unique index, but the worker, messaging subscriptions, catch-up/retention, venue budgets and heartbeat assume one configured owner.
+
 ## Project tracking
 
 October 16, 2026: the owner requested funding retrieval per venue, storage,
