@@ -291,6 +291,9 @@ services:
     pull_policy: never
     environment: *venue
     volumes: *ca
+  worker-notifications:
+    image: {api}
+    pull_policy: never
   verifier:
     image: {api}
     pull_policy: never
@@ -1110,7 +1113,7 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
     def step_restore(self):
         frames, _ = self.sse.snapshot()
         old_cursor = frames[-1]['cursor']
-        self.quiet('stop', 'web', 'api', 'worker', 'verifier', 'rustfs')
+        self.quiet('stop', 'web', 'api', 'worker', 'worker-notifications', 'verifier', 'rustfs')
         with (self.temp / 'vessel.dump').open('wb') as out:
             self.compose('exec', '-T', 'postgres', 'pg_dump', '-U', 'vessel', '-d', 'vessel', '-Fc', stdout=out)
         with (self.temp / 'objects.tar.gz').open('wb') as out:
@@ -1396,7 +1399,7 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
 
     def logs(self):
         try:
-            logs = self.compose('logs', '--no-color', 'api', 'worker', 'verifier', 'fake-venue', capture_output=True, text=True, check=False)
+            logs = self.compose('logs', '--no-color', 'api', 'worker', 'worker-notifications', 'verifier', 'fake-venue', capture_output=True, text=True, check=False)
             (self.artifacts / 'compose.log').write_text(redact(logs.stdout + logs.stderr))
         except (OSError, CommandFailed):
             pass

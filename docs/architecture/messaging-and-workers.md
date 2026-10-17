@@ -273,7 +273,7 @@ In effect, age decides: a slow subscription never extends retention beyond the w
 - At-least-once delivery within each subscription's responsibility window; handlers must be idempotent on the event ID.
 - The attempt cap bounds recorded attempts (above).
 - Subscriptions are unordered; arrival order is not sequence order.
-- An external send followed by a crash can repeat; restoring an older database can lose receipts of work already sent. A future notification provider must tolerate duplicates.
+- An external send followed by a crash can repeat; restoring an older database can lose receipts of work already sent. A future external notification provider must tolerate duplicates.
 - Subscription lag, gaps and failed receipts are not yet exposed through an API or health check; inspect them with SQL (see [runbook](#inspect-subscriptions-receipts-and-monitor-rows)).
 
 ## Modules
@@ -291,7 +291,7 @@ public interface IVesselModule
 public sealed record CommandQueue(string Name, Type MessageType, Type? Handler = null);
 ```
 
-Every messaging host applies a module's publishing side: a durable-outbox route for each of its command types, except the command queues it consumes. Only a host that runs the module calls `AddRunningServices` and listens on its subscription and command queues. Wolverine models a RabbitMQ queue as one endpoint with one mode for both directions, so a consumer listens inline and never publishes there (its `WolverineVesselEventOutbox` refuses the command); otherwise Wolverine logs "Conflicting endpoint mode" and keeps whichever request it applied last. Requests come from the API. `VesselModuleRegistry.From` is the explicit list of compiled-in modules: `MonitorModule` (command queue `monitor`, no subscription) and, only with `Vessel:Messaging:Verification=true`, `VerificationModule` (subscription `verification`, filter `#`, a no-op handler whose receipts are the evidence). There is no plugin discovery. The registry refuses invalid or duplicate module names, the name `api`, duplicate subscription names, a subscription owned by another module, and duplicate command queue names or message types.
+Every messaging host applies a module's publishing side: a durable-outbox route for each of its command types, except the command queues it consumes. Only a host that runs the module calls `AddRunningServices` and listens on its subscription and command queues. Wolverine models a RabbitMQ queue as one endpoint with one mode for both directions, so a consumer listens inline and never publishes there (its `WolverineVesselEventOutbox` refuses the command); otherwise Wolverine logs "Conflicting endpoint mode" and keeps whichever request it applied last. Requests come from the API. `VesselModuleRegistry.From` is the explicit list of compiled-in modules: `MonitorModule` (command queue `monitor`, no subscription), `NotificationsModule` (subscription `notifications`, filter `#`, the Notification Hub; see [Notification Hub](#notification-hub)) and, only with `Vessel:Messaging:Verification=true`, `VerificationModule` (subscription `verification`, filter `#`, a no-op handler whose receipts are the evidence). There is no plugin discovery. The registry refuses invalid or duplicate module names, the name `api`, duplicate subscription names, a subscription owned by another module, and duplicate command queue names or message types.
 
 ### Add an event subscription
 
@@ -309,7 +309,7 @@ Every messaging host applies a module's publishing side: a durable-outbox route 
 
 ### Add a worker module and deployment
 
-Example: a future `notifications` module.
+Example: the `notifications` module (`NotificationsModule`), which follows these steps.
 
 1. **Module class** in `backend/src/Vessel.Messaging/Modules/Notifications/NotificationsModule.cs` implementing `IVesselModule`, with `Name = "notifications"` (1–48 characters, lowercase letter first, letters, digits and `-`; not `api`).
 2. **Commands.** Each `CommandQueue(name, messageType, listenerType)` gets `vessel.commands.<name>`. Write the listener like `MonitorCommandListener`: check `command.OwnerId == host.OwnerId` and required IDs, throw `CommandDeadLetterException` otherwise, then resolve an Application `IVesselCommandHandler<T>`. Keep the durable work in PostgreSQL; the command is a hand-off. Publishing a new command type also needs a staging path: `IVesselEventOutbox` (Persistence) currently stages only `VesselEvent` and `MonitorAccountCommand`, so add an overload there, in `WolverineVesselEventOutbox` and in provisioning's `NoPublication`, plus an Application sink port like `IMonitorCommandSink`.
@@ -332,11 +332,11 @@ Example: a future `notifications` module.
          migrate:
            condition: service_completed_successfully
        healthcheck:
-         disable: true   # /app/worker-health reads the monitor scheduler's heartbeat
+         test: ["CMD", "/app/worker-health"]
        restart: unless-stopped
    ```
 
-   `/app/worker-health` checks the heartbeat file that only the monitor scheduler writes, so a worker without the `monitor` module must disable it (as the release check's `verifier` does) or the module must write its own heartbeat. Mount the credential key ring only if the module decrypts venue tokens. The least-privilege broker user's permissions already cover `vessel.` names.
+   `/app/worker-health` chooses its heartbeat file by the first module: the notifications module's file for `notifications`, otherwise the monitor scheduler's. Another module must write its own heartbeat (an `IMaintenanceHeartbeat`, which `SubscriptionMaintenanceService` calls after each pass in which every catch-up succeeded) and extend the script, or disable the healthcheck as the release check's `verifier` does. Mount the credential key ring only if the module decrypts venue tokens. The least-privilege broker user's permissions already cover `vessel.` names.
 8. **Tests:** registry consistency; a `WorkerHostTests`-style startup test (unknown module, schema provisioned for another module set); an owner-mismatched command dead-letter test; subscription tests; `docker compose config` for the new service; release verification if the service ships.
 9. **Document** it in `deploy/README.md`, the Compose comments and here.
 
@@ -365,7 +365,7 @@ flowchart TB
         ApiDep["api deployment<br/>Vessel.Api, no modules<br/>schema wolverine_api"]
         MonDep["worker, deployment monitor<br/>Modules = monitor, N replicas<br/>schema wolverine_monitor"]
         VerDep["verifier, deployment verification<br/>release checks only<br/>schema wolverine_verification"]
-        NotDep["worker-notifications (future)<br/>Modules = notifications<br/>schema wolverine_notifications"]
+        NotDep["worker-notifications<br/>Modules = notifications<br/>schema wolverine_notifications"]
     end
     Migrate["migrate: provision-messaging"] -->|"insert-only rows"| Registry[("messaging_deployments<br/>schema, deployment, modules")]
     ApiDep -.->|"startup check"| Registry
@@ -608,6 +608,18 @@ sequenceDiagram
 - **Check.** Only the explicit button calls `POST /api/accounts/{id}/monitor/run`. The 202 response shows `pending`; `monitor.run-completed` normally ends it, and while the shown account is not idle `useMonitorRun` reads the stored account monitor every 3 s, at most 40 times. A 429 shows the cooldown until `Retry-After` passes. A 503 (worker offline) shows the browser's own offline-specific text ("The monitor is offline, so the check could not start…"), not the API detail. Opening a Play or a timer never requests a check.
 - **Epoch reset.** After a restore, `rotate-event-epoch` makes every old cursor reset, so the browser reloads stored state instead of trusting sequence numbers from another history.
 
+## Notification Hub
+
+The `notifications` module (plan: [notification-hub-plan.md](notification-hub-plan.md); browser contract: [notification-hub-api-contract.md](notification-hub-api-contract.md)).
+
+- **Subscription** `notifications`, filter `#`, default limits. `NotificationHub` (Application) is its keyed `IVesselEventSubscriber`; unknown types are skipped.
+- **Run events** (`play.*`, `execution.*`, `link.*`) group per account and `runId` under an advisory lock: the handler reads the run's retained, uncovered events (index `ix_events_run`), keeps each one that passes every check itself, and writes one notification with a source row per covered event. Detail-only batches write nothing, so a later batch can include them.
+- **Standalone events** (`discrepancy.*`, `monitor.state-changed`, `credential.expiring`, `notification.test-requested`) parse their subject and revision from the dedup key (`NotificationIdentity`), order generations by event sequence, withdraw superseded unread notifications first, then create one only if the decision rule, preferences and current state allow.
+- **Records** are raw-SQL tables without foreign keys to accounts or Plays: `notifications`, `notification_sources`, `notification_deliveries`, `notification_cursors` (feed sequence, unread count, reset version, test cooldown), `notification_preferences`, `notification_heartbeats`. Every delivery state change takes the owner's cursor row first.
+- **Locks.** Hub: dispatcher locks → run or subject advisory lock → cursor row → rows. API and retention: cursor → rows. Disable: management and account locks → cursor. Deletion: account lock → events and receipts → cursor. The hub never locks an account; it rechecks the account's enabled state after taking the cursor.
+- **Worker services** (`case "notifications"`): `NotificationHeartbeat` (an `IMaintenanceHeartbeat`: file and row after each productive maintenance pass) and `NotificationRetentionService` (hourly, `RetentionDays`).
+- **API**: `/api/notifications/*` and notification frames on `/api/events/stream?notificationsAfter=`; see the contract.
+
 ## Configuration reference
 
 Settings use `:` in JSON and `__` in environment variables. The API and the worker both validate `Vessel:Monitor` and `Vessel:Events`; give them the same values (Compose passes `VESSEL_MONITOR_INTERVAL`, `VESSEL_MONITOR_PROTECTION_GRACE` and `VESSEL_MONITOR_MANUAL_COOLDOWN` to both). Neither `backend/src/Vessel.Api/appsettings.json` nor `backend/src/Vessel.Worker/appsettings.json` overrides these defaults.
@@ -659,6 +671,20 @@ Settings use `:` in JSON and `__` in environment variables. The API and the work
 |---|---|---|---|
 | `Modules:{i}` | `["monitor"]` | Compiled-in module names | Modules this worker runs; an unknown name stops startup |
 | `Deployment` | First module | Valid name, not `api` | Logical deployment: envelope schema and Wolverine service name |
+
+### `Vessel:Notifications` (`NotificationOptions`)
+
+The API and the notifications worker validate the same section; `MonitorInterval` is bound from `Vessel:Monitor:Interval`.
+
+| Setting | Default | Allowed | Meaning |
+|---|---|---|---|
+| `RetentionDays` | `90` | 7–365, at least `MaxEventAge` plus one day | Notifications and handled sources older than this are deleted hourly |
+| `MaxEventAge` | 7 days | 1 hour–30 days | Events detected longer ago create no notification (withdrawal still applies) |
+| `PopupWindow` | 24 hours | 5 minutes–7 days | A claimed notification older than this is counted, not popped up |
+| `RunGroupLimit` | `200` | 1–1000 | Events one run notification covers; later ones follow up |
+| `TestCooldown` | 10 s | 1 s–5 min | Between test notification requests |
+| `HeartbeatTimeout` | 90 s | 30 s–10 min | Written into the heartbeat file; the API's `workerOnline` uses it |
+| `HeartbeatFile` | `/tmp/vessel-notifications-heartbeat` | Non-empty path | Read by `/app/worker-health` for a notifications worker |
 
 ### Fixed in code
 

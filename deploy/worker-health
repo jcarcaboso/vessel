@@ -1,8 +1,13 @@
 #!/bin/sh
-# Healthy only while the scheduler keeps completing productive passes. The worker writes
-# "<unix seconds> <timeout seconds>" (Vessel:Monitor:HeartbeatTimeout) after each one.
+# Healthy only while the worker keeps completing productive passes. It writes
+# "<unix seconds> <timeout seconds>" after each one: the monitor scheduler for a monitor worker
+# (Vessel:Monitor:HeartbeatTimeout), subscription maintenance for a notifications worker
+# (Vessel:Notifications:HeartbeatTimeout). The first configured module chooses the file.
 set -euf
-file="${Vessel__Monitor__HeartbeatFile:-/tmp/vessel-worker-heartbeat}"
+case "${Vessel__Worker__Modules__0:-monitor}" in
+  notifications) file="${Vessel__Notifications__HeartbeatFile:-/tmp/vessel-notifications-heartbeat}" ;;
+  *) file="${Vessel__Monitor__HeartbeatFile:-/tmp/vessel-worker-heartbeat}" ;;
+esac
 test -r "$file" || exit 1
 # The file has no trailing newline; split its two fields without read's end-of-file status.
 set -- $(cat "$file")

@@ -473,7 +473,7 @@ No durable production subscription is required yet. The no-op `monitor` event co
 
 ### Notification Hub (future)
 
-A separate plan. Only its boundary is fixed:
+A separate plan: [Notification Hub and in-app popups](notification-hub-plan.md) (draft, October 17). Only its boundary is fixed here:
 - **One subscription,** `notifications`. It owns per-owner rules (channels, minimum severity, event types), grouping by `runId`, the relevance and expiry rechecks at delivery, and a delivery record per notification and channel.
 - **Atomic hand-off.** In the transaction that settles its subscription receipt, the hub creates the durable pending work for each channel and its outbox message.
 - **Providers** consume `vessel.notify.<provider>` queues (`telegram`, `discord`, `in-app`), which are transport only: a provider recovers unsettled work from the hub's records, using stable delivery identities. Each implements an Application port such as `INotificationChannel`, with its own rate limits, retries and dead-letter queue.

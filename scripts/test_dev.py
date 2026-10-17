@@ -125,7 +125,7 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
                 run.assert_not_called()
                 popen.assert_not_called()
 
-    def test_dev_modes_start_postgres_and_rabbitmq_then_the_api_or_monitor_worker(self):
+    def test_dev_modes_start_postgres_and_rabbitmq_then_the_api_or_both_workers(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".env").write_text(
@@ -158,12 +158,18 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
             started.clear()
             with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True), \
                     patch.object(dev.sys, "argv", ["dev.py", "worker"]), \
-                    patch.object(dev.subprocess, "run"), patch.object(dev.subprocess, "Popen", side_effect=popen), \
+                    patch.object(dev.subprocess, "run") as run, patch.object(dev.subprocess, "Popen", side_effect=popen), \
                     patch.object(dev.signal, "signal"):
                 with self.assertRaises(SystemExit):
                     dev.main()
-                self.assertEqual([["dotnet", "run", "--project", "backend/src/Vessel.Worker", "--no-launch-profile"]],
-                                 [command for command, _ in started])
+                # One build, then the monitor worker and the notifications worker from it.
+                self.assertIn(["dotnet", "build", "backend/src/Vessel.Worker"], [call.args[0] for call in run.call_args_list])
+                worker = ["dotnet", "run", "--project", "backend/src/Vessel.Worker", "--no-build", "--no-launch-profile"]
+                self.assertEqual([worker, worker], [command for command, _ in started])
+                self.assertNotIn("Vessel__Worker__Modules__0", started[0][1])
+                self.assertEqual(("notifications", "notifications"), (started[1][1]["Vessel__Worker__Modules__0"],
+                                                                      started[1][1]["Vessel__Worker__Deployment"]))
+                self.assertEqual("/tmp/vessel-dev-notifications-heartbeat", started[1][1]["Vessel__Notifications__HeartbeatFile"])
 
 
 if __name__ == "__main__":

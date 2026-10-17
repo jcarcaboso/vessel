@@ -119,8 +119,8 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  # The monitor module and the replica-safe event maintenance. A later worker-notifications
-  # service runs the same image with other modules (deploy/README.md).
+  # The monitor module and the replica-safe event maintenance. worker-notifications runs the same
+  # image with the notifications module (deploy/README.md).
   worker:
     image: skorcius/vessel:api-${VESSEL_VERSION:-0.2.0}
     entrypoint: ["/app/worker"]
@@ -134,6 +134,30 @@ services:
       Vessel__Monitor__Interval: ${VESSEL_MONITOR_INTERVAL:-00:10:00}
       Vessel__Monitor__ProtectionGrace: ${VESSEL_MONITOR_PROTECTION_GRACE:-00:10:00}
       Vessel__Monitor__ManualCooldown: ${VESSEL_MONITOR_MANUAL_COOLDOWN:-00:01:00}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/app/worker-health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 6
+    restart: unless-stopped
+
+  # The Notification Hub: the notifications subscription, in-app notifications and their retention.
+  # It never opens venue tokens, so it needs no credential key ring.
+  worker-notifications:
+    image: skorcius/vessel:api-${VESSEL_VERSION:-0.2.0}
+    entrypoint: ["/app/worker"]
+    environment:
+      DOTNET_ENVIRONMENT: Production
+      Vessel__Worker__Modules__0: notifications
+      Vessel__Worker__Deployment: notifications
+      ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      Vessel__Auth__OwnerId: ${Vessel__Auth__OwnerId:?Set a non-empty GUID}
+      Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_APP_USER:-${RABBITMQ_USER:?Set RABBITMQ_USER}}:${RABBITMQ_APP_PASSWORD:-${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}}@rabbitmq:5672/"
+      Vessel__Monitor__Interval: ${VESSEL_MONITOR_INTERVAL:-00:10:00}
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -98,6 +98,9 @@ class Check:
   worker:
     image: {self.images['api']}
     pull_policy: never
+  worker-notifications:
+    image: {self.images['api']}
+    pull_policy: never
   # Runs only the verification subscription, whose receipts prove delivery and catch-up.
   verifier:
     image: {self.images['api']}
@@ -398,6 +401,58 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             time.sleep(1)
         raise AssertionError('Durable event delivery did not recover: ' + event_id)
 
+    def notifications(self):
+        """A test notification travels API, event, broker or catch-up, hub, feed and stream, even through a broker outage."""
+        for path in ('/api/notifications', '/api/notifications/head', '/api/notifications/preferences'):
+            self.expect(self.request(path, auth=False)[0] == 401, 'notification route requires authentication: ' + path, 'notifications')
+        status, headers, _ = self.request('/api/notifications/head')
+        self.expect(status == 200 and 'no-store' in dict((key.lower(), value) for key, value in headers).get('cache-control', ''),
+                    'notification head is not cacheable', 'notifications')
+        head = self.json('/api/notifications/head')
+        self.expect(re.fullmatch(r'(0|[0-9a-f]{32})\.[0-9]+\.[0-9]+', head['nextCursor']) is not None,
+                    'notification cursor is an opaque {epoch}.{reset}.{sequence} string', 'notifications')
+        connection = self.connect()
+        try:
+            connection.request('GET', '/api/events/stream?after=0&notificationsAfter=' + head['nextCursor'],
+                               headers={'Authorization': 'Bearer ' + self.token})
+            response = connection.getresponse()
+            self.expect(self.request('/api/notifications/test', 'POST')[0] == 202, 'test notification requested', 'notifications')
+            self.expect(self.request('/api/notifications/test', 'POST')[0] == 429, 'test notification cooldown refuses a repeat', 'notifications')
+            frame, received = None, None
+            for _ in range(400):
+                line = response.readline().decode('utf-8').strip()
+                if line.startswith('event: '):
+                    frame = line[7:]
+                elif line.startswith('data: ') and frame == 'notification':
+                    received = json.loads(line[6:])
+                    break
+            self.expect(received is not None and received['notification']['kind'] == 'test' and received['notification']['state'] == 'unread',
+                        'the stream delivers the test notification frame', 'notifications')
+        finally:
+            connection.close()
+        claim = self.json('/api/notifications/claim', None, 'POST')
+        self.expect(len(claim['popups']) == 1 and claim['popups'][0]['content']['title'] == 'Test notification',
+                    'one claim wins the popup', 'notifications')
+        self.expect(self.json('/api/notifications/claim', None, 'POST')['popups'] == [], 'a second claim wins nothing', 'notifications')
+        read = self.json('/api/notifications/' + claim['popups'][0]['id'] + '/read', None, 'POST')
+        self.expect(read['state'] == 'read' and self.json('/api/notifications/head')['unreadCount'] == 0,
+                    'reading clears the unread count', 'notifications')
+        # Broker outage: the event commits; the hub's catch-up reads it from PostgreSQL.
+        time.sleep(11)
+        self.compose('stop', 'rabbitmq', stdout=subprocess.DEVNULL)
+        self.expect(self.request('/api/notifications/test', 'POST')[0] == 202, 'test request commits while the broker is unavailable', 'notifications')
+        self.wait_notifications(2)
+        self.compose('up', '-d', '--wait', 'rabbitmq', stdout=subprocess.DEVNULL)
+        self.notification_count = 2
+
+    def wait_notifications(self, count, project=None):
+        for _ in range(120):
+            if self.json('/api/notifications?tab=all')['allTotal'] >= count:
+                self.expect(True, 'notifications reached ' + str(count), 'notifications')
+                return
+            time.sleep(1)
+        raise AssertionError('The Notification Hub did not deliver ' + str(count) + ' notifications.')
+
     def wait_outbox_drained(self, project=None):
         for _ in range(120):
             if self.outbox_count(project) == 0:
@@ -407,7 +462,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         raise AssertionError('The event outbox did not drain after the broker returned.')
 
     def private_logs(self, project=None):
-        logs = self.compose('logs', '--no-color', 'api', 'worker', 'verifier', 'migrate',
+        logs = self.compose('logs', '--no-color', 'api', 'worker', 'worker-notifications', 'verifier', 'migrate',
                             project=project, capture_output=True, text=True).stdout
         for secret in (self.token, self.database_password, self.broker_password, self.s3_secret):
             self.expect(secret not in logs, 'application logs omit a synthetic secret', 'security')
@@ -482,9 +537,23 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         wrong = self.compose('run', '--rm', '--no-deps', '-e', 'Vessel__Worker__Modules__0=verification',
                              '-e', 'Vessel__Worker__Deployment=monitor', 'worker', check=False, capture_output=True, text=True)
         self.expect(wrong.returncode != 0 and 'Password' not in wrong.stderr + wrong.stdout, 'worker rejects an unprovisioned module set without printing secrets', 'worker')
-        unknown = self.compose('run', '--rm', '--no-deps', '-e', 'Vessel__Worker__Modules__0=notifications', 'worker',
+        unknown = self.compose('run', '--rm', '--no-deps', '-e', 'Vessel__Worker__Modules__0=nonexistent', 'worker',
                                check=False, capture_output=True, text=True)
         self.expect(unknown.returncode != 0, 'worker rejects an unknown module', 'worker')
+        # The Notification Hub runs as its own deployment, with its own heartbeat file and row.
+        container = self.compose('ps', '-q', 'worker-notifications', capture_output=True, text=True).stdout.strip()
+        inspected = json.loads(run('docker', 'inspect', container, capture_output=True, text=True).stdout)[0]
+        self.expect(inspected['Config']['Entrypoint'] == ['/app/worker'], 'notifications worker uses the /app/worker entrypoint', 'notifications')
+        self.expect(inspected['State']['Health']['Status'] == 'healthy', 'notifications worker is healthy after a productive maintenance pass', 'notifications')
+        self.expect(inspected['Config']['User'] == 'app', 'notifications worker runs as the non-root app user', 'notifications')
+        self.expect(not self.ports('worker-notifications'), 'notifications worker publishes no port', 'notifications')
+        mounts = [mount.get('Destination', '') for mount in inspected.get('Mounts', [])]
+        self.expect(not any('vessel-credential-keys' in mount for mount in mounts), 'notifications worker has no credential key ring', 'notifications')
+        for _ in range(60):
+            if self.json('/api/notifications/head')['workerOnline']:
+                break
+            time.sleep(1)
+        self.expect(self.json('/api/notifications/head')['workerOnline'], 'API reports the notifications heartbeat online', 'notifications')
 
     def transport_fixture(self):
         self.fixture = True
@@ -553,7 +622,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
                     'database backup includes pending event work', 'restore')
         self.private_logs()
         # Every host stops before a backup: web, api and the workers (README upgrade/backup procedure).
-        self.compose('stop', 'web', 'api', 'worker', 'verifier', stdout=subprocess.DEVNULL)
+        self.compose('stop', 'web', 'api', 'worker', 'worker-notifications', 'verifier', stdout=subprocess.DEVNULL)
         service, directory, uid = ('rustfs', '/data', '10001') if self.args.storage == 's3' else ('api', '/var/lib/vessel/evidence', '1654')
         if self.args.storage == 's3':
             # RustFS stores object metadata too; take its complete volume offline.
@@ -594,6 +663,13 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         self.expect(self.request('/health/ready')[0] == 200, 'restored database/migrations ready', 'restore')
         self.expect(self.compose('ps', '--format', 'json', 'worker', project=project, capture_output=True, text=True).stdout.count('"healthy"') == 1,
                     'restored worker healthy without the broker volume', 'restore')
+        self.expect(self.compose('ps', '--format', 'json', 'worker-notifications', project=project, capture_output=True, text=True).stdout.count('"healthy"') == 1,
+                    'restored notifications worker healthy without the broker volume', 'restore')
+        restored = self.json('/api/notifications?tab=all')
+        self.expect(restored['allTotal'] == self.notification_count and any(item['state'] == 'read' for item in restored['items']),
+                    'notifications and their read state survive the restore', 'restore')
+        self.expect(re.fullmatch(r'[0-9a-f]{32}\.[0-9]+\.[0-9]+', self.json('/api/notifications/head')['nextCursor']) is not None,
+                    'the notification head names the rotated epoch', 'restore')
         self.expect(self.json('/api/accounts/' + self.account)['name'] == 'Synthetic manual', 'account visible under preserved owner', 'restore')
         self.expect(self.json('/api/plays/' + self.play)['summary']['title'] == 'Synthetic restore play', 'saved Play restored', 'restore')
         self.expect(self.request('/api/evidence/' + self.evidence + '/content')[2] == self.png, 'original evidence bytes restored', 'restore')
@@ -641,6 +717,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             self.seed()
             self.worker()
             self.monitor()
+            self.notifications()
             self.matrix()
             self.transport_fixture()
             self.tls = True
