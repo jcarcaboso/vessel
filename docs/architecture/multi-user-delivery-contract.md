@@ -780,3 +780,21 @@ See §7. The stream endpoints get `IPrincipalValidity` from DI: `AlwaysValidPrin
 | Opus | The base branch is `t3/wallet-based-user-auth` | §2 |
 | Opus | The default-GUID refusal applies in Wallet mode only; `ensure-owner` always runs in `migrate` and does nothing in Token mode; B1's interim scheduler; the initialization helper locks the registration first; the session probe uses the public call kind and a 401 never reloads; `IPrincipalValidity` checks "at least every 15 s" | §3, §4, §8, §9.1, §9.2, §11 |
 
+
+## 16. Implementation-round clarifications
+
+Cross-model verification of the first lanes found gaps the contract left open. The orchestrator settled them as follows; later lanes and P4 follow them.
+
+| Found in | Clarification | Where |
+| --- | --- | --- |
+| A1 review | The request guard treats every method except GET, HEAD, OPTIONS and TRACE as unsafe, compared case-insensitively | §7 |
+| A1 review | A reused binding cookie keeps its value but is re-issued with a fresh lifetime on every challenge | §6, §7 |
+| A1 review | Stream endpoints resolve `IPrincipalValidity` as a required service; there is no "always valid" fallback | §7, §9.5 |
+| B1 review | The interim scheduler isolates failures per owner: one owner's error never stops discovery, claims or heartbeats for later owners | §9.1, §9.3 |
+| B1 review | `retry-event-receipts` requires `--owner <guid>` or `--all-owners`; with `--all-owners`, `--limit` applies per owner | §8, P4 runbook |
+| D1 review | Display names, labels and notes: trim, then reject Unicode categories Cc, Cf, Cs, Cn, Zl and Zp; lengths count UTF-16 code units (60, 40 and 80); private-use characters are allowed. The frontend mirrors the server rule; the server stays authoritative | §6, §11 |
+| D1 review | The browser sends only a `0x`-prefixed 130-hex-digit signature. Any other hex string, including ERC-6492, shows the `signature-unsupported` state without spending the challenge | §5, §11 |
+| D1 review | A teardown before the shell is on screen still reloads. It sets the one-shot `sessionStorage['vessel:device:landing'] = 'sign-in'`, and the next load shows the chooser without probing, so a failing cookie cannot loop. "Use another wallet" on the suspended screen does the same | §11 |
+| D1 review | Stale-generation responses, errors, stream readers and side effects are discarded, as §11 requires; generation-bound streams reopen under the current generation | §11 |
+| D1 review | The "Signed in as someone else in another tab" notice is shown after a successful reload too, and removed only once presented | §11 |
+| D1 review | The remember checkbox is locked from the moment signing starts | §11 |
