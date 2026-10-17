@@ -188,29 +188,40 @@ function WalletRow({ wallet, only, auth, onRemove, onChanged }: {
   const [label, setLabel] = useState(wallet.label ?? '')
   const [error, setError] = useState<string | null>(null)
   const name = wallet.label ?? 'Wallet'
+  // Leaving the form by Cancel, Escape or a save puts focus back on this row's Rename control.
+  const renameButton = useRef<HTMLButtonElement>(null)
+  const refocus = useRef(false)
+  useEffect(() => {
+    if (editing || !refocus.current) return
+    refocus.current = false
+    renameButton.current?.focus()
+  }, [editing])
+  const leave = () => { refocus.current = true; setEditing(false) }
+  const cancel = () => { leave(); setLabel(wallet.label ?? ''); setError(null) }
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const cleaned = cleanLabel(label)
     if (cleaned === undefined) { setError(`Use at most ${walletLabelLimit} printable characters for the label.`); return }
     try {
       await auth.updateWallet(wallet.id, cleaned)
-      setEditing(false); setError(null); onChanged()
+      leave(); setError(null); onChanged()
     } catch (cause) { setError(errorMessage(cause, 'The label could not be saved.')) }
   }
   return <li className="profile-row">
     <UserAvatar name={name} address={wallet.address} />
     <span className="profile-row-meta">
-      {editing ? <form className="profile-label-form" onSubmit={event => { void save(event) }}>
+      {editing ? <form className="profile-label-form" onSubmit={event => { void save(event) }}
+        onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); cancel() } }}>
         <Input aria-label={`Label for ${wallet.address}`} value={label} onChange={event => setLabel(event.target.value)} maxLength={walletLabelLimit * 2} autoFocus
           aria-invalid={error !== null} aria-describedby={error ? `label-error-${wallet.id}` : undefined} />
-        <Button type="submit" size="sm">Save</Button><Button type="button" size="sm" variant="ghost" onClick={() => { setEditing(false); setLabel(wallet.label ?? ''); setError(null) }}>Cancel</Button>
+        <Button type="submit" size="sm">Save</Button><Button type="button" size="sm" variant="ghost" onClick={cancel}>Cancel</Button>
       </form> : <strong>{name} <SourceChip source={wallet.address} /></strong>}
       {error && <span id={`label-error-${wallet.id}`} className="error" role="alert">{error}</span>}
       <small>Added {day(wallet.addedAt)} · {wallet.current ? 'used for this session' : wallet.lastUsedAt ? `last used ${ago(wallet.lastUsedAt)}` : 'not used yet'}</small>
     </span>
     {wallet.current && <span className="identity-pill is-brand">This session</span>}
     {!editing && <span className="profile-row-actions">
-      <Button variant="ghost" size="sm" aria-label={`Rename ${name}`} title="Rename" onClick={() => setEditing(true)}><Pencil size={14} aria-hidden="true" /></Button>
+      <Button ref={renameButton} variant="ghost" size="sm" aria-label={`Rename ${name}`} title="Rename" onClick={() => setEditing(true)}><Pencil size={14} aria-hidden="true" /></Button>
       {!only && <Button variant="ghost" size="sm" className="profile-danger" onClick={onRemove}><Trash2 size={14} aria-hidden="true" />Remove</Button>}
     </span>}
   </li>

@@ -169,6 +169,21 @@ describe('Profile & sign-in', () => {
       await waitFor(() => expect(link).toHaveFocus())
     })
 
+    it.each<[string, (user: ReturnType<typeof userEvent.setup>, form: HTMLElement) => Promise<void>]>([
+      ['Cancel', (user, form) => user.click(within(form).getByRole('button', { name: 'Cancel' }))],
+      ['Escape', user => user.keyboard('{Escape}')],
+      ['a successful save', (user, form) => user.click(within(form).getByRole('button', { name: 'Save' }))],
+    ])('returns to the row\'s Rename control after leaving the label form by %s', async (_, leave) => {
+      routes[`PATCH /api/auth/wallets/${secondWalletFixture.id}`] = () => json(secondWalletFixture)
+      const { user } = mount()
+      await user.click(await screen.findByRole('button', { name: 'Rename Ledger' }))
+      const input = screen.getByRole('textbox', { name: `Label for ${secondWalletFixture.address}` })
+      expect(input).toHaveFocus()
+      await leave(user, input.closest('form')!)
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Rename Ledger' })).toHaveFocus())
+      expect(screen.queryByRole('textbox', { name: `Label for ${secondWalletFixture.address}` })).not.toBeInTheDocument()
+    })
+
     it('returns to the row\'s Remove button when the removal dialog is cancelled', async () => {
       const { user } = mount()
       const remove = (await screen.findAllByRole('button', { name: /Remove/ }))[1]!
