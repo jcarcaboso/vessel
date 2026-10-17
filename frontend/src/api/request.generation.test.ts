@@ -125,6 +125,40 @@ describe('generation-bound streams', () => {
   const [candle, later] = candleSeriesFixture.candles
   const query = { instrument: 'BTC', interval: '1h' as const }
 
+  it('observes a late open rejection after the session-end promise wins the race', async () => {
+    const ended = new AbortController()
+    const tab = { ...generation(), ended: ended.signal }
+    let rejectCancel!: (cause: unknown) => void
+    const cancel = vi.fn(() => new Promise<void>((_resolve, reject) => { rejectCancel = reject }))
+    // Invalid headers start asynchronous cleanup before `open` rejects.
+    const body = new ReadableStream<Uint8Array>({ cancel })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { headers: { 'Content-Type': 'text/html' } })))
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    try {
+      const done = createWorkspaceApi({ kind: 'session', userId, sessionId, generation: tab })
+        .marketStream(accountId, query, new AbortController().signal, vi.fn())
+      await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce())
+      ended.abort()
+      await expect(done).resolves.toBeUndefined()
+      expect(tab.listeners()).toBe(0)
+      // Cleanup completes after `over`; the invalid stream now rejects `open`.
+      rejectCancel(new Error('late cleanup rejection'))
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(unhandled).not.toHaveBeenCalled()
+      expect(fetch).toHaveBeenCalledOnce()
+    } finally { process.off('unhandledRejection', unhandled) }
+  })
+
+  it('still rejects an open failure that settles before session end', async () => {
+    const tab = generation()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { headers: { 'Content-Type': 'text/html' } })))
+    await expect(createWorkspaceApi({ kind: 'session', userId, sessionId, generation: tab })
+      .marketStream(accountId, query, new AbortController().signal, vi.fn()))
+      .rejects.toMatchObject({ kind: 'invalid-response', message: 'The API returned an invalid live market stream.' })
+    expect(tab.listeners()).toBe(0)
+  })
+
   it('closes the live market reader on a new generation, drops its frames and reopens under the current one', async () => {
     const tab = generation()
     const streams: Array<ReturnType<typeof liveStream>> = []

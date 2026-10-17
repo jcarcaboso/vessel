@@ -453,7 +453,10 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
       const over = new Promise<void>(resolve => { quit = resolve })
       ended.addEventListener('abort', quit, { once: true })
       try {
-        await Promise.race([open(AbortSignal.any([signal, changed.signal, ended])), over])
+        const opened = open(AbortSignal.any([signal, changed.signal, ended]))
+        // The session may end before the reader rejects; still observe that later rejection.
+        opened.catch(() => {})
+        await Promise.race([opened, over])
       } catch (cause) {
         if (signal.aborted || !changed.signal.aborted && !ended.aborted) throw cause
       } finally {
