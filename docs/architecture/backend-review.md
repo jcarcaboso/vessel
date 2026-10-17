@@ -4,6 +4,50 @@ A review of the backend architecture and code after PR #37, looking for defects,
 
 **Original review method.** I read all of `backend/src` (about 10,700 lines, excluding migrations), skimmed the tests (about 18,500 lines) and cross-checked the docs, CI and the frontend's polling. The solution built with 0 warnings (`TreatWarningsAsErrors`). At that checkpoint, 1,316 tests passed and 124 were skipped because the PostgreSQL and live-venue environment variables were unset. No code changed during the initial review. The findings below retain that baseline; subsequent implementation is tracked here.
 
+## October 16–17, 2026 improvement pass
+
+A second pass on the `t3/backend-health` branch, based on `main` at `6d2e55a`. It records the work on that branch, not a release, deployment or migration of the owner's database.
+
+**Method.** Four independent audits (three Opus: performance, reliability and code health; one Sol: combined) produced a draft plan. A challenge round by Sol and Opus cut it to behaviour-preserving or clearly corrective changes; locking semantics, admission design, migrations, wire-contract changes and cross-request caches were deferred unless the owner approved them. Opus agents implemented waves A–F in separate worktrees with disjoint write scopes. A Sol verification round found three issues (a slow client could hold the event stream open for a whole page past its lifetime, an overflowing track-record mean was rounded twice, and one settlement path reparsed the plan); all three were fixed in `0a8ce60` with regression tests.
+
+| Item | What changed |
+| --- | --- |
+| A1–A5 | Execution matching uses hash indexes of the loaded links instead of scanning them per order. Matching, transitions, `GetAsync`, `LinkAsync`, `UnlinkAsync` and the retrospective preview read only what can matter (candidate orders on active Plays' contracts since their earliest creation, the Play's own links, one order or one link); orders are read without tracking. Results are unchanged. |
+| B1/B2 | Event fill capture loads the baseline once per unit, skips unlinked orders and claims fill identities in one `INSERT … SELECT unnest … ON CONFLICT DO NOTHING RETURNING`. Event identities, order and payloads are unchanged; payload amounts use the shared `ExactDecimal` formatter. |
+| C1–C4 | The monitor scheduler keeps one wake waiter across ticks (it leaked one per tick). A caller-cancelled Refresh releases its lease without recording a venue sync failure. An unreadable stored event settles its receipt as failed with zero handler attempts, and a running subscription without its handler stops host start. The browser event stream ends after `Vessel:Events:StreamMaxLifetime` (30 minutes), checked before every frame, and the browser resumes from its cursor. |
+| D1, D2, D4 | Track-record averages and the exposure ladder no longer overflow: the exact sum over the count is rounded once, and an unrepresentable ratio is null with a notice. Concurrent first writes of sizing settings both succeed (`ON CONFLICT DO NOTHING` then `FOR UPDATE`). Each closed Play's plan is parsed once. |
+| D3, E1, E2 | Transient S3 failures (transport, timeout, throttling, 5xx) answer 503 through `EvidenceStorageUnavailableException`; 4xx, missing keys and the 412 create-only conflict are unchanged. Each venue adapter reuses one `BoundedJsonHttp` and parses the pre-sized buffer without a copy. `VenueCredentialPurpose.ReadToken` replaces seven copies of the AES-GCM purpose string, byte for byte. |
+| P-a (owner-approved) | A Check with a stale worker heartbeat answers 503 and records nothing. Pending check work that no worker claimed within `Lease + HeartbeatTimeout` returns to idle at Check or Refresh admission, still due, so it no longer blocks Refresh. |
+| E3 (owner-approved) | Credential verification runs with no transaction or lock open; a short locked recheck saves, or answers 409 if the account settings, source, venue or stored credential changed. The absent-created-deleted ABA case is an accepted limitation. |
+| F1 | `AddVesselApplication()` and `AddVesselMonitoring()` live in `Vessel.Infrastructure/ApplicationServices.cs`, shared by the API and worker; Persistence registers only the context and stores. `HostCompositionTests` builds both containers. |
+| F2 | Leftovers removed (`BoundedMarketDataCache.Set` private, unused `VenueOrder.IsTrigger`, stale `global::` qualifiers). |
+| F5 | Read-only API rejection matrices share one host per class (`DiaryRequestLimitTests` 24 s to 0.6 s). |
+| R3 | `backend/README.md` rewritten around running, testing, migrating and configuring. |
+| Analyzers | Migrations are generated code. CA1806, CA1725, CA2016, CA1826, CA1859, CA1869, CA1870, CA2263, CA1068 and CA1036 are warnings (errors under `TreatWarningsAsErrors`) for `backend/src`; tests keep the SDK defaults. 28 findings: 27 fixed, one CA1859 suppressed in place with its reason. CA2016 and CA1826 had no findings. |
+
+**Verification.** The integrated branch passed the full suite with 2,763 tests passed, 5 opt-in skips (S3 and live venues) and 0 build warnings before the analyzer change. After the analyzer change the Release build had 0 warnings and the full suite again passed 2,763 with 5 opt-in skips. Tests used disposable PostgreSQL schemas and broker prefixes only.
+
+**Backlog status after this pass.** R1 is done through the monitor: Refresh and Check read the venue under a lease with no transaction or lock, then apply in short fenced units. R3 is done. S3 is done again (the monitor work had moved registrations back into Persistence). S9 is partly done: matching and execution reads are narrowed; Activity, Overview and Review still recompute from all retained facts. N6 is partly done: the purpose helper exists; the credential `GET` still decrypts to report status. N9 is done for `BoundedJsonHttp`; the Hyperliquid `StrictJson` wrappers remain. N11 is partly done: selected analyzers are on; test folders and traits are not.
+
+### Deferred proposals
+
+Each needs measurement or owner agreement first; none is implemented.
+
+- Session `lock_timeout` with a 55P03 mapping, so lock waits fail fast and clearly.
+- S2: one lock coordinator for the advisory-lock sites and the account-row lock implementations.
+- An `imported_fills (OwnerId, AccountId, OrderId)` index, after `EXPLAIN` on a 100k-fill dataset.
+- A read model for Activity, Overview and Review (P6), after measurement.
+- D5: Overview summary from one snapshot (one repeatable-read reporting transaction for membership, balances and facts).
+- Splitting the drawings column from `plays` so closed-Play loads skip it.
+- N14 HTTP status consistency (retrospective creation 201, reader-unavailable 502 versus 503); a frontend contract change.
+- Automatic decompression for venue HTTP, after checking each venue's size-limit semantics.
+- Worker readiness that reports broker and outbox age.
+- S8 typed statuses, and splitting `MonitorDiscrepancyService.Observe` and `MonitorCoordinator.RunAsync`.
+- N12 evidence orphan sweep, and handling an S3 412 on a retried create.
+- CA1848 (`LoggerMessage`) and CA1711; not enabled in this pass.
+- Activity and Diary join a Play's links to fills by account and order without checking the Play's contract (noted by Sol). Investigate whether a cross-contract attribution can occur; do not change it without a reproduction.
+- A Check on an account whose run is still `running` with an expired lease answers 429 with `Retry-After: 1` until a worker reclaims it.
+
 ## Implementation and verification
 
 October 14, 2026, on `t3/backend-architecture-review`. This records the work in PR #38, not a release or deployment.
@@ -85,6 +129,8 @@ The save is already idempotent: a snapshot is replaced only by a strictly newer 
 
 This choice shapes the monitor design, so agree it with the owner before implementing it (see P1).
 
+**Status (October 17, 2026).** Done through the monitor: Refresh and Check read the venue under a monitor lease with no transaction or lock open, then apply in short fenced units; credential verification also runs outside the lock (E3).
+
 ### R2. The owner write guard is fail-open for new entity types — S
 
 **Where.** `VesselDbContext.ValidateOwnership` (`Persistence/VesselDbContext.cs:303`) switches over 18 entity types and falls through to `_ => (Guid?)null` (line 331). Each query filter is also added by hand in `OnModelCreating`.
@@ -114,6 +160,8 @@ Combine this with S12.
 - The route list leaves out plays, review, sizing, activity, overview summary, market data, credentials and discovery.
 
 **Suggestion.** Cut the README down to running, testing, migrating and configuring, and link the [backend guide](backend-guide.md) for structure. Move the per-phase historical detail (review safeguards, stablecoin update, package provenance) into the existing state documents. This review only added a pointer at the top.
+
+**Status (October 17, 2026).** Done: the README now covers running, testing, migrating and configuring and links the guide.
 
 ### R4. Accepted plan numbers can overflow execution matching
 
@@ -198,6 +246,8 @@ Make its methods follow the documented order, and assert it in debug builds. Exp
 **Problem.** The storage project decides which use cases exist. Swapping or testing persistence means re-registering the application, and a newcomer looks for the services in the wrong place. Application cannot do the registration itself, because the architecture test forbids package references there.
 
 **Suggestion.** Register application services in the composition root, for example a `Vessel.Api/ApplicationServices.cs` with `AddVesselApplication()`. Persistence then registers only the `DbContext` and stores.
+
+**Status (October 17, 2026).** Done again: the monitor work had moved its use cases back into Persistence. `AddVesselApplication()` and `AddVesselMonitoring()` now live in `Vessel.Infrastructure/ApplicationServices.cs`, shared by the API and worker (F1).
 
 ### S4. Endpoints contain orchestration — S
 
@@ -297,6 +347,8 @@ Remove the redundant `no-store` sets.
 - Cheap wins: hash lookups for links by order, matching only orders placed after the earliest active Play and not yet linked, and filtering `GetAsync` to the Play's contract and creation time.
 - Larger options are in P6.
 
+**Status (October 17, 2026).** Partly done: matching uses hash lookups and matching and execution reads are narrowed (A1–A5). Activity, Overview and Review still recompute from all retained facts.
+
 ### S10. Venues are registered in three different ways — S
 
 **Where.** `Infrastructure/DependencyInjection.cs`:
@@ -341,16 +393,18 @@ Remove the redundant `no-store` sets.
 - **N6. Credentials.**
   - The purpose string `VenueId + "-read-token"` is built in four places; use one helper.
   - `AccountCredentialService.Metadata` decrypts the token on every `GET` to report its status, while `AccountCredentialReader.IsUsableAsync` deliberately avoids decrypting. Pick one policy.
+  - *Status (October 17, 2026):* the purpose helper is done (`VenueCredentialPurpose`); the `GET` decrypt is still open.
 - **N7. Review and Overview.**
   - `ReviewService.GetAsync` and `ExclusionsAsync` repeat the filter validation and account scoping.
   - The fee-incomplete predicate is written twice (lines 135 and 139).
   - Period windows are exclusive at the start in Review (`> from`) but inclusive in the Overview summary (`>= from`).
 - **N8.** Long user-facing notice texts are spread inline across services. A `Notices` class per module would make them easy to find and review together; keep them server-owned.
-- **N9. Adapter boilerplate.** Adapters build a new `BoundedJsonHttp` on every property access (`Http => new(...)`); make it a field. `HyperliquidPerpetualReader` has a dozen one-line wrappers around `StrictJson`; call `Json.X` directly, as RISEx does.
+- **N9. Adapter boilerplate.** Adapters build a new `BoundedJsonHttp` on every property access (`Http => new(...)`); make it a field. `HyperliquidPerpetualReader` has a dozen one-line wrappers around `StrictJson`; call `Json.X` directly, as RISEx does. *Status (October 17, 2026):* the `BoundedJsonHttp` part is done; the wrappers remain.
 - **N10.** The enum-to-wire helpers (`StatusName`, `ReasonName`, `Name<T>`, `Source(LimitSource)`) could become `JsonStringEnumConverter` with `[JsonStringEnumMemberName]` on the enums.
 - **N11. Tests and analyzers.**
   - Group the 74 test files into folders (Domain, Application, Api, Persistence, Venues) and add `[Trait]` categories, so a fast unit subset can run with `--filter`.
   - Consider `<AnalysisLevel>latest-recommended</AnalysisLevel>` and `EnforceCodeStyleInBuild`; `.editorconfig` has no C# rules yet.
+  - *Status (October 17, 2026):* partly done. Ten selected CA rules are warnings for production code and migrations are generated code; test folders, traits and a broader analysis level are not done.
 - **N12. Evidence cleanup.** A failed delete or upload leaves an unreferenced file, which is harmless by design, but nothing ever removes them. Add a maintenance command that compares the storage keys with `play_evidence.ObjectKey`.
 - **N13. Overview consistency.** `OverviewSummaryService` reads accounts and snapshots through `WorkspaceService`, then reads facts again in a separate repeatable-read transaction, so one response is not one snapshot. `FillDto.PlayId` is always null in Overview and account fills even though links exist; the contract states this, so revisit it if the UI would benefit.
 - **N14. HTTP status consistency.** `POST /api/plays/retrospective` returns 200 where `POST /api/plays` returns 201. "Venue reader is unavailable" is a 503 in `SyncAsync` but a 502 in `InstrumentsAsync` and `CandleService`.
