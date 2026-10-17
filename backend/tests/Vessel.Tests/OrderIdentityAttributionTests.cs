@@ -86,7 +86,7 @@ public sealed class OrderIdentityAttributionTests
 
         await using var db = database.Context(owner);
         // The matcher linked nothing on ETH; only the two seeded BTC links exist.
-        Assert.Equal([btcEntry.Id, btcExit.Id], (await db.OrderLinks.AsNoTracking().ToListAsync()).Select(l => l.ImportedOrderId).Order());
+        Assert.Equal(new[] { btcEntry.Id, btcExit.Id }.Order(), (await db.OrderLinks.AsNoTracking().ToListAsync()).Select(l => l.ImportedOrderId).Order());
         var btcFills = await db.Fills.Where(f => f.ContractId == "BTC").Select(f => f.Id).ToListAsync();
         var ethFills = await db.Fills.Where(f => f.ContractId == "ETH").Select(f => f.Id).ToListAsync();
 
@@ -132,7 +132,7 @@ public sealed class OrderIdentityAttributionTests
         // Creation links the ETH orders' internal IDs, never the BTC orders with the same venue IDs.
         var retrospective = await DiaryPostgresTests.Service(db).CreateRetrospectiveAsync(
             new(Guid.NewGuid(), account.Id, ethOperation.Id, ethPreview.Fingerprint, "ETH"), default);
-        Assert.Equal([ethEntry.Id, ethExit.Id], (await db.OrderLinks.AsNoTracking().Where(l => l.PlayId == retrospective.Summary.Id)
+        Assert.Equal(new[] { ethEntry.Id, ethExit.Id }.Order(), (await db.OrderLinks.AsNoTracking().Where(l => l.PlayId == retrospective.Summary.Id)
             .ToListAsync()).Select(l => l.ImportedOrderId).Order());
     }
 
