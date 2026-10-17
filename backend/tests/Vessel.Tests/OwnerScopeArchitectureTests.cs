@@ -31,10 +31,15 @@ public sealed class OwnerScopeArchitectureTests
         // Schema migrations are separately reviewed DDL, not runtime owner-scope bypasses.
         // Advisory locks on owner-derived or previously owner-validated entity keys are inventoried too.
         // To add an entry, review the statement's scope, then copy its path|hash from this assertion's diff.
-        // Identity-lane SQL is added only after that lane is reviewed and stacked here.
         string[] reviewed =
         [
             "Vessel.Api/EvidenceCopyCommand.cs|c9b34ee7f02a2f083c971b5bcfd2b6dfb239af4970d91d8e56dc616d55a3d9c4",
+            // Server-wide identity invitations: atomic use consumption by code hash, expiry and remaining uses.
+            "Vessel.Identity/IdentityService.cs|c26ffac165c6420b5dab892b98bdc6fffed4d9b01eb5f98c3e15838abdc753aa",
+            // Identity-schema advisory lock only; the raw literal keeps its quoted suffix inside the SQL hash.
+            "Vessel.Identity/IdentityTransaction.cs|412856c9009c100267bcaed2ee98f7bd0fadcb134bbb68fd42b5070d64427a34",
+            // Identity-schema user row lock by parameterized user ID; no journal tables are accessed.
+            "Vessel.Identity/IdentityTransaction.cs|e4012de46b9a1236d2044f1cb200566ccf1334562c5e9f4aecdf08440632800b",
             "Vessel.Messaging/MessagingDeployments.cs|7cef9def011385ddc17e6a8b4adb587d48f430370a1b13ad73d8395985ec579b",
             "Vessel.Messaging/MessagingDeployments.cs|a16bdafb912a647befee6a34e34df9a2211d16df05d1454b8f9d412ff1e241ae",
             "Vessel.Persistence/DiaryStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",

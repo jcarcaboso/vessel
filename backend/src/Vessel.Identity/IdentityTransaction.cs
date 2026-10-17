@@ -10,7 +10,7 @@ public sealed class IdentityTransaction(IDbContextFactory<IdentityDbContext> fac
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         // ponytail: identity writes serialize per schema; replace with narrower locks if sign-in volume warrants it.
         // A2's per-user locks may be taken inside this lock, never in the reverse order.
-        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({db.Schema.Name + ":identity-write"}, 0))", ct);
+        await db.Database.ExecuteSqlInterpolatedAsync($"""SELECT pg_advisory_xact_lock(hashtextextended({db.Schema.Name + ":identity-write"}, 0))""", ct);
         var result = await action(db);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
