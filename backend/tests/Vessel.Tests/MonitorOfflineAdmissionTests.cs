@@ -18,12 +18,13 @@ public sealed partial class MonitorPostgresTests
 {
     private static readonly TimeSpan Unclaimed = MonitorOptions.Lease + new MonitorOptions().HeartbeatTimeout;
 
-    private static MonitorCoordinator OfflineAware(VesselDbContext db, Guid owner, Clock clock, CountingCommands commands)
+    private static MonitorCoordinator OfflineAware(VesselDbContext db, Guid owner, Clock clock, CountingCommands commands,
+        EventSink? sink = null)
     {
         var work = TestUnitOfWork.For(db);
         var options = new MonitorOptions();
         return new(new MonitorStore(db, work, options), new WorkspaceStore(db, work), new Importer(),
-            TestVenues.With(new Reader(), new Orders()), new Credentials(), work, new EventSink(), commands,
+            TestVenues.With(new Reader(), new Orders()), new Credentials(), work, sink ?? new EventSink(), commands,
             new CoreOwner(owner), options, clock);
     }
 
@@ -169,6 +170,59 @@ public sealed partial class MonitorPostgresTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal(MonitorCoordinator.MonitorOffline, (await response.Content.ReadFromJsonAsync<ProblemDetails>())!.Detail);
         Assert.Null(await RowAsync(database, owner));
+    }
+
+    [PostgresTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Offline_an_expired_owner_check_completes_its_own_request_as_superseded_when_admission_replaces_it(bool byCheck)
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, clock.Now);
+        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        await store.RecordHeartbeatAsync("worker", clock.Now, default);
+        var sink = new EventSink();
+        var coordinator = OfflineAware(db, owner, clock, new CountingCommands(), sink);
+        var requested = clock.Now;
+        var first = await coordinator.RequestAsync(id, default);
+        Assert.DoesNotContain(sink.Drafts, d => d.Type == "monitor.run-completed");
+        clock.Now += Unclaimed;
+        await store.RecordHeartbeatAsync("worker", clock.Now, default);
+        Guid replacement;
+        if (byCheck) replacement = (await coordinator.RequestAsync(id, default)).RequestId;
+        else replacement = (await coordinator.AdmitRefreshAsync(id, "api", default)).RequestId;
+        var completed = Assert.Single(sink.Drafts, d => d.Type == "monitor.run-completed");
+        Assert.Equal((first.RequestId, $"monitor-run:{id}:{first.RequestId}"), (completed.RunId, completed.DedupKey));
+        Assert.Equal("manual", completed.Data.GetProperty("trigger").GetString());
+        Assert.Equal("superseded", completed.Data.GetProperty("outcome").GetString());
+        var row = (await RowAsync(database, owner))!;
+        Assert.Equal(replacement, row.RequestId);
+        // A replacing Check is due now; a Refresh leaves the expired check's due time unchanged.
+        Assert.Equal(byCheck ? clock.Now : requested, row.NextRunAtUtc);
+    }
+
+    [PostgresFact]
+    public async Task Offline_a_503_refused_check_writes_no_completion_for_an_expired_request()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, clock.Now);
+        await new MonitorStore(db, TestUnitOfWork.For(db)).RecordHeartbeatAsync("worker", clock.Now, default);
+        var sink = new EventSink();
+        var coordinator = OfflineAware(db, owner, clock, new CountingCommands(), sink);
+        var first = await coordinator.RequestAsync(id, default);
+        var before = (await RowAsync(database, owner))!;
+        clock.Now += Unclaimed;
+        Assert.Equal(503, (await Assert.ThrowsAsync<ProblemException>(() => coordinator.RequestAsync(id, default))).StatusCode);
+        Assert.DoesNotContain(sink.Drafts, d => d.Type == "monitor.run-completed");
+        var after = (await RowAsync(database, owner))!;
+        Assert.Equal((first.RequestId, "pending", "manual", before.NextRunAtUtc, before.Generation),
+            (after.RequestId!.Value, after.ManualState, after.Trigger, after.NextRunAtUtc, after.Generation));
     }
 
     private sealed class CountingCommands : IMonitorCommandSink
