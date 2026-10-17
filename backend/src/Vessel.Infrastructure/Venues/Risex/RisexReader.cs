@@ -49,7 +49,8 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
 
     public string VenueId => Id;
 
-    private BoundedJsonHttp Http => new(httpClient, timeProvider, Json, "RISEx is unavailable. Try again later.", "RISEx read timed out.");
+    // One per reader: the reader owns the injected HttpClient for its own (scoped) lifetime.
+    private readonly BoundedJsonHttp Http = new(httpClient, timeProvider, Json, "RISEx is unavailable. Try again later.", "RISEx read timed out.");
 
     private async Task<JsonDocument> GetAsync(string pathAndQuery, CancellationToken ct)
     {

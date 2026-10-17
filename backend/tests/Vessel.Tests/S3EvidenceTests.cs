@@ -91,7 +91,9 @@ public sealed class S3EvidenceTests
         using var host = builder.Build();
         await host.StartAsync();
         var store = Assert.IsType<S3EvidenceObjectStore>(host.Services.GetRequiredService<IEvidenceObjectStore>());
-        Assert.Same(client.Failure, await Assert.ThrowsAsync<AmazonS3Exception>(() => store.OpenReadAsync("owner/play/item.png", default)));
+        // A transient outage is reported as such (503 in the API), still never as a local fallback.
+        var outage = await Assert.ThrowsAsync<EvidenceStorageUnavailableException>(() => store.OpenReadAsync("owner/play/item.png", default));
+        Assert.Same(client.Failure, outage.InnerException);
         await host.StopAsync();
     }
 
@@ -135,6 +137,8 @@ public sealed class S3EvidenceTests
         using var client = new StubS3 { Failure = new AmazonS3Exception("synthetic") { StatusCode = status, ErrorCode = code } };
         var store = new S3EvidenceObjectStore(client, "test-evidence");
         if (missing) Assert.Null(await store.OpenReadAsync("owner/play/item.png", default));
+        else if (status == HttpStatusCode.ServiceUnavailable)
+            Assert.Same(client.Failure, (await Assert.ThrowsAsync<EvidenceStorageUnavailableException>(() => store.OpenReadAsync("owner/play/item.png", default))).InnerException);
         else Assert.Same(client.Failure, await Assert.ThrowsAsync<AmazonS3Exception>(() => store.OpenReadAsync("owner/play/item.png", default)));
     }
 

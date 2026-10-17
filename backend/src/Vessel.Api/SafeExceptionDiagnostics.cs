@@ -16,6 +16,9 @@ internal static class SafeExceptionDiagnostics
             {
                 case Vessel.Persistence.MissingDatabaseConfigurationException:
                     return true;
+                // Adapters wrap only transient object-storage failures; configuration and permission errors stay 500.
+                case Vessel.Application.Evidence.EvidenceStorageUnavailableException:
+                    return true;
                 case NpgsqlException database:
                     return database.IsTransient;
                 case HttpRequestException { StatusCode: null }:
