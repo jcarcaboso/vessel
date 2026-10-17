@@ -38,6 +38,9 @@ import { useHashPage, type Page } from './useHashPage'
 import { useAccountRefresh } from './useAccountRefresh'
 import { lazyPage } from './lazy-page'
 import type { ManagementEvent } from './management-events'
+import type { ShellIdentity } from '@/features/identity/types'
+import { AccountMenu } from '@/features/identity/AccountMenu'
+import type { SettingsTab } from './SettingsPage'
 import './application-shell.css'
 import './skip-content.css'
 
@@ -60,7 +63,8 @@ const pages = [
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'settings', label: 'Settings', icon: Settings2 },
 ] as const
-type ShellProps = { system: SystemInfo; disconnect: () => void; api: WorkspaceApi }
+/** `identity` is present in Wallet mode only; Token mode keeps the owner card that disconnects at once. */
+type ShellProps = { system: SystemInfo; disconnect: () => void; api: WorkspaceApi; identity?: ShellIdentity }
 
 /** The log line above each page title: today's date, with a greeting on the Overview. */
 function logLine(page: Page, owner: string, now = new Date()) {
@@ -76,7 +80,7 @@ export function ApplicationShell(props: ShellProps) {
   return <Tooltip.Provider delayDuration={250} skipDelayDuration={400}><NotificationProvider><VenuesProvider venues={props.system.venues}><Shell {...props} /></VenuesProvider></NotificationProvider></Tooltip.Provider>
 }
 
-function Shell({ system, disconnect, api }: ShellProps) {
+function Shell({ system, disconnect, api, identity }: ShellProps) {
   const { notify } = useNotifications()
   const venues = useVenues()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -107,6 +111,9 @@ function Shell({ system, disconnect, api }: ShellProps) {
     exitState.current = current
     return () => { if (exitState.current === current) exitState.current = null }
   }, [api, disconnectedApi, playsSession, playsLifetime.work])
+  // A forced sign-out drops the exit state first, so the reload never asks about unsaved work.
+  const registerExitState = identity?.registerExitState
+  useLayoutEffect(() => registerExitState?.(() => { exitState.current = null }), [registerExitState])
   useEffect(() => {
     if (disconnectedApi === api) return
     const work = playsLifetime.work
@@ -142,6 +149,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
   const [managedPortfolioId, setManagedPortfolioId] = useState<string | null>(null)
   const [managedAccountId, setManagedAccountId] = useState<string | null>(null)
   const setNotice = useCallback((message: string) => { notify({ tone: 'success', message }) }, [notify])
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance')
   const [reloadKey, setReloadKey] = useState(0)
   const reload = useCallback(() => setReloadKey(key => key + 1), [])
   // Links from notifications go through the shell's own navigation; a missing account gets a short notice.
@@ -261,9 +269,10 @@ function Shell({ system, disconnect, api }: ShellProps) {
     const current = exitState.current
     if (current?.api !== api || current.work !== playsLifetime.work) return
     if (current.work.current || hasUnsavedPlayWork(current.session)) {
+      const verb = identity ? 'Sign out' : 'Disconnect'
       const message = current.work.current
-        ? 'A Play request is still in progress. Disconnect and discard unsaved work? Already-sent changes may still complete.'
-        : 'Disconnect and discard unsaved Play work?'
+        ? `A Play request is still in progress. ${verb} and discard unsaved work? Already-sent changes may still complete.`
+        : `${verb} and discard unsaved Play work?`
       if (!window.confirm(message)) return
     }
     if (exitState.current?.api !== api || exitState.current.work !== current.work) return
@@ -292,7 +301,10 @@ function Shell({ system, disconnect, api }: ShellProps) {
       <div className="shell-sidebar-bottom">
         <a href="#notifications" className={`shell-nav-item ${page === 'notifications' ? 'active' : ''}`} aria-label={notificationsName} title={notificationsName} aria-current={page === 'notifications' ? 'page' : undefined} onClick={() => navigate('notifications')}><Bell size={18} aria-hidden="true" /><span className="sidebar-copy">Notifications</span><NotificationBadge count={unread} /></a>
         <a href="#settings" className={`shell-nav-item ${page === 'settings' ? 'active' : ''}`} aria-label="Settings" title="Settings" aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} aria-hidden="true" /><span className="sidebar-copy">Settings</span></a>
-        <button className="owner-card" onClick={disconnectSession} aria-label={`Disconnect ${system.owner.displayName}'s session`} title={`Disconnect ${system.owner.displayName}'s browser session`}><span className="owner-avatar" aria-hidden="true">{system.owner.displayName.slice(0, 1).toUpperCase()}</span><span className="sidebar-copy"><strong>{system.owner.displayName}</strong></span><LogOut size={15} aria-hidden="true" /></button>
+        {identity ? <AccountMenu identity={identity} onSignOut={disconnectSession}
+          onProfile={() => { setSettingsTab('profile'); navigate('settings') }}
+          onSessions={() => { setSettingsTab('profile'); navigate('settings'); window.setTimeout(() => document.getElementById('sessions-heading')?.focus(), 0) }} />
+          : <button className="owner-card" onClick={disconnectSession} aria-label={`Disconnect ${system.owner.displayName}'s session`} title={`Disconnect ${system.owner.displayName}'s browser session`}><span className="owner-avatar" aria-hidden="true">{system.owner.displayName.slice(0, 1).toUpperCase()}</span><span className="sidebar-copy"><strong>{system.owner.displayName}</strong></span><LogOut size={15} aria-hidden="true" /></button>}
       </div>
     </aside>
     <div className="shell-main" inert={menuOpen}>
@@ -352,7 +364,8 @@ function Shell({ system, disconnect, api }: ShellProps) {
         {page === 'notifications' && cursorReady && <Suspense fallback={<PageLoading />}><NotificationsPage api={api} inApp={inApp} accounts={accounts}
           state={notificationList} onStateChange={setNotificationList} eyebrow={logLine(page, system.owner.displayName)} onPreferences={() => navigate('settings')} /></Suspense>}
 
-        {page === 'settings' && <Suspense fallback={<PageLoading />}><SettingsPage system={system} api={api} inApp={inApp} disconnectSession={disconnectSession} onAccounts={() => navigate('accounts')} /></Suspense>}
+        {page === 'settings' && <Suspense fallback={<PageLoading />}><SettingsPage system={system} api={api} inApp={inApp} disconnectSession={disconnectSession} onAccounts={() => navigate('accounts')}
+          {...identity ? { identity, tab: settingsTab, onTab: setSettingsTab } : {}} /></Suspense>}
         </div></PageErrorBoundary>
       </main>
     </div>

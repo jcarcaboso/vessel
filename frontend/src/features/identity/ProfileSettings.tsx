@@ -1,0 +1,273 @@
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { LogOut, Monitor, Pencil, Plus, Smartphone, Trash2 } from 'lucide-react'
+import { createPublicAuthApi, displayNameLimit, walletLabelLimit, type SessionRow, type StepUpAction, type WalletDto } from '@/api/auth'
+import { ApiError, errorMessage } from '@/api/errors'
+import { SourceChip } from '@/components/accounts/AccountIdentity'
+import { useNotifications } from '@/components/notifications/notifications'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { InfoTip } from '@/components/ui/info-tip'
+import { Input } from '@/components/ui/input'
+import { UserAvatar } from './IdentityParts'
+import { validDisplayName, validLabel } from './profile-rules'
+import { signingMeaning } from './SignInScreen'
+import type { ShellIdentity } from './types'
+import { WalletSignFlow } from './WalletSignFlow'
+import { sameAddress } from './wallets/provider'
+
+const day = (at: string) => new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+function ago(at: string, now = Date.now()) {
+  const minutes = Math.round((now - Date.parse(at)) / 60_000)
+  if (!Number.isFinite(minutes) || minutes < 2) return 'now'
+  if (minutes < 60) return `${minutes} minutes ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  const days = Math.round(hours / 24)
+  return `${days} day${days === 1 ? '' : 's'} ago`
+}
+const mobile = (agent: string | null) => !!agent && /\b(iOS|iPhone|iPad|Android)\b/i.test(agent)
+
+type StepUpRequest = { action: StepUpAction; target?: WalletDto; resolve: (done: boolean) => void }
+
+/**
+ * Settings → Profile & sign-in in Wallet mode (mockup screens 8–9): display name, sign-in wallets and sessions.
+ * Linking and removing a wallet need a fresh signature from a wallet already linked (step-up); a refused call
+ * with `step-up-required` opens it and is retried once.
+ */
+export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdentity; onSignOut: () => void }) {
+  const { auth } = identity
+  const { notify } = useNotifications()
+  const [wallets, setWallets] = useState<WalletDto[] | null>(null)
+  const [sessions, setSessions] = useState<SessionRow[] | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
+  const reload = useCallback(() => setReloadKey(key => key + 1), [])
+  const [stepUp, setStepUp] = useState<StepUpRequest | null>(null)
+  const [linking, setLinking] = useState(false)
+  const [removing, setRemoving] = useState<WalletDto | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    Promise.all([auth.wallets(controller.signal), auth.sessions(controller.signal)]).then(([nextWallets, nextSessions]) => {
+      setWallets(nextWallets); setSessions(nextSessions); setLoadError(null)
+    }, (cause: unknown) => { if (!controller.signal.aborted) setLoadError(errorMessage(cause, 'Sign-in wallets and sessions could not be loaded.')) })
+    return () => controller.abort()
+  }, [auth, reloadKey])
+
+  const requestStepUp = useCallback((action: StepUpAction, target?: WalletDto) => new Promise<boolean>(resolve => {
+    setStepUp({ action, ...target ? { target } : {}, resolve })
+  }), [])
+  const finishStepUp = (done: boolean) => { stepUp?.resolve(done); setStepUp(null) }
+
+  /** Runs `action`; a `step-up-required` refusal opens the step-up and retries once. */
+  async function withStepUp<T>(action: StepUpAction, target: WalletDto | undefined, run: () => Promise<T>): Promise<T | null> {
+    try { return await run() } catch (cause) {
+      if (!(cause instanceof ApiError && cause.code === 'step-up-required')) throw cause
+      if (!await requestStepUp(action, target)) return null
+      return await run()
+    }
+  }
+
+  async function remove(wallet: WalletDto) {
+    try {
+      const done = await withStepUp('wallet.remove', wallet, () => auth.removeWallet(wallet.id))
+      if (done === null) return
+      setRemoving(null)
+      // The server revoked this wallet's sessions; when that includes this tab, leave now.
+      if (wallet.current) { identity.endSession(); return }
+      notify({ tone: 'success', message: 'Sign-in wallet removed.' })
+      reload()
+    } catch (cause) {
+      notify({ tone: 'error', message: errorMessage(cause, 'The wallet could not be removed.') })
+      reload()
+    }
+  }
+
+  const linked = wallets ?? []
+  const others = (sessions ?? []).filter(row => !row.current)
+  return <div className="profile-settings">
+    <ProfilePanel identity={identity} />
+    {loadError && <div className="workspace-alert" role="alert"><span>{loadError}</span><Button variant="ghost" size="sm" onClick={reload}>Try again</Button></div>}
+    <div className="profile-split">
+      <section className="shell-panel profile-section" aria-labelledby="wallets-title">
+        <header>
+          <h2 id="wallets-title">Sign-in wallets <InfoTip label="About sign-in wallets">Any of these wallets can sign in to this journal. They are not venue accounts and don't import trading history. {signingMeaning}</InfoTip></h2>
+          <Button variant="outline" size="sm" onClick={() => setLinking(true)} disabled={!wallets}><Plus size={15} aria-hidden="true" />Link wallet</Button>
+        </header>
+        {wallets === null && !loadError ? <p className="muted profile-loading" role="status">Loading sign-in wallets…</p>
+          : <ul className="profile-rows">{linked.map(wallet => <WalletRow key={wallet.id} wallet={wallet} only={linked.length === 1} auth={auth}
+            onRemove={() => setRemoving(wallet)} onChanged={reload} />)}</ul>}
+      </section>
+      <section className="shell-panel profile-section" aria-labelledby="sessions-heading">
+        <header>
+          <h2 id="sessions-heading" tabIndex={-1}>Sessions</h2>
+          <Button variant="outline" size="sm" disabled={!others.length} onClick={() => {
+            auth.revokeOtherSessions().then(() => { notify({ tone: 'success', message: 'Other sessions signed out.' }); reload() },
+              (cause: unknown) => notify({ tone: 'error', message: errorMessage(cause, 'Other sessions could not be signed out.') }))
+          }}>Sign out other sessions</Button>
+        </header>
+        {sessions === null && !loadError ? <p className="muted profile-loading" role="status">Loading sessions…</p>
+          : <ul className="profile-rows">{(sessions ?? []).map(row => <li key={row.id} className="profile-row">
+            <span className="profile-device" aria-hidden="true">{mobile(row.userAgent) ? <Smartphone size={16} /> : <Monitor size={16} />}</span>
+            <span className="profile-row-meta"><strong>{row.userAgent ?? 'Unknown browser'}</strong>
+              <small>Signed in {day(row.createdAt)} · active {ago(row.lastSeenAt)}{row.remember ? ' · kept signed in' : ''}</small></span>
+            {row.current ? <span className="identity-pill is-brand">This browser</span>
+              : <Button variant="ghost" size="sm" aria-label={`Sign out ${row.userAgent ?? 'unknown browser'} session`} onClick={() => {
+                auth.revokeSession(row.id).then(() => { notify({ tone: 'success', message: 'Session signed out.' }); reload() },
+                  (cause: unknown) => { notify({ tone: 'error', message: errorMessage(cause, 'The session could not be signed out.') }); reload() })
+              }}>Sign out</Button>}
+          </li>)}</ul>}
+      </section>
+    </div>
+    <div className="profile-sign-out"><Button variant="outline" onClick={onSignOut}><LogOut size={15} aria-hidden="true" />Sign out</Button></div>
+
+    {removing && <Dialog open onOpenChange={next => { if (!next) setRemoving(null) }}>
+      <DialogContent className="workspace-dialog">
+        <DialogHeader><DialogTitle>Remove sign-in wallet?</DialogTitle>
+          <DialogDescription>{removing.current
+            ? 'This wallet signed in this session. Removing it signs you out here and on every device it signed in.'
+            : 'This wallet will no longer sign in to this journal, and its sessions end.'} You'll confirm with a linked wallet.</DialogDescription></DialogHeader>
+        <p><SourceChip source={removing.address} /> {removing.label}</p>
+        <DialogFooter><Button variant="outline" onClick={() => setRemoving(null)}>Cancel</Button>
+          <Button variant="destructive" onClick={() => { void remove(removing) }}>Remove wallet</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>}
+    {linking && <LinkWalletDialog identity={identity} wallets={linked} onStepUp={() => requestStepUp('wallet.link')}
+      onClose={() => setLinking(false)} onLinked={() => { setLinking(false); notify({ tone: 'success', message: 'Wallet linked. It can now sign in to this journal.' }); reload() }} />}
+    {stepUp && <StepUpDialog identity={identity} wallets={linked} request={stepUp} onFinish={finishStepUp} />}
+  </div>
+}
+
+function ProfilePanel({ identity }: { identity: ShellIdentity }) {
+  const { user } = identity.session
+  const [name, setName] = useState(user.displayName)
+  const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  const { notify } = useNotifications()
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!validDisplayName(name)) { setError(`Use 1 to ${displayNameLimit} printable characters for the display name.`); return }
+    setPending(true); setError(null)
+    try {
+      identity.onProfile(await identity.auth.updateProfile(name.trim(), user.revision))
+      notify({ tone: 'success', message: 'Display name saved.' })
+    } catch (cause) {
+      setError(errorMessage(cause, 'The display name could not be saved.'))
+      if (cause instanceof ApiError && cause.code === 'revision-conflict') {
+        // Another tab changed the profile: take the current revision so the next save applies.
+        createPublicAuthApi().session().then(fresh => { if (fresh.user.id === user.id) { identity.onProfile(fresh.user); setName(fresh.user.displayName) } }, () => undefined)
+      }
+    } finally { setPending(false) }
+  }
+  return <section className="shell-panel profile-section" aria-labelledby="profile-title">
+    <header><h2 id="profile-title">Profile</h2></header>
+    <form className="profile-inline-form" onSubmit={event => { void save(event) }} aria-busy={pending}>
+      <div className="identity-field"><label htmlFor="profile-name">Display name</label>
+        <Input id="profile-name" value={name} onChange={event => setName(event.target.value)} maxLength={displayNameLimit * 2} autoComplete="nickname"
+          disabled={pending} aria-invalid={error !== null} aria-describedby={error ? 'profile-name-error' : undefined} /></div>
+      <Button type="submit" variant="outline" disabled={pending || name.trim() === user.displayName}>Save</Button>
+    </form>
+    {error && <p id="profile-name-error" className="error profile-error" role="alert">{error}</p>}
+  </section>
+}
+
+function WalletRow({ wallet, only, auth, onRemove, onChanged }: {
+  wallet: WalletDto; only: boolean; auth: ShellIdentity['auth']; onRemove: () => void; onChanged: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [label, setLabel] = useState(wallet.label ?? '')
+  const [error, setError] = useState<string | null>(null)
+  const name = wallet.label ?? 'Wallet'
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!validLabel(label)) { setError(`Use at most ${walletLabelLimit} printable characters for the label.`); return }
+    try {
+      await auth.updateWallet(wallet.id, label.trim() || null)
+      setEditing(false); setError(null); onChanged()
+    } catch (cause) { setError(errorMessage(cause, 'The label could not be saved.')) }
+  }
+  return <li className="profile-row">
+    <UserAvatar name={name} address={wallet.address} />
+    <span className="profile-row-meta">
+      {editing ? <form className="profile-label-form" onSubmit={event => { void save(event) }}>
+        <Input aria-label={`Label for ${wallet.address}`} value={label} onChange={event => setLabel(event.target.value)} maxLength={walletLabelLimit * 2} autoFocus />
+        <Button type="submit" size="sm">Save</Button><Button type="button" size="sm" variant="ghost" onClick={() => { setEditing(false); setLabel(wallet.label ?? ''); setError(null) }}>Cancel</Button>
+      </form> : <strong>{name} <SourceChip source={wallet.address} /></strong>}
+      {error && <span className="error" role="alert">{error}</span>}
+      <small>Added {day(wallet.addedAt)} · {wallet.current ? 'used for this session' : wallet.lastUsedAt ? `last used ${ago(wallet.lastUsedAt)}` : 'not used yet'}</small>
+    </span>
+    {wallet.current && <span className="identity-pill is-brand">This session</span>}
+    {!editing && <span className="profile-row-actions">
+      <Button variant="ghost" size="sm" aria-label={`Rename ${name}`} title="Rename" onClick={() => setEditing(true)}><Pencil size={14} aria-hidden="true" /></Button>
+      {!only && <Button variant="ghost" size="sm" className="profile-danger" onClick={onRemove}><Trash2 size={14} aria-hidden="true" />Remove</Button>}
+    </span>}
+  </li>
+}
+
+const stepUpCopy: Record<StepUpAction, (target?: WalletDto) => ReactNode> = {
+  'wallet.link': () => 'Sign with a wallet already linked to this journal before adding another.',
+  'wallet.remove': target => <>Sign with a wallet already linked to this journal to remove {target ? <SourceChip source={target.address} /> : 'this wallet'}.</>,
+}
+
+function linkedOnly(wallets: readonly WalletDto[]) {
+  return (address: string) => wallets.some(wallet => sameAddress(wallet.address, address)) ? null
+    : 'This address isn’t linked to your journal. Switch to a linked wallet, then try again.'
+}
+
+/** A fresh signature from a wallet already linked: the grant lasts five minutes and covers one action. */
+function StepUpDialog({ identity, wallets, request, onFinish }: {
+  identity: ShellIdentity; wallets: readonly WalletDto[]; request: StepUpRequest; onFinish: (done: boolean) => void
+}) {
+  const accept = useMemo(() => linkedOnly(wallets), [wallets])
+  return <Dialog open onOpenChange={next => { if (!next) onFinish(false) }}>
+    <DialogContent className="workspace-dialog identity-dialog">
+      <DialogHeader><DialogTitle>Confirm with a linked wallet</DialogTitle>
+        <DialogDescription>{stepUpCopy[request.action](request.target)}</DialogDescription></DialogHeader>
+      <WalletSignFlow purpose="Confirm" accept={accept}
+        requestChallenge={(address, signal) => identity.auth.stepUpChallenge({ action: request.action, ...request.target ? { target: request.target.id } : {}, address }, signal)}
+        complete={(challenge, signature, signal) => identity.auth.stepUp({ challengeId: challenge.challengeId, signature }, signal)}
+        onDone={() => onFinish(true)} onCancel={() => onFinish(false)} />
+    </DialogContent>
+  </Dialog>
+}
+
+/** Mockup screen 9: a step-up from a linked wallet, then a signature from the new wallet with its own statement. */
+function LinkWalletDialog({ identity, wallets, onStepUp, onClose, onLinked }: {
+  identity: ShellIdentity; wallets: readonly WalletDto[]; onStepUp: () => Promise<boolean>; onClose: () => void; onLinked: () => void
+}) {
+  const [phase, setPhase] = useState<'confirm' | 'link'>('confirm')
+  const [label, setLabel] = useState('')
+  const [labelError, setLabelError] = useState<string | null>(null)
+  const accept = useMemo(() => linkedOnly(wallets), [wallets])
+  const [confirmedWith, setConfirmedWith] = useState<string | null>(null)
+  return <Dialog open onOpenChange={next => { if (!next) onClose() }}>
+    <DialogContent className="workspace-dialog identity-dialog">
+      <DialogHeader><DialogTitle>Link another wallet</DialogTitle>
+        <DialogDescription>{phase === 'confirm' ? 'First, sign with a wallet already linked to this journal.'
+          : `Confirmed${confirmedWith ? ` with ${confirmedWith}` : ''}. Now sign with the wallet you want to add.`}</DialogDescription></DialogHeader>
+      {phase === 'confirm' ? <WalletSignFlow key="confirm" purpose="Confirm" accept={accept}
+        requestChallenge={(address, signal) => {
+          setConfirmedWith(wallets.find(wallet => sameAddress(wallet.address, address))?.label ?? null)
+          return identity.auth.stepUpChallenge({ action: 'wallet.link', address }, signal)
+        }}
+        complete={(challenge, signature, signal) => identity.auth.stepUp({ challengeId: challenge.challengeId, signature }, signal)}
+        onDone={() => setPhase('link')} onCancel={onClose} />
+        : <WalletSignFlow key="link" purpose="Link wallet" onStepUp={onStepUp}
+          accept={address => wallets.some(wallet => sameAddress(wallet.address, address)) ? 'This wallet is already linked to your journal. Switch to the wallet you want to add.' : null}
+          requestChallenge={(address, signal) => identity.auth.walletChallenge(address, signal)}
+          complete={async (challenge, signature, signal) => {
+            if (!validLabel(label)) {
+              setLabelError(`Use at most ${walletLabelLimit} printable characters for the label.`)
+              throw new ApiError('http', `Use at most ${walletLabelLimit} printable characters for the label.`, 400, undefined, 'label-invalid')
+            }
+            await identity.auth.linkWallet({ challengeId: challenge.challengeId, signature, ...label.trim() ? { label: label.trim() } : {} }, signal)
+          }}
+          onDone={onLinked} onCancel={onClose}>
+          <div className="identity-field"><label htmlFor="link-label">Label <small>· optional</small></label>
+            <Input id="link-label" value={label} onChange={event => { setLabel(event.target.value); setLabelError(null) }} maxLength={walletLabelLimit * 2}
+              aria-invalid={labelError !== null} />
+            {labelError && <p className="error" role="alert">{labelError}</p>}</div>
+        </WalletSignFlow>}
+    </DialogContent>
+  </Dialog>
+}

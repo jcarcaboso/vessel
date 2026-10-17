@@ -107,7 +107,7 @@ function isConfig(v: unknown): v is AuthConfig {
 /** The server writes the message; the browser only checks it is a bounded sign-in text before showing it. */
 function isChallenge(v: unknown): v is Challenge {
   return isRecord(v) && isGuid(v.challengeId) && isText(v.message, 2048) && v.message.includes(' wants you to sign in with your Ethereum account:\n') &&
-    !/[\0-\x09\x0b-\x1f\x7f]/.test(v.message) && isUtc(v.expiresAt)
+    v.message.split('\n').every(hasNoControlCharacters) && isUtc(v.expiresAt)
 }
 function isVerifyResult(v: unknown): v is VerifyResult {
   if (!isRecord(v)) return false
