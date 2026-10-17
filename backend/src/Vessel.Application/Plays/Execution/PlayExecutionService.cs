@@ -332,7 +332,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
 
     /// <summary>Fills that contradict their role stay visible on their links but count toward neither side.</summary>
     private static Settlement Settle(PlayPlanDocument plan, IReadOnlyCollection<PlayOrderLink> linked,
-        IReadOnlyDictionary<string, ImportedOrder> orders, ILookup<string, ImportedFill> fills, bool retrospective = false)
+        Dictionary<string, ImportedOrder> orders, ILookup<string, ImportedFill> fills, bool retrospective = false)
     {
         var side = ExecutionIntegrity.EntrySide(plan);
         var all = linked.SelectMany(l => fills[l.OrderId].Select(f => new LinkedFill(l.Role, f))).ToList();
@@ -365,7 +365,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             ? "Add or renew a read-only token to track orders." : null;
 
     /// <summary>The basis shared by every fill, "mixed" if they differ, or gross when there are none.</summary>
-    private static string PnlBasis(IReadOnlyCollection<ImportedFill> fills) =>
+    private static string PnlBasis(List<ImportedFill> fills) =>
         fills.Select(f => f.PnlBasis).Distinct().ToList() is [var only] ? only : fills.Count == 0 ? ExecutionFacts.PnlGross : "mixed";
 
     private static string Name<T>(T value) where T : Enum => value.ToString().ToLowerInvariant();

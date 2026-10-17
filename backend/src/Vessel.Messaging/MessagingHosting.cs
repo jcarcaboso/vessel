@@ -102,7 +102,7 @@ public static class MessagingHosting
                 // Inline, not the durable inbox: the delivery is acknowledged only after the receipt settles.
                 options.ListenToRabbitQueue(queue, q => topology.Configure(q, queue)).ProcessInline();
             }
-            if (host.RunningSubscriptions.Count != 0) options.Discovery.IncludeType(typeof(EventSubscriptionListener));
+            if (host.RunningSubscriptions.Count != 0) options.Discovery.IncludeType<EventSubscriptionListener>();
             foreach (var command in host.ConsumedCommands)
             {
                 var queue = topology.CommandQueue(command.Name);

@@ -44,8 +44,8 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
         return rows.Select(r => (r.Row, r.VenueId)).ToArray();
     }
 
-    public Task<MonitorAccount?> FindAsync(Guid id, CancellationToken ct) =>
-        Rows.AsNoTracking().SingleOrDefaultAsync(m => m.AccountId == id, ct);
+    public Task<MonitorAccount?> FindAsync(Guid accountId, CancellationToken ct) =>
+        Rows.AsNoTracking().SingleOrDefaultAsync(m => m.AccountId == accountId, ct);
     public Task<DateTimeOffset?> VenueRetryAtAsync(string venueId, CancellationToken ct) =>
         db.Set<MonitorVenueBudget>().Where(b => b.VenueId == venueId).Select(b => (DateTimeOffset?)b.RetryAtUtc)
             .SingleOrDefaultAsync(ct);
@@ -164,25 +164,25 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
             r.Row)).ToArray();
     }
 
-    public Task<T> LockedAsync<T>(Guid id, Func<Account, MonitorAccount, Task<T>> action, CancellationToken ct) =>
+    public Task<T> LockedAsync<T>(Guid accountId, Func<Account, MonitorAccount, Task<T>> action, CancellationToken ct) =>
         unitOfWork.ParticipateAsync(async () =>
         {
             var account = (await db.Accounts.FromSqlInterpolated($"""
-                SELECT * FROM accounts WHERE "Id" = {id} AND "OwnerId" = {db.CurrentOwnerId} FOR UPDATE
+                SELECT * FROM accounts WHERE "Id" = {accountId} AND "OwnerId" = {db.CurrentOwnerId} FOR UPDATE
                 """).ToListAsync(ct)).SingleOrDefault() ?? throw new ProblemException(404, "Account not found.");
             await db.Entry(account).ReloadAsync(ct);
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO monitor_accounts ("AccountId", "OwnerId", "State", "StateRevision", "ManualState", "Trigger", "Generation", "ConsecutiveFailures", "HasHistoryGap")
-                VALUES ({id}, {db.CurrentOwnerId}, 'idle', 0, 'idle', 'monitor', 0, 0, false) ON CONFLICT ("AccountId") DO NOTHING
+                VALUES ({accountId}, {db.CurrentOwnerId}, 'idle', 0, 'idle', 'monitor', 0, 0, false) ON CONFLICT ("AccountId") DO NOTHING
                 """, ct);
             var row = (await db.Set<MonitorAccount>().FromSqlInterpolated($"""
-                SELECT * FROM monitor_accounts WHERE "AccountId" = {id} AND "OwnerId" = {db.CurrentOwnerId} FOR UPDATE
+                SELECT * FROM monitor_accounts WHERE "AccountId" = {accountId} AND "OwnerId" = {db.CurrentOwnerId} FOR UPDATE
                 """).ToListAsync(ct)).Single();
             await db.Entry(row).ReloadAsync(ct);
             return await action(account, row);
         }, ct);
 
-    public Task<IReadOnlyList<MonitorLease>> ClaimDueAsync(string worker, DateTimeOffset now, int limit, CancellationToken ct) =>
+    public Task<IReadOnlyList<MonitorLease>> ClaimDueAsync(string workerId, DateTimeOffset now, int limit, CancellationToken ct) =>
         unitOfWork.ExecuteAsync<IReadOnlyList<MonitorLease>>(async () =>
         {
             // Account then monitor is also the lock order used by API admission and guarded apply.
@@ -213,19 +213,19 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, Moni
                         // The manual cooldown never gates a scheduled claim; it only answers manual requests.
                         row.Admit(Guid.CreateVersion7(), row.ConfirmationAtUtc <= now ? "confirmation" : "monitor", now, scheduled: true);
                     }
-                    return row.Claim(row.RequestId!.Value, worker, now, MonitorOptions.Lease)
-                        ? new MonitorLease(row.AccountId, row.RequestId.Value, row.Generation, worker, row.Trigger) : null;
+                    return row.Claim(row.RequestId!.Value, workerId, now, MonitorOptions.Lease)
+                        ? new MonitorLease(row.AccountId, row.RequestId.Value, row.Generation, workerId, row.Trigger) : null;
                 }, ct);
                 if (lease is not null) leases.Add(lease);
             }
             return leases;
         }, ct);
 
-    public Task<MonitorLease?> ClaimAsync(Guid id, Guid requestId, string worker, DateTimeOffset now, CancellationToken ct) =>
-        unitOfWork.ExecuteAsync(() => LockedAsync<MonitorLease?>(id, async (account, row) =>
+    public Task<MonitorLease?> ClaimAsync(Guid accountId, Guid requestId, string workerId, DateTimeOffset now, CancellationToken ct) =>
+        unitOfWork.ExecuteAsync(() => LockedAsync<MonitorLease?>(accountId, async (account, row) =>
             account.IsEnabled && account.SourceId is not null && !(await VenueRetryAtAsync(account.VenueId, ct) > now) &&
-            row.Trigger != "refresh" && await ReadCapacityAsync(now, ct) && row.Claim(requestId, worker, now, MonitorOptions.Lease)
-                ? new MonitorLease(id, requestId, row.Generation, worker, row.Trigger) : null, ct), ct);
+            row.Trigger != "refresh" && await ReadCapacityAsync(now, ct) && row.Claim(requestId, workerId, now, MonitorOptions.Lease)
+                ? new MonitorLease(accountId, requestId, row.Generation, workerId, row.Trigger) : null, ct), ct);
 
     public async Task<bool> ReadCapacityAsync(DateTimeOffset now, CancellationToken ct)
     {

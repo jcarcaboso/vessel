@@ -8,9 +8,9 @@ namespace Vessel.Persistence.Events;
 // Read/SSE paths never resolve the outbox, runtime, broker or a mutation boundary.
 public sealed class VesselEventHistory(VesselDbContext db) : IVesselEventReader
 {
-    public async Task<VesselEventPage> ReadAsync(string? after, int limit, CancellationToken cancellationToken)
+    public async Task<VesselEventPage> ReadAsync(string? cursor, int limit, CancellationToken cancellationToken)
     {
-        if (!VesselEventCursor.TryParse(after, out var cursor) || limit is < 1 or > 200)
+        if (!VesselEventCursor.TryParse(cursor, out var position) || limit is < 1 or > 200)
             throw new ProblemException(400, "Invalid event cursor or limit.");
         await db.Database.OpenConnectionAsync(cancellationToken);
         try
@@ -29,12 +29,12 @@ public sealed class VesselEventHistory(VesselDbContext db) : IVesselEventReader
                       AND (@epoch IS NULL OR c.epoch=@epoch)
                     ORDER BY sequence LIMIT @limit
                 ) e ON true ORDER BY e.sequence
-                """, ("owner", db.CurrentOwnerId), ("after", cursor.Sequence), ("limit", limit),
-                ("epoch", (object?)cursor.Epoch ?? DBNull.Value));
+                """, ("owner", db.CurrentOwnerId), ("after", position.Sequence), ("limit", limit),
+                ("epoch", (object?)position.Epoch ?? DBNull.Value));
             ((Npgsql.NpgsqlParameter)command.Parameters["epoch"]).NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Uuid;
             await using var rows = await command.ExecuteReaderAsync(cancellationToken);
             var events = new List<VesselEvent>();
-            long latest = 0, floor = 0, next = cursor.Sequence;
+            long latest = 0, floor = 0, next = position.Sequence;
             Guid? epoch = null;
             while (await rows.ReadAsync(cancellationToken))
             {
@@ -46,9 +46,9 @@ public sealed class VesselEventHistory(VesselDbContext db) : IVesselEventReader
             }
             // "0" (no epoch) starts at the oldest retained event, so pruning never resets it. Any other epoch,
             // a pruned or a future cursor needs a state reload.
-            var start = cursor.Epoch is null && cursor.Sequence == 0;
-            var reset = cursor.Epoch is null ? !start : cursor.Epoch != epoch;
-            reset |= (!start && cursor.Sequence < floor) || cursor.Sequence > latest;
+            var start = position.Epoch is null && position.Sequence == 0;
+            var reset = position.Epoch is null ? !start : position.Epoch != epoch;
+            reset |= (!start && position.Sequence < floor) || position.Sequence > latest;
             if (start && events.Count == 0) next = Math.Max(next, floor);
             return new(reset ? [] : events, VesselEventCursor.Format(epoch, reset ? latest : next), reset);
         }
