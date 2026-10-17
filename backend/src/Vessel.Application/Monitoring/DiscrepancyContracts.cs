@@ -1,3 +1,4 @@
+using Vessel.Application.Common;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Monitoring;
 using Vessel.Domain.Plays;
@@ -31,9 +32,10 @@ public interface IMonitorDiscrepancyStore
     Task<Play?> PlayAsync(Guid playId, CancellationToken ct);
     /// <param name="recentSince">Terminal Plays that ended at or after this time are loaded, so their late fills can
     /// make an earlier position snapshot unknown.</param>
-    /// <param name="restingOrderIds">Orders the current read reports resting, even from a partial book. Terminal Plays
-    /// linked to them are evaluated: that is positive evidence of an orphaned entry or exit.</param>
-    Task<MonitorDiscrepancyFacts> LoadAsync(Guid accountId, DateTimeOffset recentSince, IReadOnlyCollection<string> restingOrderIds, CancellationToken ct);
+    /// <param name="restingOrders">Orders the current read reports resting, even from a partial book, by contract and
+    /// external ID (a venue order ID is unique only within its contract). Terminal Plays whose linked order has one of
+    /// these keys are evaluated: that is positive evidence of an orphaned entry or exit. Keys of other accounts are ignored.</param>
+    Task<MonitorDiscrepancyFacts> LoadAsync(Guid accountId, DateTimeOffset recentSince, IReadOnlyCollection<OrderKey> restingOrders, CancellationToken ct);
     Task<IReadOnlyList<PlayDiscrepancy>> RecordsAsync(Guid accountId, CancellationToken ct);
     void Add(PlayDiscrepancy record);
     /// <summary>Serializes dismissal with the monitor account fence. Requires an active unit of work.</summary>

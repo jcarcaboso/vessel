@@ -556,7 +556,7 @@ internal sealed class DiscrepancyMemoryStore : IMonitorDiscrepancyStore
     public Task<Play?> PlayAsync(Guid id, CancellationToken ct) => Task.FromResult(Plays.SingleOrDefault(x => x.Id == id));
     public HashSet<string> TruncatedFillContracts = [];
     public DateTimeOffset? RecentSince;
-    public Task<MonitorDiscrepancyFacts> LoadAsync(Guid id, DateTimeOffset recentSince, IReadOnlyCollection<string> resting, CancellationToken ct)
+    public Task<MonitorDiscrepancyFacts> LoadAsync(Guid id, DateTimeOffset recentSince, IReadOnlyCollection<OrderKey> resting, CancellationToken ct)
     {
         RecentSince = recentSince;
         return Task.FromResult(new MonitorDiscrepancyFacts(Plays, Links, Orders, Fills, Complete, Links, AssignmentLinksComplete, TruncatedFillContracts));
