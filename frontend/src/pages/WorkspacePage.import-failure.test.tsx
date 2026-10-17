@@ -10,9 +10,11 @@ vi.mock('@/features/workspace/ApplicationShell', () => {
 
 it('offers a reload, not a retry, when the workspace code cannot be loaded', async () => {
   const user = userEvent.setup()
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(systemFixture))))
+  // Token mode: the page asks the server for its sign-in mode first.
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (path: string) =>
+    new Response(JSON.stringify(path.startsWith('/api/auth/config') ? { mode: 'token' } : systemFixture))))
   render(<WorkspacePage />)
-  await user.type(screen.getByLabelText('API token'), 'memory-only-token')
+  await user.type(await screen.findByLabelText('API token'), 'memory-only-token')
   await user.click(screen.getByRole('button', { name: 'Connect' }))
 
   expect(await screen.findByRole('alert')).toHaveTextContent('The workspace could not be loaded.')

@@ -119,15 +119,15 @@ export function SignInGate({ registration, originAccepted, children, channels, n
       {(state.kind === 'probing' || state.kind === 'loading') && <><h1 id="gate-title" className="sr-only">Vessel</h1>
         <p className="muted" role="status">{state.kind === 'probing' ? 'Checking your session…' : 'Loading your workspace…'}</p></>}
       {state.kind === 'signing-out' && <><h1 id="gate-title" className="sr-only">Signing out</h1><p className="muted" role="status">Signing out…</p></>}
-      {state.kind === 'failed' && <><h1 id="gate-title" className="sr-only">Vessel is unreachable</h1>
+      {state.kind === 'failed' && <><h1 id="gate-title" className="sr-only">Vessel</h1>
         <StateCard icon={<Plug size={16} />} title="Vessel is unreachable" actions={[{ label: 'Retry', primary: true, onClick: () => {
           if (state.retry) void enter(state.retry.session, false, state.retry.walletName)
           else { setState({ kind: 'probing' }); probe(new AbortController().signal) }
         } }]}>{state.message}</StateCard></>}
-      {state.kind === 'suspended' && <><h1 id="gate-title" className="sr-only">Journal suspended</h1>
+      {state.kind === 'suspended' && <><h1 id="gate-title" className="sr-only">Vessel</h1>
         <StateCard icon={<Lock size={16} />} tone="bad" title="Journal suspended" actions={[{ label: 'Use another wallet', onClick: () => window.location.reload() }]}>
           The operator of this server has suspended this journal. Contact them to restore access.</StateCard></>}
-      {state.kind === 'sign-out-failed' && <><h1 id="gate-title" className="sr-only">Sign-out did not complete</h1>
+      {state.kind === 'sign-out-failed' && <><h1 id="gate-title" className="sr-only">Vessel</h1>
         <StateCard icon={<Plug size={16} />} tone="warn" title="Sign-out did not complete" actions={[
           { label: 'Try again', primary: true, onClick: () => signOut(state.ready) },
           { label: 'Reload', onClick: () => window.location.reload() },
