@@ -1085,7 +1085,7 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         delivered = [k for k, v in self.receipts().items() if v[0] == 'delivered'][:2]
         self.sql("UPDATE event_receipts SET state = 'failed' WHERE subscription = 'verification' AND event_id IN ('" + "','".join(delivered) + "')")
         retried = self.compose('run', '--rm', '--no-deps', '--entrypoint', 'dotnet', 'migrate', '/app/Vessel.Api.dll', 'retry-event-receipts',
-                               'verification', '--limit', '10', '--attempts', '2', capture_output=True, text=True, check=False)
+                               'verification', '--owner', self.owner, '--limit', '10', '--attempts', '2', capture_output=True, text=True, check=False)
         self.expect(retried.returncode == 0 and 'Returned 2 failed receipt(s)' in retried.stdout, 'retry-event-receipts returns failed receipts to pending',
                     retried.stdout[-200:])
         self.wait(lambda: all(self.receipts()[i][0] == 'delivered' for i in delivered), 'retried receipts delivered', 120)

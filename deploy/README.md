@@ -135,11 +135,14 @@ Administrator commands run in the API image with the server configuration:
 docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll rotate-event-epoch
 # Return a subscription's failed receipts to pending with a bounded extra budget.
 docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll \
-  retry-event-receipts <name> --limit 100 --attempts 3
+  retry-event-receipts <name> --owner <guid> --limit 100 --attempts 3
 # Remove a subscription's registration, receipts and queue.
 docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll \
   deregister-event-subscription <name>
 ```
+
+Retry requires exactly one of `--owner <guid>` or `--all-owners`. With
+`--all-owners`, `--limit` applies per owner, not to the command's total.
 
 A release check can set `Vessel__Messaging__Verification=true` on `migrate` to
 register the `verification` subscription, prove delivery from its receipts and
