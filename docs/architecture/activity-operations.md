@@ -104,7 +104,8 @@ Remaining only above zero; cumulative entered/exited values and reporting-basis
 notes move into the drill-down. Entry and exit have separate columns; the exit
 colour follows the direction-adjusted price return. Times are shortened in UTC,
 with full timestamps in a tooltip. Every dropdown in the app uses the shared
-`NativeSelect` (`components/ui/native-select`) for one chevron, one right inset,
+`NativeSelect` (except the account filter, which became the searchable
+`AccountPicker` on October 16, 2026) (`components/ui/native-select`) for one chevron, one right inset,
 text kept clear of it and native keyboard behaviour; density `compact` (32px) and
 `bare` (borderless field bars) keep the same arrow.
 

@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, ChevronRight, Info, RefreshCw, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import type { WorkspaceApi } from '@/api/workspace'
+import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
+import { AccountPicker } from '@/components/accounts/AccountPicker'
+import { allAccountsChoice } from '@/features/workspace/account-picker-options'
 import { errorMessage } from '@/api/errors'
 import { defaultReviewQuery, reviewPeriods, type ReviewDocument, type ReviewGroup, type ReviewGroupBy, type ReviewQuery } from '@/api/review'
 import { useVenues } from '@/api/venues'
@@ -82,10 +84,13 @@ function ReviewPlays({ api, initialQuery, onOpenPlay }: {
   </>
 }
 
-export function ReviewPage({ api, reloadGeneration, onOpenPlay }: {
+export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccounts = [] }: {
   api: WorkspaceApi; reloadGeneration: number; onOpenPlay: (id: string, signal: AbortSignal) => Promise<void>
+  /** The shell's accounts, only to show each review account's address or index beside its name. */
+  workspaceAccounts?: readonly BrokerAccount[]
 }) {
   const venues = useVenues()
+  const fieldId = useId()
   const [query, setQuery] = useState<ReviewQuery>(defaultReviewQuery)
   const [reload, setReload] = useState(0)
   const [group, setGroup] = useState<ReviewGroupBy>('portfolios')
@@ -118,7 +123,14 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay }: {
     <div className="pr-heading"><h1>Portfolio review</h1><div className="pr-heading-actions"><button className="pr-outline-button" onClick={() => { remember(); setMethods(true) }}><Info size={15} />Definitions</button><button className="pr-outline-button" disabled={loading} onClick={() => setReload(n => n + 1)} aria-label="Reload review"><RefreshCw size={15} /></button></div></div>
     <section className="pr-filters" aria-label="Review filters">
       <label><span>Portfolio</span><NativeSelect value={query.portfolio} onChange={e => setQuery(previous => { const next = { ...previous, portfolio: e.target.value }; delete next.accountId; return next })}><option value="all">All portfolios</option>{options?.portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}<option value="unassigned">Unassigned accounts</option>{query.portfolio !== 'all' && query.portfolio !== 'unassigned' && !options?.portfolios.some(p => p.id === query.portfolio) && <option value={query.portfolio}>Unavailable portfolio</option>}</NativeSelect></label>
-      <label><span>Account</span><NativeSelect value={query.accountId ?? ''} onChange={e => setQuery(previous => { const next = { ...previous }; if (e.target.value) next.accountId = e.target.value; else delete next.accountId; return next })}><option value="">All accounts</option>{accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}{query.accountId && !accounts.some(a => a.id === query.accountId) && <option value={query.accountId}>Unavailable account</option>}</NativeSelect></label>
+      <div className="pr-filter-field"><span id={`${fieldId}-account`}>Account</span><AccountPicker labelledBy={`${fieldId}-account`} value={query.accountId ?? ''}
+        onChange={value => setQuery(previous => { const next = { ...previous }; if (value) next.accountId = value; else delete next.accountId; return next })}
+        accounts={accounts.map(a => {
+          const known = workspaceAccounts.find(w => w.id === a.id)
+          return { id: a.id, name: a.name, venueId: a.venueId, source: known ? known.sourceId ?? known.address : undefined,
+            detail: a.portfolioId ? options?.portfolios.find(p => p.id === a.portfolioId)?.name ?? 'Portfolio' : 'Unassigned' }
+        })}
+        choices={[allAccountsChoice('All accounts'), ...(query.accountId && !accounts.some(a => a.id === query.accountId) ? [{ value: query.accountId, label: 'Unavailable account' }] : [])]} /></div>
       <label><span>Asset</span><NativeSelect value={query.instrument ?? ''} onChange={e => setQuery(previous => { const next = { ...previous }; if (e.target.value) next.instrument = e.target.value; else delete next.instrument; return next })}><option value="">All assets</option>{options?.instruments.map(asset => <option key={asset}>{asset}</option>)}{query.instrument && !options?.instruments.includes(query.instrument) && <option value={query.instrument}>{query.instrument} · unavailable</option>}</NativeSelect></label>
       <button className="pr-reset" disabled={!filtered} onClick={() => setQuery({ ...defaultReviewQuery, period: query.period })}><SlidersHorizontal size={15} />Reset</button>
     </section>

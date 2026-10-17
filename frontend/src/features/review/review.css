@@ -57,7 +57,8 @@
 .portfolio-review .pr-outline-button, .pr-dialog .pr-outline-button { display: inline-flex; gap: 8px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: var(--radius-control); padding: 8px 13px; font-size: var(--text-sm); font-weight: 500; background: color-mix(in srgb, var(--card) 75%, transparent); box-shadow: var(--elevation-1); transition: border-color .14s var(--ease-out), background .14s var(--ease-out); }
 .portfolio-review .pr-outline-button:hover { border-color: var(--border); background: var(--accent); }
 .pr-filters { display: grid; grid-template-columns: 1.25fr 1fr .8fr 1.15fr auto; gap: 14px; align-items: end; }
-.pr-filters label>span:first-child { display: block; font-size: var(--text-2xs); font-weight: 550; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 7px; color: var(--muted-foreground); }
+.pr-filters label, .pr-filter-field { display: grid; gap: 7px; min-width: 0; }
+.pr-filters label>span:first-child, .pr-filter-field>span:first-child { display: block; font-size: var(--text-2xs); font-weight: 550; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 0; color: var(--muted-foreground); }
 .portfolio-review .pr-filters select { font-size: var(--text-sm); border: 1px solid var(--border); background: var(--field); border-radius: var(--radius-control); }
 .pr-reset { display: flex; align-items: center; justify-content: center; gap: 7px; height: 36px; padding: 0 10px !important; }
 .pr-scope { display: flex; justify-content: space-between; gap: 8px; font-size: var(--text-2xs); color: var(--pr-muted); margin: 12px 0 23px; }

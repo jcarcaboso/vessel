@@ -1,0 +1,47 @@
+/* Account identity marks. A venue's brand accent (--venue-accent, from its bundled logo) and a source's hue
+   (--source-hue, hashed from the address or index) only tint marks; text keeps theme-token contrast. */
+.account-avatar {
+  --avatar-size: 28px; --avatar-gap: var(--card);
+  position: relative; display: inline-grid; place-items: center; flex: none; isolation: isolate;
+  width: var(--avatar-size); height: var(--avatar-size); border-radius: calc(var(--avatar-size) * .3);
+}
+.account-avatar.is-sm { --avatar-size: 20px; }
+.account-avatar.is-lg { --avatar-size: 34px; }
+.account-avatar > .venue-logo { --venue-logo-size: var(--avatar-size); border-radius: inherit; border-color: color-mix(in srgb, var(--venue-accent, var(--border)) 30%, var(--border)); }
+.account-avatar > .venue-logo img { border-radius: calc(var(--avatar-size) * .24); }
+.account-avatar.is-tile { background: var(--muted); border: 1px solid var(--border); color: var(--brand); }
+/* The ring carries a chart series colour, separated from the logo by the surface colour. */
+.account-avatar.has-ring > .venue-logo, .account-avatar.is-tile.has-ring { border-color: transparent; box-shadow: 0 0 0 2px var(--avatar-gap), 0 0 0 4px var(--avatar-ring); transition: box-shadow .14s var(--ease-out), opacity .12s ease; }
+.account-avatar.has-halo::before { content: ''; position: absolute; z-index: -1; inset: -7px; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in srgb, var(--venue-accent) 34%, transparent), transparent); }
+.account-avatar-check { position: absolute; right: -5px; bottom: -5px; display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: var(--ring); color: var(--primary-foreground); box-shadow: 0 0 0 2px var(--avatar-gap); }
+
+.venue-tag {
+  display: inline-flex; align-items: center; flex: 0 1 auto; min-width: 0; height: 19px; padding: 0 7px;
+  border-radius: 999px; font-size: var(--text-2xs); font-weight: 560; line-height: 1; white-space: nowrap;
+  color: color-mix(in srgb, var(--venue-accent, var(--muted-foreground)) 62%, var(--foreground));
+  background: color-mix(in srgb, var(--venue-accent, var(--muted-foreground)) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--venue-accent, var(--muted-foreground)) 28%, transparent);
+}
+.venue-tag > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+.source-chip {
+  --source: oklch(0.83 0.1 var(--source-hue));
+  display: inline-flex; align-items: center; gap: 5px; flex: none; height: 19px; padding: 0 6px; border-radius: 6px;
+  font: 500 var(--text-2xs)/1 ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace; letter-spacing: 0; white-space: nowrap;
+  color: var(--source); background: color-mix(in oklch, var(--source) 10%, transparent); border: 1px solid color-mix(in oklch, var(--source) 24%, transparent);
+}
+.source-chip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--source); }
+.source-chip.is-manual { --source: var(--muted-foreground); font-family: inherit; font-style: italic; }
+.source-chip.is-manual::before { display: none; }
+
+.account-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--foreground); }
+.account-name.is-unnamed { font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace; font-weight: 550; font-size: .95em; }
+.unnamed-tag { display: inline-flex; align-items: center; flex: none; height: 17px; padding: 0 6px; border-radius: 999px; border: 1px dashed var(--border); color: var(--muted-foreground); font-size: var(--text-2xs); font-weight: 500; }
+
+/* Light themes: deeper tints so tags and chips keep their contrast on pale surfaces. */
+:root[data-scheme="light"] .venue-tag { color: color-mix(in srgb, var(--venue-accent, var(--muted-foreground)) 30%, var(--foreground)); background: color-mix(in srgb, var(--venue-accent, var(--muted-foreground)) 20%, transparent); border-color: color-mix(in srgb, var(--venue-accent, var(--muted-foreground)) 45%, var(--border)); }
+:root[data-scheme="light"] .source-chip:not(.is-manual) { --source: oklch(0.47 0.13 var(--source-hue)); }
+@media (forced-colors: active) {
+  .venue-tag, .source-chip { border-color: CanvasText; color: CanvasText; }
+  .account-avatar.has-ring > .venue-logo, .account-avatar.is-tile.has-ring { outline: 2px solid CanvasText; }
+}
