@@ -11,7 +11,7 @@ using Vessel.Persistence.Notifications;
 using Vessel.Identity;
 
 if (args.FirstOrDefault() is "identity")
-    return IdentityCommands.RunAsync(args[1..], Console.Out).GetAwaiter().GetResult();
+    return IdentityCommands.RunAsync(args[1..], Console.Out, verify: Program.VerifyIdentityAsync).GetAwaiter().GetResult();
 if (args.FirstOrDefault() is "evidence-copy-to-s3" or "evidence-copy-to-local")
     return EvidenceCopyCommand.RunAsync(args[1..], Console.Out, toLocal: args[0] == "evidence-copy-to-local").GetAwaiter().GetResult();
 if (args.FirstOrDefault() is { } command && MessagingCommands.Names.Contains(command))
@@ -149,4 +149,36 @@ if (app.Environment.IsDevelopment()) app.MapOpenApi().RequireAuthorization();
 app.Run();
 return 0;
 
-public partial class Program;
+public partial class Program
+{
+    public static async Task<int> VerifyIdentityAsync(Microsoft.Extensions.Configuration.IConfiguration configuration,
+        IReadOnlyList<IdentityVerificationUser> users, TextWriter output, CancellationToken ct)
+    {
+        await using var services = new ServiceCollection().AddVesselPersistence(configuration).BuildServiceProvider();
+        return await VerifyIdentityAsync(users, services.GetRequiredService<Vessel.Application.Ownership.IJournalOwnerInventory>(), output, ct);
+    }
+
+    public static async Task<int> VerifyIdentityAsync(IReadOnlyList<IdentityVerificationUser> users,
+        Vessel.Application.Ownership.IJournalOwnerInventory inventory, TextWriter output, CancellationToken ct)
+    {
+        var identities = users.Select(x => x.Id).ToHashSet();
+        var missingUsers = 0;
+        Guid? after = null;
+        while (true)
+        {
+            var page = await inventory.DistinctOwnersAsync(after, 1000, ct);
+            foreach (var owner in page.Where(owner => !identities.Contains(owner)))
+            {
+                await output.WriteLineAsync($"Journal owner without identity user: {owner}");
+                missingUsers++;
+            }
+            if (page.Count < 1000) break;
+            after = page[^1];
+        }
+        foreach (var user in users.Where(x => !x.HasWallet))
+            await output.WriteLineAsync($"Identity user without wallet: {user.Id}");
+        var missingWallets = users.Count(x => !x.HasWallet);
+        await output.WriteLineAsync($"Identity verification: {missingUsers} journal owners without users; {missingWallets} users without wallets.");
+        return missingUsers == 0 && missingWallets == 0 ? 0 : 3;
+    }
+}

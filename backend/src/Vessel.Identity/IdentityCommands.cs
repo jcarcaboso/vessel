@@ -5,15 +5,23 @@ using Vessel.Application.Common;
 
 namespace Vessel.Identity;
 
-public static class IdentityCommands
+public delegate Task<int> IdentityVerification(IConfiguration configuration, IReadOnlyList<IdentityVerificationUser> users,
+    TextWriter output, CancellationToken cancellationToken);
+
+public static partial class IdentityCommands
 {
     private const string Usage = """
         Usage: dotnet Vessel.Api.dll identity ensure-owner
                dotnet Vessel.Api.dll identity bind-wallet --user <guid> --address 0x… [--label <label>]
                dotnet Vessel.Api.dll identity invite [--note <note>] [--expires 7d] [--max-uses 1]
+               dotnet Vessel.Api.dll identity unbind-wallet --wallet <guid>
+               dotnet Vessel.Api.dll identity suspend|restore|promote|demote --user <guid>
+               dotnet Vessel.Api.dll identity revoke-sessions --user <guid> | --all
+               dotnet Vessel.Api.dll identity reset-after-restore [--keep-active <guid> …]
+               dotnet Vessel.Api.dll identity verify
         """;
 
-    public static async Task<int> RunAsync(string[] args, TextWriter output, CancellationToken ct = default)
+    public static async Task<int> RunAsync(string[] args, TextWriter output, CancellationToken ct = default, IdentityVerification? verify = null)
     {
         try
         {
@@ -39,7 +47,7 @@ public static class IdentityCommands
                 .AddJsonFile("appsettings.json", optional: true).AddJsonFile($"appsettings.{environment}.json", optional: true)
                 .AddEnvironmentVariables().AddCommandLine(configArgs.ToArray()).Build();
             return await RunAsync(commandArgs.ToArray(), configuration,
-                string.Equals(environment, "Development", StringComparison.OrdinalIgnoreCase), output, ct);
+                string.Equals(environment, "Development", StringComparison.OrdinalIgnoreCase), output, ct, verify);
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
@@ -49,19 +57,12 @@ public static class IdentityCommands
     }
 
     public static async Task<int> RunAsync(string[] args, IConfiguration configuration, bool development,
-        TextWriter output, CancellationToken ct = default)
+        TextWriter output, CancellationToken ct = default, IdentityVerification? verify = null)
     {
         try
         {
-            if (args.Length == 0 || args[0] is not ("ensure-owner" or "bind-wallet" or "invite") ||
-                !TryOptions(args[1..], out var options))
-            {
-                await output.WriteLineAsync(Usage); return 2;
-            }
-            if (args[0] == "ensure-owner" && options.Count != 0 ||
-                args[0] == "bind-wallet" && (options.Keys.Any(x => x is not ("--user" or "--address" or "--label")) ||
-                    !options.ContainsKey("--user") || !options.ContainsKey("--address")) ||
-                args[0] == "invite" && options.Keys.Any(x => x is not ("--note" or "--expires" or "--max-uses")))
+            if (args.Length == 0 || !TryOptions(args[1..], out var options, out var keepActive) ||
+                !ValidOptions(args[0], options, keepActive))
             {
                 await output.WriteLineAsync(Usage); return 2;
             }
@@ -110,7 +111,7 @@ public static class IdentityCommands
                     }, ct);
                     await output.WriteLineAsync(bound ? $"Bound {WalletSignatures.Checksum(address)} to {userId}." : "The user is absent or the wallet belongs to another user.");
                     return bound ? 0 : 3;
-                default:
+                case "invite":
                     var expires = options.GetValueOrDefault("--expires", "7d");
                     if (!expires.EndsWith('d') || !int.TryParse(expires[..^1], NumberStyles.None, CultureInfo.InvariantCulture, out var days) ||
                         days < 1 || !int.TryParse(options.GetValueOrDefault("--max-uses", "1"), NumberStyles.None,
@@ -127,6 +128,8 @@ public static class IdentityCommands
                     }, ct);
                     await output.WriteLineAsync(code);
                     return 0;
+                default:
+                    return await RunAdministrationAsync(args[0], options, keepActive, configuration, factory, transactions, output, verify, ct);
             }
         }
         catch (Exception error) when (error is not OperationCanceledException)
@@ -138,13 +141,47 @@ public static class IdentityCommands
         }
     }
 
-    private static bool TryOptions(string[] args, out Dictionary<string, string> options)
+    private static bool TryOptions(string[] args, out Dictionary<string, string> options, out List<Guid> keepActive)
     {
         options = [];
-        if (args.Length % 2 != 0) return false;
-        for (var i = 0; i < args.Length; i += 2)
-            if (!args[i].StartsWith("--", StringComparison.Ordinal) || !options.TryAdd(args[i], args[i + 1])) return false;
+        keepActive = [];
+        for (var i = 0; i < args.Length; i++)
+        {
+            var key = args[i];
+            if (key == "--keep-active")
+            {
+                var start = i;
+                while (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                {
+                    if (!Guid.TryParse(args[++i], out var id) || id == Guid.Empty) return false;
+                    keepActive.Add(id);
+                }
+                if (start == i) return false;
+            }
+            else if (key == "--all")
+            {
+                if (!options.TryAdd(key, "true")) return false;
+            }
+            else if (!key.StartsWith("--", StringComparison.Ordinal) || i + 1 >= args.Length ||
+                args[i + 1].StartsWith("--", StringComparison.Ordinal) || !options.TryAdd(key, args[++i])) return false;
+        }
         return true;
+    }
+
+    private static bool ValidOptions(string command, Dictionary<string, string> options, List<Guid> keepActive)
+    {
+        if (command != "reset-after-restore" && keepActive.Count != 0) return false;
+        return command switch
+        {
+            "ensure-owner" or "verify" or "reset-after-restore" => options.Count == 0,
+            "bind-wallet" => options.ContainsKey("--user") && options.ContainsKey("--address") &&
+                options.Keys.All(x => x is "--user" or "--address" or "--label"),
+            "invite" => options.Keys.All(x => x is "--note" or "--expires" or "--max-uses"),
+            "unbind-wallet" => options.Count == 1 && options.ContainsKey("--wallet"),
+            "suspend" or "restore" or "promote" or "demote" => options.Count == 1 && options.ContainsKey("--user"),
+            "revoke-sessions" => options.Count == 1 && (options.ContainsKey("--user") || options.ContainsKey("--all")),
+            _ => false
+        };
     }
 
     private sealed class CommandContextFactory(DbContextOptions<IdentityDbContext> options, IdentitySchema schema) : IDbContextFactory<IdentityDbContext>
