@@ -50,6 +50,10 @@ Owner scope and the account lock apply as for other account writes.
 
 **API:** write-only.
 - `PUT /api/accounts/{id}/credential` with `{ token }` validates, verifies at the venue, seals and stores.
+
+**Save sequence (October 16, 2026 owner decision):** read, verify, then a short locked recheck. (1) An owner-scoped read of the account runs every validation (venue capability, enabled, source, storage configured, token size) and captures its settings revision, source, venue and the stored credential's revision (`CredentialAttempt.RevisionOf`, or absent). (2) The venue verifies the token with no unit of work, transaction or account row lock open, so a slow venue never holds the account row against refreshes or settings changes. (3) Under a unit of work and the account lock the save reruns the validations and requires the account to be enabled with the same settings revision, source and venue, and the credential revision to be unchanged (absent stays absent). Otherwise it answers 409 "The account or its credential changed while verifying; try again." and stores nothing; it never re-verifies by itself. An account deleted meanwhile answers 404. The token's expiry is checked against the time of the save; sealing, purpose, scope and creation-time preservation are unchanged. A refusal mark (`last_error`) is not part of the revision, so a refresh that marks the old token refused does not conflict and the verified replacement clears it.
+
+Accepted limitation (no generation column, no schema change): a credential created and then deleted between steps 1 and 3 looks unchanged (absent → absent), so the newly verified token is saved. That is the outcome the owner asked for with that request.
 - `DELETE /api/accounts/{id}/credential` removes it.
 - `GET /api/accounts/{id}/credential` returns `{ storageConfigured, credential: { scope, expiresAt, lastVerifiedAt, status } | null }`. Metadata is loaded only when managing the credential, not added to every account list. No endpoint ever returns the token, a prefix or a hash.
 
