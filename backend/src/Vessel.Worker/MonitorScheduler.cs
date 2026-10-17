@@ -114,19 +114,29 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
             foreach (var owner in page)
             {
                 after = owner;
-                if (await owners.StatusAsync(owner, ct) != JournalOwnerStatus.Active) continue;
-                await using var scope = scopes.Create(owner);
-                var now = time.GetUtcNow();
-                var venues = scope.Services.GetRequiredService<IVenueRegistry>();
-                await scope.Services.GetRequiredService<MonitorCoordinator>().DiscoverAsync(venues.Descriptors
-                    .Where(v => v.Capabilities is { Sync: true, Orders: true }).Select(v => v.Id).ToArray(), now, ct);
-                if (running.Count < 2 && await owners.StatusAsync(owner, ct) == JournalOwnerStatus.Active)
+                try
                 {
-                    var leases = await scope.Services.GetRequiredService<IMonitorStore>()
-                        .ClaimDueAsync(workerId, now, 2 - running.Count, ct);
-                    foreach (var lease in leases) running.Add(RunAsync(owner, lease, ct));
+                    if (await owners.StatusAsync(owner, ct) != JournalOwnerStatus.Active) continue;
+                    await using (var scope = scopes.Create(owner))
+                    {
+                        var now = time.GetUtcNow();
+                        var venues = scope.Services.GetRequiredService<IVenueRegistry>();
+                        await scope.Services.GetRequiredService<MonitorCoordinator>().DiscoverAsync(venues.Descriptors
+                            .Where(v => v.Capabilities is { Sync: true, Orders: true }).Select(v => v.Id).ToArray(), now, ct);
+                        if (running.Count < 2 && await owners.StatusAsync(owner, ct) == JournalOwnerStatus.Active)
+                        {
+                            var leases = await scope.Services.GetRequiredService<IMonitorStore>()
+                                .ClaimDueAsync(workerId, now, 2 - running.Count, ct);
+                            foreach (var lease in leases) running.Add(RunAsync(owner, lease, ct));
+                        }
+                    }
+                    productive.Add(owner);
                 }
-                productive.Add(owner);
+                catch (Exception error) when (error is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    logger.LogWarning("Monitor scheduling for owner {OwnerId} failed with {ErrorType}. Later owners will still be checked.",
+                        owner, error.GetType().Name);
+                }
             }
         }
         // Only a completed discovery and claim pass is productive; liveness alone is not health.
@@ -135,21 +145,17 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
 
     private async Task HeartbeatAsync(IReadOnlyList<Guid> productive, CancellationToken ct)
     {
+        if (productive.Count == 0) return;
         var file = options.HeartbeatFile;
+        var now = time.GetUtcNow();
         try
         {
-            var now = time.GetUtcNow();
             // "<unix seconds> <timeout seconds>": the health script needs no configuration of its own.
             // No secrets or account information in this file.
             var temporary = file + "." + workerId + ".new";
             await File.WriteAllTextAsync(temporary, string.Create(CultureInfo.InvariantCulture,
                 $"{now.ToUnixTimeSeconds()} {(long)options.HeartbeatTimeout.TotalSeconds}"), ct);
             File.Move(temporary, file, overwrite: true);
-            foreach (var owner in productive)
-            {
-                await using var scope = scopes.Create(owner);
-                await scope.Services.GetRequiredService<IMonitorStore>().RecordHeartbeatAsync(workerId, now, ct);
-            }
         }
         catch
         {
@@ -157,6 +163,24 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
             try { File.Delete(file); } catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
             throw;
         }
+        var recorded = false;
+        foreach (var owner in productive)
+        {
+            try
+            {
+                await using (var scope = scopes.Create(owner))
+                    await scope.Services.GetRequiredService<IMonitorStore>().RecordHeartbeatAsync(workerId, now, ct);
+                recorded = true;
+            }
+            catch (Exception error) when (error is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogWarning("Monitor heartbeat for owner {OwnerId} failed with {ErrorType}. Later owners will still be recorded.",
+                    owner, error.GetType().Name);
+            }
+        }
+        // One owner's failure cannot erase another's successful heartbeat.
+        if (!recorded)
+            try { File.Delete(file); } catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
     }
 
     private async Task RunAsync(Guid owner, MonitorLease lease, CancellationToken ct)

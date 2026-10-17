@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -22,6 +24,89 @@ namespace Vessel.Tests;
 
 public sealed class MultiOwnerWorkerTests
 {
+    [PostgresTheory]
+    [InlineData("status")]
+    [InlineData("discovery")]
+    [InlineData("claim")]
+    [InlineData("heartbeat")]
+    public async Task One_owners_failure_does_not_starve_later_owners_or_remove_their_heartbeat(string failure)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Failures.Owner = fixture.First;
+        fixture.Failures.Step = failure;
+        if (failure == "status")
+            fixture.Directory.Checking = (owner, _) => owner == fixture.First
+                ? throw new InvalidOperationException("Synthetic private directory failure") : Task.CompletedTask;
+        var scheduler = fixture.Host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
+        await scheduler.TickAsync(default);
+        await fixture.Venue.Started(fixture.Second).WaitAsync(TimeSpan.FromSeconds(20));
+        await using (var later = fixture.Database.Context(fixture.Second))
+        {
+            var row = Assert.Single(await later.Set<MonitorAccount>().ToListAsync());
+            Assert.Equal("running", row.ManualState);
+            Assert.NotNull(await later.Set<MonitorHeartbeat>().SingleOrDefaultAsync());
+        }
+        await using (var first = fixture.Database.Context(fixture.First))
+            Assert.Empty(await first.Set<MonitorHeartbeat>().ToListAsync());
+        Assert.True(File.Exists(fixture.Heartbeat));
+        Assert.Contains(fixture.Logs.Messages, m => m.Level == LogLevel.Warning &&
+            m.Text.Contains(fixture.First.ToString(), StringComparison.Ordinal) &&
+            m.Text.Contains(nameof(InvalidOperationException), StringComparison.Ordinal));
+        Assert.DoesNotContain(fixture.Logs.Messages.Where(m => m.Level >= LogLevel.Warning),
+            m => m.Text.Contains("Synthetic private", StringComparison.Ordinal));
+        if (failure != "status") Assert.True(fixture.Failures.Triggered);
+        fixture.Venue.Release.TrySetResult();
+        foreach (var owner in failure == "heartbeat" ? new[] { fixture.First, fixture.Second } : new[] { fixture.Second })
+            await fixture.EventuallyAsync(async () =>
+            {
+                await using var db = fixture.Database.Context(owner);
+                return (await db.Set<MonitorAccount>().SingleAsync()).ManualState == "idle";
+            });
+    }
+
+    [PostgresFact]
+    public async Task Scheduler_shutdown_cancellation_propagates_instead_of_skipping_the_owner()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        using var stop = new CancellationTokenSource();
+        fixture.Directory.Checking = (_, ct) =>
+        {
+            stop.Cancel();
+            ct.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        };
+        var scheduler = fixture.Host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => scheduler.TickAsync(stop.Token));
+        Assert.Empty(fixture.Venue.Reads);
+        Assert.False(File.Exists(fixture.Heartbeat));
+    }
+
+    [PostgresFact]
+    public async Task Multiple_due_accounts_per_owner_still_share_exactly_two_process_wide_reads()
+    {
+        await using var fixture = await Fixture.CreateAsync(firstAccounts: 2, secondAccounts: 3);
+        var scheduler = fixture.Host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
+        await scheduler.TickAsync(default);
+        await fixture.EventuallyAsync(() => Task.FromResult(fixture.Venue.Reads.Count >= 2));
+        await scheduler.TickAsync(default);
+        Assert.Equal(2, fixture.Venue.Reads.Count);
+        Assert.Equal(2, fixture.Venue.PeakReads);
+        Assert.All(fixture.Venue.Reads, owner => Assert.Equal(fixture.First, owner));
+        await using (var first = fixture.Database.Context(fixture.First))
+            Assert.Equal(2, await first.Set<MonitorAccount>().CountAsync(m => m.ManualState == "running"));
+        await using (var second = fixture.Database.Context(fixture.Second))
+        {
+            Assert.Equal(3, await second.Set<MonitorAccount>().CountAsync());
+            Assert.False(await second.Set<MonitorAccount>().AnyAsync(m => m.ManualState == "running"));
+        }
+        fixture.Venue.Release.TrySetResult();
+        await fixture.EventuallyAsync(async () =>
+        {
+            await using var db = fixture.Database.Context(fixture.First);
+            return await db.Set<MonitorAccount>().AllAsync(m => m.ManualState == "idle");
+        });
+    }
+
     [PostgresFact]
     public async Task Scheduler_claims_each_active_owner_keeps_the_process_cap_and_renews_suspended_inflight_runs()
     {
@@ -99,7 +184,7 @@ public sealed class MultiOwnerWorkerTests
 
     private sealed class Fixture : IAsyncDisposable
     {
-        private readonly string heartbeat = Path.Combine(Path.GetTempPath(), "vessel-owner-heartbeat-" + Guid.NewGuid().ToString("N"));
+        public string Heartbeat { get; } = Path.Combine(Path.GetTempPath(), "vessel-owner-heartbeat-" + Guid.NewGuid().ToString("N"));
         private Fixture(CoreDatabase database)
         {
             Database = database;
@@ -113,9 +198,10 @@ public sealed class MultiOwnerWorkerTests
                 ["ConnectionStrings:Vessel"] = database.ConnectionString,
                 ["Vessel:Auth:OwnerId"] = First.ToString(),
                 ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1",
-                ["Vessel:Monitor:HeartbeatFile"] = heartbeat
+                ["Vessel:Monitor:HeartbeatFile"] = Heartbeat
             });
             builder.Logging.ClearProviders();
+            builder.Logging.AddProvider(Logs);
             WorkerHost.Configure(builder);
             VesselEventTestHosting.ConfigureServices(builder.Services);
             builder.Services.Replace(ServiceDescriptor.Singleton<TimeProvider>(Clock));
@@ -123,6 +209,7 @@ public sealed class MultiOwnerWorkerTests
             builder.Services.Replace(ServiceDescriptor.Singleton<IVenueRegistry>(TestVenues.With(Venue)));
             builder.Services.Replace(ServiceDescriptor.Singleton<IMonitorImporter>(new NoImporter()));
             builder.Services.Replace(ServiceDescriptor.Singleton<IMonitorEvaluator>(new NoEvaluator()));
+            builder.Services.ConfigureDbContext<VesselDbContext>(options => options.AddInterceptors(Failures));
             Host = builder.Build();
         }
         public Guid First { get; } = Guid.Parse("11111111-0000-0000-0000-000000000001");
@@ -133,22 +220,28 @@ public sealed class MultiOwnerWorkerTests
         public RenewalClock Clock { get; } = new();
         public GatedVenue Venue { get; }
         public IHost Host { get; }
+        public BackgroundWorkLogs Logs { get; } = new();
+        public OwnerFailure Failures { get; } = new();
         public Dictionary<Guid, Guid> Accounts { get; } = [];
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(int firstAccounts = 1, int secondAccounts = 1)
         {
             var fixture = new Fixture(await CoreDatabase.CreateAsync());
             foreach (var owner in new[] { fixture.First, fixture.Second, fixture.Suspended })
             {
-                await using var db = fixture.Database.Context(owner);
-                var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic owner account");
-                account.Configure(null, "0x" + new string('a', 40), null);
-                var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"),
-                    InstrumentSource.Venue, "{}", fixture.Clock.GetUtcNow().AddMinutes(-2));
-                play.MarkPlanned(fixture.Clock.GetUtcNow().AddMinutes(-1));
-                db.AddRange(account, play);
-                await db.SaveChangesAsync();
-                fixture.Accounts[owner] = account.Id;
+                var count = owner == fixture.First ? firstAccounts : owner == fixture.Second ? secondAccounts : 1;
+                for (var index = 0; index < count; index++)
+                {
+                    await using var db = fixture.Database.Context(owner);
+                    var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic owner account");
+                    account.Configure(null, "0x" + new string((char)('a' + index), 40), null);
+                    var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"),
+                        InstrumentSource.Venue, "{}", fixture.Clock.GetUtcNow().AddMinutes(-2));
+                    play.MarkPlanned(fixture.Clock.GetUtcNow().AddMinutes(-1));
+                    db.AddRange(account, play);
+                    await db.SaveChangesAsync();
+                    fixture.Accounts[owner] = account.Id;
+                }
             }
             return fixture;
         }
@@ -175,12 +268,14 @@ public sealed class MultiOwnerWorkerTests
             Venue.Release.TrySetResult();
             Host.Dispose();
             await Database.DisposeAsync();
-            File.Delete(heartbeat);
+            File.Delete(Heartbeat);
         }
     }
 
     private sealed class GatedVenue(RenewalClock clock) : IPerpetualVenueReader, IVenueOrderReader
     {
+        private int activeReads;
+        public int PeakReads { get; private set; }
         private readonly ConcurrentDictionary<Guid, TaskCompletionSource> entered = new();
         public ConcurrentBag<Guid> Reads { get; } = [];
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -192,13 +287,43 @@ public sealed class MultiOwnerWorkerTests
         public async Task<PerpetualVenueReadResult> ReadAsync(Account account, CancellationToken ct)
         {
             Reads.Add(account.OwnerId);
+            lock (entered) PeakReads = Math.Max(PeakReads, ++activeReads);
             entered.GetOrAdd(account.OwnerId, _ => new(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
-            await Release.Task.WaitAsync(TimeSpan.FromSeconds(45), ct);
+            try { await Release.Task.WaitAsync(TimeSpan.FromSeconds(45), ct); }
+            finally { lock (entered) activeReads--; }
             return new(new(clock.GetUtcNow(), "synthetic", 100, 100, 0, []), [], [], "Synthetic isolated read",
                 PositionsComplete: true, FillHistoryComplete: true);
         }
         public Task<VenueOrderReadResult> ReadOrdersAsync(string source, CancellationToken ct) =>
             Task.FromResult(new VenueOrderReadResult([], clock.GetUtcNow(), "Synthetic isolated orders", OpenOrdersComplete: true));
+    }
+
+    private sealed class OwnerFailure : DbCommandInterceptor
+    {
+        public Guid Owner { get; set; }
+        public string? Step { get; set; }
+        public bool Triggered { get; private set; }
+        private void Check(CommandEventData data, string step)
+        {
+            if (Step != step || data.Context is not VesselDbContext db || db.CurrentOwnerId != Owner) return;
+            Triggered = true;
+            throw new InvalidOperationException("Synthetic private store failure");
+        }
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("FOR UPDATE OF a SKIP LOCKED", StringComparison.Ordinal))
+                Check(eventData, "claim");
+            Check(eventData, "discovery");
+            return ValueTask.FromResult(result);
+        }
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("INSERT INTO monitor_heartbeats", StringComparison.Ordinal))
+                Check(eventData, "heartbeat");
+            return ValueTask.FromResult(result);
+        }
     }
 
     private sealed class NoImporter : IMonitorImporter

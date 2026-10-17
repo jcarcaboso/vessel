@@ -177,7 +177,7 @@ public sealed class WorkerHostTests
             // Discovery cannot run: the pass is not productive, so neither heartbeat advances.
             await File.WriteAllTextAsync(file, "1 90");
             using (var broken = Scheduler("Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused", owner, file, out var scheduler))
-                await Assert.ThrowsAnyAsync<Exception>(() => scheduler.TickAsync(default));
+                await scheduler.TickAsync(default);
             Assert.Equal("1 90", await File.ReadAllTextAsync(file));
             // The heartbeat file cannot be written: the database heartbeat is not recorded either.
             var other = Guid.NewGuid();
