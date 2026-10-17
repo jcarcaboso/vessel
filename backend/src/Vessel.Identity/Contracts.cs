@@ -24,3 +24,12 @@ public sealed record AuthenticatedSession(IdentitySession Session, IdentityUser 
         new(Session.Id, Session.CreatedAt, Session.IdleExpiresAt, Session.AbsoluteExpiresAt, Session.Remember),
         User.Id == settings.OwnerId);
 }
+
+public sealed record ProfileRequest([property: JsonRequired] string? DisplayName, [property: JsonRequired] int ExpectedRevision);
+public sealed record WalletLabelRequest([property: JsonRequired] string? Label);
+public sealed record StepUpChallengeRequest([property: JsonRequired] string? Action, [property: JsonRequired] string? Address, Guid? Target = null);
+public sealed record StepUpRequest([property: JsonRequired] Guid ChallengeId, [property: JsonRequired] string? Signature);
+public sealed record LinkWalletRequest([property: JsonRequired] Guid ChallengeId, [property: JsonRequired] string? Signature, string? Label = null);
+public sealed record SessionRowDto(Guid Id, bool Current, DateTimeOffset CreatedAt, DateTimeOffset LastSeenAt,
+    bool Remember, string? UserAgent, string WalletAddress);
+public sealed record IdentityVerificationUser(Guid Id, bool HasWallet);

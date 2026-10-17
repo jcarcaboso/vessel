@@ -52,11 +52,22 @@ public static class IdentityText
     {
         text = text?.Trim();
         if (string.IsNullOrEmpty(text) && nullable) return null;
-        if (string.IsNullOrEmpty(text) || text.Length > max || text.EnumerateRunes().Any(r =>
-            System.Text.Rune.GetUnicodeCategory(r) is UnicodeCategory.Control or UnicodeCategory.Format or
-                UnicodeCategory.Surrogate or UnicodeCategory.OtherNotAssigned or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator))
+        if (string.IsNullOrEmpty(text) || text.Length > max || !Printable(text))
             throw IdentityErrors.Error(400, code);
         return text;
+    }
+
+    private static bool Printable(string text)
+    {
+        for (var i = 0; i < text.Length;)
+        {
+            if (!Rune.TryGetRuneAt(text, i, out var rune) || Rune.GetUnicodeCategory(rune) is
+                UnicodeCategory.Control or UnicodeCategory.Format or UnicodeCategory.Surrogate or
+                UnicodeCategory.OtherNotAssigned or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator)
+                return false;
+            i += rune.Utf16SequenceLength;
+        }
+        return true;
     }
 
     public static string? UserAgent(string? agent)

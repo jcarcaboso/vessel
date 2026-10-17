@@ -7,9 +7,10 @@ using Vessel.Application.Common;
 
 namespace Vessel.Identity;
 
-public static class IdentityHttp
+public static partial class IdentityHttp
 {
     private const int BodyLimit = 16384;
+    private static readonly object BodyKey = new();
 
     public static bool PublicRoute(PathString path) => path.Value?.TrimEnd('/').ToLowerInvariant() is
         "/api/auth/config" or "/api/auth/challenge" or "/api/auth/verify" or "/api/auth/register";
@@ -60,6 +61,12 @@ public static class IdentityHttp
             group.Map("/{**rest}", () => { throw IdentityErrors.Error(404, "not-found"); }).AllowAnonymous();
             return endpoints;
         }
+        group.AddEndpointFilter(async (context, next) =>
+        {
+            // Also cap bodies on routes that need no JSON (for example revoke-others and DELETE).
+            await BodyBytesAsync(context.HttpContext);
+            return await next(context);
+        });
         group.MapPost("/challenge", async (HttpContext context, IdentityService service, IdentityCookies cookies) =>
         {
             var request = await BodyAsync<ChallengeRequest>(context);
@@ -105,13 +112,15 @@ public static class IdentityHttp
             cookies.ClearSession(context);
             return Results.NoContent();
         }).RequireAuthorization();
+        MapAccountEndpoints(group);
         return endpoints;
     }
 
     private static string PolicyName(string policy) => policy == "AllowList" ? "allow-list" : policy.ToLowerInvariant();
 
-    private static async Task<T> BodyAsync<T>(HttpContext context)
+    private static async Task<ReadOnlyMemory<byte>> BodyBytesAsync(HttpContext context)
     {
+        if (context.Items.TryGetValue(BodyKey, out var cached) && cached is ReadOnlyMemory<byte> body) return body;
         if (context.Request.ContentLength > BodyLimit) throw IdentityErrors.Error(413, "request-too-large");
         var buffer = new byte[BodyLimit + 1];
         var count = 0;
@@ -122,9 +131,16 @@ public static class IdentityHttp
             count += read;
         }
         if (count > BodyLimit) throw IdentityErrors.Error(413, "request-too-large");
+        ReadOnlyMemory<byte> bytes = buffer.AsMemory(0, count);
+        context.Items[BodyKey] = bytes;
+        return bytes;
+    }
+
+    private static async Task<T> BodyAsync<T>(HttpContext context)
+    {
         try
         {
-            return JsonSerializer.Deserialize<T>(buffer.AsSpan(0, count), JsonSerializerOptions.Web)
+            return JsonSerializer.Deserialize<T>((await BodyBytesAsync(context)).Span, JsonSerializerOptions.Web)
                 ?? throw IdentityErrors.Error(400, "request-invalid");
         }
         catch (JsonException) { throw IdentityErrors.Error(400, "request-invalid"); }

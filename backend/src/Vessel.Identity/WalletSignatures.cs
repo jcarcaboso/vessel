@@ -112,6 +112,13 @@ public static class SignInMessage
 
 public static class IdentityErrors
 {
+    public static ProblemException StepUpRequired(string action)
+    {
+        var error = Error(403, "step-up-required");
+        error.Data["action"] = action;
+        return error;
+    }
+
     public static ProblemException Error(int status, string code, int? retryAfter = null) =>
         new(status, code switch
         {

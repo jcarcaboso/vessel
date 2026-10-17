@@ -13,19 +13,13 @@ public sealed class IdentityService(IdentityTransaction transactions, IdentitySe
         return await transactions.RunAsync(async db =>
         {
             var now = clock.GetUtcNow();
-            await db.Challenges.Where(x => x.ExpiresAt < now.AddSeconds(-30)).ExecuteDeleteAsync(ct);
-            var open = db.Challenges.Where(x => x.ConsumedAt == null);
-            var excess = await open.CountAsync(ct) - 9999;
-            if (excess > 0)
-                await open.Where(x => open.OrderBy(row => row.IssuedAt).ThenBy(row => row.Id)
-                    .Take(excess).Select(row => row.Id).Contains(x.Id)).ExecuteDeleteAsync(ct);
             var challenge = new AuthChallenge
             {
                 Id = Guid.NewGuid(), Address = normalized, Origin = origin, BindingHash = IdentityTokens.Hash(binding),
                 IssuedAt = now, ExpiresAt = now.AddMinutes(5)
             };
             challenge.Message = SignInMessage.Create(origin, normalized, SignInMessage.Nonce(), now, challenge.ExpiresAt);
-            db.Challenges.Add(challenge);
+            await AddChallengeAsync(db, challenge, now, ct);
             return new ChallengeDto(challenge.Id, challenge.Message, challenge.ExpiresAt);
         }, ct);
     }
@@ -133,6 +127,17 @@ public sealed class IdentityService(IdentityTransaction transactions, IdentitySe
                 .ExecuteUpdateAsync(update => update.SetProperty(x => x.RevokedAt, now).SetProperty(x => x.RevokeReason, "sign-out"), ct);
             return true;
         }, ct);
+    }
+
+    internal static async Task AddChallengeAsync(IdentityDbContext db, AuthChallenge challenge, DateTimeOffset now, CancellationToken ct)
+    {
+        await db.Challenges.Where(x => x.ExpiresAt < now.AddSeconds(-30)).ExecuteDeleteAsync(ct);
+        var open = db.Challenges.Where(x => x.ConsumedAt == null);
+        var excess = await open.CountAsync(ct) - 9999;
+        if (excess > 0)
+            await open.Where(x => open.OrderBy(row => row.IssuedAt).ThenBy(row => row.Id)
+                .Take(excess).Select(row => row.Id).Contains(x.Id)).ExecuteDeleteAsync(ct);
+        db.Challenges.Add(challenge);
     }
 
     private void CheckRegistrationPolicy(string address)
