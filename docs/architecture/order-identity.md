@@ -1,6 +1,6 @@
 # Order identity: internal and external IDs
 
-Status: **draft for challenge** (October 17, 2026). The owner asked for internal and external order identities as a breaking change: Vessel is not deployed, so there is no data backfill and development databases are recreated.
+Status: **agreed for implementation** (October 17, 2026). The owner asked for internal and external order identities as a breaking change: Vessel is not deployed, so there is no data backfill and development databases are recreated.
 
 ## Problem
 
@@ -14,7 +14,7 @@ No supported venue reuses an order ID across instruments today (Hyperliquid `oid
 
 ## Decision
 
-Relationships use internal IDs. Venue IDs are external identity only.
+Status changed to **agreed for implementation** after a Sol and an Opus challenge round (October 17, 2026). Relationships use internal IDs. Venue IDs are external identity only.
 
 | Entity | Internal ID | External identity (unique) |
 | --- | --- | --- |
@@ -22,30 +22,31 @@ Relationships use internal IDs. Venue IDs are external identity only.
 | Imported fill | `ImportedFill.Id` | `(OwnerId, AccountId, ContractId, SourceFillId)` (unchanged) |
 | Play order link | `PlayOrderLink.Id` | — (references `ImportedOrderId`) |
 
-- `ImportedOrder.OrderId` is renamed `ExternalOrderId` (column `external_order_id`).
-- `ImportedFill.OrderId` is renamed `ExternalOrderId`; a nullable `ImportedOrderId` references the order with the same owner, account, contract and external ID.
-- `PlayOrderLink.OrderId` is replaced by a required `ImportedOrderId` with a composite owner foreign key (`OwnerId, ImportedOrderId`) and restrict-delete (account deletion already deletes links/Plays first; verify).
-- Unique linked-order index becomes `(OwnerId, ImportedOrderId)` where linked.
+- `ImportedOrder.OrderId` and `ImportedFill.OrderId` are renamed `ExternalOrderId` (column `"ExternalOrderId"`, keeping the existing quoted PascalCase convention).
+- `PlayOrderLink.OrderId` is replaced by a required `ImportedOrderId`. The foreign key is composite `(OwnerId, AccountId, ImportedOrderId)` → alternate key `(OwnerId, AccountId, Id)` on `imported_orders`, so a cross-owner or cross-account link is impossible in the database. The link constructor takes the `ImportedOrder` and refuses one whose account or contract differs from the Play's (contract consistency is a domain rule, since the database cannot express it).
+- The unique linked-order index becomes `(OwnerId, ImportedOrderId)` where state is Linked.
+- **Fills carry no order reference.** Fills normally arrive before their order in the same refresh (`SaveRefreshAsync` then `RetainAsync`), so a back-filled reference would need a set-based update that leaves tracked fills stale and is invisible to event capture. Instead fills belong to an order by `(OwnerId, AccountId, ContractId, ExternalOrderId)`, through **one** shared rule: a Persistence helper (`LinkedFills`: link → order → fills on that key) and an Application `OrderKey(AccountId, ContractId, ExternalOrderId)` value for in-memory grouping. No consumer joins fills on the external ID alone. A new index `(OwnerId, AccountId, ContractId, ExternalOrderId)` on `imported_fills` backs it.
+- The external key uses the canonical `ContractId` (non-null, shared by fills, Plays, matcher and catalogue). When an order row exists for the key with a non-null `VenueContractId` that differs from the incoming non-null native ID, import fails closed with a safe venue error instead of overwriting. A future canonical remap (like `k…` → `1000…`) is an identity change and needs its own migration.
+- `MonitorExitWatch.OrderId` is removed: a link's order is immutable, so the watch identifies its order through `LinkId`. Matching against a fresh venue read uses the linked order's `(ContractId, ExternalOrderId)`.
 
 ## Resolution rules
 
-- **Fill import.** When a fill is stored, `ImportedOrderId` is set if an order with the same `(account, contract, external ID)` exists.
-- **Order import.** After orders are upserted (keyed by contract + external ID, never overwriting another contract's row), a set-based update attaches unresolved fills of the same account/contract/external ID. Both happen in the same unit of work as today's import.
-- **Linking.** The matcher works on order rows, so it links `order.Id` directly. Manual link (`POST …/link` with a venue order ID) resolves the ID within the Play's account **and contract**; another contract's order is not found (404). Retrospective Plays already require an order record; they link the internal ID.
-- **Attribution.** Every consumer joins link → order → fills on `ImportedOrderId`; fills without an order reference are never attributed to a Play. Activity's per-fill Play map, Diary, Sizing/Review, `ExecutionIntegrity`, lifecycle transitions, closed-event data and monitor assignment use one shared read rule.
+- **Order import.** `UpsertOrdersAsync` keys existing rows and the incoming batch (deduplicated newest-status-first) by `(ContractId, ExternalOrderId)`, never writes `ContractId` on update, and keeps today's older-status skip rule.
+- **Adapters.** Hyperliquid, Lighter and RISEx merge/deduplicate orders by `(contract, ID)`, preserving newest-status selection and complete-book duplicate detection.
+- **Linking.** The matcher links `order.Id`; its `LinkIndex` keys become `(PlayId, ImportedOrderId, LevelKey)` and a set of linked order IDs. Manual link resolves the venue order ID within the Play's account **and contract** (another contract's order is 404). Retrospective preview scopes fills and orders to the operation's contract and returns the order rows so creation links internal IDs; its fingerprint hashes an explicit projection instead of whole entities.
+- **Attribution.** Activity, Diary, Sizing/Review, `ExecutionIntegrity` inputs, lifecycle transitions, closed-event data and monitor assignment all use the shared rule. Manual-ledger `manual:{id}` fills stay outside it.
+- **Events.** `FillOrders` mutation tracking uses `(AccountId, ContractId, ExternalOrderId)`. The `execution.filled` dedup key becomes `order:{accountId}:{importedOrderId}:filled:{cumulative}` (the external ID alone collides across contracts). Fill claims stay keyed by fill identity; payloads keep the external `orderId` string.
 
 ## Wire contracts
 
-- API DTOs and event payloads keep the venue order ID string (`orderId`) as today: it is what the owner recognises on the venue. Link/unlink requests keep sending the venue ID (link) or link ID (unlink). No frontend change is expected; confirm.
-- Event types, payload shapes and dedup keys stay unchanged (fill claims are keyed by fill identity).
+API DTOs, event payloads and the browser keep the external `orderId` string; link requests send the venue ID and unlink sends the link ID. No frontend change is expected. `scripts/e2e-full-stack.py` reads the watch `OrderId` column directly and must be updated.
 
 ## Migration
 
-One new EF migration changes the schema in place with **no backfill**. It is a breaking change for any existing database: recreate development databases. Document it in `CHANGELOG.md`/release notes for the next version. Apply explicitly; never to the owner's database during tests.
+One new EF migration: renames, the link foreign key and alternate key, dropped `OrderId` columns on links and watches, and the new indexes. **No backfill.** It starts with a guard that raises an exception when `imported_orders`, `imported_fills` or `play_order_links` holds rows, so a database someone forgot to recreate fails loudly instead of being truncated. Recreate development databases. Earlier migration tests that seed `OrderId` columns target the pre-change migration. Record the breaking change in `CHANGELOG.md`. Apply explicitly; never to the owner's database during tests.
 
-## Open questions for the challenge round
+## Implementation waves
 
-1. Should the order's external key use `ContractId` (canonical) or `VenueContractId` (native)? Canonical aliases (`k…` → `1000…`) map one native contract to one canonical ID, so either works; canonical matches fills' key.
-2. Should fills carry `ImportedOrderId` at all, or should consumers join fills via the order's external key + contract? (Null-until-resolved adds a maintenance step; the join adds a contract predicate everywhere.)
-3. Monitor watches and discrepancy identities that key on order ID strings: switch to internal IDs or keep `(contract, external ID)`?
-4. Adapter-level merges (Lighter inactive pages, RISEx history + TP/SL) dedupe by order ID only: key them by `(market, ID)` too.
+1. **Schema and compile (serial):** Domain, ports, EF configurations, migration and guard, `LinkedFills`/`OrderKey`, and the mechanical consumer changes needed to build and pass with unchanged behaviour.
+2. **Parallel, disjoint scopes:** (A) execution, Diary, Activity, Sizing and Review on the shared rule with cross-contract tests; (B) event capture and the dedup key; (C) monitor watches, discrepancy observations and assignment; (D) venue adapters' merge keys.
+3. **Integration:** same external ID on two contracts end to end, fills-before-orders events, migration guard, E2E script, docs and changelog.
