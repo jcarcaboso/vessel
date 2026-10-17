@@ -70,4 +70,19 @@ public sealed partial class RisexAdapterTests
         var order = Assert.Single(result.Orders);
         Assert.Equal(("DOGE", VenueOrderStatus.Open, "Limit"), (order.ContractId, order.Status, order.OrderType));
     }
+
+    [Fact]
+    public async Task Identity_retired_and_active_markets_sharing_a_canonical_key_both_reach_order_import()
+    {
+        var (reader, _) = Reader(new()
+        {
+            ["/v1/orders"] = OrderPage(HistoryOrder("0xsame", "13", "ORDER_STATUS_CANCELLED", Now.AddMinutes(-30), "0.0951"),
+                HistoryOrder("0xsame", "14", "ORDER_STATUS_OPEN", Now.AddMinutes(-10), "0.0951")),
+            ["/v1/orders/tpsl"] = OrderPage(),
+        });
+        var result = await reader.ReadOrdersAsync(Address, default);
+        // Both native markets are kept, so the import guard sees the conflicting identity and fails closed.
+        Assert.Equal(["13", "14"], result.Orders.Where(o => o.OrderId == "0xsame").Select(o => o.VenueContractId).Order(StringComparer.Ordinal));
+        Assert.All(result.Orders, o => Assert.Equal("DOGE", o.ContractId));
+    }
 }
