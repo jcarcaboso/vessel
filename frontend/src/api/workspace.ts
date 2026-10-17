@@ -1,7 +1,13 @@
 import { overviewSummaryPath, isOverviewSummary, type OverviewQuery, type OverviewSummaryDocument } from './overview-summary'
 import { activityFillsPath, activityPath, isActivityFills, isActivityPage, type ActivityFills, type ActivityPage, type ActivityQuery } from './activity'
 import { readSseStream, SseOverflowError, SseParser } from './sse'
-import { isRequestCursor } from './event-cursor'
+import { isNotificationCursor, isRequestCursor } from './event-cursor'
+import {
+  isInAppNotification, isNotificationClaim, isNotificationHead, isNotificationPage, isNotificationPreferenceFields,
+  isNotificationPreferences, isNotificationReadAll, notificationPagePath, notificationPreferencesConflict, notificationReadAllConflict,
+  type InAppNotification, type NotificationClaim, type NotificationHead, type NotificationPage, type NotificationPreferenceFields,
+  type NotificationPreferences, type NotificationQuery,
+} from './notifications'
 import { isAccountMonitor, isMonitorEventPage, isMonitorRunAccepted, isMonitorSummary, monitorFrame,
   type AccountMonitor, type MonitorEventPage, type MonitorRunAccepted, type MonitorSummary, type MonitorStreamEvent } from './monitor'
 import { candleIntervals, type CandleInterval } from './candles'
@@ -227,7 +233,22 @@ export interface WorkspaceApi {
   runAccountMonitor(id: string, signal?: AbortSignal): Promise<MonitorRunAccepted>
   /** Stored owner events after a cursor. A cursor outside the retained range returns a reset to the head. */
   monitorEvents(after: string, limit: number, signal?: AbortSignal): Promise<MonitorEventPage>
-  monitorStream(after: string, signal: AbortSignal, onEvent: (event: MonitorStreamEvent) => void): Promise<void>
+  /** With `notificationsAfter` the stream also carries the owner's notification feed from that cursor. */
+  monitorStream(after: string, signal: AbortSignal, onEvent: (event: MonitorStreamEvent) => void, notificationsAfter?: string): Promise<void>
+  /** The notification head, unread count, channel switch and notifications worker status from one snapshot. */
+  notificationHead(signal?: AbortSignal): Promise<NotificationHead>
+  notifications(query: NotificationQuery, signal?: AbortSignal): Promise<NotificationPage>
+  /** Claims every unshown unread notification for this tab; only the returned ones pop up. */
+  claimNotifications(signal?: AbortSignal): Promise<NotificationClaim>
+  /** The notification in its current state; a withdrawn one stays withdrawn. */
+  readNotification(id: string, signal?: AbortSignal): Promise<InAppNotification>
+  /** Marks read every unread notification that existed at `upTo`. A 409 (reset or ahead of the head) means reload first. */
+  readAllNotifications(upTo: string, signal?: AbortSignal): Promise<{ read: number }>
+  notificationPreferences(signal?: AbortSignal): Promise<NotificationPreferences>
+  /** A stale `expectedRevision` is a 409 with `notificationPreferencesConflict`. */
+  saveNotificationPreferences(preferences: NotificationPreferenceFields & { expectedRevision: number }): Promise<NotificationPreferences>
+  /** Accepted (202): the test arrives through the stream. A 429 carries the cooldown in `retryAtUtc`. */
+  requestTestNotification(): Promise<void>
   dismissPlayDiscrepancy(playId: string, discrepancyId: string, note?: string, signal?: AbortSignal): Promise<void>
   dismissAccountDiscrepancy(accountId: string, discrepancyId: string, note?: string, signal?: AbortSignal): Promise<void>
   overviewSummary(query: OverviewQuery, signal?: AbortSignal): Promise<OverviewSummaryDocument>
@@ -480,6 +501,12 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
     return `/api/evidence/${id}`
   }
   const none = (v: unknown): v is undefined => v === undefined
+  const notificationRequest = { timeout: 10_000, notFound: 'This notification is no longer available.',
+    unavailable: 'Notifications are unavailable. Check the API and try again.', invalidData: 'The API returned incompatible notification data.' }
+  // A conflict asks the caller to reload, so it gets its own fixed text and stays distinguishable by status.
+  const conflict = <T,>(request: Promise<T>, message: string) => request.catch((cause: unknown) => {
+    throw cause instanceof ApiError && cause.status === 409 ? new ApiError('http', message, 409) : cause
+  })
   const withSignal = (signal?: AbortSignal) => signal ? { signal } : {}
   const api: WorkspaceApi = {
     monitor: signal => call('/api/monitor', { ...workspaceRequest, validate: isMonitorSummary, ...withSignal(signal) }),
@@ -496,12 +523,13 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       return call(`/api/events?${new URLSearchParams({ after, limit: String(limit) })}`, { ...workspaceRequest,
         validate: isMonitorEventPage, unavailable: 'Monitor events are unavailable.', ...withSignal(signal) })
     },
-    monitorStream: async (after, signal, onEvent) => {
+    monitorStream: async (after, signal, onEvent, notificationsAfter) => {
       if (!isRequestCursor(after)) throw new ApiError('invalid-response', 'The event cursor is invalid.')
+      if (notificationsAfter !== undefined && !isNotificationCursor(notificationsAfter)) throw new ApiError('invalid-response', 'The notification cursor is invalid.')
       if (signal.aborted) return
       let response: Response
       try {
-        response = await call(`/api/events/stream?${new URLSearchParams({ after })}`, {
+        response = await call(`/api/events/stream?${new URLSearchParams({ after, ...(notificationsAfter !== undefined ? { notificationsAfter } : {}) })}`, {
           ...workspaceRequest, signal, timeout: 25_000, accept: 'text/event-stream',
           unavailable: 'The monitor event stream did not connect.', read: async response => response,
         })
@@ -522,6 +550,33 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
         if (!signal.aborted) throw new ApiError('unavailable', 'The monitor event stream was interrupted.')
       }
     },
+    notificationHead: signal => call('/api/notifications/head', { ...notificationRequest, validate: isNotificationHead, ...withSignal(signal) }),
+    notifications: (query, signal) => {
+      let path: string
+      try { path = notificationPagePath(query) } catch (cause) { return Promise.reject(cause) }
+      return call(path, { ...notificationRequest, validate: (v): v is NotificationPage => isNotificationPage(v, query), ...withSignal(signal) })
+    },
+    claimNotifications: signal => call('/api/notifications/claim', { ...notificationRequest, validate: isNotificationClaim, method: 'POST', ...withSignal(signal) }),
+    readNotification: (id, signal) => {
+      if (!isGuid(id)) return Promise.reject(new ApiError('invalid-response', 'The notification identifier is invalid.'))
+      return call(`/api/notifications/${id}/read`, { ...notificationRequest, method: 'POST', ...withSignal(signal),
+        validate: (v): v is InAppNotification => isInAppNotification(v) && v.id.toLowerCase() === id.toLowerCase() })
+    },
+    readAllNotifications: async (upTo, signal) => {
+      if (!isNotificationCursor(upTo)) throw new ApiError('invalid-response', 'The notification cursor is invalid.')
+      return conflict(call('/api/notifications/read', { ...notificationRequest, validate: isNotificationReadAll, method: 'POST',
+        body: JSON.stringify({ upTo }), ...withSignal(signal) }), notificationReadAllConflict)
+    },
+    notificationPreferences: signal => call('/api/notifications/preferences', { ...notificationRequest, validate: isNotificationPreferences, ...withSignal(signal) }),
+    saveNotificationPreferences: async ({ enabled, minimumSeverity, categories, expectedRevision }) => {
+      if (!isNotificationPreferenceFields({ enabled, minimumSeverity, categories }) || !isCount(expectedRevision)) {
+        throw new ApiError('invalid-response', 'The notification preferences are invalid.')
+      }
+      return conflict(call('/api/notifications/preferences', { ...notificationRequest, validate: isNotificationPreferences, method: 'PUT',
+        body: JSON.stringify({ enabled, minimumSeverity, categories, expectedRevision }) }), notificationPreferencesConflict)
+    },
+    requestTestNotification: () => call('/api/notifications/test', { ...notificationRequest, method: 'POST', read: async () => undefined,
+      tooMany: 'A test notification was requested moments ago. Wait for the countdown, then try again.' }),
     dismissPlayDiscrepancy: (id, discrepancyId, note, signal) => call(`${playPath(id)}/discrepancies/${resourceId(discrepancyId)}/dismiss`,
       { ...playRequest, validate: none, method: 'POST', body: JSON.stringify({ note: note ?? null }), ...withSignal(signal) }),
     dismissAccountDiscrepancy: (id, discrepancyId, note, signal) => call(`${accountPath(id)}/discrepancies/${resourceId(discrepancyId)}/dismiss`,

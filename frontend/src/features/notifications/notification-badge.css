@@ -1,0 +1,17 @@
+/* Unread badge on the Notifications entry and the narrow-screen bell. `--destructive` pairs with its foreground. */
+.notification-badge {
+  display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  background: var(--destructive); color: var(--destructive-foreground); font-size: var(--text-2xs); font-weight: 700; line-height: 1;
+  font-feature-settings: var(--figures);
+}
+/* Expanded: the count ends the row. Collapsed: it sits on the icon. */
+.shell-nav-item > .notification-badge { margin-left: auto; }
+.header-notifications { position: relative; margin-left: auto; width: 36px; height: 36px; }
+.header-notifications > .notification-badge { position: absolute; top: -6px; right: -7px; box-shadow: 0 0 0 2px var(--background); }
+.mobile-menu { position: relative; }
+.menu-unread-dot { position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--destructive); box-shadow: 0 0 0 2px var(--background); }
+@media (min-width: 801px) {
+  .navigation-collapsed .shell-nav-item > .notification-badge {
+    position: absolute; top: 3px; left: calc(50% + 2px); min-width: 16px; height: 16px; padding: 0 4px; box-shadow: 0 0 0 2px var(--sidebar);
+  }
+}

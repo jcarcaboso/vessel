@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { WorkspaceApi } from './workspace'
 import { createWorkspaceApi } from './workspace'
-import { isAfter, isEventCursor, isEventSequence, isRequestCursor, isUnknownCursor, readHeadCursor, unknownCursor } from './event-cursor'
+import { isAfter, isEventCursor, isEventSequence, isNotificationAfter, isNotificationCursor, isRequestCursor, isStaleNotificationCursor,
+  isUnknownCursor, readHeadCursor, unknownCursor } from './event-cursor'
 
 const epoch = '0123456789abcdef0123456789abcdef'
 const other = 'fedcba9876543210fedcba9876543210'
@@ -51,5 +52,31 @@ describe('owner event cursor', () => {
     expect(isAfter(`${epoch}.1`, '0')).toBe(true)
     expect(isAfter(`${epoch}.1`, unknownCursor)).toBe(false)
     expect(isAfter('not-a-cursor', `${epoch}.1`)).toBe(false)
+  })
+})
+
+describe('owner notification cursor', () => {
+  it('accepts only `{epoch}.{reset}.{sequence}` with a lowercase epoch or 0', () => {
+    for (const value of [`${epoch}.0.0`, `${epoch}.3.9007199254740993`, '0.0.0', '0.2.15']) expect(isNotificationCursor(value)).toBe(true)
+    for (const value of [`${epoch}.1`, `${epoch.toUpperCase()}.0.1`, `${'0'.repeat(32)}.0.1`, `${epoch}.01.1`, `${epoch}.0.-1`,
+      `${epoch}.0.1.2`, '0.0', 3, null, `${epoch}.0.${'9'.repeat(20)}`]) expect(isNotificationCursor(value)).toBe(false)
+    // Event cursors and notification cursors never pass for each other.
+    expect(isEventCursor(`${epoch}.0.1`)).toBe(false)
+    expect(isNotificationCursor(`${epoch}.1`)).toBe(false)
+  })
+  it('orders positions within one epoch and reset version only', () => {
+    expect(isNotificationAfter(`${epoch}.2.9007199254740993`, `${epoch}.2.9007199254740992`)).toBe(true)
+    expect(isNotificationAfter(`${epoch}.2.5`, `${epoch}.2.5`)).toBe(false)
+    expect(isNotificationAfter(`${epoch}.2.4`, `${epoch}.2.5`)).toBe(false)
+    expect(isNotificationAfter(`${epoch}.3.6`, `${epoch}.2.5`)).toBe(false)
+    expect(isNotificationAfter(`${other}.2.6`, `${epoch}.2.5`)).toBe(false)
+    expect(isNotificationAfter('bad', `${epoch}.2.5`)).toBe(false)
+  })
+  it('treats answers from another epoch or an older reset version as stale', () => {
+    expect(isStaleNotificationCursor(`${epoch}.1.50`, `${epoch}.2.5`)).toBe(true)
+    expect(isStaleNotificationCursor(`${other}.9.50`, `${epoch}.2.5`)).toBe(true)
+    expect(isStaleNotificationCursor(`0.2.5`, `${epoch}.2.5`)).toBe(true)
+    expect(isStaleNotificationCursor(`${epoch}.2.1`, `${epoch}.2.5`)).toBe(false)
+    expect(isStaleNotificationCursor(`${epoch}.3.0`, `${epoch}.2.5`)).toBe(false)
   })
 })

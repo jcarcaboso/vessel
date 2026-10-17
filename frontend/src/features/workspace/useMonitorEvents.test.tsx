@@ -4,20 +4,22 @@ import type { MonitorStreamEvent } from '@/api/monitor'
 import type { WorkspaceApi } from '@/api/workspace'
 import { eventCursor, eventFrame, monitorEventFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
 import { ApiError } from '@/api/errors'
-import { reconnectDelay, stableStream, useMonitorEvents } from './useMonitorEvents'
+import { notificationCursor, notificationFixture, notificationHeadFixture } from '@/test/notification-fixture'
+import { reconnectDelay, stableStream, useMonitorEvents, type NotificationStreamHandlers } from './useMonitorEvents'
 
 /** The head the client reads before any stored state; the fixture event lies after it. */
 const headSequence = eventCursor('9007199254740990')
 function client() {
-  const connections: { after: string; signal: AbortSignal; emit: (frame: MonitorStreamEvent) => void; finish: () => void }[] = []
+  const connections: { after: string; signal: AbortSignal; emit: (frame: MonitorStreamEvent) => void; finish: () => void; notificationsAfter: string | undefined }[] = []
   const api = {
     monitorEvents: vi.fn().mockResolvedValue({ events: [], nextCursor: headSequence, resetRequired: true }),
     monitor: vi.fn().mockResolvedValue(monitorSummaryFixture),
-    monitorStream: vi.fn((after: string, signal: AbortSignal, emit: (frame: MonitorStreamEvent) => void) => new Promise<void>(resolve => {
-      connections.push({ after, signal, emit, finish: resolve })
+    monitorStream: vi.fn((after: string, signal: AbortSignal, emit: (frame: MonitorStreamEvent) => void, notificationsAfter?: string) => new Promise<void>(resolve => {
+      connections.push({ after, signal, emit, finish: resolve, notificationsAfter })
       signal.addEventListener('abort', () => resolve(), { once: true })
     })),
     runAccountMonitor: vi.fn(), sync: vi.fn(),
+    notificationHead: vi.fn().mockResolvedValue(notificationHeadFixture),
   } as unknown as WorkspaceApi
   return { api, connections }
 }
@@ -25,6 +27,23 @@ beforeEach(() => vi.useFakeTimers())
 afterEach(() => vi.useRealTimers())
 const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 const ready = (nextCursor = headSequence) => ({ type: 'status', status: { state: 'ready', nextCursor } }) as const
+
+it('does not regress the unread count when a head read loses to a same-generation frame', async () => {
+  const { api, connections } = client()
+  const feed = { onHead: vi.fn(), onStatus: vi.fn(), onFrame: vi.fn() }
+  renderHook(() => useMonitorEvents(api, true, vi.fn(), 0, feed))
+  await advance(0)
+  act(() => connections[0]!.emit(ready()))
+  let answer!: (head: typeof notificationHeadFixture) => void
+  vi.mocked(api.notificationHead).mockImplementationOnce(() => new Promise(resolve => { answer = resolve }))
+  await advance(60_000)
+  act(() => connections[0]!.emit({ type: 'notification', frame: {
+    cursor: notificationCursor(11), unreadCount: 1, enabled: true, notification: notificationFixture,
+  } }))
+  feed.onHead.mockClear()
+  await act(async () => { answer({ ...notificationHeadFixture, unreadCount: 0 }) })
+  expect(feed.onHead).not.toHaveBeenCalled()
+})
 
 describe('one shell monitor subscription', () => {
   it('reads the head before stored state and streams from it, so a change committed in between is delivered without a second load', async () => {
@@ -260,5 +279,120 @@ describe('one shell monitor subscription', () => {
     await advance(120_000)
     expect(vi.mocked(api.monitorStream).mock.calls.length).toBeLessThanOrEqual(4)
     expect(view.result.current.notice).toMatch(/too many Vessel tabs/)
+  })
+})
+
+describe('the notification feed on the shared stream', () => {
+  const handlers = () => ({ onHead: vi.fn(), onStatus: vi.fn(), onFrame: vi.fn() }) satisfies NotificationStreamHandlers
+  const item = (sequence: number, reset = 0) => ({ type: 'notification', frame: {
+    cursor: notificationCursor(sequence, reset), unreadCount: 1, enabled: true, notification: notificationFixture } }) as const
+  const status = (state: 'ready' | 'reset', sequence: number, reset = 0) =>
+    ({ type: 'notifications', status: { state, nextCursor: notificationCursor(sequence, reset), unreadCount: 2, enabled: true } }) as const
+
+  it('reads the notification head after the event head and streams both cursors', async () => {
+    const { api, connections } = client()
+    const feed = handlers()
+    const view = renderHook(() => useMonitorEvents(api, true, vi.fn(), 0, feed))
+    await advance(0)
+    expect(view.result.current.cursorReady).toBe(true)
+    expect(vi.mocked(api.monitorEvents).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(api.notificationHead).mock.invocationCallOrder[0]!)
+    expect(feed.onHead).toHaveBeenCalledWith(notificationHeadFixture)
+    expect(connections[0]!.after).toBe(headSequence)
+    expect(connections[0]!.notificationsAfter).toBe(notificationHeadFixture.nextCursor)
+  })
+  it('never reloads stored state for notification frames and resumes from the last one handled', async () => {
+    const { api, connections } = client()
+    const feed = handlers(), reload = vi.fn()
+    renderHook(() => useMonitorEvents(api, true, reload, 0, feed))
+    await advance(0)
+    act(() => {
+      connections[0]!.emit(ready())
+      connections[0]!.emit(status('ready', 10))
+      connections[0]!.emit(item(11))
+      connections[0]!.emit(item(11))
+      connections[0]!.emit(item(9))
+      connections[0]!.emit(item(12))
+    })
+    await advance(1000)
+    expect(reload).not.toHaveBeenCalled()
+    expect(feed.onStatus).toHaveBeenCalledOnce()
+    expect(feed.onFrame.mock.calls.map(([frame]) => frame.cursor)).toEqual([notificationCursor(11), notificationCursor(12)])
+    act(() => connections[0]!.finish())
+    await advance(2000)
+    // The event cursor is unchanged; the notification cursor is the last frame's own, never an SSE id.
+    expect(connections[1]!.after).toBe(headSequence)
+    expect(connections[1]!.notificationsAfter).toBe(notificationCursor(12))
+  })
+  it('keeps the two resets independent and rereads the notification head after its own reset', async () => {
+    const { api, connections } = client()
+    const feed = handlers(), reload = vi.fn()
+    renderHook(() => useMonitorEvents(api, true, reload, 0, feed))
+    await advance(0)
+    vi.mocked(api.notificationHead).mockResolvedValue({ ...notificationHeadFixture, nextCursor: notificationCursor(3, 1), unreadCount: 2 })
+    act(() => {
+      connections[0]!.emit(ready())
+      connections[0]!.emit(status('reset', 3, 1))
+    })
+    await advance(300)
+    expect(reload).not.toHaveBeenCalled()
+    expect(feed.onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'reset' }))
+    expect(api.notificationHead).toHaveBeenCalledTimes(2)
+    expect(feed.onHead).toHaveBeenLastCalledWith(expect.objectContaining({ unreadCount: 2 }))
+    // A frame from before the reset is ignored.
+    act(() => connections[0]!.emit(item(40)))
+    expect(feed.onFrame).not.toHaveBeenCalled()
+    act(() => connections[0]!.emit({ type: 'status', status: { state: 'reset', nextCursor: eventCursor('2') } }))
+    await advance(250)
+    expect(reload).toHaveBeenCalledOnce()
+    act(() => connections[0]!.finish())
+    await advance(2000)
+    expect(connections[1]!.after).toBe(eventCursor('2'))
+    expect(connections[1]!.notificationsAfter).toBe(notificationCursor(3, 1))
+  })
+  it('ignores a head answer from an older reset version', async () => {
+    const { api, connections } = client()
+    const feed = handlers()
+    renderHook(() => useMonitorEvents(api, true, vi.fn(), 0, feed))
+    await advance(0)
+    let answer: (head: typeof notificationHeadFixture) => void = () => undefined
+    vi.mocked(api.notificationHead).mockImplementationOnce(() => new Promise(resolve => { answer = resolve }))
+    act(() => connections[0]!.emit(ready()))
+    // The fallback timer starts a head read; a reset arrives before it answers.
+    await advance(60_000)
+    vi.mocked(api.notificationHead).mockResolvedValueOnce({ ...notificationHeadFixture, nextCursor: notificationCursor(1, 2), unreadCount: 5 })
+    act(() => connections[0]!.emit(status('reset', 1, 2)))
+    await advance(0)
+    feed.onHead.mockClear()
+    await act(async () => { answer({ ...notificationHeadFixture, unreadCount: 99 }) })
+    expect(feed.onHead).not.toHaveBeenCalled()
+  })
+  it('streams without notifications when their head fails, then adds them once a fallback read succeeds', async () => {
+    const { api, connections } = client()
+    vi.mocked(api.notificationHead).mockRejectedValueOnce(new ApiError('unavailable', 'Down.'))
+    const feed = handlers(), reload = vi.fn()
+    const view = renderHook(() => useMonitorEvents(api, true, reload, 0, feed))
+    await advance(0)
+    expect(view.result.current.cursorReady).toBe(true)
+    expect(api.monitor).toHaveBeenCalledOnce()
+    expect(connections[0]!.notificationsAfter).toBeUndefined()
+    act(() => { connections[0]!.emit(ready()); connections[0]!.emit(eventFrame()) })
+    await advance(60_000)
+    expect(reload).toHaveBeenCalledOnce()
+    expect(feed.onHead).toHaveBeenCalledWith(notificationHeadFixture)
+    // The open stream is replaced at once, without backoff, keeping the event cursor it reached.
+    expect(connections[0]!.signal.aborted).toBe(true)
+    expect(connections[1]!.after).toBe(eventCursor(monitorEventFixture.sequence))
+    expect(connections[1]!.notificationsAfter).toBe(notificationHeadFixture.nextCursor)
+  })
+  it('refreshes the worker status from the head on the 60-second fallback', async () => {
+    const { api, connections } = client()
+    const feed = handlers()
+    renderHook(() => useMonitorEvents(api, true, vi.fn(), 0, feed))
+    await advance(0)
+    act(() => connections[0]!.emit(ready()))
+    vi.mocked(api.notificationHead).mockResolvedValueOnce({ ...notificationHeadFixture, workerOnline: false })
+    await advance(60_000)
+    expect(feed.onHead).toHaveBeenLastCalledWith(expect.objectContaining({ workerOnline: false }))
+    expect(connections).toHaveLength(1)
   })
 })

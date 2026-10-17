@@ -32,6 +32,12 @@ describe('Built-in themes', () => {
     expect(contrastChecks(theme.colors).filter(check => check.ratio < check.minimum)).toEqual([])
   })
 
+  it.each(themes.map(theme => [theme.name, theme] as const))('%s keeps the unread badge and warning popups readable', (_name, theme) => {
+    const checks = contrastChecks(theme.colors).filter(check => /Unread badge|warning popups/.test(check.label))
+    expect(checks.map(check => check.label)).toEqual(['Unread badge', 'Text on warning popups', 'Warning mark on warning popups'])
+    for (const check of checks) expect(check.ratio, check.label).toBeGreaterThanOrEqual(check.minimum)
+  })
+
   it('applies Graphite tokens when nothing is stored', () => {
     expect(root.dataset.theme).toBe('graphite')
     expect(token('--background')).toBe('#0f1114')

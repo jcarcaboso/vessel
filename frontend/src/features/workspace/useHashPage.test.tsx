@@ -25,4 +25,10 @@ describe('hash page routing', () => {
     window.dispatchEvent(new HashChangeEvent('hashchange'))
     expect(onNavigate).not.toHaveBeenCalled()
   })
+  it('opens the Notifications page from its hash', () => {
+    window.history.replaceState(null, '', '/#notifications')
+    const { result, unmount } = renderHook(() => useHashPage(vi.fn()))
+    expect(result.current.page).toBe('notifications')
+    unmount()
+  })
 })
