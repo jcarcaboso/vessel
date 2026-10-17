@@ -1,6 +1,11 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Nethereum.Signer;
+using Vessel.Api;
 using Vessel.Application.Ownership;
 using Vessel.Identity;
 
@@ -55,6 +60,88 @@ public sealed class ConfigurationAndCommandTests
         {
             ["Vessel:Auth:OwnerId"] = JournalOwner.Default.ToString(), ["Vessel:Identity:AllowLegacyDefaultOwner"] = "true"
         }), false);
+    }
+
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Production")]
+    [InlineData("Staging")]
+    public async Task Wallet_hosts_refuse_a_configured_bearer_token_in_every_environment(string environment)
+    {
+        await using var factory = new CoreApiFactory(Guid.NewGuid(), connection: "Host=unused", environment: environment,
+            settings: new()
+            {
+                ["Vessel:Auth:Mode"] = "Wallet", ["Vessel:Auth:Token"] = "synthetic-must-never-echo",
+                ["Vessel:Identity:Origins:0"] = "https://vessel.test"
+            });
+        var error = Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
+        Assert.Contains("Vessel:Auth:Token", error.Message);
+        Assert.DoesNotContain("synthetic-must-never-echo", error.Message);
+    }
+
+    [Theory]
+    [InlineData("Vessel:Identity:Origins:0", "http://localhost", "Vessel:Identity:Origins")]
+    [InlineData("Vessel:Identity:CookieName", "vessel-session", "Vessel:Identity:CookieName")]
+    [InlineData("Vessel:Identity:SignInCookieName", "vessel-signin", "Vessel:Identity:SignInCookieName")]
+    [InlineData("Vessel:Identity:SignInCookieName", "__Host-vessel-session", "Vessel:Identity:SignInCookieName")]
+    public async Task Production_wallet_validation_and_host_enforce_HTTPS_origins_and_host_cookie_names(
+        string key, string value, string expectedSetting)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["Vessel:Auth:Mode"] = "Wallet", ["Vessel:Auth:Token"] = null,
+            ["Vessel:Identity:Origins:0"] = "https://vessel.test", ["ConnectionStrings:Vessel"] = "Host=unused"
+        };
+        ProductionConfiguration.Validate(Config(values));
+        values[key] = value;
+        var validation = Assert.Throws<InvalidOperationException>(() => ProductionConfiguration.Validate(Config(values)));
+        Assert.Contains(expectedSetting, validation.Message);
+        await using var factory = new CoreApiFactory(Guid.NewGuid(), environment: "Production", settings: values);
+        var startup = Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
+        Assert.Contains(expectedSetting, startup.Message);
+    }
+
+    [PostgresTheory]
+    [InlineData("Production")]
+    [InlineData("Staging")]
+    public async Task Nondevelopment_wallet_hosts_use_secure_configured_cookies_without_a_bearer_token(string environment)
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        var key = EthECKey.GenerateKey();
+        var owner = await database.SeedAsync(key);
+        var values = database.ConfigurationValues(owner.User.Id);
+        values.Remove("Vessel:Identity:Origins:1");
+        values["Vessel:Identity:CookieName"] = "__Host-test-session";
+        values["Vessel:Identity:SignInCookieName"] = "__Host-test-signin";
+        await using var factory = new CoreApiFactory(owner.User.Id, environment: environment, settings: values);
+        using var client = IdentityHttpTest.Client(factory);
+        var binding = await client.PostAsJsonAsync("/api/auth/challenge", new { address = key.GetPublicAddress() });
+        Assert.Equal(HttpStatusCode.OK, binding.StatusCode);
+        var bindingCookie = binding.Headers.GetValues("Set-Cookie").Single();
+        Assert.StartsWith("__Host-test-signin=", bindingCookie);
+        Assert.Contains("; secure", bindingCookie);
+        Assert.Contains("; httponly", bindingCookie);
+        Assert.Contains("; samesite=strict", bindingCookie);
+        Assert.Contains("; path=/", bindingCookie);
+        Assert.DoesNotContain("domain=", bindingCookie);
+        var challenge = (await binding.Content.ReadFromJsonAsync<ChallengeDto>())!;
+        var verified = await client.PostAsJsonAsync("/api/auth/verify", new { challengeId = challenge.ChallengeId,
+            signature = IdentityDatabase.Sign(key, challenge.Message), remember = false });
+        Assert.Equal(HttpStatusCode.OK, verified.StatusCode);
+        var sessionCookie = verified.Headers.GetValues("Set-Cookie")
+            .Single(cookie => cookie.StartsWith("__Host-test-session=", StringComparison.Ordinal));
+        Assert.Contains("; secure", sessionCookie);
+        Assert.Contains("; httponly", sessionCookie);
+        Assert.Contains("; samesite=strict", sessionCookie);
+        Assert.Contains("; path=/", sessionCookie);
+        Assert.DoesNotContain("domain=", sessionCookie);
+        var session = await verified.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(owner.User.Id, session.GetProperty("session").GetProperty("user").GetProperty("id").GetGuid());
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/session")).StatusCode);
+        var settings = factory.Services.GetRequiredService<IdentitySettings>();
+        Assert.False(settings.Development);
+        Assert.Equal("__Host-test-session", settings.CookieName);
+        Assert.Equal("__Host-test-signin", settings.SignInCookieName);
     }
 
     [Fact]

@@ -17,6 +17,7 @@ public static class IdentityCommands
     {
         try
         {
+            // Match WebApplication.CreateBuilder: DOTNET_ENVIRONMENT overrides ASPNETCORE_ENVIRONMENT.
             var environment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ??
                 Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
             var commandArgs = new List<string>();

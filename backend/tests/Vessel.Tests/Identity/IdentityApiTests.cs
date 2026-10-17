@@ -208,6 +208,27 @@ public sealed class IdentityApiTests
     }
 
     [PostgresTheory]
+    [InlineData("link")]
+    [InlineData("step-up")]
+    public async Task Verify_rejects_and_consumes_challenges_for_other_purposes(string purpose)
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        var key = EthECKey.GenerateKey();
+        var owner = await database.SeedAsync(key);
+        await using var factory = IdentityHttpTest.Factory(database, owner.User.Id);
+        using var client = IdentityHttpTest.Client(factory);
+        var issued = await client.PostAsJsonAsync("/api/auth/challenge", new { address = key.GetPublicAddress() });
+        var challenge = (await issued.Content.ReadFromJsonAsync<ChallengeDto>())!;
+        await using var db = database.CreateDbContext();
+        await db.Challenges.Where(row => row.Id == challenge.ChallengeId).ExecuteUpdateAsync(update => update.SetProperty(row => row.Purpose, purpose));
+        var request = new { challengeId = challenge.ChallengeId, signature = IdentityDatabase.Sign(key, challenge.Message), remember = false };
+        await IdentityHttpTest.Code(await client.PostAsJsonAsync("/api/auth/verify", request), 400, "challenge-invalid");
+        Assert.NotNull((await db.Challenges.AsNoTracking().SingleAsync()).ConsumedAt);
+        Assert.Empty(await db.Sessions.ToListAsync());
+        await IdentityHttpTest.Code(await client.PostAsJsonAsync("/api/auth/verify", request), 400, "challenge-invalid");
+    }
+
+    [PostgresTheory]
     [InlineData("Origin", null, "origin-rejected")]
     [InlineData("Origin", "null", "origin-rejected")]
     [InlineData("Origin", "https://evil.test", "origin-rejected")]
@@ -350,6 +371,19 @@ public sealed class IdentityApiTests
         await using var db = database.CreateDbContext();
         await db.Users.ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, "suspended"));
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/health/ready")).StatusCode);
+    }
+
+    [PostgresFact]
+    public async Task Token_readiness_is_unavailable_when_only_the_identity_schema_is_missing()
+    {
+        await using var journal = await CoreDatabase.CreateAsync();
+        await using var factory = new CoreApiFactory(Guid.NewGuid(), connection: journal.ConnectionString,
+            settings: new() { ["Vessel:Identity:Schema"] = "missing_identity_" + Guid.NewGuid().ToString("N") });
+        using var client = factory.CreateClient();
+        var response = await client.GetAsync("/health/ready");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("""{"status":"unavailable"}""", await response.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
     }
 
     private sealed class ChunkedBody(byte[] bytes) : HttpContent

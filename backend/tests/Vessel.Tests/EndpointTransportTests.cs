@@ -78,6 +78,25 @@ public sealed class EndpointTransportTests
         });
     }
 
+    [Fact]
+    public async Task Wallet_mode_has_exactly_the_public_auth_and_health_routes_anonymous()
+    {
+        await using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new()
+        {
+            ["Vessel:Auth:Mode"] = "Wallet", ["Vessel:Auth:Token"] = null,
+            ["Vessel:Identity:Origins:0"] = "https://vessel.test"
+        });
+        var endpoints = Endpoints(factory);
+        Assert.Equal(
+            ["GET /api/auth/config", "GET /health/live", "GET /health/ready",
+             "POST /api/auth/challenge", "POST /api/auth/register", "POST /api/auth/verify"],
+            endpoints.Where(endpoint => endpoint.Metadata.GetMetadata<IAllowAnonymous>() is not null)
+                .Select(Name).Order(StringComparer.Ordinal));
+        Assert.All(endpoints.Where(endpoint => endpoint.RoutePattern.RawText!.StartsWith("/api/", StringComparison.Ordinal) &&
+            endpoint.Metadata.GetMetadata<IAllowAnonymous>() is null),
+            endpoint => Assert.NotNull(endpoint.Metadata.GetMetadata<IAuthorizeData>()));
+    }
+
     [Theory]
     [InlineData("POST", "/api/venues/index-fixture/accounts/credential")]
     [InlineData("PUT", "/api/accounts/11111111-1111-1111-1111-111111111111/credential")]
