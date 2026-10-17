@@ -1,8 +1,10 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Vessel.Application.Events;
+using Vessel.Application.Ownership;
 using Vessel.Messaging;
 using Vessel.Messaging.Modules.Monitor;
 using Vessel.Messaging.Modules.Verification;
@@ -87,20 +89,27 @@ public sealed class WorkerHostTests
     }
 
     [VesselEventRabbitFact]
-    public async Task Owner_mismatched_monitor_command_is_dead_lettered_not_acknowledged()
+    public async Task Unknown_monitor_owner_dead_letters_while_active_owners_run_and_suspended_commands_are_acknowledged()
     {
         await using var broker = await BrokerScope.CreateAsync();
         await broker.ProvisionAsync();
         var api = await broker.StartAsync(MessagingHosting.ApiDeployment);
-        using var worker = Worker(broker, MonitorModule.ModuleName);
+        var owners = new MutableOwnerDirectory();
+        owners.Set(broker.Owner, JournalOwnerStatus.Active);
+        var other = Guid.NewGuid(); var suspended = Guid.NewGuid();
+        owners.Set(other, JournalOwnerStatus.Active);
+        owners.Set(suspended, JournalOwnerStatus.Suspended);
+        using var worker = Worker(broker, MonitorModule.ModuleName, owners: owners);
         await worker.StartAsync();
         var bus = api.Services.GetRequiredService<IMessageBus>();
         var queue = broker.Topology.CommandQueue(MonitorModule.ModuleName);
         await bus.SendAsync(new MonitorAccountCommand(Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), "manual"));
         await broker.EventuallyAsync(async () => await broker.ReadyAsync(MessagingTopology.DeadLetterQueue(queue)) == 1);
-        // A command for the configured owner without a matching pending request is acknowledged: the record is
+        // Commands for either active owner without a matching pending request are acknowledged: the record is
         // monitor_accounts, and the listener never polls a venue.
         await bus.SendAsync(new MonitorAccountCommand(Guid.CreateVersion7(), Guid.NewGuid(), broker.Owner, "manual"));
+        await bus.SendAsync(new MonitorAccountCommand(Guid.CreateVersion7(), Guid.NewGuid(), other, "manual"));
+        await bus.SendAsync(new MonitorAccountCommand(Guid.CreateVersion7(), Guid.NewGuid(), suspended, "manual"));
         await Task.Delay(1000);
         await worker.StopAsync();
         Assert.Equal(0u, await broker.ReadyAsync(queue));
@@ -132,9 +141,9 @@ public sealed class WorkerHostTests
         Assert.Equal(EndpointMode.Inline, listened.Mode);
         Assert.DoesNotContain(Routes(worker), route => route == queue);
         // Nothing in the worker may stage the command it consumes: it would bypass the API's durable outbox.
-        await using (var scope = worker.Services.CreateAsyncScope())
+        await using (var scope = worker.Services.GetRequiredService<IOwnerScopeFactory>().Create(broker.Owner))
         {
-            var outbox = scope.ServiceProvider.GetRequiredService<Vessel.Persistence.Events.IVesselEventOutbox>();
+            var outbox = scope.Services.GetRequiredService<Vessel.Persistence.Events.IVesselEventOutbox>();
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 outbox.StageAsync(new MonitorAccountCommand(Guid.CreateVersion7(), Guid.NewGuid(), broker.Owner, "manual"), default));
             Assert.Contains("consumes", error.Message);
@@ -206,7 +215,8 @@ public sealed class WorkerHostTests
     private static Uri[] Routes(IHost host) => host.Services.GetRequiredService<IWolverineRuntime>()
         .RoutingFor(typeof(MonitorAccountCommand)).Routes.OfType<MessageRoute>().Select(r => r.Uri).ToArray();
 
-    private static IHost Worker(BrokerScope broker, string module, string? deployment = null, ILoggerProvider? logs = null)
+    private static IHost Worker(BrokerScope broker, string module, string? deployment = null, ILoggerProvider? logs = null,
+        IJournalOwnerDirectory? owners = null)
     {
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
         builder.Configuration.AddConfiguration(broker.Configuration);
@@ -220,6 +230,7 @@ public sealed class WorkerHostTests
         builder.Logging.ClearProviders();
         if (logs is not null) builder.Logging.AddProvider(logs);
         WorkerHost.Configure(builder);
+        if (owners is not null) builder.Services.Replace(ServiceDescriptor.Singleton(owners));
         return builder.Build();
     }
 

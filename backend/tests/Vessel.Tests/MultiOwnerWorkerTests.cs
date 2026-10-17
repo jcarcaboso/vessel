@@ -1,0 +1,246 @@
+using System.Collections.Concurrent;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Vessel.Application.Monitoring;
+using Vessel.Application.Ownership;
+using Vessel.Application.Venues;
+using Vessel.Domain.Accounts;
+using Vessel.Domain.Markets;
+using Vessel.Domain.Monitoring;
+using Vessel.Domain.Plays;
+using Vessel.Infrastructure.Auth;
+using Vessel.Persistence;
+using Vessel.Worker;
+
+namespace Vessel.Tests;
+
+public sealed class MultiOwnerWorkerTests
+{
+    [PostgresFact]
+    public async Task Scheduler_claims_each_active_owner_keeps_the_process_cap_and_renews_suspended_inflight_runs()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var scheduler = fixture.Host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
+        await scheduler.TickAsync(default);
+        await fixture.Venue.Started(fixture.First).WaitAsync(TimeSpan.FromSeconds(20));
+        await fixture.Venue.Started(fixture.Second).WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(2, fixture.Venue.Reads.Count);
+        var leases = new Dictionary<Guid, DateTimeOffset>();
+        foreach (var owner in new[] { fixture.First, fixture.Second })
+        {
+            await using var db = fixture.Database.Context(owner);
+            var row = Assert.Single(await db.Set<MonitorAccount>().ToListAsync());
+            Assert.Equal(owner, row.OwnerId);
+            Assert.Equal("running", row.ManualState);
+            leases[owner] = row.LeaseUntilUtc!.Value;
+            Assert.NotNull(await db.Set<MonitorHeartbeat>().SingleOrDefaultAsync());
+        }
+        await using (var disabled = fixture.Database.Context(fixture.Suspended))
+        {
+            Assert.Empty(await disabled.Set<MonitorAccount>().ToListAsync());
+            Assert.Empty(await disabled.Set<MonitorHeartbeat>().ToListAsync());
+        }
+        // Another tick cannot start more than two in this process.
+        await scheduler.TickAsync(default);
+        Assert.Equal(2, fixture.Venue.Reads.Count);
+        fixture.Directory.Set(fixture.First, JournalOwnerStatus.Suspended);
+        fixture.Clock.Advance(TimeSpan.FromSeconds(61));
+        foreach (var owner in new[] { fixture.First, fixture.Second })
+            await fixture.EventuallyAsync(async () =>
+            {
+                await using var db = fixture.Database.Context(owner);
+                return (await db.Set<MonitorAccount>().SingleAsync()).LeaseUntilUtc > leases[owner];
+            });
+        fixture.Venue.Release.TrySetResult();
+        await fixture.AssertSettledAsync();
+        // Suspension prevented discovery/claims, not renewal or settlement of the already-started run.
+        await scheduler.TickAsync(default);
+        Assert.Equal(2, fixture.Venue.Reads.Count);
+    }
+
+    [PostgresFact]
+    public async Task Api_refresh_renews_after_a_minute_in_each_request_owners_fresh_scope()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var runs = new[] { fixture.First, fixture.Second }.Select(owner => Task.Run(async () =>
+        {
+            var accessor = fixture.Host.Services.GetRequiredService<IHttpContextAccessor>();
+            accessor.HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(JournalOwnerClaims.Identity(owner, "Synthetic owner", "test"))
+            };
+            try
+            {
+                await using var request = fixture.Host.Services.CreateAsyncScope();
+                return await request.ServiceProvider.GetRequiredService<MonitorRunExecutor>().RefreshAsync(fixture.Accounts[owner], default);
+            }
+            finally { accessor.HttpContext = null; }
+        })).ToArray();
+        foreach (var owner in new[] { fixture.First, fixture.Second })
+            await fixture.Venue.Started(owner).WaitAsync(TimeSpan.FromSeconds(20));
+        var previous = fixture.Clock.GetUtcNow() + MonitorOptions.Lease;
+        fixture.Clock.Advance(TimeSpan.FromSeconds(61));
+        foreach (var owner in new[] { fixture.First, fixture.Second })
+            await fixture.EventuallyAsync(async () =>
+            {
+                await using var db = fixture.Database.Context(owner);
+                return (await db.Set<MonitorAccount>().SingleAsync()).LeaseUntilUtc > previous;
+            });
+        fixture.Venue.Release.TrySetResult();
+        Assert.All(await Task.WhenAll(runs), Assert.True);
+        await fixture.AssertSettledAsync(refresh: true);
+    }
+
+    private sealed class Fixture : IAsyncDisposable
+    {
+        private readonly string heartbeat = Path.Combine(Path.GetTempPath(), "vessel-owner-heartbeat-" + Guid.NewGuid().ToString("N"));
+        private Fixture(CoreDatabase database)
+        {
+            Database = database;
+            Directory.Set(First, JournalOwnerStatus.Active);
+            Directory.Set(Second, JournalOwnerStatus.Active);
+            Directory.Set(Suspended, JournalOwnerStatus.Suspended);
+            Venue = new(Clock);
+            var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
+            builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:Vessel"] = database.ConnectionString,
+                ["Vessel:Auth:OwnerId"] = First.ToString(),
+                ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1",
+                ["Vessel:Monitor:HeartbeatFile"] = heartbeat
+            });
+            builder.Logging.ClearProviders();
+            WorkerHost.Configure(builder);
+            VesselEventTestHosting.ConfigureServices(builder.Services);
+            builder.Services.Replace(ServiceDescriptor.Singleton<TimeProvider>(Clock));
+            builder.Services.Replace(ServiceDescriptor.Singleton<IJournalOwnerDirectory>(Directory));
+            builder.Services.Replace(ServiceDescriptor.Singleton<IVenueRegistry>(TestVenues.With(Venue)));
+            builder.Services.Replace(ServiceDescriptor.Singleton<IMonitorImporter>(new NoImporter()));
+            builder.Services.Replace(ServiceDescriptor.Singleton<IMonitorEvaluator>(new NoEvaluator()));
+            Host = builder.Build();
+        }
+        public Guid First { get; } = Guid.Parse("11111111-0000-0000-0000-000000000001");
+        public Guid Second { get; } = Guid.Parse("22222222-0000-0000-0000-000000000002");
+        public Guid Suspended { get; } = Guid.Parse("33333333-0000-0000-0000-000000000003");
+        public CoreDatabase Database { get; }
+        public MutableOwnerDirectory Directory { get; } = new();
+        public RenewalClock Clock { get; } = new();
+        public GatedVenue Venue { get; }
+        public IHost Host { get; }
+        public Dictionary<Guid, Guid> Accounts { get; } = [];
+
+        public static async Task<Fixture> CreateAsync()
+        {
+            var fixture = new Fixture(await CoreDatabase.CreateAsync());
+            foreach (var owner in new[] { fixture.First, fixture.Second, fixture.Suspended })
+            {
+                await using var db = fixture.Database.Context(owner);
+                var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic owner account");
+                account.Configure(null, "0x" + new string('a', 40), null);
+                var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"),
+                    InstrumentSource.Venue, "{}", fixture.Clock.GetUtcNow().AddMinutes(-2));
+                play.MarkPlanned(fixture.Clock.GetUtcNow().AddMinutes(-1));
+                db.AddRange(account, play);
+                await db.SaveChangesAsync();
+                fixture.Accounts[owner] = account.Id;
+            }
+            return fixture;
+        }
+
+        public async Task AssertSettledAsync(bool refresh = false)
+        {
+            foreach (var owner in new[] { First, Second })
+                await EventuallyAsync(async () =>
+                {
+                    await using var db = Database.Context(owner);
+                    var row = await db.Set<MonitorAccount>().SingleAsync();
+                    return row.ManualState == "idle" && (refresh || row.LastSuccessAtUtc is not null) && await db.Snapshots.AnyAsync();
+                });
+        }
+
+        public async Task EventuallyAsync(Func<Task<bool>> check)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            while (!await check()) await Task.Delay(25, timeout.Token);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Venue.Release.TrySetResult();
+            Host.Dispose();
+            await Database.DisposeAsync();
+            File.Delete(heartbeat);
+        }
+    }
+
+    private sealed class GatedVenue(RenewalClock clock) : IPerpetualVenueReader, IVenueOrderReader
+    {
+        private readonly ConcurrentDictionary<Guid, TaskCompletionSource> entered = new();
+        public ConcurrentBag<Guid> Reads { get; } = [];
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task Started(Guid owner) => entered.GetOrAdd(owner, _ => new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+        public string VenueId => "hyperliquid";
+        public Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<VenueInstrument>>([]);
+        public Task<PerpetualVenueReadResult> ReadAsync(string source, CancellationToken ct) => throw new NotSupportedException();
+        public async Task<PerpetualVenueReadResult> ReadAsync(Account account, CancellationToken ct)
+        {
+            Reads.Add(account.OwnerId);
+            entered.GetOrAdd(account.OwnerId, _ => new(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
+            await Release.Task.WaitAsync(TimeSpan.FromSeconds(45), ct);
+            return new(new(clock.GetUtcNow(), "synthetic", 100, 100, 0, []), [], [], "Synthetic isolated read",
+                PositionsComplete: true, FillHistoryComplete: true);
+        }
+        public Task<VenueOrderReadResult> ReadOrdersAsync(string source, CancellationToken ct) =>
+            Task.FromResult(new VenueOrderReadResult([], clock.GetUtcNow(), "Synthetic isolated orders", OpenOrdersComplete: true));
+    }
+
+    private sealed class NoImporter : IMonitorImporter
+    {
+        public Task RetainAsync(Account account, VenueOrderReadResult orders, CancellationToken ct) => Task.CompletedTask;
+        public Task ReconcileAsync(Account account, VenueOrderReadResult orders, IReadOnlyList<VenueInstrument> instruments, CancellationToken ct) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class NoEvaluator : IMonitorEvaluator
+    {
+        public Task<MonitorEvaluationResult> EvaluateAsync(MonitorEvaluation observation, CancellationToken ct) => Task.FromResult(new MonitorEvaluationResult(null));
+        public Task<IReadOnlyList<MonitorDiscrepancyDto>> ReadAsync(Guid accountId, Guid? playId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<MonitorDiscrepancyDto>>([]);
+        public Task SettleAsync(Account account, Guid runId, string trigger, bool interrupted, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class RenewalClock : TimeProvider
+    {
+        private long ticks = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()).Ticks;
+        private readonly List<ClockTimer> timers = [];
+        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref ticks), TimeSpan.Zero);
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new ClockTimer(callback, state);
+            lock (timers) timers.Add(timer);
+            return timer;
+        }
+        public void Advance(TimeSpan elapsed)
+        {
+            Interlocked.Add(ref ticks, elapsed.Ticks);
+            ClockTimer[] snapshot;
+            lock (timers) snapshot = timers.ToArray();
+            foreach (var timer in snapshot) timer.Tick();
+        }
+        private sealed class ClockTimer(TimerCallback callback, object? state) : ITimer
+        {
+            private bool disposed;
+            public void Tick() { if (!disposed) callback(state); }
+            public bool Change(TimeSpan dueTime, TimeSpan period) => !disposed;
+            public void Dispose() => disposed = true;
+            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+        }
+    }
+}

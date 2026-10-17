@@ -287,6 +287,7 @@ internal sealed class BrokerScope : IAsyncDisposable
     private BrokerScope(CoreDatabase database, IVesselModule[] modules)
     {
         Database = database;
+        Owners = new ConfiguredOwnerDirectory(Owner);
         Registry = new([new MonitorModule(), new VerificationModule(), .. modules]);
         var values = new Dictionary<string, string?>
         {
@@ -301,6 +302,7 @@ internal sealed class BrokerScope : IAsyncDisposable
         Topology = new(MessagingHosting.Settings(Configuration), Registry);
     }
 
+    public IJournalOwnerDirectory Owners { get; set; }
     public CoreDatabase Database { get; }
     public Guid Owner { get; } = Guid.NewGuid();
     public VesselModuleRegistry Registry { get; }
@@ -322,7 +324,9 @@ internal sealed class BrokerScope : IAsyncDisposable
         builder.Configuration.AddConfiguration(Configuration);
         builder.Logging.ClearProviders();
         if (logs is not null) builder.Logging.AddProvider(logs);
-        builder.Services.AddSingleton<IJournalOwnerContext>(new CoreOwner(Owner));
+        builder.Services.AddScoped<IJournalOwnerContext>(sp =>
+            new CoreOwner(sp.GetRequiredService<OwnerScopeAssignment>().OwnerId ?? Owner));
+        builder.Services.AddSingleton(Owners);
         builder.Services.AddVesselPersistence(builder.Configuration);
         builder.AddVesselMessaging(deployment, run, registry: Registry);
         var host = builder.Build();
@@ -337,16 +341,16 @@ internal sealed class BrokerScope : IAsyncDisposable
         return host;
     }
 
-    public async Task<VesselEvent> AppendAsync(IHost api, VesselEventDraft draft)
+    public async Task<VesselEvent> AppendAsync(IHost api, VesselEventDraft draft, Guid? ownerId = null)
     {
-        await using var scope = api.Services.CreateAsyncScope();
-        var sink = scope.ServiceProvider.GetRequiredService<IVesselEventSink>();
-        await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().ExecuteAsync(async () =>
+        await using var scope = api.Services.GetRequiredService<IOwnerScopeFactory>().Create(ownerId ?? Owner);
+        var sink = scope.Services.GetRequiredService<IVesselEventSink>();
+        await scope.Services.GetRequiredService<IUnitOfWork>().ExecuteAsync(async () =>
         {
             await sink.AppendAsync(draft, default);
             return true;
         }, default);
-        await using var db = Database.Context(Owner);
+        await using var db = Database.Context(ownerId ?? Owner);
         return (await EventReads.ReadAsync(db, 0, 200, default)).Events.Single(e => e.DedupKey == draft.DedupKey);
     }
 

@@ -404,7 +404,7 @@ public sealed partial class MonitorPostgresTests
     }
 
     [PostgresFact]
-    public async Task Refresh_admission_is_shared_across_scopes_and_global_read_budget_is_two()
+    public async Task Refresh_admission_is_shared_across_scopes_and_each_owners_read_budget_is_two()
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
@@ -421,6 +421,10 @@ public sealed partial class MonitorPostgresTests
             Coordinator(third, owner, new Reader()).AdmitRefreshAsync(ids[2], "third", default))).RetryAfter);
         Assert.False(await new MonitorStore(third, TestUnitOfWork.For(third))
             .RenewAsync(lease with { Generation = lease.Generation - 1 }, DateTimeOffset.UtcNow, default));
+        var otherOwner = Guid.NewGuid();
+        var otherId = (await AccountsAsync(database, otherOwner, 1)).Single();
+        await using var other = database.Context(otherOwner);
+        Assert.Equal(otherId, (await Coordinator(other, otherOwner, new Reader()).AdmitRefreshAsync(otherId, "other-owner", default)).AccountId);
     }
 
     [PostgresFact]
@@ -536,6 +540,15 @@ public sealed partial class MonitorPostgresTests
         Assert.Null(await new MonitorStore(foreign, TestUnitOfWork.For(foreign)).HeartbeatAsync(default));
         Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() =>
             Coordinator(foreign, foreign.CurrentOwnerId, new Reader()).AccountAsync(id, default))).StatusCode);
+        var ownId = (await AccountsAsync(database, foreign.CurrentOwnerId, 1)).Single();
+        _ = await Coordinator(foreign, foreign.CurrentOwnerId, new Reader()).AdmitRefreshAsync(ownId, "other-worker", default);
+        var ownStore = new MonitorStore(foreign, TestUnitOfWork.For(foreign));
+        await ownStore.RecordHeartbeatAsync("other-worker", DateTimeOffset.UtcNow, default);
+        Assert.Equal(ownId, (await foreign.Set<MonitorAccount>().SingleAsync()).AccountId);
+        Assert.Equal("other-worker", (await ownStore.HeartbeatAsync(default))!.WorkerId);
+        await using var original = database.Context(owner);
+        Assert.Equal(id, (await original.Set<MonitorAccount>().SingleAsync()).AccountId);
+        Assert.Equal("worker", (await new MonitorStore(original, TestUnitOfWork.For(original)).HeartbeatAsync(default))!.WorkerId);
     }
 
     [PostgresFact]

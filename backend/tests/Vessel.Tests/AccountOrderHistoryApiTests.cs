@@ -8,6 +8,7 @@ using Vessel.Application.Activity;
 using Vessel.Application.Common;
 using Vessel.Application.Credentials;
 using Vessel.Application.Monitoring;
+using Vessel.Application.Ownership;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
@@ -83,12 +84,13 @@ public sealed class AccountOrderHistoryApiTests
         builder.Services.AddSingleton<IVenueRegistry>(AccountHistoryOrders.Registry(reader, orders));
         if (credential is not null) builder.Services.AddSingleton(credential);
         using var host = builder.Build();
-        await using var worker = host.Services.CreateAsyncScope();
-        var store = worker.ServiceProvider.GetRequiredService<IMonitorStore>();
-        var time = worker.ServiceProvider.GetRequiredService<TimeProvider>();
+        await using var worker = host.Services.GetRequiredService<IOwnerScopeFactory>().Create(
+            JournalOwner.Parse(builder.Configuration[JournalOwner.ConfigurationKey]));
+        var store = worker.Services.GetRequiredService<IMonitorStore>();
+        var time = worker.Services.GetRequiredService<TimeProvider>();
         var lease = await store.ClaimAsync(accountId, request.RequestId, "synthetic-worker", time.GetUtcNow(), default);
         Assert.NotNull(lease);
-        Assert.True(await worker.ServiceProvider.GetRequiredService<MonitorRunExecutor>().RunAsync(lease, default));
+        Assert.True(await worker.Services.GetRequiredService<MonitorRunExecutor>().RunAsync(lease, default));
         Assert.Null(await store.ClaimAsync(accountId, request.RequestId, "duplicate", time.GetUtcNow(), default));
     }
 
