@@ -74,7 +74,7 @@ describe('transport kinds', () => {
 
 describe('auth failures', () => {
   it('reports the code and the generation read when the request started', async () => {
-    const generation = { current: () => 3, subscribe: () => () => {} }
+    const generation = { current: () => 3, subscribe: () => () => {}, ended: new AbortController().signal }
     const failures: unknown[] = []
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => problem(401, 'session-revoked')))
     const call = createApiCall({ kind: 'session', userId, sessionId, generation }, failure => failures.push(failure))

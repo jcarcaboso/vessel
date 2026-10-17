@@ -110,6 +110,7 @@ export class SessionController {
   private live = false
   private exitStates = new Set<() => void>()
   private generationListeners = new Set<() => void>()
+  private readonly endedController = new AbortController()
   private readonly channel: SessionChannel | null
   private readonly navigate: (url: string) => void
 
@@ -131,6 +132,7 @@ export class SessionController {
       this.generationListeners.add(listener)
       return () => { this.generationListeners.delete(listener) }
     },
+    ended: this.endedController.signal,
   }
 
   credentials(): Extract<ApiCredentials, { kind: 'session' }> {
@@ -160,7 +162,7 @@ export class SessionController {
    */
   teardown(notice: Notice) {
     if (this.ended) return
-    this.ended = true
+    this.end()
     writeNotice(notice)
     this.leave(!this.live)
   }
@@ -182,16 +184,18 @@ export class SessionController {
       await auth.signOut(sessionId)
     } catch (cause) {
       if (!(cause instanceof ApiError && cause.code === 'session-changed')) throw cause
-      this.ended = true
+      this.end()
       this.leave()
       return
     }
     this.post({ type: 'signed-out', userId: this.userId, sessionId })
-    this.ended = true
+    this.end()
     this.leave()
   }
 
+  /** Also ends the session for this tab's clients: nothing they started is retried or reopened. */
   dispose() {
+    this.end()
     if (this.channel) {
       this.channel.onmessage = null
       try { this.channel.close() } catch { /* Already closed. */ }
@@ -204,7 +208,7 @@ export class SessionController {
       if (data.sessionId === this.sessionIdValue) this.teardown(notices.signedOutElsewhere)
     } else if (data.userId !== this.userId) {
       // Another person's cookie now rides every request: reload before adopting any state.
-      this.ended = true
+      this.end()
       writeNotice(notices.otherUser)
       this.leave()
     } else if (data.sessionId !== this.sessionIdValue) {
@@ -212,6 +216,12 @@ export class SessionController {
       this.generationValue++
       for (const listener of [...this.generationListeners]) listener()
     }
+  }
+
+  /** Ends this tab's session before anything leaves, so the transport stops sending, retrying and reopening. */
+  private end() {
+    this.ended = true
+    this.endedController.abort()
   }
 
   private post(message: SessionMessage) {

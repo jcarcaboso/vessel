@@ -439,17 +439,19 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
   const generation = typeof credentials !== 'string' && credentials.kind === 'session' ? credentials.generation : undefined
   /**
    * Runs one stream under the current session generation. A newer generation aborts it, so no frame read under the
-   * old one reaches the caller, and opens it again under the new one; `open` reads only its own signal.
+   * old one reaches the caller, and opens it again under the new one; `open` reads only its own signal. The end of the
+   * session aborts it for good: it settles quietly and never reopens.
    */
   async function generationBound(signal: AbortSignal, open: (signal: AbortSignal) => Promise<void>) {
     if (!generation) return open(signal)
-    while (!signal.aborted) {
+    const { ended } = generation
+    while (!signal.aborted && !ended.aborted) {
       const changed = new AbortController()
       const unsubscribe = generation.subscribe(() => changed.abort())
       try {
-        await open(AbortSignal.any([signal, changed.signal]))
+        await open(AbortSignal.any([signal, changed.signal, ended]))
       } catch (cause) {
-        if (!changed.signal.aborted || signal.aborted) throw cause
+        if (signal.aborted || !changed.signal.aborted && !ended.aborted) throw cause
       } finally {
         unsubscribe()
       }

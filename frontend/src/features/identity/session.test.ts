@@ -1,5 +1,8 @@
+import { waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/errors'
+import { onApiEvent, type ApiEvent } from '@/api/events'
+import { createApiCall } from '@/api/request'
 import { createWorkspaceApi } from '@/api/workspace'
 import { sessionFixture } from '@/test/identity-fixture'
 import { channelBus } from '@/test/session-channel'
@@ -175,5 +178,88 @@ describe('cross-tab messages', () => {
     expect(navigate).not.toHaveBeenCalled()
     controller.dispose()
     expect(bus.open()).toBe(0)
+  })
+})
+
+describe('after the session ends', () => {
+  const isText = (value: unknown): value is string => typeof value === 'string'
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
+  const accountId = '5c5e3f43-2aa4-4b7a-9d1e-0e6b0d3c5a11'
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>(settle => { resolve = settle })
+    return { promise, resolve }
+  }
+  /** Another tab first adopts a newer session of the same user, then someone else signs in there. */
+  function sameUserThenOther(bus: ReturnType<typeof channelBus>) {
+    bus.send({ type: 'signed-in', userId: sessionFixture.user.id, sessionId: newSession })
+    bus.send({ type: 'signed-in', userId: otherUser, sessionId: '8d2e4f61-3a7b-4c85-b0e1-6f8a2d5c7b34' })
+  }
+  /** An SSE response that stays open until its request is aborted. */
+  function liveStream(signal: AbortSignal | null | undefined) {
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    const body = new ReadableStream<Uint8Array>({ start(value) { controller = value } })
+    signal?.addEventListener('abort', () => { try { controller.error(new DOMException('aborted', 'AbortError')) } catch { /* closed */ } }, { once: true })
+    return new Response(body, { headers: { 'Content-Type': 'text/event-stream' } })
+  }
+
+  it('never reissues an older read once another person\'s sign-in has started the reload', async () => {
+    const { controller, bus, navigate } = live()
+    const pending = deferred<Response>()
+    const failures = vi.fn(), changed = vi.fn()
+    const fetch = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValueOnce(json('after the user changed'))
+    vi.stubGlobal('fetch', fetch)
+    const result = createApiCall(controller.credentials(), failures, changed)('/api/example', { timeout: 1_000, validate: isText })
+    sameUserThenOther(bus)
+    expect(navigate).toHaveBeenCalledOnce()
+    pending.resolve(json('old'))
+    await expect(result).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(failures).not.toHaveBeenCalled()
+    expect(changed).not.toHaveBeenCalled()
+  })
+
+  it('never reopens a generation-bound stream, and the stream settles quietly', async () => {
+    const { controller, bus, navigate } = live()
+    const fetch = vi.fn(async (_path: string, init: RequestInit) => liveStream(init.signal))
+    vi.stubGlobal('fetch', fetch)
+    const stop = new AbortController()
+    const onEvent = vi.fn()
+    const done = createWorkspaceApi(controller.credentials(), controller.handleFailure).marketStream(accountId, { instrument: 'BTC', interval: '1h' }, stop.signal, onEvent)
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    sameUserThenOther(bus)
+    expect(navigate).toHaveBeenCalledOnce()
+    await expect(done).resolves.toBeUndefined()
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(onEvent).not.toHaveBeenCalled()
+    expect(stop.signal.aborted).toBe(false)
+  })
+
+  it.each<[string, (tab: ReturnType<typeof live>) => unknown]>([
+    ['a forced teardown', tab => tab.controller.handleFailure({ status: 401, generation: 0 })],
+    ['a voluntary sign-out', tab => tab.controller.signOut({ signOut: vi.fn().mockResolvedValue(undefined) })],
+    ['another person\'s sign-in', tab => tab.bus.send({ type: 'signed-in', userId: otherUser, sessionId: newSession })],
+    ['disposal', tab => tab.controller.dispose()],
+  ])('after %s, aborts what is in flight, sends nothing more and never asks the shell to reload', async (_, end) => {
+    const tab = live()
+    const credentials = tab.controller.credentials()
+    const events: ApiEvent[] = []
+    let sent: AbortSignal | null | undefined
+    const fetch = vi.fn((_path: string, init: RequestInit) => {
+      sent = init.signal
+      return new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const api = createWorkspaceApi(credentials, tab.controller.handleFailure)
+    onApiEvent(api, event => events.push(event))
+    const write = api.deletePlay('8b7c7a64-34b4-4d61-9b5f-1b0b9d5c1e20')
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    await end(tab)
+    expect(credentials.generation!.ended.aborted).toBe(true)
+    expect(sent?.aborted).toBe(true)
+    await expect(write).rejects.toMatchObject({ name: 'AbortError' })
+    await expect(api.overview()).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(events).toEqual([])
   })
 })

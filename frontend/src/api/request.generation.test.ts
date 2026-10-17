@@ -24,6 +24,7 @@ function generation() {
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
     advance: () => { value++; for (const listener of [...listeners]) listener() },
     listeners: () => listeners.size,
+    ended: new AbortController().signal,
   }
 }
 

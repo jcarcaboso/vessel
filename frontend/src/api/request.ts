@@ -19,6 +19,16 @@ export interface SessionGeneration {
   current(): number
   /** Hears every change until the returned function runs. */
   subscribe(listener: () => void): () => void
+  /**
+   * Aborts once the tab's session is over: a teardown, a sign-out, another person's sign-in or disposal. From then on
+   * nothing is sent, retried, published or reopened; pending calls reject with a quiet `AbortError`.
+   */
+  readonly ended: AbortSignal
+}
+
+/** The quiet rejection of a call whose session ended while the page leaves; callers treat it like their own abort. */
+export function sessionEndedError() {
+  return new DOMException('The session ended.', 'AbortError')
 }
 
 /** Copy for an answer discarded because the session changed meanwhile. A write may still have been applied. */
@@ -135,7 +145,8 @@ function discard(outcome: Outcome<unknown>) {
  * A session call checks its generation before it publishes anything. An answer to a request sent under an older
  * generation is dropped with its 401 or 403: a read (GET without a body) is sent once more under the current
  * generation, and anything else rejects with `session-changed` and calls `onSessionChanged`, since the server may
- * already have applied it.
+ * already have applied it. Once the session has ended, nothing more is sent or published: in-flight requests are
+ * aborted and every call rejects with `sessionEndedError`, without reporting failures or session changes.
  */
 export function createApiCall(credentials: string | ApiCredentials, onUnauthorized?: (failure: AuthFailure) => void, onSessionChanged?: () => void) {
   const kind: ApiCredentials = typeof credentials === 'string' ? { kind: 'bearer', token: credentials } : credentials
@@ -152,7 +163,8 @@ export function createApiCall(credentials: string | ApiCredentials, onUnauthoriz
     // Clear the timer after decoding, or after headers for a long-lived SSE response.
     const timeout = new AbortController()
     const timer = setTimeout(() => timeout.abort(), options.timeout)
-    const signal = options.signal ? AbortSignal.any([options.signal, timeout.signal]) : timeout.signal
+    const signals = [options.signal, timeout.signal, source?.ended].filter(signal => signal !== undefined)
+    const signal = signals.length > 1 ? AbortSignal.any(signals) : timeout.signal
     let failure: Omit<AuthFailure, 'generation'> | undefined
     try {
       let response: Response
@@ -193,8 +205,13 @@ export function createApiCall(credentials: string | ApiCredentials, onUnauthoriz
   return async function call<T>(path: string, options: Options<T>): Promise<T> {
     const read = (options.method ?? 'GET') === 'GET' && options.body === undefined
     for (let attempt = 0; ; attempt++) {
+      if (source?.ended.aborted) throw sessionEndedError()
       const generation = source?.current()
       const outcome = await send(path, options)
+      if (source?.ended.aborted) {
+        discard(outcome)
+        throw sessionEndedError()
+      }
       if (source && generation !== source.current()) {
         discard(outcome)
         if (read && attempt === 0 && !options.signal?.aborted) continue
