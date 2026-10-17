@@ -192,3 +192,65 @@ The orchestrator folded these into the contract:
 4. Wallet mode for more than one user waits for 2b.
 
 </details>
+
+## Round 2: verification of contract version 1
+
+| Reviewer | Verdict | Required edits |
+| --- | --- | --- |
+| GPT-6.1-Sol | **Not ready** | 18 |
+| Claude Opus 5.5 | **Ready with edits** | 37 |
+
+**Both found:**
+- `/verify` cleared the binding cookie that `/register` needs.
+- Provisioning backfilled at the current cursor on every run, so re-provisioning skipped events.
+- A missing progress row had to be initialized under the owner's retention lock, with a registration foreign key.
+- Catch-up discovery missed pending receipts below the low-water mark.
+- The owner-scope bridge could not be built across the Persistence/Infrastructure boundary.
+- The candidate query needed fairness, and claims needed one transaction per candidate under a full lock order.
+- The ownerless monitor tables needed a destructive-migration plan.
+- The packaging had to keep Token mode compatible and isolate identity migrations.
+- Write-scope fixes and missing tests.
+
+**Sol also found:**
+- a stale tab could sign out the newer session of the same user, so sign-out now names its session (`session-changed`);
+- step-up and wallet changes need re-checks at completion;
+- venue rate-limit exceptions are swallowed by safe-error conversion;
+- restore reconciliation needs wallet addresses and `unbind-wallet`.
+
+**Opus also found:**
+- the page's `Referrer-Policy: no-referrer` makes browsers send `Origin: null` on writes, so fetches now set `referrerPolicy: "same-origin"`;
+- busy market streams send no keepalive, so revalidation runs on a timer;
+- the `beforeunload` prompt defeated forced teardown;
+- `/api/auth/{**rest}` gave 401 instead of 404 in Token mode;
+- invitation code normalization was missing.
+
+**On each other's positions:**
+- Sol accepted the remember-device default, the CSRF policy, high-`s` normalization and dropping step-up for venue tokens.
+- Sol accepted user-ID tab binding for isolation, but required session-aware sign-out.
+- Opus accepted having no session cache (about 10 requests per page, one indexed lookup each), the remember-device default and 128-bit invitations.
+
+The orchestrator rewrote the contract as version 2. Its §14 records the decisions where the two differed.
+
+## Round 3: confirmation of contract version 2
+
+**GPT-6.1-Sol: not ready.**
+- All 18 edits applied and all §14 decisions accepted.
+- Two small gaps:
+  - the step-up grant did not record its signing wallet;
+  - restore reconciliation was not fail-closed: a previously removed wallet could get a fresh session.
+
+**Claude Opus 5.5: ready.**
+- All §14 decisions accepted.
+- Four blockers:
+  - thrown 429s lost `Retry-After` in the error handler, which `ProblemException` now covers;
+  - the messaging provisioning container had no owner context that reads the assignment;
+  - the wrong monitor candidate type;
+  - the wrong base branch name.
+- Smaller clarifications:
+  - the default-GUID refusal belongs to Wallet mode only;
+  - `ensure-owner` should run always and do nothing in Token mode;
+  - B1's interim scheduler;
+  - the initialization helper should lock the registration first;
+  - a 401 from the session probe must never reload.
+
+All of these are applied in contract version 3 (§15). With them, both reviewers' remaining blockers are closed, and implementation starts from version 3.

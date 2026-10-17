@@ -1,8 +1,13 @@
 # Multi-user wallet sign-in: delivery contract
 
-October 17, 2026, **version 2**. Status: **delivery contract for implementation.**
+October 17, 2026, **version 3**. Status: **delivery contract for implementation.**
 
-On October 17 the owner asked to start orchestrating the work, with Opus and Sol (Codex) agents to discuss and verify the approach. This version folds in both review rounds. In round 1 both reviewers said "go with changes". In round 2 Opus said "ready with edits" and Sol said "not ready". Every required edit from round 2 is applied or explicitly decided in §14. The discussion is recorded in [the review log](multi-user-review-log.md).
+On October 17 the owner asked to start orchestrating the work, with Opus and Sol (Codex) agents to discuss and verify the approach. This version folds in three review rounds:
+- Round 1: both reviewers said "go with changes".
+- Round 2: Opus said "ready with edits" and Sol said "not ready".
+- Round 3: Opus said "ready". Sol said "not ready", with two small gaps (the step-up signer and fail-closed restore reconciliation).
+
+Every required edit is applied or explicitly decided in §14, and the round-3 fixes are in §15. The discussion is recorded in [the review log](multi-user-review-log.md).
 
 Where this contract and [the analysis](multi-user-wallet-auth.md) disagree, this contract wins. The screens are in [`docs/design/wallet-sign-in/`](../design/wallet-sign-in/README.md).
 
@@ -30,7 +35,7 @@ The owner has not answered D1–D12. These are the working defaults, adopted fro
 ## 2. Pull requests, lanes and write scopes
 
 ```text
-base: t3/7a0854db (this contract + shared ports)
+base: t3/wallet-based-user-auth (this contract + shared ports)
 ├─ Lane A (Sol):   A1 identity core ─► A2 identity account management
 ├─ Lane B (Sol):   B1 owner scopes + events ─► B2 monitor + venue limits (lifts the registration gate)
 ├─ Lane C (Opus):  C1 isolation suite (tests only)
@@ -38,7 +43,7 @@ base: t3/7a0854db (this contract + shared ports)
 then P4: deployment, release checks, runbooks
 ```
 
-Each lane works in its own worktree from the base commit. Lanes B, C and D build against this contract, not against lane A's code.
+Each lane works in its own worktree from the base commit of branch `t3/wallet-based-user-auth`. Lanes B, C and D build against this contract, not against lane A's code.
 
 ### Write scopes
 
@@ -68,7 +73,7 @@ Each lane edits **only** these paths. Any lane may also fix existing tests broke
   - a new `OwnerScopeArchitectureTests.cs`
   - the `IJournalOwnerInventory` implementation
 - **B2:**
-  - in `Vessel.Persistence`: monitor files, `MonitorModel.cs` and `Migrations/**`, including the snapshot
+  - in `Vessel.Persistence`: monitor files, `MonitorModel.cs`, the new `SystemMonitorStore.cs` and `ServerStateStore.cs`, and `Migrations/**`, including the snapshot
   - `Vessel.Domain/Monitoring/MonitorAccount.cs`
   - in `Vessel.Application`: `Monitoring/**`, `MarketData/**`, `Workspace/AccountDiscoveryService.cs`, `Credentials/AccountCredentialService.cs`
   - `Vessel.Worker/MonitorScheduler.cs`
@@ -80,7 +85,7 @@ Each lane edits **only** these paths. Any lane may also fix existing tests broke
 
 ### Shared ports
 
-These are already in the base commit, in `backend/src/Vessel.Application/Ownership/`:
+These are already in the base commit. `Application/Common/ProblemException` gained optional `Code` (the ProblemDetails `code` extension) and `RetryAfterSeconds` (the `Retry-After` header). The rest are in `backend/src/Vessel.Application/Ownership/`:
 - `IJournalOwnerDirectory`, with `JournalOwnerStatus` and `ConfiguredOwnerDirectory`
 - `IOwnerScopeFactory` / `IOwnerScope`
 - `OwnerScopeAssignment`
@@ -106,7 +111,7 @@ All keys are read identically by the API, the worker and offline commands. Valid
 | --- | --- | --- |
 | `Vessel:Auth:Mode` | `Token` (default when absent) \| `Wallet` | Any other value refuses startup |
 | `Vessel:Auth:Token` | — | Token mode: required outside Development (unchanged). Wallet mode: absent or empty, otherwise refuse to start |
-| `Vessel:Auth:OwnerId` | GUID | Token mode as today. Wallet mode: required outside Development; used by `ensure-owner` and legacy-preference adoption. The well-known default GUID is refused outside Development unless `Vessel:Identity:AllowLegacyDefaultOwner=true` (logged at startup as a warning) |
+| `Vessel:Auth:OwnerId` | GUID | Token mode: as today, and the default GUID stays accepted. Wallet mode: required outside Development; used by `ensure-owner` and legacy-preference adoption. In Wallet mode only, the well-known default GUID is refused outside Development unless `Vessel:Identity:AllowLegacyDefaultOwner=true` (logged at startup as a warning) |
 | `Vessel:Auth:OwnerName` | `Owner` | Display name given by `ensure-owner` |
 | `Vessel:Identity:Origins` | list | Wallet mode: required, at least one entry. Each entry is normalized to `scheme://host[:port]` (lower-case host, no path, no default port, no trailing slash). **Outside Development every origin must be `https://`.** In Development `http://` origins are allowed |
 | `Vessel:Identity:Registration` | `Invitation` | `Closed`, `Invitation`, `AllowList`, `Open`. Forced to `Closed` while the §10 gate is in place |
@@ -147,10 +152,10 @@ All keys are read identically by the API, the worker and offline commands. Valid
 - **Bundles.** The Dockerfile builds and copies a second executable bundle, `/app/migrate-identity-ef`. `deploy/migrate` runs the steps below with `set -e`, so a failure stops the script:
   1. `/app/migrate-identity-ef`, with no arguments;
   2. the journal bundle, with `"$@"` as today;
-  3. **only when `Vessel__Auth__Mode=Wallet`**, `identity ensure-owner`;
+  3. `identity ensure-owner`, always. It reads the effective mode from all configuration sources and does nothing (exit 0, with a log line) in Token mode;
   4. `provision-messaging`.
 
-  Token-mode upgrades therefore need no new configuration.
+  Token-mode upgrades therefore need no new configuration. The mode value must be exactly `Token` or `Wallet`.
 - **Readiness.** `/health/ready` checks both contexts. In Wallet mode it also answers 503 with exactly `{"status":"unavailable","reason":"no-operator-wallet"}` while no active operator has a wallet. Other failures stay `{"status":"unavailable"}`.
 
 | Table | Columns | Constraints |
@@ -159,7 +164,7 @@ All keys are read identically by the API, the worker and offline commands. Valid
 | `user_wallets` | `id uuid`, `user_id`, `address char(42)` (lower-case `0x…`), `label varchar(40) null`, `added_at`, `last_used_at null` | PK `id`, FK `user_id`, **unique `address`** |
 | `auth_challenges` | `id uuid`, `purpose text` (`sign-in`, `link`, `step-up`), `address`, `origin`, `message text` (exact signed text), `binding_hash bytea null`, `user_id null`, `session_id null`, `action text null`, `target text null`, `issued_at`, `expires_at`, `consumed_at null` | Index on `expires_at`. At most 10 000 unconsumed rows; the oldest are evicted at the cap |
 | `pending_registrations` | `id uuid`, `token_hash bytea`, `address`, `origin`, `binding_hash`, `created_at`, `expires_at`, `consumed_at null` | Unique `token_hash`. Lifetime 10 min. Capped by `MaxPendingRegistrations` |
-| `sessions` | `id uuid`, `user_id`, `wallet_id null` (FK, `ON DELETE SET NULL`), `token_hash bytea`, `remember bool`, `created_at`, `last_seen_at`, `idle_expires_at`, `absolute_expires_at`, `revoked_at null`, `revoke_reason text null`, `step_up_action null`, `step_up_target null`, `step_up_expires_at null`, `user_agent_summary varchar(80) null` | Unique `token_hash`. **Invariant:** a live session always references an existing wallet of its user. Removing a wallet revokes its sessions in the same transaction, so only revoked sessions can have a null wallet. No IP address stored |
+| `sessions` | `id uuid`, `user_id`, `wallet_id null` (FK, `ON DELETE SET NULL`), `token_hash bytea`, `remember bool`, `created_at`, `last_seen_at`, `idle_expires_at`, `absolute_expires_at`, `revoked_at null`, `revoke_reason text null`, `step_up_action null`, `step_up_target null`, `step_up_wallet_id null` (the wallet that signed the grant), `step_up_expires_at null`, `user_agent_summary varchar(80) null` | Unique `token_hash`. **Invariant:** a live session always references an existing wallet of its user. Removing a wallet revokes its sessions in the same transaction, so only revoked sessions can have a null wallet. No IP address stored |
 | `invitations` | `id uuid`, `code_hash bytea`, `note varchar(80) null`, `created_at`, `expires_at`, `max_uses int`, `uses int`, `revoked_at null` | Unique `code_hash` |
 
 **Other rules:**
@@ -285,7 +290,9 @@ Expiration Time: {expires}
   - the step-up signer is still linked to this user;
   - the grant's action and target match the call.
 - **Atomic consumption:** the challenge and grant are consumed with the mutation, so concurrent reuse allows at most one success.
-- **Step-up** sets a single grant on the session: the action, the target and 5 minutes.
+- **Step-up** sets a single grant on the session: the action, the target, the signing wallet (`step_up_wallet_id`) and 5 minutes.
+  - At link or remove completion, under the user lock, that exact wallet must still be linked to the user.
+  - Every unlink path (the API and `identity unbind-wallet`) clears grants signed by the removed wallet, in the same transaction.
 - **Link:**
   - the address is already linked to this user → 409 `wallet-already-linked`;
   - it is linked to another user → 409 `wallet-taken`.
@@ -305,6 +312,7 @@ Expiration Time: {expires}
 ### Sessions
 
 - **Cookie.** The value is 32 random bytes in base64url; only their SHA-256 is stored. Attributes: `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, no `Domain`, except the Development HTTP variant in §3. With "keep me signed in", `Max-Age` equals the absolute lifetime; otherwise it is a browser-session cookie.
+- **Error handler (A1).** The API error handler in `Program.cs` writes `ProblemException.Code` as the `code` extension and `RetryAfterSeconds` as `Retry-After` after `Response.Clear()`. Today `Clear()` drops the `Retry-After: 5` that `VesselEventEndpoints.cs:38` sets. All auth errors, both event-stream caps (A1) and B2's per-user caps use it, and tests assert the header.
 - **Validation** reads the database on every request, with **no cache**. A request without a cookie never touches the database.
   - The session must not be revoked or past its idle or absolute expiry.
   - Its user must be active.
@@ -367,7 +375,7 @@ They run as `dotnet Vessel.Api.dll identity <command>`. Exit codes: 0 success, 1
 
 | Command | PR | Effect |
 | --- | --- | --- |
-| `identity ensure-owner` | A1 | Creates the configured owner as user 1 (`operator`, `active`, `OwnerName`) if absent. Idempotent. Refuses the default GUID per §3 |
+| `identity ensure-owner` | A1 | Wallet mode: creates the configured owner as user 1 (`operator`, `active`, `OwnerName`) if absent; idempotent; refuses the default GUID per §3. Token mode: does nothing, exit 0 |
 | `identity bind-wallet --user <guid> --address 0x… [--label]` | A1 | Exit 3 if the address belongs to another user |
 | `identity invite [--note] [--expires 7d] [--max-uses 1]` | A1 | Prints the code once |
 | `identity unbind-wallet --wallet <id>` | A2 | Refuses the last wallet, and revokes that wallet's sessions |
@@ -377,11 +385,18 @@ They run as `dotnet Vessel.Api.dll identity <command>`. Exit codes: 0 success, 1
 | `identity reset-after-restore` | A2 | See below. **Mandatory before any host starts after a restore** |
 | `identity verify` | A2 | Read-only. API-level orchestration over identity reads and `IJournalOwnerInventory` (B1). Reports journal owner IDs without a user and users without wallets. Identity never queries journal tables |
 
-`identity reset-after-restore`:
+`identity reset-after-restore [--keep-active <user guid> …]`:
+- **suspends every user except those listed** (normally the operator who will reconcile), so a restored, previously removed wallet or a user whose later suspension was lost cannot obtain a fresh session;
 - revokes every session;
 - deletes challenges and pending registrations;
 - revokes still-usable invitations;
 - prints a review table of users (ID, role, status) and their wallets (ID and address).
+
+**Reconciliation.** All API and worker hosts stay stopped until both the reset and the reconciliation are done. The operator compares the table with trusted records made after the backup, then:
+- reapplies wallet removals (`unbind-wallet`), suspensions and demotions;
+- restores only the users confirmed as current (`identity restore --user`).
+
+Users who cannot be confirmed stay suspended pending recovery. P4 documents this in the restore runbook.
 
 ## 9. Multi-owner backend (B1, B2)
 
@@ -398,11 +413,14 @@ They run as `dotnet Vessel.Api.dll identity <command>`. Exit codes: 0 success, 1
   - `SubscriptionMaintenanceService.cs:33,45`;
   - `EventSubscriptionListener.cs:47`;
   - `MonitorCommandListener.cs:23`;
-  - `MessagingProvisioning.cs:90-95`.
+  - `MessagingProvisioning.cs:52,71,85`, inside the `RegistrationServices` container built at `:90-95`. That container cannot reference Infrastructure, so B1 adds `Vessel.Persistence.AssignedOwnerContext : IJournalOwnerContext`, which returns the assignment and throws when it is unset. B1 registers it there with `OwnerScopeAssignment` and the factory, replacing `ConfiguredOwner` (`:94`, `:102`):
+    - `:52` (provisioning) and `:71` (server-wide deregister) become system-store calls;
+    - `:85` (`retry-event-receipts`) uses the factory per owner named by `--owner` or `--all-owners`.
+  - `MessagingHosting.cs:62`: `MessagingHost.OwnerId` is removed; listeners take the owner from each message.
 
   `OwnerScopeArchitectureTests` forbids `IServiceScopeFactory`, `CreateScope` and `CreateAsyncScope` in `Vessel.Worker`, `Vessel.Messaging` and the monitor files, except in the factory itself.
 - **Owner directory registration** is order-independent:
-  - B1 registers `services.TryAddSingleton<IJournalOwnerDirectory>(new ConfiguredOwnerDirectory(JournalOwner.Parse(...)))` in the API and worker composition.
+  - B1 registers `services.TryAddSingleton<IJournalOwnerDirectory>(new ConfiguredOwnerDirectory(JournalOwner.Parse(...)))` in the owner-context section of `AddVesselInfrastructure`, which both the API and the worker call. B1 cannot edit `Api/Program.cs`.
   - In Wallet mode, A1's `AddVesselIdentityDirectory(configuration)` uses `services.Replace(...)` with the identity implementation.
 - **System stores** are singletons over an `NpgsqlDataSource` from `ConnectionStrings:Vessel`, and never use `VesselDbContext` or an owner scope. They cover:
   - subscription registrations;
@@ -420,6 +438,7 @@ They run as `dotnet Vessel.Api.dll identity <command>`. Exit codes: 0 success, 1
 
   It also asserts zero `IgnoreQueryFilters` in `src`. Any new site fails the test until it is reviewed.
 - **Heartbeat.** B1 writes the heartbeat for each active owner, as today's per-owner table requires. B2 moves it to `IServerStateStore` (§9.4).
+- **Interim scheduler (B1).** `MonitorScheduler` loops over `ActiveOwnersAsync` pages and calls the existing owner-scoped `ClaimDueAsync` in a factory scope per owner, keeping the process-wide cap of 2. Renewals take the owner from the executor's scope until B2 adds `MonitorLease.OwnerId`.
 - **Out of scope:** the analysis's two integrity foreign keys (`monitor_exit_watches.LinkId`, `play_order_links.AccountId`). They need their own orphan audit.
 
 ### 9.2 Event subscriptions (B1)
@@ -448,7 +467,7 @@ ON CONFLICT DO NOTHING
 
 Then the registration's module and fingerprint are verified, as today. **Re-provisioning never backfills.** A missing progress row under an existing registration is repaired only by the initialization rule below, never at the current cursor.
 
-**Progress-row initialization.** One helper creates progress rows. The dispatcher's responsibility check and catch-up (per owner) call it inside a transaction that already holds `pg_advisory_xact_lock_shared(RetentionLock(owner))`:
+**Progress-row initialization.** One helper creates progress rows. The dispatcher's responsibility check and catch-up (per owner) call it inside a transaction that already holds `pg_advisory_xact_lock_shared(RetentionLock(owner))`. Before inserting, the helper locks the registration `FOR KEY SHARE`, so a racing deregistration never fails with a foreign-key error:
 
 ```sql
 INSERT INTO event_subscriptions(owner_id, name, module, filters, filter_fingerprint, responsible_from, low_water_mark, status, gap_from, gap_to, registered_at, updated_at)
@@ -500,9 +519,9 @@ Monitor commands for a suspended owner are dropped and logged by ID; for an unkn
 
 ### 9.3 Monitor (B2)
 
-- **Leases.** `MonitorLease` and `MonitorCandidate` gain `OwnerId`.
+- **Leases.** `MonitorLease` gains `OwnerId`. The existing discovery record `MonitorCandidate` (`Application/Monitoring/Contracts.cs:56`, which carries a tracked `MonitorAccount`) stays as it is.
 - **Discovery** stays owner-scoped (the existing EF code) and iterates `ActiveOwnersAsync` pages.
-- **Candidates** come from `ISystemMonitorStore.DueCandidatesAsync(after, limit)`. It is a lock-free system query across owners, with keyset pages ordered by `(DueAt, OwnerId, AccountId)` and at most 2 candidates per owner per page (`ROW_NUMBER() OVER (PARTITION BY owner)`).
+- **Candidates** come from `ISystemMonitorStore.DueCandidatesAsync(DueMonitorKey? after, int limit)`. It returns `DueMonitorCandidate(OwnerId, AccountId, VenueId, DueAt)`, where `DueMonitorKey = (DueAt, OwnerId, AccountId)`. It is a lock-free system query across owners, with keyset pages in that order and at most 2 candidates per owner per page (`ROW_NUMBER() OVER (PARTITION BY owner)`).
   - The scheduler keeps the continuation across ticks, so later owners cannot starve. It skips suspended owners (directory status, cached for one tick) and owners at capacity.
 - **Claiming.** Each candidate is claimed in **its own transaction** (one account) in its owner's scope, re-checking owner status, deadlines and both capacities. The scheduler no longer calls `ClaimDueAsync`; its multi-row claim can deadlock on venue locks.
 - **Lock order:** account row, monitor row, owner budget lock (`vessel-monitor-budget:{owner}`), venue budget lock (`vessel-venue-budget:{venue}`). It is the same in `MonitorCoordinator`, `ClaimAsync` and Refresh admission. A transaction never takes two venue locks. `ReadCapacityAsync` takes `venueId`.
@@ -565,7 +584,7 @@ See §7. The stream endpoints get `IPrincipalValidity` from DI: `AlwaysValidPrin
 - `api/auth.ts` holds the endpoints, guards and the code-to-copy map. `features/identity/*` holds the UI.
 - `WorkspacePage` first calls `GET /api/auth/config?origin=…`:
   - `token`: the existing `ConnectionGate`, unchanged;
-  - `wallet`: `SignInGate`, which calls `GET /api/auth/session`. A 200 goes to the shell, a 401 to sign-in.
+  - `wallet`: `SignInGate`, which probes `GET /api/auth/session` with the **public** call kind. A 200 goes to the shell. A 401 shows the sign-in screen and is never a teardown; otherwise the teardown's reload would land on the probe again and loop.
 
 ### Transport
 
@@ -640,6 +659,8 @@ See §7. The stream endpoints get `IPrincipalValidity` from DI: `AlwaysValidPrin
   - public routes exempt with a cookie present.
 - `originAccepted` with and without the query value; Token-mode 404s, anonymous included; Wallet-mode startup refusals.
 - At most one idle refresh per 5 minutes under concurrency; the readiness reason; cookie attributes per origin kind.
+- `code` and `Retry-After` reach the client through the error handler, for auth 429s and both event-stream caps.
+- `ensure-owner` does nothing in Token mode, and the default GUID is accepted in Token mode.
 - Rate-limit partitions; session idle, absolute and remember expiry; `MaxSessionsPerUser`; suspension.
 - Revalidation ends an open, otherwise idle stream within 15 s.
 - Sign-out with a stale `expectedSessionId` returns 409 without revoking.
@@ -654,7 +675,8 @@ See §7. The stream endpoints get `IPrincipalValidity` from DI: `AlwaysValidPrin
 - Removing the current wallet clears the cookie.
 - Demoting the last operator is refused.
 - Another user's session or wallet ID gives 404.
-- `reset-after-restore` output and its effects; `unbind-wallet`.
+- `reset-after-restore` output and its effects: everyone except `--keep-active` is suspended. A wallet removed after the backup, now restored, cannot get a fresh session. A user suspended after the backup, now restored as active, is suspended again by the reset. `unbind-wallet` clears grants signed by that wallet.
+- A session authenticated by wallet B holds a step-up signed by wallet A. A is then unlinked, so the grant can no longer link wallet C.
 
 ### B1
 
@@ -674,6 +696,7 @@ See §7. The stream endpoints get `IPrincipalValidity` from DI: `AlwaysValidPrin
   - suspension during delivery, then restore after retention (gap shown);
   - the B1 migration backfill and its conflicting-fingerprint failure.
 - `OwnerScopeArchitectureTests` and the raw-SQL inventory.
+- Provisioning and `retry-event-receipts` through the `RegistrationServices` container, with `AssignedOwnerContext`.
 
 ### B2
 
@@ -684,7 +707,7 @@ See §7. The stream endpoints get `IPrincipalValidity` from DI: `AlwaysValidPrin
 - `WorkerConcurrency`.
 - Heartbeat only from a productive monitor pass.
 - The migration copies deadlines.
-- Per-user caps.
+- Per-user caps, with `Retry-After` asserted.
 
 ### C1
 
@@ -710,7 +733,8 @@ See §7. The stream endpoints get `IPrincipalValidity` from DI: `AlwaysValidPrin
   - non-auth 403s don't tear down;
   - cross-tab messages with session IDs;
   - sign-out with `session-changed`;
-  - preference adoption only when absent.
+  - preference adoption only when absent;
+  - a 401 from the session probe shows sign-in without reloading.
 - **Hygiene:** inject `BroadcastChannel` and clear `localStorage` after each test.
 
 ### P4
@@ -743,3 +767,16 @@ See §7. The stream endpoints get `IPrincipalValidity` from DI: `AlwaysValidPrin
 | Market streams per user | — | 4 (optional) | 4 (§9.4) |
 | Sessions per user | 20 | about 50 (optional) | 20 (§3) |
 | Integrity foreign keys | Decide explicitly | Decide explicitly | Out of scope (§9.1, §13) |
+
+## 15. Round-3 fixes
+
+| From | Fix | Where |
+| --- | --- | --- |
+| Sol | The step-up grant records its signing wallet (`step_up_wallet_id`). Completion re-checks that wallet under the user lock, and every unlink clears grants it signed | §4, §6, §12 A2 |
+| Sol | `reset-after-restore` suspends everyone except `--keep-active` users, and hosts stay stopped until reconciliation against post-backup records | §8, §12 A2, P4 runbook |
+| Opus | `ProblemException.Code`/`RetryAfterSeconds` (base), written by A1's error handler after `Response.Clear()` | §2, §7 |
+| Opus | `AssignedOwnerContext` for the messaging `RegistrationServices` container; correct provisioning line references; `MessagingHost.OwnerId` removed | §9.1 |
+| Opus | `DueMonitorCandidate`/`DueMonitorKey` instead of the discovery `MonitorCandidate`; B2 gains the system-store files | §9.3, §2 |
+| Opus | The base branch is `t3/wallet-based-user-auth` | §2 |
+| Opus | The default-GUID refusal applies in Wallet mode only; `ensure-owner` always runs in `migrate` and does nothing in Token mode; B1's interim scheduler; the initialization helper locks the registration first; the session probe uses the public call kind and a 401 never reloads; `IPrincipalValidity` checks "at least every 15 s" | §3, §4, §8, §9.1, §9.2, §11 |
+
