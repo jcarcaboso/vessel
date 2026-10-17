@@ -44,7 +44,7 @@ public sealed class AccountCredentialService(
         // 2. Venue verification, with nothing open.
         if (unitOfWork.IsActive)
             throw new InvalidOperationException("Credential verification calls the venue and cannot run inside a unit of work or transaction.");
-        await reads.AdmitAsync(owner.OwnerId, account.VenueId, ct);
+        await reads.AdmitVerificationAsync(owner.OwnerId, account.VenueId, ct);
         VerifiedVenueCredential verified;
         try
         {

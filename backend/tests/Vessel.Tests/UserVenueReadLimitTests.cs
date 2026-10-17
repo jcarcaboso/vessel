@@ -64,13 +64,13 @@ public sealed class UserVenueReadLimitTests
         (await client.GetAsync(candleUrl.Replace("interval=1h", "interval=1m", StringComparison.Ordinal))).EnsureSuccessStatusCode();
         (await client.GetAsync(candleUrl.Replace("refresh=true", "refresh=false", StringComparison.Ordinal))).EnsureSuccessStatusCode();
 
-        for (var index = 0; index < 5; index++)
-        {
+        for (var index = 0; index < 10; index++)
             (await client.GetAsync($"/api/venues/{SecurityFixture.Venue.Id}/accounts?address={SecurityFixture.Address}")).EnsureSuccessStatusCode();
-            (await client.PutAsJsonAsync($"/api/accounts/{credentialAccount.Id}/credential", new { token = SecurityFixture.Token })).EnsureSuccessStatusCode();
-        }
         using (var rejected = await client.GetAsync($"/api/venues/{SecurityFixture.Venue.Id}/accounts?address={SecurityFixture.Address}"))
             await LimitedAsync(rejected, 60);
+        // Exhausting discovery does not prevent a token-bearing import of up to 30 subaccounts.
+        for (var index = 0; index < 30; index++)
+            (await client.PutAsJsonAsync($"/api/accounts/{credentialAccount.Id}/credential", new { token = SecurityFixture.Token })).EnsureSuccessStatusCode();
         using (var rejected = await client.PutAsJsonAsync($"/api/accounts/{credentialAccount.Id}/credential", new { token = SecurityFixture.Token }))
             await LimitedAsync(rejected, 60);
 
@@ -80,6 +80,46 @@ public sealed class UserVenueReadLimitTests
         candles.Error = new VenueRateLimitException(SecurityFixture.Now.AddMinutes(10));
         Assert.Equal(502, (int)(await client.GetAsync(candleUrl.Replace("interval=1h", "interval=15m", StringComparison.Ordinal))).StatusCode);
         Assert.Equal(SecurityFixture.Now.AddMinutes(5), await state.VenueRetryAtAsync("hyperliquid", default));
+    }
+
+    [Theory]
+    [InlineData(false, 10)]
+    [InlineData(true, 30)]
+    public async Task Venue_deadline_refusals_consume_neither_discovery_nor_verification_budget(bool verification, int budget)
+    {
+        var owner = Guid.NewGuid();
+        var clock = new ManualTime(SecurityFixture.Now);
+        var state = new MonitorServerState();
+        var policy = new AccountReadPolicy(state, new UserReadLimits(clock), clock);
+        var accounts = new MemoryWorkspaceStore(owner);
+        var account = SecurityFixture.Account(owner); accounts.Accounts.Add(account);
+        var verifier = new SecurityVerifier();
+        var adapter = new SecurityDiscovery([]);
+        var registry = SecurityFixture.Registry(verifier, adapter);
+        using var vault = SecurityFixture.Vault();
+        var credentials = new AccountCredentialService(accounts, new SecurityCredentialStore(), new CoreOwner(owner),
+            registry, vault, clock, TestUnitOfWork.None, policy);
+        var discovery = new AccountDiscoveryService(accounts, new CoreOwner(owner), registry, policy);
+        async Task AttemptAsync()
+        {
+            if (verification) await credentials.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
+            else await discovery.DiscoverAsync(SecurityFixture.Venue.Id,
+                new CredentialDiscoveryRequest { Address = SecurityFixture.Address, Token = SecurityFixture.Token }, default);
+        }
+        await state.DeferVenueAsync(SecurityFixture.Venue.Id, clock.GetUtcNow().AddSeconds(30), clock.GetUtcNow(), default);
+        for (var index = 0; index <= budget; index++)
+        {
+            var error = await Assert.ThrowsAsync<Vessel.Application.Common.ProblemException>(AttemptAsync);
+            Assert.Equal(429, error.StatusCode);
+            Assert.Equal(30, error.RetryAfterSeconds);
+        }
+        Assert.Null(verifier.ReceivedToken);
+        Assert.Null(adapter.ReceivedToken);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        for (var index = 0; index < budget; index++) await AttemptAsync();
+        var exhausted = await Assert.ThrowsAsync<Vessel.Application.Common.ProblemException>(AttemptAsync);
+        Assert.Equal(429, exhausted.StatusCode);
+        Assert.Equal(60, exhausted.RetryAfterSeconds);
     }
 
     [Fact]
@@ -106,15 +146,15 @@ public sealed class UserVenueReadLimitTests
         var clock = new ManualTime(SecurityFixture.Now);
         var limits = new UserReadLimits(clock);
         var first = Guid.NewGuid(); var second = Guid.NewGuid();
-        for (var index = 0; index < 10; index++) limits.Admit(first, "account-reads", 10);
-        Assert.Equal(60, Assert.Throws<Vessel.Application.Common.ProblemException>(() => limits.Admit(first, "account-reads", 10)).RetryAfterSeconds);
-        limits.Admit(second, "account-reads", 10);
+        for (var index = 0; index < 10; index++) limits.Admit(first, "account-discovery", 10);
+        Assert.Equal(60, Assert.Throws<Vessel.Application.Common.ProblemException>(() => limits.Admit(first, "account-discovery", 10)).RetryAfterSeconds);
+        limits.Admit(second, "account-discovery", 10);
         limits.Admit(first, "hyperliquid|BTC|1h", 1);
         limits.Admit(second, "hyperliquid|BTC|1h", 1);
         clock.Advance(TimeSpan.FromSeconds(59));
         Assert.Equal(1, Assert.Throws<Vessel.Application.Common.ProblemException>(() => limits.Admit(first, "hyperliquid|BTC|1h", 1)).RetryAfterSeconds);
         clock.Advance(TimeSpan.FromSeconds(1));
-        limits.Admit(first, "account-reads", 10);
+        limits.Admit(first, "account-discovery", 10);
         limits.Admit(first, "hyperliquid|BTC|1h", 1);
     }
 
@@ -170,6 +210,22 @@ public sealed class UserVenueReadLimitTests
         Assert.Throws<Vessel.Application.Common.ProblemException>(() => limits.Admit(newcomer, "first-series", 1));
         clock.Advance(TimeSpan.FromMinutes(1));
         foreach (var owner in owners) limits.Admit(owner, "after-expiry", 1);
+    }
+
+    [Fact]
+    public void Global_backstop_reclaims_expired_keys_before_penalizing_a_live_user()
+    {
+        var clock = new ManualTime(SecurityFixture.Now);
+        var limits = new UserReadLimits(clock);
+        var expired = Guid.NewGuid();
+        for (var index = 0; index < 256; index++) limits.Admit(expired, "old-" + index, 1);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        var live = Enumerable.Range(0, 31).Select(_ => Guid.NewGuid()).ToArray();
+        foreach (var owner in live)
+            for (var index = 0; index < 256; index++) limits.Admit(owner, "live-" + index, 2);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        limits.Admit(Guid.NewGuid(), "first-series", 1);
+        foreach (var owner in live) limits.Admit(owner, "live-0", 2);
     }
 
     private static async Task LimitedAsync(HttpResponseMessage response, int seconds)
