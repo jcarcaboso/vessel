@@ -45,8 +45,8 @@ public sealed class CredentialAttempt(string token, string revision)
     public string Token { get; } = token;
     public string Revision { get; } = revision;
     public static string RevisionOf(AccountCredential credential) => Convert.ToHexString(
-        global::System.Security.Cryptography.SHA256.HashData(credential.Ciphertext.Concat(credential.Tag).Concat(credential.Nonce)
-            .Concat(global::System.Text.Encoding.UTF8.GetBytes(
+        System.Security.Cryptography.SHA256.HashData(credential.Ciphertext.Concat(credential.Tag).Concat(credential.Nonce)
+            .Concat(System.Text.Encoding.UTF8.GetBytes(
                 $"{credential.KeyId}|{credential.Purpose}|{credential.LastVerifiedAt:O}|{credential.ExpiresAt:O}")).ToArray()));
 }
 
