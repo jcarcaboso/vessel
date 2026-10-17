@@ -299,7 +299,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
           </PageErrorBoundary>
         </div>}
         <PageErrorBoundary key={page}><div className="page-settle">
-        {page === 'review' && cursorReady && <Suspense fallback={<PageLoading />}><ReviewPage api={api} reloadGeneration={reloadKey} onOpenPlay={viewPlay} /></Suspense>}
+        {page === 'review' && cursorReady && <Suspense fallback={<PageLoading />}><ReviewPage api={api} reloadGeneration={reloadKey} onOpenPlay={viewPlay} workspaceAccounts={accounts} /></Suspense>}
 
         {page === 'overview' && data && <OverviewPage data={data} api={api} monitors={monitor.summary?.accounts ?? []} overviewQuery={overviewQuery} setOverviewQuery={setOverviewQuery}
           reloadKey={reloadKey} refreshAllAction={refreshAllAction} refreshing={refreshing} onAddAccount={() => setAccountDialog(true)}

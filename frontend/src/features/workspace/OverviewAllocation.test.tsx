@@ -16,6 +16,24 @@ const accounts = [account('Alpha', 'p1', '300'), account('Beta', 'p1', '100'), a
   account('Delta', null, null), account('Hidden', 'p1', '5000', false)]
 
 describe('Overview allocation', () => {
+  it('shows each account as a capsule with its venue, its source and the full identity in the title', () => {
+    const hl = { ...account('hl', 'p1', '300'), name: 'main', venueId: 'hyperliquid', address: '0x6d1e9c42aa1b3c4d5e6f708192a3b4c5d6e7f389' }
+    const rh = { ...account('rh', 'p1', '100'), name: 'main', venueId: 'lighter-rh', sourceId: '48213' }
+    const blank = { ...account('blank', 'p1', '50'), name: ' ', venueId: 'hyperliquid', address: '0x3f5ab2c19e0d4471a8b6e2f0c9d1aa7c3b21c0de' }
+    render(<OverviewAllocation accounts={[hl, rh, blank]} portfolios={[portfolio('p1', 'Swing')]} scope="all" onScope={vi.fn()} />)
+    const legend = screen.getByRole('list', { name: 'Swing shares' })
+    const first = within(legend).getAllByRole('button', { name: 'Show allocation for main' })[0]!
+    expect(first).toHaveAttribute('title', 'main · Hyperliquid · 0x6d1e9c42aa1b3c4d5e6f708192a3b4c5d6e7f389')
+    expect(within(first).getByText('Hyperliquid')).toBeInTheDocument()
+    expect(within(first).getByText('0x6d1e…f389')).toHaveAttribute('title', '0x6d1e9c42aa1b3c4d5e6f708192a3b4c5d6e7f389')
+    const second = within(legend).getAllByRole('button', { name: 'Show allocation for main' })[1]!
+    expect(within(second).getByText('Lighter · Robinhood')).toBeInTheDocument()
+    expect(within(second).getByText('#48213')).toBeInTheDocument()
+    // An unnamed account reads as its short source, tagged Unnamed.
+    const unnamed = within(legend).getByRole('button', { name: 'Show allocation for 0x3f5a…c0de' })
+    expect(within(unnamed).getByText('Unnamed')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Swing balance shares: main 66.67%, main 22.22%, 0x3f5a…c0de 11.11%' })).toBeInTheDocument()
+  })
   it('shows portfolio shares of the total and account shares within each portfolio, excluding disabled accounts', () => {
     const onScope = vi.fn()
     render(<OverviewAllocation accounts={accounts} portfolios={portfolios} scope="all" onScope={onScope} />)

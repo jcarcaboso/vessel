@@ -71,7 +71,8 @@ After reviewing the preview, the owner asked for:
 - **Play identity**: asset as a ticker chip, venue as its logo, account with a wallet icon, instead of one grey line.
 - **Accounts grouping**: Group by None, Venue or Address. See the
   [account management contract](../../architecture/account-management-contract.md#october-15-2026-grouping-accounts).
-- **One select style**: every dropdown uses `NativeSelect` with the same chevron and row heights.
+- **One select style**: every dropdown uses `NativeSelect` with the same chevron and row heights. Since October 16, account
+  filters and the Overview scope use the searchable `AccountPicker` instead (see the core workspace contract).
 - **Less helper text**: page descriptions, panel subtitles, metric captions and long paragraphs were removed. What still
   matters is a pill, an `InfoTip` on the thing it concerns, a `CoverageBadge` shown only when coverage is incomplete, or
   one "About these numbers" disclosure holding API notices verbatim. Required notices stay visible: the plaintext-HTTP

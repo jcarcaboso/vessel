@@ -1,8 +1,9 @@
 import { emptyFilters, filterQuery, initialActivityState, type ActivityListState, type Filters } from './activity-filters'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ActivityPage, ActivityQuery } from '@/api/activity'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
+import { AccountPicker } from '@/components/accounts/AccountPicker'
 import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Pager } from '@/components/ui/pager'
@@ -12,6 +13,7 @@ import { OperationsSkeleton, OperationsTable } from './OperationsTable'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { RetrospectivePreview } from './RetrospectivePreview'
 import { FundingPaymentsTable } from './FundingPaymentsTable'
+import { allAccountsChoice, pickerAccounts } from './account-picker-options'
 import './activity-operations.css'
 
 /** Overview shows this many of the latest operations in its scope, without a pager. */
@@ -44,6 +46,7 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
   const trigger = useRef<HTMLElement | null>(null)
   const top = useRef<HTMLDivElement | null>(null)
   const enabled = accounts.filter(a => a.isEnabled !== false)
+  const fieldId = useId()
   const previous = result?.api === api ? result.page : null
   // Options that disappear fall back to All; instruments come from the scoped set the server reports.
   const selected = list.filters
@@ -109,7 +112,9 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
   const note = compact || filtered
   return <div className="activity-operations">
     {showFilters && <fieldset className="operation-filters"><legend>Filter operations</legend>
-      <label>Account<NativeSelect value={filters.account} onChange={e => update('account', e.target.value)}><option value="">All enabled accounts</option>{enabled.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</NativeSelect></label>
+      <div className="operation-filter-field"><span id={`${fieldId}-account`}>Account</span>
+        <AccountPicker labelledBy={`${fieldId}-account`} value={filters.account} onChange={value => update('account', value)}
+          accounts={pickerAccounts(enabled, portfolios)} choices={[allAccountsChoice('All enabled accounts')]} /></div>
       <label>Portfolio<NativeSelect value={filters.portfolio} onChange={e => update('portfolio', e.target.value)}><option value="">All portfolios</option><option value="unassigned">Unassigned accounts</option>{portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</NativeSelect></label>
       <label>Instrument<NativeSelect value={filters.contract} onChange={e => update('contract', e.target.value)}><option value="">All instruments</option>{contracts.map(c => <option key={c}>{c}</option>)}</NativeSelect></label>
       <label>Direction<NativeSelect value={filters.direction} onChange={e => update('direction', e.target.value)}><option value="">All directions</option><option value="long">Long</option><option value="short">Short</option></NativeSelect></label>

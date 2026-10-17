@@ -7,6 +7,7 @@ import { ApiError } from '@/api/errors'
 import type { WorkspaceApi } from '@/api/workspace'
 import { activityFillFixture, activityFillsFixture, activityFixture, activityPage, operationFixture } from '@/test/activity-fixture'
 import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
+import { accountPicker, chooseInPicker } from '@/test/account-picker'
 import { ActivityOperations } from './ActivityOperations'
 import { AccountDetail } from './AccountDetail'
 import { render as renderWithVenues } from '@/test/render'
@@ -232,15 +233,16 @@ describe('activity loading, filters and pages', () => {
     const view = render(<ActivityOperations api={api} accounts={[accountFixture, otherAccount]} portfolios={[portfolioFixture]} filters />)
     await screen.findByRole('button', { name: 'Expand ETH operation' })
     const label = kind === 'portfolio' ? 'Portfolio' : kind === 'instrument' ? 'Instrument' : 'Account'
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: label }),
-      kind === 'portfolio' ? portfolioFixture.id : kind === 'instrument' ? 'ETH' : otherAccount.id)
+    if (label === 'Account') await chooseInPicker('Account', otherAccount.name)
+    else await userEvent.selectOptions(screen.getByRole('combobox', { name: label }), kind === 'portfolio' ? portfolioFixture.id : 'ETH')
     await waitFor(() => expect(lastQuery(activity)).toMatchObject(kind === 'portfolio' ? { portfolio: portfolioFixture.id } : kind === 'instrument' ? { contract: 'ETH' } : { account: otherAccount.id }))
     facets = { accountIds: [accountFixture.id], contracts: ['BTC'] }
     view.rerender(<ActivityOperations api={api}
       accounts={kind === 'disabled account' ? [accountFixture, { ...otherAccount, isEnabled: false }] : kind === 'deleted account' ? [accountFixture] :
         kind === 'portfolio' ? [{ ...accountFixture, portfolioId: null }, otherAccount] : [accountFixture, otherAccount]}
       portfolios={kind === 'portfolio' ? [] : [portfolioFixture]} filters reloadGeneration={1} />)
-    await waitFor(() => expect(screen.getByRole('combobox', { name: label })).toHaveValue(''))
+    if (label === 'Account') await waitFor(() => expect(accountPicker('Account')).toHaveAttribute('data-value', ''))
+    else await waitFor(() => expect(screen.getByRole('combobox', { name: label })).toHaveValue(''))
     await waitFor(() => expect(lastQuery(activity)).toEqual({ page: 1, pageSize: 25 }))
     expect(await within(await screen.findByRole('table')).findByText('BTC')).toBeInTheDocument()
   })
@@ -265,7 +267,8 @@ describe('activity loading, filters and pages', () => {
     const cases: [string, string, Partial<ActivityQuery>][] = [['Account', otherAccount.id, { account: otherAccount.id }], ['Portfolio', 'unassigned', { portfolio: 'unassigned' }],
       ['Instrument', 'ETH', { contract: 'ETH' }], ['Direction', 'short', { direction: 'short' }], ['Status', 'partial', { status: 'partial' }], ['Period', '7', { period: '7' }]]
     for (const [label, value, sent] of cases) {
-      await userEvent.selectOptions(screen.getByRole('combobox', { name: label }), value)
+      if (label === 'Account') await chooseInPicker('Account', otherAccount.name)
+      else await userEvent.selectOptions(screen.getByRole('combobox', { name: label }), value)
       await waitFor(() => expect(lastQuery(activity)).toEqual({ ...sent, page: 1, pageSize: 25 }))
       await userEvent.click(screen.getByRole('button', { name: 'Reset filters' }))
       await waitFor(() => expect(lastQuery(activity)).toEqual({ page: 1, pageSize: 25 }))

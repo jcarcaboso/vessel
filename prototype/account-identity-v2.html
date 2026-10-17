@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Account identity · styled options · Vessel</title>
+<!-- Disposable, self-contained comparison (no external files) so it can be opened directly, shown inline or captured.
+     Synthetic accounts only. Graphite tokens copied from frontend/src/styles.css. Venue accents would come from the venue
+     descriptor next to its logo, not from the theme. -->
+<style>
+.vx {
+  color-scheme: dark;
+  --background: #0f1114; --foreground: #e9edf2; --card: #171a1f; --popover: #1a1e24;
+  --muted: #1e2229; --muted-foreground: #abb3c0; --accent: #242932; --border: #394350; --ring: #9ab5f2; --field: #111419;
+  --positive: #a9d6b6;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181; --series-6: #9085e9;
+  --radius: 0.4375rem;
+  --brand: var(--ring);
+  --brand-wash: color-mix(in srgb, var(--ring) 10%, transparent);
+  --line: color-mix(in srgb, var(--border) 60%, var(--card));
+  --surface-sunken: color-mix(in srgb, var(--background) 55%, var(--card));
+  --sheen: rgb(255 255 255 / 0.045);
+  --radius-panel: calc(var(--radius) + 4px);
+  --radius-control: max(4px, calc(var(--radius) - 1px));
+  --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  --figures: 'tnum' 1, 'cv11' 1, 'ss01' 1;
+  font: 13px/1.4 'Inter Variable', Inter, var(--font-sans, system-ui), sans-serif;
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+  background: #0b0d10; padding: 18px; border-radius: 14px;
+}
+.vx * { box-sizing: border-box; }
+:where(.vx) button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.vx-section { margin: 0 0 22px; }
+.vx-section > h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: var(--foreground); }
+.vx-shot { background: #0b0d10; }
+.vx-section > p { margin: 0 0 12px; color: var(--muted-foreground); font-size: 12.5px; }
+
+/* Option switcher */
+.vx-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.vx-tab { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px 0 6px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--muted-foreground); font-weight: 550; font-size: 12px; transition: all .15s; }
+.vx-tab b { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--muted); color: var(--foreground); font-size: 11px; }
+.vx-tab:hover { color: var(--foreground); border-color: var(--border); }
+.vx-tab[aria-selected="true"] { color: var(--foreground); border-color: color-mix(in srgb, var(--ring) 55%, var(--border)); background: color-mix(in srgb, var(--ring) 12%, var(--card)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 12%, transparent); }
+.vx-tab[aria-selected="true"] b { background: var(--ring); color: #11161d; }
+.vx-pitch { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); color: var(--muted-foreground); font-size: 12.5px; }
+.vx-pitch strong { color: var(--foreground); font-weight: 600; }
+
+/* Screen mock */
+.vx-screen { align-content: start; padding: 18px; border-radius: 14px; background: var(--background); border: 1px solid var(--line); display: grid; gap: 14px; }
+
+/* ---------- Shared identity atoms ---------- */
+.ava { --s: 26px; position: relative; flex: none; display: grid; place-items: center; width: var(--s); height: var(--s); border-radius: calc(var(--s) * .3); background: var(--muted); border: 1px solid color-mix(in srgb, var(--venue, var(--border)) 30%, var(--border)); color: var(--muted-foreground); }
+.ava img { width: 100%; height: 100%; border-radius: inherit; display: block; }
+.ava svg { width: 60%; height: 60%; }
+.ava.sm { --s: 20px; }
+.ava.lg { --s: 34px; }
+.ava.xl { --s: 44px; }
+.ava.ring { box-shadow: 0 0 0 2px var(--ring-gap, var(--card)), 0 0 0 4px var(--slice); border-color: transparent; }
+.ava.glow::after { content: ''; position: absolute; inset: -8px; z-index: -1; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in srgb, var(--venue) 38%, transparent), transparent); }
+.ava .dot { position: absolute; right: -4px; bottom: -4px; width: 11px; height: 11px; border-radius: 50%; background: var(--slice); box-shadow: 0 0 0 2px var(--ring-gap, var(--card)); }
+.ava .tick { position: absolute; right: -5px; bottom: -5px; width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center; background: var(--ring); color: #11161d; box-shadow: 0 0 0 2px var(--popover); }
+.ava .tick svg { width: 10px; height: 10px; }
+.vtag { display: inline-flex; align-items: center; gap: 5px; flex: 0 1 auto; min-width: 0; height: 19px; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 560; letter-spacing: .01em; white-space: nowrap; color: color-mix(in srgb, var(--venue) 68%, var(--foreground)); background: color-mix(in srgb, var(--venue) 13%, transparent); border: 1px solid color-mix(in srgb, var(--venue) 28%, transparent); }
+.vtag > span { overflow: hidden; text-overflow: ellipsis; }
+.vtag img { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.addr { display: inline-flex; align-items: center; gap: 4px; flex: none; height: 19px; padding: 0 6px; border-radius: 6px; font: 500 11px/1 var(--mono); color: var(--muted-foreground); background: color-mix(in srgb, var(--foreground) 5%, transparent); border: 1px solid color-mix(in srgb, var(--foreground) 7%, transparent); }
+.addr.manual { font-family: inherit; font-style: italic; }
+.addr svg { width: 11px; height: 11px; opacity: 0; transition: opacity .15s; }
+*:hover > .addr svg, .addr:hover svg { opacity: .8; }
+.nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--foreground); }
+.nm.unnamed { font-family: var(--mono); font-weight: 550; font-size: .95em; }
+.unnamed-tag { flex: none; font-size: 11px; color: var(--muted-foreground); padding: 0 6px; height: 17px; display: inline-flex; align-items: center; border-radius: 999px; border: 1px dashed var(--border); }
+.share { font-weight: 650; font-variant-numeric: tabular-nums; font-feature-settings: var(--figures); }
+
+/* ---------- Allocation card ---------- */
+.alloc-pair { display: grid; gap: 14px; }
+.card { --ring-gap: var(--surface-sunken); border: 1px solid var(--line); border-radius: var(--radius-panel); padding: 14px; background: var(--surface-sunken); min-width: 0; }
+.card > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; font-size: 11px; color: var(--muted-foreground); }
+.card > header .pf { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--foreground); font-size: 13px; font-weight: 560; }
+.card > header .pf span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card > header .pf svg { color: var(--brand); flex: none; }
+.card-body { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 16px; align-items: center; }
+.card-body.stack { grid-template-columns: minmax(0, 1fr); justify-items: stretch; }
+.card-body.stack .donut { justify-self: center; }
+.donut { position: relative; width: 112px; height: 112px; }
+.donut svg { width: 100%; height: 100%; overflow: visible; }
+.donut path { stroke: var(--surface-sunken); stroke-width: 2.5; transition: opacity .15s, transform .15s; }
+.donut .c { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+.donut .c strong { font-size: 13px; font-weight: 650; }
+.donut .c small { font-size: 11px; color: var(--muted-foreground); }
+.legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; min-width: 0; }
+
+/* L1 · capsules */
+.l-capsule li { --ring-gap: color-mix(in srgb, var(--venue) 6%, var(--surface-sunken)); display: flex; align-items: center; gap: 11px; min-width: 0; padding: 7px 10px 7px 8px; border-radius: 12px; background: linear-gradient(100deg, color-mix(in srgb, var(--venue) 9%, var(--surface-sunken)), var(--surface-sunken) 70%); border: 1px solid color-mix(in srgb, var(--venue) 16%, var(--line)); transition: transform .15s, border-color .15s; }
+.l-capsule li:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--slice) 55%, var(--line)); }
+.l-capsule .main { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.l-capsule .top, .l-capsule .bot { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.l-capsule .right { display: grid; justify-items: end; gap: 5px; flex: none; }
+.l-capsule .bar { width: 46px; height: 4px; border-radius: 4px; background: color-mix(in srgb, var(--foreground) 8%, transparent); overflow: hidden; }
+.l-capsule .bar i { display: block; height: 100%; border-radius: inherit; background: var(--slice); box-shadow: 0 0 8px var(--slice); }
+
+/* L2 · share bars */
+.l-bars li { position: relative; display: flex; align-items: center; gap: 9px; min-width: 0; height: 38px; padding: 0 12px 0 10px; border-radius: 10px; overflow: hidden; background: color-mix(in srgb, var(--foreground) 3%, transparent); }
+.l-bars li::before { content: ''; position: absolute; inset: 0 auto 0 0; width: var(--pct); background: linear-gradient(90deg, color-mix(in srgb, var(--slice) 30%, transparent), color-mix(in srgb, var(--slice) 14%, transparent)); border-right: 1px solid color-mix(in srgb, var(--slice) 60%, transparent); }
+.l-bars li::after { content: ''; position: absolute; inset: 6px auto 6px 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--slice); }
+.l-bars li > * { position: relative; }
+.l-bars .meta { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+.l-bars .vtag { --venue: var(--foreground); }
+.l-bars .share { margin-left: auto; }
+
+/* L3 · tiles */
+.l-tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.l-tiles li { position: relative; display: grid; gap: 7px; align-content: start; min-width: 0; padding: 12px 11px 10px; border-radius: 12px; overflow: hidden; isolation: isolate; background: color-mix(in srgb, var(--card) 70%, var(--surface-sunken)); border: 1px solid var(--line); transition: transform .15s, border-color .15s; }
+.l-tiles li::before { content: ''; position: absolute; inset: 0 0 auto; height: 3px; background: var(--slice); box-shadow: 0 0 14px 1px var(--slice); }
+.l-tiles li::after { content: ''; position: absolute; z-index: -1; width: 120px; height: 120px; top: -60px; right: -50px; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in srgb, var(--venue) 26%, transparent), transparent); }
+.l-tiles li:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--slice) 50%, var(--line)); }
+.l-tiles .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.l-tiles .share { font-size: 17px; letter-spacing: -.01em; }
+.l-tiles .nm { font-size: 13px; }
+.l-tiles .tags { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.l-tiles .money { font-size: 11px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+
+/* L4 · compact + hover card */
+.l-hover li { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 5px 8px; border-radius: 9px; cursor: default; }
+.l-hover li:hover, .l-hover li.is-hover { background: var(--accent); }
+.l-hover .share { margin-left: auto; }
+.l-hover .nm { font-weight: 560; }
+.hovercard { position: absolute; z-index: 5; left: 34px; top: calc(100% + 6px); width: 280px; padding: 14px; border-radius: 14px; pointer-events: none; opacity: 0; transform: translateY(-4px); transition: opacity .15s, transform .15s;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--venue) 16%, var(--popover)), var(--popover) 55%); border: 1px solid color-mix(in srgb, var(--venue) 24%, var(--border));
+  box-shadow: 0 24px 50px -18px rgb(0 0 0 / .75), 0 0 0 1px rgb(255 255 255 / .03) inset; --ring-gap: var(--popover); }
+.l-hover li:hover .hovercard, .l-hover li.is-hover .hovercard { opacity: 1; transform: none; }
+.hovercard .hc-top { display: flex; align-items: center; gap: 11px; }
+.hovercard .hc-top > div { display: grid; gap: 4px; min-width: 0; }
+.hovercard .hc-name { font-size: 14px; }
+.hovercard dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; }
+.hovercard dt { color: var(--muted-foreground); }
+.hovercard dd { margin: 0; text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hovercard dd.full { font: 500 11px var(--mono); color: var(--foreground); }
+
+/* Today */
+.l-today li { display: flex; align-items: center; gap: 8px; padding: 3px 6px; font-size: 12px; }
+.l-today .sw { width: 10px; height: 10px; border-radius: 50%; background: var(--slice); flex: none; }
+.l-today .share { margin-left: auto; font-weight: 600; }
+
+/* ---------- Selector ---------- */
+.filters { position: relative; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); }
+.filters > label, .filters > .fl { display: grid; gap: 5px; color: var(--muted-foreground); font-size: 12px; flex: 1 1 130px; min-width: 0; position: relative; }
+.filters > .acc { flex: 0 1 236px; }
+.fsel { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 36px; padding: 0 10px; border-radius: var(--radius-control); background: var(--field); border: 1px solid var(--border); color: var(--foreground); font-size: 13px; white-space: nowrap; overflow: hidden; }
+.fsel svg { flex: none; color: var(--muted-foreground); }
+.trigger { --ring-gap: var(--field); width: 100%; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 9px 0 6px; border-radius: var(--radius-control); background: linear-gradient(100deg, color-mix(in srgb, var(--venue, transparent) 10%, var(--field)), var(--field) 75%); border: 1px solid color-mix(in srgb, var(--venue, var(--border)) 22%, var(--border)); text-align: left; transition: border-color .15s, box-shadow .15s; }
+.trigger:hover { border-color: color-mix(in srgb, var(--ring) 45%, var(--border)); }
+.trigger[aria-expanded="true"] { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 22%, transparent); }
+.trigger .nm { flex: 0 1 auto; }
+.trigger .vtag { height: 18px; padding: 0 6px; }
+.trigger .chev { margin-left: auto; flex: none; color: var(--muted-foreground); transition: transform .15s; }
+.trigger[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.stackava { display: inline-flex; flex: none; padding-left: 6px; }
+.stackava .ava { --s: 20px; margin-left: -6px; box-shadow: 0 0 0 2px var(--ring-gap, var(--field)); border-color: transparent; }
+.pop { position: absolute; z-index: 10; top: calc(100% + 8px); left: 0; width: 400px; max-width: calc(100vw - 40px); border-radius: 16px; overflow: hidden; --ring-gap: var(--popover);
+  background: color-mix(in srgb, var(--popover) 94%, transparent); backdrop-filter: blur(14px);
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, var(--border));
+  box-shadow: 0 30px 60px -20px rgb(0 0 0 / .8), 0 0 0 1px rgb(255 255 255 / .02) inset; }
+.pop[hidden] { display: none; }
+.pop-search { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--line); color: var(--muted-foreground); }
+.pop-search input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--foreground); font: inherit; font-size: 13px; }
+.pop-search kbd, .pop-foot kbd { font: 500 10.5px/1 inherit; padding: 3px 5px; border-radius: 5px; border: 1px solid var(--border); background: var(--muted); color: var(--muted-foreground); }
+.chips { display: flex; gap: 6px; padding: 10px 12px 4px; overflow-x: auto; scrollbar-width: none; }
+.chip { --ring-gap: var(--popover); display: inline-flex; align-items: center; gap: 6px; flex: none; height: 26px; padding: 0 10px 0 4px; border-radius: 999px; font-size: 12px; font-weight: 550; color: var(--muted-foreground); border: 1px solid var(--line); background: color-mix(in srgb, var(--foreground) 3%, transparent); transition: all .15s; }
+.chip.text-only { padding: 0 11px; }
+.chip img { width: 18px; height: 18px; border-radius: 50%; }
+.chip:hover { color: var(--foreground); }
+.chip[aria-pressed="true"] { color: var(--foreground); background: color-mix(in srgb, var(--venue, var(--ring)) 16%, transparent); border-color: color-mix(in srgb, var(--venue, var(--ring)) 45%, transparent); }
+.chip .count { font-size: 11px; opacity: .7; }
+.opts { list-style: none; margin: 0; padding: 6px; max-height: 330px; overflow: auto; }
+.opt { --ring-gap: var(--popover); position: relative; display: flex; align-items: center; gap: 11px; min-width: 0; padding: 8px 10px; border-radius: 11px; cursor: pointer; transition: background .12s; }
+.opt:hover, .opt.is-active { background: color-mix(in srgb, var(--venue, var(--foreground)) 8%, var(--accent)); }
+.opt[aria-selected="true"] { background: color-mix(in srgb, var(--ring) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ring) 30%, transparent); }
+.opt .main { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.opt .top, .opt .bot { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.opt .right { display: grid; justify-items: end; gap: 3px; flex: none; font-size: 12px; font-variant-numeric: tabular-nums; }
+.opt .right small { color: var(--muted-foreground); font-size: 11px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opt .right b.bal { font-weight: 600; }
+.opt mark { background: color-mix(in srgb, var(--ring) 30%, transparent); color: inherit; border-radius: 3px; }
+.opt-all .nm { font-weight: 600; }
+.opt-all small { color: var(--muted-foreground); font-size: 11px; }
+.pop-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--line); color: var(--muted-foreground); font-size: 11px; }
+.pop-empty { padding: 26px; text-align: center; color: var(--muted-foreground); }
+
+/* S2 · tiles */
+.pop.tiles { width: 470px; }
+.tgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 10px; max-height: 380px; overflow: auto; }
+.tile { --ring-gap: var(--popover); position: relative; display: grid; gap: 7px; align-content: start; min-width: 0; padding: 12px; border-radius: 13px; text-align: left; overflow: hidden; isolation: isolate; cursor: pointer;
+  background: linear-gradient(150deg, color-mix(in srgb, var(--venue, var(--foreground)) 13%, var(--card)), var(--card) 60%); border: 1px solid color-mix(in srgb, var(--venue, var(--foreground)) 16%, var(--line)); transition: transform .15s, border-color .15s, box-shadow .15s; }
+.tile:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--venue, var(--ring)) 45%, var(--line)); }
+.tile[aria-selected="true"] { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 22%, transparent), 0 10px 26px -12px color-mix(in srgb, var(--ring) 50%, transparent); }
+.tile .head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.tile .bal { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 12px; }
+.tile .nm { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.3; }
+.tile .tags { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.tile.wide { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; }
+.tile.wide small { color: var(--muted-foreground); font-size: 11px; }
+.tile .pfl { font-size: 11px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* S3 · chip rail */
+.rail { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); }
+.rail > .lbl { font-size: 12px; color: var(--muted-foreground); margin-right: 4px; }
+.rail .chip { height: 32px; padding: 0 12px 0 4px; font-size: 12.5px; }
+.rail .chip .ava { --s: 24px; border-radius: 50%; }
+.rail .chip .ava img { border-radius: 50%; }
+.rail .chip .addr { height: 17px; font-size: 10.5px; }
+.rail .chip.more { padding: 0 10px; }
+.rail-wrap { position: relative; }
+.rail-wrap .pop { top: calc(100% + 6px); left: auto; right: 0; }
+
+/* Today's native list */
+.native { position: absolute; z-index: 10; top: calc(100% + 6px); left: 0; min-width: 100%; padding: 5px; border-radius: 9px; background: #1d2026; border: 1px solid #3a3f48; box-shadow: 0 12px 30px rgb(0 0 0 / .5); font: 14px system-ui, sans-serif; color: #e8e8e8; }
+.native div { padding: 5px 10px 5px 26px; border-radius: 5px; }
+.native div.sel { padding-left: 10px; }
+.sel-stage { min-height: 640px; }
+.l-tiles .unnamed-tag { display: none; }
+</style>
+</head>
+<body>
+<div class="vx" id="vx"></div>
+<script>
+(() => {
+const svgLogo = {
+  hyperliquid: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180"><rect width="180" height="180" fill="#0f1a1f"/><path fill="#97fce4" transform="translate(90 90) scale(.78) translate(-91 -88)" d="M15 95c0-35 30-50 50-33 15 12 25 18 35-2 12-25 40-35 55-18 17 20 15 78 0 96-15 17-43 7-55-13-10-17-20-17-35-3-20 18-50 8-50-27z"/></svg>',
+  'lighter-rh': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180"><rect width="180" height="180" fill="#0b0b0f"/><path fill="#fff" d="M45 47 72 20v96l-27 25zM80 101l26-23v38l-26 25z"/><circle cx="138" cy="138" r="40" fill="#ccff00" stroke="#0b0b0f" stroke-width="6"/><path fill="#0b0b0f" d="M121 160c4-13 10-24 18-32-6 3-11 7-15 12 2-17 15-34 37-40-1 16-9 32-24 41l7-1c-7 5-14 8-21 9l-2 11z"/></svg>',
+  lighter: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180"><rect width="180" height="180" fill="#0b0b0f"/><path fill="#fff" d="M57 55 86 26v102l-29 27zM94 113l28-25v40l-28 27z"/></svg>',
+  risex: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1821 1821"><rect width="1821" height="1821" fill="#02e082"/><path id="s" fill="#131313" d="M413 469h137l168 361c27 58 97 70 144 32l469-392h68L830 948c-72 61-175 37-216-50z"/><use href="#s" transform="rotate(180 910 910)"/></svg>',
+}
+const logoUrl = key => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgLogo[key])}`
+const I = {
+  chevron: '<path d="m6 9 6 6 6-6"/>', check: '<path d="M20 6 9 17l-5-5"/>', search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  wallet: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
+  notebook: '<path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/><path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><path d="M21.4 5.6a1 1 0 1 0-3-3l-5 5a2 2 0 0 0-.5.9l-.9 2.9a.5.5 0 0 0 .6.6l2.9-.8a2 2 0 0 0 .9-.5z"/>',
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  layers: '<path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>',
+}
+const ic = (n, s = 14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]}</svg>`
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+
+// `accent` would be a venue descriptor field beside `logo`; an unknown venue falls back to a neutral accent.
+const venues = {
+  hyperliquid: { name: 'Hyperliquid', logo: 'hyperliquid', accent: '#97fce4' },
+  lighter: { name: 'Lighter', logo: 'lighter', accent: '#c9ced6' },
+  'lighter-rh': { name: 'Lighter · Robinhood', logo: 'lighter-rh', accent: '#ccff00' },
+  risex: { name: 'RISEx', logo: 'risex', accent: '#02e082' },
+  manual: { name: 'Manual', icon: 'notebook', accent: '#9aa3b0' },
+  hip3: { name: 'Hyperliquid Builder-Deployed Perpetuals (HIP-3)', icon: 'wallet', accent: '#9085e9' },
+}
+const portfolios = { farming: 'farming', intraday: 'intraday', swing: 'Swing research desk — long-horizon experiments' }
+const accounts = [
+  { id: 'hl-main', name: 'main', venue: 'hyperliquid', source: '0x6d1e9c42aa1b3c4d5e6f708192a3b4c5d6e7f389', portfolio: 'farming', bal: '$1,336.06' },
+  { id: 'lt-main', name: 'Main account', venue: 'lighter', source: '48213', portfolio: 'farming', bal: '$1,307.49' },
+  { id: 'rx-main', name: 'main', venue: 'risex', source: '0x9a3c55e7b1d2c3f4a5b6c7d8e9f0a1b2c3d401be', portfolio: 'intraday', bal: '$1,372.30' },
+  { id: 'rh-long', name: 'Swing desk — long-horizon subaccount for majors', venue: 'lighter-rh', source: '281474976710655', portfolio: 'swing', bal: '$3,043.08' },
+  { id: 'hl-blank', name: '', venue: 'hyperliquid', source: '0x3f5ab2c19e0d4471a8b6e2f0c9d1aa7c3b21c0de', portfolio: 'swing', bal: '$2,351.04' },
+  { id: 'hip3-main', name: 'main', venue: 'hip3', source: '0x77b04c1d2e3f405162738495a6b7c8d9e0f1a2b3', portfolio: 'swing', bal: '$1,744.32' },
+  { id: 'hl-main-2', name: 'main', venue: 'hyperliquid', source: '0xa41c7d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a92de', portfolio: 'swing', bal: '$1,440.96' },
+  { id: 'manual', name: 'Cold storage ledger', venue: 'manual', source: null, portfolio: 'swing', bal: '$900.60' },
+  { id: 'lt-scratch', name: 'Scratch', venue: 'lighter', source: '7', portfolio: null, bal: '$214.10' },
+]
+const byId = Object.fromEntries(accounts.map(a => [a.id, a]))
+const groups = [
+  { name: 'farming', note: '65.83% of total', short: '$2.6K', count: 2, slices: [['hl-main', 2, 50.54], ['lt-main', 1, 49.46]] },
+  { name: 'intraday', note: '34.17% of total', short: '$1.4K', count: 1, slices: [['rx-main', 1, 100]] },
+  { name: portfolios.swing, note: 'stress data', short: '$9.5K', count: 5, slices: [['rh-long', 1, 32.1], ['hl-blank', 2, 24.8], ['hip3-main', 3, 18.4], ['hl-main-2', 4, 15.2], ['manual', 5, 9.5]] },
+]
+
+function shortSource(v) {
+  if (!v) return null
+  if (/^0x[\da-f]{40}$/i.test(v)) return `${v.slice(0, 6)}…${v.slice(-4)}`
+  if (/^\d+$/.test(v)) return v.length > 10 ? `#${v.slice(0, 4)}…${v.slice(-4)}` : `#${v}`
+  return v.length > 16 ? `${v.slice(0, 8)}…${v.slice(-4)}` : v
+}
+const V = a => venues[a.venue]
+const named = a => a.name.trim() !== ''
+const key = a => a.name.trim().toLowerCase()
+const ambiguous = a => !named(a) || accounts.filter(b => key(b) === key(a)).length > 1
+const vars = (a, slot) => `--venue:${V(a).accent};${slot ? `--slice:var(--series-${slot});` : ''}`
+const title = a => `${named(a) ? a.name : 'Unnamed account'} · ${V(a).name} · ${a.source ?? 'Manual record'}`
+
+const ava = (a, cls = '', extra = '') => { const v = V(a); return `<span class="ava ${cls}" style="--venue:${v.accent}">${v.logo ? `<img src="${logoUrl(v.logo)}" alt="">` : ic(v.icon)}${extra}</span>` }
+const vtag = (a, withLogo = false) => { const v = V(a); return `<span class="vtag" title="${esc(v.name)}" style="--venue:${v.accent}">${withLogo && v.logo ? `<img src="${logoUrl(v.logo)}" alt="">` : ''}<span>${esc(v.name)}</span></span>` }
+const addr = a => a.source ? `<span class="addr" title="${esc(a.source)}">${esc(shortSource(a.source))}${ic('copy', 11)}</span>` : '<span class="addr manual">Manual record</span>'
+const addrIf = a => named(a) ? addr(a) : ''
+const nm = (a, q) => named(a) ? `<span class="nm">${mark(a.name, q)}</span>` : `<span class="nm unnamed">${esc(shortSource(a.source))}</span><span class="unnamed-tag">Unnamed</span>`
+const mark = (text, q) => q ? esc(text).replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig'), '<mark>$1</mark>') : esc(text)
+
+// ---------- donut ----------
+const tau = Math.PI * 2
+const pt = (r, a) => `${(r * Math.sin(a)).toFixed(3)} ${(-r * Math.cos(a)).toFixed(3)}`
+function arc(o, i, s, e) {
+  if (e - s >= tau - 1e-6) return `M ${pt(o, 0)} A ${o} ${o} 0 1 1 ${pt(o, Math.PI)} A ${o} ${o} 0 1 1 ${pt(o, 0)} M ${pt(i, 0)} A ${i} ${i} 0 1 0 ${pt(i, Math.PI)} A ${i} ${i} 0 1 0 ${pt(i, 0)} Z`
+  const l = e - s > Math.PI ? 1 : 0
+  return `M ${pt(o, s)} A ${o} ${o} 0 ${l} 1 ${pt(o, e)} L ${pt(i, e)} A ${i} ${i} 0 ${l} 0 ${pt(i, s)} Z`
+}
+function donut(g) {
+  let at = 0
+  const p = g.slices.map(([, slot, pct]) => { const s = at; at += pct / 100 * tau; return `<path d="${arc(52, 33, s, at)}" fill="var(--series-${slot})"/>` }).join('')
+  return `<div class="donut"><svg viewBox="-56 -56 112 112" aria-hidden="true">${p}</svg><div class="c"><strong>${g.short}</strong><small>${g.count} ${g.count === 1 ? 'account' : 'accounts'}</small></div></div>`
+}
+
+const legends = {
+  today: {
+    label: 'Today', pitch: '<strong>Current.</strong> Name only — the two “main” accounts on different venues are indistinguishable.',
+    row: (a, slot, pct) => `<li style="${vars(a, slot)}" title="${esc(title(a))}"><span class="sw"></span><span class="nm" style="font-weight:400">${esc(named(a) ? a.name : shortSource(a.source))}</span><span class="share">${pct.toFixed(2)}%</span></li>`,
+  },
+  capsule: {
+    label: 'Capsules', pitch: '<strong>Branded capsules.</strong> Each account is a capsule tinted with its venue colour: logo avatar ringed in the slice colour, bold name, a venue tag and the address chip (copy on hover), with a glowing share bar.',
+    row: (a, slot, pct) => `<li style="${vars(a, slot)}" title="${esc(title(a))}">${ava(a, 'ring')}<span class="main"><span class="top">${nm(a)}</span><span class="bot">${vtag(a)}${addrIf(a)}</span></span><span class="right"><span class="share">${pct.toFixed(2)}%</span><span class="bar"><i style="width:${pct}%"></i></span></span></li>`,
+  },
+  bars: {
+    label: 'Share bars', pitch: '<strong>Legend as a bar chart.</strong> Each row fills to its share in the slice colour, so the legend reads like a ranked bar chart. One line: logo, name, venue tag, address.',
+    row: (a, slot, pct) => `<li style="${vars(a, slot)};--pct:${pct}%" title="${esc(title(a))}">${ava(a, 'sm')}<span class="meta">${nm(a)}${addrIf(a)}</span><span class="share">${pct.toFixed(2)}%</span></li>`,
+  },
+  tiles: {
+    label: 'Tiles', pitch: '<strong>Account tiles.</strong> The legend becomes a small grid of cards: a glowing slice-colour edge, the venue logo with a soft halo of its brand colour, share in large figures, then name, venue and address.',
+    row: (a, slot, pct) => `<li style="${vars(a, slot)}" title="${esc(title(a))}"><span class="head">${ava(a, 'lg glow')}<span class="share">${pct.toFixed(1)}%</span></span>${`<span style="display:flex;gap:6px;align-items:center;min-width:0">${nm(a)}</span>`}<span class="tags">${vtag(a)}${addrIf(a)}</span><span class="money">${a.bal}</span></li>`,
+  },
+  hover: {
+    label: 'Compact + card', pitch: '<strong>Compact rows, rich hover card.</strong> The legend stays light (logo ringed in the slice colour, name, share); hovering or focusing a row opens a glass account card with venue, full address, portfolio and balance. Hover any row.',
+    row: (a, slot, pct, first) => `<li class="${first ? 'is-hover' : ''}" style="${vars(a, slot)}" tabindex="0">${ava(a, 'sm ring')}<span class="nm">${esc(named(a) ? a.name : shortSource(a.source))}</span>${ambiguous(a) && named(a) ? addr(a) : ''}<span class="share">${pct.toFixed(2)}%</span>
+      <span class="hovercard"><span class="hc-top">${ava(a, 'xl ring')}<div><span style="display:flex;gap:6px;align-items:center;min-width:0" class="hc-name">${nm(a)}</span>${vtag(a)}</div></span>
+      <dl><dt>Address</dt><dd class="full">${esc(a.source ? (a.source.length > 22 ? `${a.source.slice(0, 12)}…${a.source.slice(-8)}` : a.source) : 'Manual record')}</dd><dt>Portfolio</dt><dd>${esc(a.portfolio ? portfolios[a.portfolio] : 'Unassigned')}</dd><dt>Balance</dt><dd>${a.bal} · ${pct.toFixed(2)}%</dd></dl></span></li>`,
+  },
+}
+
+function card(g, legendKey, hoverFirst) {
+  const L = legends[legendKey]
+  const stack = legendKey === 'tiles'
+  return `<article class="card"><header><span class="pf">${ic('folder', 15)}<span>${esc(g.name)}</span></span><span>${g.note}</span></header>
+    <div class="card-body${stack ? ' stack' : ''}">${donut(g)}<ul class="legend l-${legendKey}">${g.slices.map(([id, slot, pct], i) => L.row(byId[id], slot, pct, hoverFirst && i === 0)).join('')}</ul></div></article>`
+}
+
+// ---------- selectors ----------
+let state = { sel: 'hl-main', venue: 'all', q: '', open: true }
+const sw = accounts.length, vcount = new Set(accounts.map(a => a.venue)).size
+const triggerBody = a => !a
+  ? `<span class="stackava">${['hyperliquid', 'lighter', 'risex'].map(v => `<span class="ava"><img src="${logoUrl(v)}" alt=""></span>`).join('')}</span><span class="nm" style="font-weight:550">All accounts</span>`
+  : `${ava(a, 'sm')}${named(a) ? `<span class="nm">${esc(a.name)}</span>` : `<span class="nm unnamed">${esc(shortSource(a.source))}</span>`}${ambiguous(a) && named(a) ? `<span class="addr">${esc(shortSource(a.source) ?? 'Manual')}</span>` : ''}`
+const trigger = (a, open) => `<button type="button" class="trigger" data-act="toggle" aria-haspopup="listbox" aria-expanded="${open}" style="${a ? `--venue:${V(a).accent}` : ''}" title="${a ? esc(title(a)) : 'All enabled accounts'}">${triggerBody(a)}<span class="chev">${ic('chevron')}</span></button>`
+const otherFilters = () => `<label>Portfolio<span class="fsel">All portfolios${ic('chevron')}</span></label><label>Period<span class="fsel">All retained${ic('chevron')}</span></label>`
+const matches = a => (state.venue === 'all' || a.venue === state.venue) && (!state.q || [a.name, V(a).name, a.source ?? '', a.portfolio ? portfolios[a.portfolio] : 'Unassigned'].some(t => t.toLowerCase().includes(state.q.toLowerCase())))
+const venueChips = () => `<div class="chips"><button class="chip text-only" data-venue="all" aria-pressed="${state.venue === 'all'}">All venues</button>${Object.entries(venues).filter(([k]) => accounts.some(a => a.venue === k)).map(([k, v]) => `<button class="chip" data-venue="${k}" aria-pressed="${state.venue === k}" style="--venue:${v.accent}" title="${esc(v.name)}">${v.logo ? `<img src="${logoUrl(v.logo)}" alt="">` : `<span class="ava sm" style="--s:18px;border-radius:50%">${ic(v.icon)}</span>`}${esc(v.name.length > 14 ? `${v.name.slice(0, 12)}…` : v.name)}<span class="count">${accounts.filter(a => a.venue === k).length}</span></button>`).join('')}</div>`
+const optRow = a => `<li class="opt" role="option" data-pick="${a.id}" aria-selected="${state.sel === a.id}" style="--venue:${V(a).accent}" title="${esc(title(a))}">${ava(a, 'lg glow', state.sel === a.id ? `<span class="tick">${ic('check')}</span>` : '')}<span class="main"><span class="top">${nm(a, state.q)}</span><span class="bot">${vtag(a)}${addrIf(a)}</span></span><span class="right"><b class="bal">${a.bal}</b><small>${esc(a.portfolio ? portfolios[a.portfolio] : 'Unassigned')}</small></span></li>`
+const allRow = () => `<li class="opt opt-all" role="option" data-pick="" aria-selected="${state.sel === ''}"><span class="stackava" style="--ring-gap:var(--popover)">${['hyperliquid', 'lighter', 'risex'].map(v => `<span class="ava"><img src="${logoUrl(v)}" alt=""></span>`).join('')}</span><span class="main"><span class="nm">All enabled accounts</span><small>${sw} accounts across ${vcount} venues</small></span></li>`
+
+const selectors = {
+  today: {
+    label: 'Today', pitch: '<strong>Current.</strong> The native select lists “Main account”, “main”, “main”.',
+    render: () => `<div class="filters"><div class="fl acc"><span>Account</span><span class="fsel" style="outline:2px solid var(--ring);outline-offset:2px">All enabled accounts${ic('chevron')}</span><div class="native"><div class="sel">✓ All enabled accounts</div><div>Main account</div><div>main</div><div>main</div></div></div>${otherFilters()}</div>`,
+  },
+  command: {
+    label: 'Command picker', pitch: '<strong>Command-style picker.</strong> Search plus venue chips with logos, then rich rows: haloed logo avatar, name, branded venue tag, address chip, balance and portfolio. The trigger carries the venue tint and adds the address only when the name is shared. Try typing, the chips, or picking a row.',
+    render: () => {
+      const list = accounts.filter(matches)
+      return `<div class="filters"><div class="fl acc"><span>Account</span>${trigger(byId[state.sel], state.open)}
+        <div class="pop" ${state.open ? '' : 'hidden'}><div class="pop-search">${ic('search')}<input data-input="q" placeholder="Search name, venue, address…" value="${esc(state.q)}"><kbd>Esc</kbd></div>${venueChips()}
+        <ul class="opts" role="listbox">${!state.q && state.venue === 'all' ? allRow() : ''}${list.map(optRow).join('') || '<li class="pop-empty">No account matches</li>'}</ul>
+        <div class="pop-foot"><span>${list.length} of ${sw} accounts</span><span><kbd>↑</kbd> <kbd>↓</kbd> move · <kbd>Enter</kbd> select</span></div></div></div>${otherFilters()}</div>`
+    },
+  },
+  tiles: {
+    label: 'Tile picker', pitch: '<strong>Tile picker.</strong> The popover is a grid of account cards washed in each venue’s colour; the selected card glows. Strong visual identity, best for a handful to a few dozen accounts.',
+    render: () => `<div class="filters"><div class="fl acc"><span>Account</span>${trigger(byId[state.sel], state.open)}
+      <div class="pop tiles" ${state.open ? '' : 'hidden'}><div class="tgrid">
+        <button class="tile wide" data-pick="" aria-selected="${state.sel === ''}"><span class="stackava" style="--ring-gap:var(--card)">${['hyperliquid', 'lighter', 'risex', 'lighter-rh'].map(v => `<span class="ava"><img src="${logoUrl(v)}" alt=""></span>`).join('')}</span><span style="display:grid"><span class="nm">All enabled accounts</span><small>${sw} accounts · ${vcount} venues</small></span></button>
+        ${accounts.map(a => `<button class="tile" data-pick="${a.id}" aria-selected="${state.sel === a.id}" style="--venue:${V(a).accent}" title="${esc(title(a))}"><span class="head">${ava(a, 'lg glow', state.sel === a.id ? `<span class="tick">${ic('check')}</span>` : '')}<span class="bal">${a.bal}</span></span><span style="display:flex;gap:6px;align-items:center;min-width:0">${nm(a)}</span><span class="tags">${vtag(a)}${addrIf(a)}</span><span class="pfl">${esc(a.portfolio ? portfolios[a.portfolio] : 'Unassigned')}</span></button>`).join('')}
+      </div></div></div>${otherFilters()}</div>`,
+  },
+  rail: {
+    label: 'Chip rail', pitch: '<strong>Chip rail.</strong> Accounts become avatar chips on their own row above the other filters — one click to switch, no dropdown. Shared names show their address; extra accounts fold into “+N”, which opens the command picker.',
+    render: () => {
+      const shown = accounts.slice(0, 4)
+      const chip = a => `<button class="chip" data-pick="${a.id}" aria-pressed="${state.sel === a.id}" style="--venue:${V(a).accent};--ring-gap:var(--background)" title="${esc(title(a))}">${ava(a)}${named(a) ? esc(a.name.length > 22 ? `${a.name.slice(0, 20)}…` : a.name) : `<span style="font-family:var(--mono)">${esc(shortSource(a.source))}</span>`}${ambiguous(a) && named(a) ? `<span class="addr">${esc(shortSource(a.source) ?? 'Manual')}</span>` : ''}</button>`
+      return `<div class="rail-wrap"><div class="rail"><span class="lbl">Account</span><button class="chip text-only" data-pick="" aria-pressed="${state.sel === ''}">All · ${sw}</button>${shown.map(chip).join('')}<button class="chip more" data-act="toggle" aria-expanded="${state.open}">+${sw - shown.length} more ${ic('chevron', 12)}</button></div>
+        <div class="pop" ${state.open ? '' : 'hidden'}><div class="pop-search">${ic('search')}<input data-input="q" placeholder="Search name, venue, address…" value="${esc(state.q)}"><kbd>Esc</kbd></div><ul class="opts">${accounts.slice(4).filter(matches).map(optRow).join('')}</ul></div></div>
+        <div class="filters" style="margin-top:10px">${otherFilters()}</div>`
+    },
+  },
+}
+
+// ---------- page ----------
+const root = document.getElementById('vx')
+const params = new URLSearchParams(location.search)
+let legendKey = params.get('legend') || 'capsule', selKey = params.get('selector') || 'command'
+const only = params.get('only')
+function tabs(map, current, kind) {
+  return `<div class="vx-tabs" role="tablist">${Object.entries(map).map(([k, v], i) => `<button class="vx-tab" role="tab" data-${kind}="${k}" aria-selected="${k === current}"><b>${i === 0 ? '–' : i}</b>${v.label}</button>`).join('')}</div>`
+}
+function render() {
+  const L = legends[legendKey], S = selectors[selKey]
+  const legendHtml = `<section class="vx-section" data-capture="legend-${legendKey}"><h2>Allocation legend</h2><p>Your three accounts, then a stress portfolio: long name, unnamed account, unknown long venue, two “main” on one venue, manual record.</p>
+    ${tabs(legends, legendKey, 'legend')}<div class="vx-shot" data-shot="legend-${legendKey}"><div class="vx-pitch">${L.pitch}</div>
+    <div class="vx-screen"><div class="alloc-pair">${card(groups[0], legendKey, legendKey === 'hover')}${legendKey === 'hover' ? '' : card(groups[1], legendKey)}${card(groups[2], legendKey)}</div></div></div></section>`
+  const selHtml = `<section class="vx-section" data-capture="selector-${selKey}"><h2>Account selector</h2><p>Activity filter and the other account filters. Interactive: open, search, filter by venue and pick.</p>
+    ${tabs(selectors, selKey, 'selector')}<div class="vx-shot" data-shot="selector-${selKey}"><div class="vx-pitch">${S.pitch}</div>
+    <div class="vx-screen sel-stage">${S.render()}</div></div></section>`
+  root.innerHTML = only === 'legend' ? legendHtml : only === 'selector' ? selHtml : legendHtml + selHtml
+}
+root.addEventListener('click', e => {
+  const t = e.target.closest('button, [data-pick]')
+  if (!t) return
+  if (t.dataset.legend) { legendKey = t.dataset.legend; render(); return }
+  if (t.dataset.selector) { selKey = t.dataset.selector; state = { ...state, open: true, q: '', venue: 'all' }; render(); return }
+  if (t.dataset.act === 'toggle') { state.open = !state.open; render(); return }
+  if (t.dataset.venue) { state.venue = t.dataset.venue; render(); return }
+  if (t.dataset.pick !== undefined) { state.sel = t.dataset.pick; state.open = false; render() }
+})
+root.addEventListener('input', e => {
+  if (e.target.dataset.input !== 'q') return
+  state.q = e.target.value; const pos = e.target.selectionStart; render()
+  const input = root.querySelector('[data-input="q"]'); input.focus(); input.setSelectionRange(pos, pos)
+})
+root.addEventListener('keydown', e => { if (e.key === 'Escape') { state.open = false; render() } })
+render()
+window.__vx = { legends: Object.keys(legends), selectors: Object.keys(selectors), set(l, s) { legendKey = l; selKey = s; state = { sel: 'hl-main', venue: 'all', q: '', open: true }; render() } }
+})()
+</script>
+</body>
+</html>

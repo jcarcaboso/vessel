@@ -1,8 +1,9 @@
-import { ArrowLeft } from 'lucide-react'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { ArrowLeft, Layers } from 'lucide-react'
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
+import { AccountAvatar, AccountName, IdentityTile, SourceChip, VenueTag } from '@/components/accounts/AccountIdentity'
+import { accountLabel, accountTitle, useVenueAccent } from '@/components/accounts/identity'
 import { useVenues } from '@/api/venues'
-import { VenueLogo } from '@/components/venues/VenueBadge'
 import { money } from '@/lib/format'
 import { PortfolioIcon } from './PortfolioIcon'
 import { portfolioAllocations, totalAllocation, type Allocation, type AllocationSlice } from './overview-allocation'
@@ -20,6 +21,9 @@ function arc(outer: number, inner: number, start: number, end: number) {
 // Display only, inside the small rings; the exact total stays in the portfolio's own legend and tooltip.
 const compactMoney = (value: string | null) => value === null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }).format(value as Intl.StringNumericLiteral)
 const fill = (slice: AllocationSlice) => slice.slot === null ? 'var(--series-other)' : `var(--series-${slice.slot})`
+const sliceAccount = (s: AllocationSlice & { venueId: string }) => ({ id: s.id, name: s.name, venueId: s.venueId, source: s.source })
+/** The slice's name; an unnamed account reads as its short source. */
+const sliceName = (s: AllocationSlice) => s.venueId ? accountLabel(sliceAccount({ ...s, venueId: s.venueId })) : s.name
 
 /**
  * A donut of part-to-whole balance shares. Hovering or focusing a slice or legend row emphasizes it. `selectedId` is the
@@ -37,9 +41,8 @@ function Donut({ allocation, size, selectedId, onScope }: {
   const active = hover ?? emphasized
   const radius = size === 'lg' ? 84 : 52, inner = radius * 0.64
   const current = allocation.slices.find(s => s.id === active)
-  const withVenue = size === 'lg' && allocation.slices.some(s => s.venueId)
   const ends = allocation.slices.reduce<number[]>((list, s) => [...list, (list.at(-1) ?? 0) + s.fraction * tau], [])
-  const label = allocation.slices.map(s => `${s.name} ${s.share}`).join(', ')
+  const label = allocation.slices.map(s => `${sliceName(s)} ${s.share}`).join(', ')
   return <div className={`allocation-donut allocation-${size}`}>
     <div className="allocation-figure">
       <svg viewBox={`${-radius - 4} ${-radius - 4} ${radius * 2 + 8} ${radius * 2 + 8}`} role="img" aria-label={`${allocation.name} balance shares: ${label}`}>
@@ -50,31 +53,57 @@ function Donut({ allocation, size, selectedId, onScope }: {
             className={dimmed ? 'allocation-dim' : undefined} data-scope={to ?? undefined}
             onMouseEnter={() => setHover(s.id)} onMouseLeave={() => setHover(null)}
             onClick={to ? () => onScope(to) : undefined}>
-            <title>{`${s.name}: ${money(s.balanceUsd)} · ${s.share}`}</title>
+            <title>{`${sliceName(s)}: ${money(s.balanceUsd)} · ${s.share}`}</title>
           </path>
         })}
       </svg>
       <div className="allocation-center" aria-hidden="true">
-        {current ? <><strong>{current.share}</strong><small>{current.name}</small></> :
+        {current ? <><strong>{current.share}</strong><small>{sliceName(current)}</small></> :
           <><strong>{size === 'sm' ? compactMoney(allocation.totalUsd) : money(allocation.totalUsd)}</strong><small>{allocation.accountCount} {allocation.accountCount === 1 ? 'account' : 'accounts'}</small></>}
       </div>
     </div>
-    <ul className={`allocation-legend${withVenue ? ' with-venue' : ''}`} aria-label={`${allocation.name} shares`}>
+    <ul className="allocation-legend" aria-label={`${allocation.name} shares`}>
       {allocation.slices.map(s => {
-        const to = target(s)
-        return <li key={s.id} className={active === s.id ? 'allocation-active' : active !== null ? 'allocation-dim' : undefined}
+        const to = target(s), name = sliceName(s)
+        const title = s.venueId ? accountTitle(sliceAccount({ ...s, venueId: s.venueId }), venues.name(s.venueId)) : name
+        const identity = <SliceIdentity slice={s} />
+        return <LegendRow key={s.id} slice={s} className={active === s.id ? 'allocation-active' : active !== null ? 'allocation-dim' : undefined}
           onMouseEnter={() => setHover(s.id)} onMouseLeave={() => setHover(null)}>
-          <span className="allocation-swatch" style={{ background: fill(s) }} aria-hidden="true" />
-          {to ? <button className="allocation-name" onFocus={() => setHover(s.id)} onBlur={() => setHover(null)} aria-pressed={s.id === emphasized}
-            data-focus={s.scope ?? s.id} onClick={() => onScope(to)} aria-label={`Show allocation for ${s.name}`} title={s.name}>{s.name}</button> : <span className="allocation-name" title={s.name}>{s.name}</span>}
-          {withVenue && <span className="allocation-venue" title={s.venueId ? venues.name(s.venueId) : undefined}>{s.venueId && <><VenueLogo venueId={s.venueId} size="sm" /><span>{venues.name(s.venueId)}</span></>}</span>}
-          <span className="allocation-money">{money(s.balanceUsd)}</span>
-          <strong className="allocation-share">{s.share}</strong>
-        </li>
+          {to ? <button className="allocation-identity" onFocus={() => setHover(s.id)} onBlur={() => setHover(null)} aria-pressed={s.id === emphasized}
+            data-focus={s.scope ?? s.id} onClick={() => onScope(to)} aria-label={`Show allocation for ${name}`} title={title}>{identity}</button>
+            : <span className="allocation-identity" title={title}>{identity}</span>}
+          {size === 'lg' && <span className="allocation-money">{money(s.balanceUsd)}</span>}
+          <span className="allocation-share-block"><strong className="allocation-share">{s.share}</strong>
+            <span className="allocation-bar" aria-hidden="true"><i style={{ width: `${Math.min(s.fraction, 1) * 100}%` }} /></span></span>
+        </LegendRow>
       })}
     </ul>
     <AllocationNotes allocation={allocation} />
   </div>
+}
+
+/** A legend row: a capsule tinted with the account's venue accent, its slice colour on the avatar ring and share bar. */
+function LegendRow({ slice, className, children, onMouseEnter, onMouseLeave }: {
+  slice: AllocationSlice; className: string | undefined; children: ReactNode; onMouseEnter: () => void; onMouseLeave: () => void
+}) {
+  const accent = useVenueAccent(slice.venueId ?? '')
+  return <li className={className} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}
+    style={{ '--slice': fill(slice), ...(slice.venueId && accent ? { '--venue-accent': accent } : {}) } as CSSProperties}>{children}</li>
+}
+
+const accountsText = (n: number) => `${n} ${n === 1 ? 'account' : 'accounts'}`
+/** Who a slice is: an account (venue logo, name, venue tag and source), a portfolio (its icon and size) or Other. */
+function SliceIdentity({ slice }: { slice: AllocationSlice }) {
+  if (slice.venueId) return <>
+    <AccountAvatar venueId={slice.venueId} ring={fill(slice)} />
+    <span className="allocation-text"><span className="allocation-line"><AccountName account={sliceAccount({ ...slice, venueId: slice.venueId })} /></span>
+      <span className="allocation-line allocation-tags"><VenueTag venueId={slice.venueId} />{slice.source !== undefined && <SourceChip source={slice.source} />}</span></span>
+  </>
+  return <>
+    <IdentityTile ring={fill(slice)}>{slice.slot === null ? <Layers size={14} /> : <PortfolioIcon icon={slice.icon} size={14} />}</IdentityTile>
+    <span className="allocation-text"><span className="allocation-line"><span className="account-name">{slice.name}</span></span>
+      <span className="allocation-line"><small className="allocation-meta">{accountsText(slice.accountCount)}</small></span></span>
+  </>
 }
 
 function AllocationNotes({ allocation }: { allocation: Allocation }) {

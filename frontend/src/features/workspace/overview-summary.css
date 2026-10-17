@@ -2,7 +2,7 @@
 /* View all is level with the select (36px), not with a small button. */
 .overview-scope > [data-slot="button"] { height: 36px; }
 .overview-scope select, .overview-summary-controls select { max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--field); color: var(--foreground); font-size: var(--text-sm); }
-.overview-scope .native-select { min-width: min(100%, 280px); }
+.overview-scope .account-picker-trigger { width: auto; min-width: min(100%, 280px); max-width: 420px; }
 .overview-summary { margin-bottom: 18px; }
 .overview-summary-controls { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .overview-summary-controls label { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--muted-foreground); white-space: nowrap; }
@@ -37,8 +37,8 @@
 @media (max-width: 600px) {
   /* The label sits above; the select takes the row and View all, when shown, sits beside it. */
   .overview-scope { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; }
-  .overview-scope > label { grid-column: 1 / -1; }
-  .overview-scope .native-select { width: 100%; min-width: 0; }
-  .overview-scope .native-select:last-child { grid-column: 1 / -1; }
+  .overview-scope > span:first-child { grid-column: 1 / -1; }
+  .overview-scope .account-picker-trigger { width: 100%; min-width: 0; max-width: none; }
+  .overview-scope .account-picker-trigger:last-child { grid-column: 1 / -1; }
   .overview-summary .shell-panel-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
 }
