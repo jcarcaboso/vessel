@@ -99,6 +99,6 @@ public static class ExecutionIntegrity
         var fills = facts.Fills;
         var entered = Quantity(fills.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill));
         return entered.Units.Sign > 0 && entered == Quantity(fills.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill)) &&
-            Problems(EntrySide(PlayDocuments.Read(facts.Play.Plan)), fills, facts.IncompleteOrders ?? []).Count == 0;
+            Problems(EntrySide(facts.CurrentPlan), fills, facts.IncompleteOrders ?? []).Count == 0;
     }
 }
