@@ -8,8 +8,22 @@ import { isGuid, isRecord, isText } from './guards'
  */
 export type ApiCredentials =
   | { kind: 'bearer'; token: string }
-  | { kind: 'session'; userId: string; sessionId: string; generation?: () => number }
+  | { kind: 'session'; userId: string; sessionId: string; generation?: SessionGeneration }
   | { kind: 'public' }
+
+/**
+ * The tab's session generation. It grows when this tab adopts a newer session of the same user from another tab;
+ * answers to requests sent under an older generation are never published.
+ */
+export interface SessionGeneration {
+  current(): number
+  /** Hears every change until the returned function runs. */
+  subscribe(listener: () => void): () => void
+}
+
+/** Copy for an answer discarded because the session changed meanwhile. A write may still have been applied. */
+export const sessionChangedRead = 'Your session changed in another tab. Try again.'
+export const sessionChangedWrite = 'Your session changed in another tab. This change may already be saved; Vessel reloads your workspace so you can check before trying again.'
 
 /**
  * A 401 or 403 answer, with the ProblemDetails `code` when a cookie call received one. `generation` is the session
@@ -107,24 +121,39 @@ function transport(credentials: ApiCredentials): { headers: Record<string, strin
   }
 }
 
+type Outcome<T> = { ok: true; value: T } | { ok: false; error: unknown; failure?: Omit<AuthFailure, 'generation'> }
+
+/** Frees what a discarded answer holds: a stream response's body. */
+function discard(outcome: Outcome<unknown>) {
+  if (outcome.ok && outcome.value instanceof Response) void outcome.value.body?.cancel().catch(() => undefined)
+}
+
 /**
  * One transport for JSON, images and stream headers. A token stays in this closure. `onUnauthorized` hears every 401
  * and 403, with the cookie call's code; the caller decides what ends a session.
+ *
+ * A session call checks its generation before it publishes anything. An answer to a request sent under an older
+ * generation is dropped with its 401 or 403: a read (GET without a body) is sent once more under the current
+ * generation, and anything else rejects with `session-changed` and calls `onSessionChanged`, since the server may
+ * already have applied it.
  */
-export function createApiCall(credentials: string | ApiCredentials, onUnauthorized?: (failure: AuthFailure) => void) {
+export function createApiCall(credentials: string | ApiCredentials, onUnauthorized?: (failure: AuthFailure) => void, onSessionChanged?: () => void) {
   const kind: ApiCredentials = typeof credentials === 'string' ? { kind: 'bearer', token: credentials } : credentials
   const { headers: identity, init } = transport(kind)
   const cookie = kind.kind !== 'bearer'
+  const source = kind.kind === 'session' ? kind.generation : undefined
 
-  return async function call<T>(path: string, options: RequestOptions & (
+  type Options<T> = RequestOptions & (
     { validate: (value: unknown) => value is T; read?: never } |
     { read: (response: Response) => Promise<T>; validate?: never }
-  )): Promise<T> {
+  )
+
+  async function send<T>(path: string, options: Options<T>): Promise<Outcome<T>> {
     // Clear the timer after decoding, or after headers for a long-lived SSE response.
     const timeout = new AbortController()
     const timer = setTimeout(() => timeout.abort(), options.timeout)
     const signal = options.signal ? AbortSignal.any([options.signal, timeout.signal]) : timeout.signal
-    const generation = kind.kind === 'session' ? kind.generation?.() : undefined
+    let failure: Omit<AuthFailure, 'generation'> | undefined
     try {
       let response: Response
       try {
@@ -139,11 +168,10 @@ export function createApiCall(credentials: string | ApiCredentials, onUnauthoriz
       }
       if (!response.ok) {
         const error = await httpError(response, options, cookie)
-        if (response.status === 401 || response.status === 403)
-          onUnauthorized?.({ status: response.status, ...error.code ? { code: error.code } : {}, ...generation !== undefined ? { generation } : {} })
+        if (response.status === 401 || response.status === 403) failure = { status: response.status, ...error.code ? { code: error.code } : {} }
         throw error
       }
-      if (options.read) return await options.read(response)
+      if (options.read) return { ok: true, value: await options.read(response) }
       let body: unknown
       if (response.status === 204) {
         body = undefined
@@ -154,9 +182,28 @@ export function createApiCall(credentials: string | ApiCredentials, onUnauthoriz
         }
         if (!options.validate(body)) throw new ApiError('invalid-response', options.safeError ?? options.invalidData ?? 'The API returned incompatible workspace data.')
       }
-      return body
+      return { ok: true, value: body }
+    } catch (error) {
+      return { ok: false, error, ...failure ? { failure } : {} }
     } finally {
       clearTimeout(timer)
+    }
+  }
+
+  return async function call<T>(path: string, options: Options<T>): Promise<T> {
+    const read = (options.method ?? 'GET') === 'GET' && options.body === undefined
+    for (let attempt = 0; ; attempt++) {
+      const generation = source?.current()
+      const outcome = await send(path, options)
+      if (source && generation !== source.current()) {
+        discard(outcome)
+        if (read && attempt === 0 && !options.signal?.aborted) continue
+        if (!read) onSessionChanged?.()
+        throw new ApiError('http', read ? sessionChangedRead : sessionChangedWrite, undefined, undefined, 'session-changed')
+      }
+      if (outcome.ok) return outcome.value
+      if (outcome.failure) onUnauthorized?.({ ...outcome.failure, ...generation !== undefined ? { generation } : {} })
+      throw outcome.error
     }
   }
 }

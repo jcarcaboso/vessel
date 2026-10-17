@@ -1,6 +1,6 @@
 import { ApiError } from './errors'
 import { hasNoControlCharacters, isCount, isGuid, isListOf, isNonBlankText, isNullOr, isRecord, isText, isTimestamp } from './guards'
-import { createApiCall, type AuthFailure } from './request'
+import { createApiCall, type AuthFailure, type SessionGeneration } from './request'
 
 /** `GET /api/auth/config`: the server's sign-in mode. `originAccepted` is only a hint for the screen. */
 export type AuthConfig =
@@ -31,7 +31,7 @@ export type VerifyResult =
 export type StepUpAction = 'wallet.link' | 'wallet.remove'
 
 /** The tab's session: `X-Vessel-User` carries the user, `sessionId` names the session sign-out expects. */
-export interface SessionIdentity { userId: string; sessionId: string; generation?: () => number }
+export interface SessionIdentity { userId: string; sessionId: string; generation?: SessionGeneration }
 
 export const displayNameLimit = 60
 export const walletLabelLimit = 40

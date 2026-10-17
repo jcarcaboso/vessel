@@ -1,7 +1,7 @@
 import type { SessionDto, SessionAuthApi } from '@/api/auth'
 import { ApiError } from '@/api/errors'
 import { isGuid, isRecord } from '@/api/guards'
-import type { ApiCredentials, AuthFailure } from '@/api/request'
+import type { ApiCredentials, AuthFailure, SessionGeneration } from '@/api/request'
 
 export const noticeKey = 'vessel:device:notice'
 export const sessionChannelName = 'vessel-session'
@@ -74,6 +74,7 @@ export class SessionController {
   private ended = false
   private live = false
   private exitStates = new Set<() => void>()
+  private generationListeners = new Set<() => void>()
   private readonly channel: SessionChannel | null
   private readonly navigate: (url: string) => void
 
@@ -88,8 +89,17 @@ export class SessionController {
   get sessionId() { return this.sessionIdValue }
   get generation() { return this.generationValue }
 
+  /** Read by every client of this tab before it publishes an answer; generation-bound streams reopen on a change. */
+  readonly sessionGeneration: SessionGeneration = {
+    current: () => this.generationValue,
+    subscribe: listener => {
+      this.generationListeners.add(listener)
+      return () => { this.generationListeners.delete(listener) }
+    },
+  }
+
   credentials(): Extract<ApiCredentials, { kind: 'session' }> {
-    return { kind: 'session', userId: this.userId, sessionId: this.sessionIdValue, generation: () => this.generationValue }
+    return { kind: 'session', userId: this.userId, sessionId: this.sessionIdValue, generation: this.sessionGeneration }
   }
 
   /** The workspace is on screen; from now on a teardown reloads the page. */
@@ -166,6 +176,7 @@ export class SessionController {
     } else if (data.sessionId !== this.sessionIdValue) {
       this.sessionIdValue = data.sessionId
       this.generationValue++
+      for (const listener of [...this.generationListeners]) listener()
     }
   }
 

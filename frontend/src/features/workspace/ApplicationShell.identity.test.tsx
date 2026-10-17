@@ -3,6 +3,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createSessionAuthApi } from '@/api/auth'
+import { emitApiEvent } from '@/api/events'
 import { createWorkspaceApi } from '@/api/workspace'
 import { noticeKey, notices, SessionController } from '@/features/identity/session'
 import type { ShellIdentity } from '@/features/identity/types'
@@ -35,7 +36,7 @@ function dirty() {
   act(() => plays.onSession({ ...session, draft: { ...session.draft, leverage: '3' } }))
 }
 
-async function mount(role: 'member' | 'operator' = 'member') {
+async function mount(role: 'member' | 'operator' = 'member', extra: Partial<ShellIdentity> = {}) {
   const session = { ...sessionFixture, user: { ...sessionFixture.user, role } }
   const navigate = vi.fn()
   const controller = new SessionController({ session, channels: channelBus().factory, navigate })
@@ -44,12 +45,13 @@ async function mount(role: 'member' | 'operator' = 'member') {
   const identity: ShellIdentity = {
     session, walletName: 'Rabby Wallet', auth: createSessionAuthApi(controller.credentials(), controller.handleFailure),
     registerExitState: clear => controller.registerExitState(clear), onProfile: vi.fn(), endSession: () => controller.teardown(notices.ended),
+    ...extra,
   }
   const disconnect = vi.fn()
   render(<ApplicationShell system={systemFixture} api={api} disconnect={disconnect} identity={identity} />)
   await screen.findByText('Test Play editor')
   await waitFor(() => expect(plays).toBeDefined())
-  return { identity, navigate, disconnect, user: userEvent.setup() }
+  return { identity, navigate, disconnect, api, user: userEvent.setup() }
 }
 
 beforeEach(() => {
@@ -83,6 +85,18 @@ describe('Wallet-mode session teardown in the shell', () => {
     expect(navigate).not.toHaveBeenCalled()
     expect(unload()).toBe(true)
     expect(screen.getByText('Test Play editor')).toBeInTheDocument()
+  })
+})
+
+describe('session changes in the workspace', () => {
+  it('reloads the workspace and says why when a write was answered under a session another tab replaced', async () => {
+    const { api, navigate } = await mount()
+    const overviews = vi.mocked(api.overview).mock.calls.length
+    // The client emits this when it drops a write's answer (see request.generation.test.ts).
+    act(() => emitApiEvent(api, { type: 'session-changed' }))
+    expect(await screen.findByText(/Your session changed in another tab\. Vessel reloaded your workspace/)).toBeVisible()
+    await waitFor(() => expect(vi.mocked(api.overview).mock.calls.length).toBeGreaterThan(overviews))
+    expect(navigate).not.toHaveBeenCalled()
   })
 })
 

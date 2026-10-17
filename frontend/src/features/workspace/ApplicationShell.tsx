@@ -2,6 +2,7 @@ import { createRef, Suspense, useCallback, useEffect, useLayoutEffect, useRef, u
 import { Tooltip } from 'radix-ui'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
+import { onApiEvent } from '@/api/events'
 import type { SystemInfo } from '@/api/system'
 import { Button } from '@/components/ui/button'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
@@ -152,6 +153,12 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance')
   const [reloadKey, setReloadKey] = useState(0)
   const reload = useCallback(() => setReloadKey(key => key + 1), [])
+  // A write answered under the session another tab replaced may still have applied: say so and read everything again.
+  useEffect(() => onApiEvent(api, event => {
+    if (event.type !== 'session-changed') return
+    notify({ tone: 'info', key: 'session-changed', message: 'Your session changed in another tab. Vessel reloaded your workspace; check your last change before trying again.' })
+    reload()
+  }), [api, notify, reload])
   // Links from notifications go through the shell's own navigation; a missing account gets a short notice.
   const notificationLink = useRef<(link: NotificationLink) => void>(() => {})
   const inApp = useInAppNotifications({ api, active: disconnectedApi !== api, onLink: link => notificationLink.current(link),

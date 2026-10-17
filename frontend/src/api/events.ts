@@ -3,8 +3,9 @@ import type { WorkspaceApi } from './workspace'
 /**
  * What a client tells the rest of the session, so caches can drop data without the client knowing them.
  * `unauthorized`: a request was answered 401 or 403. `account-removed`: an account was deleted or disabled.
+ * `session-changed`: another tab replaced this tab's session while a write was in flight, so its answer was dropped.
  */
-export type ApiEvent = { type: 'unauthorized' } | { type: 'account-removed'; accountId: string }
+export type ApiEvent = { type: 'unauthorized' } | { type: 'account-removed'; accountId: string } | { type: 'session-changed' }
 type Listener = (event: ApiEvent) => void
 
 const listeners = new WeakMap<WorkspaceApi, Set<Listener>>()

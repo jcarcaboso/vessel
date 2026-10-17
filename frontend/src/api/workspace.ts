@@ -1,7 +1,7 @@
 import { overviewSummaryPath, isOverviewSummary, type OverviewQuery, type OverviewSummaryDocument } from './overview-summary'
 import { activityFillsPath, activityPath, isActivityFills, isActivityPage, type ActivityFills, type ActivityPage, type ActivityQuery } from './activity'
 import { readSseStream, SseOverflowError, SseParser } from './sse'
-import { isNotificationCursor, isRequestCursor } from './event-cursor'
+import { isAfter, isNotificationAfter, isNotificationCursor, isRequestCursor, isUnknownCursor } from './event-cursor'
 import {
   isInAppNotification, isNotificationClaim, isNotificationHead, isNotificationPage, isNotificationPreferenceFields,
   isNotificationPreferences, isNotificationReadAll, notificationPagePath, notificationPreferencesConflict, notificationReadAllConflict,
@@ -435,7 +435,27 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
   const call = createApiCall(credentials, failure => {
     if (endsSession(credentials, failure)) emitApiEvent(api, { type: 'unauthorized' })
     onAuthFailure?.(failure)
-  })
+  }, () => emitApiEvent(api, { type: 'session-changed' }))
+  const generation = typeof credentials !== 'string' && credentials.kind === 'session' ? credentials.generation : undefined
+  /**
+   * Runs one stream under the current session generation. A newer generation aborts it, so no frame read under the
+   * old one reaches the caller, and opens it again under the new one; `open` reads only its own signal.
+   */
+  async function generationBound(signal: AbortSignal, open: (signal: AbortSignal) => Promise<void>) {
+    if (!generation) return open(signal)
+    while (!signal.aborted) {
+      const changed = new AbortController()
+      const unsubscribe = generation.subscribe(() => changed.abort())
+      try {
+        await open(AbortSignal.any([signal, changed.signal]))
+      } catch (cause) {
+        if (!changed.signal.aborted || signal.aborted) throw cause
+      } finally {
+        unsubscribe()
+      }
+      if (!changed.signal.aborted) return
+    }
+  }
   // Session refusals use Vessel's copy for their code; other statuses keep each endpoint's own messages.
   const codeMessage = (code: string, status: number) => status === 401 || status === 403 ? authErrorMessage(code) : undefined
   const workspaceRequest = { timeout: 10_000, notFound: 'This account or portfolio is no longer available.', codeMessage,
@@ -452,6 +472,9 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
       throw new ApiError('invalid-response', 'The live chart request is invalid.')
     }
     const path = `${accountPath(id)}/market-stream?${new URLSearchParams({ instrument: query.instrument, interval: query.interval })}`
+    await generationBound(signal, bound => readMarketStream(path, query, bound, onEvent))
+  }
+  async function readMarketStream(path: string, query: MarketStreamQuery, signal: AbortSignal, onEvent: (event: MarketStreamEvent) => void) {
     const interrupted = () => new ApiError('unavailable', 'The live market stream was interrupted.')
     // The pipeline bounds the header read, not the lifetime of the stream.
     let response: Response
@@ -541,29 +564,39 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     monitorStream: async (after, signal, onEvent, notificationsAfter) => {
       if (!isRequestCursor(after)) throw new ApiError('invalid-response', 'The event cursor is invalid.')
       if (notificationsAfter !== undefined && !isNotificationCursor(notificationsAfter)) throw new ApiError('invalid-response', 'The notification cursor is invalid.')
-      if (signal.aborted) return
-      let response: Response
-      try {
-        response = await call(`/api/events/stream?${new URLSearchParams({ after, ...(notificationsAfter !== undefined ? { notificationsAfter } : {}) })}`, {
-          ...workspaceRequest, signal, timeout: 25_000, accept: 'text/event-stream',
-          unavailable: 'The monitor event stream did not connect.', read: async response => response,
-        })
-      } catch (cause) {
-        if (signal.aborted) return
-        throw cause
-      }
-      if (!response.body || !/^text\/event-stream\b/i.test(response.headers.get('Content-Type') ?? '')) {
-        await response.body?.cancel().catch(() => undefined)
-        throw new ApiError('invalid-response', 'The API returned an invalid monitor stream.')
-      }
-      try {
-        await readSseStream(response.body, signal, ({ event, data, id }) => {
-          const frame = monitorFrame(event, data, id)
-          if (frame) onEvent(frame)
-        })
-      } catch {
-        if (!signal.aborted) throw new ApiError('unavailable', 'The monitor event stream was interrupted.')
-      }
+      // A stream reopened for a newer session generation resumes where the caller's cursor would.
+      let resume = after
+      let notificationResume = notificationsAfter
+      await generationBound(signal, async bound => {
+        if (bound.aborted) return
+        let response: Response
+        try {
+          response = await call(`/api/events/stream?${new URLSearchParams({ after: resume, ...(notificationResume !== undefined ? { notificationsAfter: notificationResume } : {}) })}`, {
+            ...workspaceRequest, signal: bound, timeout: 25_000, accept: 'text/event-stream',
+            unavailable: 'The monitor event stream did not connect.', read: async response => response,
+          })
+        } catch (cause) {
+          if (bound.aborted) return
+          throw cause
+        }
+        if (!response.body || !/^text\/event-stream\b/i.test(response.headers.get('Content-Type') ?? '')) {
+          await response.body?.cancel().catch(() => undefined)
+          throw new ApiError('invalid-response', 'The API returned an invalid monitor stream.')
+        }
+        try {
+          await readSseStream(response.body, bound, ({ event, data, id }) => {
+            const frame = monitorFrame(event, data, id)
+            if (!frame || bound.aborted) return
+            if (frame.type === 'event') { if (isAfter(frame.cursor, resume)) resume = frame.cursor }
+            else if (frame.type === 'status' && (isUnknownCursor(resume) || frame.status.state === 'reset')) resume = frame.status.nextCursor
+            else if (frame.type === 'notifications' && notificationResume !== undefined && frame.status.state === 'reset') notificationResume = frame.status.nextCursor
+            else if (frame.type === 'notification' && notificationResume !== undefined && isNotificationAfter(frame.frame.cursor, notificationResume)) notificationResume = frame.frame.cursor
+            onEvent(frame)
+          })
+        } catch {
+          if (!bound.aborted) throw new ApiError('unavailable', 'The monitor event stream was interrupted.')
+        }
+      })
     },
     notificationHead: signal => call('/api/notifications/head', { ...notificationRequest, validate: isNotificationHead, ...withSignal(signal) }),
     notifications: (query, signal) => {

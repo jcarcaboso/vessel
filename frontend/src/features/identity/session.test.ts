@@ -128,11 +128,14 @@ describe('cross-tab messages', () => {
   it('adopts a new session of the same user and discards answers to older requests', () => {
     const { controller, bus, navigate } = live()
     const before = controller.credentials()
+    const heard = vi.fn()
+    before.generation!.subscribe(heard)
     bus.send({ type: 'signed-in', userId: sessionFixture.user.id, sessionId: newSession })
     expect(navigate).not.toHaveBeenCalled()
     expect(controller.sessionId).toBe(newSession)
     expect(controller.generation).toBe(1)
-    expect(before.generation!()).toBe(1)
+    expect(before.generation!.current()).toBe(1)
+    expect(heard).toHaveBeenCalledOnce()
     // A 401 to a request sent under generation 0 is stale.
     controller.handleFailure({ status: 401, generation: 0 })
     expect(navigate).not.toHaveBeenCalled()

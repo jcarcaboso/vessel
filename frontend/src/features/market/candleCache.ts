@@ -76,7 +76,10 @@ export class CandleCache {
   private invalidations = new Set<{ accountId: string; callback: () => void }>()
   constructor(private readonly api: WorkspaceApi) {
     // A rejected token ends every chart; a deleted or disabled account ends its own.
-    onApiEvent(api, event => event.type === 'unauthorized' ? this.invalidate() : this.invalidate(event.accountId))
+    onApiEvent(api, event => {
+      if (event.type === 'unauthorized') this.invalidate()
+      else if (event.type === 'account-removed') this.invalidate(event.accountId)
+    })
   }
 
   entry(accountId: string, instrument: string, interval: CandleInterval) {

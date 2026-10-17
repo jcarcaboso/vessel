@@ -74,10 +74,10 @@ describe('transport kinds', () => {
 
 describe('auth failures', () => {
   it('reports the code and the generation read when the request started', async () => {
-    let generation = 3
+    const generation = { current: () => 3, subscribe: () => () => {} }
     const failures: unknown[] = []
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => { generation = 4; return problem(401, 'session-revoked') }))
-    const call = createApiCall({ kind: 'session', userId, sessionId, generation: () => generation }, failure => failures.push(failure))
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => problem(401, 'session-revoked')))
+    const call = createApiCall({ kind: 'session', userId, sessionId, generation }, failure => failures.push(failure))
     await expect(call('/api/example', { timeout: 1_000, validate: isString, codeMessage: authErrorMessage }))
       .rejects.toMatchObject({ kind: 'unauthorized', status: 401, code: 'session-revoked', message: 'Your session was signed out. Sign in again.' })
     expect(failures).toEqual([{ status: 401, code: 'session-revoked', generation: 3 }])
