@@ -103,7 +103,7 @@ public sealed class AccountSecurityPostgresTests
     }
 
     [PostgresFact]
-    public async Task Credential_write_serializes_with_disable_and_disabled_reader_never_opens_token()
+    public async Task Disable_during_credential_verification_completes_and_the_save_is_refused_and_disabled_reader_never_opens_token()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); var account = SecurityFixture.Account(owner);
         await using (var seed = database.Context(owner)) { seed.Accounts.Add(account); await seed.SaveChangesAsync(); }
@@ -113,12 +113,13 @@ public sealed class AccountSecurityPostgresTests
         var saving = writer.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
         await verifier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var management = new WorkspaceService(new WorkspaceStore(managementDb, TestUnitOfWork.For(managementDb)), new CoreOwner(owner), SecurityFixture.Registry(), TestUnitOfWork.For(managementDb));
-        var disabling = management.UpdateAccountAsync(account.Id, new("Disabled", null, false, 1), default);
-        await Task.Delay(100); Assert.False(disabling.IsCompleted);
+        // Verification holds no transaction or account lock, so disabling does not wait for the venue.
+        Assert.False((await management.UpdateAccountAsync(account.Id, new("Disabled", null, false, 1), default).WaitAsync(TimeSpan.FromSeconds(5))).IsEnabled);
         verifier.Release.SetResult();
-        await saving.WaitAsync(TimeSpan.FromSeconds(5)); await disabling.WaitAsync(TimeSpan.FromSeconds(5));
+        var refused = await Assert.ThrowsAsync<ProblemException>(() => saving.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(409, refused.StatusCode); Assert.Equal(AccountCredentialService.ChangedWhileVerifying, refused.Message);
         await using var check = database.Context(owner);
-        Assert.False((await check.Accounts.SingleAsync()).IsEnabled); Assert.Single(await check.AccountCredentials.ToListAsync());
+        Assert.False((await check.Accounts.SingleAsync()).IsEnabled); Assert.Empty(await check.AccountCredentials.ToListAsync());
         var reader = new AccountCredentialReader(new WorkspaceStore(check, TestUnitOfWork.For(check)), new AccountCredentialStore(check, TestUnitOfWork.For(check)), new CoreOwner(owner), vault, SecurityFixture.Clock, TestUnitOfWork.For(check));
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => reader.ReadAsync(account.Id, default))).StatusCode);
         await management.DeleteAccountAsync(account.Id, default); Assert.Empty(await check.AccountCredentials.AsNoTracking().ToListAsync());

@@ -114,6 +114,14 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             (eligible ? row.State != "credential-error" && row.NextRunAtUtc is null : row.State != "idle" || row.NextRunAtUtc is not null);
     }
 
+    public const string MonitorOffline = "The monitor is offline; try again later.";
+
+    /// <summary>
+    /// How long due, pending check work may wait for a worker before it stops gating manual admission: a full lease plus
+    /// the heartbeat timeout, so a live worker always had the chance to claim it.
+    /// </summary>
+    private TimeSpan UnclaimedAfter => MonitorOptions.Lease + options.HeartbeatTimeout;
+
     public async Task<MonitorRunAccepted> RequestAsync(Guid accountId, CancellationToken ct)
     {
         var request = Guid.CreateVersion7();
@@ -124,8 +132,13 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 !await store.EligibleAsync(accountId, now, ct))
                 throw new ProblemException(409, "This account has no eligible venue Plays, pending linked orders or discrepancy work.");
             row.ReleaseAbandonedRefresh(now);
+            row.ReleaseUnclaimedWork(now, UnclaimedAfter);
             var retry = await RetryAfterAsync(account.VenueId, row, now, ct);
             if (retry > 0) throw new MonitorAdmissionException(retry);
+            // Only the worker runs a Check. With its heartbeat stale (the "worker offline" signal) nothing is recorded:
+            // accepted work would sit pending and block this account's admission until a worker returns.
+            if (!IsOnline((await store.HeartbeatAsync(ct))?.HeartbeatAtUtc))
+                throw new ProblemException(503, MonitorOffline);
             row.Admit(request, "manual", now);
             await commands.EnqueueAsync(new(request, accountId, owner.OwnerId, "manual"), ct);
             return true;
@@ -143,6 +156,8 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             if (venues.Reader(account.VenueId) is null) throw new ProblemException(503, "Venue reader is unavailable.");
             var now = time.GetUtcNow();
             row.ReleaseAbandonedRefresh(now);
+            // Check work nobody claimed (worker down or not deployed) must not refuse Refresh indefinitely.
+            row.ReleaseUnclaimedWork(now, UnclaimedAfter);
             var retry = await RetryAfterAsync(account.VenueId, row, now, ct);
             if (retry > 0) throw new MonitorAdmissionException(retry);
             if (!await store.ReadCapacityAsync(now, ct)) throw new MonitorAdmissionException(30);
