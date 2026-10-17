@@ -49,6 +49,8 @@ public static partial class IdentityCommands
             if (!reset) { await output.WriteLineAsync("A --keep-active user does not exist; nothing changed."); return 3; }
             await output.WriteLineAsync("Reset complete. Keep all hosts stopped until reconciliation against trusted post-backup records is complete.");
             await using var report = await factory.CreateDbContextAsync(ct);
+            if (!await HasActiveOperatorWithWalletAsync(report, null, ct))
+                await output.WriteLineAsync("WARNING: No active operator with a linked wallet remains. Restore operator access before starting hosts.");
             var wallets = await report.Wallets.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
             await output.WriteLineAsync("USER ID | ROLE | STATUS | WALLET ID | ADDRESS");
             foreach (var user in await report.Users.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct))
@@ -80,6 +82,8 @@ public static partial class IdentityCommands
                     case "revoke-sessions":
                         return await RevokeSessionsAsync(db, id, "operator", now, ct);
                     case "suspend":
+                        if (user.Status == "active" && !await HasActiveOperatorWithWalletAsync(db, id, ct))
+                        { await output.WriteLineAsync("Suspension would leave no active operator with a linked wallet."); return -1; }
                         await RevokeSessionsAsync(db, id, "suspended", now, ct);
                         if (user.Status == "suspended") return 0;
                         user.Status = "suspended"; user.SuspendedAt = now;
@@ -94,8 +98,8 @@ public static partial class IdentityCommands
                         break;
                     case "demote":
                         if (user.Role != "operator") return 0;
-                        if (user.Status == "active" && !await db.Users.AnyAsync(x => x.Id != id && x.Role == "operator" && x.Status == "active", ct))
-                        { await output.WriteLineAsync("The last active operator cannot be demoted."); return -1; }
+                        if (user.Status == "active" && !await HasActiveOperatorWithWalletAsync(db, id, ct))
+                        { await output.WriteLineAsync("The last active operator with a linked wallet cannot be demoted."); return -1; }
                         user.Role = "member";
                         break;
                 }
@@ -113,6 +117,10 @@ public static partial class IdentityCommands
             return 3;
         }
     }
+
+    private static Task<bool> HasActiveOperatorWithWalletAsync(IdentityDbContext db, Guid? excludingUser, CancellationToken ct) =>
+        db.Users.AnyAsync(user => (excludingUser == null || user.Id != excludingUser) &&
+            user.Role == "operator" && user.Status == "active" && db.Wallets.Any(wallet => wallet.UserId == user.Id), ct);
 
     private static Task<int> RevokeSessionsAsync(IdentityDbContext db, Guid? userId, string reason, DateTimeOffset now, CancellationToken ct) =>
         db.Sessions.Where(x => (userId == null || x.UserId == userId) && x.RevokedAt == null)

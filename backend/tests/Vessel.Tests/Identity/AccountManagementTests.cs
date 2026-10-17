@@ -367,12 +367,13 @@ public sealed class AccountManagementTests
         await Grant(db, current, key);
         link = await service.WalletChallengeAsync(current, new(target.GetPublicAddress()), Origin, default);
         var output = new StringWriter();
+        await db.SeedAsync(EthECKey.GenerateKey());
         Assert.Equal(0, await IdentityCommands.RunAsync(["suspend", "--user", owner.User.Id.ToString()], db.Configuration(owner.User.Id), true, output));
         await Error(() => service.LinkWalletAsync(current, new(link.ChallengeId, IdentityDatabase.Sign(target, link.Message)), Origin, default), "user-suspended");
         Assert.Equal(0, await IdentityCommands.RunAsync(["restore", "--user", owner.User.Id.ToString()], db.Configuration(owner.User.Id), true, output));
         await Error(() => service.StepUpAsync(current, new(expires.ChallengeId, null), Origin, default), "session-revoked");
         await using var state = db.CreateDbContext();
-        Assert.Equal(2, await state.Wallets.CountAsync());
+        Assert.Equal(2, await state.Wallets.CountAsync(x => x.UserId == owner.User.Id));
         Assert.Null((await state.Challenges.SingleAsync(x => x.Id == link.ChallengeId)).ConsumedAt);
     }
 

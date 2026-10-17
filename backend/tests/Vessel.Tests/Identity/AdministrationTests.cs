@@ -27,6 +27,7 @@ public sealed class AdministrationTests
         Assert.Equal(0, await Run("promote", member.User.Id));
         Assert.Equal(0, await Run("demote", owner.User.Id));
         Assert.Equal(3, await Run("demote", member.User.Id));
+        Assert.Equal(0, await Run("promote", owner.User.Id));
         Assert.Equal(0, await Run("suspend", member.User.Id));
         Assert.Equal(JournalOwnerStatus.Suspended, await directory.StatusAsync(member.User.Id, default));
         Assert.DoesNotContain(member.User.Id, await directory.ActiveOwnersAsync(null, 200, default));
@@ -128,6 +129,7 @@ public sealed class AdministrationTests
         Assert.Equal(0, await IdentityCommands.RunAsync(args, config, true, output));
         var table = output.ToString();
         Assert.Contains("hosts stopped", table);
+        Assert.Equal(!keepOperator, table.Contains("WARNING: No active operator with a linked wallet remains.", StringComparison.Ordinal));
         Assert.Contains("USER ID | ROLE | STATUS | WALLET ID | ADDRESS", table);
         Assert.Contains(restored.User.Id.ToString(), table);
         Assert.Contains(restored.Wallet.Id.ToString(), table);
@@ -170,6 +172,7 @@ public sealed class AdministrationTests
         var output = new StringWriter();
         Assert.Equal(3, await IdentityCommands.RunAsync(["reset-after-restore", "--keep-active", owner.User.Id.ToString(), Guid.NewGuid().ToString()], config, true, output));
         Assert.True(await database.Sessions().StillValidAsync(session.Session.Session.Id, default));
+        await database.SeedAsync(EthECKey.GenerateKey());
         Assert.Equal(0, await IdentityCommands.RunAsync(["suspend", "--user", owner.User.Id.ToString()], config, true, output));
         Assert.Equal(0, await IdentityCommands.RunAsync(["reset-after-restore", "--keep-active", owner.User.Id.ToString()], config, true, output));
         Assert.Equal(JournalOwnerStatus.Suspended, await new IdentityOwnerDirectory(database).StatusAsync(owner.User.Id, default));
