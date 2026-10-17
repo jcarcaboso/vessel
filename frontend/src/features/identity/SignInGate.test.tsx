@@ -297,6 +297,15 @@ describe('wallet sign-in', () => {
     expect(sent('/api/auth/challenge')).toHaveLength(2)
   })
 
+  it('shows the unsupported-signature state for a smart account\'s ERC-6492 signature without spending the challenge', async () => {
+    wallet = walletProvider(async () => `0x${'00'.repeat(200)}${'6492'.repeat(16)}`)
+    const { user } = mount()
+    await user.click(await screen.findByRole('button', { name: /Rabby Wallet/ }))
+    await user.click(await screen.findByRole('button', { name: 'Sign with Rabby Wallet' }))
+    expect(await screen.findByRole('heading', { name: 'Signature not supported' })).toBeVisible()
+    expect(sent('/api/auth/verify')).toHaveLength(0)
+  })
+
   it.each([
     ['signature-unsupported', 'Signature not supported'],
     ['challenge-expired', 'Request expired'],

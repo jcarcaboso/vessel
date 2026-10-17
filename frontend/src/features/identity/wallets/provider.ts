@@ -5,19 +5,27 @@ export interface WalletProvider {
   removeListener?(event: string, listener: (...args: unknown[]) => void): unknown
 }
 
-/** Why a wallet request failed, in the terms the sign-in screen shows. Raw wallet messages are never displayed. */
-export type WalletFailure = 'declined' | 'pending' | 'no-account' | 'failed'
+/**
+ * Why a wallet request failed, in the terms the sign-in screen shows. Raw wallet messages are never displayed.
+ * `unsupported`: a hex signature that is not 65 bytes, such as a smart account's ERC-6492 or ERC-1271 one.
+ */
+export type WalletFailure = 'declined' | 'pending' | 'no-account' | 'unsupported' | 'failed'
 
 export class WalletError extends Error {
   constructor(public readonly reason: WalletFailure) {
     super(reason === 'declined' ? 'The wallet request was declined.' : reason === 'pending' ? 'The wallet already has a request open.'
-      : reason === 'no-account' ? 'The wallet shared no address.' : 'The wallet request failed.')
+      : reason === 'no-account' ? 'The wallet shared no address.' : reason === 'unsupported' ? 'The wallet returned an unsupported signature format.'
+      : 'The wallet request failed.')
     this.name = 'WalletError'
   }
 }
 
 const addressPattern = /^0x[\da-fA-F]{40}$/
-const signaturePattern = /^0x[\da-fA-F]{2,1024}$/
+const hexPattern = /^0x[\da-fA-F]+$/
+/** `0x` and 65 bytes: the only form the server verifies. */
+const signatureLength = 132
+/** The longest wallet answer inspected; a smart account's wrapped signature with deployment data stays far below it. */
+const signatureInspectLimit = 65_536
 
 function failure(cause: unknown): WalletError {
   const code = typeof cause === 'object' && cause !== null ? (cause as { code?: unknown }).code : undefined
@@ -45,7 +53,9 @@ export async function requestAccount(provider: WalletProvider): Promise<string> 
 export async function signMessage(provider: WalletProvider, message: string, address: string): Promise<string> {
   let signature: unknown
   try { signature = await provider.request({ method: 'personal_sign', params: [utf8Hex(message), address] }) } catch (cause) { throw failure(cause) }
-  if (typeof signature !== 'string' || !signaturePattern.test(signature)) throw new WalletError('failed')
+  if (typeof signature !== 'string' || signature.length > signatureInspectLimit || !hexPattern.test(signature)) throw new WalletError('failed')
+  // Like the server, any other hex length (including ERC-6492) is unsupported; refusing it here keeps the challenge.
+  if (signature.length !== signatureLength) throw new WalletError('unsupported')
   return signature
 }
 

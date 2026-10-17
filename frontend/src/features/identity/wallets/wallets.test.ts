@@ -148,6 +148,17 @@ describe('wallet requests', () => {
     expect((failure as Error).message).not.toContain('private')
   })
 
+  it('classifies wallet signatures like the server, inspecting a bounded answer', async () => {
+    const sign = (value: unknown) => signMessage(provider(vi.fn().mockResolvedValue(value)), 'm', address).catch((cause: unknown) => cause)
+    // Exactly 0x + 130 hex characters goes to the server, which checks v, r and s (and the 6492 suffix) itself.
+    await expect(sign(`0x${'Ab'.repeat(65)}`)).resolves.toBe(`0x${'Ab'.repeat(65)}`)
+    const erc6492 = `0x${'00'.repeat(200)}${'6492'.repeat(16)}`
+    for (const value of [erc6492, `0x${'ab'.repeat(64)}`, `0x${'ab'.repeat(66)}`, `0x${'a'.repeat(131)}`])
+      expect(await sign(value)).toMatchObject({ reason: 'unsupported' })
+    for (const value of [`0x${'zz'.repeat(65)}`, `0X${'ab'.repeat(65)}`, '0x', 42, null, { r: '0x1' }, `0x${'a'.repeat(70_000)}`])
+      expect(await sign(value)).toMatchObject({ reason: 'failed' })
+  })
+
   it('hears accountsChanged and disconnect until unsubscribed', () => {
     const listeners = new Map<string, (...args: unknown[]) => void>()
     const wallet: WalletProvider = { request: vi.fn(), on: (event, listener) => listeners.set(event, listener), removeListener: event => listeners.delete(event) }

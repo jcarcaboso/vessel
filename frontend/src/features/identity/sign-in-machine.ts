@@ -65,6 +65,7 @@ export function signInError(cause: unknown, during: 'connect' | 'sign' = 'sign')
   if (cause instanceof WalletError) {
     if (cause.reason === 'declined') return { kind: 'declined', during }
     if (cause.reason === 'pending') return { kind: 'pending' }
+    if (cause.reason === 'unsupported') return { kind: 'unsupported' }
     return { kind: 'other', message: cause.reason === 'no-account' ? 'The wallet did not share an address. Unlock it and try again.' : 'The wallet could not complete the request. Try again or choose another wallet.' }
   }
   if (cause instanceof ApiError) {
