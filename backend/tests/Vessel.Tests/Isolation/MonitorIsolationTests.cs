@@ -6,7 +6,7 @@ using Vessel.Domain.Monitoring;
 namespace Vessel.Tests.Isolation;
 
 /// <summary>Monitor state, manual checks and discrepancy dismissal across two owners.</summary>
-public sealed class MonitorIsolationTests(IsolationApi api) : IClassFixture<IsolationApi>
+public abstract class MonitorIsolationCases(IsolationHost api)
 {
     /// <summary>
     /// Seeds the existing discrepancy fixture (its Open Play and linked orders) into this API's database and confirms an
@@ -35,7 +35,7 @@ public sealed class MonitorIsolationTests(IsolationApi api) : IClassFixture<Isol
     public async Task Discrepancies_of_another_owner_cannot_be_dismissed_by_any_route()
     {
         var (f, discrepancy) = await Confirmed();
-        var a = api.Owner(f.Account.OwnerId);
+        var a = await api.Owner(f.Account.OwnerId);
         var account = f.Account.Id;
         var play = f.Play.Id;
         var monitor = await a.GetJson($"/api/accounts/{account}/monitor");
@@ -52,7 +52,7 @@ public sealed class MonitorIsolationTests(IsolationApi api) : IClassFixture<Isol
 
         // B has its own discrepancy to dismiss, so every ID it holds is valid for itself.
         var (g, own) = await Confirmed();
-        var b = api.Owner(g.Account.OwnerId);
+        var b = await api.Owner(g.Account.OwnerId);
         var note = new { note = "dismissed by b" };
         await Attempt(() => Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Post, id => $"/api/accounts/{id}/discrepancies/{discrepancy}/dismiss", _ => note)));
         await Attempt(() => Isolated.NotFound(b, play, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{id}/discrepancies/{discrepancy}/dismiss", _ => note)));
@@ -84,7 +84,7 @@ public sealed class MonitorIsolationTests(IsolationApi api) : IClassFixture<Isol
     [Covers("POST", "/api/accounts/{id:guid}/monitor/run")]
     public async Task Monitor_state_and_manual_checks_of_another_owner_answer_like_unknown_ones()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var account = (await a.SyncedVenueAccount(Isolated.Marker("venue-a"))).GetProperty("id").GetGuid();
         var own = (await b.SyncedVenueAccount(Isolated.Marker("venue-b"))).GetProperty("id").GetGuid();
         // The summary lists monitored accounts: those with an active Play.
@@ -115,3 +115,9 @@ public sealed class MonitorIsolationTests(IsolationApi api) : IClassFixture<Isol
         finally { api.Clock.Now = now; }
     }
 }
+
+/// <summary>The cases above in Token mode, with the suite's test scheme selecting the owner.</summary>
+public sealed class MonitorIsolationTests(IsolationApi api) : MonitorIsolationCases(api), IClassFixture<IsolationApi>;
+
+/// <summary>The same cases in Wallet mode: two signed-in users, each request mapped to its owner by the session scheme.</summary>
+public sealed class WalletMonitorIsolationTests(WalletIsolationApi api) : MonitorIsolationCases(api), IClassFixture<WalletIsolationApi>;

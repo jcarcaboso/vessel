@@ -61,7 +61,7 @@ public sealed class EndpointInventoryTests(IsolationApi api) : IClassFixture<Iso
     [Covers("GET", "/api/system")]
     public async Task Test_scheme_selects_the_owner_and_issues_the_production_claims()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         foreach (var owner in new[] { a, b })
         {
             var system = await owner.GetJson("/api/system");

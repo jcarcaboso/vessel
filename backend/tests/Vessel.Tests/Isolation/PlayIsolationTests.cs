@@ -7,7 +7,7 @@ using Vessel.Domain.Plays;
 namespace Vessel.Tests.Isolation;
 
 /// <summary>Plays, revisions, status, history, order links and the manual diary across two owners.</summary>
-public sealed class PlayIsolationTests(IsolationApi api) : IClassFixture<IsolationApi>
+public abstract class PlayIsolationCases(IsolationHost api)
 {
     private static readonly JsonElement NoDrawings = JsonDocument.Parse("{}").RootElement.Clone();
 
@@ -35,7 +35,7 @@ public sealed class PlayIsolationTests(IsolationApi api) : IClassFixture<Isolati
     [Covers("DELETE", "/api/plays/{id:guid}")]
     public async Task Plays_of_another_owner_answer_like_unknown_ones_and_stay_unchanged()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var aAccount = (await a.SyncedVenueAccount(Isolated.Marker("venue-a"))).GetProperty("id").GetGuid();
         var title = Isolated.Marker("play-a");
         var planned = await Planned(a, aAccount, title);
@@ -79,7 +79,7 @@ public sealed class PlayIsolationTests(IsolationApi api) : IClassFixture<Isolati
     [Covers("GET", "/api/plays/counts")]
     public async Task Play_lists_counts_searches_and_scopes_never_include_the_other_owner()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var portfolio = await a.Portfolio(Isolated.Marker("portfolio-a"));
         var aAccount = (await a.ManualAccount(Isolated.Marker("manual-a"), portfolio)).GetProperty("id").GetGuid();
         var shared = Isolated.Marker("shared-title");
@@ -117,7 +117,7 @@ public sealed class PlayIsolationTests(IsolationApi api) : IClassFixture<Isolati
     [Covers("DELETE", "/api/plays/{id:guid}/execution/links/{linkId:guid}")]
     public async Task Order_links_of_another_owner_answer_like_unknown_ones_and_stay_unchanged()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var aAccount = (await a.SyncedVenueAccount(Isolated.Marker("venue-a"))).GetProperty("id").GetGuid();
         var play = Id(await Planned(a, aAccount, Isolated.Marker("linked-a")));
         // Positive control: A links its retained entry order explicitly.
@@ -174,7 +174,7 @@ public sealed class PlayIsolationTests(IsolationApi api) : IClassFixture<Isolati
     [Covers("PUT", "/api/plays/{id:guid}/manual-executions/{executionId:guid}")]
     public async Task Manual_diary_of_another_owner_answers_like_unknown_and_request_ids_are_per_owner()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var aAccount = (await a.ManualAccount(Isolated.Marker("manual-a"))).GetProperty("id").GetGuid();
         var aPlanned = await Planned(a, aAccount, Isolated.Marker("diary-a"), "manual");
         var aPlay = Id(aPlanned);
@@ -280,7 +280,7 @@ public sealed class PlayIsolationTests(IsolationApi api) : IClassFixture<Isolati
     [Covers("GET", "/api/plays/{id:guid}/history")]
     public async Task Reviews_exclusions_and_ended_tabs_stay_separate_and_foreign_reviews_answer_like_unknown_ones()
     {
-        var (aOwner, bOwner) = api.Owners();
+        var (aOwner, bOwner) = await api.Owners();
         var a = await EndedJournal(aOwner);
         var b = await EndedJournal(bOwner);
         foreach (var (mine, theirs) in new[] { (a, b), (b, a) })
@@ -355,3 +355,9 @@ public sealed class PlayIsolationTests(IsolationApi api) : IClassFixture<Isolati
     private static ManualExecutionRequest Fact(Guid requestId, long version, string quantity, string price) =>
         new(requestId, version, "entry", "entry-1", AccountHistoryOrders.At, "buy", quantity, price, "0", "USDC", "Paper broker");
 }
+
+/// <summary>The cases above in Token mode, with the suite's test scheme selecting the owner.</summary>
+public sealed class PlayIsolationTests(IsolationApi api) : PlayIsolationCases(api), IClassFixture<IsolationApi>;
+
+/// <summary>The same cases in Wallet mode: two signed-in users, each request mapped to its owner by the session scheme.</summary>
+public sealed class WalletPlayIsolationTests(WalletIsolationApi api) : PlayIsolationCases(api), IClassFixture<WalletIsolationApi>;

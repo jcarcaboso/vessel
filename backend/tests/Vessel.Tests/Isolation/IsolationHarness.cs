@@ -5,9 +5,14 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Nethereum.Signer;
 using Vessel.Application.Credentials;
 using Vessel.Application.MarketData;
 using Vessel.Application.Plays;
@@ -18,6 +23,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Auth;
 using Vessel.Infrastructure.Credentials;
 using Vessel.Infrastructure.Venues.Hyperliquid;
+using Vessel.Tests.Identity;
 
 namespace Vessel.Tests.Isolation;
 
@@ -102,9 +108,10 @@ internal sealed class IsolationVenues
 
 /// <summary>
 /// One API over one isolated PostgreSQL schema, shared by a test class. Tests mint fresh owners per case, so they
-/// stay independent while the class keeps a single factory. The bearer token is configured but never sent.
+/// stay independent while the class keeps a single factory. Server state (per-user budgets, stream slots, caches)
+/// lives as long as the host and is shared by the class's cases, so cases that count it use fresh owners.
 /// </summary>
-public sealed class IsolationApi : IAsyncLifetime
+public abstract class IsolationHost : IAsyncLifetime
 {
     private CoreDatabase? database;
     private CoreApiFactory? factory;
@@ -117,26 +124,26 @@ public sealed class IsolationApi : IAsyncLifetime
     internal CoreApiFactory Factory => factory ?? throw new InvalidOperationException("Set Vessel_TEST_POSTGRES to run the isolation suite.");
     internal ICredentialVault Vault => vault!;
 
+    /// <summary>The configured installation owner (<c>Vessel:Auth:OwnerId</c>); never one of the owners a case mints.</summary>
+    internal Guid InstallationOwner { get; } = Guid.NewGuid();
+
     public async Task InitializeAsync()
     {
         // PostgresFact skips every case without a database; the fixture then stays empty.
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("Vessel_TEST_POSTGRES"))) return;
         database = await CoreDatabase.CreateAsync();
         vault = SecurityFixture.Vault();
+        await PrepareAsync(database);
         var registry = Venues.Registry();
-        factory = new CoreApiFactory(Guid.NewGuid(), connection: database.ConnectionString, settings: new()
+        var settings = new Dictionary<string, string?>
         {
             ["Vessel:Evidence:Storage:Local:RootPath"] = evidenceRoot,
             ["Vessel:Events:StreamPollSeconds"] = "1"
-        }, configure: services =>
+        };
+        foreach (var (key, value) in Settings(database)) settings[key] = value;
+        factory = new CoreApiFactory(InstallationOwner, connection: database.ConnectionString, settings: settings, configure: services =>
         {
-            services.AddAuthentication().AddScheme<AuthenticationSchemeOptions, TestOwnerAuthHandler>(TestOwnerAuthHandler.SchemeName, _ => { });
-            services.PostConfigure<AuthenticationOptions>(options =>
-            {
-                options.DefaultScheme = TestOwnerAuthHandler.SchemeName;
-                options.DefaultAuthenticateScheme = TestOwnerAuthHandler.SchemeName;
-                options.DefaultChallengeScheme = TestOwnerAuthHandler.SchemeName;
-            });
+            Configure(services);
             services.AddSingleton<IVenueRegistry>(registry);
             services.AddSingleton<TimeProvider>(Clock);
             services.AddSingleton<ICredentialVault>(vault);
@@ -144,32 +151,154 @@ public sealed class IsolationApi : IAsyncLifetime
         _ = factory.Server;
     }
 
+    /// <summary>Runs once the journal schema exists, before the host starts.</summary>
+    private protected virtual Task PrepareAsync(CoreDatabase journal) => Task.CompletedTask;
+
+    /// <summary>Settings beside the suite's evidence root and stream poll interval.</summary>
+    private protected virtual IEnumerable<KeyValuePair<string, string?>> Settings(CoreDatabase journal) => [];
+
+    protected abstract void Configure(IServiceCollection services);
+
     public async Task DisposeAsync()
     {
         if (factory is not null) await factory.DisposeAsync();
+        await CleanUpAsync();
         if (database is not null) await database.DisposeAsync();
         vault?.Dispose();
         if (Directory.Exists(evidenceRoot)) Directory.Delete(evidenceRoot, recursive: true);
     }
 
-    /// <summary>Two fresh journal owners on this server.</summary>
-    internal (Owner A, Owner B) Owners() => (Owner(), Owner());
+    protected virtual Task CleanUpAsync() => Task.CompletedTask;
 
-    internal Owner Owner() => Owner(Guid.NewGuid());
+    /// <summary>Two fresh journal owners on this server.</summary>
+    internal async Task<(Owner A, Owner B)> Owners() => (await Owner(), await Owner());
+
+    internal Task<Owner> Owner() => Owner(Guid.NewGuid());
 
     /// <summary>A client for a known owner, such as one whose rows a fixture seeded directly.</summary>
-    internal Owner Owner(Guid id)
+    internal abstract Task<Owner> Owner(Guid id);
+}
+
+/// <summary>
+/// Token mode with the suite's test scheme: <see cref="TestOwnerAuthHandler"/> selects the owner from a header. The
+/// bearer token is configured but never sent.
+/// </summary>
+public sealed class IsolationApi : IsolationHost
+{
+    protected override void Configure(IServiceCollection services)
+    {
+        services.AddAuthentication().AddScheme<AuthenticationSchemeOptions, TestOwnerAuthHandler>(TestOwnerAuthHandler.SchemeName, _ => { });
+        services.PostConfigure<AuthenticationOptions>(options =>
+        {
+            options.DefaultScheme = TestOwnerAuthHandler.SchemeName;
+            options.DefaultAuthenticateScheme = TestOwnerAuthHandler.SchemeName;
+            options.DefaultChallengeScheme = TestOwnerAuthHandler.SchemeName;
+        });
+    }
+
+    internal override Task<Owner> Owner(Guid id)
     {
         var client = Factory.CreateClient();
         // A stream answered where a 404 was expected must fail the case, not hang the run.
         client.Timeout = TimeSpan.FromSeconds(30);
         client.DefaultRequestHeaders.Add(TestOwnerAuthHandler.Header, id.ToString("D"));
-        return new(id, client);
+        return Task.FromResult(new Owner(id, client));
     }
 }
 
-/// <summary>An owner's HTTP client. Every request carries only the test owner header, never a bearer token.</summary>
-internal sealed record Owner(Guid Id, HttpClient Http)
+/// <summary>
+/// Wallet mode as production runs it: the session scheme, the request guard and tab binding, over an identity schema
+/// with real migrations in the journal's database. Each owner is a seeded identity user with its own synthetic EOA
+/// that signs in through <c>/api/auth/challenge</c> and <c>/api/auth/verify</c>; its client then carries only the
+/// session cookie, <c>X-Vessel-User</c> and the accepted <c>Origin</c>. No test scheme and no token exist here.
+/// </summary>
+public sealed class WalletIsolationApi : IsolationHost
+{
+    public const string Origin = "https://vessel.test";
+    private IdentityDatabase? identity;
+    private int clients;
+
+    internal IdentityDatabase Identity => identity ?? throw new InvalidOperationException("Set Vessel_TEST_POSTGRES to run the isolation suite.");
+
+    /// <summary>The host's configuration, as the offline <c>identity</c> commands read it.</summary>
+    internal IConfiguration Configuration => new ConfigurationBuilder().AddInMemoryCollection(Settings(Database)).Build();
+
+    private protected override async Task PrepareAsync(CoreDatabase journal) => identity = await IdentityDatabase.CreateAsync();
+
+    private protected override IEnumerable<KeyValuePair<string, string?>> Settings(CoreDatabase journal) => new Dictionary<string, string?>
+    {
+        ["Vessel:Auth:Mode"] = "Wallet", ["Vessel:Auth:Token"] = null, ["Vessel:Auth:OwnerId"] = InstallationOwner.ToString(),
+        ["Vessel:Identity:Schema"] = Identity.Schema.Name, ["Vessel:Identity:Origins:0"] = Origin,
+        ["ConnectionStrings:Vessel"] = journal.ConnectionString
+    };
+
+    protected override void Configure(IServiceCollection services) => services.AddSingleton<IStartupFilter, ClientAddress>();
+
+    protected override async Task CleanUpAsync()
+    {
+        if (identity is not null) await identity.DisposeAsync();
+    }
+
+    /// <summary>Seeds the user and its wallet, then signs in over HTTP. The session's user is the owner.</summary>
+    internal override async Task<Owner> Owner(Guid id)
+    {
+        var key = EthECKey.GenerateKey();
+        var (_, wallet) = await Identity.SeedAsync(key, id, role: "member");
+        var client = Client();
+        var session = await IdentityHttpTest.SignInAsync(client, key);
+        Assert.Equal((id, wallet.Id), (session.User.Id, session.Wallet.Id));
+        return new(id, client, new(key, wallet.Id, session.Session.Id));
+    }
+
+    /// <summary>A browser on its own device: cookies, the accepted origin and its own client address, but no session yet.</summary>
+    internal HttpClient Client()
+    {
+        var client = Factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new(Origin) });
+        client.Timeout = TimeSpan.FromSeconds(30);
+        client.DefaultRequestHeaders.Add("Origin", Origin);
+        client.DefaultRequestHeaders.Add("X-Vessel-Request", "1");
+        var device = Interlocked.Increment(ref clients);
+        client.DefaultRequestHeaders.Add(ClientAddress.Header, $"10.{device / 250 % 250}.{device % 250}.1");
+        return client;
+    }
+
+    /// <summary>A second session of an existing owner, as from another browser.</summary>
+    internal async Task<Owner> SignInAgain(Owner owner)
+    {
+        var client = Client();
+        var session = await IdentityHttpTest.SignInAsync(client, owner.Login!.Key);
+        Assert.Equal(owner.Id, session.User.Id);
+        return owner with { Http = client, Login = owner.Login with { Session = session.Session.Id } };
+    }
+
+    /// <summary>
+    /// Gives each test client its own remote address, so the per-client sign-in limits partition per device as they
+    /// would in production instead of every owner of a class sharing one test-server address. Test hosting only.
+    /// </summary>
+    private sealed class ClientAddress : IStartupFilter
+    {
+        public const string Header = "X-Isolation-Client-Address";
+
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            app.Use((context, following) =>
+            {
+                if (IPAddress.TryParse(context.Request.Headers[Header], out var address)) context.Connection.RemoteIpAddress = address;
+                return following(context);
+            });
+            next(app);
+        };
+    }
+}
+
+/// <summary>A Wallet-mode owner's sign-in: its synthetic EOA, the wallet row and the session its client holds.</summary>
+internal sealed record WalletLogin(EthECKey Key, Guid Wallet, Guid Session);
+
+/// <summary>
+/// An owner's HTTP client. In Token mode every request carries only the test owner header, never a bearer token; in
+/// Wallet mode only the session cookie and the tab-binding and origin headers (<see cref="Login"/>).
+/// </summary>
+internal sealed record Owner(Guid Id, HttpClient Http, WalletLogin? Login = null)
 {
     public async Task<JsonElement> GetJson(string path)
     {

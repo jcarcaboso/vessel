@@ -3,14 +3,14 @@ using Microsoft.EntityFrameworkCore;
 namespace Vessel.Tests.Isolation;
 
 /// <summary>Concurrent requests for two owners on one server never take each other's identity or data.</summary>
-public sealed class ConcurrencyIsolationTests(IsolationApi api) : IClassFixture<IsolationApi>
+public abstract class ConcurrencyIsolationCases(IsolationHost api)
 {
     private const int Rounds = 12;
 
     [PostgresFact]
     public async Task Concurrent_requests_of_two_owners_never_cross()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var owners = new[] { a, b };
         // Interleaved writes and reads, all in flight together.
         var work = owners.SelectMany(owner => Enumerable.Range(0, Rounds).Select(async round =>
@@ -46,7 +46,7 @@ public sealed class ConcurrencyIsolationTests(IsolationApi api) : IClassFixture<
     [PostgresFact]
     public async Task Concurrent_refreshes_of_the_same_source_keep_one_copy_per_owner()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         // Both owners import and refresh the same native address at the same time.
         var synced = await Task.WhenAll(new[] { a, b }.Select(async owner =>
             (owner, account: (await owner.SyncedVenueAccount(Isolated.Marker("venue"))).GetProperty("id").GetGuid())));
@@ -69,3 +69,9 @@ public sealed class ConcurrencyIsolationTests(IsolationApi api) : IClassFixture<
         }
     }
 }
+
+/// <summary>The cases above in Token mode, with the suite's test scheme selecting the owner.</summary>
+public sealed class ConcurrencyIsolationTests(IsolationApi api) : ConcurrencyIsolationCases(api), IClassFixture<IsolationApi>;
+
+/// <summary>The same cases in Wallet mode: two signed-in users, each request mapped to its owner by the session scheme.</summary>
+public sealed class WalletConcurrencyIsolationTests(WalletIsolationApi api) : ConcurrencyIsolationCases(api), IClassFixture<WalletIsolationApi>;

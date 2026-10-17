@@ -11,7 +11,7 @@ namespace Vessel.Tests.Isolation;
 /// Both owners follow the same native address, so they retain identical source fill, order and funding IDs.
 /// Overview, Activity, Review and Sizing must still answer each owner from its own copy only.
 /// </summary>
-public sealed class ReadModelIsolationTests(IsolationApi api) : IClassFixture<IsolationApi>
+public abstract class ReadModelIsolationCases(IsolationHost api)
 {
     private sealed record Journal(Owner Owner, Guid Portfolio, Guid Account, string Operation, Guid Play, string? Fingerprint = null);
 
@@ -59,7 +59,7 @@ public sealed class ReadModelIsolationTests(IsolationApi api) : IClassFixture<Is
     [Covers("GET", "/api/sizing")]
     public async Task Shared_venue_identities_stay_separate_and_correct_for_each_owner()
     {
-        var (aOwner, bOwner) = api.Owners();
+        var (aOwner, bOwner) = await api.Owners();
         var a = await Import(aOwner);
         var b = await Import(bOwner);
         // Operation IDs are Vessel row identities, so each owner's differ even over the same native fills.
@@ -133,7 +133,7 @@ public sealed class ReadModelIsolationTests(IsolationApi api) : IClassFixture<Is
     [Covers("POST", "/api/plays/retrospective")]
     public async Task Retrospective_request_ids_are_per_owner_and_reviews_stay_separate()
     {
-        var (aOwner, bOwner) = api.Owners();
+        var (aOwner, bOwner) = await api.Owners();
         // The same request ID in both owners: B's retrospective is its own, not a replay of A's.
         var requestId = Guid.NewGuid();
         var a = await Import(aOwner, requestId);
@@ -164,7 +164,7 @@ public sealed class ReadModelIsolationTests(IsolationApi api) : IClassFixture<Is
     [PostgresFact]
     public async Task Read_filters_naming_the_other_owners_ids_answer_like_unknown_ones()
     {
-        var (aOwner, bOwner) = api.Owners();
+        var (aOwner, bOwner) = await api.Owners();
         var a = await Import(aOwner);
         var b = await Import(bOwner);
         var state = await Snapshot.Of((a.Owner, Reads(a)), (b.Owner, Reads(b)));
@@ -211,7 +211,7 @@ public sealed class ReadModelIsolationTests(IsolationApi api) : IClassFixture<Is
     [Covers("POST", "/api/plays/retrospective")]
     public async Task Foreign_operation_ids_under_an_owned_account_answer_like_unknown_ones()
     {
-        var (aOwner, b) = api.Owners();
+        var (aOwner, b) = await api.Owners();
         var a = await Import(aOwner, Guid.NewGuid());
         // B's own account on the same address: its operation has the same fills but its own ID, and is still eligible.
         var account = (await b.SyncedVenueAccount(Isolated.Marker("venue-b"))).GetProperty("id").GetGuid();
@@ -259,7 +259,7 @@ public sealed class ReadModelIsolationTests(IsolationApi api) : IClassFixture<Is
     [Covers("PUT", "/api/sizing/settings")]
     public async Task Sizing_settings_are_per_owner()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var aSettings = await a.Send(HttpMethod.Put, "/api/sizing/settings", new UpdateSizingSettingsRequest("0.5"));
         Assert.Equal("0.5", aSettings.GetProperty("settings").GetProperty("riskPercent").GetString());
         Assert.Equal("1.25", (await b.GetJson("/api/sizing")).GetProperty("settings").GetProperty("riskPercent").GetString());
@@ -268,3 +268,9 @@ public sealed class ReadModelIsolationTests(IsolationApi api) : IClassFixture<Is
         Assert.Equal("2", (await b.GetJson("/api/sizing")).GetProperty("settings").GetProperty("riskPercent").GetString());
     }
 }
+
+/// <summary>The cases above in Token mode, with the suite's test scheme selecting the owner.</summary>
+public sealed class ReadModelIsolationTests(IsolationApi api) : ReadModelIsolationCases(api), IClassFixture<IsolationApi>;
+
+/// <summary>The same cases in Wallet mode: two signed-in users, each request mapped to its owner by the session scheme.</summary>
+public sealed class WalletReadModelIsolationTests(WalletIsolationApi api) : ReadModelIsolationCases(api), IClassFixture<WalletIsolationApi>;

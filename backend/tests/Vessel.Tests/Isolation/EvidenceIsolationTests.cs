@@ -8,7 +8,7 @@ using Vessel.Application.Plays;
 namespace Vessel.Tests.Isolation;
 
 /// <summary>Evidence metadata, bytes, notes and markup across two owners.</summary>
-public sealed class EvidenceIsolationTests(IsolationApi api) : IClassFixture<IsolationApi>
+public abstract class EvidenceIsolationCases(IsolationHost api)
 {
     private static readonly ImageMarkup Box = new(10, 10, [new("a", "box", "#ffffff", 2, From: new(1, 1), To: new(5, 5))]);
 
@@ -50,7 +50,7 @@ public sealed class EvidenceIsolationTests(IsolationApi api) : IClassFixture<Iso
     [Covers("DELETE", "/api/evidence/{id:guid}")]
     public async Task Evidence_of_another_owner_answers_like_unknown_and_its_bytes_stay_private()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var aPlay = await Play(a);
         byte[] aBytes = [.. EvidenceFixtures.Png, .. RandomNumberGenerator.GetBytes(16)];
         var note = Isolated.Marker("note-a");
@@ -89,3 +89,9 @@ public sealed class EvidenceIsolationTests(IsolationApi api) : IClassFixture<Iso
         await a.Send(HttpMethod.Delete, $"/api/evidence/{evidence}", expected: HttpStatusCode.NoContent);
     }
 }
+
+/// <summary>The cases above in Token mode, with the suite's test scheme selecting the owner.</summary>
+public sealed class EvidenceIsolationTests(IsolationApi api) : EvidenceIsolationCases(api), IClassFixture<IsolationApi>;
+
+/// <summary>The same cases in Wallet mode: two signed-in users, each request mapped to its owner by the session scheme.</summary>
+public sealed class WalletEvidenceIsolationTests(WalletIsolationApi api) : EvidenceIsolationCases(api), IClassFixture<WalletIsolationApi>;

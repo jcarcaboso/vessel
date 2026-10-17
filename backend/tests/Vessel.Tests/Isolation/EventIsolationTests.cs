@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace Vessel.Tests.Isolation;
 
 /// <summary>The event page, its cursors and the event stream across two owners.</summary>
-public sealed class EventIsolationTests(IsolationApi api) : IClassFixture<IsolationApi>
+public abstract class EventIsolationCases(IsolationHost api)
 {
     private static async Task<(Guid Account, Guid Play)> Journal(Owner owner)
     {
@@ -28,7 +28,7 @@ public sealed class EventIsolationTests(IsolationApi api) : IClassFixture<Isolat
     [Covers("GET", "/api/events")]
     public async Task Event_pages_and_cursors_never_return_the_other_owners_events()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var (aAccount, aPlay) = await Journal(a);
         var (bAccount, bPlay) = await Journal(b);
         var aPage = await a.GetJson("/api/events");
@@ -60,7 +60,7 @@ public sealed class EventIsolationTests(IsolationApi api) : IClassFixture<Isolat
     [Covers("GET", "/api/events/stream")]
     public async Task Event_streams_deliver_only_the_callers_events()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var (aAccount, aPlay) = await Journal(a);
         var (bAccount, bPlay) = await Journal(b);
         var aCursor = (await a.GetJson("/api/events?limit=1")).GetProperty("nextCursor").GetString()!;
@@ -81,7 +81,7 @@ public sealed class EventIsolationTests(IsolationApi api) : IClassFixture<Isolat
     public async Task Event_stream_cap_is_per_owner()
     {
         // Fresh owners hold no stream slots, so no earlier case's disconnecting stream can be counted here.
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var open = new List<HttpResponseMessage>();
         try
@@ -128,3 +128,9 @@ public sealed class EventIsolationTests(IsolationApi api) : IClassFixture<Isolat
         return text.ToString();
     }
 }
+
+/// <summary>The cases above in Token mode, with the suite's test scheme selecting the owner.</summary>
+public sealed class EventIsolationTests(IsolationApi api) : EventIsolationCases(api), IClassFixture<IsolationApi>;
+
+/// <summary>The same cases in Wallet mode: two signed-in users, each request mapped to its owner by the session scheme.</summary>
+public sealed class WalletEventIsolationTests(WalletIsolationApi api) : EventIsolationCases(api), IClassFixture<WalletIsolationApi>;

@@ -7,7 +7,7 @@ using Vessel.Application.Workspace;
 namespace Vessel.Tests.Isolation;
 
 /// <summary>Portfolios, accounts, bulk membership, credentials and the account sub-resources across two owners.</summary>
-public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<IsolationApi>
+public abstract class WorkspaceIsolationCases(IsolationHost api)
 {
     [PostgresFact]
     [Covers("GET", "/api/portfolios")]
@@ -17,7 +17,7 @@ public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<Is
     [Covers("DELETE", "/api/portfolios/{id:guid}")]
     public async Task Portfolios_of_another_owner_answer_like_unknown_ones_and_stay_unchanged()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var name = Isolated.Marker("portfolio-a");
         var portfolio = await a.Portfolio(name);
         var account = (await a.ManualAccount(Isolated.Marker("account-a"), portfolio)).GetProperty("id").GetGuid();
@@ -46,7 +46,7 @@ public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<Is
     [Covers("DELETE", "/api/accounts/{id:guid}")]
     public async Task Accounts_of_another_owner_answer_like_unknown_ones_and_stay_unchanged()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var portfolio = await a.Portfolio(Isolated.Marker("portfolio-a"));
         var name = Isolated.Marker("account-a");
         var created = await a.ManualAccount(name, portfolio);
@@ -82,7 +82,7 @@ public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<Is
     [Covers("POST", "/api/accounts/portfolio")]
     public async Task Bulk_membership_with_foreign_ids_changes_nothing_for_either_owner()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var aPortfolio = await a.Portfolio(Isolated.Marker("portfolio-a"));
         var aAccount = await a.ManualAccount(Isolated.Marker("account-a"), aPortfolio);
         var aId = aAccount.GetProperty("id").GetGuid();
@@ -148,7 +148,7 @@ public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<Is
     [Covers("DELETE", "/api/accounts/{id:guid}/credential")]
     public async Task Credential_metadata_of_another_owner_answers_like_an_unknown_account()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var account = (await a.IndexAccount(Isolated.Marker("index-a"))).GetProperty("id").GetGuid();
         var saved = await a.Send(HttpMethod.Put, $"/api/accounts/{account}/credential", new { token = SecurityFixture.Token });
         Assert.Equal("valid", saved.GetProperty("credential").GetProperty("status").GetString());
@@ -173,7 +173,7 @@ public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<Is
     [Covers("POST", "/api/venues/{venueId}/accounts/credential")]
     public async Task Discovery_marks_only_the_callers_imports_of_a_shared_source()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var account = (await a.IndexAccount(Isolated.Marker("index-a"))).GetProperty("id").GetGuid();
         var venue = SecurityFixture.Venue.Id;
         var query = $"/api/venues/{venue}/accounts?address={IsolationVenues.Address}";
@@ -205,7 +205,7 @@ public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<Is
     [Covers("POST", "/api/accounts/{id:guid}/sync")]
     public async Task Account_reads_and_refresh_of_another_owner_answer_like_unknown_ones()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var synced = await a.SyncedVenueAccount(Isolated.Marker("venue-a"));
         var account = synced.GetProperty("id").GetGuid();
         Assert.Equal("synced", synced.GetProperty("syncStatus").GetString());
@@ -246,7 +246,7 @@ public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<Is
     [PostgresFact]
     public async Task Sealed_credential_copied_to_another_owners_account_cannot_be_opened()
     {
-        var (a, b) = api.Owners();
+        var (a, b) = await api.Owners();
         var aAccount = (await a.IndexAccount(Isolated.Marker("index-a"))).GetProperty("id").GetGuid();
         var bAccount = (await b.IndexAccount(Isolated.Marker("index-b"))).GetProperty("id").GetGuid();
         await a.Send(HttpMethod.Put, $"/api/accounts/{aAccount}/credential", new { token = SecurityFixture.Token });
@@ -276,3 +276,9 @@ public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<Is
         Assert.Equal("valid", (await a.GetJson($"/api/accounts/{aAccount}/credential")).GetProperty("credential").GetProperty("status").GetString());
     }
 }
+
+/// <summary>The cases above in Token mode, with the suite's test scheme selecting the owner.</summary>
+public sealed class WorkspaceIsolationTests(IsolationApi api) : WorkspaceIsolationCases(api), IClassFixture<IsolationApi>;
+
+/// <summary>The same cases in Wallet mode: two signed-in users, each request mapped to its owner by the session scheme.</summary>
+public sealed class WalletWorkspaceIsolationTests(WalletIsolationApi api) : WorkspaceIsolationCases(api), IClassFixture<WalletIsolationApi>;
