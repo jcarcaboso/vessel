@@ -30,6 +30,11 @@
           "AWSSDK.Core": "[4.0.102.11, 5.0.0)"
         }
       },
+      "BouncyCastle.Cryptography": {
+        "type": "Transitive",
+        "resolved": "2.5.1",
+        "contentHash": "zy8TMeTP+1FH2NrLaNZtdRbBdq7u5MI+NFZQOBSM69u5RFkciinwzV2eveY6Kjf5MzgsYvvl6kTStsj3JrXqkg=="
+      },
       "Cronos": {
         "type": "Transitive",
         "resolved": "0.11.0",
@@ -287,6 +292,73 @@
           "System.CodeDom": "6.0.0"
         }
       },
+      "NBitcoin.Secp256k1": {
+        "type": "Transitive",
+        "resolved": "3.1.1",
+        "contentHash": "ekF91qDK2+TI9FFhXvjClfUOQ3DWxNhvjh8Eoqawk1KPk/hCURpc8xoyeprtAiIoM5wgPnWeFxQybVWhl2NsHA=="
+      },
+      "Nethereum.ABI": {
+        "type": "Transitive",
+        "resolved": "7.0.0",
+        "contentHash": "x5Ghi+9GxCEW6y3Dd72b/SxoS7aP4YL68vou4ffjZY4bWNreDkOvAYih+s5N0ectzpS9vveZMij0gKAQjOLEzA==",
+        "dependencies": {
+          "Nethereum.Hex": "7.0.0",
+          "Nethereum.Util": "7.0.0",
+          "Newtonsoft.Json": "[11.0.2, 14.0.0)"
+        }
+      },
+      "Nethereum.Hex": {
+        "type": "Transitive",
+        "resolved": "7.0.0",
+        "contentHash": "uEdB+TeN6Pj3jY7OarOjjpJMu0FsLeUD/qDYSrjht2PchgADgFaAc0y1JitH2ccXv6csTIiCqDR4xL2Gqzmg2A==",
+        "dependencies": {
+          "Newtonsoft.Json": "[11.0.2, 14.0.0)"
+        }
+      },
+      "Nethereum.Model": {
+        "type": "Transitive",
+        "resolved": "7.0.0",
+        "contentHash": "3JTwNIFYzLGOB/CSaoA5+UUiFo780BLyPXAt3Ig7+NcoJZtXi5sSi/+h51vSQ1sSmDzdZqJozVh6MPwuUUlJEA==",
+        "dependencies": {
+          "Nethereum.RLP": "7.0.0",
+          "Nethereum.Util": "7.0.0",
+          "Newtonsoft.Json": "[11.0.2, 14.0.0)"
+        }
+      },
+      "Nethereum.RLP": {
+        "type": "Transitive",
+        "resolved": "7.0.0",
+        "contentHash": "SbUqK/xcxkTdBwLFMoOj1wda2IhGxQsF6XTsJhBoztrACKmTgG9QshzgK+q4vpCsp0frurQLJaFSMBQJJsZcEw==",
+        "dependencies": {
+          "Nethereum.Hex": "7.0.0",
+          "Newtonsoft.Json": "[11.0.2, 14.0.0)"
+        }
+      },
+      "Nethereum.Signer": {
+        "type": "Transitive",
+        "resolved": "7.0.0",
+        "contentHash": "c3GYqaS0dBCG+Dw5h3FLm7sj9AFjaA4/VQq1RUOPrT+ZAWkDvtsYc0AGKyq7GGGTtt82WgiDS/b0Oo816GgZew==",
+        "dependencies": {
+          "BouncyCastle.Cryptography": "[2.5.1, 3.0.0)",
+          "NBitcoin.Secp256k1": "3.1.1",
+          "Nethereum.ABI": "7.0.0",
+          "Nethereum.Hex": "7.0.0",
+          "Nethereum.Model": "7.0.0",
+          "Nethereum.RLP": "7.0.0",
+          "Nethereum.Util": "7.0.0",
+          "Newtonsoft.Json": "[11.0.2, 14.0.0)"
+        }
+      },
+      "Nethereum.Util": {
+        "type": "Transitive",
+        "resolved": "7.0.0",
+        "contentHash": "oPGB2K8hMM1g8bjJcoPCbs/rVIpgdxYe+C77JJau9Q/U3cOrf0nW8U4BqODEvHn+6OciAHxR71muhH8bU9K5Qw==",
+        "dependencies": {
+          "Nethereum.Hex": "7.0.0",
+          "Nethereum.RLP": "7.0.0",
+          "Newtonsoft.Json": "[11.0.2, 14.0.0)"
+        }
+      },
       "NetTopologySuite": {
         "type": "Transitive",
         "resolved": "2.5.0",
@@ -532,24 +604,34 @@
       "vessel.application": {
         "type": "Project",
         "dependencies": {
-          "Vessel.Domain": "[0.1.1, )"
+          "Vessel.Domain": "[0.2.0, )"
         }
       },
       "vessel.domain": {
         "type": "Project"
       },
+      "vessel.identity": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.EntityFrameworkCore": "[10.0.10, )",
+          "Microsoft.EntityFrameworkCore.Relational": "[10.0.10, )",
+          "Nethereum.Signer": "[7.0.0, )",
+          "Npgsql.EntityFrameworkCore.PostgreSQL": "[10.0.3, )",
+          "Vessel.Application": "[0.2.0, )"
+        }
+      },
       "vessel.infrastructure": {
         "type": "Project",
         "dependencies": {
           "AWSSDK.S3": "[4.0.104.4, )",
-          "Vessel.Application": "[0.1.1, )"
+          "Vessel.Application": "[0.2.0, )"
         }
       },
       "vessel.messaging": {
         "type": "Project",
         "dependencies": {
-          "Vessel.Application": "[0.1.1, )",
-          "Vessel.Persistence": "[0.1.1, )",
+          "Vessel.Application": "[0.2.0, )",
+          "Vessel.Persistence": "[0.2.0, )",
           "WolverineFx": "[6.50.0, )",
           "WolverineFx.EntityFrameworkCore": "[6.50.0, )",
           "WolverineFx.Postgresql": "[6.50.0, )",
@@ -563,8 +645,8 @@
           "Microsoft.EntityFrameworkCore": "[10.0.10, )",
           "Microsoft.EntityFrameworkCore.Relational": "[10.0.10, )",
           "Npgsql.EntityFrameworkCore.PostgreSQL": "[10.0.3, )",
-          "Vessel.Application": "[0.1.1, )",
-          "Vessel.Domain": "[0.1.1, )"
+          "Vessel.Application": "[0.2.0, )",
+          "Vessel.Domain": "[0.2.0, )"
         }
       }
     }

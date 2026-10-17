@@ -21,6 +21,9 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
     protected override IHost CreateHost(IHostBuilder builder)
     {
         VesselEventTestHosting.ConfigureBootstrap(builder);
+        // Mode selects schemes before ConfigureAppConfiguration runs on a minimal test host.
+        if (settings?.ContainsKey("Vessel:Auth:Mode") == true)
+            builder.ConfigureHostConfiguration(config => config.AddInMemoryCollection(settings));
         // Production validation runs before ConfigureAppConfiguration on a minimal host.
         // Supply synthetic bootstrap settings early; never change the process environment.
         if (environment != "Development")

@@ -5,6 +5,7 @@
     <ProjectReference Include="../Vessel.Application/Vessel.Application.csproj" />
     <ProjectReference Include="../Vessel.Persistence/Vessel.Persistence.csproj" />
     <ProjectReference Include="../Vessel.Infrastructure/Vessel.Infrastructure.csproj" />
+    <ProjectReference Include="../Vessel.Identity/Vessel.Identity.csproj" />
     <ProjectReference Include="../Vessel.Messaging/Vessel.Messaging.csproj" />
   </ItemGroup>
   <ItemGroup><None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>

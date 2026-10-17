@@ -3,5 +3,7 @@
 # insert-only subscription registrations). The API and workers never migrate or provision at startup.
 set -eu
 cd /app
+/app/migrate-identity-ef
 /app/migrate-ef "$@"
+dotnet /app/Vessel.Api.dll identity ensure-owner
 exec dotnet /app/Vessel.Api.dll provision-messaging

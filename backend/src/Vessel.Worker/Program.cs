@@ -68,6 +68,7 @@ public static class WorkerHost
         var modules = VesselModuleRegistry.From(builder.Configuration).Select(worker.Modules);
         builder.Services.AddSingleton(worker);
         builder.Services.AddVesselInfrastructure(builder.Configuration);
+        Vessel.Identity.DependencyInjection.AddVesselIdentityDirectory(builder.Services, builder.Configuration);
         builder.Services.RemoveAll<IJournalOwnerContext>();
         builder.Services.AddSingleton<IJournalOwnerContext>(new WorkerOwnerContext(owner));
         builder.Services.AddVesselPersistence(builder.Configuration);

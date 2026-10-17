@@ -14,6 +14,9 @@ RUN dotnet publish src/Vessel.Worker/Vessel.Worker.csproj -c Release --no-restor
 RUN ConnectionStrings__Vessel='Host=localhost;Database=vessel;Username=vessel' \
     dotnet ef migrations bundle --project src/Vessel.Persistence --configuration Release \
     --target-runtime linux-x64 --output /out/migrate-ef
+RUN ConnectionStrings__Vessel='Host=localhost;Database=vessel;Username=vessel' \
+    dotnet ef migrations bundle --project src/Vessel.Identity --configuration Release \
+    --target-runtime linux-x64 --output /out/migrate-identity-ef
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 ARG VERSION=0.2.0
@@ -29,6 +32,7 @@ WORKDIR /app
 COPY --from=build /out/api/ ./
 COPY --from=build /out/worker/ /app/worker-host/
 COPY --from=build --chmod=755 /out/migrate-ef /app/migrate-ef
+COPY --from=build --chmod=755 /out/migrate-identity-ef /app/migrate-identity-ef
 COPY --chmod=755 deploy/migrate deploy/worker deploy/worker-health /app/
 ENV ASPNETCORE_HTTP_PORTS=8080 \
     ASPNETCORE_ENVIRONMENT=Production \

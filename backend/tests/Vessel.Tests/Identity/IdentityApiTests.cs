@@ -1,0 +1,285 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Nethereum.Signer;
+using Vessel.Application.Events;
+using Vessel.Application.Ownership;
+using Vessel.Identity;
+
+namespace Vessel.Tests.Identity;
+
+public sealed class IdentityApiTests
+{
+    [Theory]
+    [InlineData("GET", "/api/auth/session")]
+    [InlineData("POST", "/api/auth/challenge")]
+    [InlineData("POST", "/api/auth/verify")]
+    [InlineData("POST", "/api/auth/register")]
+    [InlineData("POST", "/api/auth/sign-out")]
+    [InlineData("DELETE", "/api/auth/unknown")]
+    public async Task Token_mode_auth_routes_are_anonymous_404s(string method, string path)
+    {
+        await using var factory = new CoreApiFactory(Guid.NewGuid());
+        using var client = factory.CreateClient();
+        await IdentityHttpTest.Code(await client.SendAsync(new(new HttpMethod(method), path)), 404, "not-found");
+        var config = await client.GetFromJsonAsync<JsonElement>("/api/auth/config");
+        Assert.Equal("""{"mode":"token"}""", config.GetRawText());
+    }
+
+    [Fact]
+    public async Task Wallet_config_does_not_reveal_origins_and_only_reports_the_query_hint_and_gate()
+    {
+        await using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new()
+        {
+            ["Vessel:Auth:Mode"] = "Wallet", ["Vessel:Auth:Token"] = null, ["Vessel:Identity:Origins:0"] = "https://vessel.test",
+            ["Vessel:Identity:Registration"] = "Open"
+        });
+        using var client = factory.CreateClient();
+        var without = await client.GetFromJsonAsync<JsonElement>("/api/auth/config");
+        Assert.False(without.GetProperty("originAccepted").GetBoolean());
+        Assert.Equal("closed", without.GetProperty("registration").GetString());
+        var accepted = await client.GetFromJsonAsync<JsonElement>("/api/auth/config?origin=https%3A%2F%2Fvessel.test");
+        Assert.True(accepted.GetProperty("originAccepted").GetBoolean());
+        Assert.Equal(3, accepted.EnumerateObject().Count());
+        var rejected = await client.GetFromJsonAsync<JsonElement>("/api/auth/config?origin=https%3A%2F%2Fevil.test");
+        Assert.False(rejected.GetProperty("originAccepted").GetBoolean());
+        using var scope = factory.Services.CreateScope();
+        var schemes = scope.ServiceProvider.GetRequiredService<IAuthenticationSchemeProvider>();
+        Assert.Null(await schemes.GetSchemeAsync("VesselBearer"));
+        client.DefaultRequestHeaders.Authorization = new("Bearer", CoreApiFactory.Token);
+        await IdentityHttpTest.Code(await client.GetAsync("/api/system"), 401, "session-required");
+        client.DefaultRequestHeaders.Add("Cookie", "__Host-vessel-session=" + IdentityTokens.Create());
+        await IdentityHttpTest.Code(await client.GetAsync("/api/system"), 503, "identity-unavailable");
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/config")).StatusCode);
+    }
+
+    [PostgresFact]
+    public async Task Session_scheme_preserves_the_legacy_principal_type_and_adds_the_session_claim()
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        var key = EthECKey.GenerateKey();
+        var seeded = await database.SeedAsync(key);
+        var issued = await database.SignInAsync(key);
+        await using var factory = IdentityHttpTest.Factory(database, seeded.User.Id);
+        using var scope = factory.Services.CreateScope();
+        var context = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
+        context.Request.Path = "/api/system";
+        context.Request.Headers.Cookie = "__Host-vessel-session=" + issued.Token;
+        var result = await context.AuthenticateAsync(SessionAuthentication.SchemeName);
+        Assert.True(result.Succeeded);
+        Assert.Equal(SessionAuthentication.SchemeName, result.Ticket!.AuthenticationScheme);
+        Assert.Equal("VesselBearer", result.Principal!.Identity!.AuthenticationType);
+        Assert.Equal(seeded.User.DisplayName, result.Principal.Identity.Name);
+        Assert.Equal(seeded.User.Id.ToString(), result.Principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+        Assert.Equal(issued.Session.Session.Id.ToString(), result.Principal.FindFirst(SessionAuthentication.SessionClaim)!.Value);
+    }
+
+    [PostgresFact]
+    public async Task Sign_in_session_system_and_expected_sign_out_use_the_same_owner_claims()
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        var key = EthECKey.GenerateKey();
+        var seeded = await database.SeedAsync(key);
+        await using var factory = IdentityHttpTest.Factory(database, seeded.User.Id);
+        using var client = IdentityHttpTest.Client(factory);
+        var session = await IdentityHttpTest.SignInAsync(client, key);
+        Assert.True(session.AdoptsLegacyPreferences);
+        Assert.Equal(WalletSignatures.Checksum(key.GetPublicAddress()), session.Wallet.Address);
+        var system = await client.GetFromJsonAsync<JsonElement>("/api/system");
+        Assert.Equal(seeded.User.Id, system.GetProperty("owner").GetProperty("id").GetGuid());
+        client.DefaultRequestHeaders.Remove("X-Vessel-User");
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/session")).StatusCode);
+        await IdentityHttpTest.Code(await client.GetAsync("/api/system"), 401, "session-user-mismatch");
+        client.DefaultRequestHeaders.Add("X-Vessel-User", Guid.NewGuid().ToString());
+        await IdentityHttpTest.Code(await client.GetAsync("/api/system"), 401, "session-user-mismatch");
+        client.DefaultRequestHeaders.Remove("X-Vessel-User");
+        client.DefaultRequestHeaders.Add("X-Vessel-User", seeded.User.Id.ToString());
+        var stale = await client.PostAsJsonAsync("/api/auth/sign-out", new { expectedSessionId = Guid.NewGuid() });
+        await IdentityHttpTest.Code(stale, 409, "session-changed");
+        Assert.False(stale.Headers.Contains("Set-Cookie"));
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/session")).StatusCode);
+        var signedOut = await client.PostAsJsonAsync("/api/auth/sign-out", new { expectedSessionId = session.Session.Id });
+        Assert.Equal(HttpStatusCode.NoContent, signedOut.StatusCode);
+        Assert.Contains(signedOut.Headers.GetValues("Set-Cookie"), cookie => cookie.StartsWith("__Host-vessel-session=;", StringComparison.Ordinal));
+        await IdentityHttpTest.Code(await client.GetAsync("/api/auth/session"), 401, "session-required");
+    }
+
+    [PostgresTheory]
+    [InlineData("https://vessel.test", "__Host-vessel-signin", "__Host-vessel-session", true, false)]
+    [InlineData("https://vessel.test", "__Host-vessel-signin", "__Host-vessel-session", true, true)]
+    [InlineData("http://localhost", "vessel-signin", "vessel-session", false, false)]
+    [InlineData("http://localhost", "vessel-signin", "vessel-session", false, true)]
+    public async Task Cookies_have_origin_specific_names_attributes_lifetimes_and_reuse_binding(
+        string origin, string bindingName, string sessionName, bool secure, bool remember)
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        var key = EthECKey.GenerateKey();
+        var owner = await database.SeedAsync(key);
+        await using var factory = IdentityHttpTest.Factory(database, owner.User.Id);
+        using var client = IdentityHttpTest.Client(factory, origin);
+        var first = await client.PostAsJsonAsync("/api/auth/challenge", new { address = key.GetPublicAddress() });
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var cookie = first.Headers.GetValues("Set-Cookie").Single();
+        Assert.StartsWith(bindingName + "=", cookie);
+        Assert.Contains("httponly", cookie);
+        Assert.Contains("samesite=strict", cookie);
+        Assert.Contains("path=/", cookie);
+        Assert.Contains("max-age=600", cookie);
+        Assert.Equal(secure, cookie.Contains("; secure", StringComparison.Ordinal));
+        Assert.DoesNotContain("domain=", cookie);
+        var second = await client.PostAsJsonAsync("/api/auth/challenge", new { address = key.GetPublicAddress() });
+        Assert.False(second.Headers.Contains("Set-Cookie"));
+        var challenge = (await first.Content.ReadFromJsonAsync<ChallengeDto>())!;
+        var verify = await client.PostAsJsonAsync("/api/auth/verify", new { challengeId = challenge.ChallengeId,
+            signature = IdentityDatabase.Sign(key, challenge.Message), remember });
+        Assert.Equal(HttpStatusCode.OK, verify.StatusCode);
+        var sessionCookie = verify.Headers.GetValues("Set-Cookie").Single(value => value.StartsWith(sessionName + "=", StringComparison.Ordinal));
+        Assert.Equal(secure, sessionCookie.Contains("; secure", StringComparison.Ordinal));
+        Assert.Equal(remember, sessionCookie.Contains("max-age=", StringComparison.Ordinal));
+        if (remember) Assert.Contains("max-age=2592000", sessionCookie);
+        client.DefaultRequestHeaders.Remove("Origin");
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/session")).StatusCode);
+        client.DefaultRequestHeaders.Add("Origin", "null");
+        client.DefaultRequestHeaders.Add("X-Vessel-User", owner.User.Id.ToString());
+        await IdentityHttpTest.Code(await client.DeleteAsync("/api/unknown-write"), 403, "origin-rejected");
+    }
+
+    [PostgresFact]
+    public async Task New_user_verify_reissues_binding_cookie_and_failed_register_does_not_burn_it()
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        var key = EthECKey.GenerateKey();
+        await using var factory = IdentityHttpTest.Factory(database, Guid.NewGuid(), registration: "Open");
+        using var client = IdentityHttpTest.Client(factory);
+        var challenge = await (await client.PostAsJsonAsync("/api/auth/challenge", new { address = key.GetPublicAddress() })).Content.ReadFromJsonAsync<ChallengeDto>();
+        var response = await client.PostAsJsonAsync("/api/auth/verify", new { challengeId = challenge!.ChallengeId,
+            signature = IdentityDatabase.Sign(key, challenge.Message), remember = false });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains(response.Headers.GetValues("Set-Cookie"), value =>
+            value.StartsWith("__Host-vessel-signin=", StringComparison.Ordinal) && value.Contains("max-age=600", StringComparison.Ordinal));
+        var verified = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("registration-required", verified.GetProperty("status").GetString());
+        var registration = verified.GetProperty("registration").GetString();
+        await IdentityHttpTest.Code(await client.PostAsJsonAsync("/api/auth/register", new { registration, displayName = "", remember = false }),
+            400, "display-name-invalid");
+        var registered = await client.PostAsJsonAsync("/api/auth/register", new { registration, displayName = "  Synthetic new user  ", remember = false });
+        Assert.Equal(HttpStatusCode.Created, registered.StatusCode);
+        var dto = (await registered.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("session");
+        Assert.Equal("Synthetic new user", dto.GetProperty("user").GetProperty("displayName").GetString());
+        Assert.False(dto.GetProperty("adoptsLegacyPreferences").GetBoolean());
+        Assert.Contains(registered.Headers.GetValues("Set-Cookie"), value => value.StartsWith("__Host-vessel-session=", StringComparison.Ordinal));
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/session")).StatusCode);
+    }
+
+    [PostgresTheory]
+    [InlineData("Origin", null, "origin-rejected")]
+    [InlineData("Origin", "null", "origin-rejected")]
+    [InlineData("Origin", "https://evil.test", "origin-rejected")]
+    [InlineData("Origin", "https://vessel.test/", "origin-rejected")]
+    [InlineData("Sec-Fetch-Site", "cross-site", "csrf-rejected")]
+    [InlineData("X-Vessel-Request", null, "csrf-rejected")]
+    public async Task Guard_refuses_missing_null_or_wrong_origins_cross_site_and_missing_public_header(string header, string? value, string code)
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        await using var factory = IdentityHttpTest.Factory(database, Guid.NewGuid());
+        using var client = IdentityHttpTest.Client(factory);
+        client.DefaultRequestHeaders.Remove(header);
+        if (value is not null) client.DefaultRequestHeaders.Add(header, value);
+        await IdentityHttpTest.Code(await client.PostAsJsonAsync("/api/auth/challenge", new { address = EthECKey.GenerateKey().GetPublicAddress() }),
+            403, code);
+    }
+
+    [PostgresFact]
+    public async Task Public_routes_are_exempt_even_with_an_invalid_or_foreign_session_cookie()
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        var key = EthECKey.GenerateKey();
+        var seed = await database.SeedAsync(key);
+        await using var factory = IdentityHttpTest.Factory(database, seed.User.Id);
+        using var client = IdentityHttpTest.Client(factory);
+        await IdentityHttpTest.SignInAsync(client, key);
+        client.DefaultRequestHeaders.Remove("X-Vessel-User");
+        client.DefaultRequestHeaders.Add("X-Vessel-User", Guid.NewGuid().ToString());
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/config")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/auth/challenge", new { address = key.GetPublicAddress() })).StatusCode);
+        await using var db = database.CreateDbContext();
+        await db.Sessions.ExecuteUpdateAsync(update => update.SetProperty(x => x.RevokedAt, database.Clock.Now));
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/auth/challenge", new { address = key.GetPublicAddress() })).StatusCode);
+    }
+
+    [PostgresFact]
+    public async Task Guard_has_no_content_type_rule_and_allows_multipart_and_bodyless_DELETE()
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        var key = EthECKey.GenerateKey();
+        var seed = await database.SeedAsync(key);
+        await using var factory = IdentityHttpTest.Factory(database, seed.User.Id);
+        using var client = IdentityHttpTest.Client(factory);
+        await IdentityHttpTest.SignInAsync(client, key);
+        using var multipart = new MultipartFormDataContent();
+        multipart.Add(new ByteArrayContent([1, 2, 3]), "file", "synthetic.png");
+        // Nonexistent authenticated paths reach the normal router, not a content-type/body guard.
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync("/api/unknown-write", multipart)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync("/api/unknown-write")).StatusCode);
+        client.DefaultRequestHeaders.Remove("Origin");
+        await IdentityHttpTest.Code(await client.DeleteAsync("/api/unknown-write"), 403, "origin-rejected");
+    }
+
+    [PostgresFact]
+    public async Task Auth_bodies_are_bounded_including_streaming_and_malformed_JSON_has_a_code()
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        await using var factory = IdentityHttpTest.Factory(database, Guid.NewGuid());
+        using var client = IdentityHttpTest.Client(factory);
+        await IdentityHttpTest.Code(await client.PostAsync("/api/auth/challenge", new StringContent("{")), 400, "request-invalid");
+        await IdentityHttpTest.Code(await client.PostAsync("/api/auth/challenge", new StringContent(new string(' ', 16385))), 413, "request-too-large");
+        await IdentityHttpTest.Code(await client.PostAsync("/api/auth/challenge", new ChunkedBody(new byte[17000])),
+            413, "request-too-large");
+    }
+
+    [PostgresFact]
+    public async Task Auth_429_preserves_code_and_RetryAfter_through_Response_Clear()
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        await using var factory = IdentityHttpTest.Factory(database, Guid.NewGuid());
+        using var client = IdentityHttpTest.Client(factory);
+        for (var i = 0; i < 10; i++)
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/auth/challenge", new { address = "invalid" })).StatusCode);
+        var response = await client.PostAsJsonAsync("/api/auth/challenge", new { address = "invalid" });
+        await IdentityHttpTest.Code(response, 429, "rate-limited");
+        Assert.True(response.Headers.RetryAfter?.Delta > TimeSpan.Zero);
+    }
+
+    [PostgresFact]
+    public async Task Readiness_checks_both_schemas_and_requires_an_active_operator_wallet()
+    {
+        await using var journal = await CoreDatabase.CreateAsync();
+        await using var database = await IdentityDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var settings = database.ConfigurationValues(owner);
+        settings["ConnectionStrings:Vessel"] = journal.ConnectionString;
+        await using var factory = new CoreApiFactory(owner, connection: journal.ConnectionString, settings: settings);
+        using var client = factory.CreateClient();
+        var noWallet = await client.GetAsync("/health/ready");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, noWallet.StatusCode);
+        Assert.Equal("""{"status":"unavailable","reason":"no-operator-wallet"}""", await noWallet.Content.ReadAsStringAsync());
+        await database.SeedAsync(EthECKey.GenerateKey(), owner);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/ready")).StatusCode);
+        await using var db = database.CreateDbContext();
+        await db.Users.ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, "suspended"));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/health/ready")).StatusCode);
+    }
+
+    private sealed class ChunkedBody(byte[] bytes) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => stream.WriteAsync(bytes).AsTask();
+        protected override bool TryComputeLength(out long length) { length = 0; return false; }
+    }
+}

@@ -57,14 +57,22 @@ public sealed class EndpointTransportTests
     }
 
     [Fact]
-    public async Task Every_api_route_is_mapped_through_an_authorized_group()
+    public async Task Every_api_route_is_authorized_except_explicit_public_auth_routes()
     {
         await using var factory = new CoreApiFactory(Guid.NewGuid());
         var api = Endpoints(factory).Where(e => e.RoutePattern.RawText!.StartsWith("/api/", StringComparison.Ordinal)).ToList();
 
         Assert.NotEmpty(api);
+        string[] publicAuth = ["/api/auth/config", "/api/auth/{**rest}"];
+        Assert.Equal(publicAuth.Order(), api.Where(e => e.Metadata.GetMetadata<IAllowAnonymous>() is not null)
+            .Select(e => e.RoutePattern.RawText!).Order());
         Assert.All(api, endpoint =>
         {
+            if (publicAuth.Contains(endpoint.RoutePattern.RawText))
+            {
+                Assert.NotNull(endpoint.Metadata.GetMetadata<IAllowAnonymous>());
+                return;
+            }
             Assert.NotNull(endpoint.Metadata.GetMetadata<IAuthorizeData>());
             Assert.Null(endpoint.Metadata.GetMetadata<IAllowAnonymous>());
         });

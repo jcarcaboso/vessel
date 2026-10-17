@@ -111,7 +111,9 @@ public sealed class ProductionHardeningTests
     public async Task Readiness_reports_ready_once_the_database_is_migrated()
     {
         await using var database = await CoreDatabase.CreateAsync();
-        await using var factory = new CoreApiFactory(Guid.NewGuid(), connection: database.ConnectionString);
+        await using var identity = await Identity.IdentityDatabase.CreateAsync();
+        await using var factory = new CoreApiFactory(Guid.NewGuid(), connection: database.ConnectionString,
+            settings: new() { ["Vessel:Identity:Schema"] = identity.Schema.Name });
         using var client = factory.CreateClient();
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/ready")).StatusCode);
     }
