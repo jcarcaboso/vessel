@@ -279,7 +279,8 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             using var history = await GetAsync($"/v1/orders?account={address}&limit={PageSize}&page=1", token);
             using var tpsl = await GetAsync($"/v1/orders/tpsl?account={address}&limit={PageSize}&page=1", token);
             var orders = ReadOrders(Data(history), catalogue, latest).Concat(ReadTpslOrders(Data(tpsl), catalogue, latest))
-                .GroupBy(o => o.OrderId, StringComparer.Ordinal).Select(g => g.OrderByDescending(o => o.StatusAtUtc).First())
+                // Keyed by (canonical contract, ID): the same venue ID on another contract is another order.
+                .GroupBy(o => (o.ContractId, o.OrderId)).Select(g => g.OrderByDescending(o => o.StatusAtUtc).First())
                 .OrderByDescending(o => o.PlacedAtUtc).ToList();
             // Both reads are bounded history pages, not /orders/open plus a complete TP/SL list.
             return new VenueOrderReadResult(orders, timeProvider.GetUtcNow(), OrdersNotice, OpenOrdersComplete: false);
