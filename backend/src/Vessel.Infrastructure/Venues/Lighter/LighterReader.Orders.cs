@@ -32,7 +32,8 @@ public sealed partial class LighterReader
             await BindAsync(source, credential, ct);
             var catalogue = await CatalogueAsync(ct, refresh: true);
             var observed = timeProvider.GetUtcNow();
-            var orders = new Dictionary<string, VenueOrder>(StringComparer.Ordinal);
+            // Keyed by (canonical contract, order index): the same venue ID on another market is another order.
+            var orders = new Dictionary<(string ContractId, string OrderId), VenueOrder>();
             bool openOrdersComplete;
             using (var active = await GetAsync("accountActiveOrders?account_index=" + source + "&market_type=perp", ct, credential))
             {
@@ -45,7 +46,7 @@ public sealed partial class LighterReader
                 openOrdersComplete = rows.GetArrayLength() < 1000 && noNextPage &&
                     current.Count == rows.GetArrayLength() && current.All(o => o.Status == VenueOrderStatus.Open);
                 foreach (var order in current)
-                    if (!orders.TryAdd(order.OrderId, order)) throw json.Invalid();
+                    if (!orders.TryAdd((order.ContractId, order.OrderId), order)) throw json.Invalid();
             }
             string? cursor = null;
             var cursors = new HashSet<string>(StringComparer.Ordinal);
@@ -55,8 +56,8 @@ public sealed partial class LighterReader
                     (cursor is null ? "" : "&cursor=" + Uri.EscapeDataString(cursor)), ct, credential);
                 foreach (var order in ReadOrders(inactive.RootElement, catalogue, source, observed, PageSize))
                     // A fill/cancel can move an order between the two reads. Keep the later observation.
-                    if (!orders.TryGetValue(order.OrderId, out var previous) || order.StatusAtUtc >= previous.StatusAtUtc)
-                        orders[order.OrderId] = order;
+                    if (!orders.TryGetValue((order.ContractId, order.OrderId), out var previous) || order.StatusAtUtc >= previous.StatusAtUtc)
+                        orders[(order.ContractId, order.OrderId)] = order;
                 cursor = Cursor(json, inactive.RootElement);
                 if (cursor is null) break;
                 if (!cursors.Add(cursor)) throw json.Invalid();
