@@ -23,14 +23,21 @@ namespace Vessel.Tests.Isolation;
 
 /// <summary>
 /// Test-only authentication: the <see cref="Header"/> names the owner of each request and the handler issues the
-/// production owner claims (<see cref="JournalOwnerClaims"/>). Registered as the default scheme, so the bearer token
-/// path never runs in this suite. Not production code: Wallet mode authenticates sessions, never a header.
+/// production owner claims (<see cref="JournalOwnerClaims"/>) with the production authentication type. Registered as
+/// the default scheme, so the bearer token path never runs in this suite. Not production code: Wallet mode
+/// authenticates sessions, never a header.
 /// </summary>
 internal sealed class TestOwnerAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     public const string SchemeName = "VesselIsolationTest";
     public const string Header = "X-Vessel-Test-Owner";
+
+    /// <summary>
+    /// The identity's authentication type, as the production handler sets it. Wallet-mode cases switch this to the
+    /// session scheme's value when this suite moves onto that stack.
+    /// </summary>
+    public const string AuthenticationType = BearerTokenHandler.SchemeName;
 
     public static string NameOf(Guid owner) => "Owner " + owner.ToString("N")[..8];
 
@@ -39,7 +46,7 @@ internal sealed class TestOwnerAuthHandler(IOptionsMonitor<AuthenticationSchemeO
         if (!Request.Headers.TryGetValue(Header, out var value)) return Task.FromResult(AuthenticateResult.NoResult());
         if (!Guid.TryParseExact(value.ToString(), "D", out var owner) || owner == Guid.Empty)
             return Task.FromResult(AuthenticateResult.Fail("Invalid test owner."));
-        var identity = JournalOwnerClaims.Identity(owner, NameOf(owner), SchemeName);
+        var identity = JournalOwnerClaims.Identity(owner, NameOf(owner), AuthenticationType);
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
     }
 }
@@ -244,9 +251,36 @@ internal static class Isolated
     /// per-response <c>traceId</c> (the <c>X-Correlation-ID</c> header is not compared). A response may echo the ID the
     /// caller sent, so each body is compared with its own ID replaced. Returns the shared status.
     /// </summary>
-    public static async Task<HttpStatusCode> SameAsUnknown(Owner caller, Guid foreign, Func<Guid, HttpRequestMessage> request)
+    public static async Task<HttpStatusCode> SameAsUnknown(Owner caller, Guid foreign, Func<Guid, HttpRequestMessage> request) =>
+        (await Compare(caller, foreign.ToString("D"), Guid.NewGuid().ToString("D"), id => request(Guid.Parse(id)))).Status;
+
+    /// <summary>
+    /// As <see cref="SameAsUnknown(Owner, Guid, Func{Guid, HttpRequestMessage})"/> for a textual identifier, such as an
+    /// Activity operation ID, with an <paramref name="unknown"/> one of the same shape.
+    /// </summary>
+    public static async Task<HttpStatusCode> SameAsUnknown(Owner caller, string foreign, string unknown, Func<string, HttpRequestMessage> request) =>
+        (await Compare(caller, foreign, unknown, request)).Status;
+
+    /// <summary>
+    /// As <see cref="SameAsUnknown(Owner, Guid, Func{Guid, HttpRequestMessage})"/>, and the shared answer is 404. A
+    /// <paramref name="detail"/> names the lookup that must refuse it, so the case cannot pass by failing earlier.
+    /// </summary>
+    public static async Task NotFound(Owner caller, Guid foreign, Func<Guid, HttpRequestMessage> request, string? detail = null) =>
+        Refused(await Compare(caller, foreign.ToString("D"), Guid.NewGuid().ToString("D"), id => request(Guid.Parse(id))), detail);
+
+    public static async Task NotFound(Owner caller, string foreign, string unknown, Func<string, HttpRequestMessage> request, string? detail = null) =>
+        Refused(await Compare(caller, foreign, unknown, request), detail);
+
+    private static void Refused((HttpStatusCode Status, string Body) answer, string? detail)
     {
-        var unknown = Guid.NewGuid();
+        Assert.Equal(HttpStatusCode.NotFound, answer.Status);
+        if (detail is not null) Assert.Equal(detail, JsonDocument.Parse(answer.Body).RootElement.GetProperty("detail").GetString());
+    }
+
+    private static async Task<(HttpStatusCode Status, string Body)> Compare(Owner caller, string foreign, string unknown,
+        Func<string, HttpRequestMessage> request)
+    {
+        Assert.NotEqual(foreign, unknown);
         using var foreignRequest = request(foreign);
         using var unknownRequest = request(unknown);
         using var foreignResponse = await caller.Http.SendAsync(foreignRequest);
@@ -258,22 +292,18 @@ internal static class Isolated
             $"{what}: foreign ID answered {(int)foreignResponse.StatusCode} ({foreignBody}), unknown ID {(int)unknownResponse.StatusCode} ({unknownBody}).");
         Assert.Equal(unknownResponse.Content.Headers.ContentType?.MediaType, foreignResponse.Content.Headers.ContentType?.MediaType);
         Assert.Equal(Comparable(unknownBody, unknown), Comparable(foreignBody, foreign));
-        return foreignResponse.StatusCode;
+        return (foreignResponse.StatusCode, foreignBody);
     }
-
-    /// <summary>As <see cref="SameAsUnknown"/>, and the shared answer is 404.</summary>
-    public static async Task NotFound(Owner caller, Guid foreign, Func<Guid, HttpRequestMessage> request) =>
-        Assert.Equal(HttpStatusCode.NotFound, await SameAsUnknown(caller, foreign, request));
 
     public static Func<Guid, HttpRequestMessage> Request(HttpMethod method, Func<Guid, string> path, Func<Guid, object?>? body = null) =>
         id => new(method, path(id)) { Content = body?.Invoke(id) is { } content ? JsonContent.Create(content) : null };
 
-    private static string Comparable(string body, Guid sent)
+    private static string Comparable(string body, string sent)
     {
         if (body.Length == 0) return body;
         var node = JsonNode.Parse(body);
         if (node is JsonObject problem) problem.Remove("traceId");
-        return (node?.ToJsonString() ?? "null").Replace(sent.ToString("D"), "{sent-id}", StringComparison.OrdinalIgnoreCase);
+        return (node?.ToJsonString() ?? "null").Replace(sent, "{sent-id}", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The body contains none of the other owner's IDs or markers.</summary>
@@ -292,6 +322,42 @@ internal static class Isolated
         var parts = new List<string>();
         foreach (var path in paths) parts.Add(path + " " + await owner.GetText(path));
         return string.Join("\n", parts);
+    }
+}
+
+/// <summary>
+/// Owners' state before a sequence of attempts by another owner. <see cref="After"/> runs one attempt and then requires
+/// every snapshot byte-identical, so any change is pinned to the attempt that made it.
+/// </summary>
+internal sealed class Snapshot
+{
+    private readonly List<(Owner Owner, string[] Paths, string State)> parts = [];
+
+    public static Task<Snapshot> Of(Owner owner, params string[] paths) => Of((owner, paths));
+
+    public static async Task<Snapshot> Of(params (Owner Owner, string[] Paths)[] owners)
+    {
+        var snapshot = new Snapshot();
+        foreach (var (owner, paths) in owners) snapshot.parts.Add((owner, paths, await Isolated.State(owner, paths)));
+        return snapshot;
+    }
+
+    public async Task Unchanged()
+    {
+        foreach (var (owner, paths, state) in parts) Assert.Equal(state, await Isolated.State(owner, paths));
+    }
+
+    public async Task After(Func<Task> attempt)
+    {
+        await attempt();
+        await Unchanged();
+    }
+
+    public async Task<T> After<T>(Func<Task<T>> attempt)
+    {
+        var result = await attempt();
+        await Unchanged();
+        return result;
     }
 }
 
