@@ -392,18 +392,34 @@ internal static class Isolated
 
     /// <summary>
     /// As <see cref="SameAsUnknown(Owner, Guid, Func{Guid, HttpRequestMessage})"/>, and the shared answer is 404. A
-    /// <paramref name="detail"/> names the lookup that must refuse it, so the case cannot pass by failing earlier.
+    /// <paramref name="detail"/> names the lookup that must refuse it, so the case cannot pass by failing earlier; a
+    /// <paramref name="code"/> is the ProblemDetails <c>code</c> extension that refusal carries.
     /// </summary>
-    public static async Task NotFound(Owner caller, Guid foreign, Func<Guid, HttpRequestMessage> request, string? detail = null) =>
-        Refused(await Compare(caller, foreign.ToString("D"), Guid.NewGuid().ToString("D"), id => request(Guid.Parse(id))), detail);
+    public static async Task NotFound(Owner caller, Guid foreign, Func<Guid, HttpRequestMessage> request, string? detail = null,
+        string? code = null) =>
+        Refused(await Compare(caller, foreign.ToString("D"), Guid.NewGuid().ToString("D"), id => request(Guid.Parse(id))), detail, code);
 
     public static async Task NotFound(Owner caller, string foreign, string unknown, Func<string, HttpRequestMessage> request, string? detail = null) =>
-        Refused(await Compare(caller, foreign, unknown, request), detail);
+        Refused(await Compare(caller, foreign, unknown, request), detail, null);
 
-    private static void Refused((HttpStatusCode Status, string Body) answer, string? detail)
+    private static void Refused((HttpStatusCode Status, string Body) answer, string? detail, string? code)
     {
         Assert.Equal(HttpStatusCode.NotFound, answer.Status);
         if (detail is not null) Assert.Equal(detail, JsonDocument.Parse(answer.Body).RootElement.GetProperty("detail").GetString());
+        if (code is not null) Assert.Equal(code, Code(answer.Body));
+    }
+
+    /// <summary>The ProblemDetails <c>code</c> extension of a response body.</summary>
+    public static string? Code(string body) => JsonDocument.Parse(body).RootElement.GetProperty("code").GetString();
+
+    /// <summary>The response is a refusal with this status and <c>code</c>; returns its body.</summary>
+    public static async Task<string> Problem(HttpResponseMessage response, HttpStatusCode status, string code)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == status,
+            $"{response.RequestMessage?.Method} {response.RequestMessage?.RequestUri?.PathAndQuery} answered {(int)response.StatusCode}, expected {(int)status}: {body}");
+        Assert.Equal(code, Code(body));
+        return body;
     }
 
     private static async Task<(HttpStatusCode Status, string Body)> Compare(Owner caller, string foreign, string unknown,
