@@ -374,10 +374,12 @@ public sealed class MultiOwnerWorkerTests
             db.Add(row); await db.SaveChangesAsync();
         }
         fixture.Failures.AccountLocks = 0;
+        fixture.Failures.VenueCapacityReads = 0;
         var scheduler = fixture.Host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
         await scheduler.TickAsync(default);
         Assert.Empty(fixture.Venue.Reads);
         Assert.Equal(0, fixture.Failures.AccountLocks);
+        Assert.Equal(1, fixture.Failures.VenueCapacityReads);
         Assert.True(File.Exists(fixture.Heartbeat));
     }
 
@@ -522,6 +524,7 @@ public sealed class MultiOwnerWorkerTests
         public string? Step { get; set; }
         public bool Triggered { get; private set; }
         public int AccountLocks { get; set; }
+        public int VenueCapacityReads { get; set; }
         private void Check(CommandEventData data, string step)
         {
             if (Step != step || data.Context is not VesselDbContext db || db.CurrentOwnerId != Owner) return;
@@ -536,6 +539,8 @@ public sealed class MultiOwnerWorkerTests
                 AccountLocks++;
                 Check(eventData, "claim");
             }
+            if (command.CommandText.Contains("SELECT COUNT(*) AS \"Value\" FROM monitor_accounts", StringComparison.Ordinal))
+                VenueCapacityReads++;
             Check(eventData, "discovery");
             return ValueTask.FromResult(result);
         }
