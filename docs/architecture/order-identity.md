@@ -1,6 +1,6 @@
 # Order identity: internal and external IDs
 
-Status: **agreed for implementation** (October 17, 2026). The owner asked for internal and external order identities as a breaking change: Vessel is not deployed, so there is no data backfill and development databases are recreated.
+Status: **implemented** (October 17, 2026; migration `20261017091636_OrderIdentity`). The owner asked for internal and external order identities as a breaking change: Vessel is not deployed, so there is no data backfill and development databases are recreated.
 
 ## Problem
 

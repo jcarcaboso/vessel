@@ -81,6 +81,28 @@ public sealed class OrderIdentityTests
     }
 
     [PostgresFact]
+    public async Task An_observation_without_a_native_market_keeps_the_established_one()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var account = new Account(Guid.NewGuid(), owner, "lighter", "Main");
+        await using (var seed = database.Context(owner))
+        {
+            seed.Accounts.Add(account);
+            await seed.SaveChangesAsync();
+        }
+        await Upsert(database, owner, account, [Order("7", "BTC", At, native: "1")]);
+        await Upsert(database, owner, account, [Order("7", "BTC", At.AddMinutes(1))]);
+
+        await Assert.ThrowsAsync<VenueReadException>(() =>
+            Upsert(database, owner, account, [Order("7", "BTC", At.AddMinutes(2), VenueOrderStatus.Filled, native: "2")]));
+
+        await using var verify = database.Context(owner);
+        var row = Assert.Single(await verify.Orders.AsNoTracking().ToListAsync());
+        Assert.Equal(("7", "1", "open"), (row.ExternalOrderId, row.VenueContractId, row.Status));
+    }
+
+    [PostgresFact]
     public async Task A_fresh_database_migrates_to_the_current_model()
     {
         await using var database = await CoreDatabase.CreateAsync(TestOrders.BeforeOrderIdentity);

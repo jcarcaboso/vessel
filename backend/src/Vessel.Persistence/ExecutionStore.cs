@@ -116,7 +116,8 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
             // An older status never replaces a newer one.
             else if (order.StatusAtUtc < row.StatusAtUtc) continue;
             // ContractId is identity and is never rewritten.
-            row.VenueContractId = order.VenueContractId;
+            // An observation without a native ID keeps the established one, so a later mismatch is still refused.
+            row.VenueContractId = order.VenueContractId ?? row.VenueContractId;
             row.Side = order.Side;
             row.OrderType = order.OrderType;
             row.LimitPrice = order.LimitPrice;
