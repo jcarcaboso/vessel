@@ -50,12 +50,22 @@ export function SignInGate({ registration, originAccepted, children, channels, n
   // Cleared once the sign-in card or the workspace has shown it.
   const [notice, setNotice] = useState<Notice | null>(readNotice)
   const controllerRef = useRef<SessionController | null>(null)
-  useEffect(() => () => { controllerRef.current?.dispose() }, [])
+  // A late probe or sign-in answer after unmount never scopes preferences or opens a channel.
+  const mounted = useRef(false)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      controllerRef.current?.dispose()
+      controllerRef.current = null
+    }
+  }, [])
   const signingIn = state.kind === 'sign-in'
   useEffect(() => { if (signingIn && notice) clearNotice() }, [signingIn, notice])
   const noticePresented = useCallback(() => { setNotice(null); clearNotice() }, [])
 
   const enter = useCallback(async (session: SessionDto, fresh: boolean, walletName: string | null) => {
+    if (!mounted.current) return
     setState({ kind: 'loading' })
     controllerRef.current?.dispose()
     // The stores switch to this user before the workspace reads any preference.
@@ -87,17 +97,23 @@ export function SignInGate({ registration, originAccepted, children, channels, n
     else if (cause instanceof ApiError && cause.code === 'user-suspended') setState({ kind: 'suspended' })
     else setState({ kind: 'failed', message: errorMessage(cause, 'Vessel is unreachable.'), retry: null })
   }, [enter])
-  const probe = useCallback((signal: AbortSignal) => {
-    api.session(signal).then(session => ({ session }), (cause: unknown) => ({ cause }))
-      .then(result => { if (!signal.aborted) settleProbe(result) })
+  // Every probe, a manual Retry included, belongs to the gate: a newer one, unmount or a replaced client aborts it.
+  const probing = useRef<AbortController | null>(null)
+  const probe = useCallback(() => {
+    probing.current?.abort()
+    const attempt = new AbortController()
+    probing.current = attempt
+    api.session(attempt.signal).then(session => ({ session }), (cause: unknown) => ({ cause }))
+      .then(result => { if (!attempt.signal.aborted) settleProbe(result) })
   }, [api, settleProbe])
 
+  useEffect(() => () => {
+    probing.current?.abort()
+    probing.current = null
+  }, [api])
   useEffect(() => {
     // The landing marker means the chooser is already showing.
-    if (landing) return
-    const controller = new AbortController()
-    probe(controller.signal)
-    return () => controller.abort()
+    if (!landing) probe()
   }, [landing, probe])
 
   const ready = state.kind === 'ready' ? state.ready : null
@@ -133,7 +149,7 @@ export function SignInGate({ registration, originAccepted, children, channels, n
       {state.kind === 'failed' && <><h1 id="gate-title" className="sr-only">Vessel</h1>
         <StateCard icon={<Plug size={16} />} title="Vessel is unreachable" actions={[{ label: 'Retry', primary: true, onClick: () => {
           if (state.retry) void enter(state.retry.session, false, state.retry.walletName)
-          else { setState({ kind: 'probing' }); probe(new AbortController().signal) }
+          else { setState({ kind: 'probing' }); probe() }
         } }]}>{state.message}</StateCard></>}
       {state.kind === 'suspended' && <><h1 id="gate-title" className="sr-only">Vessel</h1>
         <StateCard icon={<Lock size={16} />} tone="bad" title="Journal suspended" actions={[{ label: 'Use another wallet', onClick: () => reloadToSignIn(navigate) }]}>

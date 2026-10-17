@@ -45,7 +45,8 @@ export function SignInScreen({ api, registration, originAccepted, notice, onSign
     run.current = { id: run.current.id + 1, controller: new AbortController() }
     return run.current
   }, [])
-  useEffect(() => () => run.current.controller.abort(), [])
+  // Unmount replaces the run too, so a late wallet or server answer stops before any callback.
+  useEffect(() => () => { begin() }, [begin])
 
   const prepare = useCallback(async (current: { id: number; controller: AbortController }, address: string) => {
     try {

@@ -3,10 +3,12 @@ import userEvent from '@testing-library/user-event'
 import { Tooltip } from 'radix-ui'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createSessionAuthApi } from '@/api/auth'
+import { ApiError } from '@/api/errors'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { challengeFixture, secondWalletFixture, sessionFixture, sessionRowsFixture, walletFixture } from '@/test/identity-fixture'
 import { ProfileSettings } from './ProfileSettings'
 import type { ShellIdentity } from './types'
+import { WalletSignFlow } from './WalletSignFlow'
 
 type Route = (init: RequestInit) => Response
 let routes: Record<string, Route | Route[]>
@@ -238,5 +240,25 @@ describe('Profile & sign-in', () => {
       expect(sent('/api/auth/step-up/challenge')).toHaveLength(2)
       expect(screen.queryByRole('dialog', { name: 'Confirm with a linked wallet' })).not.toBeInTheDocument()
     })
+  })
+})
+
+describe('wallet signing flow', () => {
+  it('stops at unmount, so a late step-up-required answer opens no step-up and completes nothing', async () => {
+    let refuse!: (cause: unknown) => void
+    const complete = vi.fn(() => new Promise<void>((_resolve, reject) => { refuse = reject }))
+    const onStepUp = vi.fn().mockResolvedValue(true)
+    const onDone = vi.fn()
+    const user = userEvent.setup()
+    const view = render(<Tooltip.Provider><WalletSignFlow purpose="Link wallet" requestChallenge={async address => challengeFixture(address)}
+      complete={complete} onStepUp={onStepUp} onDone={onDone} onCancel={vi.fn()} /></Tooltip.Provider>)
+    await user.click(await screen.findByRole('button', { name: /Rabby Wallet/ }))
+    await user.click(await screen.findByRole('button', { name: 'Sign with Rabby Wallet' }))
+    await waitFor(() => expect(complete).toHaveBeenCalledOnce())
+    view.unmount()
+    refuse(new ApiError('http', 'Confirm first.', 403, undefined, 'step-up-required'))
+    await new Promise(resolve => setTimeout(resolve, 25))
+    expect(onStepUp).not.toHaveBeenCalled()
+    expect(onDone).not.toHaveBeenCalled()
   })
 })

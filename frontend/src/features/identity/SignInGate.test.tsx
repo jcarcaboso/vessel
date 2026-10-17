@@ -1,6 +1,8 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPublicAuthApi, type SessionDto } from '@/api/auth'
+import { ApiError } from '@/api/errors'
 import { challengeFixture, sessionFixture, walletFixture } from '@/test/identity-fixture'
 import { channelBus } from '@/test/session-channel'
 import { systemFixture } from '@/test/system-fixture'
@@ -8,6 +10,7 @@ import { lastWalletKey } from './wallets/discovery'
 import type { WalletProvider } from './wallets/provider'
 import { landingKey, noticeKey, notices, workspaceNotices } from './session'
 import { SignInGate } from './SignInGate'
+import { SignInScreen } from './SignInScreen'
 
 const address = walletFixture.address
 const other = '0x19B4c7aE02F3d81e6C5a9b0D2E7f4A3c8D1e0a53'
@@ -105,6 +108,45 @@ describe('session probe', () => {
     const { user } = mount()
     await user.click(await screen.findByRole('button', { name: 'Retry' }))
     expect(sent('/api/auth/session')).toHaveLength(2)
+  })
+
+  describe('a probe that answers after the gate is gone', () => {
+    function deferred<T>() {
+      let resolve!: (value: T) => void
+      const promise = new Promise<T>(settle => { resolve = settle })
+      return { promise, resolve }
+    }
+    async function retryThenUnmount(replace?: (view: ReturnType<typeof render>, api: ReturnType<typeof createPublicAuthApi>) => void) {
+      const pending = deferred<SessionDto>()
+      let retried: AbortSignal | undefined
+      const api = createPublicAuthApi()
+      vi.spyOn(api, 'session').mockRejectedValueOnce(new ApiError('unavailable', 'unreachable'))
+        .mockImplementationOnce(signal => { retried = signal; return pending.promise })
+      const bus = channelBus()
+      const gate = (publicApi: typeof api) => <SignInGate registration="invitation" originAccepted publicApi={publicApi} channels={bus.factory} navigate={vi.fn()}>
+        {() => <p>Workspace</p>}</SignInGate>
+      const view = render(gate(api))
+      await userEvent.setup().click(await screen.findByRole('button', { name: 'Retry' }))
+      expect(api.session).toHaveBeenCalledTimes(2)
+      if (replace) view.rerender(gate(createPublicAuthApi()))
+      else view.unmount()
+      const aborted = retried?.aborted
+      pending.resolve(sessionFixture)
+      await new Promise(resolve => setTimeout(resolve, 25))
+      return { aborted, bus }
+    }
+
+    it('aborts a manual Retry on unmount, and its late answer opens no session channel or workspace', async () => {
+      const { aborted, bus } = await retryThenUnmount()
+      expect(aborted).toBe(true)
+      expect(bus.open()).toBe(0)
+      expect(sent('/api/system')).toHaveLength(0)
+    })
+
+    it('aborts a manual Retry when the public client is replaced', async () => {
+      const { aborted } = await retryThenUnmount(() => undefined)
+      expect(aborted).toBe(true)
+    })
   })
 })
 
@@ -268,6 +310,22 @@ describe('wallet sign-in', () => {
     await user.click(await screen.findByRole('button', { name: 'Sign with Rabby Wallet' }))
     await user.click(await screen.findByRole('button', { name: 'Try again' }))
     expect(await screen.findByRole('checkbox', { name: 'Keep me signed in on this device' })).toBeEnabled()
+  })
+
+  it('never reports a sign-in whose verification answers after the screen unmounted', async () => {
+    let answer!: (response: Response) => void
+    routes['/api/auth/verify'] = () => new Promise(resolve => { answer = resolve })
+    const onSignedIn = vi.fn()
+    const user = userEvent.setup()
+    const view = render(<SignInScreen api={createPublicAuthApi()} registration="invitation" originAccepted notice={null} onSignedIn={onSignedIn} />)
+    await user.click(await screen.findByRole('button', { name: /Rabby Wallet/ }))
+    await user.click(await screen.findByRole('button', { name: 'Sign with Rabby Wallet' }))
+    await waitFor(() => expect(sent('/api/auth/verify')).toHaveLength(1))
+    view.unmount()
+    answer(json({ status: 'signed-in', session: sessionFixture }))
+    await new Promise(resolve => setTimeout(resolve, 25))
+    expect(onSignedIn).not.toHaveBeenCalled()
+    expect(localStorage.getItem(lastWalletKey)).toBeNull()
   })
 
   it('discards a signature that arrives after the person cancelled', async () => {

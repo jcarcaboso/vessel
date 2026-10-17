@@ -56,7 +56,8 @@ export function WalletSignFlow({ purpose, accept, requestChallenge, complete, on
     run.current = { id: run.current.id + 1, controller: new AbortController() }
     return run.current
   }, [])
-  useEffect(() => () => run.current.controller.abort(), [])
+  // Unmount replaces the run too, so a late wallet or server answer stops before any callback.
+  useEffect(() => () => { begin() }, [begin])
   // Whether this attempt already used its one step-up; a new attempt (connect, Try again) resets it.
   const steppedUp = useRef(false)
   const fail = useCallback((wallet: BrowserWallet | null, address: string | null, error: SignInError) =>
