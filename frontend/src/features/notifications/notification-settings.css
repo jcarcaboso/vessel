@@ -1,0 +1,10 @@
+/* Notifications section of Settings. Theme tokens only. */
+.notification-settings form { margin-top: 14px; }
+.notification-settings-fields { display: grid; gap: 14px; margin: 0; padding: 0; border: 0; font-size: var(--text-sm); }
+.notification-settings-fields label { display: flex; align-items: center; gap: 9px; color: var(--foreground); }
+.notification-settings-severity { justify-content: space-between; }
+.notification-settings-categories { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 14px; margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-control); }
+.notification-settings-categories legend { padding: 0 4px; font-size: var(--text-xs); font-weight: 600; color: var(--muted-foreground); }
+.notification-settings-categories:disabled label, .notification-settings-severity:has(select:disabled) { color: var(--muted-foreground); }
+.notification-settings input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--ring); }
+.notification-settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }

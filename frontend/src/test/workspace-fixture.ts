@@ -98,7 +98,9 @@ export const playCountsFrom = (plays: PlaySummary[]): WorkspaceApi['playCounts']
 
 /** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
 export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' | 'playCounts' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' |
-  'deletePlay' | 'playExecution' | 'monitor' | 'accountMonitor' | 'runAccountMonitor' | 'monitorEvents' | 'monitorStream' | 'dismissPlayDiscrepancy' | 'dismissAccountDiscrepancy' | 'linkOrder' | 'unlinkOrder' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'review' | 'reviewExclusions' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution'> {
+  'deletePlay' | 'playExecution' | 'monitor' | 'accountMonitor' | 'runAccountMonitor' | 'monitorEvents' | 'monitorStream' | 'dismissPlayDiscrepancy' | 'dismissAccountDiscrepancy' | 'linkOrder' | 'unlinkOrder' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'review' | 'reviewExclusions' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution' |
+  'notificationHead' | 'notifications' | 'claimNotifications' | 'readNotification' | 'readAllNotifications' | 'notificationPreferences' |
+  'saveNotificationPreferences' | 'requestTestNotification'> {
   const unexpected = () => Promise.reject(new Error('Unexpected play API call in this test.'))
   return {
     // Tests outside Overview keep this unrelated read pending unless they supply a summary fixture.
@@ -118,6 +120,14 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     reviewExclusions: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, nextOffset: null, notice: 'Fixture exclusions.' }),
     retrospectivePreview: vi.fn(unexpected), createRetrospectivePlay: vi.fn(unexpected),
     manualExecutions: vi.fn(unexpected), addManualExecution: vi.fn(unexpected), correctManualExecution: vi.fn(unexpected),
+    // In-app notifications: an empty, enabled channel with its worker online.
+    notificationHead: vi.fn().mockResolvedValue({ nextCursor: '0.0.0', unreadCount: 0, enabled: true, workerOnline: true, heartbeatAtUtc: null }),
+    notifications: vi.fn().mockImplementation(query => Promise.resolve({ items: [], page: 1, pageSize: query.pageSize, total: 0, unreadTotal: 0, allTotal: 0 })),
+    claimNotifications: vi.fn().mockResolvedValue({ popups: [], more: 0 }),
+    readNotification: vi.fn(unexpected), readAllNotifications: vi.fn(unexpected),
+    notificationPreferences: vi.fn().mockResolvedValue({ enabled: true, minimumSeverity: 'info', categories: ['executions', 'links', 'discrepancies', 'monitor', 'credentials'],
+      revision: 0, workerOnline: true, heartbeatAtUtc: null }),
+    saveNotificationPreferences: vi.fn(unexpected), requestTestNotification: vi.fn(unexpected),
   }
 }
 

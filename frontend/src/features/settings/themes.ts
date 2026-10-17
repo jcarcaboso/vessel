@@ -136,5 +136,11 @@ export function contrastChecks(colors: ThemeColors): ContrastCheck[] {
   }
   checks.push({ label: 'Primary button', ratio: contrastRatio(colors.primaryForeground, colors.primary), minimum: 4.5 })
   checks.push({ label: 'Focus ring on panels', ratio: contrastRatio(colors.ring, colors.card), minimum: 3 })
+  // The unread badge draws `--destructive-foreground` (the page background) on `--destructive` (the negative colour).
+  checks.push({ label: 'Unread badge', ratio: contrastRatio(colors.background, colors.negative), minimum: 4.5 })
+  // A warning popup tints the panel with 7% warning; its text and mark must stay readable on that tint.
+  const warningPopup = mix(colors.warning, colors.card, 0.07)
+  checks.push({ label: 'Text on warning popups', ratio: contrastRatio(colors.foreground, warningPopup), minimum: 4.5 })
+  checks.push({ label: 'Warning mark on warning popups', ratio: contrastRatio(colors.warning, warningPopup), minimum: 3 })
   return checks
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-const pageIds = ['overview', 'plays', 'review', 'portfolios', 'accounts', 'activity', 'settings'] as const
+const pageIds = ['overview', 'plays', 'review', 'portfolios', 'accounts', 'activity', 'notifications', 'settings'] as const
 export type Page = typeof pageIds[number]
 const pageFromHash = (): Page => pageIds.find(id => id === window.location.hash.slice(1)) ?? 'overview'
 

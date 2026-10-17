@@ -3,14 +3,19 @@
 .notification > svg { flex-shrink: 0; margin-top: 2px; }
 .notification.is-error { border-color: color-mix(in srgb, var(--negative) 40%, var(--border)); border-left-color: var(--negative); background: color-mix(in srgb, var(--negative) 7%, var(--card)); }
 .notification.is-error > svg { color: var(--negative); }
+.notification.is-warning { border-color: color-mix(in srgb, var(--warning) 40%, var(--border)); border-left-color: var(--warning); background: color-mix(in srgb, var(--warning) 7%, var(--card)); }
+.notification.is-warning > svg { color: var(--warning); }
 .notification.is-success { border-left-color: var(--positive); }
 .notification.is-success > svg { color: var(--positive); }
 .notification.is-info { border-left-color: var(--ring); }
 .notification.is-info > svg { color: var(--ring); }
 .notification-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .notification-body strong { display: block; font-weight: 650; }
+.notification:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.notification-actions { display: flex; flex-wrap: wrap; gap: 2px 8px; margin: 4px 0 0 -4px; }
 .notification-action { flex-shrink: 0; padding: 2px 4px; border: 0; background: none; color: var(--ring); font: inherit; font-weight: 600; cursor: pointer; }
 .notification-close { flex-shrink: 0; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted-foreground); cursor: pointer; }
 .notification-close:hover { color: var(--foreground); background: var(--accent); }
 @keyframes notification-in { from { opacity: 0; transform: translateY(8px); } }
 @media (prefers-reduced-motion: reduce) { .notification { animation: none; } }
+.notification-late { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted-foreground); font-size: var(--text-2xs, 11px); font-weight: 600; line-height: 1.6; vertical-align: 1px; }

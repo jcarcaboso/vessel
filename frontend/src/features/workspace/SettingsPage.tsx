@@ -3,13 +3,17 @@ import { Button } from '@/components/ui/button'
 import { VenueBadge } from '@/components/venues/VenueBadge'
 import { AppearanceSettings, CurrentThemeName } from '@/features/settings/AppearanceSettings'
 import { showAppearanceSection } from '@/features/settings/appearance'
+import type { WorkspaceApi } from '@/api/workspace'
+import { NotificationSettings } from '@/features/notifications/NotificationSettings'
+import type { InAppNotifications } from '@/features/notifications/useInAppNotifications'
 import { Database, LogOut, ShieldCheck } from 'lucide-react'
 
-export function SettingsPage({ system, disconnectSession, onAccounts }: {
-  system: SystemInfo; disconnectSession: () => void; onAccounts: () => void
+export function SettingsPage({ system, disconnectSession, onAccounts, api, inApp }: {
+  system: SystemInfo; disconnectSession: () => void; onAccounts: () => void; api: WorkspaceApi; inApp: InAppNotifications
 }) {
   return <div className="settings-grid">
     <AppearanceSettings />
+    <NotificationSettings api={api} inApp={inApp} />
     <section className="shell-panel settings-panel">
       <ShieldCheck size={23} /><h2>Private session</h2>
       <p>Connected as {system.owner.displayName}.</p>

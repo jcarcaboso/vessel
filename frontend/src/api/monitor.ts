@@ -1,5 +1,6 @@
 import { isFilledText, isPositiveCount, isRecord as object, isText as text, isTimestamp } from './guards'
 import { isEventCursor, isEventSequence, type EventCursor } from './event-cursor'
+import { isNotificationFrame, isNotificationsStatus, type NotificationFrame, type NotificationsStatus } from './notifications'
 
 export interface MonitorDiscrepancy {
   id: string
@@ -76,9 +77,14 @@ export interface MonitorEvent {
   data: Record<string, unknown>
 }
 export interface MonitorEventPage { events: MonitorEvent[]; nextCursor: EventCursor; resetRequired: boolean }
-/** An event frame carries its resume cursor from the SSE `id:` line. */
+/**
+ * An event frame carries its resume cursor from the SSE `id:` line. Notification frames come only when the stream
+ * was opened with a notification cursor; theirs travel in the frame data, since the `id:` line stays the event's.
+ */
 export type MonitorStreamEvent = { type: 'event'; event: MonitorEvent; cursor: EventCursor } |
-  { type: 'status'; status: { state: 'ready' | 'reset'; nextCursor: EventCursor } }
+  { type: 'status'; status: { state: 'ready' | 'reset'; nextCursor: EventCursor } } |
+  { type: 'notifications'; status: NotificationsStatus } |
+  { type: 'notification'; frame: NotificationFrame }
 
 const id = (v: unknown): v is string => isFilledText(v, 128)
 // Monitor timestamps are bounded UTC strings with up to seven fractional digits.
@@ -124,7 +130,7 @@ export const isMonitorEvent = (v: unknown): v is MonitorEvent => object(v) &&
   object(v.source) && Object.keys(v.source).length === 3 && id(v.source.trigger) && ['orderIds', 'fillIds'].every(key => v.source && object(v.source) &&
     (v.source[key] === null || Array.isArray(v.source[key]) && v.source[key].every(id))) && object(v.data)
 
-/** `id` is the frame's SSE `id:` line: an event's resume cursor. */
+/** `id` is the frame's SSE `id:` line: an event's resume cursor. Notification frames never read it. */
 export function monitorFrame(event: string, data: string, id?: string): MonitorStreamEvent | null {
   let body: unknown
   try { body = JSON.parse(data) } catch { return null }
@@ -132,6 +138,8 @@ export function monitorFrame(event: string, data: string, id?: string): MonitorS
   if (event === 'status' && object(body) && (body.state === 'ready' || body.state === 'reset') && isEventCursor(body.nextCursor)) {
     return { type: 'status', status: { state: body.state, nextCursor: body.nextCursor } }
   }
+  if (event === 'notifications' && isNotificationsStatus(body)) return { type: 'notifications', status: body }
+  if (event === 'notification' && isNotificationFrame(body)) return { type: 'notification', frame: body }
   return null
 }
 

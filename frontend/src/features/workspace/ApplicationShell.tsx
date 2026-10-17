@@ -10,6 +10,11 @@ import { createPlaysSession, hasUnsavedPlayWork, startNewPlay, type PlaysSession
 import { initialPlaysList } from '@/features/plays/plays-list'
 import type { PlayView } from '@/api/plays'
 import { useMonitorEvents } from './useMonitorEvents'
+import { useInAppNotifications } from '@/features/notifications/useInAppNotifications'
+import { initialNotificationList } from '@/features/notifications/notification-list'
+import { NotificationBadge } from '@/features/notifications/NotificationBadge'
+import { notificationsLabel, useCountAnnouncement } from '@/features/notifications/unread'
+import type { NotificationLink } from '@/api/notifications'
 import { AccountDetail } from './AccountDetail'
 import { ActivityOperations } from './ActivityOperations'
 import { CreateAccountDialog, CreatePortfolioDialog } from './CreateDialogs'
@@ -22,7 +27,7 @@ import { initialActivityState } from './activity-filters'
 import { OverviewActions } from './OverviewActions'
 import { VenuesProvider, useVenues } from '@/api/venues'
 import {
-  Activity, BarChart3, CircleHelp, Compass, Folder, LayoutDashboard,
+  Activity, BarChart3, Bell, CircleHelp, Compass, Folder, LayoutDashboard,
   LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, Wallet, BookOpen, X,
 } from 'lucide-react'
 import { PageErrorBoundary } from '@/components/PageErrorBoundary'
@@ -39,6 +44,7 @@ import './skip-content.css'
 const PlaysPage = lazyPage(async () => ({ default: (await import('@/features/plays/PlaysPage')).PlaysPage }))
 const ReviewPage = lazyPage(async () => ({ default: (await import('@/features/review/ReviewPage')).ReviewPage }))
 const SettingsPage = lazyPage(async () => ({ default: (await import('./SettingsPage')).SettingsPage }))
+const NotificationsPage = lazyPage(async () => ({ default: (await import('@/features/notifications/NotificationsPage')).NotificationsPage }))
 
 function PageLoading() {
   return <div className="workspace-loading" role="status">Loading your workspace…</div>
@@ -51,6 +57,7 @@ const pages = [
   { id: 'portfolios', label: 'Portfolios', icon: Folder },
   { id: 'accounts', label: 'Accounts', icon: Wallet },
   { id: 'activity', label: 'Activity', icon: Activity },
+  { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'settings', label: 'Settings', icon: Settings2 },
 ] as const
 type ShellProps = { system: SystemInfo; disconnect: () => void; api: WorkspaceApi }
@@ -128,6 +135,7 @@ function Shell({ system, disconnect, api }: ShellProps) {
   const [accountFilters, setAccountFilters] = useState(emptyAccountFilters)
   const [overviewQuery, setOverviewQuery] = useState<OverviewQuery>({ groupBy: 'portfolio', period: '30', scope: 'all' })
   const [activityState, setActivityState] = useState(initialActivityState)
+  const [notificationList, setNotificationList] = useState(initialNotificationList)
   const [portfolioDialog, setPortfolioDialog] = useState(false)
   const [accountDialog, setAccountDialog] = useState(false)
   const [focusPortfolioAccounts, setFocusPortfolioAccounts] = useState(false)
@@ -136,7 +144,11 @@ function Shell({ system, disconnect, api }: ShellProps) {
   const setNotice = useCallback((message: string) => { notify({ tone: 'success', message }) }, [notify])
   const [reloadKey, setReloadKey] = useState(0)
   const reload = useCallback(() => setReloadKey(key => key + 1), [])
-  const monitor = useMonitorEvents(api, disconnectedApi !== api, reload, reloadKey)
+  // Links from notifications go through the shell's own navigation; a missing account gets a short notice.
+  const notificationLink = useRef<(link: NotificationLink) => void>(() => {})
+  const inApp = useInAppNotifications({ api, active: disconnectedApi !== api, onLink: link => notificationLink.current(link),
+    onOpenPage: () => navigate('notifications') })
+  const monitor = useMonitorEvents(api, disconnectedApi !== api, reload, reloadKey, inApp.handlers)
   // Derived from the request generation so Reload shows progress and a repeated
   // failure visibly clears and returns, without a synchronous effect render.
   const loading = loaded === null || loaded.api !== api || loaded.key !== reloadKey
@@ -198,6 +210,15 @@ function Shell({ system, disconnect, api }: ShellProps) {
     navigate('plays')
   }
   const portfolios = data?.portfolios ?? [], accounts = data?.accounts ?? []
+  useEffect(() => {
+    notificationLink.current = link => {
+      if (link.kind === 'play' || link.kind === 'play-execution') {
+        // The Plays page opens it (protecting unsaved work) and reports a Play that no longer exists.
+        if (link.playId) void viewPlay(link.playId, new AbortController().signal)
+      } else if (link.accountId && accounts.some(account => account.id === link.accountId)) viewAccount(link.accountId)
+      else notify({ tone: 'info', message: 'This account is no longer available.' })
+    }
+  })
   const enabledAccounts = accounts.filter(account => account.isEnabled !== false)
   const activePortfolioFilter = portfolioFilter === 'unassigned' || portfolios.some(p => p.id === portfolioFilter) ? portfolioFilter : ''
   const managedPortfolio = portfolios.find(p => p.id === managedPortfolioId) ?? null
@@ -206,6 +227,11 @@ function Shell({ system, disconnect, api }: ShellProps) {
   const refreshable = enabledAccounts.filter(account => venues.can(account.venueId, 'sync'))
   const selectedAccount = accounts.find(a => a.id === selectedAccountId)
   const currentPage = pages.find(p => p.id === page)!
+  const unread = inApp.status.known && inApp.status.enabled ? inApp.status.unreadCount : 0
+  const announcement = useCountAnnouncement(unread, inApp.status.known)
+  const notificationsName = notificationsLabel(unread)
+  // Plays are tracked: the condition that also shows the monitor's offline banner.
+  const tracked = !!monitor.summary?.accounts.some(item => item.state !== 'idle' || item.manualState !== 'idle' || item.discrepancies.some(issue => issue.state === 'open'))
   const created = () => { reload(); setNotice('Saved to your workspace.') }
   const managementChanged = (event: ManagementEvent) => {
     if (event.kind === 'portfolio-deleted' && portfolioFilter === event.id) setPortfolioFilter('')
@@ -260,18 +286,21 @@ function Shell({ system, disconnect, api }: ShellProps) {
         {navigationCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
       </button>
       <div className="nav-section-label">Workspace</div>
-      <nav>{pages.filter(p => p.id !== 'settings').map(({ id, label, icon: Icon }) => <a key={id} href={`#${id}`} className={`shell-nav-item ${page === id ? 'active' : ''}`} aria-label={label} title={label} onClick={() => navigate(id)} aria-current={page === id ? 'page' : undefined}><Icon size={18} aria-hidden="true" /><span className="sidebar-copy">{label}</span>{id === 'accounts' && accounts.length > 0 && <small>{accounts.length}</small>}</a>)}</nav>
+      <nav>{pages.filter(p => p.id !== 'settings' && p.id !== 'notifications').map(({ id, label, icon: Icon }) => <a key={id} href={`#${id}`} className={`shell-nav-item ${page === id ? 'active' : ''}`} aria-label={label} title={label} onClick={() => navigate(id)} aria-current={page === id ? 'page' : undefined}><Icon size={18} aria-hidden="true" /><span className="sidebar-copy">{label}</span>{id === 'accounts' && accounts.length > 0 && <small>{accounts.length}</small>}</a>)}</nav>
       <div className="nav-section-label later-section">Later</div>
       <div className="shell-nav-later" role="link" aria-label="Strategies" aria-disabled="true" title="Strategies are not available yet"><Compass size={18} aria-hidden="true" /><span className="sidebar-copy">Strategies</span><small className="sidebar-copy" aria-hidden="true">Soon</small></div>
       <div className="shell-sidebar-bottom">
+        <a href="#notifications" className={`shell-nav-item ${page === 'notifications' ? 'active' : ''}`} aria-label={notificationsName} title={notificationsName} aria-current={page === 'notifications' ? 'page' : undefined} onClick={() => navigate('notifications')}><Bell size={18} aria-hidden="true" /><span className="sidebar-copy">Notifications</span><NotificationBadge count={unread} /></a>
         <a href="#settings" className={`shell-nav-item ${page === 'settings' ? 'active' : ''}`} aria-label="Settings" title="Settings" aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} aria-hidden="true" /><span className="sidebar-copy">Settings</span></a>
         <button className="owner-card" onClick={disconnectSession} aria-label={`Disconnect ${system.owner.displayName}'s session`} title={`Disconnect ${system.owner.displayName}'s browser session`}><span className="owner-avatar" aria-hidden="true">{system.owner.displayName.slice(0, 1).toUpperCase()}</span><span className="sidebar-copy"><strong>{system.owner.displayName}</strong></span><LogOut size={15} aria-hidden="true" /></button>
       </div>
     </aside>
     <div className="shell-main" inert={menuOpen}>
-      <header className="shell-header"><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" title="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} aria-hidden="true" /></button><span className="shell-header-brand" aria-hidden="true"><VesselMark size={22} />vessel</span></header>
+      <header className="shell-header"><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" title="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} aria-hidden="true" />{unread > 0 && <span className="menu-unread-dot" aria-hidden="true" />}</button><span className="shell-header-brand" aria-hidden="true"><VesselMark size={22} />vessel</span>
+        <a href="#notifications" className="icon-button header-notifications" aria-label={notificationsName} title={notificationsName} onClick={() => navigate('notifications')}><Bell size={18} aria-hidden="true" /><NotificationBadge count={unread} /></a></header>
+      <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
       <main id="workspace-content" className="shell-content" tabIndex={-1}>
-        {page !== 'plays' && page !== 'review' && <section className="shell-page-heading" key={`heading-${page}`}><div><div className="eyebrow">{logLine(page, system.owner.displayName)}</div><h1>{selectedAccount ? selectedAccount.name : currentPage.label}</h1></div><div className="shell-heading-actions">
+        {page !== 'plays' && page !== 'review' && page !== 'notifications' && <section className="shell-page-heading" key={`heading-${page}`}><div><div className="eyebrow">{logLine(page, system.owner.displayName)}</div><h1>{selectedAccount ? selectedAccount.name : currentPage.label}</h1></div><div className="shell-heading-actions">
           {page !== 'settings' && <Button variant="outline" onClick={reload} disabled={loading || refreshing !== null} aria-busy={loading}><RefreshCw size={14} className={loading ? 'is-spinning' : ''} />Reload</Button>}
           {page === 'overview' ? <OverviewActions disabled={pending || !data} onNewPlay={newPlay} onPortfolio={() => setPortfolioDialog(true)} onAccount={() => setAccountDialog(true)} /> : page === 'portfolios' ? <Button onClick={() => setPortfolioDialog(true)}><Plus size={15} />New portfolio</Button> : page !== 'settings' && page !== 'activity' && <Button onClick={() => setAccountDialog(true)} disabled={pending || !data}><Plus size={15} />Add account</Button>}
         </div></section>}
@@ -280,6 +309,9 @@ function Shell({ system, disconnect, api }: ShellProps) {
         {monitor.notice && <div className="workspace-alert" role="status">{monitor.notice}</div>}
         {monitor.summary && !monitor.summary.workerOnline && monitor.summary.accounts.some(item => item.state !== 'idle' || item.manualState !== 'idle' || item.discrepancies.some(issue => issue.state === 'open')) && <div className="workspace-alert monitor-offline" role="status">
           Worker offline. Background Play checks are delayed. Last heartbeat {monitor.summary.heartbeatAtUtc ? new Date(monitor.summary.heartbeatAtUtc).toLocaleString() : 'not recorded'}. Stored executions may be out of date.
+        </div>}
+        {inApp.status.known && inApp.status.enabled && !inApp.status.workerOnline && tracked && <div className="workspace-alert notifications-offline" role="status">
+          Notifications offline: they will arrive when it returns
         </div>}
         {pending && <div className="workspace-loading" role="status">Loading your workspace…</div>}
         {!pending && !data && !error && <div className="workspace-alert">No workspace data is available.</div>}
@@ -317,7 +349,10 @@ function Shell({ system, disconnect, api }: ShellProps) {
 
         {page === 'activity' && data && <section className="shell-panel"><header className="shell-panel-heading"><h2>Position operations</h2></header><ActivityOperations api={api} accounts={accounts} portfolios={portfolios} filters state={activityState} onStateChange={setActivityState} reloadGeneration={reloadKey} onOpenPlay={viewPlay} onCreated={reload} /></section>}
 
-        {page === 'settings' && <Suspense fallback={<PageLoading />}><SettingsPage system={system} disconnectSession={disconnectSession} onAccounts={() => navigate('accounts')} /></Suspense>}
+        {page === 'notifications' && cursorReady && <Suspense fallback={<PageLoading />}><NotificationsPage api={api} inApp={inApp} accounts={accounts}
+          state={notificationList} onStateChange={setNotificationList} eyebrow={logLine(page, system.owner.displayName)} onPreferences={() => navigate('settings')} /></Suspense>}
+
+        {page === 'settings' && <Suspense fallback={<PageLoading />}><SettingsPage system={system} api={api} inApp={inApp} disconnectSession={disconnectSession} onAccounts={() => navigate('accounts')} /></Suspense>}
         </div></PageErrorBoundary>
       </main>
     </div>
