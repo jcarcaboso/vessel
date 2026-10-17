@@ -151,6 +151,8 @@ public sealed class IsolationApi : IAsyncLifetime
     {
         var id = Guid.NewGuid();
         var client = Factory.CreateClient();
+        // A stream answered where a 404 was expected must fail the case, not hang the run.
+        client.Timeout = TimeSpan.FromSeconds(30);
         client.DefaultRequestHeaders.Add(TestOwnerAuthHandler.Header, id.ToString("D"));
         return new(id, client);
     }
