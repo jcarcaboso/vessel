@@ -2,7 +2,9 @@ export type ApiErrorKind = 'missing-token' | 'unauthorized' | 'unavailable' | 'i
 
 /** A failure the browser may show: `message` is always a fixed or bounded safe text, never a raw response body. */
 export class ApiError extends Error {
-  constructor(public readonly kind: ApiErrorKind, message: string, public readonly status?: number, public readonly retryAtUtc?: string) {
+  constructor(public readonly kind: ApiErrorKind, message: string, public readonly status?: number, public readonly retryAtUtc?: string,
+    /** The ProblemDetails `code` of session and public calls, e.g. `step-up-required`; never shown as text. */
+    public readonly code?: string) {
     super(message)
     this.name = 'ApiError'
   }

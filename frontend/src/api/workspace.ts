@@ -12,7 +12,8 @@ import { isAccountMonitor, isMonitorEventPage, isMonitorRunAccepted, isMonitorSu
   type AccountMonitor, type MonitorEventPage, type MonitorRunAccepted, type MonitorSummary, type MonitorStreamEvent } from './monitor'
 import { candleIntervals, type CandleInterval } from './candles'
 import { ApiError } from './errors'
-import { createApiCall } from './request'
+import { createApiCall, type ApiCredentials, type AuthFailure } from './request'
+import { authErrorMessage } from './auth'
 import { emitApiEvent } from './events'
 import { isImportedFill, type ImportedFill } from './fills'
 import {
@@ -421,11 +422,25 @@ const overview = (v: unknown): v is Overview => isRecord(v) && Array.isArray(v.p
     (v.totals[k] === undefined || coverages.includes(String(v.totals[k])))) &&
   Array.isArray(v.recentActivity) && v.recentActivity.every(isImportedFill) && isText(v.scopeNote)
 
-export function createWorkspaceApi(token: string): WorkspaceApi {
-  const call = createApiCall(token, () => emitApiEvent(api, { type: 'unauthorized' }))
-  const workspaceRequest = { timeout: 10_000, notFound: 'This account or portfolio is no longer available.',
+/**
+ * A 401 on a session call ends the session. A 403 never does, except `user-suspended`; other refusals only explain
+ * themselves. Token mode keeps treating both as a rejected token.
+ */
+export function endsSession(credentials: string | ApiCredentials, failure: AuthFailure) {
+  return typeof credentials === 'string' || credentials.kind === 'bearer' || failure.status === 401 || failure.code === 'user-suspended'
+}
+
+/** `onAuthFailure` hears every 401 and 403 of this client, so the session owner can tear down or open a dialog. */
+export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthFailure?: (failure: AuthFailure) => void): WorkspaceApi {
+  const call = createApiCall(credentials, failure => {
+    if (endsSession(credentials, failure)) emitApiEvent(api, { type: 'unauthorized' })
+    onAuthFailure?.(failure)
+  })
+  // Session refusals use Vessel's copy for their code; other statuses keep each endpoint's own messages.
+  const codeMessage = (code: string, status: number) => status === 401 || status === 403 ? authErrorMessage(code) : undefined
+  const workspaceRequest = { timeout: 10_000, notFound: 'This account or portfolio is no longer available.', codeMessage,
     noContent: 'The API returned no workspace data.', invalidData: 'The API returned incompatible workspace data.' }
-  const playRequest = { timeout: 15_000, notFound: 'This play or image is no longer available.',
+  const playRequest = { timeout: 15_000, notFound: 'This play or image is no longer available.', codeMessage,
     noContent: 'The API returned no play data.', invalidData: 'The API returned incompatible play data.' }
   const resourceId = (id: string) => {
     if (!isGuid(id)) throw new ApiError('invalid-response', 'The account identifier is invalid.')
