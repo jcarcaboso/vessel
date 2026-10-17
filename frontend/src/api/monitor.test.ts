@@ -92,6 +92,11 @@ describe('monitor contract', () => {
     expect(failure.status).toBe(429)
     expect(Date.parse(failure.retryAtUtc)).toBeGreaterThanOrEqual(before + 60_000)
   })
+  it('explains an offline monitor when a check is refused with 503', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(null, { status: 503 })))
+    const failure = await createWorkspaceApi('test').runAccountMonitor(accountFixture.id).catch(error => error)
+    expect(failure).toMatchObject({ status: 503, message: 'The monitor is offline, so the check could not start. Try again once the monitor is back.' })
+  })
   it('dismisses from either Play or account using exact IDs and plain-text notes', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetcher)
