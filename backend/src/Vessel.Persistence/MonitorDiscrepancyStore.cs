@@ -86,11 +86,17 @@ public sealed class MonitorDiscrepancyStore(VesselDbContext db, UnitOfWork work)
         // SQL narrows by external ID; the OrderKey rule keeps only links whose order has a loaded fill's own contract.
         var fillKeys = fills.Select(OrderKey.Of).ToHashSet();
         var fillOrders = fillKeys.Select(x => x.ExternalOrderId).Distinct(StringComparer.Ordinal).ToArray();
-        var assigned = (await db.LinkedOrders(db.OrderLinks.Where(x => x.AccountId == accountId &&
-                    (x.State == OrderLinkState.Linked || x.State == OrderLinkState.Suggested)))
-                .Where(x => fillOrders.Contains(x.Order.ExternalOrderId))
-                .OrderBy(x => x.Link.Id).AsNoTracking().ToListAsync(ct))
-            .Where(x => fillKeys.Contains(OrderKey.Of(x.Order))).ToList();
+        // Two single-table reads, orders then links, rather than a link-order join: with long assignment history a join
+        // plan can degrade badly, while each read here stays an indexed lookup.
+        var assignedOrders = fillOrders.Length == 0 ? [] : (await db.Orders.AsNoTracking()
+                .Where(o => o.AccountId == accountId && fillOrders.Contains(o.ExternalOrderId)).ToListAsync(ct))
+            .Where(o => fillKeys.Contains(OrderKey.Of(o))).ToDictionary(o => o.Id);
+        var assignedIds = assignedOrders.Keys.ToArray();
+        var assigned = assignedIds.Length == 0 ? [] : (await db.OrderLinks.AsNoTracking()
+                .Where(x => x.AccountId == accountId && (x.State == OrderLinkState.Linked || x.State == OrderLinkState.Suggested) &&
+                    assignedIds.Contains(x.ImportedOrderId))
+                .OrderBy(x => x.Id).ToListAsync(ct))
+            .Select(x => new LinkedOrderRow { Link = x, Order = assignedOrders[x.ImportedOrderId] }).ToList();
         // The checks resolve each assignment's order by internal ID, so its order comes with the facts.
         orders.AddRange(assigned.Select(x => x.Order).Where(x => !ordersById.ContainsKey(x.Id)).DistinctBy(x => x.Id));
         return new(plays, links, orders, fills, true, assigned.Select(x => x.Link).ToList(), true, truncated);
