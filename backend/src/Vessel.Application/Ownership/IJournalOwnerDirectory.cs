@@ -13,11 +13,15 @@ public enum JournalOwnerStatus
 /// (<see cref="ConfiguredOwnerDirectory"/>); Wallet mode is implemented by the identity module. Retained-data
 /// maintenance (event retention) enumerates owners from journal data instead, so suspended owners keep being pruned.
 /// </summary>
+/// <remarks>
+/// Implementations are safe to call from singleton background services and never capture a scoped DbContext.
+/// Owner pages use ascending UUID order with an exclusive cursor; callers restart the scan after reaching the end.
+/// </remarks>
 public interface IJournalOwnerDirectory
 {
     Task<JournalOwnerStatus> StatusAsync(Guid ownerId, CancellationToken cancellationToken);
 
-    /// <summary>Active owners in ascending ID order after <paramref name="after"/> (exclusive), at most <paramref name="limit"/>.</summary>
+    /// <summary>Active owners in ascending ID order after <paramref name="after"/> (exclusive), at most <paramref name="limit"/> (1–200).</summary>
     Task<IReadOnlyList<Guid>> ActiveOwnersAsync(Guid? after, int limit, CancellationToken cancellationToken);
 }
 
@@ -32,6 +36,7 @@ public sealed class ConfiguredOwnerDirectory(Guid ownerId) : IJournalOwnerDirect
     public Task<IReadOnlyList<Guid>> ActiveOwnersAsync(Guid? after, int limit, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(limit, 200);
         IReadOnlyList<Guid> owners = after is { } last && last.CompareTo(owner) >= 0 ? [] : [owner];
         return Task.FromResult(owners);
     }

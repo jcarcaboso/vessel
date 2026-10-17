@@ -7,6 +7,11 @@ namespace Vessel.Application.Ownership;
 /// </summary>
 public interface IOwnerScopeFactory
 {
+    /// <summary>
+    /// Creates a fresh scope and assigns its <see cref="OwnerScopeAssignment"/> before returning. Rejects an empty
+    /// owner. Never consults the owner directory: callers decide whether the owner's work may run (retention,
+    /// renewals and settlement still run for suspended owners).
+    /// </summary>
     IOwnerScope Create(Guid ownerId);
 }
 
