@@ -233,7 +233,7 @@ public sealed class MonitorDiscrepancyRound3PostgresTests
         f.Advance(61);
         await using var scope = database.Scope(f);
         var monitor = new MonitorStore(scope.Db, scope.Work);
-        var coordinator = new MonitorCoordinator(monitor, new WorkspaceStore(scope.Db, scope.Work), new NoImporter(),
+        var coordinator = new MonitorCoordinator(new MonitorWorkerOnline(monitor, f.Clock), new WorkspaceStore(scope.Db, scope.Work), new NoImporter(),
             TestVenues.With(new FixedReader(f), new FixedOrders(f)), new NoCredentials(), scope.Work, scope.Events, new NoCommands(),
             new CoreOwner(f.Account.OwnerId), new MonitorOptions(), f.Clock, scope.Service);
         var request = await coordinator.RequestAsync(f.Account.Id, default);

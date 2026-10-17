@@ -1,4 +1,5 @@
 using Vessel.Domain.Common;
+using Vessel.Domain.Numerics;
 
 namespace Vessel.Domain.Sizing;
 
@@ -35,11 +36,11 @@ public sealed record TrackRecord(int ClosedPlays, int DecidedPlays, int Window, 
         var wins = decided.Where(o => o.Kind == PlayOutcomeKind.Win).ToList();
         var losses = decided.Where(o => o.Kind == PlayOutcomeKind.Loss).ToList();
         decimal? batting = decided.Count > 0 ? (decimal)wins.Count / decided.Count : null;
-        decimal? gain = wins.Count > 0 ? wins.Average(o => o.ReturnPercent) : null;
-        decimal? loss = losses.Count > 0 ? losses.Average(o => -o.ReturnPercent) : null;
+        decimal? gain = wins.Count > 0 ? Average(wins.Select(o => o.ReturnPercent).ToList()) : null;
+        decimal? loss = losses.Count > 0 ? Average(losses.Select(o => -o.ReturnPercent).ToList()) : null;
         return new TrackRecord(outcomes.Count, outcomes.Count(o => o.Kind != PlayOutcomeKind.Scratch), window, wins.Count, losses.Count,
             outcomes.Count(o => o.Kind == PlayOutcomeKind.Scratch), batting, gain, loss,
-            gain is { } g && loss is > 0 and var l ? g / l : null,
+            gain is { } g && loss is > 0 and var l ? Ratio(g, l) : null,
             batting is > 0 and var b ? (1 - b) / b : null,
             AverageR(wins), AverageR(losses));
     }
@@ -47,7 +48,37 @@ public sealed record TrackRecord(int ClosedPlays, int DecidedPlays, int Window, 
     private static decimal? AverageR(List<PlayOutcome> outcomes)
     {
         var known = outcomes.Where(o => o.RMultiple.HasValue).Select(o => o.RMultiple!.Value).ToList();
-        return known.Count > 0 ? known.Average() : null;
+        return known.Count > 0 ? Average(known) : null;
+    }
+
+    /// <summary>
+    /// The decimal mean when the decimal sum fits; otherwise the exact sum over the count, rounded once. The mean of
+    /// representable terms is itself representable, so an overflowing intermediate sum never fails the record.
+    /// </summary>
+    private static decimal Average(List<decimal> values)
+    {
+        try
+        {
+            return values.Average();
+        }
+        catch (OverflowException)
+        {
+            var sum = values.Aggregate(default(ExactAmount), (total, value) => total + ExactAmount.From(value));
+            return sum.ToDecimal(values.Count);
+        }
+    }
+
+    /// <summary>A derived ratio outside decimal range is unknown, never clamped or zeroed.</summary>
+    private static decimal? Ratio(decimal numerator, decimal denominator)
+    {
+        try
+        {
+            return numerator / denominator;
+        }
+        catch (OverflowException)
+        {
+            return null;
+        }
     }
 }
 
@@ -71,11 +102,12 @@ public sealed record Exposure(ExposureLevel Level, int LossStreak, int WinsSince
     {
         var level = ExposureLevel.Full;
         int streak = 0, wins = 0;
-        decimal sinceStepDown = 0;
+        // Only the sign of the running result matters; exact units cannot overflow however large the results are.
+        var sinceStepDown = default(ExactAmount);
         var reason = "Full size: no losing streak.";
         foreach (var outcome in outcomes.Where(o => o.Kind != PlayOutcomeKind.Scratch).OrderBy(o => o.ClosedAtUtc).ThenBy(o => o.PlayId))
         {
-            if (level != ExposureLevel.Full) sinceStepDown += outcome.NetResult;
+            if (level != ExposureLevel.Full) sinceStepDown += ExactAmount.From(outcome.NetResult);
             if (outcome.Kind == PlayOutcomeKind.Loss)
             {
                 streak++;
@@ -85,20 +117,20 @@ public sealed record Exposure(ExposureLevel Level, int LossStreak, int WinsSince
                     level = level == ExposureLevel.Full ? ExposureLevel.Half : ExposureLevel.Quarter;
                     reason = $"{(level == ExposureLevel.Half ? "Half" : "Quarter")} size after {streak} losses in a row.";
                     streak = 0;
-                    sinceStepDown = 0;
+                    sinceStepDown = default;
                 }
                 continue;
             }
             streak = 0;
             if (level == ExposureLevel.Full) continue;
             wins++;
-            if (wins >= WinsToStepUp && sinceStepDown > 0)
+            if (wins >= WinsToStepUp && sinceStepDown.Units.Sign > 0)
             {
                 level = level == ExposureLevel.Quarter ? ExposureLevel.Half : ExposureLevel.Full;
                 reason = level == ExposureLevel.Full ? $"Full size again after {wins} wins at half size."
                     : $"Half size after {wins} wins at quarter size.";
                 wins = 0;
-                sinceStepDown = 0;
+                sinceStepDown = default;
             }
         }
         if (level != ExposureLevel.Full && wins > 0)

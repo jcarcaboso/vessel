@@ -10,3 +10,21 @@ indent_size = 2
 
 [*.cs]
 indent_size = 4
+
+# EF Core migrations and their snapshot are generated code; analyzers skip them.
+[backend/src/Vessel.Persistence/Migrations/*.cs]
+generated_code = true
+
+# Selected correctness/performance analyzers for production code only.
+# Tests keep the SDK defaults. TreatWarningsAsErrors turns these into errors.
+[backend/src/**/*.cs]
+dotnet_diagnostic.CA1806.severity = warning
+dotnet_diagnostic.CA1725.severity = warning
+dotnet_diagnostic.CA2016.severity = warning
+dotnet_diagnostic.CA1826.severity = warning
+dotnet_diagnostic.CA1859.severity = warning
+dotnet_diagnostic.CA1869.severity = warning
+dotnet_diagnostic.CA1870.severity = warning
+dotnet_diagnostic.CA2263.severity = warning
+dotnet_diagnostic.CA1068.severity = warning
+dotnet_diagnostic.CA1036.severity = warning

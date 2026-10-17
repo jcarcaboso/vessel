@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Vessel.Application.Plays;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Workspace;
@@ -28,7 +29,39 @@ public sealed record SizingDto(SizingSettingsDto Settings, ExposureDto Exposure,
 /// beyond their retained fills.
 /// </summary>
 public sealed record ClosedPlayFacts(Play Play, IReadOnlyList<PlayPlanRevision> Revisions, IReadOnlyList<LinkedFill> Fills,
-    IReadOnlyCollection<string>? IncompleteOrders = null, bool ManualSource = false, bool ManualFeesComplete = true);
+    IReadOnlyCollection<string>? IncompleteOrders = null, bool ManualSource = false, bool ManualFeesComplete = true)
+{
+    private readonly ParsedPlans plans = new();
+
+    /// <summary>The Play's current plan, parsed once per stored document.</summary>
+    public PlayPlanDocument CurrentPlan => plans.Read(Play.Plan);
+
+    /// <summary>A stored plan document of this Play (current or a revision), parsed once per distinct document.</summary>
+    public PlayPlanDocument ParsedPlan(string stored) => plans.Read(stored);
+
+    /// <summary>
+    /// Parsed plans keyed by their stored text, so a changed or revised plan is never answered from another document.
+    /// It carries no facts: record equality and hashing ignore it.
+    /// </summary>
+    private sealed class ParsedPlans
+    {
+        private readonly Dictionary<string, PlayPlanDocument> parsed = new(StringComparer.Ordinal);
+
+        public PlayPlanDocument Read(string stored)
+        {
+            lock (parsed)
+            {
+                if (parsed.TryGetValue(stored, out var plan)) return plan;
+            }
+            var read = PlayDocuments.Read(stored);
+            lock (parsed) parsed.TryAdd(stored, read);
+            return read;
+        }
+
+        public override bool Equals(object? obj) => obj is ParsedPlans;
+        public override int GetHashCode() => 0;
+    }
+}
 
 public sealed record LinkedFill(OrderLinkRole Role, ImportedFill Fill);
 
@@ -39,5 +72,16 @@ public interface ISizingStore
     /// <summary>Closed Plays on enabled accounts with their revisions, linked fills and incompletely retained orders.</summary>
     Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct);
     void Add(SizingSettings settings);
+
+    /// <summary>
+    /// Inside a unit of work: the owner's settings row, created from <paramref name="initial"/> when absent, locked for
+    /// update. Concurrent first writes must not conflict. This default suits single-flow stores; Persistence overrides it atomically.
+    /// </summary>
+    async Task<SizingSettings> SettingsForUpdateAsync(SizingSettings initial, CancellationToken ct)
+    {
+        if (await SettingsAsync(ct) is { } settings) return settings;
+        Add(initial);
+        return initial;
+    }
     Task SaveAsync(CancellationToken ct);
 }

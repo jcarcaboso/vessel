@@ -14,6 +14,7 @@ using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Lighter;
+using Vessel.Infrastructure.Monitoring;
 using Vessel.Persistence;
 using Vessel.Worker;
 
@@ -56,6 +57,13 @@ public sealed class AccountOrderHistoryApiTests
         using var response = await client.PostAsync($"/api/accounts/{accountId}/sync", null);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<AccountDto>())!;
+    }
+
+    /// <summary>An owner Check needs a live worker: record its heartbeat at the test clock.</summary>
+    private static async Task WorkerOnline(CoreDatabase database, Guid owner, TimeProvider clock)
+    {
+        await using var db = database.Context(owner);
+        await new Vessel.Persistence.MonitorStore(db, TestUnitOfWork.For(db)).RecordHeartbeatAsync("test-worker", clock.GetUtcNow(), default);
     }
 
     private static async Task CompleteCheck(CoreApiFactory factory, Guid accountId, HttpResponseMessage accepted,
@@ -311,6 +319,7 @@ public sealed class AccountOrderHistoryApiTests
         Assert.Equal(HttpStatusCode.TooManyRequests, cooling.StatusCode);
         Assert.Equal(TimeSpan.FromSeconds(60), cooling.Headers.RetryAfter!.Delta);
         clock.Advance(reader, orders);
+        await WorkerOnline(database, owner, clock);
         using var check = await client.PostAsync($"/api/plays/{play.Summary.Id}/execution/check", null);
         Assert.Equal(1, reader.Reads); Assert.Equal(1, orders.Reads);
         await CompleteCheck(factory, account.Id, check, reader, orders, clock);
@@ -519,6 +528,7 @@ public sealed class AccountOrderHistoryApiTests
             planned.EnsureSuccessStatusCode();
             orders.Failure = null; credential.Token = "ro:synthetic-only";
             clock.Advance(reader, orders);
+            await WorkerOnline(database, owner, clock);
             using var check = await client.PostAsync($"/api/plays/{play.Summary.Id}/execution/check", null);
             Assert.Equal(1, reader.Reads);
             Assert.Equal(venue == "lighter" ? 0 : 1, orders.Reads);

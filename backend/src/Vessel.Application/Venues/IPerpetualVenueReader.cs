@@ -9,7 +9,7 @@ public interface IPerpetualVenueReader
 {
     string VenueId { get; }
     Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken cancellationToken);
-    Task<PerpetualVenueReadResult> ReadAsync(string publicAddress, CancellationToken cancellationToken);
+    Task<PerpetualVenueReadResult> ReadAsync(string sourceId, CancellationToken cancellationToken);
     Task<PerpetualVenueReadResult> ReadAsync(Account account, CancellationToken cancellationToken) =>
         ReadAsync(account.SourceId ?? throw new VenueReadException("Account source is unavailable."), cancellationToken);
 }

@@ -11,6 +11,7 @@ interface RequestOptions {
   notFound?: string
   badGateway?: string
   tooMany?: string
+  serviceUnavailable?: string
   safeError?: string
   noContent?: string
   invalidJson?: string
@@ -35,7 +36,7 @@ async function httpError(response: Response, options: RequestOptions): Promise<A
     } catch { /* Keep the safe default for non-JSON proxy responses. */ }
   }
   if (response.status === 404) detail = options.notFound ?? 'This account or portfolio is no longer available.'
-  if (response.status === 503) detail = 'The service is unavailable. Check the database and server configuration.'
+  if (response.status === 503) detail = options.serviceUnavailable ?? 'The service is unavailable. Check the database and server configuration.'
   const reference = response.headers.get('X-Correlation-ID')
   if (response.status >= 500 && reference && /^[\da-f]{32}$/.test(reference)) detail += ` Reference: ${reference}`
   const retryAfter = response.headers.get('Retry-After')

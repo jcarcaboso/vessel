@@ -58,19 +58,33 @@ public static class VesselEventEndpoints
             // accepted cursor normalized with the stream epoch; reset carries where a reloaded client resumes.
             var cursor = page.ResetRequired ? page.NextCursor : Accepted(after, page.NextCursor);
             await Frame("status", new { state = page.ResetRequired ? "reset" : "ready", nextCursor = cursor });
+            // Bounded lifetime: expiry is checked before every event frame, so the response ends cleanly between frames
+            // (never mid-frame), even part-way through a page. Every written event frame carries its own resume cursor,
+            // so the browser reconnects from the last fully written frame and the unsent rest of the page is replayed.
+            var time = context.RequestServices?.GetService<TimeProvider>() ?? TimeProvider.System;
+            var started = time.GetTimestamp();
+            var lifetime = settings.Value.StreamMaxLifetime;
+            TimeSpan Remaining() => lifetime - time.GetElapsedTime(started);
             while (!ct.IsCancellationRequested)
             {
                 // A reset means reload state, not replay popups from retained history.
                 if (!page.ResetRequired)
                     foreach (var message in page.Events)
+                    {
+                        if (Remaining() <= TimeSpan.Zero) return;
                         await Frame("event", message, Resume(page.NextCursor, message.Sequence));
+                    }
                 cursor = page.NextCursor;
                 if (page.Events.Count < 200)
                 {
                     await context.Response.WriteAsync(": keepalive\n\n", ct);
                     await context.Response.Body.FlushAsync(ct);
-                    await Task.Delay(TimeSpan.FromSeconds(settings.Value.StreamPollSeconds), ct);
+                    var poll = TimeSpan.FromSeconds(settings.Value.StreamPollSeconds);
+                    var remaining = Remaining();
+                    if (remaining <= TimeSpan.Zero) break;
+                    await Task.Delay(remaining < poll ? remaining : poll, time, ct);
                 }
+                if (Remaining() <= TimeSpan.Zero) break;
                 page = await reader.ReadAsync(cursor, 200, ct);
                 if (page.ResetRequired)
                     await Frame("status", new { state = "reset", nextCursor = page.NextCursor });
@@ -81,16 +95,19 @@ public static class VesselEventEndpoints
     }
 
     // The page cursor already names the epoch; an accepted request cursor keeps its own sequence.
+    // Both parses always succeed: StreamAsync rejected an invalid request cursor with 400 before reading, and
+    // the page cursor is produced by the server's own VesselEventCursor.Format. The results are discarded deliberately.
     private static string Accepted(string? after, string next)
     {
-        VesselEventCursor.TryParse(after, out var requested);
-        VesselEventCursor.TryParse(next, out var page);
+        _ = VesselEventCursor.TryParse(after, out var requested);
+        _ = VesselEventCursor.TryParse(next, out var page);
         return VesselEventCursor.Format(page.Epoch, requested.Sequence);
     }
 
+    // The page cursor is server-produced (VesselEventCursor.Format), so the parse always succeeds.
     private static string Resume(string pageCursor, string sequence)
     {
-        VesselEventCursor.TryParse(pageCursor, out var page);
+        _ = VesselEventCursor.TryParse(pageCursor, out var page);
         return VesselEventCursor.Format(page.Epoch, long.Parse(sequence, System.Globalization.CultureInfo.InvariantCulture));
     }
 

@@ -67,6 +67,10 @@ Each lower layer was also checked on its own: `stack/45` 2,057 backend tests and
 - Independent Sol reviewers reproduced and checked fixes for transaction participation, credential races, rate limits, discrepancy coverage and frontend cancellation.
 - The parent integrated the reviewed layers with current upstream changes and completed final browser/E2E verification.
 
+## Worker-offline admission, October 16
+
+Owner-approved behaviour change: an owner Check with a stale worker heartbeat answers 503 and records nothing, and pending check work unclaimed for `Lease` + `HeartbeatTimeout` after it became due returns to idle at admission so it no longer refuses Refresh with 429 indefinitely; it stays due for a returning worker. Verified by the `Offline_*` Postgres tests in `MonitorOfflineAdmissionTests.cs`; tests about other behaviour use `MonitorWorkerOnline` to report a fresh heartbeat. See [Admission, cooldown and triggers](messaging-and-workers.md#admission-cooldown-and-triggers).
+
 ## Verified foundation
 
 An independent Sol reviewed the exact 50-file foundation snapshot, then built it in Release and ran its tests against disposable PostgreSQL. Results: 1,453 passed, two live-venue tests skipped, zero failed; all 15 UoW regressions passed. The build had zero warnings/errors.

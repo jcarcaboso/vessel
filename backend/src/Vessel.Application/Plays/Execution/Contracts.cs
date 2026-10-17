@@ -55,10 +55,44 @@ public interface IPlayExecutionStore
     /// until the transaction ends, so owner status and plan changes take turns with linking.
     /// </summary>
     Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct);
+    /// <summary>Every retained order of the account, read-only, by placement time then order ID.</summary>
     Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct);
+
+    /// <summary>
+    /// Read-only orders with one of <paramref name="orderIds"/>, plus orders on a contract of <paramref name="placedSince"/>
+    /// placed at or after its time, in the order <see cref="OrdersAsync(Guid, CancellationToken)"/> returns them.
+    /// </summary>
+    async Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<string> orderIds,
+        IReadOnlyDictionary<string, DateTimeOffset> placedSince, CancellationToken ct) =>
+        (await OrdersAsync(accountId, ct)).Where(o => IncludesOrder(o, orderIds, placedSince)).ToList();
+
+    /// <summary>The selection rule of the targeted order read; persistence may narrow in SQL first but must end here.</summary>
+    static bool IncludesOrder(ImportedOrder order, IReadOnlyCollection<string> orderIds, IReadOnlyDictionary<string, DateTimeOffset> placedSince) =>
+        orderIds.Contains(order.OrderId) || placedSince.TryGetValue(order.ContractId, out var since) && order.PlacedAtUtc >= since;
     /// <summary>Inserts new orders and updates the status of known ones.</summary>
     Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset observedAt, CancellationToken ct);
+    /// <summary>Every link of the account in any state, tracked for changes, by creation time then ID.</summary>
     Task<List<PlayOrderLink>> LinksAsync(Guid accountId, CancellationToken ct);
+
+    /// <summary>
+    /// Links in any state, tracked for changes, on one of <paramref name="orderIds"/> (for any Play) or belonging to one of
+    /// <paramref name="playIds"/>, in the order <see cref="LinksAsync(Guid, CancellationToken)"/> returns them.
+    /// </summary>
+    async Task<List<PlayOrderLink>> LinksAsync(Guid accountId, IReadOnlyCollection<string> orderIds, IReadOnlyCollection<Guid> playIds,
+        CancellationToken ct) =>
+        (await LinksAsync(accountId, ct)).Where(l => orderIds.Contains(l.OrderId) || playIds.Contains(l.PlayId)).ToList();
+
+    /// <summary>Links of one Play in any state, read-only, in creation order.</summary>
+    async Task<List<PlayOrderLink>> PlayLinksAsync(Guid accountId, Guid playId, CancellationToken ct) =>
+        (await LinksAsync(accountId, ct)).Where(l => l.PlayId == playId).ToList();
+
+    /// <summary>One link of a Play in any state, tracked for changes, or null.</summary>
+    async Task<PlayOrderLink?> LinkAsync(Guid accountId, Guid playId, Guid linkId, CancellationToken ct) =>
+        (await LinksAsync(accountId, ct)).FirstOrDefault(l => l.Id == linkId && l.PlayId == playId);
+
+    /// <summary>Order IDs linked to any Play of the account, in any status.</summary>
+    async Task<HashSet<string>> LinkedOrderIdsAsync(Guid accountId, CancellationToken ct) =>
+        (await LinksAsync(accountId, ct)).Where(l => l.State == OrderLinkState.Linked).Select(l => l.OrderId).ToHashSet(StringComparer.Ordinal);
     Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<string> orderIds, CancellationToken ct);
     void Add(PlayOrderLink link);
     void Add(PlayStatusChange change);

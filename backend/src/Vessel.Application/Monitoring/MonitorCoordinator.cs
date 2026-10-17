@@ -114,6 +114,30 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             (eligible ? row.State != "credential-error" && row.NextRunAtUtc is null : row.State != "idle" || row.NextRunAtUtc is not null);
     }
 
+    public const string MonitorOffline = "The monitor is offline; try again later.";
+
+    /// <summary>
+    /// How long due, pending check work may wait for a worker before it stops gating manual admission: a full lease plus
+    /// the heartbeat timeout, so a live worker always had the chance to claim it.
+    /// </summary>
+    private TimeSpan UnclaimedAfter => MonitorOptions.Lease + options.HeartbeatTimeout;
+
+    /// <returns>The released request and its trigger, when unclaimed check work stopped gating admission.</returns>
+    private (Guid RequestId, string Trigger)? ReleaseUnclaimed(MonitorAccount row, DateTimeOffset now) =>
+        row.RequestId is { } request && row.Trigger is var trigger && row.ReleaseUnclaimedWork(now, UnclaimedAfter)
+            ? (request, trigger) : null;
+
+    /// <summary>
+    /// The released owner Check will not run under its own request (a returning worker runs the still-due check as a
+    /// scheduled run), so it completes as <c>superseded</c>, like any owner Check settled without its own run. Only
+    /// called once admission has succeeded, just before <see cref="MonitorAccount.Admit"/> replaces the request, in the
+    /// same transaction: a refused admission rolls back and records nothing.
+    /// </summary>
+    private Task CompleteExpiredAsync(Guid accountId, (Guid RequestId, string Trigger)? expired, MonitorAccount row,
+        DateTimeOffset now, CancellationToken ct) => expired is { } released
+        ? RunCompletedAsync(accountId, released.RequestId, released.Trigger, row, "superseded", now, ct)
+        : Task.CompletedTask;
+
     public async Task<MonitorRunAccepted> RequestAsync(Guid accountId, CancellationToken ct)
     {
         var request = Guid.CreateVersion7();
@@ -124,8 +148,14 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 !await store.EligibleAsync(accountId, now, ct))
                 throw new ProblemException(409, "This account has no eligible venue Plays, pending linked orders or discrepancy work.");
             row.ReleaseAbandonedRefresh(now);
+            var expired = ReleaseUnclaimed(row, now);
             var retry = await RetryAfterAsync(account.VenueId, row, now, ct);
             if (retry > 0) throw new MonitorAdmissionException(retry);
+            // Only the worker runs a Check. With its heartbeat stale (the "worker offline" signal) nothing is recorded:
+            // accepted work would sit pending and block this account's admission until a worker returns.
+            if (!IsOnline((await store.HeartbeatAsync(ct))?.HeartbeatAtUtc))
+                throw new ProblemException(503, MonitorOffline);
+            await CompleteExpiredAsync(accountId, expired, row, now, ct);
             row.Admit(request, "manual", now);
             await commands.EnqueueAsync(new(request, accountId, owner.OwnerId, "manual"), ct);
             return true;
@@ -143,9 +173,12 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             if (venues.Reader(account.VenueId) is null) throw new ProblemException(503, "Venue reader is unavailable.");
             var now = time.GetUtcNow();
             row.ReleaseAbandonedRefresh(now);
+            // Check work nobody claimed (worker down or not deployed) must not refuse Refresh indefinitely.
+            var expired = ReleaseUnclaimed(row, now);
             var retry = await RetryAfterAsync(account.VenueId, row, now, ct);
             if (retry > 0) throw new MonitorAdmissionException(retry);
             if (!await store.ReadCapacityAsync(now, ct)) throw new MonitorAdmissionException(30);
+            await CompleteExpiredAsync(accountId, expired, row, now, ct);
             var request = Guid.CreateVersion7();
             row.Admit(request, "refresh", now);
             row.Claim(request, readerId, now, MonitorOptions.Lease);
@@ -275,8 +308,9 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         }
         catch (OperationCanceledException)
         {
-            // An interrupted run (shutdown or a lost lease) is not a failure; the next run repeats the work.
-            if (refresh) await FailAsync(lease, capture, false, "", CancellationToken.None, snapshotApplied);
+            // An interrupted run (request abort, shutdown or a lost lease) is not a failure; the next run repeats the
+            // work. A refresh still releases its lease with the cooldown, but records no venue sync failure.
+            if (refresh) await FailAsync(lease, capture, false, "", CancellationToken.None, snapshotApplied, interrupted: true);
             else await SupersedeAsync(lease, CancellationToken.None);
             throw;
         }
@@ -405,7 +439,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         }, ct), ct);
 
     private Task<bool> FailAsync(MonitorLease lease, MonitorCapture expected, bool credential, string error, CancellationToken ct,
-        bool snapshotApplied = false) =>
+        bool snapshotApplied = false, bool interrupted = false) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>
         {
             var refresh = lease.Trigger == "refresh";
@@ -423,7 +457,8 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 {
                     if (snapshotApplied)
                         account.RecordOrderHistoryNotice("Public account data refreshed; order coverage is unavailable because the order check did not complete.");
-                    else account.RecordSyncFailure();
+                    // Caller cancellation interrupted the read: the venue did not fail, so keep the sync status.
+                    else if (!interrupted) account.RecordSyncFailure();
                 }
                 row.CompleteRefresh(now, options.ManualCooldown);
                 await ApplyVenueBudgetAsync(account.VenueId, row, ct);

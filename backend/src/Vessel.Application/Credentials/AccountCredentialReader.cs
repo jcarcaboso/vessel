@@ -17,7 +17,7 @@ public sealed class AccountCredentialReader(IWorkspaceStore accounts, IAccountCr
         {
             if (account.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
             if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before reading its credential.");
-            var purpose = account.VenueId + "-read-token";
+            var purpose = VenueCredentialPurpose.ReadToken(account.VenueId);
             var credential = await credentials.FindAsync(accountId, purpose, cancellationToken);
             if (credential is null || credential.ExpiresAt <= time.GetUtcNow() || credential.LastError is not null || !vault.IsConfigured)
                 return null;
@@ -31,7 +31,7 @@ public sealed class AccountCredentialReader(IWorkspaceStore accounts, IAccountCr
         unitOfWork.ExecuteAsync(() => accounts.WithAccountLockAsync(accountId, async account =>
         {
             if (account.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
-            var credential = await credentials.FindAsync(accountId, account.VenueId + "-read-token", cancellationToken);
+            var credential = await credentials.FindAsync(accountId, VenueCredentialPurpose.ReadToken(account.VenueId), cancellationToken);
             if (credential is null || credential.LastError is not null || string.IsNullOrEmpty(attemptedRevision) ||
                 CredentialAttempt.RevisionOf(credential) != attemptedRevision) return false;
             // A fixed application status; the venue response is never persisted.
@@ -45,7 +45,7 @@ public sealed class AccountCredentialReader(IWorkspaceStore accounts, IAccountCr
     public async Task<bool> IsUsableAsync(Account account, CancellationToken cancellationToken)
     {
         if (account.OwnerId != owner.OwnerId || !account.IsEnabled) return false;
-        var credential = await credentials.FindAsync(account.Id, account.VenueId + "-read-token", cancellationToken);
+        var credential = await credentials.FindAsync(account.Id, VenueCredentialPurpose.ReadToken(account.VenueId), cancellationToken);
         return credential is not null && credential.ExpiresAt > time.GetUtcNow() && credential.LastError is null &&
             vault.HasKey(credential.KeyId);
     }

@@ -49,7 +49,8 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
 
     public string VenueId => Id;
 
-    private BoundedJsonHttp Http => new(httpClient, timeProvider, Json, "RISEx is unavailable. Try again later.", "RISEx read timed out.");
+    // One per reader: the reader owns the injected HttpClient for its own (scoped) lifetime.
+    private readonly BoundedJsonHttp Http = new(httpClient, timeProvider, Json, "RISEx is unavailable. Try again later.", "RISEx read timed out.");
 
     private async Task<JsonDocument> GetAsync(string pathAndQuery, CancellationToken ct)
     {
@@ -127,9 +128,9 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
 
     private static string Address(string? publicAddress) => EvmAddress.Require(publicAddress).ToLowerInvariant();
 
-    public Task<PerpetualVenueReadResult> ReadAsync(string publicAddress, CancellationToken cancellationToken)
+    public Task<PerpetualVenueReadResult> ReadAsync(string sourceId, CancellationToken cancellationToken)
     {
-        var address = Address(publicAddress);
+        var address = Address(sourceId);
         var latest = timeProvider.GetUtcNow().AddMinutes(5);
         return Http.ReadBoundedAsync(async token =>
         {
@@ -268,9 +269,9 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
 
     // ---- Orders ----
 
-    public Task<VenueOrderReadResult> ReadOrdersAsync(string publicAddress, CancellationToken cancellationToken)
+    public Task<VenueOrderReadResult> ReadOrdersAsync(string sourceId, CancellationToken cancellationToken)
     {
-        var address = Address(publicAddress);
+        var address = Address(sourceId);
         var latest = timeProvider.GetUtcNow().AddMinutes(5);
         return Http.ReadBoundedAsync(async token =>
         {

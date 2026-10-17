@@ -131,7 +131,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
 
     private static IReadOnlyList<string> ExclusionReasons(ClosedPlayFacts facts, DateTimeOffset now, string exclusion)
     {
-        var reasons = ExecutionIntegrity.Problems(ExecutionIntegrity.EntrySide(PlayDocuments.Read(facts.Play.Plan)),
+        var reasons = ExecutionIntegrity.Problems(ExecutionIntegrity.EntrySide(facts.CurrentPlan),
             facts.Fills.ToList(), facts.IncompleteOrders ?? []);
         PlayOutcomeCalculator.Outcome(facts, out var arithmeticProblem);
         if (arithmeticProblem is not null) reasons.Add(arithmeticProblem);
@@ -177,7 +177,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
             exits.Any(f => f.Fill.PositionEffect != ExecutionFacts.Close) ||
             !ExecutionIntegrity.Settled(facts))
             return incomplete;
-        var side = ExecutionIntegrity.EntrySide(PlayDocuments.Read(facts.Play.Plan));
+        var side = ExecutionIntegrity.EntrySide(facts.CurrentPlan);
         var result = PlayOutcomeCalculator.Outcome(facts);
         if (result is not null && !HasCompleteInitialRisk(facts, entries.Min(f => f.Fill.OccurredAtUtc), side))
             result = result with { PlannedRisk = null };
@@ -191,7 +191,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         // The sizing assistant retains its existing fallback/partial-plan estimate.
         var revision = facts.Revisions.Where(r => r.CreatedAtUtc <= entryAt).OrderBy(r => r.Number).LastOrDefault();
         if (facts.Play.Origin == PlayOrigin.Retrospective || revision is null) return false;
-        var plan = PlayDocuments.Read(revision.Plan);
+        var plan = facts.ParsedPlan(revision.Plan);
         if ((plan.Direction == "long" ? ExecutionFacts.Buy : ExecutionFacts.Sell) != side) return false;
         static decimal Positive(string value) =>
             decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && number > 0 ? number : 0;

@@ -33,7 +33,7 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         "Account value is primary perpetual margin only, not total spot/unified account equity.";
     // Curated identities checked October 1, 2026. Indices come from metadata;
     // names and isCanonical alone are not token identity or stablecoin approval.
-    private static readonly IReadOnlyDictionary<string, string> Stablecoins = new Dictionary<string, string>(StringComparer.Ordinal)
+    private static readonly Dictionary<string, string> Stablecoins = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["0x6d1e7cde53ba9467b783cb7c530ce054"] = "USDC",
         ["0x2e6d84f2d7ca82e6581e03523e4389f7"] = "USDE",
@@ -57,7 +57,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
     // Strict parsing and bounded reads are shared with other venues; Hyperliquid keeps its own messages.
     private static readonly StrictJson Json = new(InvalidResponse);
     private const string Unavailable = "Hyperliquid is unavailable. Try again later.";
-    private BoundedJsonHttp Http => new(httpClient, timeProvider, Json, Unavailable, "Hyperliquid read timed out.", MaxResponseBytes);
+    // One per reader: the reader owns the injected HttpClient for its own (scoped) lifetime.
+    private readonly BoundedJsonHttp Http = new(httpClient, timeProvider, Json, Unavailable, "Hyperliquid read timed out.", MaxResponseBytes);
 
     private Task<T> ReadBoundedAsync<T>(Func<CancellationToken, Task<T>> read, CancellationToken cancellationToken) =>
         Http.ReadBoundedAsync(read, cancellationToken);
@@ -99,9 +100,9 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
     public async Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken cancellationToken) =>
         (await CatalogueAsync(cancellationToken)).Selectable;
 
-    public async Task<PerpetualVenueReadResult> ReadAsync(string publicAddress, CancellationToken cancellationToken)
+    public async Task<PerpetualVenueReadResult> ReadAsync(string sourceId, CancellationToken cancellationToken)
     {
-        EvmAddress.Require(publicAddress);
+        var publicAddress = EvmAddress.Require(sourceId);
 
         var latestTimestamp = Math.Min(253402300799999L, timeProvider.GetUtcNow().ToUnixTimeMilliseconds() + 300000);
 

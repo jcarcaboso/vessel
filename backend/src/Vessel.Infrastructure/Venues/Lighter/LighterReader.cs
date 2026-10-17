@@ -28,13 +28,14 @@ public sealed partial class LighterReader
     /// <summary>The mainnet descriptor; each exchange has its own (<see cref="LighterExchange.Descriptor"/>).</summary>
     public static VenueDescriptor Descriptor => LighterExchange.Mainnet.Descriptor;
 
-    private readonly HttpClient httpClient;
     private readonly TimeProvider timeProvider;
     private readonly IAccountCredentialReader credentials;
     private readonly LighterExchange venue;
     private readonly StrictJson json;
     private readonly SemaphoreSlim readSlots;
     private readonly LighterCatalogueCache catalogues;
+    // One per reader: the reader owns the injected HttpClient for its own (scoped) lifetime.
+    private readonly BoundedJsonHttp Http;
 
     public LighterReader(HttpClient httpClient, TimeProvider timeProvider, IAccountCredentialReader credentials,
         LighterCatalogueCache? catalogueCache = null, LighterExchange? exchange = null)
@@ -43,16 +44,15 @@ public sealed partial class LighterReader
         // A shared cache would serve one exchange's market IDs to the other.
         if (catalogueCache is not null && catalogueCache.VenueId != venue.VenueId)
             throw new ArgumentException("The catalogue cache belongs to another Lighter exchange.", nameof(catalogueCache));
-        this.httpClient = httpClient;
         this.timeProvider = timeProvider;
         this.credentials = credentials;
         json = venue.Json;
         readSlots = Gates.GetOrAdd(venue.VenueId, _ => new SemaphoreSlim(2, 2));
         catalogues = catalogueCache ?? new(timeProvider, venue.VenueId);
+        Http = new(httpClient, timeProvider, json, venue.Unavailable, venue.TimedOut);
     }
 
     public string VenueId => venue.VenueId;
-    private BoundedJsonHttp Http => new(httpClient, timeProvider, json, venue.Unavailable, venue.TimedOut);
 
     private async Task<T> BoundedAsync<T>(Func<CancellationToken, Task<T>> read, CancellationToken ct)
     {

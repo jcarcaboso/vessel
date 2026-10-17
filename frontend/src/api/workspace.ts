@@ -487,7 +487,8 @@ export function createWorkspaceApi(token: string): WorkspaceApi {
       validate: (v): v is AccountMonitor => isAccountMonitor(v) && v.accountId === id, ...withSignal(signal) }),
     runAccountMonitor: (id, signal) => call(`${accountPath(id)}/monitor/run`, { ...workspaceRequest,
       validate: (v): v is MonitorRunAccepted => isMonitorRunAccepted(v) && v.monitor.accountId === id, method: 'POST', ...withSignal(signal),
-      tooMany: 'A check is already running for this account or it was checked moments ago. Try again when the countdown ends.' }),
+      tooMany: 'A check is already running for this account or it was checked moments ago. Try again when the countdown ends.',
+      serviceUnavailable: 'The monitor is offline, so the check could not start. Try again once the monitor is back.' }),
     monitorEvents: (after, limit, signal) => {
       if (!isRequestCursor(after) || !Number.isInteger(limit) || limit < 1 || limit > 200) {
         return Promise.reject(new ApiError('invalid-response', 'The event cursor is invalid.'))

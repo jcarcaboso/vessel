@@ -29,6 +29,10 @@ public readonly record struct ExactAmount(BigInteger Units) : IComparable<ExactA
     public static ExactAmount operator -(ExactAmount a) => new(-a.Units);
     public ExactAmount Abs() => new(BigInteger.Abs(Units));
     public int CompareTo(ExactAmount other) => Units.CompareTo(other.Units);
+    public static bool operator <(ExactAmount a, ExactAmount b) => a.Units < b.Units;
+    public static bool operator <=(ExactAmount a, ExactAmount b) => a.Units <= b.Units;
+    public static bool operator >(ExactAmount a, ExactAmount b) => a.Units > b.Units;
+    public static bool operator >=(ExactAmount a, ExactAmount b) => a.Units >= b.Units;
     /// <summary>A 56-place notional over a quantity, rounded half away from zero to 28 places; null for a zero quantity.</summary>
     public static string? Average(BigInteger notional, ExactAmount quantity)
     {
@@ -36,6 +40,36 @@ public readonly record struct ExactAmount(BigInteger Units) : IComparable<ExactA
         var quotient = BigInteger.DivRem(notional, quantity.Units, out var remainder);
         if (BigInteger.Abs(remainder) * 2 >= BigInteger.Abs(quantity.Units)) quotient += notional.Sign * quantity.Units.Sign;
         return new ExactAmount(quotient).ToString();
+    }
+    private static readonly BigInteger MaxCoefficient = (BigInteger.One << 96) - 1;
+
+    /// <summary>
+    /// This amount over a positive count, rounded a single time to the most precise decimal (96-bit coefficient,
+    /// scale 0–28). Rounding is half to even, as decimal division (<c>/</c>, and so <c>Enumerable.Average</c>) rounds,
+    /// and the exact remainder is kept until that one rounding. Throws when the quotient is outside decimal range.
+    /// </summary>
+    public decimal ToDecimal(int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+        var numerator = BigInteger.Abs(Units);
+        var denominator = Factor * count;
+        for (var scale = 28; scale >= 0; scale--)
+        {
+            var quotient = BigInteger.DivRem(numerator * BigInteger.Pow(10, scale), denominator, out var remainder);
+            var twice = remainder * 2;
+            if (twice > denominator || twice == denominator && !quotient.IsEven) quotient++;
+            if (quotient > MaxCoefficient) continue;
+            // An exact quotient drops trailing zeros; a rounded one keeps full precision like decimal division. Only the
+            // representation differs, never the value.
+            if (remainder.IsZero)
+                while (scale > 0 && !quotient.IsZero && (quotient % 10).IsZero) { quotient /= 10; scale--; }
+            if (quotient.IsZero) scale = 0;
+            var bytes = quotient.ToByteArray(isUnsigned: true, isBigEndian: false);
+            Array.Resize(ref bytes, 12);
+            return new decimal(BitConverter.ToInt32(bytes, 0), BitConverter.ToInt32(bytes, 4), BitConverter.ToInt32(bytes, 8),
+                Units.Sign < 0 && !quotient.IsZero, (byte)scale);
+        }
+        throw new OverflowException("The quotient is outside decimal range.");
     }
     public override string ToString()
     {

@@ -8,11 +8,19 @@ using Vessel.Application.Plays.Execution;
 using Vessel.Application.Review;
 using Vessel.Application.Sizing;
 using Vessel.Application.Workspace;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Vessel.Application.Monitoring;
 using Vessel.Domain.Accounts;
+using Vessel.Infrastructure.Monitoring;
 
-namespace Vessel.Api;
+namespace Vessel.Infrastructure;
 
-/// <summary>The use cases the API exposes. Persistence registers only the DbContext and the stores behind their ports.</summary>
+/// <summary>
+/// Application use-case registrations shared by both hosts (API and worker), so they resolve the same scoped
+/// collaborators. Persistence registers only the DbContext and the stores behind their ports.
+/// </summary>
 public static class ApplicationServices
 {
     public static IServiceCollection AddVesselApplication(this IServiceCollection services)
@@ -36,6 +44,27 @@ public static class ApplicationServices
         services.AddScoped<CandleService>();
         services.AddScoped<MarketContextService>();
         services.AddScoped<MarketStreamService>();
+        return services;
+    }
+
+    /// <summary>
+    /// The monitor use cases and <c>Vessel:Monitor</c> settings. The API always registers them (Check and Refresh);
+    /// a worker only when it runs the monitor module.
+    /// </summary>
+    public static IServiceCollection AddVesselMonitoring(this IServiceCollection services, IConfiguration configuration)
+    {
+        var options = new MonitorOptions();
+        configuration.GetSection("Vessel:Monitor").Bind(options);
+        options.Validate();
+        services.AddSingleton(options);
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<MonitorDiscrepancyService>();
+        services.AddScoped<IMonitorEvaluator>(sp => sp.GetRequiredService<MonitorDiscrepancyService>());
+        services.AddScoped<IMonitorImporter>(sp => sp.GetRequiredService<PlayExecutionService>());
+        services.TryAddSingleton<IMonitorRunLog, MonitorRunLog>();
+        services.AddScoped<MonitorCoordinator>();
+        services.AddScoped<MonitorExecutionView>();
+        services.AddScoped<MonitorRunExecutor>();
         return services;
     }
 }

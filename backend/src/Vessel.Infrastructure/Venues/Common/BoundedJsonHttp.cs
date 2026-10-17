@@ -6,11 +6,14 @@ namespace Vessel.Infrastructure.Venues.Common;
 /// <summary>
 /// Bounded venue reads: one deadline for a whole multi-request read, a response size cap, strict parsing and
 /// duplicate-key rejection. Failures become <see cref="VenueReadException"/> with the venue's safe messages.
+/// Stateless apart from its constructor arguments and safe for concurrent use; an adapter creates one and keeps it
+/// for its own lifetime, never longer than the HttpClient it was given.
 /// </summary>
 public sealed class BoundedJsonHttp(HttpClient httpClient, TimeProvider timeProvider, StrictJson json,
     string unavailable, string timedOut, int maxResponseBytes = 4 * 1024 * 1024, int maxDepth = 32)
 {
     public static readonly TimeSpan Deadline = TimeSpan.FromSeconds(20);
+    private const int InitialCapacity = 16384;
 
     /// <summary>Runs <paramref name="read"/> under one deadline and maps transport and parse failures.</summary>
     public async Task<T> ReadBoundedAsync<T>(Func<CancellationToken, Task<T>> read, CancellationToken cancellationToken)
@@ -71,8 +74,11 @@ public sealed class BoundedJsonHttp(HttpClient httpClient, TimeProvider timeProv
         if (response.Content.Headers.ContentLength > maxResponseBytes)
             throw json.Invalid();
 
+        // ContentLength only sizes the first allocation; the actual byte count is enforced below whatever it claims.
+        var declared = response.Content.Headers.ContentLength;
+        var capacity = declared is > 0 ? (int)Math.Min(declared.Value, maxResponseBytes) : InitialCapacity;
         using var body = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var bytes = new MemoryStream();
+        var bytes = new MemoryStream(capacity);
         var buffer = new byte[16384];
         int count;
         while ((count = await body.ReadAsync(buffer, cancellationToken)) != 0)
@@ -81,7 +87,10 @@ public sealed class BoundedJsonHttp(HttpClient httpClient, TimeProvider timeProv
                 throw json.Invalid();
             bytes.Write(buffer, 0, count);
         }
-        var document = JsonDocument.Parse(bytes.ToArray(), new JsonDocumentOptions { MaxDepth = maxDepth });
+        // Parse the stream's own array without copying it. The array is a fresh, unpooled allocation that nothing
+        // else writes to, so the document can keep referencing it after this method returns.
+        var document = JsonDocument.Parse(bytes.GetBuffer().AsMemory(0, (int)bytes.Length),
+            new JsonDocumentOptions { MaxDepth = maxDepth });
         try
         {
             json.RejectDuplicateProperties(document.RootElement);

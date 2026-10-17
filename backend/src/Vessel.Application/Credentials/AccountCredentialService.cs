@@ -20,35 +20,59 @@ public sealed class AccountCredentialService(
         return Metadata(account, credential);
     }
 
-    public Task<AccountCredentialDto> PutAsync(Guid id, SaveAccountCredentialRequest request, CancellationToken ct) =>
-        unitOfWork.ExecuteAsync(() => accounts.WithAccountLockAsync(id, async account =>
+    public const string ChangedWhileVerifying = "The account or its credential changed while verifying; try again.";
+
+    /// <summary>
+    /// Read, verify, then a short locked recheck. The venue call runs with no unit of work, transaction or account lock
+    /// open, so it never holds the account row (blocking refreshes and settings changes) for the length of venue HTTP.
+    /// The save then requires the account and its stored credential to be exactly as they were when verification
+    /// started; otherwise it refuses with 409 and the owner retries. It never re-verifies by itself.
+    /// </summary>
+    public async Task<AccountCredentialDto> PutAsync(Guid id, SaveAccountCredentialRequest request, CancellationToken ct)
+    {
+        // 1. Owner-scoped read with every validation, outside any unit.
+        var account = await accounts.AccountAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
+        var token = Validate(account, request);
+        // Copy now: the locked reload below refreshes this same tracked instance.
+        var (revision, sourceId, venueId) = (account.SettingsRevision, account.SourceId!, account.VenueId);
+        var purpose = Purpose(account);
+        var existing = await credentials.FindAsync(id, purpose, ct);
+        var expected = existing is null ? null : CredentialAttempt.RevisionOf(existing);
+        var verifier = venues.CredentialVerifier(venueId) ?? throw new ProblemException(503, "Credential verification is unavailable.");
+
+        // 2. Venue verification, with nothing open.
+        if (unitOfWork.IsActive)
+            throw new InvalidOperationException("Credential verification calls the venue and cannot run inside a unit of work or transaction.");
+        VerifiedVenueCredential verified;
+        try
         {
-            Guard(account, requireEnabled: true);
-            if (!vault.IsConfigured) throw new ProblemException(503, "Credential storage is not configured.");
-            var token = request.Token?.Trim();
-            if (string.IsNullOrEmpty(token) || request.Token!.Length > 512)
-                throw new ProblemException(400, "Enter a read-only token of at most 512 characters.");
-            var verifier = venues.CredentialVerifier(account.VenueId)
-                ?? throw new ProblemException(503, "Credential verification is unavailable.");
-            VerifiedVenueCredential verified;
-            try
-            {
-                verified = await verifier.VerifyAsync(account.SourceId!, token, ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-            catch (Exception)
-            {
-                // Adapters are an external boundary. Never forward even a ProblemException from them.
-                throw new ProblemException(400, "The venue did not accept this read-only token.");
-            }
+            verified = await verifier.VerifyAsync(sourceId, token, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception)
+        {
+            // Adapters are an external boundary. Never forward even a ProblemException from them.
+            throw new ProblemException(400, "The venue did not accept this read-only token.");
+        }
+        if (verified.Scope is not ("single" or "all"))
+            throw new ProblemException(400, "The venue did not accept this read-only token.");
+
+        // 3. Short locked recheck and save.
+        return await unitOfWork.ExecuteAsync(() => accounts.WithAccountLockAsync(id, async current =>
+        {
+            if (current.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
+            if (!current.IsEnabled || current.SettingsRevision != revision || current.SourceId != sourceId || current.VenueId != venueId)
+                throw new ProblemException(409, ChangedWhileVerifying);
+            Validate(current, request);
+            var previous = await credentials.FindAsync(id, purpose, ct);
+            // Absent must still be absent. A refusal mark (LastError) is not part of the revision, so it does not conflict.
+            if ((previous is null ? null : CredentialAttempt.RevisionOf(previous)) != expected)
+                throw new ProblemException(409, ChangedWhileVerifying);
             var now = time.GetUtcNow();
-            if (verified.Scope is not ("single" or "all") || verified.ExpiresAt <= now)
-                throw new ProblemException(400, "The venue did not accept this read-only token.");
-            var purpose = Purpose(account);
+            if (verified.ExpiresAt <= now) throw new ProblemException(400, "The venue did not accept this read-only token.");
             SealedCredential sealedCredential;
             try { sealedCredential = vault.Seal(owner.OwnerId, id, purpose, token); }
             catch (CredentialStorageException) { throw new ProblemException(503, "Credential storage is unavailable."); }
-            var previous = await credentials.FindAsync(id, purpose, ct);
             var credential = new AccountCredential
             {
                 OwnerId = owner.OwnerId, AccountId = id, Purpose = purpose,
@@ -58,8 +82,20 @@ public sealed class AccountCredentialService(
                 CreatedAt = previous?.CreatedAt ?? now, LastVerifiedAt = now
             };
             await credentials.SaveAsync(credential, ct);
-            return Metadata(account, credential);
+            return Metadata(current, credential);
         }, ct), ct);
+    }
+
+    /// <returns>The trimmed token.</returns>
+    private string Validate(Account account, SaveAccountCredentialRequest request)
+    {
+        Guard(account, requireEnabled: true);
+        if (!vault.IsConfigured) throw new ProblemException(503, "Credential storage is not configured.");
+        var token = request.Token?.Trim();
+        if (string.IsNullOrEmpty(token) || request.Token!.Length > 512)
+            throw new ProblemException(400, "Enter a read-only token of at most 512 characters.");
+        return token;
+    }
 
     public async Task DeleteAsync(Guid id, CancellationToken ct) =>
         await unitOfWork.ExecuteAsync(() => accounts.WithAccountLockAsync(id, async account =>
@@ -91,5 +127,5 @@ public sealed class AccountCredentialService(
         return new(vault.IsConfigured, new(credential.Scope, credential.ExpiresAt, credential.LastVerifiedAt, status));
     }
 
-    private static string Purpose(Account account) => account.VenueId + "-read-token";
+    private static string Purpose(Account account) => VenueCredentialPurpose.ReadToken(account.VenueId);
 }

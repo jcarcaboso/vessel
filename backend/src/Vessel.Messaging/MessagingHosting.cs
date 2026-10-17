@@ -69,7 +69,9 @@ public static class MessagingHosting
         builder.Services.AddVesselEvents(builder.Configuration);
         builder.Services.Replace(ServiceDescriptor.Scoped<IVesselEventOutbox, WolverineVesselEventOutbox>());
         foreach (var module in host.RunningModules) module.AddRunningServices(builder.Services, builder.Configuration);
-        // Registered before Wolverine, so it runs first: never recover envelopes from a schema provisioned for others.
+        // Registered before Wolverine, so they run first: fail fast on a subscription without its handler, and never
+        // recover envelopes from a schema provisioned for others.
+        builder.Services.AddHostedService<EventSubscriberGuard>();
         builder.Services.AddHostedService<MessagingDeploymentGuard>();
         builder.UseWolverine(options =>
         {
@@ -100,7 +102,7 @@ public static class MessagingHosting
                 // Inline, not the durable inbox: the delivery is acknowledged only after the receipt settles.
                 options.ListenToRabbitQueue(queue, q => topology.Configure(q, queue)).ProcessInline();
             }
-            if (host.RunningSubscriptions.Count != 0) options.Discovery.IncludeType(typeof(EventSubscriptionListener));
+            if (host.RunningSubscriptions.Count != 0) options.Discovery.IncludeType<EventSubscriptionListener>();
             foreach (var command in host.ConsumedCommands)
             {
                 var queue = topology.CommandQueue(command.Name);
@@ -136,4 +138,16 @@ public static class MessagingHosting
             json.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never;
         });
     }
+}
+
+/// <summary>Stops host start when a running subscription has no keyed handler (a configuration error, not a poison event).</summary>
+internal sealed class EventSubscriberGuard(MessagingHost host, IServiceProvider services) : IHostedService
+{
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        EventSubscriptionRegistry.EnsureHandlers(services, host.RunningSubscriptions);
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

@@ -10,7 +10,7 @@ public enum DispatchTrigger { Live, CatchUp }
 public enum DispatchOutcome
 {
     Delivered, Skipped, Expired, RetryScheduled,
-    /// <summary>Terminal: attempt cap, unsupported version or a permanent handler failure.</summary>
+    /// <summary>Terminal: attempt cap, unsupported version, unreadable payload or a permanent handler failure.</summary>
     Failed,
     InvalidOwner,
     /// <summary>Neither a retained event nor a dedup identity: whatever the message claims, it is not ours.</summary>
@@ -89,7 +89,14 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
         if (nextAttemptAt > now) return DispatchOutcome.NotDue;
         if (expiresAt is { } expires && expires <= now)
             return await SettleAsync(subscription.Name, eventId, "expired", 0, null, now, ct);
-        var message = JsonSerializer.Deserialize<VesselEvent>(payload, VesselEventJson.Options)!;
+        // A stored payload that cannot be read is a poison event, not a retryable failure: settle it here, in this
+        // transaction and before any handler attempt, so catch-up never rediscovers it and the low-water mark moves.
+        // Never log the payload.
+        if (Read(payload) is not { } message)
+        {
+            logger.LogWarning("Subscription {Subscription} cannot read event {EventId}; settled as failed.", subscription.Name, eventId);
+            return await SettleAsync(subscription.Name, eventId, "failed", 0, UnreadableEvent, now, ct);
+        }
         if (message.Version > subscription.Limits.SupportedVersion)
             return await SettleAsync(subscription.Name, eventId, "failed", 0, "Unsupported event version.", now, ct);
         if (attempts >= maxAttempts)
@@ -167,8 +174,11 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
         };
     }
 
+    // The scalar result of pg_advisory_xact_lock_shared is void; callers only await the lock, so Task is the contract.
+#pragma warning disable CA1859
     private Task LockRetentionSharedAsync(CancellationToken ct) =>
         VesselEventSql.ScalarAsync(db, "SELECT pg_advisory_xact_lock_shared(@key)", ct, ("key", VesselEventSql.RetentionLock(db.CurrentOwnerId)));
+#pragma warning restore CA1859
 
     private async Task<(long Sequence, string Type, DateTimeOffset? ExpiresAt, string Payload, long Floor)?> RetainedAsync(
         Guid eventId, CancellationToken ct)
@@ -218,6 +228,18 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
     }
 
     private static string Safe(string message) => message.Length <= 200 ? message : message[..200];
+
+    /// <summary>The fixed receipt error for a stored payload that does not deserialize to an event.</summary>
+    public const string UnreadableEvent = "Unreadable event.";
+
+    private static VesselEvent? Read(string payload)
+    {
+        try { return JsonSerializer.Deserialize<VesselEvent>(payload, VesselEventJson.Options); }
+        catch (Exception error) when (error is JsonException or NotSupportedException or ArgumentException or FormatException)
+        {
+            return null;
+        }
+    }
 
     private sealed class Attempt
     {

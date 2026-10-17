@@ -1,7 +1,4 @@
-using Vessel.Application.Credentials;
 using Vessel.Application.Monitoring;
-using Vessel.Application.Workspace;
-using Vessel.Application.Plays.Execution;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -72,6 +69,8 @@ public static class WorkerHost
         builder.Services.RemoveAll<IJournalOwnerContext>();
         builder.Services.AddSingleton<IJournalOwnerContext>(new WorkerOwnerContext(owner));
         builder.Services.AddVesselPersistence(builder.Configuration);
+        // The same use-case registrations as the API; module-specific use cases follow per selected module.
+        builder.Services.AddVesselApplication();
         foreach (var module in modules) WorkerModules.AddHostedServices(module.Name, builder.Services, builder.Configuration);
         builder.AddVesselMessaging(worker.Deployment!, modules.Select(m => m.Name));
         // Every worker runs catch-up for the subscriptions it hosts and the owner's retention sweep. Both are
@@ -88,10 +87,6 @@ public static class WorkerModules
         switch (module)
         {
             case MonitorModule.ModuleName:
-                // This host owns its use-case registrations; it never references the API assembly.
-                services.AddScoped<WorkspaceService>();
-                services.AddScoped<PlayExecutionService>();
-                services.AddScoped<IAccountCredentialReader, AccountCredentialReader>();
                 services.AddVesselMonitoring(configuration);
                 services.AddSingleton<MonitorWakeup>();
                 services.AddSingleton<IMonitorWakeup>(sp => sp.GetRequiredService<MonitorWakeup>());

@@ -97,6 +97,20 @@ public sealed class MonitorAccount : IOwned
         return true;
     }
 
+    /// <summary>
+    /// Pending check work (an owner Check, or a scheduled run deferred by a venue budget) that no worker claimed within
+    /// <paramref name="unclaimedAfter"/> of becoming due stops blocking manual admission: it returns to idle. It is not
+    /// dropped: <see cref="NextRunAtUtc"/> stays due (in the past), so a returning worker claims it as a scheduled run.
+    /// Running or leased work and refresh work are unaffected.
+    /// </summary>
+    public bool ReleaseUnclaimedWork(DateTimeOffset now, TimeSpan unclaimedAfter)
+    {
+        if (ManualState != "pending" || Trigger == "refresh" || LeaseUntilUtc is not null ||
+            NextRunAtUtc is not { } due || now - due < unclaimedAfter) return false;
+        Release();
+        return true;
+    }
+
     public void Release()
     {
         ManualState = "idle";

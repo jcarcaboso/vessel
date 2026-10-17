@@ -11,7 +11,7 @@ using Vessel.Infrastructure.Venues.Hyperliquid;
 
 namespace Vessel.Tests;
 
-public sealed class CandleApiTests
+public sealed class CandleApiTests(CandleApiTests.InvalidParameterHost host) : IClassFixture<CandleApiTests.InvalidParameterHost>
 {
     private static string Url(Guid id, string query) => $"/api/accounts/{id}/candles?{query}";
     private const long End = 1_790_000_000_000L;
@@ -29,7 +29,7 @@ public sealed class CandleApiTests
         string coin = "BTC", string interval = "1h") =>
         $$"""{"t":{{t}},"T":{{t + 3599999}},"s":"{{coin}}","i":"{{interval}}","o":"{{o}}","c":"{{c}}","h":"{{h}}","l":"{{l}}","v":"{{v}}","n":{{n}}}""";
 
-    private sealed class Candles : ICandleReader
+    internal sealed class Candles : ICandleReader
     {
         public string VenueId { get; init; } = "hyperliquid";
         public int Reads; public Exception? Failure;
@@ -159,11 +159,27 @@ public sealed class CandleApiTests
     [InlineData("instrument=BTC&interval=1h&endTime=abc")]
     public async Task Invalid_parameters_return_400_without_venue_read(string query)
     {
-        var (owner, store, account) = Setup(); var reader = new Candles();
-        await using var factory = new CoreApiFactory(owner, store, candles: reader);
-        using var client = factory.AuthorizedClient();
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync(Url(account.Id, query))).StatusCode);
-        Assert.Equal(0, reader.Reads);
+        // One host for the matrix: a case that read the venue would leave a nonzero count for every later case too.
+        using var client = host.Factory.AuthorizedClient();
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync(Url(host.Account.Id, query))).StatusCode);
+        Assert.Equal(0, host.Reader.Reads);
+    }
+
+    /// <summary>The invalid-parameter matrix's shared host; its requests are refused before any read or write.</summary>
+    public sealed class InvalidParameterHost : IAsyncDisposable
+    {
+        internal Candles Reader { get; } = new();
+        internal Account Account { get; }
+        internal CoreApiFactory Factory { get; }
+
+        public InvalidParameterHost()
+        {
+            var (owner, store, account) = Setup();
+            Account = account;
+            Factory = new CoreApiFactory(owner, store, candles: Reader);
+        }
+
+        public ValueTask DisposeAsync() => Factory.DisposeAsync();
     }
 
     [Theory]

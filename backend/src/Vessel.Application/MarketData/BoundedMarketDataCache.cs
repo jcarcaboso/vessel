@@ -33,7 +33,7 @@ public sealed class BoundedMarketDataCache<T>(TimeProvider time, int maxEntries,
         return false;
     }
 
-    public void Set(string key, T value, TimeSpan lifetime)
+    private void Set(string key, T value, TimeSpan lifetime)
     {
         lock (gate)
         {

@@ -72,7 +72,8 @@ Arrows point to what a project references. `backend/tests/Vessel.Tests/Architect
 |---|---|
 | `Vessel.Domain` | `Monitoring/MonitorAccount` (admission, leases, state and `StateRevision`), `MonitorExitWatch`, `MonitorHeartbeat`, `MonitorVenueBudget`, `PlayDiscrepancy`, `DiscrepancyLifecycle` |
 | `Vessel.Application` | Ports: `IUnitOfWork`, `IUnitOfWorkParticipant`, `IVesselEventSink`, `IVesselEventReader`, `IMonitorCommandSink`, `IVesselEventSubscriber`, `IVesselCommandHandler<T>`. Contracts: `VesselEvent`, `VesselEventDraft`, `VesselEventCursor`, `VesselEventValues.Types`, `MonitorAccountCommand`. Use cases: `MonitorCoordinator`, `MonitorDiscrepancyService`, `MonitorCommandHandler`, `MonitorOptions`; `Venues/OrderMechanics` |
-| `Vessel.Persistence` | `UnitOfWork`; `Events/`: `VesselEventStore` (sink, cursor, dedup), `VesselEventMutationCapture`, `VesselEventHistory` (reader), `EventRetention`, `EventStreamEpoch`, `IVesselEventOutbox`; `Events/Subscriptions/`: `EventSubscription`, `EventSubscriptionLimits`, `TopicFilter`, `EventDispatcher`, `EventCatchUp`, `EventSubscriptionRegistry`, `EventReceiptAdmin`; `MonitorStore`, `MonitorRegistration` (`MonitorRunExecutor`) |
+| `Vessel.Persistence` | `UnitOfWork`; `Events/`: `VesselEventStore` (sink, cursor, dedup), `VesselEventMutationCapture`, `VesselEventHistory` (reader), `EventRetention`, `EventStreamEpoch`, `IVesselEventOutbox`; `Events/Subscriptions/`: `EventSubscription`, `EventSubscriptionLimits`, `TopicFilter`, `EventDispatcher`, `EventCatchUp`, `EventSubscriptionRegistry`, `EventReceiptAdmin`; `MonitorStore`, `MonitorDiscrepancyStore` (registered by `AddVesselPersistence`) |
+| `Vessel.Infrastructure` | `ApplicationServices.AddVesselMonitoring` (monitor use cases and `Vessel:Monitor`, shared by the API and the monitor worker), `Monitoring/MonitorRunExecutor` (lease renewal through fresh scopes), `MonitorRunLog` |
 | `Vessel.Messaging` | `MessagingSettings`, `MessagingHosting` (`AddVesselMessaging`), `MessagingTopology`, `MessagingProvisioning`, `MessagingCommands` (offline CLI), `MessagingDeployments`, `EventSubscriptionListener`, `SubscriptionMaintenanceService`, `WolverineVesselEventOutbox`; `Modules/`: `IVesselModule`, `VesselModuleRegistry`, `Monitor/`, `Verification/` |
 | `Vessel.Worker` | `WorkerHost`, `WorkerSettings`, `WorkerModules`, `MonitorScheduler`, `MonitorWakeup` |
 | `Vessel.Api` | `AddVesselMessaging("api")`, offline command dispatch, `VesselEventEndpoints`, `MonitorEndpoints` |
@@ -198,7 +199,7 @@ flowchart LR
 3. looks the event up by owner and ID, never trusting the message's sequence or payload. Absent with an `event_dedup` row: `Historical`; absent with neither: `Unknown`; retained at or below the floor: `Historical`;
 4. checks responsibility: registered, same fingerprint, sequence above `responsible_from`, type matching the filter. Otherwise `NotResponsible`, with no receipt;
 5. inserts the receipt if absent and locks it (`FOR UPDATE`; catch-up uses `SKIP LOCKED` and returns `Busy`, live delivery waits);
-6. returns `AlreadySettled` for a terminal receipt and `NotDue` before `next_attempt_at`; settles `expired` past `expiresAt`, `failed` for a version above the subscription's `SupportedVersion` or when the attempt cap is reached;
+6. returns `AlreadySettled` for a terminal receipt and `NotDue` before `next_attempt_at`; settles `expired` past `expiresAt`, and `failed` with zero handler attempts when the stored payload cannot be read as an event (`Unreadable event.`; the payload is never logged), for a version above the subscription's `SupportedVersion` or when the attempt cap is reached. Each of these settles in the same transaction as the receipt insert, so a poison event never blocks catch-up or the low-water mark;
 7. runs the keyed `IVesselEventSubscriber` inside `IsolateAsync` and settles `delivered` or `skipped`; on a handler or save failure it records the attempt on the still-locked receipt (`TerminalEventException` fails it at once).
 
 If the whole unit then fails at commit after the handler ran, the attempt is recorded in a new transaction. The cap therefore bounds recorded attempts, not every rolled-back invocation; if that recording also fails or the process dies, the invocation is not counted. This is accepted because handlers are database-only and idempotent. Shutdown cancellation is not an attempt.
@@ -211,7 +212,7 @@ stateDiagram-v2
     pending --> delivered: handler returned Delivered
     pending --> skipped: handler returned Skipped
     pending --> pending: retryable failure, attempts + 1, next_attempt_at
-    pending --> failed: attempt cap, unsupported version or TerminalEventException
+    pending --> failed: attempt cap, unreadable payload, unsupported version or TerminalEventException
     pending --> expired: past expiresAt
     failed --> pending: retry-event-receipts adds a bounded budget
     delivered --> [*]
@@ -300,7 +301,7 @@ Every messaging host applies a module's publishing side: a durable-outbox route 
    - return `EventHandling.Delivered`, or `Skipped` when the event no longer applies (for example superseded or no longer relevant);
    - throw `TerminalEventException` (safe, server-authored text, cut to 200 characters) for a permanent failure; any other exception is retried;
    - for external work, write durable work rows (and an outbox message) in the same transaction and send from elsewhere, never while holding the receipt lock.
-3. **Declare it** in the module: `Subscriptions => [new("name", ModuleName, ["play.*"])]`, with an `EventSubscriptionLimits` override only if needed, and register the handler in `AddRunningServices`: `services.AddKeyedScoped<IVesselEventSubscriber, Handler>("name")`. The listener (`EventSubscriptionListener`) and catch-up come with the host.
+3. **Declare it** in the module: `Subscriptions => [new("name", ModuleName, ["play.*"])]`, with an `EventSubscriptionLimits` override only if needed, and register the handler in `AddRunningServices`: `services.AddKeyedScoped<IVesselEventSubscriber, Handler>("name")`. The listener (`EventSubscriptionListener`) and catch-up come with the host. A host that runs a subscription without its keyed handler fails at start (`EventSubscriberGuard`): a missing handler is a configuration error, never settled as a poison event.
 4. **Provision before starting** the hosting worker: run `migrate` (or `provision-messaging`). The queue, bindings, `.dlx`/`.dlq` and registration are created; the registration starts at the current sequence.
 5. **Run it** in a worker whose `Vessel:Worker:Modules` includes the module.
 6. **Tests:** a handler unit test; a PostgreSQL test through `EventDispatcher` and `EventCatchUp` covering delivered, skipped, retried and terminal outcomes and idempotent redelivery (see `EventSubscriptionTests`); a registration test if the filter matters; optionally a broker test in the `VesselEventTransportTests` style.
@@ -455,6 +456,8 @@ The API also projects `stale` when a `live` row's last success is older than twi
 
 - One admission gate per account (`MonitorAccount.Admit`), stored in `monitor_accounts` (`ManualState` `idle`, `pending` or `running`; `Trigger` `manual`, `refresh`, `monitor` or `confirmation`; `RequestId`; `NextManualAllowedAtUtc`). The API exposes `runTrigger` as `owner`, `refresh` or `scheduled`.
 - Owner Check and Refresh are refused with 429 and `Retry-After` while a run is pending or running, during the cooldown (`Vessel:Monitor:ManualCooldown`, from every completion including failures), or behind a venue deadline. Check answers 409 for an account without eligible work. The cooldown never gates scheduled or confirmation claims.
+- Check answers 503 "The monitor is offline; try again later." when the worker heartbeat is older than `HeartbeatTimeout` (the same signal as `workerOnline: false`), after the 409 and 429 checks; nothing is recorded. Refresh runs in the API and does not need the worker.
+- Pending (unclaimed, unleased) check work that has been due for `Lease` (5 minutes) plus `HeartbeatTimeout` no longer gates Check or Refresh admission: admission returns it to idle under the account and monitor locks. Its due time stays in the past, so a returning worker's next scheduled claim still runs it as a scheduled run under a new request. An expired owner Check completes its own request with `monitor.run-completed` `superseded`, appended in the admitting transaction just before the new request replaces it; a refused admission (429 or the offline 503) rolls back and records neither the release nor the event. Running or leased work and the cooldown are unchanged.
 - Venue 429 deadlines are stored per owner and venue in `monitor_venue_budgets` and respected by Check, Refresh and scheduled claims across processes. A missing or invalid `Retry-After` counts as 60 s; every deadline is clamped to at most 1 hour; a shorter later deadline never shortens a longer one.
 - A scheduled run that starts before an accepted Check covers it; duplicate or late commands with the same request ID cannot start another run.
 
@@ -467,6 +470,7 @@ The API also projects `stale` when a `live` row's last success is older than twi
 | Does | Imports snapshot, fills and orders; fences older results | Also reconciles links and lifecycle, updates watches and gaps, evaluates discrepancies |
 | Leaves alone | Monitor state, backoff, last success, consecutive failures, gap evidence, due time | — |
 | Refused or abandoned | Answered to the owner (429 or 502); never replayed by the worker; a crashed API's lease is released, not replayed | Pending requests survive restarts |
+| Interrupted by the caller (request abort, shutdown, lost lease renewal) | Lease released with the cooldown; no venue sync failure is recorded (the account keeps its sync status). If the snapshot was already applied, the order-coverage notice records that the order check did not complete. Venue deadlines and `HttpClient` timeouts are not caller cancellation and still record a sync failure | Superseded, not failed |
 
 ### Watches
 
@@ -598,10 +602,10 @@ sequenceDiagram
 
 - **Head first.** There is no head route: the hook sends a bare pre-epoch sequence beyond any retained one, which always answers with a reset naming the head. The shell holds stored reads until then (`cursorReady`), so a change committed during the first load is streamed, not skipped. If the head read fails, the stream learns the head itself and reloads once.
 - **Resume.** Event frames carry their resume cursor in the SSE `id:` line; status frames and pages carry `nextCursor`. An event in another epoch is new whatever its sequence.
-- **Server side.** `GET /api/events` returns 1–200 events (default 100). The stream allows four per owner (a fifth gets 429 with `Retry-After: 5`), sends `ready` or `reset` first, polls every `Vessel:Events:StreamPollSeconds` when idle with keepalive comments, and never replays history after a reset.
+- **Server side.** `GET /api/events` returns 1–200 events (default 100). The stream allows four per owner (a fifth gets 429 with `Retry-After: 5`), sends `ready` or `reset` first, polls every `Vessel:Events:StreamPollSeconds` when idle with keepalive comments, and never replays history after a reset. After `Vessel:Events:StreamMaxLifetime` (30 minutes) it ends the response cleanly between frames, never mid-frame: expiry is checked before every event frame, so a slow client cannot hold the response open for the rest of a page, and the unsent remainder is replayed on reconnect; the hook treats the close like any other, reconnects after the short backoff from the last event's `id:` cursor (or the last status `nextCursor`), and its catch-up page returns everything committed in between, or a reset if that history was pruned.
 - **Backoff.** Reconnects wait from 2 s doubling to 60 s with jitter, honour `Retry-After`, and reset only after the stream stays open for 30 s or delivers an event. After three consecutive 429 refusals the shell shows a notice and retries every 5 minutes.
 - **Fallback.** Every 60 s: if the stream is not ready, reload stored state; if it is, refresh the monitor summary. These reads never contact a venue.
-- **Check.** Only the explicit button calls `POST /api/accounts/{id}/monitor/run`. The 202 response shows `pending`; `monitor.run-completed` normally ends it, and while the shown account is not idle `useMonitorRun` reads the stored account monitor every 3 s, at most 40 times. A 429 shows the cooldown until `Retry-After` passes. Opening a Play or a timer never requests a check.
+- **Check.** Only the explicit button calls `POST /api/accounts/{id}/monitor/run`. The 202 response shows `pending`; `monitor.run-completed` normally ends it, and while the shown account is not idle `useMonitorRun` reads the stored account monitor every 3 s, at most 40 times. A 429 shows the cooldown until `Retry-After` passes. A 503 (worker offline) shows the browser's own offline-specific text ("The monitor is offline, so the check could not start…"), not the API detail. Opening a Play or a timer never requests a check.
 - **Epoch reset.** After a restore, `rotate-event-epoch` makes every old cursor reset, so the browser reloads stored state instead of trusting sequence numbers from another history.
 
 ## Configuration reference
@@ -632,6 +636,7 @@ Settings use `:` in JSON and `__` in environment variables. The API and the work
 |---|---|---|---|
 | `RetentionDays` | `90` | 1–36500 | Event history window by `detected_at` |
 | `StreamPollSeconds` | `2` | 1–60 | API stream pause between empty reads |
+| `StreamMaxLifetime` | `00:30:00` | `00:00:01`–`1.00:00:00` | Longest one browser event stream stays open; the API then ends it cleanly between frames and the browser reconnects from its cursor |
 | `RetentionBatch` | `1000` | 1–10000 | Rows per physical deletion batch |
 
 `VesselEventSettings.MonitorInterval` is bound from `Vessel:Monitor:Interval` for timeliness; do not set it under `Vessel:Events`.
