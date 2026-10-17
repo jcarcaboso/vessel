@@ -24,7 +24,10 @@ const addressPattern = /^0x[\da-fA-F]{40}$/
 const hexPattern = /^0x[\da-fA-F]+$/
 /** `0x` and 65 bytes: the only form the server verifies. */
 const signatureLength = 132
-/** The longest wallet answer inspected; a smart account's wrapped signature with deployment data stays far below it. */
+/**
+ * The longest wallet answer inspected. Anything longer that starts with `0x` (a smart account's wrapped signature with
+ * deployment data, say) is unsupported without being scanned.
+ */
 const signatureInspectLimit = 65_536
 
 function failure(cause: unknown): WalletError {
@@ -53,7 +56,9 @@ export async function requestAccount(provider: WalletProvider): Promise<string> 
 export async function signMessage(provider: WalletProvider, message: string, address: string): Promise<string> {
   let signature: unknown
   try { signature = await provider.request({ method: 'personal_sign', params: [utf8Hex(message), address] }) } catch (cause) { throw failure(cause) }
-  if (typeof signature !== 'string' || signature.length > signatureInspectLimit || !hexPattern.test(signature)) throw new WalletError('failed')
+  if (typeof signature !== 'string') throw new WalletError('failed')
+  if (signature.length > signatureInspectLimit) throw new WalletError(signature.startsWith('0x') ? 'unsupported' : 'failed')
+  if (!hexPattern.test(signature)) throw new WalletError('failed')
   // Like the server, any other hex length (including ERC-6492) is unsupported; refusing it here keeps the challenge.
   if (signature.length !== signatureLength) throw new WalletError('unsupported')
   return signature

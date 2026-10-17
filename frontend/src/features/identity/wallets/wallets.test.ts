@@ -153,9 +153,10 @@ describe('wallet requests', () => {
     // Exactly 0x + 130 hex characters goes to the server, which checks v, r and s (and the 6492 suffix) itself.
     await expect(sign(`0x${'Ab'.repeat(65)}`)).resolves.toBe(`0x${'Ab'.repeat(65)}`)
     const erc6492 = `0x${'00'.repeat(200)}${'6492'.repeat(16)}`
-    for (const value of [erc6492, `0x${'ab'.repeat(64)}`, `0x${'ab'.repeat(66)}`, `0x${'a'.repeat(131)}`])
+    // An answer over the bound that starts with 0x is unsupported without being scanned, even when it is not hex.
+    for (const value of [erc6492, `0x${'ab'.repeat(64)}`, `0x${'ab'.repeat(66)}`, `0x${'a'.repeat(131)}`, `0x${'a'.repeat(70_000)}`, `0x${'z'.repeat(70_000)}`])
       expect(await sign(value)).toMatchObject({ reason: 'unsupported' })
-    for (const value of [`0x${'zz'.repeat(65)}`, `0X${'ab'.repeat(65)}`, '0x', 42, null, { r: '0x1' }, `0x${'a'.repeat(70_000)}`])
+    for (const value of [`0x${'zz'.repeat(65)}`, `0X${'ab'.repeat(65)}`, '0x', 42, null, { r: '0x1' }, 'a'.repeat(70_000), `0X${'a'.repeat(70_000)}`])
       expect(await sign(value)).toMatchObject({ reason: 'failed' })
   })
 
