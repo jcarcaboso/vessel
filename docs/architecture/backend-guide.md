@@ -49,8 +49,8 @@ flowchart LR
 | Domain | Entities (`Account`, `Portfolio`, `Play`, `PlayOrderLink`, `PlayEvidence`, …), fact records (`ImportedFill`, `ImportedOrder`, `AccountSnapshot`), the execution vocabulary (`ExecutionFacts`) and pure rules (`TrackRecord`, `Exposure`, `SizingLimits`). | EF, HTTP, JSON contracts, venue knowledge. |
 | Application | One folder per feature with its use-case service, request/response DTOs and the store port it needs. Venue ports and the `IVenueRegistry`. | SQL, EF types, `HttpClient` configuration, venue wire formats. |
 | Persistence | `VesselDbContext`, per-entity configurations, one store class per port, explicit migrations. Registers the context and stores. | Business rules beyond locking and storage. |
-| Infrastructure | Bearer authentication and owner context, AES-GCM credential vault, local evidence object store, venue adapters and their caches. | Use-case logic. |
-| Api | `Program.cs` pipeline, `ApplicationServices.AddVesselApplication()` use-case registrations, endpoint mapping files and transport rules for credentials, compression, forwarded headers and production configuration. | Business decisions. |
+| Infrastructure | Bearer authentication and owner context, AES-GCM credential vault, local evidence object store, venue adapters and their caches. `ApplicationServices` (`AddVesselApplication()`, `AddVesselMonitoring()`): the use-case registrations both hosts share, and the host-side `Monitoring/MonitorRunExecutor`. | Use-case logic. |
+| Api | `Program.cs` pipeline (calls the shared `AddVesselApplication()`), endpoint mapping files and transport rules for credentials, compression, forwarded headers and production configuration. | Business decisions. |
 
 ## How a request flows
 
@@ -278,7 +278,7 @@ dotnet test backend/Vessel.slnx
 
 1. Put the request/response records in the feature's `Contracts.cs` and the logic in its service. Throw `ProblemException` with a safe message for expected request failures.
 2. Map it in the feature's `*Endpoints.cs` inside an authorized group. Keep the lambda to binding and one service call.
-3. If the service is new, register it in `Api/ApplicationServices.cs`.
+3. If the service is new, register it in `Infrastructure/ApplicationServices.cs`, which the API and worker share (`HostCompositionTests` checks both containers).
 4. Mark token-bearing routes with `CarriesCredential()` and other bounded JSON writes with `WithBodyLimit()`.
 5. Add an API test and, if it touches locking or SQL, a `[PostgresFact]` test.
 

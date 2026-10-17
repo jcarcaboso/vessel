@@ -10,6 +10,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Monitoring;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
+using Vessel.Infrastructure.Monitoring;
 using Vessel.Persistence;
 
 namespace Vessel.Tests;

@@ -14,6 +14,7 @@ using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Lighter;
+using Vessel.Infrastructure.Monitoring;
 using Vessel.Persistence;
 using Vessel.Worker;
 

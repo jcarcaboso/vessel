@@ -69,7 +69,35 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
     }
 }
 
-public sealed class CoreApiTests
+/// <summary>
+/// Hosts shared by CoreApiTests' rejection matrices. <see cref="Bare"/> has no database or store, so a route
+/// that reached persistence before authentication would answer 503, not 401. <see cref="Rejecting"/> has an
+/// in-memory store with one portfolio; the cases that use it are refused before any write and assert so.
+/// </summary>
+public sealed class CoreApiRejectionHosts : IAsyncDisposable
+{
+    internal CoreApiFactory Bare { get; } = new(Guid.NewGuid());
+    internal MemoryWorkspaceStore Store { get; }
+    internal Vessel.Domain.Workspace.Portfolio Portfolio { get; }
+    internal CoreApiFactory Rejecting { get; }
+
+    public CoreApiRejectionHosts()
+    {
+        var owner = Guid.NewGuid();
+        Store = new MemoryWorkspaceStore(owner);
+        Portfolio = new Vessel.Domain.Workspace.Portfolio(Guid.NewGuid(), owner, "Trading");
+        Store.Portfolios.Add(Portfolio);
+        Rejecting = new CoreApiFactory(owner, Store);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await Bare.DisposeAsync();
+        await Rejecting.DisposeAsync();
+    }
+}
+
+public sealed class CoreApiTests(CoreApiRejectionHosts hosts) : IClassFixture<CoreApiRejectionHosts>
 {
     [Theory]
     [InlineData("GET", "/api/portfolios")]
@@ -84,7 +112,7 @@ public sealed class CoreApiTests
     [InlineData("POST", "/api/accounts/11111111-1111-1111-1111-111111111111/sync")]
     public async Task Core_routes_require_authentication_before_database_or_provider(string method, string path)
     {
-        await using var factory = new CoreApiFactory(Guid.NewGuid()); using var client = factory.CreateClient();
+        using var client = hosts.Bare.CreateClient();
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(new(new HttpMethod(method), path))).StatusCode);
     }
 
@@ -173,13 +201,11 @@ public sealed class CoreApiTests
     [InlineData("lighter", null, null)]
     public async Task Invalid_account_configuration_returns_safe_problem(string venue, string? value, string? address)
     {
-        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var portfolio = new Vessel.Domain.Workspace.Portfolio(Guid.NewGuid(), owner, "Trading"); store.Portfolios.Add(portfolio);
-        await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
-        var response = await client.PostAsJsonAsync("/api/accounts", new CreateAccountRequest(portfolio.Id, "Account", venue, address, value));
+        using var client = hosts.Rejecting.AuthorizedClient();
+        var response = await client.PostAsJsonAsync("/api/accounts", new CreateAccountRequest(hosts.Portfolio.Id, "Account", venue, address, value));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
-        Assert.Empty(store.Accounts);
+        Assert.Empty(hosts.Store.Accounts);
     }
 
     [Fact]
@@ -202,11 +228,13 @@ public sealed class CoreApiTests
     [InlineData("{broken")]
     public async Task Invalid_portfolio_body_is_a_safe_400(string body)
     {
-        var owner = Guid.NewGuid(); await using var factory = new CoreApiFactory(owner, new MemoryWorkspaceStore(owner)); using var client = factory.AuthorizedClient();
+        using var client = hosts.Rejecting.AuthorizedClient();
+        var before = hosts.Store.Portfolios.Count;
         var response = await client.PostAsync("/api/portfolios", new StringContent(body, System.Text.Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
         Assert.DoesNotContain("Exception", await response.Content.ReadAsStringAsync());
+        Assert.Equal(before, hosts.Store.Portfolios.Count);
     }
 
     [Fact]

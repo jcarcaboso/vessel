@@ -5,7 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Vessel.Application.Monitoring;
 using Vessel.Application.Venues;
-using Vessel.Persistence;
+using Vessel.Infrastructure.Monitoring;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Vessel.Tests")]
 
