@@ -138,6 +138,7 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
             }
         }
         var capped = new HashSet<Guid>();
+        var cappedVenues = new HashSet<string>(StringComparer.Ordinal);
         while (running.Count < options.WorkerConcurrency)
         {
             var page = await candidates.DueCandidatesAsync(continuation, 100, ct);
@@ -148,10 +149,12 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
                 var owner = candidate.OwnerId;
                 try
                 {
-                    if (failed.Contains(owner) || capped.Contains(owner) || await StatusAsync(owner) != JournalOwnerStatus.Active) continue;
+                    if (cappedVenues.Contains(candidate.VenueId) || failed.Contains(owner) || capped.Contains(owner) || await StatusAsync(owner) != JournalOwnerStatus.Active) continue;
                     await using var scope = scopes.Create(owner);
                     var store = scope.Services.GetRequiredService<IMonitorStore>();
                     if (await store.OwnerAtCapacityAsync(time.GetUtcNow(), ct)) { capped.Add(owner); continue; }
+                    if (await store.VenueAtCapacityAsync(candidate.VenueId, time.GetUtcNow(), ct))
+                    { cappedVenues.Add(candidate.VenueId); continue; }
                     // Claim rechecks status, deadlines and both budgets, locking just this account and venue.
                     if (await store.ClaimAsync(candidate.AccountId, null, workerId, time.GetUtcNow(), ct) is { } lease)
                         running.Add(RunAsync(owner, lease, ct));

@@ -18,6 +18,8 @@ public sealed class SystemMonitorStore(NpgsqlDataSource data, TimeProvider time)
                 WHERE a."IsEnabled" AND a."SourceId" IS NOT NULL
                     AND (m."NextRunAtUtc" <= @now OR m."ManualState" <> 'idle')
                     AND (m."LeaseUntilUtc" IS NULL OR m."LeaseUntilUtc" <= @now)
+                    AND NOT EXISTS (SELECT 1 FROM server_venue_deadlines d
+                        WHERE d.venue_id = a."VenueId" AND d.retry_after_until > @now)
             ), ranked AS (
                 SELECT *, ROW_NUMBER() OVER (PARTITION BY owner_id ORDER BY due_at, account_id) AS owner_row
                 FROM due WHERE @after_due IS NULL OR (due_at, owner_id, account_id) > (@after_due, @after_owner, @after_account)

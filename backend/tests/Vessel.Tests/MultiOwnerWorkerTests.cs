@@ -290,6 +290,31 @@ public sealed class MultiOwnerWorkerTests
     }
 
     [PostgresFact]
+    public async Task Venue_at_capacity_is_skipped_for_the_rest_of_the_tick_without_account_claim_locks()
+    {
+        await using var fixture = await Fixture.CreateAsync(firstAccounts: 3, secondAccounts: 3, venueConcurrency: 1);
+        foreach (var owner in new[] { fixture.First, fixture.Second })
+        {
+            await using var scope = fixture.Host.Services.GetRequiredService<IOwnerScopeFactory>().Create(owner);
+            await scope.Services.GetRequiredService<MonitorCoordinator>().DiscoverAsync(["hyperliquid"], fixture.Clock.GetUtcNow(), default);
+        }
+        await using (var db = fixture.Database.Context(fixture.Suspended))
+        {
+            var row = new MonitorAccount { OwnerId = fixture.Suspended, AccountId = fixture.Accounts[fixture.Suspended] };
+            var request = Guid.NewGuid();
+            row.Admit(request, "manual", fixture.Clock.GetUtcNow());
+            Assert.True(row.Claim(request, "another-process", fixture.Clock.GetUtcNow(), MonitorOptions.Lease));
+            db.Add(row); await db.SaveChangesAsync();
+        }
+        fixture.Failures.AccountLocks = 0;
+        var scheduler = fixture.Host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
+        await scheduler.TickAsync(default);
+        Assert.Empty(fixture.Venue.Reads);
+        Assert.Equal(0, fixture.Failures.AccountLocks);
+        Assert.True(File.Exists(fixture.Heartbeat));
+    }
+
+    [PostgresFact]
     public async Task An_active_owner_with_no_due_accounts_still_records_health()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -309,7 +334,7 @@ public sealed class MultiOwnerWorkerTests
     private sealed class Fixture : IAsyncDisposable
     {
         public string Heartbeat { get; } = Path.Combine(Path.GetTempPath(), "vessel-owner-heartbeat-" + Guid.NewGuid().ToString("N"));
-        private Fixture(CoreDatabase database, int concurrency)
+        private Fixture(CoreDatabase database, int concurrency, int venueConcurrency)
         {
             Database = database;
             Directory.Set(First, JournalOwnerStatus.Active);
@@ -323,7 +348,8 @@ public sealed class MultiOwnerWorkerTests
                 ["Vessel:Auth:OwnerId"] = First.ToString(),
                 ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1",
                 ["Vessel:Monitor:HeartbeatFile"] = Heartbeat,
-                ["Vessel:Monitor:WorkerConcurrency"] = concurrency.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                ["Vessel:Monitor:WorkerConcurrency"] = concurrency.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["Vessel:Monitor:VenueReadConcurrency"] = venueConcurrency.ToString(System.Globalization.CultureInfo.InvariantCulture)
             });
             builder.Logging.ClearProviders();
             builder.Logging.AddProvider(Logs);
@@ -349,9 +375,9 @@ public sealed class MultiOwnerWorkerTests
         public OwnerFailure Failures { get; } = new();
         public Dictionary<Guid, Guid> Accounts { get; } = [];
 
-        public static async Task<Fixture> CreateAsync(int firstAccounts = 1, int secondAccounts = 1, int concurrency = 2)
+        public static async Task<Fixture> CreateAsync(int firstAccounts = 1, int secondAccounts = 1, int concurrency = 2, int venueConcurrency = 4)
         {
-            var fixture = new Fixture(await CoreDatabase.CreateAsync(), concurrency);
+            var fixture = new Fixture(await CoreDatabase.CreateAsync(), concurrency, venueConcurrency);
             foreach (var owner in new[] { fixture.First, fixture.Second, fixture.Suspended })
             {
                 var count = owner == fixture.First ? firstAccounts : owner == fixture.Second ? secondAccounts : 1;
@@ -428,6 +454,7 @@ public sealed class MultiOwnerWorkerTests
         public Guid Owner { get; set; }
         public string? Step { get; set; }
         public bool Triggered { get; private set; }
+        public int AccountLocks { get; set; }
         private void Check(CommandEventData data, string step)
         {
             if (Step != step || data.Context is not VesselDbContext db || db.CurrentOwnerId != Owner) return;
@@ -438,7 +465,10 @@ public sealed class MultiOwnerWorkerTests
             CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
         {
             if (command.CommandText.Contains("SELECT * FROM accounts", StringComparison.Ordinal))
+            {
+                AccountLocks++;
                 Check(eventData, "claim");
+            }
             Check(eventData, "discovery");
             return ValueTask.FromResult(result);
         }

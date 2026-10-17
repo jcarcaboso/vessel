@@ -1,7 +1,5 @@
 using Vessel.Application.Common;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
-using Npgsql;
 using Vessel.Application.Ownership;
 using Vessel.Application.Credentials;
 using Vessel.Application.Monitoring;
@@ -208,16 +206,15 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         // Count on this transaction's connection, including any lease it has just saved. No owner filter is removed.
         await unitOfWork.SaveChangesAsync(ct);
         if (await OwnerAtCapacityAsync(now, ct)) return false;
-        await using var command = new NpgsqlCommand("""
-            SELECT COUNT(*) FROM monitor_accounts m JOIN accounts a
-                ON a."Id" = m."AccountId" AND a."OwnerId" = m."OwnerId"
-            WHERE a."VenueId" = @venue AND m."ManualState" = 'running' AND m."LeaseUntilUtc" > @now
-            """, (NpgsqlConnection)db.Database.GetDbConnection(),
-            (NpgsqlTransaction)db.Database.CurrentTransaction!.GetDbTransaction());
-        command.Parameters.AddWithValue("venue", venueId);
-        command.Parameters.AddWithValue("now", now);
-        return (long)(await command.ExecuteScalarAsync(ct))! < settings.VenueReadConcurrency;
+        return !await VenueAtCapacityAsync(venueId, now, ct);
     }
+
+    public async Task<bool> VenueAtCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct) =>
+        await db.Database.SqlQuery<long>($"""
+            SELECT COUNT(*) AS "Value" FROM monitor_accounts m JOIN accounts a
+                ON a."Id" = m."AccountId" AND a."OwnerId" = m."OwnerId"
+            WHERE a."VenueId" = {venueId} AND m."ManualState" = 'running' AND m."LeaseUntilUtc" > {now}
+            """).SingleAsync(ct) >= settings.VenueReadConcurrency;
 
     public Task<bool> RenewAsync(MonitorLease lease, DateTimeOffset now, CancellationToken ct) =>
         lease.OwnerId != db.CurrentOwnerId ? Task.FromResult(false) : unitOfWork.ExecuteAsync(() => LockedAsync(lease.AccountId, (_, row) =>

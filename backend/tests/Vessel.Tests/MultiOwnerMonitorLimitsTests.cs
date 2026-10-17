@@ -70,6 +70,29 @@ public sealed class MultiOwnerMonitorLimitsTests
     }
 
     [PostgresFact]
+    public async Task Throttled_venue_cannot_take_an_owners_two_candidate_slots_from_another_venue()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        var throttled = await SeedAsync(database, owner, "hyperliquid", now.AddMinutes(-2), 2);
+        var available = (await SeedAsync(database, owner, "risex", now.AddMinutes(-1), 1)).Single();
+        await using var data = NpgsqlDataSource.Create(database.ConnectionString);
+        var state = new ServerStateStore(data, new(["monitor"]));
+        await state.DeferVenueAsync("hyperliquid", now.AddHours(1), now, default);
+        var clock = new ManualTime(now);
+        var system = new SystemMonitorStore(data, clock);
+        for (var pass = 0; pass < 3; pass++)
+        {
+            var candidate = Assert.Single(await system.DueCandidatesAsync(null, 100, default));
+            Assert.Equal(available, candidate.AccountId);
+            Assert.Equal("risex", candidate.VenueId);
+        }
+        clock.Advance(TimeSpan.FromHours(1));
+        Assert.Equal(throttled.Order(), (await system.DueCandidatesAsync(null, 100, default)).Select(c => c.AccountId).Order());
+    }
+
+    [PostgresFact]
     public async Task Two_owners_and_two_venues_claim_without_deadlock_and_share_server_slots()
     {
         await using var database = await CoreDatabase.CreateAsync();

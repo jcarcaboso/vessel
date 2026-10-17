@@ -107,5 +107,7 @@ public interface IMonitorStore
     Task<IReadOnlyList<MonitorWatchDto>> WatchesAsync(Guid playId, DateTimeOffset now, CancellationToken ct);
     /// <summary>Inside account admission transaction. Locks the owner budget, then this venue budget, and checks both capacities.</summary>
     Task<bool> ReadCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct);
+    /// <summary>Lock-free preflight only; admission rechecks under the venue budget lock.</summary>
+    Task<bool> VenueAtCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct);
     Task<bool> OwnerAtCapacityAsync(DateTimeOffset now, CancellationToken ct);
 }
