@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Tooltip } from 'radix-ui'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createSessionAuthApi } from '@/api/auth'
+import { authErrorMessage, createSessionAuthApi } from '@/api/auth'
 import { ApiError } from '@/api/errors'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { challengeFixture, secondWalletFixture, sessionFixture, sessionRowsFixture, walletFixture } from '@/test/identity-fixture'
@@ -19,6 +19,9 @@ const signature = `0x${'cd'.repeat(65)}`
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
 const problem = (status: number, code: string) => json({ code }, status)
 const sent = (path: string, method = 'POST') => calls.filter(call => call.path === path && call.method === method)
+const atWalletLimit = () => Array.from({ length: 20 }, (_, index) => ({
+  ...walletFixture, id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+}))
 
 beforeEach(() => {
   calls = []
@@ -60,6 +63,73 @@ async function confirmWithRabby(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('Profile & sign-in', () => {
+  it('disables linking at 20 wallets and explains the limit', async () => {
+    routes['GET /api/auth/wallets'] = () => json(atWalletLimit())
+    const { user } = mount()
+    const link = await screen.findByRole('button', { name: 'Link wallet' })
+    await waitFor(() => expect(link).toHaveAccessibleDescription(authErrorMessage('wallet-limit')))
+    expect(link).toBeDisabled()
+    await user.click(link)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(sent('/api/auth/step-up/challenge')).toHaveLength(0)
+  })
+
+  it('shows last-wallet before any step-up and closes the stale removal dialog', async () => {
+    routes[`DELETE /api/auth/wallets/${secondWalletFixture.id}`] = () => problem(409, 'last-wallet')
+    const { user } = mount()
+    await user.click((await screen.findAllByRole('button', { name: /Remove/ }))[1]!)
+    await user.click(await screen.findByRole('button', { name: 'Remove wallet' }))
+    expect(await screen.findByText(authErrorMessage('last-wallet')!)).toBeVisible()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(sent('/api/auth/step-up/challenge')).toHaveLength(0)
+    expect(sent(`/api/auth/wallets/${secondWalletFixture.id}`, 'DELETE')).toHaveLength(1)
+  })
+
+  it.each(['/api/auth/wallets/challenge', '/api/auth/wallets'])('closes linking on wallet-limit from %s without another step-up', async path => {
+    routes['POST /api/auth/wallets/challenge'] = init => json(challengeFixture(JSON.parse(init.body as string).address))
+    routes[`POST ${path}`] = () => {
+      routes['GET /api/auth/wallets'] = () => json(atWalletLimit())
+      return problem(409, 'wallet-limit')
+    }
+    const { user } = mount()
+    await user.click(await screen.findByRole('button', { name: 'Link wallet' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Link another wallet' })
+    await user.click(await within(dialog).findByRole('button', { name: /Rabby Wallet/ }))
+    await user.click(await within(dialog).findByRole('button', { name: 'Sign with Rabby Wallet' }))
+    await within(dialog).findByText(/Now sign with the wallet you want to add/)
+    account = '0x19B4c7aE02F3d81e6C5a9b0D2E7f4A3c8D1e0a53'
+    await user.click(await within(dialog).findByRole('button', { name: /Rabby Wallet/ }))
+    if (path === '/api/auth/wallets') await user.click(await within(dialog).findByRole('button', { name: 'Sign with Rabby Wallet' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(authErrorMessage('wallet-limit')!)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Link wallet' })).toBeDisabled())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /Sign-in wallets/ })).toHaveFocus())
+    expect(sent('/api/auth/step-up/challenge')).toHaveLength(1)
+    expect(sent(path)).toHaveLength(1)
+  })
+
+  it.each(['/api/auth/step-up/challenge', '/api/auth/step-up', '/api/auth/wallets/challenge', '/api/auth/wallets'])(
+    'shows Retry-After for %s without retrying or opening a nested step-up', async path => {
+      routes['POST /api/auth/wallets/challenge'] = init => json(challengeFixture(JSON.parse(init.body as string).address))
+      routes[`POST ${path}`] = () => new Response(JSON.stringify({ code: 'rate-limited' }), { status: 429, headers: { 'Retry-After': '600' } })
+      const { user } = mount()
+      await user.click(await screen.findByRole('button', { name: 'Link wallet' }))
+      const dialog = await screen.findByRole('dialog', { name: 'Link another wallet' })
+      await user.click(await within(dialog).findByRole('button', { name: /Rabby Wallet/ }))
+      if (path !== '/api/auth/step-up/challenge') await user.click(await within(dialog).findByRole('button', { name: 'Sign with Rabby Wallet' }))
+      if (path.startsWith('/api/auth/wallets')) {
+        await within(dialog).findByText(/Now sign with the wallet you want to add/)
+        account = '0x19B4c7aE02F3d81e6C5a9b0D2E7f4A3c8D1e0a53'
+        await user.click(await within(dialog).findByRole('button', { name: /Rabby Wallet/ }))
+        if (path === '/api/auth/wallets') await user.click(await within(dialog).findByRole('button', { name: 'Sign with Rabby Wallet' }))
+      }
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent('Wait 600 seconds before trying again.')
+      expect(screen.queryByRole('dialog', { name: 'Confirm with a linked wallet' })).not.toBeInTheDocument()
+      expect(sent(path)).toHaveLength(1)
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
   it('removes a wallet after a step-up, retrying the refused call once', async () => {
     routes[`DELETE /api/auth/wallets/${secondWalletFixture.id}`] = [() => problem(403, 'step-up-required'), () => new Response(null, { status: 204 })]
     const { user, identity } = mount()

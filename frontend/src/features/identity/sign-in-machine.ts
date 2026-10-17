@@ -1,5 +1,5 @@
 import type { Challenge, SessionDto, VerifyResult } from '@/api/auth'
-import { ApiError } from '@/api/errors'
+import { ApiError, rateLimitMessage } from '@/api/errors'
 import { shortSource } from '@/lib/format'
 import type { BrowserWallet } from './wallets/discovery'
 import { WalletError, sameAddress } from './wallets/provider'
@@ -69,6 +69,7 @@ export function signInError(cause: unknown, during: 'connect' | 'sign' = 'sign')
     return { kind: 'other', message: cause.reason === 'no-account' ? 'The wallet did not share an address. Unlock it and try again.' : 'The wallet could not complete the request. Try again or choose another wallet.' }
   }
   if (cause instanceof ApiError) {
+    if (cause.status === 429) return { kind: 'rate-limited', retryAt: cause.retryAtUtc ?? null }
     switch (cause.code) {
       case 'challenge-expired': return { kind: 'expired' }
       case 'signature-unsupported': return { kind: 'unsupported' }
@@ -94,7 +95,7 @@ export function flowErrorText(error: SignInError): string {
     case 'disconnected': return 'The wallet ended the connection. Connect again or choose another wallet.'
     case 'invitation': return 'This server only admits invited wallets.'
     case 'unsupported': return 'This signature format isn’t supported yet, as with Safe and other smart accounts. Use a regular wallet address.'
-    case 'rate-limited': return 'Too many attempts. Wait a moment before trying again.'
+    case 'rate-limited': return rateLimitMessage(error.retryAt)
     case 'suspended': return 'The operator of this server has suspended this journal.'
     case 'closed': return 'This server is not admitting new journals.'
     case 'unreachable': return 'Vessel is unreachable. Check your connection and try again.'

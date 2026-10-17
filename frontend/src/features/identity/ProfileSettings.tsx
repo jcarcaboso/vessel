@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { LogOut, Monitor, Pencil, Plus, Smartphone, Trash2 } from 'lucide-react'
-import { createPublicAuthApi, displayNameLimit, walletLabelLimit, type SessionRow, type StepUpAction, type WalletDto } from '@/api/auth'
+import { authErrorMessage, createPublicAuthApi, displayNameLimit, signInWalletLimit, walletLabelLimit, type SessionRow, type StepUpAction, type WalletDto } from '@/api/auth'
 import { ApiError, errorMessage } from '@/api/errors'
 import { SourceChip } from '@/components/accounts/AccountIdentity'
 import { useNotifications } from '@/components/notifications/notifications'
@@ -49,6 +49,7 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
   const [removing, setRemoving] = useState<WalletDto | null>(null)
   // These dialogs open from state, so they remember where focus goes back to.
   const linkButton = useRef<HTMLButtonElement>(null)
+  const linkRefused = useRef(false)
   const walletsHeading = useRef<HTMLHeadingElement>(null)
   const removeOpener = useRef<HTMLElement | null>(null)
 
@@ -86,12 +87,14 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
       notify({ tone: 'success', message: 'Sign-in wallet removed.' })
       reload()
     } catch (cause) {
+      if (cause instanceof ApiError && cause.code === 'last-wallet') setRemoving(null)
       notify({ tone: 'error', message: errorMessage(cause, 'The wallet could not be removed.') })
       reload()
     }
   }
 
   const linked = wallets ?? []
+  const walletLimitReached = linked.length >= signInWalletLimit
   const others = (sessions ?? []).filter(row => !row.current)
   return <div className="profile-settings">
     <ProfilePanel identity={identity} />
@@ -100,8 +103,10 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
       <section className="shell-panel profile-section" aria-labelledby="wallets-title">
         <header>
           <h2 id="wallets-title" ref={walletsHeading} tabIndex={-1}>Sign-in wallets <InfoTip label="About sign-in wallets">Any of these wallets can sign in to this journal. They are not venue accounts and don't import trading history. {signingMeaning}</InfoTip></h2>
-          <Button ref={linkButton} variant="outline" size="sm" onClick={() => setLinking(true)} disabled={!wallets}><Plus size={15} aria-hidden="true" />Link wallet</Button>
+          <Button ref={linkButton} variant="outline" size="sm" onClick={() => { linkRefused.current = false; setLinking(true) }} disabled={!wallets || walletLimitReached}
+            aria-describedby={walletLimitReached ? 'wallet-limit' : undefined}><Plus size={15} aria-hidden="true" />Link wallet</Button>
         </header>
+        {walletLimitReached && <p id="wallet-limit" className="field-help">{authErrorMessage('wallet-limit')}</p>}
         {wallets === null && !loadError ? <p className="muted profile-loading" role="status">Loading sign-in wallets…</p>
           : <ul className="profile-rows">{linked.map(wallet => <WalletRow key={wallet.id} wallet={wallet} only={linked.length === 1} auth={auth}
             onRemove={() => { removeOpener.current = focusedControl(); setRemoving(wallet) }} onChanged={reload} />)}</ul>}
@@ -141,7 +146,8 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
       </DialogContent>
     </Dialog>}
     {linking && <LinkWalletDialog identity={identity} wallets={linked} onStepUp={() => requestStepUp('wallet.link')}
-      onCloseAutoFocus={event => returnFocus(() => linkButton.current, () => walletsHeading.current)(event)}
+      onCloseAutoFocus={event => returnFocus(() => linkRefused.current || linkButton.current?.disabled ? null : linkButton.current, () => walletsHeading.current)(event)}
+      onLimit={message => { linkRefused.current = true; setLinking(false); notify({ tone: 'error', message }); reload() }}
       onClose={() => setLinking(false)} onLinked={() => { setLinking(false); notify({ tone: 'success', message: 'Wallet linked. It can now sign in to this journal.' }); reload() }} />}
     {stepUp && <StepUpDialog identity={identity} wallets={linked} request={stepUp} onFinish={finishStepUp} />}
   </div>
@@ -257,8 +263,9 @@ function StepUpDialog({ identity, wallets, request, onFinish }: {
 }
 
 /** Mockup screen 9: a step-up from a linked wallet, then a signature from the new wallet with its own statement. */
-function LinkWalletDialog({ identity, wallets, onStepUp, onClose, onLinked, onCloseAutoFocus }: {
+function LinkWalletDialog({ identity, wallets, onStepUp, onClose, onLinked, onLimit, onCloseAutoFocus }: {
   identity: ShellIdentity; wallets: readonly WalletDto[]; onStepUp: () => Promise<boolean>; onClose: () => void; onLinked: () => void
+  onLimit: (message: string) => void
   onCloseAutoFocus: (event: Event) => void
 }) {
   const [phase, setPhase] = useState<'confirm' | 'link'>('confirm')
@@ -280,7 +287,12 @@ function LinkWalletDialog({ identity, wallets, onStepUp, onClose, onLinked, onCl
         onDone={() => setPhase('link')} onCancel={onClose} />
         : <WalletSignFlow key="link" purpose="Link wallet" onStepUp={onStepUp}
           accept={address => wallets.some(wallet => sameAddress(wallet.address, address)) ? 'This wallet is already linked to your journal. Switch to the wallet you want to add.' : null}
-          requestChallenge={(address, signal) => identity.auth.walletChallenge(address, signal)}
+          requestChallenge={async (address, signal) => {
+            try { return await identity.auth.walletChallenge(address, signal) } catch (cause) {
+              if (!signal.aborted && cause instanceof ApiError && cause.code === 'wallet-limit') onLimit(cause.message)
+              throw cause
+            }
+          }}
           complete={async (challenge, signature, signal) => {
             const cleaned = cleanLabel(label)
             if (cleaned === undefined) {
@@ -290,6 +302,7 @@ function LinkWalletDialog({ identity, wallets, onStepUp, onClose, onLinked, onCl
             try {
               await identity.auth.linkWallet({ challengeId: challenge.challengeId, signature, ...cleaned ? { label: cleaned } : {} }, signal)
             } catch (cause) {
+              if (!signal.aborted && cause instanceof ApiError && cause.code === 'wallet-limit') onLimit(cause.message)
               // The server decides; its refusal shows on the field too.
               if (cause instanceof ApiError && cause.code === 'label-invalid') setLabelError(cause.message)
               throw cause

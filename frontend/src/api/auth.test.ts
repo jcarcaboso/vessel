@@ -164,7 +164,7 @@ describe('auth endpoints', () => {
       'signature-mismatch', 'registration-invalid', 'display-name-invalid', 'label-invalid', 'session-required', 'session-expired', 'session-revoked',
       'session-user-mismatch', 'origin-rejected', 'csrf-rejected', 'registration-closed', 'invitation-required', 'invitation-invalid', 'user-suspended',
       'step-up-required', 'operator-required', 'not-found', 'wallet-taken', 'wallet-already-linked', 'last-wallet', 'revision-conflict', 'session-changed',
-      'request-too-large', 'rate-limited', 'identity-unavailable']) expect(authErrorMessage(code), code).toBeTruthy()
+      'request-too-large', 'rate-limited', 'wallet-limit', 'identity-unavailable']) expect(authErrorMessage(code), code).toBeTruthy()
     expect(authErrorMessage('toString')).toBeUndefined()
   })
 })

@@ -12,5 +12,14 @@ export class ApiError extends Error {
 
 /** Show only API-safe text, retaining each caller's fallback for other failures. */
 export function errorMessage(cause: unknown, fallback: string): string {
+  if (cause instanceof ApiError && cause.kind === 'http' && cause.status === 429) return rateLimitMessage(cause.retryAtUtc)
   return cause instanceof ApiError ? cause.message : fallback
+}
+
+/** A wait notice, not a failed operation or an automatic retry. Never includes the response body. */
+export function rateLimitMessage(retryAtUtc?: string | null): string {
+  const seconds = Math.ceil((Date.parse(retryAtUtc ?? '') - Date.now()) / 1000)
+  return Number.isFinite(seconds) && seconds > 0
+    ? `Too many requests. Wait ${seconds} second${seconds === 1 ? '' : 's'} before trying again.`
+    : 'Too many requests. Wait a moment before trying again.'
 }

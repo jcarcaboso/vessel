@@ -35,6 +35,7 @@ export interface SessionIdentity { userId: string; sessionId: string; generation
 
 export const displayNameLimit = 60
 export const walletLabelLimit = 40
+export const signInWalletLimit = 20
 
 const codeCopy: Record<string, string> = {
   'request-invalid': 'Vessel could not read this request. Reload the page and try again.',
@@ -62,6 +63,7 @@ const codeCopy: Record<string, string> = {
   'not-found': 'This item is no longer available.',
   'wallet-taken': 'This wallet already signs in to another journal.',
   'wallet-already-linked': 'This wallet is already linked to your journal.',
+  'wallet-limit': `This journal already has the maximum of ${signInWalletLimit} sign-in wallets. Remove one before linking another.`,
   'last-wallet': 'You can’t remove your only sign-in wallet. Link another one first.',
   'revision-conflict': 'Your profile changed somewhere else. It has been reloaded; try again.',
   'session-changed': 'You signed in again in another tab.',
