@@ -55,7 +55,7 @@ public static class VesselEventEndpoints
             throw new ProblemException(400, "Invalid event cursor.");
         if (notificationsAfter is not null && (notifications is null || !NotificationCursor.TryParse(notificationsAfter, out _)))
             throw new ProblemException(400, "Invalid notification cursor.");
-        if (!TryAcquire(owner.OwnerId, context.RequestServices?.GetService<IdentitySettings>()?.MaxEventStreams ?? 64))
+        if (!TryAcquire(owner.OwnerId, context.RequestServices.GetService<IdentitySettings>()?.MaxEventStreams ?? 64))
         {
             throw new ProblemException(429, "The event stream limit has been reached.", "rate-limited", 5);
         }
@@ -63,8 +63,8 @@ public static class VesselEventEndpoints
         try
         {
             await using var validation = new PrincipalRevalidation(
-                context.RequestServices?.GetService<IPrincipalValidity>() ?? new AlwaysValidPrincipal(),
-                context.RequestAborted, context.RequestServices?.GetService<TimeProvider>() ?? TimeProvider.System);
+                context.RequestServices.GetRequiredService<IPrincipalValidity>(),
+                context.RequestAborted, context.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System);
             var ct = validation.Token;
             try
             {

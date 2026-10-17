@@ -94,6 +94,30 @@ public sealed class IdentityStreamCollection;
 public sealed class StreamRevalidationTests
 {
     [Theory]
+    [InlineData("Token")]
+    [InlineData("Wallet")]
+    public async Task Each_authentication_mode_registers_its_principal_validity(string mode)
+    {
+        await using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new()
+        {
+            ["Vessel:Auth:Mode"] = mode, ["Vessel:Auth:Token"] = mode == "Token" ? CoreApiFactory.Token : null,
+            ["Vessel:Identity:Origins:0"] = "https://vessel.test"
+        });
+        using var scope = factory.Services.CreateScope();
+        var validity = scope.ServiceProvider.GetRequiredService<IPrincipalValidity>();
+        if (mode == "Token")
+        {
+            Assert.IsType<AlwaysValidPrincipal>(validity);
+            Assert.True(await validity.StillValidAsync(default));
+        }
+        else
+        {
+            Assert.IsType<SessionPrincipal>(validity);
+            Assert.False(await validity.StillValidAsync(default));
+        }
+    }
+
+    [Theory]
     [InlineData(1)]
     [InlineData(64)]
     public async Task Both_event_caps_preserve_RetryAfter_and_code_at_the_client(int maximum)
