@@ -22,14 +22,13 @@ public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<Is
         var portfolio = await a.Portfolio(name);
         var account = (await a.ManualAccount(Isolated.Marker("account-a"), portfolio)).GetProperty("id").GetGuid();
         Assert.Equal(name, (await a.GetJson($"/api/portfolios/{portfolio}")).GetProperty("name").GetString());
-        var before = await Isolated.State(a, "/api/portfolios", $"/api/portfolios/{portfolio}", $"/api/accounts/{account}");
+        var state = await Snapshot.Of(a, "/api/portfolios", $"/api/portfolios/{portfolio}", $"/api/accounts/{account}");
         await b.Portfolio(Isolated.Marker("portfolio-b"));
 
-        await Isolated.NotFound(b, portfolio, Isolated.Request(HttpMethod.Get, id => $"/api/portfolios/{id}"));
-        await Isolated.NotFound(b, portfolio, Isolated.Request(HttpMethod.Patch, id => $"/api/portfolios/{id}",
-            _ => new UpdatePortfolioRequest("renamed-by-b", "folder")));
-        await Isolated.NotFound(b, portfolio, Isolated.Request(HttpMethod.Delete, id => $"/api/portfolios/{id}"));
-        Assert.Equal(before, await Isolated.State(a, "/api/portfolios", $"/api/portfolios/{portfolio}", $"/api/accounts/{account}"));
+        await state.After(() => Isolated.NotFound(b, portfolio, Isolated.Request(HttpMethod.Get, id => $"/api/portfolios/{id}")));
+        await state.After(() => Isolated.NotFound(b, portfolio, Isolated.Request(HttpMethod.Patch, id => $"/api/portfolios/{id}",
+            _ => new UpdatePortfolioRequest("renamed-by-b", "folder"))));
+        await state.After(() => Isolated.NotFound(b, portfolio, Isolated.Request(HttpMethod.Delete, id => $"/api/portfolios/{id}")));
 
         var list = await b.GetText("/api/portfolios");
         Isolated.NoLeak(list, portfolio, name, account);
@@ -55,26 +54,23 @@ public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<Is
         var revision = created.GetProperty("settingsRevision").GetInt64();
         Assert.Equal(name, (await a.GetJson($"/api/accounts/{account}")).GetProperty("name").GetString());
         var paths = new[] { "/api/accounts", $"/api/accounts/{account}", "/api/portfolios", "/api/overview" };
-        var before = await Isolated.State(a, paths);
+        var state = await Snapshot.Of(a, paths);
 
         var own = await b.ManualAccount(Isolated.Marker("account-b"));
         var ownId = own.GetProperty("id").GetGuid();
         var ownRevision = own.GetProperty("settingsRevision").GetInt64();
-        await Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Get, id => $"/api/accounts/{id}"));
+        await state.After(() => Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Get, id => $"/api/accounts/{id}")));
         // Disable, rename and move through the route: the request is otherwise valid for an owned account.
-        await Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Put, id => $"/api/accounts/{id}",
-            _ => new UpdateAccountRequest("taken-by-b", null, false, revision)));
-        await Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Delete, id => $"/api/accounts/{id}"));
-        Assert.Equal(before, await Isolated.State(a, paths));
+        await state.After(() => Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Put, id => $"/api/accounts/{id}",
+            _ => new UpdateAccountRequest("taken-by-b", null, false, revision))));
+        await state.After(() => Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Delete, id => $"/api/accounts/{id}")));
 
         // A foreign portfolio in a body answers like an unknown portfolio, and creates or moves nothing.
-        var bBefore = await Isolated.State(b, "/api/accounts", "/api/portfolios");
-        await Isolated.SameAsUnknown(b, portfolio, Isolated.Request(HttpMethod.Post, _ => "/api/accounts",
-            id => new CreateAccountRequest(id, "into-foreign-portfolio", "manual", ManualAccountValueUsd: "1")));
-        await Isolated.SameAsUnknown(b, portfolio, Isolated.Request(HttpMethod.Put, _ => $"/api/accounts/{ownId}",
-            id => new UpdateAccountRequest("moved-into-foreign", id, true, ownRevision)));
-        Assert.Equal(bBefore, await Isolated.State(b, "/api/accounts", "/api/portfolios"));
-        Assert.Equal(before, await Isolated.State(a, paths));
+        var both = await Snapshot.Of((a, paths), (b, ["/api/accounts", "/api/portfolios"]));
+        await both.After(() => Isolated.SameAsUnknown(b, portfolio, Isolated.Request(HttpMethod.Post, _ => "/api/accounts",
+            id => new CreateAccountRequest(id, "into-foreign-portfolio", "manual", ManualAccountValueUsd: "1"))));
+        await both.After(() => Isolated.SameAsUnknown(b, portfolio, Isolated.Request(HttpMethod.Put, _ => $"/api/accounts/{ownId}",
+            id => new UpdateAccountRequest("moved-into-foreign", id, true, ownRevision))));
 
         var list = await b.GetText("/api/accounts");
         Isolated.NoLeak(list, account, name, portfolio);
@@ -101,36 +97,50 @@ public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<Is
         Assert.Equal(aPortfolio, Assert.Single(moved.EnumerateArray()).GetProperty("portfolioId").GetGuid());
         var aPaths = new[] { "/api/accounts", "/api/portfolios", $"/api/portfolios/{aPortfolio}" };
         var bPaths = new[] { "/api/accounts", "/api/portfolios", $"/api/portfolios/{bPortfolio}" };
-        var aBefore = await Isolated.State(a, aPaths);
-        var bBefore = await Isolated.State(b, bPaths);
+        var state = await Snapshot.Of((a, aPaths), (b, bPaths));
+        var aState = await Snapshot.Of(a, aPaths);
+        var move = (Func<Guid, MoveAccountsRequest> body) => Isolated.Request(HttpMethod.Post, _ => "/api/accounts/portfolio", body);
+        var create = (Func<Guid, CreatePortfolioRequest> body) => Isolated.Request(HttpMethod.Post, _ => "/api/portfolios", body);
+        var withForeign = Isolated.Marker("with-foreign");
 
-        // A foreign account mixed with an owned one: all or nothing, like an unknown ID.
-        await Isolated.SameAsUnknown(b, aId, Isolated.Request(HttpMethod.Post, _ => "/api/accounts/portfolio",
-            id => new MoveAccountsRequest([bId, id], bPortfolio)));
-        await Isolated.SameAsUnknown(b, aId, Isolated.Request(HttpMethod.Post, _ => "/api/accounts/portfolio",
-            id => new MoveAccountsRequest([bId, id], bPortfolio, [new(bId, bRevision), new(id, aRevision)])));
+        // Well-formed requests that select a foreign account beside an owned one, with or without matching expected
+        // revisions for both: all or nothing, refused like an unknown ID by the account lookup.
+        await state.After(() => Isolated.NotFound(b, aId, move(id => new MoveAccountsRequest([bId, id], bPortfolio)), AccountNotFound));
+        await state.After(() => Isolated.NotFound(b, aId, move(id => new MoveAccountsRequest([bId, id], bPortfolio,
+            [new(bId, bRevision), new(id, aRevision)])), AccountNotFound));
         // Unlinking (null portfolio) a foreign account.
-        await Isolated.SameAsUnknown(b, aId, Isolated.Request(HttpMethod.Post, _ => "/api/accounts/portfolio",
-            id => new MoveAccountsRequest([id], null)));
+        await state.After(() => Isolated.NotFound(b, aId, move(id => new MoveAccountsRequest([id], null)), AccountNotFound));
+        await state.After(() => Isolated.NotFound(b, aId, move(id => new MoveAccountsRequest([id], null, [new(id, aRevision)])), AccountNotFound));
         // An owned account moved into a foreign portfolio.
-        await Isolated.SameAsUnknown(b, aPortfolio, Isolated.Request(HttpMethod.Post, _ => "/api/accounts/portfolio",
-            id => new MoveAccountsRequest([bId], id, [new(bId, bRevision)])));
-        // A foreign account only named in the expected revisions.
-        await Isolated.SameAsUnknown(b, aId, Isolated.Request(HttpMethod.Post, _ => "/api/accounts/portfolio",
-            id => new MoveAccountsRequest([bId], bPortfolio, [new(bId, bRevision), new(id, aRevision)])));
-        // Create-with-accounts naming a foreign account creates no portfolio.
-        await Isolated.SameAsUnknown(b, aId, Isolated.Request(HttpMethod.Post, _ => "/api/portfolios",
-            id => new CreatePortfolioRequest(Isolated.Marker("with-foreign"), null, [bId, id])));
-        await Isolated.SameAsUnknown(b, aId, Isolated.Request(HttpMethod.Post, _ => "/api/portfolios",
-            id => new CreatePortfolioRequest(Isolated.Marker("with-foreign-expected"), null, [bId], [new(bId, bRevision), new(id, aRevision)])));
+        await state.After(() => Isolated.NotFound(b, aPortfolio, move(id => new MoveAccountsRequest([bId], id, [new(bId, bRevision)])),
+            "Portfolio not found."));
+        // Create-with-accounts selecting a foreign account, with or without matching expected revisions, creates no
+        // portfolio (B's portfolio list is part of the snapshot) and moves nothing.
+        await state.After(() => Isolated.NotFound(b, aId, create(id => new CreatePortfolioRequest(withForeign, null, [bId, id])), AccountNotFound));
+        await state.After(() => Isolated.NotFound(b, aId, create(id => new CreatePortfolioRequest(withForeign, null, [bId, id],
+            [new(bId, bRevision), new(id, aRevision)])), AccountNotFound));
 
-        Assert.Equal(aBefore, await Isolated.State(a, aPaths));
-        Assert.Equal(bBefore, await Isolated.State(b, bPaths));
-        // The owned account still moves with its unchanged revision: no partial change consumed it.
-        var final = await b.Post("/api/accounts/portfolio", new MoveAccountsRequest([bId], bPortfolio, [new(bId, bRevision)]));
-        Assert.Equal(bPortfolio, Assert.Single(final.EnumerateArray()).GetProperty("portfolioId").GetGuid());
-        Assert.Equal(aBefore, await Isolated.State(a, aPaths));
+        // Validation, not ownership: expected revisions that name an account outside the selection are malformed and
+        // refused before any account is read, identically for a foreign and an unknown ID.
+        await state.After(async () => Assert.Equal(HttpStatusCode.BadRequest, await Isolated.SameAsUnknown(b, aId,
+            move(id => new MoveAccountsRequest([bId], bPortfolio, [new(bId, bRevision), new(id, aRevision)])))));
+        await state.After(async () => Assert.Equal(HttpStatusCode.BadRequest, await Isolated.SameAsUnknown(b, aId,
+            create(id => new CreatePortfolioRequest(withForeign, null, [bId], [new(bId, bRevision), new(id, aRevision)])))));
+
+        // The owned account still moves with its unchanged revision: no attempt consumed it or partly applied.
+        var final = Assert.Single((await b.Post("/api/accounts/portfolio", new MoveAccountsRequest([bId], bPortfolio, [new(bId, bRevision)])))
+            .EnumerateArray());
+        Assert.Equal(bPortfolio, final.GetProperty("portfolioId").GetGuid());
+        await aState.Unchanged();
+        // Positive control for create-with-accounts and expected revisions: B's own account moves into the new portfolio.
+        var created = await b.Post("/api/portfolios", new CreatePortfolioRequest(Isolated.Marker("with-own"), null, [bId],
+            [new(bId, final.GetProperty("settingsRevision").GetInt64())]), HttpStatusCode.Created);
+        Assert.Equal(created.GetProperty("id").GetGuid(), (await b.GetJson($"/api/accounts/{bId}")).GetProperty("portfolioId").GetGuid());
+        await aState.Unchanged();
+        Isolated.NoLeak(await b.GetText("/api/portfolios"), withForeign, aPortfolio, aId);
     }
+
+    private const string AccountNotFound = "Account not found.";
 
     [PostgresFact]
     [Covers("GET", "/api/accounts/{id:guid}/credential")]
@@ -143,20 +153,19 @@ public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<Is
         var saved = await a.Send(HttpMethod.Put, $"/api/accounts/{account}/credential", new { token = SecurityFixture.Token });
         Assert.Equal("valid", saved.GetProperty("credential").GetProperty("status").GetString());
         var path = $"/api/accounts/{account}/credential";
-        var before = await Isolated.State(a, path, $"/api/accounts/{account}");
+        var state = await Snapshot.Of(a, path, $"/api/accounts/{account}");
 
-        await Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Get, id => $"/api/accounts/{id}/credential"));
-        await Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Put, id => $"/api/accounts/{id}/credential",
-            _ => new { token = SecurityFixture.Token }));
-        await Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Delete, id => $"/api/accounts/{id}/credential"));
-        Assert.Equal(before, await Isolated.State(a, path, $"/api/accounts/{account}"));
+        await state.After(() => Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Get, id => $"/api/accounts/{id}/credential")));
+        await state.After(() => Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Put, id => $"/api/accounts/{id}/credential",
+            _ => new { token = SecurityFixture.Token })));
+        await state.After(() => Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Delete, id => $"/api/accounts/{id}/credential")));
 
         // B's own account on the same index stores its own credential; A's stays.
         var own = (await b.IndexAccount(Isolated.Marker("index-b"))).GetProperty("id").GetGuid();
         Assert.Equal(JsonValueKind.Null, (await b.GetJson($"/api/accounts/{own}/credential")).GetProperty("credential").ValueKind);
         await b.Send(HttpMethod.Put, $"/api/accounts/{own}/credential", new { token = SecurityFixture.Token });
         await b.Send(HttpMethod.Delete, $"/api/accounts/{own}/credential", expected: HttpStatusCode.NoContent);
-        Assert.Equal(before, await Isolated.State(a, path, $"/api/accounts/{account}"));
+        await state.Unchanged();
     }
 
     [PostgresFact]
@@ -206,9 +215,16 @@ public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<Is
         await a.GetJson($"/api/accounts/{account}/instruments");
         await a.GetJson($"/api/accounts/{account}/candles?instrument=BTC&interval=1h");
         await a.GetJson($"/api/accounts/{account}/market-context?instrument=BTC");
+        var subscriptions = api.Venues.Stream.Subscriptions.Count;
+        using (var request = new HttpRequestMessage(HttpMethod.Get, $"/api/accounts/{account}/market-stream?instrument=BTC&interval=1h"))
+        using (var stream = await a.Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead))
+        {
+            Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
+            Assert.Equal(subscriptions + 1, api.Venues.Stream.Subscriptions.Count);
+        }
         var reads = api.Venues.Reader.Fixture.Reads;
         var orderReads = api.Venues.Orders.Reads;
-        var before = await Isolated.State(a, $"/api/accounts/{account}", $"/api/accounts/{account}/snapshot", $"/api/accounts/{account}/fills");
+        var state = await Snapshot.Of(a, $"/api/accounts/{account}", $"/api/accounts/{account}/snapshot", $"/api/accounts/{account}/fills");
 
         foreach (var path in new Func<Guid, string>[]
         {
@@ -219,11 +235,12 @@ public sealed class WorkspaceIsolationTests(IsolationApi api) : IClassFixture<Is
             id => $"/api/accounts/{id}/market-context?instrument=BTC",
             id => $"/api/accounts/{id}/market-stream?instrument=BTC&interval=1h"
         })
-            await Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Get, path));
+            await state.After(() => Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Get, path)));
+        // No foreign stream subscribed to the venue.
+        Assert.Equal(subscriptions + 1, api.Venues.Stream.Subscriptions.Count);
         // A refresh of a foreign account answers like an unknown one and never reads the venue for it.
-        await Isolated.SameAsUnknown(b, account, Isolated.Request(HttpMethod.Post, id => $"/api/accounts/{id}/sync"));
+        await state.After(() => Isolated.SameAsUnknown(b, account, Isolated.Request(HttpMethod.Post, id => $"/api/accounts/{id}/sync")));
         Assert.Equal((reads, orderReads), (api.Venues.Reader.Fixture.Reads, api.Venues.Orders.Reads));
-        Assert.Equal(before, await Isolated.State(a, $"/api/accounts/{account}", $"/api/accounts/{account}/snapshot", $"/api/accounts/{account}/fills"));
     }
 
     [PostgresFact]
