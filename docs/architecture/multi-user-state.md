@@ -62,12 +62,17 @@ migration creates empty notification deployment health and **drops/replaces**
 state also replaces tables. No rolling upgrade; rollback restores the pre-upgrade
 backup. Main's OrderIdentity retained-data refusal/backfill limit still applies.
 
-The orchestrator reports **3,111** backend tests on integrated B2, **3,185** on C1
-and **2,405** Vitest cases on D1. These are inherited lane evidence, not P4 reruns.
-The integration review row intentionally leaves the Opus verdict for the
-orchestrator. Fresh P4 commands/results are recorded here after serial isolated
-checks; the earlier evidence below is historical and does not imply rerunning
-its complete backend/frontend suites on this rebase.
+October 18, final stack tip (P4 on D1 `a89ed49`, B2 including the integration
+fixes `38e15a0`), run serially by the orchestrator:
+
+| Check | Result |
+| --- | --- |
+| `pnpm check` | scripts 77 passed; Release build 0 warnings; backend **3,191 passed**, 0 failed, 5 opt-in skips; frontend **2,405 passed** (133 files); typecheck, lint and build passed |
+| `python3 scripts/verify-release.py` (Token, S3) | **177 passed**, 0 failed |
+| `python3 scripts/verify-release.py --auth wallet … --wallet-browsers chromium,firefox --wallet-browser-image mcr.microsoft.com/playwright:v1.58.2-noble` | **177 passed**, 0 failed: 155 packaged + 11 Chromium + 11 Firefox 146.0.1 (remote); revoked-session stream closed in 14,155 ms (Chromium) and 13,370 ms (Firefox) |
+
+The Opus verdict on the integration with main is recorded in the review log.
+The earlier evidence below is historical.
 
 ### Fresh integration checks
 
