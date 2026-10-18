@@ -224,7 +224,7 @@ public sealed class ConfigurationAndCommandTests
         while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "deploy", "migrate"))) directory = directory.Parent;
         Assert.NotNull(directory);
         var script = File.ReadAllText(Path.Combine(directory.FullName, "deploy", "migrate"));
-        var expected = new[] { "/app/migrate-identity-ef\n", "/app/migrate-ef \"$@\"", "Vessel.Api.dll identity ensure-owner", "Vessel.Api.dll provision-messaging" };
+        var expected = new[] { "Vessel.Api.dll check-config", "/app/migrate-identity-ef\n", "/app/migrate-ef \"$@\"", "Vessel.Api.dll identity ensure-owner", "Vessel.Api.dll provision-messaging" };
         var previous = -1;
         foreach (var step in expected) { var index = script.IndexOf(step, StringComparison.Ordinal); Assert.True(index > previous); previous = index; }
         Assert.Contains("set -eu", script);

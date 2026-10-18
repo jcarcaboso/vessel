@@ -44,6 +44,23 @@ def snapshot(directory):
     return sorted((str(p.relative_to(directory)), p.read_bytes() if p.is_file() else None) for p in Path(directory).rglob('*'))
 
 
+class ProvisioningReportTests(unittest.TestCase):
+    def test_new_and_existing_reports_include_the_hub_and_do_not_depend_on_order(self):
+        prefix = 'Token mode: identity ensure-owner has nothing to do.\nProvisioned envelope storage. '
+        for report, expected in (
+            ('Registered subscriptions: notifications, verification; already registered: none.',
+             ({'notifications', 'verification'}, set())),
+            ('Registered subscriptions: none; already registered: notifications, verification.',
+             (set(), {'notifications', 'verification'})),
+            ('Registered subscriptions: verification, notifications; already registered: none.',
+             ({'notifications', 'verification'}, set())),
+            ('Registered subscriptions: verification; already registered: none.', ({'verification'}, set())),
+            ('not a provisioning report', None),
+        ):
+            with self.subTest(report=report):
+                self.assertEqual(expected, harness.subscription_report(prefix + report + '\n'))
+
+
 class ResumeSafetyTests(unittest.TestCase):
     def setUp(self):
         self.artifacts = tempfile.mkdtemp()

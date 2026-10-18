@@ -579,6 +579,12 @@ See §7. The stream endpoints get `IPrincipalValidity` from DI: `AlwaysValidPrin
   - a real-wallet compatibility check, including an EOA connected to a non-mainnet network;
   - Wallet-mode writes (POST, PATCH, bodyless DELETE, multipart upload) in **Chromium and Firefox**.
 
+P4 operator documentation is published under the explicit §16 clarification,
+not activation approval. §10 is not signed off; Wallet is a documented opt-in
+but not activated. Keep registration `Closed` until both-browser writes and the
+owner real-wallet/non-mainnet EOA check pass and are recorded in
+`multi-user-state.md`. Publishing this runbook does not waive either gate.
+
 ## 11. Frontend (D1)
 
 ### Gate
@@ -791,6 +797,9 @@ Cross-model verification of the first lanes found gaps the contract left open. T
 
 | Found in | Clarification | Where |
 | --- | --- | --- |
+| P4 | Operator docs are published before two §10 items passed; they mark Wallet mode as not activated and start registration `Closed` | §10 |
+| P4 stack verification | `deploy/migrate` first runs `check-config`: the API's startup validation (production settings and the identity settings the workers also read) without a database connection, so first installs can be checked. Exit 0 valid, 1 invalid, 2 usage; nothing migrates on a non-zero exit. The shell preflight matches `Token`/`Wallet` case-sensitively, as the application does | §10; P4 runbook |
+| P4 stack verification | Operator docs support only `Closed` and `Invitation`. `AllowList` and `Open` stay in code and tests but are unsupported and undocumented until the per-user quotas of §13 exist; `check-config` warns when Wallet mode selects either | §13; P4 runbook |
 | A1 review | The request guard treats every method except GET, HEAD, OPTIONS and TRACE as unsafe, compared case-insensitively | §7 |
 | A1 review | A reused binding cookie keeps its value but is re-issued with a fresh lifetime on every challenge | §6, §7 |
 | A1 review | Stream endpoints resolve `IPrincipalValidity` as a required service; there is no "always valid" fallback | §7, §9.5 |
@@ -804,6 +813,21 @@ Cross-model verification of the first lanes found gaps the contract left open. T
 | D1 review | Stale-generation responses, errors, stream readers and side effects are discarded, as §11 requires; generation-bound streams reopen under the current generation | §11 |
 | D1 review | The "Signed in as someone else in another tab" notice is shown after a successful reload too, and removed only once presented | §11 |
 | D1 review | The remember checkbox is locked from the moment signing starts | §11 |
+| A2 | At most 20 linked wallets per user (`IdentityLimits.MaxWalletsPerUser`); 409 `wallet-limit` at `wallets/challenge` before the step-up grant check and again at completion; `bind-wallet` exits 3 at capacity | §6, §8 |
+| A2 | Step-up and wallet-link use separate per-session buckets, each 10 requests per 10 minutes | §7 |
+| A2 | `suspend`, `demote` and operator wallet removal cannot leave no active operator with a linked wallet, but only when the target currently is such an operator; members and wallet-less operators may always be suspended. `reset-after-restore` only warns | §8 |
+| A2 | Wallet removal checks `last-wallet` before requiring step-up | §6 |
+| A1/A2 | Identity text rejects lone surrogates directly; JSON input already returns 400 `request-invalid` | §6 |
+| B2 | Candidate selection excludes venues under a server-wide deadline; a venue found at capacity is skipped for the rest of the tick; background claims use account `SKIP LOCKED`, while API admission still waits | §9.3–9.4 |
+| B2 | A manual Check queues even when capacity is full; claiming enforces capacity | §9.3 |
+| B2 | Separate per-user budgets: account discovery 10/minute, credential verification 30/minute. Refusal by a server-wide venue deadline consumes no user budget | §9.4 |
+| B2 | Candle refresh admission follows catalogue lookup; keys are capped at 256/user with an 8,192 backstop that never lets one user refuse everyone | §9.4 |
+| D1 | Once the tab's session ends, session calls never settle and streams settle quietly; nothing is retried, reopened, published or reported | §11 |
+| D1 | An oversized `0x` wallet answer is classified unsupported without scanning it | §11 |
+| Integration with main | The Notification Hub registers server-wide with per-owner progress/receipts; active/new Wallet owners use the identity directory and assigned scopes. Notifications, API, preferences, feed/unread counts, popup claims and retention remain owner-scoped. Suspended-owner live deliveries are acknowledged without notifications; retained catch-up resumes when active | §9.1–9.2; Notification Hub plan/state |
+| Integration with main | Notification heartbeat is per deployment through the system `NotificationWorkerState` store and `server_notification_heartbeats`, separate from monitor health. Empty until a productive notifications maintenance pass; never copy per-owner liveness | §9.4; worker reference |
+| Integration with main | Test-notification admission is 6 requests/minute/user/API-process (`UserReadLimits`) plus the stored per-owner cooldown; 429 with `Retry-After`, no venue call | §9.4; `/api/notifications/test` |
+| Integration with main | Rename unshipped `20261017120000_ServerEventSubscriptions` → `20261018100000_ServerEventSubscriptions` and `20261017193000_ServerMonitorState` → `20261018110000_ServerMonitorState`; add `20261018120000_ServerNotificationState` (creates empty `server_notification_heartbeats`, drops/replaces `notification_heartbeats`). Stop every API/worker on all hosts and back up both schemas; identity → journal → ensure-owner → provision → start. Recreate development databases with old IDs, never edit history; rollback restores backup | §8, §10; deployment upgrade/restore runbook |
 | B2 review | Candidate scans run in bounded cycles (only work due by the cycle start), so accounts skipped during a cycle are revisited at the next wrap; a Check made mid-cycle waits for the next cycle when workers are saturated | §9.3 |
 | B2 review | Candidate pages have no per-owner cut. Ranking each owner's rows before the keyset let the continuation pass rows never returned, so an owner's third account (and its Check) starved behind two locked ones. Owner fairness comes from the transactional owner budget and the in-tick capped-owner skip; a tick reads at most 10 pages of 100 and resumes from its continuation | §9.3 |
 | D1 review | Adopting a same-user session from another tab re-probes `/api/auth/session` and refreshes the shell's session, wallet and profile lists without touching drafts; open removal dialogs and their step-ups are dropped. After a wallet removal the server's session probe, not the removed row, decides whether this tab ended. Each probe is bound to its controller and generation: a newer probe, adoption or teardown aborts it, and its late answer (a 401 or `user-suspended` included) is dropped. A profile epoch increases on every authoritative profile change (a newer generation's profile, a newer revision, a successful save, a conflict rebase). Every asynchronous profile read (session probe, `revision-conflict` recovery read) captures the generation and epoch when it starts and applies its profile only if both are unchanged when it answers; a current-generation probe still updates the session and wallet. Within one generation the profile only moves forward by `UserDto.revision`; a probe of a newer generation, and a recovery read whose generation and epoch are still current, replace it at any revision, so a restored backup with a lower revision never leaves saves conflicted. An adoption while the workspace loads is followed once it is on screen. Until the adopted session's wallet and session lists load, Remove and session sign-outs are withheld, and Remove rechecks its target against the current list and session at confirmation | §11 |

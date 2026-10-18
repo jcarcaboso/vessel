@@ -4,6 +4,21 @@ October 17, 2026. Status: **implementation authorized on October 17, 2026, with 
 
 The owner asked to start the Notification Hub with in-app notifications. The [monitor plan](play-monitor-plan.md#notification-hub-future) fixed the boundary: one `notifications` subscription on the `vessel.events` topic, per-owner rules, grouping by `runId`, relevance and expiry checks at delivery, a delivery record per notification and channel, and providers that never change publishers or the event contract. This plan fills that boundary for the first channel, `in-app`: popups plus a Notifications page. Telegram, Discord and price or drawing alerts remain later work.
 
+## Multi-user integration — October 18, 2026
+
+The integrated contract is [multi-user delivery §16](multi-user-delivery-contract.md#16-implementation-round-clarifications).
+The subscription registers server-wide with per-owner progress; API, preferences,
+notifications, claims and retention are owner-scoped. Suspended-owner live events
+are acknowledged without notifications. Wallet workers use the identity directory,
+including owners created after provisioning. Test requests have a 6/minute/user/API-process
+cap besides the per-owner cooldown. Health is per deployment through
+`NotificationWorkerState`, **not** per owner. Offline upgrade order and stop-all-hosts
+rules are in the [runbook](../../deploy/README.md#multi-user-wallet-sign-in-this-delivery):
+renamed `20261018100000_ServerEventSubscriptions`, renamed
+`20261018110000_ServerMonitorState`, then `20261018120000_ServerNotificationState`,
+which creates empty `server_notification_heartbeats` and drops/replaces
+`notification_heartbeats`. No rolling upgrade or liveness backfill.
+
 ## What the owner has settled
 
 October 17, 2026:
@@ -193,7 +208,7 @@ Tables are created by raw SQL in one migration, like the event tables, with expl
 | `notification_sources` | Owner and event ID (primary key), notification ID or none, event type, subject key, generation, transition or state, `handled_at` | Hub |
 | `notification_deliveries` | Notification and channel (primary key): state, `shown_at`, `read_at`, `feed_sequence`, `state_at` | Hub, API, account disable |
 | `notification_cursors` | Per owner: feed `sequence`, `unread_count`, `reset_version`, `last_test_at` | Every delivery change |
-| `notification_heartbeats` | Per owner: worker ID and time of the last productive maintenance pass | Notifications worker |
+| `server_notification_heartbeats` | Per deployment: last productive maintenance pass; system `NotificationWorkerState` store | Notifications worker |
 
 - **In-app states.** `unread`, `read` and `withdrawn` (it no longer applied before being read, or its account was disabled). `shown_at` records that a popup claim won it; it never changes the state and does not advance the feed.
 - **Feed sequence.** Every delivery state change (created, read, withdrawn) takes the next owner feed sequence under the cursor row lock, held to commit. The feed is a latest-state synchronization feed: a change below the cursor can never appear later, and a reader converges on the current state of every delivery.
@@ -305,7 +320,7 @@ Changes apply to events the hub handles afterwards; they never re-evaluate notif
 
 ## Health
 
-- The notifications worker writes its own productive heartbeat (its own `notification_heartbeats` row and file, same `<unix seconds> <timeout seconds>` format) after each maintenance pass in which every catch-up it runs succeeded. `SubscriptionMaintenanceService` gains a heartbeat hook for this; there is no second loop or liveness timer. The monitor's `monitor_heartbeats` row is never reused, so a healthy notifications worker cannot make a stopped monitor look online.
+- The notifications worker writes its own productive heartbeat (its own `server_notification_heartbeats` deployment row and file, same `<unix seconds> <timeout seconds>` format) after each maintenance pass in which every catch-up it runs succeeded. `SubscriptionMaintenanceService` gains a heartbeat hook for this; there is no second loop or liveness timer. The monitor's `server_monitor_heartbeats` row is never reused, so a healthy notifications worker cannot make a stopped monitor look online.
 - `/app/worker-health` chooses its file by module: `Vessel__Notifications__HeartbeatFile` when `Vessel__Worker__Modules__0` is `notifications`, otherwise `Vessel__Monitor__HeartbeatFile` as today.
 - While Plays are tracked and in-app notifications are on, an offline hub uses the shell's existing offline banner slot ("Notifications offline: they will arrive when it returns"). No new layout.
 - Subscription lag, gaps and failed receipts appear in the Settings status. The SQL runbook queries in [messaging and workers](messaging-and-workers.md) cover the rest.

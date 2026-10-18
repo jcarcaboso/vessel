@@ -12,6 +12,8 @@ using Vessel.Identity;
 
 if (args.FirstOrDefault() is "identity")
     return IdentityCommands.RunAsync(args[1..], Console.Out, verify: Program.VerifyIdentityAsync).GetAwaiter().GetResult();
+if (args.FirstOrDefault() is "check-config")
+    return ConfigurationCheckCommand.Run(args[1..], Console.Out);
 if (args.FirstOrDefault() is "evidence-copy-to-s3" or "evidence-copy-to-local")
     return EvidenceCopyCommand.RunAsync(args[1..], Console.Out, toLocal: args[0] == "evidence-copy-to-local").GetAwaiter().GetResult();
 if (args.FirstOrDefault() is { } command && MessagingCommands.Names.Contains(command))

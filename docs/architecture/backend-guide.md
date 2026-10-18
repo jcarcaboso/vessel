@@ -1,12 +1,12 @@
 # Backend guide
 
-Start here if you are new to the Vessel backend. This guide explains how the code is organised, what each module does, how the modules work together and which rules hold everywhere. It describes the code as of October 17, 2026, after the background monitor, venue funding and the October 16–17 improvement pass. The contracts and state documents in this folder hold the detailed rules for each feature. Where this guide and the code disagree, the code wins; please fix the guide.
+Start here if you are new to the Vessel backend. This guide explains how the code is organised, what each module does, how the modules work together and which rules hold everywhere. It describes this branch as of October 18, 2026, including the multi-user wallet sign-in stack, Notification Hub and October 16–17 backend improvement pass. The contracts and state documents in this folder hold the detailed rules for each feature. Where this guide and the code disagree, the code wins; please fix the guide.
 
 For a shorter tour of the whole app, start with [App today](../app-status.md). Read [`CONTEXT.md`](../../CONTEXT.md) for the product vocabulary. Improvement work is tracked in [`backend-review.md`](backend-review.md).
 
 ## What the backend is
 
-Vessel is a self-hosted, single-owner trading diary. The backend is an ASP.NET Core 10 minimal API over PostgreSQL (EF Core 10 with Npgsql). It:
+Vessel is a self-hosted trading diary with isolated journals per user. The backend is an ASP.NET Core 10 minimal API over PostgreSQL (EF Core 10 with Npgsql). It:
 
 - keeps portfolios, accounts and Plays (trading ideas with plans, revisions, status and review);
 - reads venue data (Hyperliquid, RISEx and Lighter) **read-only** and keeps normalized facts: the latest account snapshot, imported fills and imported orders;
@@ -30,6 +30,7 @@ backend/
     Vessel.Persistence/       EF Core DbContext, stores (port implementations), migrations
     Vessel.Infrastructure/    auth, credential vault, evidence storage, venue adapters, shared use-case registration
     Vessel.Messaging/         Wolverine/RabbitMQ adapter: outbox, topology, subscriptions, feature modules
+    Vessel.Identity/          separate identity schema, EOA/session auth and offline administration
     Vessel.Api/               composition root, middleware and HTTP endpoints
     Vessel.Worker/            background host (monitor scheduler, subscription catch-up, event retention)
   tests/Vessel.Tests/         one xUnit project: unit, API (WebApplicationFactory) and PostgreSQL tests
@@ -47,6 +48,9 @@ flowchart LR
     Worker --> Persistence
     Worker --> Infrastructure
     Worker --> Messaging
+    Api --> Identity
+    Worker --> Identity
+    Identity[Vessel.Identity] --> Application
     Messaging[Vessel.Messaging] --> Application
     Messaging --> Persistence
     Persistence[Vessel.Persistence] --> Application
@@ -61,20 +65,80 @@ flowchart LR
 | Application | One folder per feature with its use-case service, request/response DTOs and the store port it needs. Venue ports and the `IVenueRegistry`. | SQL, EF types, `HttpClient` configuration, venue wire formats. |
 | Persistence | `VesselDbContext`, per-entity configurations, one store class per port, the `UnitOfWork`, the event store, dispatcher and retention (`Events/`), explicit migrations. Registers the context and stores. | Business rules beyond locking and storage. |
 | Infrastructure | Bearer authentication and owner context, AES-GCM credential vault, evidence object stores (local and S3-compatible), venue adapters and their caches. `ApplicationServices` (`AddVesselApplication()`, `AddVesselMonitoring()`): the use-case registrations both hosts share, and the host-side `Monitoring/MonitorRunExecutor`. | Use-case logic. |
+| Identity | Identity context/migrations, EOA verification, cookies/sessions, owner directory and offline identity administration. References Application only. | Journal tables, journal unit of work or Infrastructure/Persistence references. |
 | Messaging | The only project that references Wolverine and RabbitMQ: the outbox behind `IVesselEventOutbox`, the `vessel.events` topic and subscription queues, provisioning commands, and feature modules (`Modules/Monitor`) that declare their own topology and hosted services. | Business decisions; Domain and Application never reference it. |
 | Api | `Program.cs` pipeline (calls the shared `AddVesselApplication()` and `AddVesselMonitoring()`), endpoint mapping files and transport rules for credentials, compression, forwarded headers and production configuration. | Business decisions. |
-| Worker | `Program.cs` (`WorkerHost`): the same shared registrations, then the modules in `Vessel:Worker:Modules` (default `["monitor"]`, whose `MonitorScheduler` claims due accounts) and subscription maintenance. Shipped in the API image with its own entrypoint. | HTTP endpoints. |
+| Worker | `Program.cs` (`WorkerHost`): the same shared registrations, then the modules in `Vessel:Worker:Modules` (default `["monitor"]`, whose `MonitorScheduler` claims due accounts) and owner-aware subscription maintenance. Shipped in the API image with its own entrypoint. | HTTP endpoints, fixed-owner background contexts or implicit migrations. |
+
+## Identity, background owners and migrations
+
+`Vessel.Identity` references Application only (not Persistence/Infrastructure),
+uses its own `IdentityDbContext`/transaction helper/schema/history table and has
+no cross-schema foreign keys. API and Worker reference it. Journal credentials
+stay encrypted under the same owner GUID; identity never owns journal entities.
+Identity's EOA SIWE message fixes Chain ID 1 and does not require a network
+switch. Smart-contract signatures and WalletConnect are out of scope.
+
+`IOwnerScopeFactory` assigns a fresh background scope before resolving an
+owner-filtered context. It never mutates request scopes or discovers owners.
+`IJournalOwnerDirectory` supplies Active/Suspended/Unknown status; registration
+is order-independent, fixed configured owner in Token mode and identity-backed
+in Wallet mode. No unassigned background scope may resolve journal services.
+Singleton system stores use their own `NpgsqlDataSource`, not `VesselDbContext`:
+subscriber registrations/discovery, journal-owner inventory, monitor candidate
+selection and server venue/heartbeat state. Reviewed raw SQL and the absence of
+`IgnoreQueryFilters` are enforced by `OwnerScopeArchitectureTests`.
+
+Explicit packaged migrations run identity first, journal second, then
+`identity ensure-owner` and messaging provisioning; never at host startup.
+The database role needs database `CREATE` for `CREATE SCHEMA`. Stop all API and
+worker replicas (including `worker-notifications`) on **all hosts** and back up
+before applying the journal sequence `20261018100000_ServerEventSubscriptions`
+(server registration/per-owner progress), `20261018110000_ServerMonitorState`
+(MAX venue deadlines; drops/replaces old monitor state), then
+`20261018120000_ServerNotificationState` (creates empty
+`server_notification_heartbeats`, **drops/replaces** `notification_heartbeats`).
+The first two replace the unshipped October 17 IDs; recreate disposable databases
+that applied them, never rewrite migration history. Rollback restores the
+pre-upgrade backup. Main's separate OrderIdentity migration still refuses retained
+orders/fills/links; identity does not add a backfill. Wallet readiness
+also requires an active operator with a linked wallet. After any restore, run
+`identity reset-after-restore`, reconcile against trusted later records and
+rotate the event epoch before provisioning/starting hosts. See the
+[delivery contract](multi-user-delivery-contract.md), [state/evidence](multi-user-state.md)
+and [worker reference](messaging-and-workers.md).
+
+## Multi-user Notification Hub
+
+The `notifications` module shares `WorkerHost`'s mode-aware identity directory,
+not the configured bootstrap owner for all deliveries. Registration is server-wide;
+progress/receipts, notifications, preferences, feed/unread cursor, popup claims and
+`/api/notifications/*` are owner-scoped. A suspended owner's live event is
+acknowledged without producing a notification; active/new owners are handled in
+assigned scopes, with retained catch-up and no re-provisioning. Retention visits
+retained owners (including suspended ones) with explicit scopes. The browser uses
+the session transport and the server claim, never a device-global shown marker.
+
+`NotificationWorkerState` is a system `NpgsqlDataSource` store over
+`server_notification_heartbeats(deployment, seen_at)`, separate from journal and
+monitor state. `NotificationHeartbeat` writes its own file and records the row
+only after productive subscription maintenance; health starts empty after the
+migration. Healthy notifications never make a stopped monitor look online.
+`POST /api/notifications/test` is capped at **6 requests/minute/user/API-process**
+(`UserReadLimits`), in addition to the stored per-owner cooldown; 429 supplies
+`Retry-After`. See [worker reference](messaging-and-workers.md#notification-hub)
+and the [integration decisions](multi-user-delivery-contract.md#16-implementation-round-clarifications).
 
 ## How a request flows
 
 `Program.cs` builds one pipeline for every request:
 
-1. **Startup checks.** Outside Development, `ProductionConfiguration.Validate` refuses to start without a 32+ character token and a connection string.
+1. **Startup checks.** A connection string is required outside Development. Token mode requires a 32+ character token. Wallet mode refuses a nonempty token, requires allowed HTTPS origins and an explicit owner GUID, and refuses the legacy default GUID unless explicitly overridden. All hosts read identical identity settings; see the [operator reference](../../deploy/README.md#sign-in-mode).
 2. **Forwarded headers.** Only explicitly configured proxies are trusted (`ForwardedHeadersConfiguration`).
 3. **Security headers.** `nosniff`, `X-Frame-Options: DENY`, `no-referrer`, and `Cache-Control: no-store` on `/api` unless an endpoint set its own policy.
 4. **Error mapping.** Exceptions become RFC 7807 Problem Details. `ProblemException(status, detail)` maps to its status and safe message. `DomainValidationException` maps to 400 and `DomainRuleException` to 409. Bad bodies map to 400/413; transient database or network failures anywhere in the exception chain, and an evidence storage outage (`EvidenceStorageUnavailableException`), map to 503. Anything else is a 500 logged once by `SafeExceptionDiagnostics`, with trace ID, route, exception type and method names only, never messages or data.
 5. **Compression.** Only endpoints marked with `CompressMarketData` metadata (instruments, candles, market context) are compressed.
-6. **Authentication and authorization.** `BearerTokenHandler` compares a hash of the bearer token with the configured token in constant time and issues the configured owner identity. The fallback policy makes every endpoint private unless it opts out (`/health/live`, `/health/ready`). Repeated wrong tokens from one address get 429 (`AuthFailureLimiter`).
+6. **Authentication and authorization.** Token mode uses constant-time `BearerTokenHandler` verification and the configured owner. Wallet mode registers only session authentication, backed by `Vessel.Identity`; unsafe requests check allowed Origin/Fetch Metadata and all private requests except the session probe require `X-Vessel-User`. Public auth writes also require `X-Vessel-Request: 1`. The fallback policy is private; health and public auth routes opt out. Wrong-token and identity endpoint limits return 429 with `Retry-After`. Streams require `IPrincipalValidity` and revalidate at most every 15 s.
 7. **Endpoint transport.** `CarriesCredential()` marks token routes with the HTTPS guard and a 4 KiB body limit. `WithBodyLimit()` marks manual writes with 16 KiB and retrospective creation with 128 KiB. The guard and server body limit run after authorization, before binding. Matched routes use their metadata; an unmatched-route fallback preserves the old error responses for malformed URLs and unsupported methods. Non-loopback credential entry requires HTTPS outside Development.
 8. **Endpoint.** A thin lambda binds the request, calls one application service and returns `Results.Ok/Created/NoContent`.
 
@@ -82,8 +146,8 @@ Application services throw `ProblemException` from `Application/Common` for expe
 
 ## Ownership and security model
 
-- **One owner per installation.** The bearer token maps to a configured owner ID (`Vessel:Auth:OwnerId`). `IJournalOwnerContext` exposes it to the application; request bodies never carry an owner.
-- **Every entity implements `IOwned`.** Model construction fails if a mapped entity lacks the owner contract. `VesselDbContext` builds query filters from that contract, and `SaveChanges` checks both current and original owner IDs. Composite owner foreign keys prevent cross-owner relationships. Raw SQL still needs its own explicit owner predicate.
+- **One owner per journal.** Token mode maps its bearer to `Vessel:Auth:OwnerId`. Wallet mode maps its cookie to the identity user GUID, equal to the journal owner GUID. `IJournalOwnerContext` exposes that owner; request bodies never choose it. Operator role does not bypass journal isolation. The configured legacy owner remains user 1, preserving credential encryption bindings.
+- **Every journal entity implements `IOwned` (identity and reviewed system stores are separate).** Model construction fails if a mapped entity lacks the owner contract. `VesselDbContext` builds query filters from that contract, and `SaveChanges` checks both current and original owner IDs. Composite owner foreign keys prevent cross-owner relationships. Raw SQL still needs its own explicit owner predicate.
 - **Venue secrets.** Only Lighter needs one: a read-only `ro:` token, verified at the venue, sealed with AES-GCM (associated data binds owner, account and purpose, built once by `VenueCredentialPurpose`) and stored in `account_credentials`. Verification runs with no transaction or lock open; a short locked recheck then saves, or answers 409 if the account or its credential changed meanwhile. Keys come from configuration or a mode-600 key file, never from the database. See [`venue-credentials.md`](venue-credentials.md).
 - **No leaks.** Venue payloads, exception messages, tokens and connection strings are never logged or returned. HTTP clients have logging removed; EF error events are downgraded to Debug.
 
@@ -250,7 +314,7 @@ The worker's `ClaimDueAsync` locks accounts with `SKIP LOCKED` in the same accou
 
 ## Data model
 
-All tables have `OwnerId` and composite owner foreign keys. Entity mappings live in `Vessel.Persistence/Configurations`; the context loads them before applying owner filters. A decimal pre-convention maps both `decimal` and nullable decimal properties to unconstrained PostgreSQL `numeric`, independent of mapping order.
+Journal-owned entities carry `OwnerId` and use owner-scoped relationships. The singleton system-store tables (registrations, venue runtime and deployment heartbeats) and the separate Identity schema are exceptions, not owner-filter bypasses. Journal entity mappings live in `Vessel.Persistence/Configurations`; the context loads them before applying owner filters. A decimal pre-convention maps both `decimal` and nullable decimal properties to unconstrained PostgreSQL `numeric`, independent of mapping order.
 
 | Table | Entity | Notes |
 | --- | --- | --- |
@@ -268,12 +332,14 @@ All tables have `OwnerId` and composite owner foreign keys. Entity mappings live
 | `play_evidence` | `PlayEvidence` | Metadata; bytes live in the evidence object store. |
 | `sizing_settings` | `SizingSettings` | Risk per trade. |
 | `funding_payments`, `account_funding_states` | `FundingPayment`, … | Signed funding settlements with native identities, and the covered window per account. |
-| `monitor_accounts`, `monitor_heartbeats`, `monitor_venue_budgets`, `monitor_exit_watches` | | Monitor state, lease and schedule per account; worker heartbeat; venue `Retry-After`; watched exits. |
+| `monitor_accounts`, `monitor_exit_watches` | | Owner-scoped monitor state, lease/schedule per account and watched exits. |
+| `server_monitor_heartbeats`, `server_venue_deadlines`, `server_notification_heartbeats` | (system SQL stores) | Monitor/notification health per deployment, venue `Retry-After` across owners. No journal context. |
+| `notifications`, `notification_sources`, `notification_deliveries`, `notification_cursors`, `notification_preferences` | (SQL, `Persistence/Notifications`) | Owner-scoped Hub output, handled sources, delivery/claim state, feed/unread cursor and preferences. |
 | `play_discrepancies` | | Venue-versus-Play discrepancies and their lifecycle. |
 | `events`, `event_cursors`, `event_dedup`, `event_fills`, `event_baselines` | (SQL, `Persistence/Events`) | The event log, per-owner sequence and epoch, de-duplication and captured fill baselines. |
 | `event_subscriptions`, `event_receipts`, `messaging_deployments` | (SQL) | Subscription registrations, low-water marks and per-event receipts; provisioned deployments. |
 
-Migrations live in `Vessel.Persistence/Migrations` and are **never** applied at API startup. Apply them with `pnpm db:migrate` in development, or the `/app/migrate` bundle in the API image (see [`deploy/README.md`](../../deploy/README.md)).
+Journal migrations live in `Vessel.Persistence/Migrations`; identity migrations live separately in `Vessel.Identity/Migrations`. Neither is applied at API startup. The development `pnpm db:migrate` helper applies journal migrations and provisions messaging; it is not a complete Wallet bootstrap. For the complete packaged stack, use `/app/migrate` (identity first, then journal, owner bootstrap and provisioning); see [`deploy/README.md`](../../deploy/README.md).
 
 ## Conventions you will meet everywhere
 
@@ -288,8 +354,8 @@ Migrations live in `Vessel.Persistence/Migrations` and are **never** applied at 
 
 | Setting | Meaning |
 | --- | --- |
-| `Vessel__Auth__Token` | Bearer secret (32+ characters outside Development). |
-| `Vessel__Auth__OwnerId`, `Vessel__Auth__OwnerName` | Owner identity issued for the token. |
+| `Vessel__Auth__Token` | Token mode bearer secret (32+ characters outside Development); must be absent/empty in Wallet mode. |
+| `Vessel__Auth__OwnerId`, `Vessel__Auth__OwnerName` | Token fixed journal owner; Wallet legacy owner/operator bootstrap, preserving the same GUID. |
 | `ConnectionStrings__Vessel` | PostgreSQL connection. Resolved lazily, so `/health/live` and `/api/system` work without a database. |
 | `Vessel__Credentials__…` | Key ring for venue credentials (`ActiveKeyId` + `Keys`, or `KeyFile`). |
 | `Vessel__Evidence__…` | Upload limits and storage (`Local` root by default, or `Provider=S3`). |

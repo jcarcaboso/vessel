@@ -2,6 +2,28 @@
 
 October 17, 2026. Implementation authorized the same day, with Sol (Codex) for design discussion and verification, as stacked pull requests. Follows the [plan](notification-hub-plan.md) and the [API contract](notification-hub-api-contract.md).
 
+## Multi-user integration — October 18, 2026
+
+Main's N1–N4 are retained in the rebased Wallet stack. The Hub registers once
+server-wide and handles active/new owners in assigned identity-directory scopes;
+progress, receipts, notifications, preferences, API, feed/unread count and popup
+claims remain owner-scoped. Suspended-owner live events are acknowledged without
+notifications; retention visits retained owners, including suspended ones.
+The test event has a **6/minute/user/API-process** cap plus its stored cooldown.
+
+Health uses `NotificationWorkerState` and `server_notification_heartbeats`, one
+row per deployment, separate from monitor health. Journal migrations now sort as
+`20261018100000_ServerEventSubscriptions`, `20261018110000_ServerMonitorState`
+(renamed from the unshipped October 17 IDs), then
+`20261018120000_ServerNotificationState`; the last creates empty deployment health
+and **drops/replaces** `notification_heartbeats`. Stop **all** API/worker hosts,
+including `worker-notifications`, back up both schemas first, run identity then
+journal bundles, bootstrap, provision, and only then start. No rolling upgrade;
+rollback restores the pre-upgrade backup. See [§16 decisions](multi-user-delivery-contract.md#16-implementation-round-clarifications),
+[upgrade runbook](../../deploy/README.md#multi-user-wallet-sign-in-this-delivery)
+and [integrated verification evidence](multi-user-state.md#integration-with-main--october-18-2026).
+The N1–N4 results below are historical lane checks, not a re-review of this integration.
+
 ## Steps
 
 | Step | Scope | State |

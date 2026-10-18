@@ -254,3 +254,43 @@ The orchestrator rewrote the contract as version 2. Its §14 records the decisio
   - a 401 from the session probe must never reload.
 
 All of these are applied in contract version 3 (§15). With them, both reviewers' remaining blockers are closed, and implementation starts from version 3.
+
+
+## Implementation round — October 18, 2026
+
+The following records the orchestrator-provided cross-model implementation verification, not a new P4 review. §16 of the delivery contract records the resulting decisions.
+
+| Lane | Implementer | Reviewer | Verdict(s) | Main findings | Resolution |
+| --- | --- | --- | --- | --- | --- |
+| A1 identity core | Sol | Opus | ready-with-fixes | Case-sensitive unsafe-method guard (lowercase `post`/`delete` skipped the Origin check); reused binding cookie kept its old expiry; event stream fell back to "always valid"; cap enforcement loaded all open rows under the identity lock; cleanup raced verify/register; missing Wallet-mode route inventory and host-level tests | Deny-by-default method guard; cookie renewed on reuse; required `IPrincipalValidity`; bounded COUNT/DELETE; cleanup under the identity lock; tests added. The CLI environment-precedence finding was disproved by subprocess tests |
+| B1 owner scopes and events | Sol | Opus | ready-with-fixes | One owner's failure aborted the scheduler tick for all later owners; a race test had been weakened to a no-op; the breaking `retry-event-receipts` flags were not carried to scripts/docs; incompatible registrations no longer logged; directory failures escaped the listener's acknowledge path | Per-owner isolation of discovery, claims and heartbeats; strict race test restored; script/docs updated; incompatible registrations logged; status lookup inside the failure handling |
+| A1+B1 stacking | Sol | orchestrator | — | Worker composition conflict; A1's identity SQL missing from B1's reviewed raw-SQL inventory | Resolved; composition tests in both modes and both registration orders; inventory entries reviewed |
+| A2 identity accounts | Sol | Opus | ready | No defects; contract questions on the shared step-up/link rate bucket, the operator readiness invariant and checking `last-wallet` before step-up | Orchestrator decisions (§16): split buckets, wallet-capable-operator guard, early `last-wallet`, 20-wallet limit. The orchestrator narrowed the operator guard so members and wallet-less operators can always be suspended |
+| B2 monitor and venue limits | Sol | Opus | ready-with-fixes | Throttled venues starved the same owner's other venues; the scheduler's blocking account lock let one owner stall everyone; one user could exhaust the shared candle-refresh key store; manual Check refused at capacity; one budget for discovery and verification broke bulk Lighter imports | Deadline-aware candidates and per-tick venue skips; `SKIP LOCKED` background claims; per-user key caps with a fair backstop; Check queues; separate 10/30 per-minute budgets |
+| C1 isolation suite | Opus | Sol | not-ready → fixed | Several cases never reached the boundary they claimed (a correction rejected by Play status, operations tested only behind a foreign account, empty exclusion/review controls, malformed expected revisions); a stream-cap cleanup race | Positive controls and exact lookup-detail 404s; per-attempt state snapshots; mutation probes proved three cases now fail when the owner predicate is removed. Then rebased onto the stack with Wallet-mode coverage |
+| D1 frontend identity | Opus | Sol | not-ready ×3 → ready | Round 1: stale-generation responses still published; remember choice could contradict the checkbox; completion-time step-up unhandled; notice lost on a cross-user reload; focus, landing-flag reload, text-rule and signature-classification gaps. Round 2: retries/reopens after a cross-user teardown; an orphaned probe Retry. Round 3: session-end cancellations shown as failures | Generation-checked transport with read reissue and neutral dropped-write state; locked checkbox; one bounded step-up retry; shell notice; one-shot landing flag; mirrored text rule; local signature classification; a terminal session lifetime in the transport; owned probe attempts; ended session calls never settle |
+| Integration with main | Sol (backend lanes, D1 and P4), Opus (C1) | Opus (backend), orchestrator (D1, C1 restack) | ready-with-fixes → fixed | Main advanced to `43ebaa0` with Notification Hub N1–N4, order identity and the October 17 backend pass. No cross-owner leak and nothing lost from either side. One owner's catch-up failure stopped the notification heartbeat for every user; notification retention scanned the full journal inventory and created cursor rows for every owner; the stream isolation test read only the first frame; no upgrade test seeded the old heartbeat table | Heartbeat when any active owner succeeds or nothing failed; retention discovers owners from the notification tables only and never creates cursors; the stream test drains to the keepalive; an upgrade test seeds `notification_heartbeats`. Suspended users' notifications age out after `RetentionDays` like events. Both worker deployments, health and checks retained; Wallet settings reach the notifications identity directory; two-user browser notification probe recorded in `multi-user-state.md` |
+
+### P4 independent review and scoped follow-up
+
+Claude Opus 5.5 reviewed Sol's P4 head `0988a1b` on `be9474b`: **ready-with-fixes**,
+no blockers. It confirmed the configuration/CLI/migration and restore ordering,
+secret-free deployment defaults, EIP-191 signer (independent recovery), browser
+coverage/counts and §16/review record. Findings: ambiguous activation status;
+overlay omission could downgrade Wallet to Token; missing migration preflight,
+reconciliation/exit-code/origin/manual-release details; and weaker stream,
+restore and cookie assertions. It requested official-container Firefox coverage
+and readiness-order/negative-control tests.
+
+The scoped follow-up persists auth mode and overlay lists, guards both EF
+bundles before migration, defaults deployment registration to `Closed`, and
+documents trusted recovery records and unsigned §10. Cookie/stream/restore
+assertions and the requested tests were strengthened. Remote Firefox 146.0.1
+passed through the official Playwright 1.58.2 container without host package
+changes or the whole-smoke fallback. A rootless port-proxy startup race in the
+first attempt was fixed with actual server `/json` readiness and a regression
+test. Final evidence: **74 Python tests**, **152 Token packaged assertions**,
+**129 Wallet packaged + 10 Chromium + 10 Firefox assertions**, cleanup verified.
+Details and exact commands are in `multi-user-state.md`. The real-wallet/
+non-mainnet EOA check stays owner-pending; no independent re-review of these
+fixes is claimed. The known D1 timing-sensitive fixture remains outside P4.

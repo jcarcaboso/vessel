@@ -1,6 +1,6 @@
 # Frontend guide
 
-Start here if you are new to the Vessel frontend. This guide explains how the code is organised, what each module does, who owns which state and which rules hold everywhere. It describes the code as of October 14, 2026 (after PR #37). The contract documents in this folder hold the detailed rules for each feature. Where this guide and the code disagree, the code wins; please fix the guide.
+Start here if you are new to the Vessel frontend. This guide explains how the code is organised, what each module does, who owns which state and which rules hold everywhere. It describes the code as of October 18, 2026 (including D1 multi-user identity). The contract documents in this folder hold the detailed rules for each feature. Where this guide and the code disagree, the code wins; please fix the guide.
 
 Read [`CONTEXT.md`](../../CONTEXT.md) first for the product vocabulary (Play, Plan, Order link, Fill, Portfolio, Account and so on). The [backend guide](backend-guide.md) explains the API this client talks to. Improvement work is tracked in [`frontend-review.md`](frontend-review.md).
 
@@ -10,11 +10,11 @@ A single-page React 19 application built with Vite 8 and TypeScript 6, styled wi
 
 It talks to one same-origin API (`/api`, proxied by Vite in development and by nginx in the release image). It:
 
-- connects with the owner's bearer token, kept only in memory;
-- shows Overview, Plays, Review, Portfolios, Accounts, Activity and Settings;
+- discovers Token or Wallet mode from `/api/auth/config`; Token keeps the bearer only in memory, Wallet uses a same-origin HttpOnly session cookie;
+- shows Overview, Plays, Review, Portfolios, Accounts, Activity, Notifications and Settings;
 - edits Plays as an in-memory draft and saves them through the API;
 - draws venue candles with planned levels, drawings and indicators, and captures the chart as evidence;
-- never sends orders, never signs anything and never treats a price touch as a fill.
+- asks the wallet to sign identity messages only; never sends orders, signs venue requests or treats a price touch as a fill.
 
 ## Layout
 
@@ -53,18 +53,70 @@ modules, rather than feature components.
 
 ## How the application starts
 
-1. `main.tsx` calls `initAppearance()` so the stored theme is on `<html>` before the first paint, then renders `WorkspacePage` in `StrictMode` inside a last-resort error boundary.
-2. `ConnectionGate` (`features/connection`) shows the token form. On submit it calls `getSystem(token)` (`GET /api/system`), then creates the client with `createWorkspaceApi(token)`. The field is cleared whether or not it worked.
-3. With a `SystemInfo` and a client, the gate renders `ApplicationShell`. Both Disconnect controls ask for confirmation if the Plays session has unsaved work or an in-flight request. Confirming drops the connection, clears the candle cache and returns to the form.
-4. `ApplicationShell` provides tooltips, notifications and venue descriptors from `/api/system`, loads `GET /api/overview` and renders the current page. Polite and assertive notification regions stay mounted so newly inserted messages can be announced.
+1. `ConnectionGate` fetches public `/api/auth/config?origin=…`. Token mode keeps
+   the existing token form and `/api/system` connection flow unchanged.
+2. Wallet mode mounts `SignInGate`: probe a session, or show `SignInScreen` and
+   discover EIP-6963 providers (500 ms fallback to `window.ethereum`). Provider
+   metadata is untrusted; only account access and `personal_sign` are called.
+   Only a bounded 65-byte EOA signature goes to the API; oversized `0x` answers
+   are classified unsupported without scanning. WalletConnect is absent.
+3. A valid cookie/session creates the session-bound `WorkspaceApi` and shell.
+   An unknown address follows verify → invitation registration → create journal.
+   Profile, linked wallets, step-up and sessions live in `features/identity`.
 
-A new `WorkspaceApi` object means a new session. Shell memory, the Plays session
-and the old client's candle cache are reset. Saved-Play reads, history and
-execution reads/checks abort when their session ends, and ignore stale results.
-Order-link mutations deliberately remain non-abortable; ignoring a stale
-completion does not roll back a server write. Wallet-account and token-name
-discovery abort on close, replacement or unmount; stale results cannot repopulate
-a later discovery session.
+A session is both a user and a **generation**. A new same-user session aborts
+old-generation requests, reissues reads under the current generation and never
+replays a stale write (it may already have committed). Stale responses, errors,
+streams and side effects cannot publish. A terminal session lifetime aborts all
+work; pending/later session calls deliberately **never settle**, while streams
+settle quietly. No request retries, stream reopens, toast or reload callbacks
+may escape after teardown; this prevents abandoned hooks from reporting errors.
+
+Wallet 401 forces teardown without the unsaved-work prompt: set the one-shot
+session-ended notice and landing flag, clear shell exit state, then
+`location.replace`. The landing flag skips the next cookie probe, avoiding an
+invalid-cookie reload loop. A step-up-required 403 opens the linked-wallet
+confirmation and retries once; suspension has its own screen; other 403s stay
+local. Voluntary sign-out keeps the unsaved-work confirmation, then sends the
+expected session ID and reloads. A session-changed 409 reloads without a false
+sign-out broadcast. API replacement/disconnect aborts shell refreshes, chart
+requests, draft work and owned probe attempts; cancellation is not a failure.
+
+`BroadcastChannel("vessel-session")` announces only user/session IDs. A matching
+sign-out ends that session; another user's sign-in reloads **before** adopting
+state and shows a one-shot notice (also after successful reload). Same-user
+sign-in advances the generation. No token or cookie enters browser storage.
+
+### Preference scope
+
+Wallet preferences use `vessel:u:{userId}:appearance` and
+`vessel:u:{userId}:chart.preferences.v1`. `vessel:device:theme` contains only a
+built-in theme ID; `vessel:device:last-wallet` remembers provider rdns, not a
+trusted identity. Only the configured legacy owner's session has
+`adoptsLegacyPreferences`: copy each old key only when its user key is absent,
+then remove the old key. The in-memory stores switch keys after sign-in, and
+user changes always reload. Token mode retains its legacy keys. Theme and chart
+settings are not journal/financial data.
+
+## Notifications and user sessions
+
+`useInAppNotifications` and every notification API call use the current session
+transport (`X-Vessel-User`, cookie, generation/terminal-session rules), not a bearer
+captured before sign-in. Preferences, page rows, feed cursors, unread counts and
+popup claims belong to the authenticated owner. The server's owner-scoped claim
+is the authoritative "shown once" marker across tabs/reloads; never persist a
+device-global marker. User change reloads before adopting another journal's state.
+Suspension ends the session, while the worker acknowledges that owner's live
+events without creating notifications; operators cannot inspect another feed.
+
+The head's `workerOnline` is **deployment** health from `NotificationWorkerState`
+(`server_notification_heartbeats`), not the signed-in user's activity and not the
+monitor's heartbeat. `20261018120000_ServerNotificationState` drops/replaces the
+old owner-heartbeat table; all hosts stop before upgrading. It follows the renamed
+`20261018100000_ServerEventSubscriptions` and `20261018110000_ServerMonitorState`
+after the separate identity bundle. See [upgrade order](../../deploy/README.md#multi-user-wallet-sign-in-this-delivery).
+The test button uses `/api/notifications/test`: **6 requests/minute/user/API-process**,
+plus the stored owner cooldown; honor 429/`Retry-After`, do not retry automatically.
 
 ## Routing and the shell
 
@@ -101,9 +153,15 @@ preserve a shell that has itself failed.
 
 ## The API client
 
-`api/workspace.ts` defines the `WorkspaceApi` interface and `createWorkspaceApi(token)`, which returns an object of methods closing over the token. Feature code only ever calls these methods.
+`api/workspace.ts` defines the `WorkspaceApi` interface and `createWorkspaceApi(credentials)`, which returns an object of methods closing over the selected transport credentials. Feature code only ever calls these methods.
 
 `api/request.ts` implements the shared transport through `createApiCall`.
+`ApiCredentials` has exactly three kinds: `bearer` (in-memory Token header),
+`session` (same-origin cookies plus `X-Vessel-User`, generation/lifetime) and
+`public` (auth config/challenge/verify/register and the session probe, with
+`X-Vessel-Request: 1` on unsafe public writes). Cookie transports provide Origin
+on unsafe requests even under `no-referrer`; never put credentials in URLs.
+JSON, bodyless DELETE, multipart evidence and SSE share the same auth transport.
 Endpoints supply their timeout, response decoder or guard, and error-message
 options. `getSystem` uses the same transport. API events notify the candle cache
 of unauthorized responses and removed or disabled accounts without importing the
@@ -114,7 +172,7 @@ Ordinary JSON requests:
 - send `Authorization: Bearer …`, `credentials: 'omit'`, `redirect: 'error'` and `cache: 'no-store'`;
 - combine the caller's `AbortSignal` with a timeout (10 to 60 seconds depending on the endpoint);
 - turn network failures, timeouts and caller aborts into `ApiError('unavailable', …)`, so callers check `signal.aborted` before showing an error;
-- map HTTP failures to safe messages: 401/403 is "token rejected" (and clears the candle cache); 400, 409, 413 and 415 may show the server's Problem Details `detail` (at most 500 characters); 502, 503 and 404 use fixed texts; 5xx adds `Reference: <trace id>` only when `X-Correlation-ID` is 32 hex characters;
+- map HTTP failures to safe messages: Token 401/403 is "token rejected" (and clears the candle cache); Wallet auth failures follow the session lifecycle above; 400, 409, 413 and 415 may show the server's Problem Details `detail` (at most 500 characters); 502, 503 and 404 use fixed texts; 5xx adds `Reference: <trace id>` only when `X-Correlation-ID` is 32 hex characters;
 - parse JSON and run a **runtime guard** before returning. A body that fails its guard is an `ApiError('invalid-response')`.
 
 Binary and streaming requests differ. `evidenceImage` returns a `Blob`, not a
@@ -156,17 +214,19 @@ lookups also come from descriptors, including USDG for Lighter on Robinhood.
 
 **Guards** are hand-written to mirror the C# DTOs: exact decimal strings by regular expression, GUIDs, ISO dates, counts, enumerations, length limits and cross-field invariants (for example an Overview summary's totals must match its rows). `guards.ts` names the differing acceptance profiles, including plain and diary decimals and ISO and strict UTC timestamps. Endpoint guards choose the profile required by their contract. Optional fields marked "older servers" were added during rollouts. When a backend DTO changes, update the TypeScript type, its guard and the fixtures in `src/test/` together.
 
-**The live stream** (`marketStream`) uses `fetch` with the bearer header, never `EventSource` and never a token in the URL. `SseParser` handles split chunks and bounds memory; each event is validated with the same candle and context guards as the REST endpoints.
+**The live stream** (`marketStream`) uses the shared `fetch` transport (bearer or same-origin session), never `EventSource` and never a token in the URL. `SseParser` handles split chunks and bounds memory; each event is validated with the same candle and context guards as the REST endpoints.
 
 ## Feature modules
 
 | Module | Entry points | What it does | Contract |
 | --- | --- | --- | --- |
+| identity | `SignInGate`, `SignInScreen`, `WalletSignFlow`, `ProfileSettings`, `AccountMenu` | EOA sign-in, invitation registration, step-up, linked wallets, session lifetime and account menu. | [multi-user-delivery-contract](multi-user-delivery-contract.md) |
 | connection | `ConnectionGate` | Token form, `/api/system` check, session start and end. | [scaffold-contract](scaffold-contract.md) |
 | workspace | `ApplicationShell`, `AccountsPanel`, `AccountDetail`, `ActivityOperations`, `OverviewSummary`, `OverviewPlays`, `CreateDialogs`, `ManageDialogs`, `WalletAccountImport`, `AccountCredential`, `RetrospectivePreview` | The shell and the Overview, Portfolios, Accounts and Activity pages; portfolio and account management, Lighter discovery and tokens, retrospective Play creation from an operation. | [core-workspace-contract](core-workspace-contract.md), [account-management-contract](account-management-contract.md), [activity-operations](activity-operations.md), [lighter-delivery-contract](lighter-delivery-contract.md), [diary-completion-contract](diary-completion-contract.md) |
 | plays | `PlaysPage`, `PlayWorkspace` | The list of saved Plays and the editor: context fields, capital context, suggestions, chart, journal, position editor and summary; save, status changes, revisions, history, evidence, execution and manual executions. | [plays-workspace-contract](plays-workspace-contract.md), [play-lifecycle](play-lifecycle.md), [sizing-suggestions](sizing-suggestions.md), [diary-completion-contract](diary-completion-contract.md) |
 | market | `useCandles`, `useMarketContext`, `useLiveMarket`, `candleCache`, `useChartPreferences` | Candles with a per-connection cache, header statistics, the live stream with reconnect and polling fallback, chart view preferences. | [chart-plan](chart-plan.md), [performance-plan](performance-plan.md) |
 | review | `ReviewPage` | Scored closed Plays: periods, scorecard, equity chart, breakdowns, drill-down and exclusions. | [portfolio-review](portfolio-review.md) |
+| notifications | `useInAppNotifications`, `NotificationsPage`, `NotificationBadge`, `NotificationSettings` | Session-bound feed, unread count, server-claimed popups, owner preferences and test event. | [notification-hub-api-contract](notification-hub-api-contract.md), [multi-user-delivery-contract §16](multi-user-delivery-contract.md#16-implementation-round-clarifications) |
 | settings | `AppearanceSettings`, `appearance.ts`, `themes.ts`, `generator.ts` | Built-in themes, per-theme overrides, the theme builder and the contrast checks. | [appearance-settings](appearance-settings.md) |
 
 Inside **plays**, the pure modules carry the rules and the components stay thin:
@@ -220,7 +280,8 @@ Pages talk to each other only through the shell: opening a Play from Overview or
 | State | Owner | Lifetime |
 | --- | --- | --- |
 | Token | `createWorkspaceApi` closure | Until Disconnect or reload. Never stored. |
-| `SystemInfo`, venues | `ConnectionGate`, `VenuesProvider` | The session. |
+| Wallet session/generation | `SignInGate` and the session transport; raw cookie only in the browser's HttpOnly cookie jar | Server expiry/revocation; forced teardown clears shell exit state and reloads. Nothing is put in local/session storage. |
+| `SystemInfo`, venues | `ConnectionGate` / `SignInGate`, `VenuesProvider` | The session. |
 | Overview document (accounts, portfolios, totals) | `ApplicationShell` | Reloaded on demand; pages read it as props. |
 | Shell memory: account filters, portfolio filter, Activity filters, Overview scope and grouping, selected account, sidebar collapsed | `ApplicationShell` | Survives navigation; resets on a new API identity. Missing scopes and options fall back to "All". |
 | Plays session: list or editor view, the draft, the saved state, the manual execution form, the observed version | `ApplicationShell` (`playsSession`), edited by `PlaysPage` | Survives navigation. Reload and confirmed Disconnect discard it; unsaved work triggers an exit warning. |
@@ -228,11 +289,13 @@ Pages talk to each other only through the shell: opening a Play from Overview or
 | Page data (Activity, Review, account detail, Overview summary, Plays list) | Each page component | Refetched when its key or `reloadGeneration` changes. |
 | Candles | `candleCache` (`features/market`), one per `WorkspaceApi` | The session, at most 20 series of 5,000 candles; never stored in the browser. |
 | Chart undo/redo, drawing tool and selection | `useChartHistory`, `useDrawingEditor` | Per account and instrument; reset when it changes. |
-| Theme choice, overrides, saved themes | `appearanceStore` → `localStorage['vessel.appearance']` | Persistent; a browser preference, not workspace data. |
-| Chart preferences (interval, favourites, magnet, live, indicators) | Shared `useSyncExternalStore` store in `chartPreferences.ts`, exposed by `useChartPreferences` | Persistent in `localStorage['vessel.chart.preferences.v1']`; view preferences only. All mounted charts observe the same value. |
+| Theme choice, overrides, saved themes | `appearanceStore` → current user's appearance key (legacy `vessel.appearance` in Token mode) | Persistent; a browser preference, not workspace data. |
+| Chart preferences (interval, favourites, magnet, live, indicators) | Shared `useSyncExternalStore` store in `chartPreferences.ts`, exposed by `useChartPreferences` | Persistent in the current user's chart key (legacy `vessel.chart.preferences.v1` only in Token mode); view preferences only. All mounted charts observe the same value. |
 
-Tokens and financial data are not persisted in browser storage. They remain in
-memory for the active session.
+Bearer tokens and financial data are never put in local/session storage. The
+Wallet HttpOnly cookie is browser-managed (persistent only when remembered);
+its server-side idle/absolute bounds remain authoritative. Session metadata
+and financial reads remain in memory for the active session.
 
 `hasUnsavedPlayWork` in `plays/saved.ts` checks dirty saved Plays, populated new
 drafts and manual execution drafts. Both New play and the shell's exit guard use

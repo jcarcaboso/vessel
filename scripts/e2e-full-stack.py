@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Full-stack end-to-end test of the packaged Vessel images with a fake Hyperliquid venue.
 
-Runs the real Compose stack (postgres, rabbitmq, rustfs, storage-init, migrate, api, worker, a verifier
-worker, web) on an isolated project, unused subnet and loopback ports, with generated secrets, a synthetic
+Runs the real Compose stack (postgres, rabbitmq, rustfs, storage-init, migrate, api, monitor and
+notifications workers, a verifier worker, web) on an isolated project, unused subnet and loopback ports, with generated secrets, a synthetic
 owner and synthetic venue data served by scripts/e2e/fake_venue.py over TLS (a private CA trusted only by
 the API and worker containers). It drives a realistic monitor scenario through the public HTTP API, the
 SSE stream and a Playwright browser, asserting at every step, then cleans up everything it created.
@@ -104,6 +104,14 @@ def free_port():
 
 def seq(event):
     return int(event['sequence'])
+
+
+def subscription_report(output):
+    """The provision command reports inserted and already-present subscriptions separately."""
+    match = re.search(r'Registered subscriptions: ([^;\r\n]+); already registered: ([^\r\n]+)\.$', output, re.M)
+    if match is None:
+        return None
+    return tuple(set() if names == 'none' else set(names.split(', ')) for names in match.groups())
 
 
 class SseReader(threading.Thread):
@@ -616,15 +624,17 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         migrate = self.compose('run', '--rm', 'migrate', capture_output=True, text=True, check=False)
         output = migrate.stdout + migrate.stderr
         self.expect(migrate.returncode == 0, 'migrate runs the EF bundle and provision-messaging', output[-400:])
-        self.expect('wolverine_api' in output and 'wolverine_monitor' in output and 'wolverine_verification' in output,
+        self.expect(all(schema in output for schema in ('wolverine_api', 'wolverine_monitor',
+                                                       'wolverine_notifications', 'wolverine_verification')),
                     'provisioning prepares every deployment envelope schema', output[-300:])
-        self.expect(re.search(r'Registered subscriptions: verification', output) is not None,
-                    'verification subscription registered insert-only', output[-300:])
+        self.expect(subscription_report(output) == ({'notifications', 'verification'}, set()),
+                    'notifications and verification subscriptions registered insert-only', output[-300:])
         queues, exchanges, bindings = self.topology()
         expected = {'vessel.commands.monitor', 'vessel.commands.monitor.dlq', 'vessel.events.sub.verification',
-                    'vessel.events.sub.verification.dlq'}
+                    'vessel.events.sub.verification.dlq', 'vessel.events.sub.notifications',
+                    'vessel.events.sub.notifications.dlq'}
         self.expect(expected <= set(queues), 'provisioned queues exist', sorted(queues))
-        for name in ('vessel.commands.monitor', 'vessel.events.sub.verification'):
+        for name in ('vessel.commands.monitor', 'vessel.events.sub.verification', 'vessel.events.sub.notifications'):
             arguments = queues[name]['arguments']
             self.expect(queues[name]['type'] == 'quorum' and queues[name]['durable'], f'{name} is a durable quorum queue', queues[name])
             self.expect(arguments.get('x-delivery-limit') == 20, f'{name} has delivery limit 20', arguments)
@@ -633,8 +643,11 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
                     'vessel.events is a durable topic exchange', exchanges)
         self.expect(('vessel.events', 'vessel.events.sub.verification', '#') in bindings,
                     'verification subscription bound to every event type', bindings)
+        self.expect(('vessel.events', 'vessel.events.sub.notifications', '#') in bindings,
+                    'notifications subscription bound to every event type', bindings)
         dead = {(s, d) for s, d, _ in bindings}
         self.expect({('vessel.commands.monitor.dlx', 'vessel.commands.monitor.dlq'),
+                     ('vessel.events.sub.notifications.dlx', 'vessel.events.sub.notifications.dlq'),
                      ('vessel.events.sub.verification.dlx', 'vessel.events.sub.verification.dlq')} <= dead,
                     'each dead-letter exchange routes to its dead-letter queue', bindings)
         before = self.topology()
@@ -645,11 +658,18 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         self.expect(summary['workerOnline'] and summary['heartbeatAtUtc'], 'worker heartbeat online in /api/monitor')
         worker = json.loads(run('docker', 'inspect', self.container('worker', 0), capture_output=True, text=True).stdout)[0]
         self.expect(worker['State']['Health']['Status'] == 'healthy', 'worker container healthy (heartbeat file)')
+        notifications = json.loads(run('docker', 'inspect', self.container('worker-notifications', 0),
+                                       capture_output=True, text=True).stdout)[0]
+        self.expect(notifications['State']['Health']['Status'] == 'healthy',
+                    'notifications worker healthy (module-aware heartbeat file)')
+        self.wait(lambda: self.api('/api/notifications/head')['workerOnline'], 'notifications heartbeat', 120)
+        self.expect(self.sql("SELECT count(*) FROM server_notification_heartbeats WHERE deployment='notifications'") == '1',
+                    'notifications worker records per-deployment health')
         time.sleep(3)
         self.expect(self.topology() == before, 'API and workers declared nothing at runtime (topology unchanged)')
         self.expect(self.listening('listeners'), 'the worker consumes the command queue and the verifier its subscription', self.consumers())
         deployments = self.sql('SELECT schema_name FROM messaging_deployments ORDER BY 1')
-        self.expect(deployments.split() == ['wolverine_api', 'wolverine_monitor', 'wolverine_verification'],
+        self.expect(deployments.split() == ['wolverine_api', 'wolverine_monitor', 'wolverine_notifications', 'wolverine_verification'],
                     'messaging deployments recorded per schema', deployments)
         self.expect(self.request('/api/monitor', auth=False)[0] == 401, 'monitor API requires authentication')
         self.head_cursor = self.head()
@@ -957,7 +977,7 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         return {q['name']: q['consumers'] for q in self.rabbit('list_queues', 'name', 'consumers')}
 
     def listening(self, label, timeout=90):
-        queues = ('vessel.commands.monitor', 'vessel.events.sub.verification')
+        queues = ('vessel.commands.monitor', 'vessel.events.sub.verification', 'vessel.events.sub.notifications')
         try:
             self.wait(lambda: all(self.consumers().get(q, 0) >= 1 for q in queues), label, timeout, 3)
             return True
@@ -998,7 +1018,8 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         lost = self.events(mark)
         self.expect(any(e['type'] == 'play.opened' for e in lost), 'events commit while the broker has no topology')
         migrate = self.compose('run', '--rm', 'migrate', capture_output=True, text=True, check=False)
-        self.expect(migrate.returncode == 0 and 'already registered: verification' in migrate.stdout,
+        self.expect(migrate.returncode == 0 and
+                    subscription_report(migrate.stdout) == (set(), {'notifications', 'verification'}),
                     're-provisioning restores the topology; registration stays insert-only', migrate.stdout[-300:])
         self.wait_delivered(lost, 'catch-up after broker volume loss', 180)
         self.expect(True, 'subscription catch-up from PostgreSQL delivers the events the empty broker missed')
