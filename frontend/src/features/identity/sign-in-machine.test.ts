@@ -28,7 +28,8 @@ describe('sign-in state machine', () => {
     expect(signIn(preparing, { type: 'sign' })).toBe(preparing)
     const waiting = signIn(signing(), { type: 'sign' })
     expect(signIn(waiting, { type: 'sign' })).toBe(waiting)
-    expect(signIn(signing(), { type: 'signed' })).toEqual(signing())
+    const ready = signing()
+    expect(signIn(ready, { type: 'signed' })).toBe(ready)
   })
 
   it('asks a new wallet to create a journal, with invitation only when required, and keeps the registration on field errors', () => {
@@ -47,7 +48,8 @@ describe('sign-in state machine', () => {
 
   it('shows the switched-account state only while the message waits for a signature', () => {
     expect(signIn(signing(), { type: 'account-changed', address: other })).toMatchObject({ step: 'failed', error: { kind: 'switched', address: other } })
-    expect(signIn(signing(), { type: 'account-changed', address: address.toLowerCase() })).toEqual(signing())
+    const ready = signing()
+    expect(signIn(ready, { type: 'account-changed', address: address.toLowerCase() })).toEqual(ready)
     expect(signIn(signing(), { type: 'account-changed', address: null })).toMatchObject({ step: 'failed', error: { kind: 'disconnected' } })
     const connecting = run({ type: 'choose', wallet })
     expect(signIn(connecting, { type: 'account-changed', address: other })).toBe(connecting)
