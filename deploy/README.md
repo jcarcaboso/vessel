@@ -3,8 +3,8 @@
 Vessel is a self-hosted trading diary. These examples use the
 API and web images in one Docker Hub repository:
 
-- `skorcius/vessel:api-0.2.0` and `skorcius/vessel:api-latest`
-- `skorcius/vessel:web-0.2.0` and `skorcius/vessel:web-latest`
+- `skorcius/vessel:api-0.3.0` and `skorcius/vessel:api-latest`
+- `skorcius/vessel:web-0.3.0` and `skorcius/vessel:web-latest`
 
 Use versioned tags for deployments. The `latest` tags move with each release.
 This release targets Linux amd64.
@@ -19,10 +19,8 @@ Releases are published by the repository's Release workflow when an annotated
 **Token is still the default.** Existing installs need no identity settings and
 continue to use their configured owner and in-memory browser token. Wallet mode
 is an explicit operator opt-in, not a deployment or an automatic mode switch.
-These Wallet instructions require **both images built from the multi-user
-stack** (the next release); do not apply this overlay to older published images.
-The version examples here are not evidence that an already published tag contains
-this delivery. P4 itself does not bump a version or publish images.
+These Wallet instructions require **both v0.3.0 images or newer**; do not apply
+this overlay to older published images.
 The implementation and automated acceptance evidence are in
 [`multi-user-state.md`](../docs/architecture/multi-user-state.md). Complete its
 §10 checklist before enabling registration for real users: the real-wallet,
@@ -890,9 +888,27 @@ unchanged and compresses static assets only.
 
 ## Upgrade
 
+### From v0.2.0 to v0.3.0
+
+Read the [release notes](../docs/releases/v0.3.0.md) first. This release includes
+settled funding, order identity, the Notification Hub and the multi-user stack.
+**There is no retained-data upgrade path if imported orders, fills or Play
+order links exist.** The order-identity guard below refuses the migration;
+do not bypass it or clear individual tables to force an upgrade.
+Keep a verified backup and the old installation before deliberately creating
+a fresh database and evidence store.
+
+Stop every web, API and worker instance, including `worker-notifications`,
+before changing images or running the one-shot `migrate` service. Set
+`VESSEL_VERSION=0.3.0`, preserve the chosen storage/credential/TLS overlays
+and keep Token mode unless explicitly opting into Wallet mode. The full
+migration and provisioning sequence is below; rollback requires the old
+images and pre-upgrade backup, not down migrations. Publishing the release
+does not perform any of these installation steps.
+
 ### After v0.2.0: order identity (breaking, no upgrade path)
 
-The next release's `OrderIdentity` migration changes how orders, fills and
+The v0.3.0 `OrderIdentity` migration changes how orders, fills and
 Play order links are keyed and has **no backfill**. It refuses to run when
 the database holds imported orders, fills or links. There is no retained-data
 upgrade path: an installation with v0.2.0 data must be recreated (fresh
@@ -932,8 +948,9 @@ change above: a v0.2.0 database with imported orders/fills/links must be recreat
 these identity migrations do not supply an order backfill.
 
 Identity's `20261017155708_InitialIdentity` uses its own schema/history. The
-journal bundle applies main's migrations (including OrderIdentity and
-`20261017180000_NotificationHub`), followed in order by:
+journal bundle applies `20261016174509_FundingPayments`,
+`20261017091636_OrderIdentity` and `20261017180000_NotificationHub` after
+v0.2.0's migrations, followed in order by:
 
 | Journal migration | Effect |
 | --- | --- |
@@ -952,7 +969,7 @@ migrates. Token installs continue unchanged without identity configuration
 (`ensure-owner` is a no-op); the identity schema is still migrated. Wallet opt-in
 also needs the existing owner GUID, allowed HTTPS origin and explicit operator
 wallet binding above. Back up both schemas together with the evidence and key
-ring. This delivery does not itself deploy, publish, or migrate any installation.
+ring. Publishing v0.3.0 does not deploy or migrate any installation.
 
 ### From v0.1.3 to v0.2.0 (the account monitor)
 
@@ -1365,11 +1382,11 @@ From the repository root, with no populated secret files in the build context:
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.2.0 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.2.0 .
+  --build-arg VERSION=0.3.0 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.3.0 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.2.0 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.2.0 .
+  --build-arg VERSION=0.3.0 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.3.0 .
 ```
 
 The API build pins SDK `10.0.302` to match the repository's `global.json`. The

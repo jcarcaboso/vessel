@@ -4,10 +4,14 @@ A trading diary for recording decisions, executions, and reflection.
 
 ## Deploy with Docker
 
-See the [Docker deployment guide](deploy/README.md) for the v0.2.0 API and web
+See the [Docker deployment guide](deploy/README.md) for the v0.3.0 API and web
 images, Compose setup, explicit migrations, opt-in Caddy TLS, credential keys,
 backups and isolated restores.
 Both images use `skorcius/vessel` with `api-` and `web-` tags.
+Read the [v0.3.0 release notes](docs/releases/v0.3.0.md) before upgrading.
+The order-identity migration has no retained-data upgrade path when imported
+orders, fills or Play order links exist. Token sign-in remains the default;
+Wallet mode is opt-in and real-wallet acceptance is still pending.
 
 This repository contains the approved Graphite prototype and the React/Vite/TypeScript plus modular ASP.NET Core 10/PostgreSQL application. The default page is Overview. The app includes account/portfolio management, saved Plays and bounded read-only Hyperliquid, Lighter, Lighter · Robinhood and RISEx integration. The disposable prototype is separate from the application.
 
