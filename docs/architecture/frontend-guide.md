@@ -11,10 +11,10 @@ A single-page React 19 application built with Vite 8 and TypeScript 6, styled wi
 It talks to one same-origin API (`/api`, proxied by Vite in development and by nginx in the release image). It:
 
 - discovers Token or Wallet mode from `/api/auth/config`; Token keeps the bearer only in memory, Wallet uses a same-origin HttpOnly session cookie;
-- shows Overview, Plays, Review, Portfolios, Accounts, Activity and Settings;
+- shows Overview, Plays, Review, Portfolios, Accounts, Activity, Notifications and Settings;
 - edits Plays as an in-memory draft and saves them through the API;
 - draws venue candles with planned levels, drawings and indicators, and captures the chart as evidence;
-- never sends orders, never signs anything and never treats a price touch as a fill.
+- asks the wallet to sign identity messages only; never sends orders, signs venue requests or treats a price touch as a fill.
 
 ## Layout
 
@@ -226,6 +226,7 @@ lookups also come from descriptors, including USDG for Lighter on Robinhood.
 | plays | `PlaysPage`, `PlayWorkspace` | The list of saved Plays and the editor: context fields, capital context, suggestions, chart, journal, position editor and summary; save, status changes, revisions, history, evidence, execution and manual executions. | [plays-workspace-contract](plays-workspace-contract.md), [play-lifecycle](play-lifecycle.md), [sizing-suggestions](sizing-suggestions.md), [diary-completion-contract](diary-completion-contract.md) |
 | market | `useCandles`, `useMarketContext`, `useLiveMarket`, `candleCache`, `useChartPreferences` | Candles with a per-connection cache, header statistics, the live stream with reconnect and polling fallback, chart view preferences. | [chart-plan](chart-plan.md), [performance-plan](performance-plan.md) |
 | review | `ReviewPage` | Scored closed Plays: periods, scorecard, equity chart, breakdowns, drill-down and exclusions. | [portfolio-review](portfolio-review.md) |
+| notifications | `useInAppNotifications`, `NotificationsPage`, `NotificationBadge`, `NotificationSettings` | Session-bound feed, unread count, server-claimed popups, owner preferences and test event. | [notification-hub-api-contract](notification-hub-api-contract.md), [multi-user-delivery-contract §16](multi-user-delivery-contract.md#16-implementation-round-clarifications) |
 | settings | `AppearanceSettings`, `appearance.ts`, `themes.ts`, `generator.ts` | Built-in themes, per-theme overrides, the theme builder and the contrast checks. | [appearance-settings](appearance-settings.md) |
 
 Inside **plays**, the pure modules carry the rules and the components stay thin:

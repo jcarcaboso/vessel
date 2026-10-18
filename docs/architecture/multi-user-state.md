@@ -69,6 +69,52 @@ orchestrator. Fresh P4 commands/results are recorded here after serial isolated
 checks; the earlier evidence below is historical and does not imply rerunning
 its complete backend/frontend suites on this rebase.
 
+### Fresh integration checks
+
+All checks run serially from the P4 worktree, sourcing
+`/tmp/vessel-mu/test-env.sh` without printing it where needed. Release checks
+create their own secrets, owner GUIDs, loopback ports, unused subnets and fresh
+volumes; they never read an installation `.env` or use its database. No pushes,
+publication, live migrations or deployment. The commands below use S3/RustFS by
+default; the prior local-storage evidence remains historical.
+
+| Command | Fresh integration result |
+| --- | --- |
+| `python3 -m unittest discover -s scripts -p 'test_*.py'` | **77 passed**, zero failures/skips. Includes provisioning reports for both new/existing subscriptions, real Compose config resolution for both workers, bare persisted Wallet overlays and explicit overlay omission (mode remains Wallet/fails preflight), plus notification SSE session transport. |
+| `python3 scripts/verify-release.py` | **177 packaged assertions passed**. Matrix: HTTP 44, TLS 47, image 5, monitor 26, notifications 22, restore 15, security 8, worker 10. Both deployments healthy; Token notification delivery, claim/read, broker outage catch-up and restore passed. |
+| Exact two-browser Wallet command in **Manual Wallet pre-release step** below | **155 packaged + 11 Chromium + 11 Firefox = 177 assertions passed**. Matrix: TLS 44, image 5, monitor 26, notifications 22, restore 15, security 8, wallet 25, worker 10. Chromium **153.0.8010.12** local, Firefox **146.0.1** remote, client/server Playwright 1.58.2. |
+| `python3 scripts/e2e-full-stack.py --artifacts /tmp/vessel-mu/p4-integration-e2e` | **140 passed, one stale harness assertion failed** at broker re-provisioning; cleanup completed. Correct application output included both registered subscriptions. Not counted as a passing full-stack run. |
+| `python3 scripts/e2e-full-stack.py --artifacts /tmp/vessel-mu/p4-integration-e2e-rerun` | **177 passed, zero failed**, all **16 stages**, 1,099 s, from fresh volumes. Includes both deployments/subscriptions and module health, two browser phases, linking/lifecycle, broker loss/re-provisioning, crash/lease recovery, disable/re-enable, receipt retry, retention, backup/restore/epoch rotation and SSE continuity. Pinned official Playwright 1.63.0 image/module as in main's harness. |
+| `python3 -m py_compile scripts/verify-release.py scripts/e2e-full-stack.py scripts/test_release.py scripts/test_e2e_full_stack.py`; `node --check scripts/wallet-browser-smoke.cjs`; `node --check scripts/wallet-test-signer.cjs`; `sh -n deploy/migrate deploy/worker-health`; `git diff --check` | Passed. Local Markdown link targets and the P4 write-scope inventory also passed. |
+
+The Wallet smoke creates a new invitation user after provisioning, signs a
+second user into an independent browser context, settles that second user's own
+older synthetic test popups, requests the first user's test event and waits for
+both its API row and actual popup. The second user's feed/total stay unchanged,
+no popup appears there, and reading the first user's notification ID returns
+404. Both engines passed with zero page errors, CSP violations or external
+browser requests. Notification health is checked via the module-aware script,
+the API head and the `server_notification_heartbeats` deployment row, with Wallet
+mode/empty bearer/origin inspected only through assertions (no secrets printed).
+
+The first full-stack run passed **140 checks** before its stale
+`already registered: verification` substring assertion rejected the correct
+`already registered: notifications, verification` report. This was a harness
+mismatch, not an application failure. The shared provisioning-report parser now
+checks both inserted and already-present sets, with a regression test, and the
+scenario is rerun from fresh volumes (not resumed or counted as a pass). Broker
+recovery listener checks also include the notifications queue.
+
+Final resource audit compares Docker names/tags with the pre-run inventory:
+**no new release/e2e containers, volumes, networks or temporary image tags remain**.
+This covers both original/restore release projects, the remote Firefox server,
+the first failed full-stack run, the successful fresh rerun and its restore
+project. Run-owned Playwright dependency volumes were removed. Reusable official
+Playwright images **1.58.2 and 1.63.0 are retained**; no shared-host browser/system
+packages were installed. Logs and synthetic browser captures remain only under
+`/tmp/vessel-mu/p4-integration-*`; counts here are the durable repository record,
+not a promise that temporary artifacts remain.
+
 ## Original P4 verification evidence (before integration with main)
 
 All commands ran only in `/home/ops/.local/share/vessel-mu/worktrees/p4`.
@@ -178,14 +224,16 @@ workflow changed. Nothing was pushed or published.
 
 | Gate | Outcome / evidence |
 | --- | --- |
-| Isolation suite | **PASS:** 66 isolation cases, zero skips, focused Token/Wallet rerun plus full backend run. |
-| Two-owner worker/events | **PASS:** focused 120-case isolation/multi-owner/scope-inventory run and full backend suite; includes `MultiOwnerWorkerTests`, `MultiOwnerEventTests`, `MultiOwnerMessagingTests` and `MultiOwnerMonitorLimitsTests`. |
-| Revocation of already-open streams | **PASS:** latest Chromium **14,172 ms**, Firefox **13,305 ms** (≤15 s + 5 s margin), using frontend bodyless session DELETE and an independent already-open SSE reader. Smoke asserts the reader is still open immediately before revocation and elapsed time is nonnegative; backend identity/stream/isolation cases also passed. |
+| Isolation suite | **PASS (inherited):** original P4 reran 66 isolation cases, zero skips; integrated C1 reports 3,185 backend cases via the orchestrator. P4 did not rerun that full suite on this rebase; fresh packaged browser isolation is below. |
+| Two-owner worker/events | **PASS (inherited + fresh packaged):** prior focused 120-case isolation/multi-owner/scope-inventory run; integrated B2 reports 3,111 backend cases. Fresh Token/Wallet packaged workers, delivery/catch-up/restore and new-user two-context notification isolation pass. |
+| Revocation of already-open streams | **PASS:** latest integrated Chromium **14,226 ms**, Firefox **13,492 ms** (≤15 s + 5 s margin), using frontend bodyless session DELETE and an independent already-open SSE reader. Smoke asserts the reader is still open immediately before revocation and elapsed time is nonnegative; backend identity/stream/isolation cases also passed. |
 | HTTPS cookies | **PASS:** packaged HTTPS check plus Chromium and Firefox inspect both binding/session `__Host-` cookies, Secure, HttpOnly, SameSite=Strict, Path=/ and no Domain. Browser storage is checked before signing (binding) and after authentication (session), and both issuing response headers must omit Domain. |
 | Restore reset | **PASS:** packaged backup had a live operator session; revocation happened after the dump; reset ran offline after restore; the resurrected cookie returned 401, then a new signature authenticated the preserved operator GUID. |
+| Packaged integration | **PASS:** Token/S3 177 packaged assertions; Wallet/S3 155 packaged + 11 Chromium + 11 Firefox; main's full-stack 177 checks across 16 stages. Explicit identity → journal → bootstrap → provisioning and offline restore reset remain verified. Cleanup inventory passed for all created stacks/tags. |
+| Multi-user Notification Hub | **PASS:** Token/Wallet notification worker health (module-aware file, API and per-deployment database row), broker-outage catch-up and notification restore; Chromium/Firefox prove a newly registered owner receives its test notification and the other session cannot list, show or read it. Suspension and the 6/minute cap are inherited backend coverage, not new browser probes. |
 | Real-wallet compatibility, including non-mainnet EOA | **OWNER-PENDING**; exact acceptance steps below. Synthetic noble signatures are not a real-wallet compatibility test. |
-| Wallet writes in Chromium | **PASS:** ten Chromium browser assertions: EIP-6963/invitation/shell, POST, frontend profile PATCH, bodyless DELETE, multipart evidence, step-up recovery link, two-user isolation, open-stream revocation and sign-out; zero page/CSP errors or external calls. |
-| Wallet writes in Firefox | **PASS: Firefox 146.0.1**, remote official `mcr.microsoft.com/playwright:v1.58.2-noble` server, Playwright 1.58.2 client/server. All ten browser assertions passed, including real Wallet-mode POST, frontend PATCH, bodyless DELETE and multipart, both secure cookies, step-up, isolation, revocation and sign-out; zero page/CSP errors or external calls. Exact command below. The local-host dependency failure is superseded, not counted as a pass. |
+| Wallet writes in Chromium | **PASS:** 11 integrated Chromium browser assertions, including new-user notification delivery/popup and foreign-owner denial: EIP-6963/invitation/shell, POST, frontend profile PATCH, bodyless DELETE, multipart evidence, step-up recovery link, two-user isolation, open-stream revocation and sign-out; zero page/CSP errors or external calls. |
+| Wallet writes in Firefox | **PASS: Firefox 146.0.1**, remote official `mcr.microsoft.com/playwright:v1.58.2-noble` server, Playwright 1.58.2 client/server. All 11 integrated browser assertions passed, including per-owner notification delivery/popup and foreign-owner denial, real Wallet-mode POST, frontend PATCH, bodyless DELETE and multipart, both secure cookies, step-up, isolation, revocation and sign-out; zero page/CSP errors or external calls. Exact command below. The local-host dependency failure is superseded, not counted as a pass. |
 
 **Activation outcome:** implementation supports explicit Wallet opt-in, but §10
 acceptance is **not fully signed off**: Firefox has passed, while the real-wallet/

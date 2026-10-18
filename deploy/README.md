@@ -573,7 +573,7 @@ docker compose ps -a
 Compose waits for healthy PostgreSQL and RabbitMQ, then runs `/app/migrate` as a
 deliberate one-shot step. The wrapper runs the EF bundle, then messaging provisioning
 (envelope storage, broker topology and insert-only subscription registrations).
-It then starts API and worker and waits for API readiness before starting web.
+It then starts API and both workers and waits for API readiness before starting web.
 The EF bundle reads `ConnectionStrings__Vessel` from its environment through the
 design-time factory. The password is not an argument and the bundle does not
 print it. Neither API nor worker migrates or auto-provisions message storage at
@@ -1005,8 +1005,8 @@ docker compose ps -a
 ```
 
 `up` restarts the completed migration service and applies any pending migrations
-before API and worker start. Re-running it against the same version is idempotent.
-Stop web, API and worker first when a schema change is expected, so no old process
+before API and both workers start. Re-running it against the same version is idempotent.
+Stop web, every API and both workers on all hosts first when a schema change is expected, so no old process
 uses the schema while it changes. This
 ordering is the explicit deployment migration step, not API startup migration.
 Do not use `docker compose restart` to upgrade or apply migrations. Failed
@@ -1048,7 +1048,7 @@ use the S3 API for cross-provider copies. Restore it, the database and the same 
 disposable deployment before relying on the procedure. The local release
 verification exercises the restore below with synthetic records and evidence.
 
-With `compose.storage-local.yaml`, keep web, API and worker stopped but replace the RustFS
+With `compose.storage-local.yaml`, keep web, every API and both workers stopped but replace the RustFS
 stop/archive commands with:
 
 ```sh
@@ -1250,7 +1250,8 @@ provider bridged to a Node noble signer. `--wallet-browsers chromium` selects a
 partial check explicitly; it never counts Firefox as passed. A browser launch
 failure fails the command and still cleans up the isolated Compose stack.
 The smoke covers invitation registration, shell, POST/PATCH/bodyless DELETE,
-multipart evidence, step-up linking, independent users, server-side stream
+multipart evidence, step-up linking, independent users and owner-only notification
+delivery/popups (with a foreign-owner read denied), server-side stream
 revocation (15 s + 5 s margin) and frontend sign-out. It blocks external calls.
 
 The remaining **human compatibility check** is not replaceable by synthetic
@@ -1274,7 +1275,7 @@ python3 scripts/e2e-full-stack.py --keep        # leave the stack, temp director
 
 It builds the API and web images as `vessel-e2e:api`/`vessel-e2e:web` and runs the
 real Compose stack (PostgreSQL, RabbitMQ with the least-privilege application user,
-RustFS, migrate, API, monitor worker, a `verifier` worker for the `verification`
+RustFS, migrate, API, monitor and notifications workers, a `verifier` worker for the `verification`
 subscription and web) on its own project, unused subnet and loopback ports, with
 generated secrets and a synthetic owner. Only Docker and Python are needed on the
 host: the fake venue's certificates are generated inside its pinned Python image. `scripts/e2e/fake_venue.py` is a
@@ -1288,7 +1289,8 @@ nginx and a Playwright browser that runs in the pinned
 installed there with the repository's pinned pnpm (Corepack) into a temporary
 Docker volume, so only Docker and Python are needed; `--playwright-module` can
 point at an existing host package instead. The scenario covers
-explicit provisioning and topology, Refresh, automatic linking by a Check,
+explicit provisioning and insert-only registration for both subscriptions,
+notification topology and per-deployment health, Refresh, automatic linking by a Check,
 fills opening and closing Plays, confirmed and dismissed discrepancies, closed-Play
 watches, orphaned entries, omitted executions, broker outage and broker volume
 loss, a worker killed mid-read with a second replica recovering after the lease,

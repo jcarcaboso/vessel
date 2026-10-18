@@ -6,9 +6,10 @@ advice. A chart reaching a price never proves that an order filled.
 
 ## Which version this describes
 
-This is the October 18, 2026 multi-user stack, based on verified `be9474b`
+This is the October 18, 2026 multi-user stack, rebased onto integrated D1 `a336bb3`
 (A1 identity core, B1 scopes/events, A2 identity accounts, B2 monitor/limits,
-C1 isolation and D1 frontend) plus P4 operator/developer documentation and
+C1 isolation and D1 frontend) on main `43ebaa0`, including Notification Hub N1–N4,
+order identity and the October 17 backend pass, plus P4 operator/developer documentation and
 isolated release/browser verification. See the
 [delivery state and exact evidence](architecture/multi-user-state.md).
 These are checkout/verification states, not a claim that a branch has merged,
@@ -49,6 +50,7 @@ not journals through an authorization bypass. There is no user/journal deletion.
 | Portfolios | Create optional groups with a name and built-in icon. Add, move or unlink accounts, including bulk membership changes. |
 | Accounts | Add manual or supported venue accounts, inspect balances and positions, refresh imports, manage credentials where needed, or disable an account. |
 | Activity | Inspect retained imported executions grouped into position operations. Expand the original facts, filter them, and preview an eligible operation for retrospective creation. |
+| Notifications | Read the current user's retained notifications, filter the feed and mark rows read; the unread badge and popups share the same owner-scoped delivery state. |
 | Settings | Choose dark or light themes, customize colours and radius, or generate and save a named palette in this browser. Inspect connection and capability information. |
 
 One ordinary journey is Accounts, Refresh, Activity, then Plays or Review.
@@ -220,7 +222,7 @@ or assume RISEx reported PnL excludes funding.
 
 | Not implemented in this checkout | What exists instead |
 | --- | --- |
-| Durable notification delivery | Background Play monitoring, event outbox/subscriptions and in-page feedback exist; no production notification subscriber yet. |
+| External notification channels | The production in-app Hub, per-owner Notifications page, unread count and server-claimed popups exist. Telegram, Discord, browser system notifications and price alerts remain out of scope. |
 | Strategy library, reusable strategy definitions and versions | Free-text strategy notes plus disposable discovery prototypes. |
 | Durable candle archive, backtesting and complete historical backfill | Bounded imports and memory caches. TimescaleDB is a direction, not a running component. |
 | Automatic evidence-storage migration | Local and private S3-compatible adapters exist; cutover is explicit and offline. |

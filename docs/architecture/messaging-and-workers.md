@@ -77,9 +77,9 @@ Arrows point to what a project references. `backend/tests/Vessel.Tests/Architect
 | `Vessel.Application` | Ports: `IUnitOfWork`, `IUnitOfWorkParticipant`, `IVesselEventSink`, `IVesselEventReader`, `IMonitorCommandSink`, `IVesselEventSubscriber`, `IVesselCommandHandler<T>`. Contracts: `VesselEvent`, `VesselEventDraft`, `VesselEventCursor`, `VesselEventValues.Types`, `MonitorAccountCommand`. Use cases: `MonitorCoordinator`, `MonitorDiscrepancyService`, `MonitorCommandHandler`, `MonitorOptions`; `Venues/OrderMechanics` |
 | `Vessel.Persistence` | `UnitOfWork`; `Events/`: `VesselEventStore` (sink, cursor, dedup), `VesselEventMutationCapture`, `VesselEventHistory` (reader), `EventRetention`, `EventStreamEpoch`, `IVesselEventOutbox`; `Events/Subscriptions/`: `EventSubscription`, `EventSubscriptionLimits`, `TopicFilter`, `EventDispatcher`, `EventCatchUp`, `EventSubscriptionRegistry`, `EventReceiptAdmin`; `MonitorStore`, `MonitorDiscrepancyStore`, `OwnerScopeFactory`, `ServerStateStore`, `SystemMonitorStore`, `SystemEventSubscriptionStore` (registered by `AddVesselPersistence`) |
 | `Vessel.Infrastructure` | `ApplicationServices.AddVesselMonitoring` (monitor use cases and `Vessel:Monitor`, shared by the API and the monitor worker), `Monitoring/MonitorRunExecutor` (lease renewal through fresh scopes), `MonitorRunLog` |
-| `Vessel.Messaging` | `MessagingSettings`, `MessagingHosting` (`AddVesselMessaging`), `MessagingTopology`, `MessagingProvisioning`, `MessagingCommands` (offline CLI), `MessagingDeployments`, `EventSubscriptionListener`, `SubscriptionMaintenanceService`, `WolverineVesselEventOutbox`; `Modules/`: `IVesselModule`, `VesselModuleRegistry`, `Monitor/`, `Verification/` |
+| `Vessel.Messaging` | `MessagingSettings`, `MessagingHosting` (`AddVesselMessaging`), `MessagingTopology`, `MessagingProvisioning`, `MessagingCommands` (offline CLI), `MessagingDeployments`, `EventSubscriptionListener`, `SubscriptionMaintenanceService`, `WolverineVesselEventOutbox`; `Modules/`: `IVesselModule`, `VesselModuleRegistry`, `Monitor/`, `Notifications/`, `Verification/` |
 | `Vessel.Identity` | `IdentityOwnerDirectory`, cookie-session principal validity and offline administration; its own context/schema, no journal-table access |
-| `Vessel.Worker` | `WorkerHost`, `WorkerSettings`, `WorkerModules`, `MonitorScheduler`, `MonitorWakeup` |
+| `Vessel.Worker` | `WorkerHost`, `WorkerSettings`, `WorkerModules`, `MonitorScheduler`, `MonitorWakeup`, `NotificationHeartbeat`, `NotificationRetentionService` |
 | `Vessel.Api` | `AddVesselMessaging("api")`, offline command dispatch, `VesselEventEndpoints`, `MonitorEndpoints` |
 
 Subscription definitions (`EventSubscription`) live in Persistence because the dispatcher, catch-up and registry use them; module descriptors live in Messaging; business handlers implement Application ports.
@@ -740,6 +740,9 @@ Commands assume the default Compose project in the operator directory; add every
 ### Offline commands
 
 The API binary runs them without starting a host; they read `ConnectionStrings__Vessel`, `Vessel__Auth__OwnerId` and `Vessel__Messaging__*` and print only Vessel's own messages.
+Retain the private `VESSEL_AUTH_MODE` and full `COMPOSE_FILE` list, including
+the Wallet overlay, on offline commands too; all hosts need identical auth and
+identity settings. The packaged migration preflight must not be bypassed for an upgrade.
 
 ```sh
 # EF migrations, then provisioning (the normal path):
