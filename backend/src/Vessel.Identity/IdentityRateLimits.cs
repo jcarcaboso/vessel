@@ -28,8 +28,9 @@ public sealed class IdentityRateLimits : IDisposable
         if (path is "/api/auth/step-up/challenge" or "/api/auth/step-up" or "/api/auth/wallets/challenge" or "/api/auth/wallets")
         {
             var session = context.User.FindFirst(SessionAuthentication.SessionClaim)?.Value;
+            var bucket = path is "/api/auth/step-up/challenge" or "/api/auth/step-up" ? "step-up:" : "link:";
             return global || session is null ? RateLimitPartition.GetNoLimiter("none") :
-                RateLimitPartition.GetFixedWindowLimiter("sensitive:" + session, _ => Window(10, TimeSpan.FromMinutes(10)));
+                RateLimitPartition.GetFixedWindowLimiter(bucket + session, _ => Window(10, TimeSpan.FromMinutes(10)));
         }
         var kind = path switch
         {

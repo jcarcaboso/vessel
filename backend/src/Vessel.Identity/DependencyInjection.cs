@@ -41,6 +41,7 @@ public static class DependencyInjection
         services.AddSingleton<IWalletSignatureVerifier, WalletSignatures>();
         services.AddScoped<IdentityTransaction>();
         services.AddScoped<IdentityService>();
+        services.AddScoped<IdentityAccountService>();
         services.AddScoped(sp => new SessionStore(() => sp.GetRequiredService<IDbContextFactory<IdentityDbContext>>(),
             sp.GetRequiredService<IdentitySettings>(), sp.GetRequiredService<TimeProvider>()));
         services.AddScoped<SessionPrincipal>();

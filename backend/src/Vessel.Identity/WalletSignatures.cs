@@ -112,11 +112,19 @@ public static class SignInMessage
 
 public static class IdentityErrors
 {
+    public static ProblemException StepUpRequired(string action)
+    {
+        var error = Error(403, "step-up-required");
+        error.Data["action"] = action;
+        return error;
+    }
+
     public static ProblemException Error(int status, string code, int? retryAfter = null) =>
         new(status, code switch
         {
             "identity-unavailable" => "The identity service is unavailable. Try again later.",
             "rate-limited" => "Too many requests. Try again later.",
+            "wallet-limit" => $"A user may have at most {IdentityLimits.MaxWalletsPerUser} linked wallets.",
             _ => "The identity request could not be completed."
         }, code, retryAfter);
 }
