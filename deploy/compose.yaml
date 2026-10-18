@@ -163,6 +163,8 @@ services:
       Vessel__Worker__Modules__0: notifications
       Vessel__Worker__Deployment: notifications
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      Vessel__Auth__Mode: ${VESSEL_AUTH_MODE:-Token}
+      Vessel__Auth__Token: ${Vessel__Auth__Token:-}
       Vessel__Auth__OwnerId: ${Vessel__Auth__OwnerId:?Set a non-empty GUID}
       Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_APP_USER:-${RABBITMQ_USER:?Set RABBITMQ_USER}}:${RABBITMQ_APP_PASSWORD:-${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}}@rabbitmq:5672/"
       Vessel__Monitor__Interval: ${VESSEL_MONITOR_INTERVAL:-00:10:00}

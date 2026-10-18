@@ -348,6 +348,40 @@ class MigrationPreflightTests(unittest.TestCase):
                 self.assertIn(message, result.stderr)
                 self.assertNotIn('cd:', result.stderr)
 
+    @unittest.skipUnless(shutil.which('docker'), 'Docker Compose is required to resolve deployment overlays')
+    def test_compose_auth_mode_and_wallet_settings_reach_both_workers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = root / 'synthetic.env'
+            common = ('POSTGRES_PASSWORD=synthetic\nRABBITMQ_USER=synthetic\nRABBITMQ_PASSWORD=synthetic\n'
+                      'Vessel__Auth__OwnerId=11111111-1111-4111-8111-111111111111\n'
+                      'VESSEL_TLS_HOST=localhost\nVESSEL_IDENTITY_ORIGIN=https://localhost\n')
+            for mode, overlay in (('Token', False), ('Wallet', True), ('Wallet', False)):
+                with self.subTest(mode=mode, wallet_overlay=overlay):
+                    env.write_text(common + f'VESSEL_AUTH_MODE={mode}\nVessel__Auth__Token=' +
+                                   ('synthetic\n' if mode == 'Token' else '\n'))
+                    command = ['docker', 'compose', '--project-directory', directory, '--env-file', str(env),
+                               '-f', str(verify_release.ROOT / 'deploy/compose.yaml')]
+                    if overlay:
+                        command += ['-f', str(verify_release.ROOT / 'deploy/compose.tls.yaml'),
+                                    '-f', str(verify_release.ROOT / 'deploy/compose.wallet.yaml')]
+                    result = subprocess.run([*command, 'config', '--format', 'json'], check=True,
+                                            env=verify_release.verification_environment(), capture_output=True, text=True)
+                    services = json.loads(result.stdout)['services']
+                    for service in ('migrate', 'api', 'worker', 'worker-notifications'):
+                        values = services[service]['environment']
+                        self.assertEqual(mode, values['Vessel__Auth__Mode'])
+                        self.assertEqual('synthetic' if mode == 'Token' else '', values['Vessel__Auth__Token'])
+                        if overlay:
+                            self.assertEqual('https://localhost', values['Vessel__Identity__Origins__0'])
+                            self.assertEqual('Closed', values['Vessel__Identity__Registration'])
+                        else:
+                            self.assertNotIn('Vessel__Identity__Origins__0', values)
+                    self.assertEqual(['CMD', '/app/worker-health'],
+                                     services['worker-notifications']['healthcheck']['test'])
+                    if overlay:
+                        self.assertFalse(services['web'].get('ports'))
+
     def test_valid_modes_keep_identity_journal_bootstrap_provision_order(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

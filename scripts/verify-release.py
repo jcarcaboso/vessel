@@ -626,7 +626,16 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         container = self.compose('ps', '-q', 'worker-notifications', capture_output=True, text=True).stdout.strip()
         inspected = json.loads(run('docker', 'inspect', container, capture_output=True, text=True).stdout)[0]
         self.expect(inspected['Config']['Entrypoint'] == ['/app/worker'], 'notifications worker uses the /app/worker entrypoint', 'notifications')
+        self.expect(inspected['Config']['Healthcheck']['Test'] == ['CMD', '/app/worker-health'],
+                    'notifications worker uses the module-aware heartbeat healthcheck', 'notifications')
         self.expect(inspected['State']['Health']['Status'] == 'healthy', 'notifications worker is healthy after a productive maintenance pass', 'notifications')
+        environment = dict(value.split('=', 1) for value in inspected['Config']['Env'])
+        self.expect(environment['Vessel__Auth__Mode'] == ('Wallet' if self.wallet else 'Token') and
+                    environment['Vessel__Auth__Token'] == ('' if self.wallet else self.token),
+                    'notifications worker shares the API authentication mode without a Wallet bearer', 'notifications')
+        if self.wallet:
+            self.expect(environment['Vessel__Identity__Origins__0'] == self.url,
+                        'notifications worker receives Wallet settings for the identity owner directory', 'wallet')
         self.expect(inspected['Config']['User'] == 'app', 'notifications worker runs as the non-root app user', 'notifications')
         self.expect(not self.ports('worker-notifications'), 'notifications worker publishes no port', 'notifications')
         mounts = [mount.get('Destination', '') for mount in inspected.get('Mounts', [])]
@@ -636,6 +645,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
                 break
             time.sleep(1)
         self.expect(self.json('/api/notifications/head')['workerOnline'], 'API reports the notifications heartbeat online', 'notifications')
+        self.expect(self.sql("SELECT COUNT(*) FROM server_notification_heartbeats WHERE deployment='notifications'") == '1',
+                    'notification health is stored per deployment, not per owner', 'notifications')
 
     def transport_fixture(self):
         self.fixture = True

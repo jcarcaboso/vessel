@@ -21,3 +21,6 @@ services:
   worker:
     environment:
       <<: *wallet-environment
+  worker-notifications:
+    environment:
+      <<: *wallet-environment

@@ -205,6 +205,31 @@ async function main() {
     assert.ok(!listA.body.some(item => listB.body.some(other => other.id === item.id)))
     pass('two user contexts have disjoint journals; foreign account/evidence return 404')
 
+    // Both sessions are live. A newly registered owner (not the bootstrap
+    // operator) must be discovered by the Hub without re-provisioning.
+    const beforeB = await call(pageB, '/api/notifications?tab=all', 'GET', undefined, sessionB.user.id)
+    assert.equal(beforeB.status, 200)
+    const bIds = beforeB.body.items.map(item => item.id)
+    assert.equal((await call(pageA, '/api/notifications/test', 'POST', undefined, ownerA)).status, 202)
+    let notification
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const feed = await call(pageA, '/api/notifications?tab=all', 'GET', undefined, ownerA)
+      assert.equal(feed.status, 200)
+      notification = feed.body.items.find(item => item.kind === 'test')
+      if (notification) break
+      await pageA.waitForTimeout(500)
+    }
+    assert.ok(notification, 'new Wallet owner must receive its test event through the Hub')
+    await pageA.getByText('Test notification', { exact: true }).waitFor()
+    const afterB = await call(pageB, '/api/notifications?tab=all', 'GET', undefined, sessionB.user.id)
+    assert.equal(afterB.status, 200)
+    assert.equal(afterB.body.allTotal, beforeB.body.allTotal)
+    assert.deepEqual(afterB.body.items.map(item => item.id), bIds)
+    assert.equal(await pageB.getByText('Test notification', { exact: true }).count(), 0)
+    assert.equal((await call(pageB, '/api/notifications/' + notification.id + '/read',
+      'POST', undefined, sessionB.user.id)).status, 404)
+    pass('Wallet test notification appears only for its owner; the other session cannot list, show or read it')
+
     // A separate same-origin document has no application navigation or stream
     // teardown: only the server can end this reader after session revocation.
     const streamPage = await a.newPage()
