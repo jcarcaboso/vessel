@@ -226,10 +226,11 @@ official download, and the supplied shell launched and ran the smoke successfull
 
 ## Deliberate limits and remaining work
 
-- Known inherited frontend flake: `frontend/src/features/identity/sign-in-machine.test.ts:31`
-  compares two time-sensitive `new Date()` fixtures. The orchestrator owns its
-  D1 fix; P4 changed no frontend/backend source or tests and did not rerun those
-  suites for the deployment/docs follow-up.
+- The timing-sensitive frontend comparison in
+  `frontend/src/features/identity/sign-in-machine.test.ts` (two `new Date()`
+  fixtures built a millisecond apart) is fixed on D1 (`08d07e7`): the unchanged
+  signing state is now compared with the same fixture. P4 changed no
+  frontend/backend source or tests.
 - The development `pnpm db:migrate` helper remains journal-only plus messaging
   provisioning, not a complete Wallet bootstrap. The packaged `/app/migrate`
   sequence is the verified identity/journal/bootstrap path for this delivery.
