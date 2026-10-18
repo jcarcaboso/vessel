@@ -384,13 +384,15 @@ class MigrationPreflightTests(unittest.TestCase):
                       'VESSEL_TLS_HOST=localhost\nVESSEL_IDENTITY_ORIGIN=https://localhost\n')
             for mode, overlay in (('Token', False), ('Wallet', True), ('Wallet', False)):
                 with self.subTest(mode=mode, wallet_overlay=overlay):
+                    files = ':'.join(str(verify_release.ROOT / 'deploy' / name) for name in
+                                     ('compose.yaml', 'compose.tls.yaml', 'compose.wallet.yaml'))
                     env.write_text(common + f'VESSEL_AUTH_MODE={mode}\nVessel__Auth__Token=' +
-                                   ('synthetic\n' if mode == 'Token' else '\n'))
-                    command = ['docker', 'compose', '--project-directory', directory, '--env-file', str(env),
-                               '-f', str(verify_release.ROOT / 'deploy/compose.yaml')]
-                    if overlay:
-                        command += ['-f', str(verify_release.ROOT / 'deploy/compose.tls.yaml'),
-                                    '-f', str(verify_release.ROOT / 'deploy/compose.wallet.yaml')]
+                                   ('synthetic\n' if mode == 'Token' else f'\nCOMPOSE_FILE={files}\n'))
+                    command = ['docker', 'compose', '--project-directory', directory, '--env-file', str(env)]
+                    # Bare Wallet commands retain the persisted overlays. Explicit -f
+                    # overrides COMPOSE_FILE but must not downgrade its persisted mode.
+                    if not overlay:
+                        command += ['-f', str(verify_release.ROOT / 'deploy/compose.yaml')]
                     result = subprocess.run([*command, 'config', '--format', 'json'], check=True,
                                             env=verify_release.verification_environment(), capture_output=True, text=True)
                     services = json.loads(result.stdout)['services']
