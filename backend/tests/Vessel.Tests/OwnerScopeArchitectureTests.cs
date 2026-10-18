@@ -138,18 +138,85 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/Events/Subscriptions/EventSubscriptionRegistry.cs|f028bd9900a04eb2f5dba91ffb25a20286a61cb7cec2ae79ceb140cfbfb7c10e",
             // Progress row: inserts @owner from the server-wide registration and the owner's own retention floor.
             "Vessel.Persistence/Events/Subscriptions/SubscriptionProgress.cs|6a6e7519684ffb58f2e2cf0a0af6c1baf38c72a25cd1c8174919b0c641bd0b3c",
+            // Fail-closed rule (quoted identifiers are never exempt); each is single-table with "OwnerId" = the scope owner:
+            // Open-play lock: plays by "AccountId" and "OwnerId" = db.CurrentOwnerId, constant status list.
+            "Vessel.Persistence/ExecutionStore.cs|c253ae2be16f266bec3f4831b268ad49ad6d2c287af43eec38cc45830ac92276",
+            // Account row lock: "Id" and "OwnerId" = db.CurrentOwnerId.
+            "Vessel.Persistence/ExecutionStore.cs|f893e1f76d22fb36ed9f16200cec96625e462cf6930d1e287e08257755036a55",
+            "Vessel.Persistence/MonitorDiscrepancyStore.cs|f893e1f76d22fb36ed9f16200cec96625e462cf6930d1e287e08257755036a55",
+            "Vessel.Persistence/WorkspaceStore.cs|72ddfb9d33e8a6c0834c1302db460ca114f05c0e3b1259f90146155ed31066aa",
+            "Vessel.Persistence/MonitorStore.cs|20cbcb1a165df294219c574b593603de1429eb3b2ab39759ffa060fe820bcae0",
+            // Venue budget upsert: inserts db.CurrentOwnerId; conflict target includes "OwnerId"; SET only "RetryAtUtc".
+            "Vessel.Persistence/MonitorStore.cs|d56f8ee8f0a974deefc5db6ff8075e06ee522a4d997125033e98fcfc4fffc976",
+            // Heartbeat upsert: inserts db.CurrentOwnerId; conflict target "OwnerId"; SET only worker and time.
+            "Vessel.Persistence/MonitorStore.cs|3e82d868b651cb76fa3345f8198c64fb6ca25eef6d67b6467f858d107a443ebc",
+            // Monitor row creation after the owner-scoped account lock: inserts db.CurrentOwnerId; DO NOTHING.
+            "Vessel.Persistence/MonitorStore.cs|735aadccde047974eba3bdab728825533ce9773222d391066ebee3374953c721",
+            // Monitor row lock: "AccountId" and "OwnerId" = db.CurrentOwnerId.
+            "Vessel.Persistence/MonitorStore.cs|9be267297c4452c53907e65138f54ee83de31681eedc3c3d231bd8fcf8bf4c7f",
+            // Account enabled recheck: "OwnerId"=@owner (db.CurrentOwnerId) and "Id"=@account.
+            "Vessel.Persistence/Notifications/NotificationStore.cs|9c7e4f9996ff9f771794a22d8ef4a53be2aa1826be74fb2d5a4524b050a3832b",
+            // Play row lock: "Id" and "OwnerId" = db.CurrentOwnerId.
+            "Vessel.Persistence/PlayStore.cs|92f5878e0e7c1be5bfd533b89b1af2f1d7c245edb9c8fc3f6981d2b3541b3f7d",
+            // First sizing row: initial.OwnerId is checked equal to db.CurrentOwnerId just before; DO NOTHING.
+            "Vessel.Persistence/SizingStore.cs|a9ceddf772233bbe66f61445850ce916446ce6f3013950049716c2e75596eaf5",
+            // Portfolio row lock and its member accounts: "Id"/"PortfolioId" and "OwnerId" = db.CurrentOwnerId.
+            "Vessel.Persistence/WorkspaceStore.cs|0c09a808bbe318f68eea1bda7d6dae1ac6ae5f56b4e988575a2787a457df5d2a",
+            "Vessel.Persistence/WorkspaceStore.cs|029e4ce40dd7db519f675a99000b2f0e8cde631a8dd888f38f14cfd2f9e09a80",
+            // Fail-closed false positives (prose that starts with a command word or holds "--" and one):
+            // Not SQL: evidence-copy usage text (its "--source" option and the word "copy").
+            "Vessel.Api/EvidenceCopyCommand.cs|cc48784ef9d9c5cdefe99d0627f044cd8a55dde3de8798853acabe2e8d60b024",
+            // Not SQL: evidence-copy console messages beginning with "Copy".
+            "Vessel.Api/EvidenceCopyCommand.cs|1fa96c1ca5ae47fff04b7b5ed6fdd6877aeb6ffaa19a7a232f7fe75f1f80643b",
+            "Vessel.Api/EvidenceCopyCommand.cs|8b086bac7175c730c31e07567d55a49b05eab5ca83438af19bf3dd9fa8fe784f",
+            "Vessel.Api/EvidenceCopyCommand.cs|cbc5c851f0dc70798f98079151240ea7ac2441729b0d45a86a994572a735efd6",
+            // Not SQL: messaging command usage text ("--owner", "--all-owners" and the word "retry").
+            "Vessel.Messaging/MessagingCommands.cs|ebacba1d8076b46e61466ea17e85b43e964482d9807da0c86c6a8b19a113ee68",
+            // Not SQL: "reset" stream status value and feed cursor parameter name.
+            "Vessel.Api/VesselEventEndpoints.cs|01be30bb4a27765c37462e6bf2a0bf8b6c109f9be9d81e6fd56455db1a736a43",
+            "Vessel.Persistence/Notifications/NotificationStore.cs|01be30bb4a27765c37462e6bf2a0bf8b6c109f9be9d81e6fd56455db1a736a43",
+            // Not SQL: candle query validation message.
+            "Vessel.Application/MarketData/CandleService.cs|08cce1536657c12e9fa66fbf50b9df30e9dffdfd13bb6c5c22d81f4dbc0701c0",
+            // Not SQL: "refresh" monitor trigger value.
+            "Vessel.Application/Monitoring/MonitorCoordinator.cs|d6cc0a088c07683c65cd266860cab8d94b3a1937b17420d9da30ca299c09fb77",
+            "Vessel.Domain/Monitoring/MonitorAccount.cs|d6cc0a088c07683c65cd266860cab8d94b3a1937b17420d9da30ca299c09fb77",
+            "Vessel.Persistence/MonitorStore.cs|d6cc0a088c07683c65cd266860cab8d94b3a1937b17420d9da30ca299c09fb77",
+            // Not SQL: "close" position-effect constant and RISEx candle field name.
+            "Vessel.Domain/Workspace/AccountFacts.cs|310ff200149b44a32f124023d7caba19a1a890763a980606813d3a3d4a085d36",
+            "Vessel.Infrastructure/Venues/Risex/RisexReader.cs|310ff200149b44a32f124023d7caba19a1a890763a980606813d3a3d4a085d36",
+            // Not SQL: venue fill direction strings "Close Long" and "Close Short".
+            "Vessel.Infrastructure/Venues/Hyperliquid/HyperliquidPerpetualReader.cs|980f257a57d5846f41e59e1d79fafb13929ea348e0eae3a28daf7132f4fe286d",
+            "Vessel.Infrastructure/Venues/Hyperliquid/HyperliquidPerpetualReader.cs|f074918f528ce6faa19ada092244639377c9eb3603e338a3cb8057b9a2ba2913",
+            "Vessel.Infrastructure/Venues/Lighter/LighterReader.Account.cs|980f257a57d5846f41e59e1d79fafb13929ea348e0eae3a28daf7132f4fe286d",
+            "Vessel.Infrastructure/Venues/Lighter/LighterReader.Account.cs|f074918f528ce6faa19ada092244639377c9eb3603e338a3cb8057b9a2ba2913",
+            "Vessel.Infrastructure/Venues/Risex/RisexReader.cs|980f257a57d5846f41e59e1d79fafb13929ea348e0eae3a28daf7132f4fe286d",
+            "Vessel.Infrastructure/Venues/Risex/RisexReader.cs|f074918f528ce6faa19ada092244639377c9eb3603e338a3cb8057b9a2ba2913",
+            // Not SQL: design-time DbContext factory error messages.
+            "Vessel.Identity/IdentityDbContext.cs|e1b7a668a5e3ab1cf3318d78321688ad059827b7d660f00bda0ac249e2afee69",
+            "Vessel.Persistence/VesselDbContextFactory.cs|e1b7a668a5e3ab1cf3318d78321688ad059827b7d660f00bda0ac249e2afee69",
+            // Not SQL: identity command names "reset-after-restore" and "revoke-sessions".
+            "Vessel.Identity/IdentityAdministration.cs|de972956ff71edac782269c6c600a1fd82dc90c14f4363d70e3287828933c5db",
+            "Vessel.Identity/IdentityAdministration.cs|d0a010615ff67a2fdcaabb9a9ea71fda1e68f0cb866d887bd960e2daac2ce4e2",
+            "Vessel.Identity/IdentityCommands.cs|de972956ff71edac782269c6c600a1fd82dc90c14f4363d70e3287828933c5db",
+            "Vessel.Identity/IdentityCommands.cs|d0a010615ff67a2fdcaabb9a9ea71fda1e68f0cb866d887bd960e2daac2ce4e2",
+            // Not SQL: reset-after-restore completion message.
+            "Vessel.Identity/IdentityAdministration.cs|05bcbd54e5313ea9342913bae8c9ca458edd7ac36a0dfdcf0493ff7afc0aab60",
+            // Not SQL: identity command usage text ("--user", "--address" … and words such as "revoke").
+            "Vessel.Identity/IdentityCommands.cs|077a1423296023055128d9ed1c94d99ecfbd28849c50709809d3ca8d2d47489b",
         ];
-        var actual = new List<string>();
+        // One entry per distinct path and statement text: repeating an already reviewed literal needs no new review.
+        Assert.Equal(reviewed.Length, reviewed.Distinct().Count());
+        var actual = new SortedSet<string>(StringComparer.Ordinal);
         foreach (var path in Sources().Where(p => !p.Contains("/Migrations/", StringComparison.Ordinal)))
         foreach (Match literal in Regex.Matches(File.ReadAllText(path),
                      @"\$?""""""[\s\S]*?""""""|\$?@""(?:[^""]|"""")*""|\$?""(?:\\.|[^""\\])*"""))
         {
-            if (!OwnerlessSqlClassifier.RequiresReview(OwnerlessSqlClassifier.Text(literal.Value))) continue;
+            if (!OwnerlessSqlClassifier.LiteralRequiresReview(literal.Value)) continue;
             var sql = literal.Value.TrimStart('$', '@', '"').TrimEnd('"').Trim();
             var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Regex.Replace(sql, @"\s+", " "))));
             actual.Add(Path.GetRelativePath(SourceRoot(), path).Replace('\\', '/') + "|" + hash);
         }
-        Assert.True(actual.Order().SequenceEqual(reviewed.Order()),
+        Assert.True(actual.SetEquals(reviewed),
             "Unreviewed: " + string.Join(", ", actual.Except(reviewed)) + "; stale: " + string.Join(", ", reviewed.Except(actual)));
     }
 
