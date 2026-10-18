@@ -1,10 +1,13 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MonitorStreamEvent } from '@/api/monitor'
-import type { WorkspaceApi } from '@/api/workspace'
+import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { eventCursor, eventFrame, monitorEventFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
 import { ApiError } from '@/api/errors'
 import { notificationCursor, notificationFixture, notificationHeadFixture } from '@/test/notification-fixture'
+import { sessionFixture } from '@/test/identity-fixture'
+import { channelBus } from '@/test/session-channel'
+import { SessionController } from '@/features/identity/session'
 import { reconnectDelay, stableStream, useMonitorEvents, type NotificationStreamHandlers } from './useMonitorEvents'
 
 /** The head the client reads before any stored state; the fixture event lies after it. */
@@ -288,6 +291,45 @@ describe('the notification feed on the shared stream', () => {
     cursor: notificationCursor(sequence, reset), unreadCount: 1, enabled: true, notification: notificationFixture } }) as const
   const status = (state: 'ready' | 'reset', sequence: number, reset = 0) =>
     ({ type: 'notifications', status: { state, nextCursor: notificationCursor(sequence, reset), unreadCount: 2, enabled: true } }) as const
+
+  it('resumes both cursors in Wallet mode after the server closes a stream at its maximum lifetime', async () => {
+    const streams: { path: string; body: ReadableStreamDefaultController<Uint8Array> }[] = []
+    const encoder = new TextEncoder()
+    const fetcher = vi.fn((path: string) => {
+      if (path.startsWith('/api/events/stream?')) {
+        const body = new ReadableStream<Uint8Array>({ start(body) { streams.push({ path, body }) } })
+        return Promise.resolve(new Response(body, { headers: { 'Content-Type': 'text/event-stream' } }))
+      }
+      return Promise.resolve(new Response(JSON.stringify(path.startsWith('/api/events?')
+        ? { events: [], nextCursor: headSequence, resetRequired: false }
+        : path === '/api/notifications/head' ? notificationHeadFixture : monitorSummaryFixture)))
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const tab = new SessionController({ session: sessionFixture, channels: channelBus().factory, navigate: vi.fn() })
+    const api = createWorkspaceApi(tab.credentials(), tab.handleFailure), feed = handlers()
+    const view = renderHook(() => useMonitorEvents(api, true, vi.fn(), 0, feed))
+    await advance(0)
+    const send = (event: string, data: unknown, id = '') => streams[0]!.body.enqueue(encoder.encode(
+      `${id ? `id: ${id}\n` : ''}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
+    ))
+    send('status', { state: 'ready', nextCursor: headSequence })
+    send('notifications', { state: 'ready', nextCursor: notificationHeadFixture.nextCursor, unreadCount: 0, enabled: true })
+    send('event', monitorEventFixture, eventCursor(monitorEventFixture.sequence))
+    send('notification', item(11).frame)
+    await advance(stableStream + 1)
+    // StreamMaxLifetime ends with EOF, not an auth failure. Reconnect without losing either feed.
+    streams[0]!.body.close()
+    await advance(2000)
+    expect(streams).toHaveLength(2)
+    const resumed = new URL(streams[1]!.path, 'https://vessel.test').searchParams
+    expect(resumed.get('after')).toBe(eventCursor(monitorEventFixture.sequence))
+    expect(resumed.get('notificationsAfter')).toBe(notificationCursor(11))
+    expect(feed.onFrame).toHaveBeenCalledOnce()
+    for (const [, init] of vi.mocked(fetch).mock.calls) {
+      expect(init).toMatchObject({ credentials: 'same-origin', referrerPolicy: 'same-origin', headers: { 'X-Vessel-User': sessionFixture.user.id } })
+    }
+    view.unmount(); tab.dispose()
+  })
 
   it('reads the notification head after the event head and streams both cursors', async () => {
     const { api, connections } = client()

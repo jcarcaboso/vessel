@@ -5,6 +5,8 @@ import { createApiCall, sessionChangedRead, sessionChangedWrite, type AuthFailur
 import { createWorkspaceApi } from './workspace'
 import { candleSeriesFixture } from '@/test/workspace-fixture'
 import { sessionFixture } from '@/test/identity-fixture'
+import { eventCursor, monitorEventFixture } from '@/test/monitor-fixture'
+import { notificationCursor, notificationHeadFixture, notificationWith } from '@/test/notification-fixture'
 
 const userId = sessionFixture.user.id
 const sessionId = sessionFixture.session.id
@@ -112,6 +114,56 @@ describe('session generation', () => {
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
+  it('discards a notification head from an older session, including its 401, and rereads under the current one', async () => {
+    const tab = generation(), failure = vi.fn()
+    const fetch = vi.fn()
+      .mockImplementationOnce(async () => { tab.advance(); return problem(401, 'session-expired') })
+      .mockResolvedValueOnce(json({ ...notificationHeadFixture, unreadCount: 2 }))
+    vi.stubGlobal('fetch', fetch)
+    const api = createWorkspaceApi({ kind: 'session', userId, sessionId, generation: tab }, failure)
+    await expect(api.notificationHead()).resolves.toMatchObject({ unreadCount: 2 })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(failure).not.toHaveBeenCalled()
+  })
+
+  it('never replays a notification write answered under an older session', async () => {
+    const tab = generation(), changed = vi.fn()
+    vi.stubGlobal('fetch', vi.fn(async () => { tab.advance(); return new Response(null, { status: 202 }) }))
+    const api = createWorkspaceApi({ kind: 'session', userId, sessionId, generation: tab })
+    onApiEvent(api, changed)
+    await expect(api.requestTestNotification()).rejects.toMatchObject({ code: 'session-changed', message: sessionChangedWrite })
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(changed).toHaveBeenCalledExactlyOnceWith({ type: 'session-changed' })
+  })
+
+  it('keeps the session failure code and its copy on notification calls', async () => {
+    const failure = vi.fn()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(problem(403, 'user-suspended')))
+    const api = createWorkspaceApi({ kind: 'session', userId, sessionId, generation: generation() }, failure)
+    await expect(api.notificationHead()).rejects.toMatchObject({
+      code: 'user-suspended', message: 'The operator of this server has suspended this journal. Contact them to restore access.',
+    })
+    expect(failure).toHaveBeenCalledExactlyOnceWith({ status: 403, code: 'user-suspended', generation: 0 })
+  })
+
+  it.each(['head', 'claim', 'test'] as const)('keeps a pending notification %s and later calls pending after session end', async method => {
+    const ended = new AbortController(), tab = { ...generation(), ended: ended.signal }
+    let answer!: (response: Response) => void
+    const fetch = vi.fn(() => new Promise<Response>(resolve => { answer = resolve }))
+    vi.stubGlobal('fetch', fetch)
+    const failure = vi.fn(), settled = vi.fn()
+    const api = createWorkspaceApi({ kind: 'session', userId, sessionId, generation: tab }, failure)
+    const run = () => method === 'head' ? api.notificationHead() : method === 'claim' ? api.claimNotifications() : api.requestTestNotification()
+    void run().then(settled, settled)
+    ended.abort()
+    answer(method === 'head' ? json(notificationHeadFixture) : method === 'claim' ? json({ popups: [notificationWith(1)], more: 0 }) : new Response(null, { status: 202 }))
+    void run().then(settled, settled)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(settled).not.toHaveBeenCalled()
+    expect(failure).not.toHaveBeenCalled()
+  })
+
   it('leaves calls without a generation, and Token mode, exactly as before', async () => {
     const fetch = vi.fn().mockImplementation(async () => json('ok'))
     vi.stubGlobal('fetch', fetch)
@@ -204,7 +256,7 @@ describe('generation-bound streams', () => {
     await done
   })
 
-  it('reopens the monitor stream after the last cursor it delivered', async () => {
+  it('reopens the multiplexed stream with both independent cursors after a new session generation', async () => {
     const tab = generation()
     const head = `${'a'.repeat(32)}.41`
     const paths: string[] = []
@@ -217,14 +269,56 @@ describe('generation-bound streams', () => {
     }))
     const frames: unknown[] = []
     const stop = new AbortController()
-    const done = createWorkspaceApi({ kind: 'session', userId, sessionId, generation: tab }).monitorStream('0', stop.signal, value => frames.push(value))
+    const done = createWorkspaceApi({ kind: 'session', userId, sessionId, generation: tab })
+      .monitorStream('0', stop.signal, value => frames.push(value), notificationCursor(10))
     await vi.waitFor(() => expect(streams).toHaveLength(1))
     streams[0]!.push(frame('status', { state: 'reset', nextCursor: head }))
-    await vi.waitFor(() => expect(frames).toHaveLength(1))
+    streams[0]!.push(frame('notifications', { state: 'ready', nextCursor: notificationCursor(10), unreadCount: 1, enabled: true }))
+    streams[0]!.push(frame('notification', { cursor: notificationCursor(11), unreadCount: 2, enabled: true, notification: notificationWith(1) }))
+    streams[0]!.push(`id: ${eventCursor('42')}\n${frame('event', monitorEventFixture)}`)
+    await vi.waitFor(() => expect(frames).toHaveLength(4))
     tab.advance()
+    try { streams[0]!.push(frame('notification', { cursor: notificationCursor(12), unreadCount: 3, enabled: true, notification: notificationWith(2) })) } catch { /* cancelled */ }
     await vi.waitFor(() => expect(streams).toHaveLength(2))
-    expect(new URL(paths[1]!, 'https://vessel.test').searchParams.get('after')).toBe(head)
+    const resumed = new URL(paths[1]!, 'https://vessel.test').searchParams
+    expect(resumed.get('after')).toBe(eventCursor('42'))
+    expect(resumed.get('notificationsAfter')).toBe(notificationCursor(11))
+    // A notification reset changes only that feed's cursor, even when its sequence moves backwards.
+    streams[1]!.push(frame('notifications', { state: 'reset', nextCursor: notificationCursor(1, 1), unreadCount: 0, enabled: true }))
+    await vi.waitFor(() => expect(frames).toHaveLength(5))
+    tab.advance()
+    await vi.waitFor(() => expect(streams).toHaveLength(3))
+    const reset = new URL(paths[2]!, 'https://vessel.test').searchParams
+    expect(reset.get('after')).toBe(eventCursor('42'))
+    expect(reset.get('notificationsAfter')).toBe(notificationCursor(1, 1))
+    expect(frames).toHaveLength(5) // No queued notification from the old generation.
+    for (const [, init] of vi.mocked(fetch).mock.calls) {
+      expect(init).toMatchObject({ credentials: 'same-origin', referrerPolicy: 'same-origin', headers: { 'X-Vessel-User': userId } })
+    }
     stop.abort()
     await done
+  })
+
+  it.each(['headers', 'body'] as const)('settles the notification stream quietly when the session ends during %s and never reopens', async phase => {
+    const ended = new AbortController(), tab = { ...generation(), ended: ended.signal }
+    const stream = liveStream(undefined), onFrame = vi.fn()
+    vi.stubGlobal('fetch', vi.fn((_path: string, init: RequestInit) => phase === 'body' ? Promise.resolve(stream.response)
+      : new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true }))))
+    const api = createWorkspaceApi({ kind: 'session', userId, sessionId, generation: tab })
+    const done = api.monitorStream(eventCursor('1'), new AbortController().signal, onFrame, notificationCursor(1))
+    await vi.waitFor(() => expect(tab.listeners()).toBe(1))
+    if (phase === 'body') {
+      stream.push(frame('notifications', { state: 'ready', nextCursor: notificationCursor(1), unreadCount: 0, enabled: true }))
+      await vi.waitFor(() => expect(onFrame).toHaveBeenCalledOnce())
+    }
+    ended.abort()
+    await expect(done).resolves.toBeUndefined()
+    onFrame.mockClear()
+    try { stream.push(frame('notification', { cursor: notificationCursor(2), unreadCount: 1, enabled: true, notification: notificationWith(1) })) } catch { /* cancelled */ }
+    tab.advance()
+    await api.monitorStream(eventCursor('1'), new AbortController().signal, onFrame, notificationCursor(1))
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(onFrame).not.toHaveBeenCalled()
+    expect(tab.listeners()).toBe(0)
   })
 })

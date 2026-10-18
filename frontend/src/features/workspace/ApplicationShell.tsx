@@ -123,7 +123,7 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
   }, [api, disconnectedApi, playsSession, playsLifetime.work])
   // A forced sign-out drops the exit state first, so the reload never asks about unsaved work.
   const registerExitState = identity?.registerExitState
-  useLayoutEffect(() => registerExitState?.(() => { exitState.current = null }), [registerExitState])
+  useLayoutEffect(() => registerExitState?.(() => { exitState.current = null; setDisconnectedApi(api) }), [api, registerExitState])
   useEffect(() => {
     if (disconnectedApi === api) return
     const work = playsLifetime.work

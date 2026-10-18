@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createSessionAuthApi } from '@/api/auth'
 import { emitApiEvent } from '@/api/events'
-import { createWorkspaceApi } from '@/api/workspace'
+import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { noticeKey, notices, SessionController, workspaceNotices } from '@/features/identity/session'
 import type { ShellIdentity } from '@/features/identity/types'
 import { createPlaysSession, type PlaysSession } from '@/features/plays/saved'
@@ -12,6 +12,7 @@ import { secondWalletFixture, sessionFixture, sessionRowsFixture, walletFixture 
 import { channelBus } from '@/test/session-channel'
 import { systemFixture } from '@/test/system-fixture'
 import { emptyOverview, playApiStubs } from '@/test/workspace-fixture'
+import { notificationHeadFixture, notificationWith } from '@/test/notification-fixture'
 import { ApplicationShell } from './ApplicationShell'
 
 type PlaysProps = { session: PlaysSession; onSession: (session: PlaysSession) => void; workRef: RefObject<symbol | null> }
@@ -36,22 +37,25 @@ function dirty() {
   act(() => plays.onSession({ ...session, draft: { ...session.draft, leverage: '3' } }))
 }
 
-async function mount(role: 'member' | 'operator' = 'member', extra: Partial<ShellIdentity> = {}) {
-  const session = { ...sessionFixture, user: { ...sessionFixture.user, role } }
+async function mount(role: 'member' | 'operator' = 'member', extra: Partial<ShellIdentity> = {},
+  options: { userId?: string; api?: Partial<WorkspaceApi> } = {}) {
+  const session = { ...sessionFixture, user: { ...sessionFixture.user, role, id: options.userId ?? sessionFixture.user.id } }
   const navigate = vi.fn()
-  const controller = new SessionController({ session, channels: channelBus().factory, navigate })
+  const bus = channelBus()
+  const controller = new SessionController({ session, channels: bus.factory, navigate })
   controller.markLive()
-  const api = { ...createWorkspaceApi(controller.credentials(), controller.handleFailure), ...playApiStubs(), overview: vi.fn().mockResolvedValue(emptyOverview) }
+  const api = { ...createWorkspaceApi(controller.credentials(), controller.handleFailure), ...playApiStubs(),
+    overview: vi.fn().mockResolvedValue(emptyOverview), ...options.api }
   const identity: ShellIdentity = {
     session, walletName: 'Rabby Wallet', auth: createSessionAuthApi(controller.credentials(), controller.handleFailure),
     registerExitState: clear => controller.registerExitState(clear), onProfile: vi.fn(), endSession: () => controller.teardown(notices.ended),
     ...extra,
   }
   const disconnect = vi.fn()
-  render(<ApplicationShell system={systemFixture} api={api} disconnect={disconnect} identity={identity} />)
+  const view = render(<ApplicationShell system={systemFixture} api={api} disconnect={disconnect} identity={identity} />)
   await screen.findByText('Test Play editor')
   await waitFor(() => expect(plays).toBeDefined())
-  return { identity, navigate, disconnect, api, user: userEvent.setup() }
+  return { identity, navigate, disconnect, api, controller, bus, view, user: userEvent.setup() }
 }
 
 beforeEach(() => {
@@ -66,15 +70,19 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe('Wallet-mode session teardown in the shell', () => {
-  it('drops unsaved-work protection on a 401, so the reload never asks, and leaves the notice', async () => {
-    const { identity, navigate } = await mount()
+  it.each(['profile', 'notifications'] as const)('drops unsaved-work protection on a %s 401, so the reload never asks, and leaves the notice', async source => {
+    const { identity, navigate, controller } = await mount()
     dirty()
     expect(unload()).toBe(true)
-    routes['/api/auth/sessions'] = () => problem(401, 'session-expired')
-    await expect(identity.auth.sessions()).rejects.toMatchObject({ status: 401 })
+    routes[source === 'profile' ? '/api/auth/sessions' : '/api/notifications/head'] = () => problem(401, 'session-expired')
+    await act(async () => {
+      await expect(source === 'profile' ? identity.auth.sessions()
+        : createWorkspaceApi(controller.credentials(), controller.handleFailure).notificationHead()).rejects.toMatchObject({ status: 401 })
+    })
     expect(navigate).toHaveBeenCalledOnce()
     expect(unload()).toBe(false)
     expect(sessionStorage.getItem(noticeKey)).toBe(notices.ended)
+    expect(screen.queryByRole('complementary', { name: 'Main navigation' })).toBeNull()
   })
 
   it('keeps the workspace and its protection for a 403 that is not about the session', async () => {
@@ -161,6 +169,14 @@ describe('account menu', () => {
     const sessions = screen.getByRole('region', { name: 'Sessions' })
     expect(within(sessions).getByText('This browser')).toBeVisible()
     expect(within(sessions).getByRole('button', { name: 'Sign out Safari on iOS session' })).toBeVisible()
+    await user.click(screen.getByRole('tab', { name: 'Appearance' }))
+    expect(await screen.findByRole('heading', { name: 'Notifications', level: 2 })).toBeVisible()
+    expect(await screen.findByRole('switch', { name: 'In-app notifications' })).toBeVisible()
+    expect(screen.getByRole('tab', { name: 'Profile & sign-in' })).toBeVisible()
+    const sidebar = screen.getByRole('complementary', { name: 'Main navigation' })
+    const bottom = within(sidebar).getByRole('link', { name: 'Notifications' }).closest('.shell-sidebar-bottom') as HTMLElement
+    expect(within(bottom).getAllByRole('link').map(link => link.getAttribute('href'))).toEqual(['#notifications', '#settings'])
+    expect(within(document.querySelector('.shell-header') as HTMLElement).getByRole('link', { name: 'Notifications' })).toHaveAttribute('href', '#notifications')
   })
 
   it('opens the step-up dialog when removing a wallet needs a fresh signature, without tearing down', async () => {
@@ -175,4 +191,40 @@ describe('account menu', () => {
     expect(await screen.findByRole('dialog', { name: 'Confirm with a linked wallet' })).toBeVisible()
     expect(navigate).not.toHaveBeenCalled()
   })
+})
+
+it('reloads rather than adopting another user and clears the previous badge, notification page, filters and popups', async () => {
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+  const old = notificationWith(1)
+  const first = await mount('member', {}, { api: {
+    notificationHead: vi.fn().mockResolvedValue({ ...notificationHeadFixture, unreadCount: 1 }),
+    claimNotifications: vi.fn().mockResolvedValue({ popups: [old], more: 0 }),
+    notifications: vi.fn().mockResolvedValue({ items: [old], page: 1, pageSize: 25, total: 1, unreadTotal: 1, allTotal: 1 }),
+  } })
+  dirty()
+  const sidebar = screen.getByRole('complementary', { name: 'Main navigation' })
+  const entry = await within(sidebar).findByRole('link', { name: 'Notifications, 1 unread' })
+  expect(within(entry).getByText('1')).toHaveClass('notification-badge')
+  expect(within(document.querySelector('.shell-header') as HTMLElement).getByRole('link', { name: 'Notifications, 1 unread' })).toBeInTheDocument()
+  await first.user.click(entry)
+  await first.user.click(await screen.findByRole('tab', { name: /^All/ }))
+  await waitFor(() => expect(screen.getByRole('tab', { name: /^All/ })).toHaveAttribute('aria-selected', 'true'))
+  expect(document.querySelector('[data-notification-row]')).not.toBeNull()
+  expect(within(document.querySelector('.notification-viewport') as HTMLElement).getByText('Notification 1')).toBeInTheDocument()
+  act(() => first.bus.send({ type: 'signed-in', userId: '7d2e4f61-3a7b-4c85-b0e1-6f8a2d5c7b34', sessionId: secondWalletFixture.id }))
+  expect(first.navigate).toHaveBeenCalledExactlyOnceWith(`${window.location.origin}/`)
+  expect(unload()).toBe(false)
+  expect(screen.queryByRole('complementary', { name: 'Main navigation' })).toBeNull()
+  expect(screen.queryByText('Notification 1')).toBeNull()
+  expect(sessionStorage.getItem(noticeKey)).toBe(notices.otherUser)
+  first.view.unmount(); first.controller.dispose()
+  // A real location.replace creates fresh module/component state. Remount the shell as the new user's load.
+  window.history.replaceState(null, '', '/#plays')
+  const second = await mount('member', {}, { userId: '7d2e4f61-3a7b-4c85-b0e1-6f8a2d5c7b34' })
+  await second.user.click(within(screen.getByRole('complementary', { name: 'Main navigation' })).getByRole('link', { name: 'Notifications' }))
+  expect(await screen.findByText('You are all caught up. No unread notifications.')).toBeInTheDocument()
+  expect(screen.getByRole('tab', { name: /^Unread/ })).toHaveAttribute('aria-selected', 'true')
+  expect(screen.queryByText('Notification 1')).toBeNull()
+  expect(document.querySelector('.notification-badge')).toBeNull()
+  expect(screen.getAllByRole('link', { name: 'Notifications' })).toHaveLength(2)
 })

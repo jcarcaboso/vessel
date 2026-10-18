@@ -1,9 +1,11 @@
+import { useEffect } from 'react'
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { WorkspaceApi } from '@/api/workspace'
+import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import type { InAppNotification, NotificationLink } from '@/api/notifications'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { notificationCursor, notificationFixture, notificationHeadFixture, notificationWith } from '@/test/notification-fixture'
+import { sessionFixture } from '@/test/identity-fixture'
 import { useInAppNotifications, type InAppNotifications } from './useInAppNotifications'
 
 let visibility: DocumentVisibilityState = 'visible'
@@ -80,6 +82,47 @@ it('withdraws old-session popups when the API is replaced', async () => {
 })
 
 describe('in-app notification popups', () => {
+  it('uses owner-scoped server claims across Wallet tabs and reloads, with no browser marker or read on timeout', async () => {
+    // Stand-in for the server's atomic, owner-scoped shown_at claim; the browser must not invent its own marker.
+    const shown = new Set<string>()
+    const fetcher = vi.fn((_path: string, init: RequestInit) => {
+      const owner = new Headers(init.headers).get('X-Vessel-User')!
+      const popups = shown.has(owner) ? [] : [notificationWith(1)]
+      shown.add(owner)
+      return Promise.resolve(new Response(JSON.stringify({ popups, more: 0 })))
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const clientFor = (userId: string) => createWorkspaceApi({ kind: 'session', userId, sessionId: sessionFixture.session.id })
+    function Harness({ api }: { api: WorkspaceApi }) {
+      const hub = useInAppNotifications({ api, active: true, onLink: vi.fn(), onOpenPage: vi.fn() })
+      useEffect(() => { hub.handlers.onHead({ ...notificationHeadFixture, unreadCount: 1 }) }, [hub.handlers])
+      return <span>{hub.status.unreadCount} unread</span>
+    }
+    const tree = (userId: string) => <NotificationProvider><Harness api={clientFor(userId)} /></NotificationProvider>
+    const first = render(tree(sessionFixture.user.id))
+    const otherTab = render(tree(sessionFixture.user.id))
+    await flush()
+    expect(screen.getAllByText('Notification 1')).toHaveLength(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000) })
+    expect(screen.queryByText('Notification 1')).toBeNull()
+    expect(screen.getAllByText('1 unread')).toHaveLength(2)
+    first.unmount(); otherTab.unmount()
+    const reloaded = render(tree(sessionFixture.user.id))
+    await flush()
+    expect(screen.queryByText('Notification 1')).toBeNull()
+    reloaded.unmount()
+    render(tree('7d2e4f61-3a7b-4c85-b0e1-6f8a2d5c7b34'))
+    await flush()
+    expect(screen.getByText('Notification 1')).toBeInTheDocument()
+    expect(fetcher).toHaveBeenCalledTimes(4)
+    for (const [path, init] of fetcher.mock.calls) {
+      expect(path).toBe('/api/notifications/claim') // Timers never mark anything read.
+      expect(init).toMatchObject({ method: 'POST', credentials: 'same-origin' })
+    }
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(0)
+  })
+
   it('claims at start-up only while visible and focused, then shows the claimed popups once', async () => {
     const api = client([{ popups: [notificationWith(1, { severity: 'critical' })], more: 0 }])
     const { hub } = setup(api)

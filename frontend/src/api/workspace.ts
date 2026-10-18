@@ -549,7 +549,7 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     return `/api/evidence/${id}`
   }
   const none = (v: unknown): v is undefined => v === undefined
-  const notificationRequest = { timeout: 10_000, notFound: 'This notification is no longer available.',
+  const notificationRequest = { timeout: 10_000, notFound: 'This notification is no longer available.', codeMessage,
     unavailable: 'Notifications are unavailable. Check the API and try again.', invalidData: 'The API returned incompatible notification data.' }
   // A conflict asks the caller to reload, so it gets its own fixed text and stays distinguishable by status.
   const conflict = <T,>(request: Promise<T>, message: string) => request.catch((cause: unknown) => {
