@@ -210,6 +210,11 @@ or assume RISEx reported PnL excludes funding.
 | S3-compatible evidence storage | An object-store interface with a local-filesystem implementation. |
 | Multi-user onboarding or order execution | One configured owner and read-only venue access. No venue signing or trading. |
 
+October 17, 2026: wallet sign-in for several users is analysed in the
+[multi-user plan](architecture/multi-user-wallet-auth.md), with screens in
+[wallet sign-in design](design/wallet-sign-in/README.md). It is a draft for
+owner decisions, not implemented.
+
 The [backend review](architecture/backend-review.md) and
 [strategy plan](architecture/strategies-plan.md) describe further work, not
 additional running features. [Release packaging](../deploy/README.md) documents
