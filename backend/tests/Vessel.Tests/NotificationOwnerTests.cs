@@ -51,12 +51,18 @@ public sealed class NotificationOwnerTests
             {
                 Assert.Equal(HttpStatusCode.OK, response.StatusCode);
                 using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(stop.Token));
-                while (await reader.ReadLineAsync(stop.Token) != "event: notification") { }
-                var data = (await reader.ReadLineAsync(stop.Token))!;
-                Assert.StartsWith("data: ", data); // Notification frames must not set the event feed's id.
-                using var json = JsonDocument.Parse(data[6..]);
-                Assert.Equal(item.Id, json.RootElement.GetProperty("notification").GetProperty("id").GetGuid());
-                Assert.Equal(1, json.RootElement.GetProperty("unreadCount").GetInt32());
+                var notifications = new List<Guid>();
+                while (await reader.ReadLineAsync(stop.Token) is var line && line != ": keepalive")
+                {
+                    Assert.NotNull(line);
+                    if (line != "event: notification") continue;
+                    var data = (await reader.ReadLineAsync(stop.Token))!;
+                    Assert.StartsWith("data: ", data); // Notification frames must not set the event feed's id.
+                    using var json = JsonDocument.Parse(data[6..]);
+                    notifications.Add(json.RootElement.GetProperty("notification").GetProperty("id").GetGuid());
+                    Assert.Equal(1, json.RootElement.GetProperty("unreadCount").GetInt32());
+                }
+                Assert.Equal(item.Id, Assert.Single(notifications));
                 await stop.CancelAsync();
             }
             var claim = (await (await client.PostAsync("/api/notifications/claim", null))
