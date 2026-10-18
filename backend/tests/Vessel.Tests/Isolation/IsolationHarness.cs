@@ -40,8 +40,8 @@ internal sealed class TestOwnerAuthHandler(IOptionsMonitor<AuthenticationSchemeO
     public const string Header = "X-Vessel-Test-Owner";
 
     /// <summary>
-    /// The identity's authentication type, as the production handler sets it. Wallet-mode cases switch this to the
-    /// session scheme's value when this suite moves onto that stack.
+    /// The identity's authentication type, as the production bearer handler sets it; the session scheme keeps the same
+    /// type. Wallet-mode cases do not use this handler: <see cref="WalletIsolationApi"/> runs the real session scheme.
     /// </summary>
     public const string AuthenticationType = BearerTokenHandler.SchemeName;
 
