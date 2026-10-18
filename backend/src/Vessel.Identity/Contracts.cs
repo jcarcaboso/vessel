@@ -1,0 +1,26 @@
+using System.Text.Json.Serialization;
+
+namespace Vessel.Identity;
+
+public sealed record ChallengeRequest([property: JsonRequired] string? Address);
+public sealed record VerifyRequest([property: JsonRequired] Guid ChallengeId, [property: JsonRequired] string? Signature,
+    [property: JsonRequired] bool Remember);
+public sealed record RegisterRequest([property: JsonRequired] string? Registration, [property: JsonRequired] string? DisplayName,
+    string? Invitation, [property: JsonRequired] bool Remember);
+public sealed record SignOutRequest([property: JsonRequired] Guid ExpectedSessionId);
+public sealed record ChallengeDto(Guid ChallengeId, string Message, DateTimeOffset ExpiresAt);
+public sealed record UserDto(Guid Id, string DisplayName, string Role, int Revision);
+public sealed record WalletDto(Guid Id, string Address, string? Label, DateTimeOffset AddedAt, DateTimeOffset? LastUsedAt, bool Current);
+public sealed record SessionDetails(Guid Id, DateTimeOffset CreatedAt, DateTimeOffset IdleExpiresAt, DateTimeOffset AbsoluteExpiresAt, bool Remember);
+public sealed record SessionDto(UserDto User, WalletDto Wallet, SessionDetails Session, bool AdoptsLegacyPreferences);
+public sealed record IssuedSession(string Token, SessionDto Session);
+public sealed record VerificationResult(string Status, IssuedSession? SignedIn = null, string? Registration = null,
+    bool? RequiresInvitation = null, DateTimeOffset? ExpiresAt = null);
+public sealed record AuthenticatedSession(IdentitySession Session, IdentityUser User, UserWallet Wallet)
+{
+    public SessionDto ToDto(IdentitySettings settings) => new(
+        new(User.Id, User.DisplayName, User.Role, User.Revision),
+        new(Wallet.Id, WalletSignatures.Checksum(Wallet.Address), Wallet.Label, Wallet.AddedAt, Wallet.LastUsedAt, true),
+        new(Session.Id, Session.CreatedAt, Session.IdleExpiresAt, Session.AbsoluteExpiresAt, Session.Remember),
+        User.Id == settings.OwnerId);
+}

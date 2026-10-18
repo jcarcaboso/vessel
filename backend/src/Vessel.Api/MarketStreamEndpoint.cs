@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
 using Vessel.Application.MarketData;
+using Vessel.Application.Ownership;
+using Vessel.Identity;
 
 namespace Vessel.Api;
 
@@ -15,7 +17,10 @@ public static class MarketStreamEndpoint
     public static async Task StreamAsync(Guid id, string? instrument, string? interval, MarketStreamService service,
         IOptions<JsonOptions> json, HttpContext context)
     {
-        var aborted = context.RequestAborted;
+        await using var validation = new PrincipalRevalidation(
+            context.RequestServices.GetRequiredService<IPrincipalValidity>(),
+            context.RequestServices.GetRequiredService<TimeProvider>(), context.RequestAborted);
+        var aborted = validation.Token;
         // Failures here propagate to the ProblemDetails middleware as normal responses.
         using var session = await service.OpenAsync(id, instrument, interval, aborted);
 

@@ -3,16 +3,42 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Vessel.Api;
 using Vessel.Application.Events;
+using Vessel.Application.Ownership;
 using Vessel.Application.Workspace;
 using Vessel.Persistence.Events;
 
 namespace Vessel.Tests;
 
-public sealed class VesselEventStreamTests
+public sealed class VesselEventStreamTests : IDisposable
 {
+    private readonly ServiceProvider services = new ServiceCollection()
+        .AddSingleton<IPrincipalValidity, AlwaysValidPrincipal>().BuildServiceProvider();
+    public void Dispose() => services.Dispose();
+
+    [Fact]
+    public async Task Missing_principal_validity_fails_closed_before_reading_and_releases_stream_capacity()
+    {
+        var owner = new CoreOwner(Guid.NewGuid());
+        await using var missing = new ServiceCollection().BuildServiceProvider();
+        var reader = new FixedReader();
+        var context = Context(new MemoryStream(), default);
+        context.RequestServices = missing;
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => VesselEventEndpoints.StreamAsync(
+            "0", reader, owner, Options.Create(new VesselEventSettings()), Options.Create(new JsonOptions()), context));
+        Assert.Contains(nameof(IPrincipalValidity), error.Message);
+        Assert.Equal(0, reader.Calls);
+        Assert.False(context.Response.HasStarted);
+        using var cancellation = new CancellationTokenSource();
+        var streams = Enumerable.Range(0, 4).Select(_ => Open(owner, reader, cancellation.Token)).ToArray();
+        Assert.All(streams, stream => Assert.False(stream.IsCompleted));
+        await cancellation.CancelAsync();
+        await Task.WhenAll(streams);
+    }
+
     [Fact]
     public async Task Stream_bounds_four_sessions_per_owner_and_releases_all_on_disconnect()
     {
@@ -91,19 +117,23 @@ public sealed class VesselEventStreamTests
         await stream;
     }
 
-    private static Task Open(CoreOwner owner, IVesselEventReader reader, CancellationToken ct) =>
+    private Task Open(CoreOwner owner, IVesselEventReader reader, CancellationToken ct) =>
         VesselEventEndpoints.StreamAsync("0", reader, owner, Options.Create(new VesselEventSettings()),
             Options.Create(new JsonOptions()), Context(new MemoryStream(), ct));
-    private static DefaultHttpContext Context(Stream body, CancellationToken ct)
+    private DefaultHttpContext Context(Stream body, CancellationToken ct)
     {
-        var context = new DefaultHttpContext { RequestAborted = ct };
+        var context = new DefaultHttpContext { RequestAborted = ct, RequestServices = services };
         context.Response.Body = body;
         return context;
     }
     private sealed class FixedReader(VesselEventPage? initial = null) : IVesselEventReader
     {
-        public Task<VesselEventPage> ReadAsync(string? after, int limit, CancellationToken ct) =>
-            Task.FromResult(initial ?? new([], after ?? "0", false));
+        public int Calls { get; private set; }
+        public Task<VesselEventPage> ReadAsync(string? after, int limit, CancellationToken ct)
+        {
+            Calls++;
+            return Task.FromResult(initial ?? new([], after ?? "0", false));
+        }
     }
     private sealed class FailingReader : IVesselEventReader
     {

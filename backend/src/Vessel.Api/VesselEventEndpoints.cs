@@ -1,5 +1,4 @@
 using Vessel.Application.Common;
-using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http.Json;
@@ -9,12 +8,15 @@ using Vessel.Application.Notifications;
 using Vessel.Application.Ownership;
 using Vessel.Application.Workspace;
 using Vessel.Persistence.Events;
+using Vessel.Identity;
 
 namespace Vessel.Api;
 
 public static class VesselEventEndpoints
 {
-    private static readonly ConcurrentDictionary<Guid, int> Streams = new();
+    private static readonly Dictionary<Guid, int> Streams = new();
+    private static readonly object StreamLock = new();
+    private static int totalStreams;
 
     public static IEndpointRouteBuilder MapVesselEvents(this IEndpointRouteBuilder endpoints)
     {
@@ -53,94 +55,99 @@ public static class VesselEventEndpoints
             throw new ProblemException(400, "Invalid event cursor.");
         if (notificationsAfter is not null && (notifications is null || !NotificationCursor.TryParse(notificationsAfter, out _)))
             throw new ProblemException(400, "Invalid notification cursor.");
-        if (!TryAcquire(owner.OwnerId))
+        if (!TryAcquire(owner.OwnerId, context.RequestServices.GetService<IdentitySettings>()?.MaxEventStreams ?? 64))
         {
-            context.Response.Headers.RetryAfter = "5";
-            throw new ProblemException(429, "At most four event streams may be open per owner.");
+            throw new ProblemException(429, "The event stream limit has been reached.", "rate-limited", 5);
         }
         var ownerId = owner.OwnerId;
-        var ct = context.RequestAborted;
         try
         {
-            // Validate/query both feeds before committing SSE headers so normal errors remain ProblemDetails.
-            var page = await reader.ReadAsync(after, 200, ct);
-            var feed = notifications is null ? null : await notifications(notificationsAfter, NotificationBatch, ct);
-            var notificationCursor = notificationsAfter;
-            context.Response.ContentType = "text/event-stream; charset=utf-8";
-            context.Response.Headers["X-Accel-Buffering"] = "no";
-            context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
-            await context.Response.StartAsync(ct);
-            async Task Frame(string type, object data, string? id = null)
+            await using var validation = new PrincipalRevalidation(
+                context.RequestServices.GetRequiredService<IPrincipalValidity>(),
+                context.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System, context.RequestAborted);
+            var ct = validation.Token;
+            try
             {
-                var resume = id is null ? "" : $"id: {id}\n";
-                await context.Response.WriteAsync($"event: {type}\n{resume}data: {JsonSerializer.Serialize(data, json.Value.SerializerOptions)}\n\n", ct);
-                await context.Response.Body.FlushAsync(ct);
-            }
-            // Ready must not acknowledge a page that has not been written to this stream yet. It carries the
-            // accepted cursor normalized with the stream epoch; reset carries where a reloaded client resumes.
-            var cursor = page.ResetRequired ? page.NextCursor : Accepted(after, page.NextCursor);
-            await Frame("status", new { state = page.ResetRequired ? "reset" : "ready", nextCursor = cursor });
-            // Bounded lifetime: expiry is checked before every event frame, so the response ends cleanly between frames
-            // (never mid-frame), even part-way through a page. Every written event frame carries its own resume cursor,
-            // so the browser reconnects from the last fully written frame and the unsent rest of the page is replayed.
-            var time = context.RequestServices?.GetService<TimeProvider>() ?? TimeProvider.System;
-            var started = time.GetTimestamp();
-            var lifetime = settings.Value.StreamMaxLifetime;
-            TimeSpan Remaining() => lifetime - time.GetElapsedTime(started);
-            if (feed is not null)
-                await Frame("notifications", new
+                // Validate/query both feeds before committing SSE headers so normal errors remain ProblemDetails.
+                var page = await reader.ReadAsync(after, 200, ct);
+                var feed = notifications is null ? null : await notifications(notificationsAfter, NotificationBatch, ct);
+                var notificationCursor = notificationsAfter;
+                context.Response.ContentType = "text/event-stream; charset=utf-8";
+                context.Response.Headers["X-Accel-Buffering"] = "no";
+                context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+                await context.Response.StartAsync(ct);
+                async Task Frame(string type, object data, string? id = null)
                 {
-                    state = feed.ResetRequired ? "reset" : "ready",
-                    nextCursor = feed.ResetRequired ? feed.NextCursor : notificationsAfter,
-                    unreadCount = feed.UnreadCount, enabled = feed.Enabled
-                });
-            while (!ct.IsCancellationRequested)
-            {
-                // A reset means reload state, not replay popups from retained history.
-                if (!page.ResetRequired)
-                    foreach (var message in page.Events)
-                    {
-                        if (Remaining() <= TimeSpan.Zero) return;
-                        await Frame("event", message, Resume(page.NextCursor, message.Sequence));
-                    }
-                cursor = page.NextCursor;
-                var notificationsBehind = false;
-                if (feed is not null)
-                {
-                    if (!feed.ResetRequired)
-                        foreach (var item in feed.Items)
-                        {
-                            // The same bounded lifetime: the browser resumes from the last notification frame it received.
-                            if (Remaining() <= TimeSpan.Zero) return;
-                            await Frame("notification", new { cursor = item.Cursor, unreadCount = feed.UnreadCount, enabled = feed.Enabled,
-                                notification = item.Notification });
-                        }
-                    notificationCursor = feed.NextCursor;
-                    notificationsBehind = feed.Items.Count == NotificationBatch;
-                }
-                if (page.Events.Count < 200 && !notificationsBehind)
-                {
-                    await context.Response.WriteAsync(": keepalive\n\n", ct);
+                    var resume = id is null ? "" : $"id: {id}\n";
+                    await context.Response.WriteAsync($"event: {type}\n{resume}data: {JsonSerializer.Serialize(data, json.Value.SerializerOptions)}\n\n", ct);
                     await context.Response.Body.FlushAsync(ct);
-                    var poll = TimeSpan.FromSeconds(settings.Value.StreamPollSeconds);
-                    var remaining = Remaining();
-                    if (remaining <= TimeSpan.Zero) break;
-                    await Task.Delay(remaining < poll ? remaining : poll, time, ct);
                 }
-                if (Remaining() <= TimeSpan.Zero) break;
-                page = await reader.ReadAsync(cursor, 200, ct);
-                if (page.ResetRequired)
-                    await Frame("status", new { state = "reset", nextCursor = page.NextCursor });
-                if (notifications is not null)
+                // Ready must not acknowledge a page that has not been written to this stream yet. It carries the
+                // accepted cursor normalized with the stream epoch; reset carries where a reloaded client resumes.
+                var cursor = page.ResetRequired ? page.NextCursor : Accepted(after, page.NextCursor);
+                await Frame("status", new { state = page.ResetRequired ? "reset" : "ready", nextCursor = cursor });
+                // Bounded lifetime: expiry is checked before every event frame, so the response ends cleanly between frames
+                // (never mid-frame), even part-way through a page. Every written event frame carries its own resume cursor,
+                // so the browser reconnects from the last fully written frame and the unsent rest of the page is replayed.
+                var time = context.RequestServices?.GetService<TimeProvider>() ?? TimeProvider.System;
+                var started = time.GetTimestamp();
+                var lifetime = settings.Value.StreamMaxLifetime;
+                TimeSpan Remaining() => lifetime - time.GetElapsedTime(started);
+                if (feed is not null)
+                    await Frame("notifications", new
+                    {
+                        state = feed.ResetRequired ? "reset" : "ready",
+                        nextCursor = feed.ResetRequired ? feed.NextCursor : notificationsAfter,
+                        unreadCount = feed.UnreadCount, enabled = feed.Enabled
+                    });
+                while (!ct.IsCancellationRequested)
                 {
-                    feed = await notifications(notificationCursor, NotificationBatch, ct);
-                    if (feed.ResetRequired)
-                        await Frame("notifications", new { state = "reset", nextCursor = feed.NextCursor,
-                            unreadCount = feed.UnreadCount, enabled = feed.Enabled });
+                    // A reset means reload state, not replay popups from retained history.
+                    if (!page.ResetRequired)
+                        foreach (var message in page.Events)
+                        {
+                            if (Remaining() <= TimeSpan.Zero) return;
+                            await Frame("event", message, Resume(page.NextCursor, message.Sequence));
+                        }
+                    cursor = page.NextCursor;
+                    var notificationsBehind = false;
+                    if (feed is not null)
+                    {
+                        if (!feed.ResetRequired)
+                            foreach (var item in feed.Items)
+                            {
+                                // The same bounded lifetime: the browser resumes from the last notification frame it received.
+                                if (Remaining() <= TimeSpan.Zero) return;
+                                await Frame("notification", new { cursor = item.Cursor, unreadCount = feed.UnreadCount, enabled = feed.Enabled,
+                                    notification = item.Notification });
+                            }
+                        notificationCursor = feed.NextCursor;
+                        notificationsBehind = feed.Items.Count == NotificationBatch;
+                    }
+                    if (page.Events.Count < 200 && !notificationsBehind)
+                    {
+                        await context.Response.WriteAsync(": keepalive\n\n", ct);
+                        await context.Response.Body.FlushAsync(ct);
+                        var poll = TimeSpan.FromSeconds(settings.Value.StreamPollSeconds);
+                        var remaining = Remaining();
+                        if (remaining <= TimeSpan.Zero) break;
+                        await Task.Delay(remaining < poll ? remaining : poll, time, ct);
+                    }
+                    if (Remaining() <= TimeSpan.Zero) break;
+                    page = await reader.ReadAsync(cursor, 200, ct);
+                    if (page.ResetRequired)
+                        await Frame("status", new { state = "reset", nextCursor = page.NextCursor });
+                    if (notifications is not null)
+                    {
+                        feed = await notifications(notificationCursor, NotificationBatch, ct);
+                        if (feed.ResetRequired)
+                            await Frame("notifications", new { state = "reset", nextCursor = feed.NextCursor,
+                                unreadCount = feed.UnreadCount, enabled = feed.Enabled });
+                    }
                 }
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         finally { Release(ownerId); }
     }
 
@@ -161,13 +168,15 @@ public static class VesselEventEndpoints
         return VesselEventCursor.Format(page.Epoch, long.Parse(sequence, System.Globalization.CultureInfo.InvariantCulture));
     }
 
-    internal static bool TryAcquire(Guid owner)
+    internal static bool TryAcquire(Guid owner, int maximum = 64)
     {
-        while (true)
+        lock (StreamLock)
         {
-            var count = Streams.GetOrAdd(owner, 0);
-            if (count >= 4) return false;
-            if (Streams.TryUpdate(owner, count + 1, count)) return true;
+            var count = Streams.GetValueOrDefault(owner);
+            if (count >= 4 || totalStreams >= maximum) return false;
+            Streams[owner] = count + 1;
+            totalStreams++;
+            return true;
         }
     }
     private static void NoStore(HttpContext context)
@@ -181,14 +190,12 @@ public static class VesselEventEndpoints
     }
     internal static void Release(Guid owner)
     {
-        while (true)
+        lock (StreamLock)
         {
             if (!Streams.TryGetValue(owner, out var count) || count < 1) return;
-            if (count == 1)
-            {
-                if (((ICollection<KeyValuePair<Guid, int>>)Streams).Remove(new(owner, count))) return;
-            }
-            else if (Streams.TryUpdate(owner, count - 1, count)) return;
+            if (count == 1) Streams.Remove(owner);
+            else Streams[owner] = count - 1;
+            totalStreams--;
         }
     }
 }

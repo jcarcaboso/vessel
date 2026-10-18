@@ -27,8 +27,13 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
             builder.ConfigureHostConfiguration(config => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Vessel:Auth:Token"] = Token,
+                ["Vessel:Auth:OwnerId"] = owner.ToString(),
                 ["ConnectionStrings:Vessel"] = connection
             }));
+        // Mode selects schemes before ConfigureAppConfiguration runs on a minimal test host.
+        // Explicit settings must also override the synthetic production Token defaults.
+        if (settings?.ContainsKey("Vessel:Auth:Mode") == true)
+            builder.ConfigureHostConfiguration(config => config.AddInMemoryCollection(settings));
         return base.CreateHost(builder);
     }
 

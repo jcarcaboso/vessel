@@ -4,6 +4,7 @@
     <Project Path="src/Vessel.Application/Vessel.Application.csproj" />
     <Project Path="src/Vessel.Domain/Vessel.Domain.csproj" />
     <Project Path="src/Vessel.Infrastructure/Vessel.Infrastructure.csproj" />
+    <Project Path="src/Vessel.Identity/Vessel.Identity.csproj" />
     <Project Path="src/Vessel.Messaging/Vessel.Messaging.csproj" />
     <Project Path="src/Vessel.Persistence/Vessel.Persistence.csproj" />
     <Project Path="src/Vessel.Worker/Vessel.Worker.csproj" />

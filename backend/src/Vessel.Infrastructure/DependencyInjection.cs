@@ -75,8 +75,9 @@ public static class DependencyInjection
         services.AddHttpContextAccessor();
         services.AddScoped<IJournalOwnerContext, HttpJournalOwnerContext>();
         services.AddSingleton<AuthFailureLimiter>();
-        services.AddAuthentication(BearerTokenHandler.SchemeName)
-            .AddScheme<AuthenticationSchemeOptions, BearerTokenHandler>(BearerTokenHandler.SchemeName, _ => { });
+        if (config["Vessel:Auth:Mode"] != "Wallet")
+            services.AddAuthentication(BearerTokenHandler.SchemeName)
+                .AddScheme<AuthenticationSchemeOptions, BearerTokenHandler>(BearerTokenHandler.SchemeName, _ => { });
         services.AddAuthorization(options =>
         {
             // New endpoints are private unless they explicitly opt out, such as liveness.

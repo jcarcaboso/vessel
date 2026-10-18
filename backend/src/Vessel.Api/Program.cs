@@ -8,7 +8,10 @@ using Vessel.Infrastructure;
 using Vessel.Persistence;
 using Vessel.Messaging;
 using Vessel.Persistence.Notifications;
+using Vessel.Identity;
 
+if (args.FirstOrDefault() is "identity")
+    return IdentityCommands.RunAsync(args[1..], Console.Out).GetAwaiter().GetResult();
 if (args.FirstOrDefault() is "evidence-copy-to-s3" or "evidence-copy-to-local")
     return EvidenceCopyCommand.RunAsync(args[1..], Console.Out, toLocal: args[0] == "evidence-copy-to-local").GetAwaiter().GetResult();
 if (args.FirstOrDefault() is { } command && MessagingCommands.Names.Contains(command))
@@ -17,6 +20,8 @@ if (args.FirstOrDefault() is { } command && MessagingCommands.Names.Contains(com
 var builder = WebApplication.CreateBuilder(args);
 if (!builder.Environment.IsDevelopment()) ProductionConfiguration.Validate(builder.Configuration);
 builder.Services.AddVesselInfrastructure(builder.Configuration);
+builder.Services.AddVesselIdentityDirectory(builder.Configuration);
+builder.Services.AddVesselIdentityApi(builder.Configuration);
 builder.Services.AddVesselPersistence(builder.Configuration);
 builder.Services.AddVesselApplication();
 // The API publishes events and module commands; it runs no module and never provisions at startup.
@@ -84,12 +89,22 @@ app.Use(async (context, next) =>
         context.Response.Clear();
         if (context.IsCredentialEndpoint()) context.Response.Headers.CacheControl = "no-store";
         context.Response.Headers["X-Correlation-ID"] = traceId;
+        var extensions = new Dictionary<string, object?> { ["traceId"] = traceId };
+        if (ex is ProblemException problem)
+        {
+            if (problem.Code is not null) extensions["code"] = problem.Code;
+            if (problem.RetryAfterSeconds is { } retryAfter)
+                context.Response.Headers.RetryAfter = retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        if (context.Request.Path.StartsWithSegments("/api/auth") && !extensions.ContainsKey("code"))
+            extensions["code"] = status switch { 413 => "request-too-large", 503 => "identity-unavailable", _ => "request-invalid" };
         await Results.Problem(statusCode: status, detail: detail,
-            extensions: new Dictionary<string, object?> { ["traceId"] = traceId }).ExecuteAsync(context);
+            extensions: extensions).ExecuteAsync(context);
     }
 });
 app.UseResponseCompression();
 app.UseAuthentication();
+app.UseVesselIdentity();
 app.UseAuthorization();
 // Credential HTTPS, no-store and body limits come from endpoint metadata (CredentialEndpoint, RequestBodyLimit).
 app.UseEndpointTransport();
@@ -102,6 +117,14 @@ app.MapGet("/health/ready", async (IServiceProvider services, CancellationToken 
     {
         var db = services.GetRequiredService<VesselDbContext>();
         var ready = await db.Database.CanConnectAsync(ct) && !(await db.Database.GetPendingMigrationsAsync(ct)).Any();
+        var identity = services.GetRequiredService<IdentityDbContext>();
+        ready = ready && await identity.Database.CanConnectAsync(ct) && !(await identity.Database.GetPendingMigrationsAsync(ct)).Any();
+        if (ready && services.GetRequiredService<IdentitySettings>().WalletMode &&
+            !await (from user in identity.Users
+                    join wallet in identity.Wallets on user.Id equals wallet.UserId
+                    where user.Role == "operator" && user.Status == "active"
+                    select user.Id).AnyAsync(ct))
+            return Results.Json(new { status = "unavailable", reason = "no-operator-wallet" }, statusCode: 503);
         return ready ? Results.Ok(new { status = "ready" }) : Results.Json(new { status = "unavailable" }, statusCode: 503);
     }
     catch (Exception ex) when (ex is not OperationCanceledException)
@@ -109,6 +132,7 @@ app.MapGet("/health/ready", async (IServiceProvider services, CancellationToken 
         return Results.Json(new { status = "unavailable" }, statusCode: 503);
     }
 }).AllowAnonymous();
+app.MapVesselIdentity();
 app.MapSystem();
 app.MapWorkspace();
 app.MapEvidence();

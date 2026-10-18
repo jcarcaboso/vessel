@@ -10,9 +10,12 @@ public static class ProductionConfiguration
 
     public static void Validate(IConfiguration config)
     {
+        var mode = config["Vessel:Auth:Mode"] ?? "Token";
+        if (mode is not ("Token" or "Wallet")) throw new InvalidOperationException("Vessel:Auth:Mode is invalid.");
+        if (mode == "Wallet") _ = Vessel.Identity.IdentitySettings.Read(config, development: false);
         var problems = new List<string>();
         var token = config["Vessel:Auth:Token"];
-        if (string.IsNullOrWhiteSpace(token) || token.Trim().Length < MinimumTokenLength)
+        if (mode == "Token" && (string.IsNullOrWhiteSpace(token) || token.Trim().Length < MinimumTokenLength))
             problems.Add($"Vessel__Auth__Token must be a generated secret of at least {MinimumTokenLength} characters (for example `openssl rand -base64 48`).");
         if (config["Vessel:Auth:OwnerId"] is { } owner && (!Guid.TryParse(owner, out var id) || id == Guid.Empty))
             problems.Add("Vessel__Auth__OwnerId must be a non-empty GUID.");

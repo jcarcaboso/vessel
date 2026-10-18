@@ -341,6 +341,7 @@ The guard applies to cookie-authenticated unsafe methods (POST, PUT, PATCH, DELE
 ### Streams
 
 - The event stream and market streams call `IPrincipalValidity.StillValidAsync` on a **15 s timer that runs regardless of traffic**, and end the response when it turns false or the check fails.
+- Each check has a 10 s deadline on the injected clock that does not depend on the check honouring cancellation; a check that times out fails closed and ends the response, so a revoked session's stream ends within about 25 s even while the identity database stalls. The deadline also cancels the database command.
 - Revalidation never extends the idle expiry.
 - `Vessel:Events:MaxStreams` caps event streams per process, beside the existing 4 per owner. A refusal answers 429 with `Retry-After: 5`.
 
@@ -790,6 +791,7 @@ Cross-model verification of the first lanes found gaps the contract left open. T
 | A1 review | The request guard treats every method except GET, HEAD, OPTIONS and TRACE as unsafe, compared case-insensitively | §7 |
 | A1 review | A reused binding cookie keeps its value but is re-issued with a fresh lifetime on every challenge | §6, §7 |
 | A1 review | Stream endpoints resolve `IPrincipalValidity` as a required service; there is no "always valid" fallback | §7, §9.5 |
+| A1 review | Each stream revalidation check has a 10 s deadline independent of the database task; a timeout fails closed and ends the stream | §7 |
 | B1 review | The interim scheduler isolates failures per owner: one owner's error never stops discovery, claims or heartbeats for later owners | §9.1, §9.3 |
 | B1 review | `retry-event-receipts` requires `--owner <guid>` or `--all-owners`; with `--all-owners`, `--limit` applies per owner | §8, P4 runbook |
 | D1 review | Display names, labels and notes: trim, then reject Unicode categories Cc, Cf, Cs, Cn, Zl and Zp; lengths count UTF-16 code units (60, 40 and 80); private-use characters are allowed. The frontend mirrors the server rule; the server stays authoritative | §6, §11 |
