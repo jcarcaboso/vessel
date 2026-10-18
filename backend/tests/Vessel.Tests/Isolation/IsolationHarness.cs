@@ -219,7 +219,7 @@ public sealed class IsolationApi : IsolationHost
         // A stream answered where a 404 was expected must fail the case, not hang the run.
         client.Timeout = TimeSpan.FromSeconds(30);
         client.DefaultRequestHeaders.Add(TestOwnerAuthHandler.Header, id.ToString("D"));
-        return Task.FromResult(new Owner(id, client));
+        return Task.FromResult(new Owner(id, client, Journal: Database.ConnectionString));
     }
 }
 
@@ -264,7 +264,7 @@ public sealed class WalletIsolationApi : IsolationHost
         var client = Client();
         var session = await IdentityHttpTest.SignInAsync(client, key);
         Assert.Equal((id, wallet.Id), (session.User.Id, session.Wallet.Id));
-        return new(id, client, new(key, wallet.Id, session.Session.Id));
+        return new(id, client, new(key, wallet.Id, session.Session.Id), Database.ConnectionString);
     }
 
     /// <summary>A browser on its own device: cookies, the accepted origin and its own client address, but no session yet.</summary>
@@ -313,9 +313,10 @@ internal sealed record WalletLogin(EthECKey Key, Guid Wallet, Guid Session);
 
 /// <summary>
 /// An owner's HTTP client. In Token mode every request carries only the test owner header, never a bearer token; in
-/// Wallet mode only the session cookie and the tab-binding and origin headers (<see cref="Login"/>).
+/// Wallet mode only the session cookie and the tab-binding and origin headers (<see cref="Login"/>). The
+/// <see cref="Journal"/> connection lets a <see cref="Snapshot"/> fingerprint the owner's persisted rows.
 /// </summary>
-internal sealed record Owner(Guid Id, HttpClient Http, WalletLogin? Login = null)
+internal sealed record Owner(Guid Id, HttpClient Http, WalletLogin? Login = null, string? Journal = null)
 {
     public async Task<JsonElement> GetJson(string path)
     {
@@ -392,10 +393,11 @@ internal static class Isolated
     public static string Marker(string label) => $"{label}-{Guid.NewGuid():N}";
 
     /// <summary>
-    /// Sends the same request with the other owner's ID and with a random unknown ID. Both must answer the same status
-    /// and the same body: ProblemDetails <c>title</c>, <c>detail</c>, <c>code</c> and everything else except the
-    /// per-response <c>traceId</c> (the <c>X-Correlation-ID</c> header is not compared). A response may echo the ID the
-    /// caller sent, so each body is compared with its own ID replaced. Returns the shared status.
+    /// Sends the same request with the other owner's ID and with a random unknown ID. Both must answer the same status,
+    /// the same body (ProblemDetails <c>title</c>, <c>detail</c>, <c>code</c> and everything else except the
+    /// per-response <c>traceId</c>) and the same response and content headers apart from <see cref="VolatileHeaders"/>.
+    /// A response may echo the ID the caller sent, so each body and header value is compared with its own ID replaced.
+    /// Returns the shared status.
     /// </summary>
     public static async Task<HttpStatusCode> SameAsUnknown(Owner caller, Guid foreign, Func<Guid, HttpRequestMessage> request) =>
         (await Compare(caller, foreign.ToString("D"), Guid.NewGuid().ToString("D"), id => request(Guid.Parse(id)))).Status;
@@ -452,10 +454,30 @@ internal static class Isolated
         var what = $"{foreignRequest.Method} {foreignRequest.RequestUri}";
         Assert.True(foreignResponse.StatusCode == unknownResponse.StatusCode,
             $"{what}: foreign ID answered {(int)foreignResponse.StatusCode} ({foreignBody}), unknown ID {(int)unknownResponse.StatusCode} ({unknownBody}).");
-        Assert.Equal(unknownResponse.Content.Headers.ContentType?.MediaType, foreignResponse.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(Headers(unknownResponse, unknown), Headers(foreignResponse, foreign));
         Assert.Equal(Comparable(unknownBody, unknown), Comparable(foreignBody, foreign));
         return (foreignResponse.StatusCode, foreignBody);
     }
+
+    /// <summary>
+    /// Headers that differ between two answers to the same request without telling anything about the ID: the
+    /// response time, per-request correlation and trace identifiers, and the length of a body that is compared itself
+    /// (an echoed ID of another length changes it). Every other response and content header, <c>ETag</c>,
+    /// <c>Set-Cookie</c>, <c>Cache-Control</c>, <c>Vary</c>, <c>Location</c> and the full <c>Content-Type</c> with its
+    /// charset included, must be identical.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> VolatileHeaders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "Date", "X-Correlation-ID", "Request-Id", "X-Request-ID", "traceparent", "tracestate", "Content-Length"
+    };
+
+    /// <summary>The response and content headers, lower-cased and sorted by name with values in order, without the volatile ones.</summary>
+    private static List<string> Headers(HttpResponseMessage response, string sent) =>
+        response.Headers.Concat(response.Content.Headers)
+            .Where(header => !VolatileHeaders.Contains(header.Key))
+            .Select(header => header.Key.ToLowerInvariant() + ": " +
+                string.Join(", ", header.Value).Replace(sent, "{sent-id}", StringComparison.OrdinalIgnoreCase))
+            .Order(StringComparer.Ordinal).ToList();
 
     public static Func<Guid, HttpRequestMessage> Request(HttpMethod method, Func<Guid, string> path, Func<Guid, object?>? body = null) =>
         id => new(method, path(id)) { Content = body?.Invoke(id) is { } content ? JsonContent.Create(content) : null };
@@ -488,25 +510,92 @@ internal static class Isolated
 }
 
 /// <summary>
-/// Owners' state before a sequence of attempts by another owner. <see cref="After"/> runs one attempt and then requires
-/// every snapshot byte-identical, so any change is pinned to the attempt that made it.
+/// Fingerprints of an owner's persisted journal rows, so a change no response shows (a funding amount, a watch, an
+/// event receipt) still fails a snapshot. Every table of the journal schema with an owner column (<c>"OwnerId"</c> or
+/// <c>owner_id</c>) is read for that owner: its row count and an MD5 of its rows' text in a stable order. Tables are
+/// discovered, not listed, so a new owner-scoped table is fingerprinted without a change here; <see cref="Required"/>
+/// fails the read if discovery misses a table the suite relies on. This host disables Wolverine message persistence,
+/// so no envelope table exists: the event journal tables are the record an outbox would relay. Identity rows live in
+/// their own schema and are not part of the journal.
+/// </summary>
+internal static class Persisted
+{
+    /// <summary>Owner-scoped tables a snapshot must cover: imported facts, funding, monitor rows, events and notifications.</summary>
+    internal static readonly string[] Required =
+    [
+        "portfolios", "accounts", "account_snapshots", "account_positions", "account_stablecoins", "imported_orders", "imported_fills",
+        "funding_payments", "account_funding_states", "plays", "play_order_links", "play_status_changes", "monitor_accounts",
+        "monitor_exit_watches", "play_discrepancies", "events", "event_cursors", "event_dedup", "event_fills", "event_baselines",
+        "event_receipts", "notifications", "notification_deliveries", "notification_sources", "notification_cursors"
+    ];
+
+    /// <summary>One line per owner-scoped table: <c>table rows=N md5=…</c>, ordered by table name.</summary>
+    public static async Task<List<string>> Of(string journal, Guid owner) =>
+        (await Rows(journal, owner)).Select(table => $"{table.Key} rows={table.Value.Rows} md5={table.Value.Hash}").ToList();
+
+    /// <summary>Row count and fingerprint of the owner's rows per owner-scoped table.</summary>
+    public static async Task<SortedDictionary<string, (long Rows, string Hash)>> Rows(string journal, Guid owner)
+    {
+        await using var connection = new NpgsqlConnection(journal);
+        await connection.OpenAsync();
+        var tables = new List<(string Table, string Column)>();
+        await using (var discover = new NpgsqlCommand("""
+            SELECT c.table_name, c.column_name FROM information_schema.columns c
+            JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+            WHERE c.table_schema = current_schema() AND t.table_type = 'BASE TABLE'
+              AND c.column_name IN ('OwnerId', 'owner_id') AND c.data_type = 'uuid'
+            ORDER BY c.table_name
+            """, connection))
+        await using (var reader = await discover.ExecuteReaderAsync())
+            while (await reader.ReadAsync()) tables.Add((reader.GetString(0), reader.GetString(1)));
+        var missing = Required.Except(tables.Select(t => t.Table)).ToList();
+        Assert.True(missing.Count == 0, "Owner-scoped tables not found for fingerprinting: " + string.Join(", ", missing));
+        var result = new SortedDictionary<string, (long, string)>(StringComparer.Ordinal);
+        foreach (var (table, column) in tables)
+        {
+            // Row text includes every column; ordering by it makes the hash independent of physical order.
+            await using var command = new NpgsqlCommand(
+                $"SELECT count(*), coalesce(md5(string_agg(r::text, chr(10) ORDER BY r::text)), '') FROM {Quote(table)} r WHERE r.{Quote(column)} = @owner",
+                connection);
+            command.Parameters.AddWithValue("owner", owner);
+            await using var reader = await command.ExecuteReaderAsync();
+            await reader.ReadAsync();
+            result[table] = (reader.GetInt64(0), reader.GetString(1));
+        }
+        return result;
+    }
+
+    private static string Quote(string identifier) => "\"" + identifier.Replace("\"", "\"\"") + "\"";
+}
+
+/// <summary>
+/// Owners' state before a sequence of attempts by another owner: the responses of the given paths and the owner's
+/// persisted rows (<see cref="Persisted"/>). <see cref="After"/> runs one attempt and then requires every snapshot
+/// identical, so any change is pinned to the attempt that made it.
 /// </summary>
 internal sealed class Snapshot
 {
-    private readonly List<(Owner Owner, string[] Paths, string State)> parts = [];
+    private readonly List<(Owner Owner, string[] Paths, string State, List<string> Rows)> parts = [];
 
     public static Task<Snapshot> Of(Owner owner, params string[] paths) => Of((owner, paths));
 
     public static async Task<Snapshot> Of(params (Owner Owner, string[] Paths)[] owners)
     {
         var snapshot = new Snapshot();
-        foreach (var (owner, paths) in owners) snapshot.parts.Add((owner, paths, await Isolated.State(owner, paths)));
+        foreach (var (owner, paths) in owners) snapshot.parts.Add((owner, paths, await Isolated.State(owner, paths), await Rows(owner)));
         return snapshot;
     }
 
+    private static Task<List<string>> Rows(Owner owner) =>
+        Persisted.Of(owner.Journal ?? throw new InvalidOperationException("A snapshot needs the owner's journal connection."), owner.Id);
+
     public async Task Unchanged()
     {
-        foreach (var (owner, paths, state) in parts) Assert.Equal(state, await Isolated.State(owner, paths));
+        foreach (var (owner, paths, state, rows) in parts)
+        {
+            Assert.Equal(state, await Isolated.State(owner, paths));
+            Assert.Equal(rows, await Rows(owner));
+        }
     }
 
     public async Task After(Func<Task> attempt)
