@@ -32,7 +32,7 @@ public sealed class MonitorHealthTests
     }
     private sealed class Candidates(bool productive) : ISystemMonitorStore
     {
-        public Task<IReadOnlyList<DueMonitorCandidate>> DueCandidatesAsync(DueMonitorKey? after, int limit, CancellationToken ct) =>
+        public Task<IReadOnlyList<DueMonitorCandidate>> DueCandidatesAsync(DueMonitorKey? after, DateTimeOffset dueBy, int limit, CancellationToken ct) =>
             productive ? Task.FromResult<IReadOnlyList<DueMonitorCandidate>>([]) : throw new InvalidOperationException("Synthetic query failure");
     }
     private sealed class FailingState : IServerStateStore

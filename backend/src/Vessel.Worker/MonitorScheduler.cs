@@ -91,7 +91,10 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
 {
     private readonly string workerId = Guid.NewGuid().ToString("N");
     private readonly List<Task> running = [];
+    // One scan cycle walks the work due by its start in key order, across ticks. Skipped accounts (locked, capped,
+    // failed) are revisited by the next cycle; work rescheduled during a cycle lands after its bound and waits too.
     private DueMonitorKey? continuation;
+    private DateTimeOffset? cycleBound;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -139,10 +142,20 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
         }
         var capped = new HashSet<Guid>();
         var cappedVenues = new HashSet<string>(StringComparer.Ordinal);
+        var wrapped = false;
         while (running.Count < options.WorkerConcurrency)
         {
-            var page = await candidates.DueCandidatesAsync(continuation, 100, ct);
-            if (page.Count == 0) { continuation = null; break; }
+            cycleBound ??= time.GetUtcNow();
+            var page = await candidates.DueCandidatesAsync(continuation, cycleBound.Value, 100, ct);
+            if (page.Count == 0)
+            {
+                // The cycle is exhausted. Start a fresh one at once (at most once per tick) unless it had just begun.
+                var fresh = continuation is null;
+                (continuation, cycleBound) = (null, null);
+                if (fresh || wrapped) break;
+                wrapped = true;
+                continue;
+            }
             foreach (var candidate in page)
             {
                 continuation = candidate.Key;

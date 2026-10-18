@@ -9,7 +9,11 @@ public sealed record DueMonitorCandidate(Guid OwnerId, Guid AccountId, string Ve
 /// <summary>Lock-free discovery only. Admission always rechecks one candidate in its owner's transaction.</summary>
 public interface ISystemMonitorStore
 {
-    Task<IReadOnlyList<DueMonitorCandidate>> DueCandidatesAsync(DueMonitorKey? after, int limit, CancellationToken ct);
+    /// <summary>
+    /// Due work after <paramref name="after"/> whose due time is at most <paramref name="dueBy"/>, the bound of the
+    /// caller's scan cycle, so work rescheduled during a cycle waits for the next one instead of extending it.
+    /// </summary>
+    Task<IReadOnlyList<DueMonitorCandidate>> DueCandidatesAsync(DueMonitorKey? after, DateTimeOffset dueBy, int limit, CancellationToken ct);
 }
 
 public sealed record ServerMonitorHeartbeat(string Deployment, DateTimeOffset HeartbeatAtUtc);
