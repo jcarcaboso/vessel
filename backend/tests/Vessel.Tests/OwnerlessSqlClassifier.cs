@@ -5,72 +5,42 @@ namespace Vessel.Tests;
 
 /// <summary>
 /// Decides which C# string literals are raw SQL that needs an entry in the reviewed ownerless inventory
-/// (contract §9.1). Only a small, demonstrably owner-safe subset is exempt; everything else is reviewed:
+/// (contract §9.1). Detection fails closed: a literal is SQL when, after leading whitespace, <c>;</c>, <c>(</c> and
+/// (nested) comments, it or any statement after a <c>;</c> starts with a PostgreSQL command keyword in any case, or
+/// when it contains a comment marker and a command keyword anywhere. Prose that starts with such a word ("Set …",
+/// "Do not …", "refresh") is therefore reviewed too, as "Not SQL: …" entries; a missed statement is the danger.
+/// Only a small, demonstrably owner-safe subset is exempt; everything else is reviewed:
 /// <list type="bullet">
 /// <item>a single-table SELECT, UPDATE or DELETE whose top-level WHERE has an exact owner-equality conjunct;</item>
 /// <item>a single-row INSERT whose owner column receives the owner value (or an INSERT … SELECT from an owner-scoped
 /// single table or from <c>unnest</c> of parameters), with ON CONFLICT DO UPDATE only on a target that includes the owner column.</item>
 /// </list>
 /// Neither may assign an owner column (UPDATE SET or ON CONFLICT DO UPDATE SET), which would move rows to another owner.
-/// Comments (nested, also before the statement keyword), quoted strings and quoted identifiers are removed first. CTEs, set operations, OR, NOT/IS around the
-/// owner predicate, joins, subqueries, multi-row VALUES and text spliced into parameterised SQL are never exempt.
+/// Nothing is exempt that contains a comment, a <c>U&amp;</c> escape, a quoted identifier other than <c>"OwnerId"</c>,
+/// a <c>$</c> other than a positional parameter, a prefixed string (<c>E''</c>, <c>B''</c> …), a backslash in a string,
+/// or anything else the normaliser cannot tokenise. CTEs, set operations, OR, NOT/IS around the owner predicate, joins,
+/// subqueries, multi-row VALUES and text spliced into parameterised SQL are never exempt either.
 /// Interpolation holes in SQL without @parameters are taken as EF Core parameters.
 /// </summary>
 internal static class OwnerlessSqlClassifier
 {
     private const RegexOptions Ci = RegexOptions.IgnoreCase;
 
-    // Core DML starters keep the original case-insensitive match. The other statement starters match in SQL-style
-    // upper case, or in any case when the next tokens follow that statement's grammar, so prose such as
-    // "Set ConnectionStrings__Vessel", "Do not switch" or "refresh" is not SQL while "truncate accounts" is.
-    private static readonly Regex CoreStarter = new(@"^(SELECT|INSERT|UPDATE|DELETE|WITH)\b", Ci);
-    private static readonly Regex OtherStarter = new(
-        @"^(MERGE|TRUNCATE|LOCK|CALL|COPY|DO|SET|RESET|VALUES|TABLE|EXPLAIN|CREATE|ALTER|DROP|GRANT|REVOKE|COMMENT|" +
-        @"REFRESH|VACUUM|ANALYZE|REINDEX|CLUSTER|DISCARD|NOTIFY|LISTEN|UNLISTEN|PREPARE|EXECUTE|DECLARE|FETCH|MOVE|IMPORT)\b");
-    private static readonly Regex AnyCaseStarter = new(OtherStarter.ToString(), Ci);
-    private const string Name = @"[\w.""]+";
-    private const string Ddl = @"\s+(?:or\s+replace\s+|unique\s+|temp(?:orary)?\s+|unlogged\s+|global\s+|local\s+|materialized\s+|" +
-        @"foreign\s+|default\s+|event\s+|text\s+search\s+|access\s+method\s+|large\s+object\s+|if\s+(?:not\s+)?exists\s+)*" +
-        @"(?:table|index|view|schema|function|procedure|trigger|type|extension|sequence|role|user|group|database|policy|domain|" +
-        @"aggregate|operator|rule|publication|subscription|server|statistics|collation|cast|conversion|language|tablespace|" +
-        @"transform|privileges|owned|routine|wrapper|data|mapping|template|parser|dictionary|configuration)\b";
-    private const string Privilege = @"\s+(?:all|select|insert|update|delete|truncate|references|trigger|usage|create|connect|" +
-        @"temporary|temp|execute|maintain|set|alter\s+system|grant\s+option\s+for|admin\s+option\s+for)\b|\s+[\w""]+(?:\s*,\s*[\w""]+)*\s+(?:to|from)\b";
-    private const string Maintenance = @"\s*(?:$|;|\()|\s+(?:full|freeze|verbose|analyze|skip_locked)\b|\s+" + Name + @"\s*(?:$|[;,(])";
-    private const string Fetch = @"\s+(?:next|prior|first|last|absolute|relative|all|forward|backward|from|in|[-+]?\d+)\b";
-    private static readonly Dictionary<string, Regex> StatementGrammar = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    // Every PostgreSQL command keyword (the SQL Commands reference), matched in any case.
+    private static readonly HashSet<string> Starters = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["MERGE"] = @"\s+into\b",
-        ["TRUNCATE"] = @"\s+(?:table\s+)?(?:only\s+)?" + Name + @"\s*(?:[,;*]|$|restart\b|continue\b|cascade\b|restrict\b)",
-        ["LOCK"] = @"\s+(?:table\s+)?(?:only\s+)?" + Name + @"\s*(?:[,;*]|$|in\b|nowait\b)",
-        ["CALL"] = @"\s+" + Name + @"\s*\(",
-        ["COPY"] = @"\s*\(|\s+" + Name + @"\s*(?:\(|from\b|to\b)",
-        ["DO"] = @"\s*(?:\$|')|\s+(?:e'|u&'|language\b)",
-        ["SET"] = @"\s+(?:session|local|transaction|constraints|role|time\s+zone|names|schema|search_path)\b|\s+[\w.]+\s*(?:=|to\b)",
-        ["RESET"] = @"\s+(?:all|role|session\s+authorization|[\w.]+)\s*(?:;|$)",
-        ["VALUES"] = @"\s*\(",
-        ["TABLE"] = @"\s+(?:only\s+)?" + Name + @"\s*\*?\s*(?:;|$)",
-        ["EXPLAIN"] = @"\s*\(|\s+(?:analyze|verbose|select|insert|update|delete|merge|with|values|table|execute|create|declare)\b",
-        ["CREATE"] = Ddl, ["ALTER"] = Ddl, ["DROP"] = Ddl,
-        ["GRANT"] = Privilege, ["REVOKE"] = Privilege,
-        ["COMMENT"] = @"\s+on\b",
-        ["REFRESH"] = @"\s+materialized\b",
-        ["VACUUM"] = Maintenance, ["ANALYZE"] = Maintenance,
-        ["REINDEX"] = @"\s*\(|\s+(?:index|table|schema|database|system)\b",
-        ["CLUSTER"] = @"\s*(?:$|;|\()|\s+verbose\b|\s+" + Name + @"\s*(?:$|;|using\b)",
-        ["DISCARD"] = @"\s+(?:all|plans|sequences|temp|temporary)\b",
-        ["NOTIFY"] = @"\s+\w+\s*(?:$|[;,])",
-        ["LISTEN"] = @"\s+(?:\w+|\*)\s*(?:$|;)", ["UNLISTEN"] = @"\s+(?:\w+|\*)\s*(?:$|;)",
-        ["PREPARE"] = @"\s+transaction\b|\s+\w+\s*(?:\(|as\b)",
-        ["EXECUTE"] = @"\s+\w+\s*(?:\(|;|$)",
-        ["DECLARE"] = @"\s+\w+\s+(?:(?:binary|asensitive|insensitive|no|scroll)\s+)*cursor\b",
-        ["FETCH"] = Fetch, ["MOVE"] = Fetch,
-        ["IMPORT"] = @"\s+foreign\s+schema\b",
-    }.ToDictionary(p => p.Key, p => new Regex(@"^(?:" + p.Value + ")", Ci), StringComparer.OrdinalIgnoreCase);
+        "ABORT", "ALTER", "ANALYZE", "ANALYSE", "BEGIN", "CALL", "CHECKPOINT", "CLOSE", "CLUSTER", "COMMENT", "COMMIT",
+        "COPY", "CREATE", "DEALLOCATE", "DECLARE", "DELETE", "DISCARD", "DO", "DROP", "END", "EXECUTE", "EXPLAIN",
+        "FETCH", "GRANT", "IMPORT", "INSERT", "LISTEN", "LOAD", "LOCK", "MERGE", "MOVE", "NOTIFY", "PREPARE",
+        "REASSIGN", "REFRESH", "REINDEX", "RELEASE", "RESET", "REVOKE", "ROLLBACK", "SAVEPOINT", "SECURITY", "SELECT",
+        "SET", "SHOW", "START", "TABLE", "TRUNCATE", "UNLISTEN", "UPDATE", "VACUUM", "VALUES", "WITH",
+    };
+    private static readonly Regex AnyStarter = new(@"(?<![\w$])(?:" + string.Join('|', Starters) + @")(?![\w$])", Ci);
+    private static readonly Regex UnicodeEscape = new(@"u&\s*[""']", Ci);
 
     private const string OwnerColumn = @"(?:\w+\.)?(?:owner_id|""OwnerId"")";
     private const string OwnerValue = @"(?:@owner(?:Id)?\b|\{\s*(?:[\w.]+\.)?(?:Current)?Owner(?:Id)?(?:\.Value)?\s*\})";
-    private const string Table = @"(?:(?:\w+|""_"")\.)?(?:\w+|""_"")";
+    private const string Table = @"(?:\w+\.)?\w+";
     // Any mention of an owner column, quoted or not, qualified or not, in any case: assigning one moves rows between owners.
     private static readonly Regex OwnerMention = new(@"(?<![\w""])(?:owner_?id|""owner_?id"")(?![\w""])", Ci);
     private static readonly Regex OwnerEquality = new($@"^(?:{OwnerColumn}\s*=\s*{OwnerValue}|{OwnerValue}\s*=\s*{OwnerColumn})$", Ci);
@@ -87,9 +57,25 @@ internal static class OwnerlessSqlClassifier
         @"(?:\s+ORDER\s+BY\s+[\w.]+(?:\s*,\s*[\w.]+)*)?\s*$", Ci);
     private static readonly Regex WhereEnd = new(@"\b(?:ORDER\s+BY|GROUP\s+BY|HAVING|WINDOW|LIMIT|OFFSET|FETCH|FOR|RETURNING)\b", Ci);
 
-    /// <summary>The SQL text a source literal token (including its quotes and $/@ prefix) produces at runtime.</summary>
-    public static string Text(string token)
+    /// <summary>True when a source literal token (including its quotes and $/@ prefix) needs a reviewed inventory entry.</summary>
+    public static bool LiteralRequiresReview(string token)
     {
+        var text = Decode(token, out var complete);
+        // An escape that cannot be decoded leaves the runtime text unknown: any command keyword at all is reviewed.
+        return complete ? RequiresReview(text) : IsSql(text) || AnyStarter.IsMatch(text);
+    }
+
+    /// <summary>The SQL text a source literal token (including its quotes and $/@ prefix) produces at runtime.</summary>
+    public static string Text(string token) => Decode(token, out _);
+
+    /// <summary>
+    /// Decodes a literal with C#'s UTF-16 semantics: <c>\uXXXX</c> and <c>\xH…</c> are single code units (lone
+    /// surrogates included) and <c>\UXXXXXXXX</c> is a code point. An invalid <c>\U</c> value becomes U+FFFD and
+    /// clears <paramref name="complete"/> instead of throwing.
+    /// </summary>
+    public static string Decode(string token, out bool complete)
+    {
+        complete = true;
         var literal = token.TrimStart('$');
         var raw = literal.StartsWith("\"\"\"", StringComparison.Ordinal);
         var verbatim = !raw && literal.StartsWith('@');
@@ -106,7 +92,10 @@ internal static class OwnerlessSqlClassifier
             var digits = next switch { 'u' => 4, 'U' => 8, 'x' => HexRun(body, i + 1, 4), _ => 0 };
             if (digits > 0 && i + digits < body.Length && HexRun(body, i + 1, digits) == digits)
             {
-                text.Append(char.ConvertFromUtf32(Convert.ToInt32(body.Substring(i + 1, digits), 16)));
+                var value = Convert.ToInt64(body.Substring(i + 1, digits), 16);
+                if (next != 'U') text.Append((char)value);
+                else if (value <= 0x10FFFF && value is < 0xD800 or > 0xDFFF) text.Append(char.ConvertFromUtf32((int)value));
+                else { text.Append('\uFFFD'); complete = false; }
                 i += digits;
                 continue;
             }
@@ -126,22 +115,35 @@ internal static class OwnerlessSqlClassifier
         return count;
     }
 
-    /// <summary>True when the text is a SQL statement (after leading comments, whitespace and parentheses).</summary>
+    /// <summary>
+    /// True when the text or any statement after a <c>;</c> starts (after whitespace, <c>;</c>, <c>(</c> and comments)
+    /// with a command keyword in any case, or when it holds a comment marker and a command keyword anywhere.
+    /// </summary>
     public static bool IsSql(string text)
     {
-        var start = text[LeadingNoise(text)..];
-        if (CoreStarter.IsMatch(start) || OtherStarter.IsMatch(start)) return true;
-        var keyword = AnyCaseStarter.Match(start);
-        return keyword.Success && StatementGrammar[keyword.Value].IsMatch(start[keyword.Length..]);
+        if (StartsWithCommand(text)) return true;
+        for (var i = text.IndexOf(';'); i >= 0; i = text.IndexOf(';', i + 1))
+            if (StartsWithCommand(text[(i + 1)..])) return true;
+        return HasComment(text) && AnyStarter.IsMatch(text);
     }
 
-    // The length of the leading whitespace, parentheses, line comments and (nested) block comments.
+    private static bool StartsWithCommand(string text)
+    {
+        var start = LeadingNoise(text);
+        var end = start;
+        while (end < text.Length && IsWord(text[end])) end++;
+        return end > start && Starters.Contains(text[start..end]);
+    }
+
+    private static bool HasComment(string text) => text.Contains("--", StringComparison.Ordinal) || text.Contains("/*", StringComparison.Ordinal);
+
+    // The length of the leading whitespace, semicolons, parentheses, line comments and (nested) block comments.
     private static int LeadingNoise(string text)
     {
         var i = 0;
         while (i < text.Length)
         {
-            if (char.IsWhiteSpace(text[i]) || text[i] == '(') i++;
+            if (char.IsWhiteSpace(text[i]) || text[i] is '(' or ';') i++;
             else if (At(text, i, "--")) { while (i < text.Length && text[i] != '\n') i++; }
             else if (At(text, i, "/*"))
             {
@@ -158,9 +160,9 @@ internal static class OwnerlessSqlClassifier
         return i;
     }
 
-    /// <summary>True when the text is SQL and at least one of its statements is outside the owner-safe subset.</summary>
+    /// <summary>True when the text is SQL and is not, statement by statement, inside the owner-safe subset.</summary>
     public static bool RequiresReview(string text) =>
-        IsSql(text) && (Normalize(text) is not { } sql ||
+        IsSql(text) && (HasComment(text) || UnicodeEscape.IsMatch(text) || Normalize(text) is not { } sql ||
                         sql.Split(';').Any(s => !string.IsNullOrWhiteSpace(s) && !OwnerScoped(s.Trim())));
 
     private static bool OwnerScoped(string statement)
@@ -254,68 +256,39 @@ internal static class OwnerlessSqlClassifier
         return conflict.Groups["target"].Value.Split(',').Any(c => OwnerColumnOnly.IsMatch(c.Trim()));
     }
 
-    // Removes comments, quoted strings and quoted identifiers (keeping owner columns) so that only SQL structure remains;
-    // null when the text cannot be tokenised (an unterminated quote or comment, or a hole inside an identifier).
+    // Blanks string literals so that only SQL structure remains. Null, so that the statement is reviewed, whenever the
+    // text holds anything whose meaning the classifier does not fully model: a comment, a quoted identifier other than
+    // "OwnerId", a $ that is not a positional parameter (dollar quoting, $ in names), a prefixed string (E'', U&'', B''
+    // …), a backslash in a string, or an unterminated quote.
     private static string? Normalize(string text)
     {
         var sql = new StringBuilder(text.Length);
         for (var i = 0; i < text.Length;)
         {
-            if (At(text, i, "--"))
+            if (At(text, i, "--") || At(text, i, "/*")) return null;
+            if (text[i] == '\'')
             {
-                while (i < text.Length && text[i] != '\n') i++;
-                sql.Append(' ');
-            }
-            else if (At(text, i, "/*"))
-            {
-                // PostgreSQL block comments nest.
-                for (var depth = 0; ;)
-                {
-                    if (i >= text.Length) return null;
-                    if (At(text, i, "/*")) { depth++; i += 2; }
-                    else if (At(text, i, "*/")) { i += 2; if (--depth == 0) break; }
-                    else i++;
-                }
-                sql.Append(' ');
-            }
-            else if (text[i] == '\'')
-            {
-                var escapes = i > 0 && text[i - 1] is 'E' or 'e' && (i == 1 || !IsWord(text[i - 2]));
+                if (i > 0 && (IsWord(text[i - 1]) || text[i - 1] is '&' or '$')) return null;
                 for (i++; ; i++)
                 {
-                    if (i >= text.Length) return null;
-                    if (escapes && text[i] == '\\') i++;
-                    else if (At(text, i, "''")) i++;
+                    if (i >= text.Length || text[i] == '\\') return null;
+                    if (At(text, i, "''")) i++;
                     else if (text[i] == '\'') { i++; break; }
                 }
                 sql.Append("''");
             }
-            else if (text[i] == '$' && (i == 0 || !IsWord(text[i - 1])) &&
-                     Regex.Match(text[i..], @"^\$(?:[A-Za-z_]\w*)?\$") is { Success: true } tag)
+            else if (text[i] == '$')
             {
-                var close = text.IndexOf(tag.Value, i + tag.Length, StringComparison.Ordinal);
-                if (close < 0) return null;
-                i = close + tag.Length;
-                sql.Append("''");
+                if (i + 1 >= text.Length || !char.IsAsciiDigit(text[i + 1]) || (i > 0 && IsWord(text[i - 1]))) return null;
+                sql.Append(text[i++]);
             }
             else if (text[i] == '"')
             {
-                var name = new StringBuilder();
-                for (i++; ; i++)
-                {
-                    if (i >= text.Length) return null;
-                    if (At(text, i, "\"\"")) { name.Append('"'); i++; }
-                    else if (text[i] == '"') { i++; break; }
-                    else name.Append(text[i]);
-                }
-                if (name.ToString().Contains('{')) return null;
-                // Other owner-like names stay recognisable to OwnerMention without counting as the owner column.
-                sql.Append(name.ToString() switch
-                {
-                    "OwnerId" => "\"OwnerId\"",
-                    var n when OwnerMention.IsMatch(n) => "\"OWNER_ID\"",
-                    _ => "\"_\"",
-                });
+                // Only the exact "OwnerId" column is understood; every other quoted name is reviewed.
+                if (!At(text, i, "\"OwnerId\"") || (i > 0 && (IsWord(text[i - 1]) || text[i - 1] == '&'))) return null;
+                sql.Append("\"OwnerId\"");
+                i += "\"OwnerId\"".Length;
+                if (i < text.Length && text[i] == '"') return null;
             }
             else sql.Append(text[i++]);
         }
