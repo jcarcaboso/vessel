@@ -21,7 +21,7 @@ public static partial class IdentityCommands
                dotnet Vessel.Api.dll identity verify
         """;
 
-    public static async Task<int> RunAsync(string[] args, TextWriter output, CancellationToken ct = default, IdentityVerification? verify = null)
+    public static async Task<int> RunAsync(string[] args, TextWriter output, IdentityVerification? verify = null, CancellationToken ct = default)
     {
         try
         {
@@ -47,7 +47,7 @@ public static partial class IdentityCommands
                 .AddJsonFile("appsettings.json", optional: true).AddJsonFile($"appsettings.{environment}.json", optional: true)
                 .AddEnvironmentVariables().AddCommandLine(configArgs.ToArray()).Build();
             return await RunAsync(commandArgs.ToArray(), configuration,
-                string.Equals(environment, "Development", StringComparison.OrdinalIgnoreCase), output, ct, verify);
+                string.Equals(environment, "Development", StringComparison.OrdinalIgnoreCase), output, verify, ct);
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
@@ -57,7 +57,7 @@ public static partial class IdentityCommands
     }
 
     public static async Task<int> RunAsync(string[] args, IConfiguration configuration, bool development,
-        TextWriter output, CancellationToken ct = default, IdentityVerification? verify = null)
+        TextWriter output, IdentityVerification? verify = null, CancellationToken ct = default)
     {
         try
         {

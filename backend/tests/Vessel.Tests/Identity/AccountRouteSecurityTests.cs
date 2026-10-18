@@ -12,7 +12,7 @@ namespace Vessel.Tests.Identity;
 public sealed class AccountRouteSecurityTests
 {
     [PostgresFact]
-    public async Task Every_A2_route_requires_a_session_tab_binding_and_the_write_guard_and_returns_no_store()
+    public async Task Every_A2_and_notification_route_requires_a_session_tab_binding_and_the_write_guard_and_returns_no_store()
     {
         await using var database = await IdentityDatabase.CreateAsync();
         var key = EthECKey.GenerateKey();
@@ -25,14 +25,21 @@ public sealed class AccountRouteSecurityTests
             ("GET", "/sessions", null), ("DELETE", $"/sessions/{id}", null), ("POST", "/sessions/revoke-others", null),
             ("PATCH", "/profile", "{\"displayName\":\"Name\",\"expectedRevision\":1}"), ("GET", "/wallets", null),
             ("POST", "/step-up/challenge", "{}"), ("POST", "/step-up", "{}"), ("POST", "/wallets/challenge", "{}"),
-            ("POST", "/wallets", "{}"), ("PATCH", $"/wallets/{id}", "{\"label\":null}"), ("DELETE", $"/wallets/{id}", null)
+            ("POST", "/wallets", "{}"), ("PATCH", $"/wallets/{id}", "{\"label\":null}"), ("DELETE", $"/wallets/{id}", null),
+            ("GET", "/api/notifications/head", null), ("GET", "/api/notifications", null),
+            ("POST", "/api/notifications/claim", null), ("POST", $"/api/notifications/{id}/read", null),
+            ("POST", "/api/notifications/read", "{\"upTo\":\"0.0.0\"}"),
+            ("GET", "/api/notifications/preferences", null), ("PUT", "/api/notifications/preferences", "{}"),
+            ("POST", "/api/notifications/test", null),
+            ("GET", "/api/events/stream?after=0&notificationsAfter=0.0.0", null)
         ];
         using var client = factory.CreateClient(new() { BaseAddress = new("https://vessel.test"), HandleCookies = false });
         foreach (var (method, path, body) in routes)
         {
             async Task<HttpResponseMessage> Send(bool cookie, string? user, string? origin = "https://vessel.test", string? site = null)
             {
-                using var request = new HttpRequestMessage(new HttpMethod(method), "/api/auth" + path);
+                using var request = new HttpRequestMessage(new HttpMethod(method),
+                    path.StartsWith("/api/", StringComparison.Ordinal) ? path : "/api/auth" + path);
                 if (cookie) request.Headers.Add("Cookie", "__Host-vessel-session=" + issued.Token);
                 if (user is not null) request.Headers.Add("X-Vessel-User", user);
                 if (origin is not null) request.Headers.Add("Origin", origin);
