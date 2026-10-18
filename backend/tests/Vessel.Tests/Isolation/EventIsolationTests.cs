@@ -78,6 +78,59 @@ public abstract class EventIsolationCases(IsolationHost api)
 
     [PostgresFact]
     [Covers("GET", "/api/events/stream")]
+    public async Task Live_event_stream_delivers_only_the_callers_new_events()
+    {
+        var (a, b) = await api.Owners();
+        // Synced before the stream opens; their Plays are opened and closed while it is live.
+        var aAccount = (await a.SyncedVenueAccount(Isolated.Marker("live-a"))).GetProperty("id").GetGuid();
+        var bAccount = (await b.SyncedVenueAccount(Isolated.Marker("live-b"))).GetProperty("id").GetGuid();
+        var aCursor = (await a.GetJson("/api/events")).GetProperty("nextCursor").GetString()!;
+        var bCursor = (await b.GetJson("/api/events")).GetProperty("nextCursor").GetString()!;
+
+        using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var response = await b.Http.SendAsync(new(HttpMethod.Get, $"/api/events/stream?after={Uri.EscapeDataString(bCursor)}"),
+            HttpCompletionOption.ResponseHeadersRead, cancel.Token);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        await using var body = await response.Content.ReadAsStreamAsync(cancel.Token);
+        using var reader = new StreamReader(body);
+        var text = new System.Text.StringBuilder();
+        // Ready: the status frame and the first keepalive, with nothing replayed after B's current cursor.
+        await Read(reader, text, line => line == ": keepalive", cancel.Token);
+        Assert.Contains("event: status", text.ToString());
+        Assert.DoesNotContain("event: event", text.ToString());
+
+        // Committed while B's stream is live: A's events first, then B's.
+        var aPlay = await a.ClosedPlay(aAccount, Isolated.Marker("live-a"));
+        var bPlay = await b.ClosedPlay(bAccount, Isolated.Marker("live-b"));
+        var aEvents = (await a.GetJson($"/api/events?after={Uri.EscapeDataString(aCursor)}")).GetProperty("events").EnumerateArray()
+            .Select(e => e.GetProperty("id").GetGuid()).ToList();
+        var bEvents = (await b.GetJson($"/api/events?after={Uri.EscapeDataString(bCursor)}")).GetProperty("events").EnumerateArray()
+            .Select(e => e.GetProperty("id").GetGuid()).ToList();
+        Assert.NotEmpty(aEvents);
+        Assert.NotEmpty(bEvents);
+        // B's last new event arrives, and with it every earlier one; the poll after A's commit has run by then.
+        var last = bEvents[^1].ToString("D");
+        await Read(reader, text, line => line.StartsWith("data: ", StringComparison.Ordinal) && line.Contains(last, StringComparison.OrdinalIgnoreCase),
+            cancel.Token);
+        var frames = text.ToString();
+        Assert.All(bEvents, id => Assert.Contains(id.ToString("D"), frames, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(bPlay.ToString("D"), frames, StringComparison.OrdinalIgnoreCase);
+        Isolated.NoLeak(frames, [a.Id, aAccount, aPlay, .. aEvents.Cast<object>()]);
+    }
+
+    /// <summary>Appends stream lines to <paramref name="text"/> until one matches.</summary>
+    private static async Task Read(StreamReader reader, System.Text.StringBuilder text, Func<string, bool> until, CancellationToken ct)
+    {
+        while (await reader.ReadLineAsync(ct) is { } line)
+        {
+            text.AppendLine(line);
+            if (until(line)) return;
+        }
+        Assert.Fail("The stream ended early: " + text);
+    }
+
+    [PostgresFact]
+    [Covers("GET", "/api/events/stream")]
     public async Task Event_stream_cap_is_per_owner()
     {
         // Fresh owners hold no stream slots, so no earlier case's disconnecting stream can be counted here.

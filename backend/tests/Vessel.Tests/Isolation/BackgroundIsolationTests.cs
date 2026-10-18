@@ -68,7 +68,7 @@ public sealed class BackgroundIsolationTests(WalletIsolationApi api) : IClassFix
                 Assert.Equal(owner.Id, scope.Services.GetRequiredService<IJournalOwnerContext>().OwnerId);
                 await scope.Services.GetRequiredService<MonitorCoordinator>().DiscoverAsync(venues, api.Clock.Now, default);
             }
-            var due = await api.Factory.Services.GetRequiredService<ISystemMonitorStore>().DueCandidatesAsync(null, 100, default);
+            var due = await api.Factory.Services.GetRequiredService<ISystemMonitorStore>().DueCandidatesAsync(null, api.Clock.Now, 100, default);
             Assert.Equal(a.Id, Assert.Single(due, c => c.AccountId == aAccount).OwnerId);
             Assert.Equal(b.Id, Assert.Single(due, c => c.AccountId == bAccount).OwnerId);
             var aRow = await Row(a.Id, aAccount);

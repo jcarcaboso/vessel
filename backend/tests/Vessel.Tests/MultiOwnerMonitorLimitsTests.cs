@@ -55,7 +55,7 @@ public sealed class MultiOwnerMonitorLimitsTests
         await SeedAsync(database, second, "risex", now, 3);
         await using var data = NpgsqlDataSource.Create(database.ConnectionString);
         var system = new SystemMonitorStore(data, new ManualTime(now));
-        var page = await system.DueCandidatesAsync(null, 100, default);
+        var page = await system.DueCandidatesAsync(null, now, 100, default);
         Assert.Equal(4, page.Count);
         Assert.All(page.GroupBy(c => c.OwnerId), group => Assert.Equal(2, group.Count()));
         Assert.All(page, candidate => Assert.Equal(now, candidate.DueAt));
@@ -63,11 +63,13 @@ public sealed class MultiOwnerMonitorLimitsTests
         await using var locked = database.Context(first);
         await using var transaction = await locked.Database.BeginTransactionAsync();
         await locked.Database.ExecuteSqlRawAsync("SELECT 1 FROM monitor_accounts FOR UPDATE");
-        Assert.Equal(page, await system.DueCandidatesAsync(null, 100, default).WaitAsync(TimeSpan.FromSeconds(5)));
-        var next = await system.DueCandidatesAsync(page[^1].Key, 100, default);
+        Assert.Equal(page, await system.DueCandidatesAsync(null, now, 100, default).WaitAsync(TimeSpan.FromSeconds(5)));
+        var next = await system.DueCandidatesAsync(page[^1].Key, now, 100, default);
         Assert.Single(next);
         Assert.Equal(second, next[0].OwnerId);
-        Assert.Empty(await system.DueCandidatesAsync(next[0].Key, 100, default));
+        Assert.Empty(await system.DueCandidatesAsync(next[0].Key, now, 100, default));
+        // A scan cycle's bound excludes work that became due after the cycle started.
+        Assert.Empty(await system.DueCandidatesAsync(null, now.AddSeconds(-1), 100, default));
     }
 
     [PostgresFact]
@@ -85,12 +87,12 @@ public sealed class MultiOwnerMonitorLimitsTests
         var system = new SystemMonitorStore(data, clock);
         for (var pass = 0; pass < 3; pass++)
         {
-            var candidate = Assert.Single(await system.DueCandidatesAsync(null, 100, default));
+            var candidate = Assert.Single(await system.DueCandidatesAsync(null, now, 100, default));
             Assert.Equal(available, candidate.AccountId);
             Assert.Equal("risex", candidate.VenueId);
         }
         clock.Advance(TimeSpan.FromHours(1));
-        Assert.Equal(throttled.Order(), (await system.DueCandidatesAsync(null, 100, default)).Select(c => c.AccountId).Order());
+        Assert.Equal(throttled.Order(), (await system.DueCandidatesAsync(null, clock.GetUtcNow(), 100, default)).Select(c => c.AccountId).Order());
     }
 
     [PostgresFact]

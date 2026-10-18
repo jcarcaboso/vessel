@@ -30,10 +30,13 @@ public sealed class OwnerScopeArchitectureTests
         // SQL text hashes make an added statement (even in an approved file) require an inventory review.
         // Schema migrations are separately reviewed DDL, not runtime owner-scope bypasses.
         // Advisory locks on owner-derived or previously owner-validated entity keys are inventoried too.
-        // To add an entry, review the statement's scope, then copy its path|hash from this assertion's diff.
+        // OwnerlessSqlClassifier decides which literals are SQL and which carry an owner predicate or owner insert.
+        // To add an entry, review the statement's scope, then copy its path|hash from this assertion's message.
         string[] reviewed =
         [
             "Vessel.Api/EvidenceCopyCommand.cs|c9b34ee7f02a2f083c971b5bcfd2b6dfb239af4970d91d8e56dc616d55a3d9c4",
+            // Offline evidence copy: read-only transaction mode for its metadata read; touches no rows.
+            "Vessel.Api/EvidenceCopyCommand.cs|6c20e5345ee8028f61cc0541aeb60699e5cffa99c8f79ff7f8c62b0a8dad1837",
             // Server-wide identity invitations: atomic use consumption by code hash, expiry and remaining uses.
             "Vessel.Identity/IdentityService.cs|c26ffac165c6420b5dab892b98bdc6fffed4d9b01eb5f98c3e15838abdc753aa",
             // Identity-schema advisory lock only; the raw literal keeps its quoted suffix inside the SQL hash.
@@ -78,7 +81,7 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/MonitorStore.cs|11fb326c24d434a2b59624a7e4a796561d98ef3e2291f2682033d47b113996e3",
             "Vessel.Persistence/MonitorStore.cs|5d0a1ed4c9cf1315a1cb064478718b843e28efcb64c8bb63578411302ca9e1be",
             "Vessel.Persistence/MonitorStore.cs|2b6dd27282cdf69a0bfa64cbc1a4de96621d46d16d63d39f96373947271daf1d",
-            "Vessel.Persistence/SystemMonitorStore.cs|e2037cb3b7902344c9316ae23e538c8738f2a6ba7b788d164ef4fd2597e43b2e",
+            "Vessel.Persistence/SystemMonitorStore.cs|f3c72b9ad177c68dc7d7c9b448086edca70b0056e135220353626110140e4c8d",
             "Vessel.Persistence/ServerStateStore.cs|40c74c937dd0eb512282090d98087bea4726000d71185d726dbbdd89e80b5b51",
             "Vessel.Persistence/ServerStateStore.cs|4de6036152e376cb02952ca7410a4db74f2a434f16091e168cf64995f90293f8",
             "Vessel.Persistence/ServerStateStore.cs|ee73f5478e13936ed833caed3737b495efb924b2d70cbf4c9d46ca0f8ff1593a",
@@ -90,13 +93,13 @@ public sealed class OwnerScopeArchitectureTests
         foreach (Match literal in Regex.Matches(File.ReadAllText(path),
                      @"\$?""""""[\s\S]*?""""""|\$?@""(?:[^""]|"""")*""|\$?""(?:\\.|[^""\\])*"""))
         {
+            if (!OwnerlessSqlClassifier.RequiresReview(OwnerlessSqlClassifier.Text(literal.Value))) continue;
             var sql = literal.Value.TrimStart('$', '@', '"').TrimEnd('"').Trim();
-            if (!Regex.IsMatch(sql, @"^(SELECT|INSERT|UPDATE|DELETE|WITH)\b", RegexOptions.IgnoreCase) ||
-                Regex.IsMatch(sql, @"@owner\b|@ownerId\b|\{[^}]*OwnerId|\{owner\}", RegexOptions.IgnoreCase)) continue;
             var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Regex.Replace(sql, @"\s+", " "))));
             actual.Add(Path.GetRelativePath(SourceRoot(), path).Replace('\\', '/') + "|" + hash);
         }
-        Assert.Equal(reviewed.Order(), actual.Order());
+        Assert.True(actual.Order().SequenceEqual(reviewed.Order()),
+            "Unreviewed: " + string.Join(", ", actual.Except(reviewed)) + "; stale: " + string.Join(", ", reviewed.Except(actual)));
     }
 
     private static IEnumerable<string> Sources() => Directory.EnumerateFiles(SourceRoot(), "*.cs", SearchOption.AllDirectories)
