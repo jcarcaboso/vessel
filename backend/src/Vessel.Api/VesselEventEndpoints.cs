@@ -64,7 +64,7 @@ public static class VesselEventEndpoints
         {
             await using var validation = new PrincipalRevalidation(
                 context.RequestServices.GetRequiredService<IPrincipalValidity>(),
-                context.RequestAborted, context.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System);
+                context.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System, context.RequestAborted);
             var ct = validation.Token;
             try
             {

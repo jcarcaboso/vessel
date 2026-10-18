@@ -18,8 +18,8 @@ public static class MarketStreamEndpoint
         IOptions<JsonOptions> json, HttpContext context)
     {
         await using var validation = new PrincipalRevalidation(
-            context.RequestServices.GetRequiredService<IPrincipalValidity>(), context.RequestAborted,
-            context.RequestServices.GetRequiredService<TimeProvider>());
+            context.RequestServices.GetRequiredService<IPrincipalValidity>(),
+            context.RequestServices.GetRequiredService<TimeProvider>(), context.RequestAborted);
         var aborted = validation.Token;
         // Failures here propagate to the ProblemDetails middleware as normal responses.
         using var session = await service.OpenAsync(id, instrument, interval, aborted);

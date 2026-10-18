@@ -9,7 +9,7 @@ public sealed class PrincipalRevalidation : IAsyncDisposable
     private readonly Task revalidation;
     public CancellationToken Token => stop.Token;
 
-    public PrincipalRevalidation(IPrincipalValidity validity, CancellationToken aborted, TimeProvider clock)
+    public PrincipalRevalidation(IPrincipalValidity validity, TimeProvider clock, CancellationToken aborted)
     {
         stop = CancellationTokenSource.CreateLinkedTokenSource(aborted);
         revalidation = RunAsync(validity, clock);

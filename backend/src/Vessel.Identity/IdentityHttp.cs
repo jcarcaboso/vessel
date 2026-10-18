@@ -124,7 +124,7 @@ public static class IdentityHttp
         if (count > BodyLimit) throw IdentityErrors.Error(413, "request-too-large");
         try
         {
-            return JsonSerializer.Deserialize<T>(buffer.AsSpan(0, count), new JsonSerializerOptions(JsonSerializerDefaults.Web))
+            return JsonSerializer.Deserialize<T>(buffer.AsSpan(0, count), JsonSerializerOptions.Web)
                 ?? throw IdentityErrors.Error(400, "request-invalid");
         }
         catch (JsonException) { throw IdentityErrors.Error(400, "request-invalid"); }

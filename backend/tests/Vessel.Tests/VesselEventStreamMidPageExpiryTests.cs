@@ -56,10 +56,9 @@ public sealed class VesselEventStreamMidPageExpiryTests
     private static async Task<List<(string Sequence, string Id)>> StreamAsync(string after, IVesselEventReader reader,
         IJournalOwnerContext owner, FlushClock clock, TimeSpan lifetime)
     {
-        var context = new DefaultHttpContext
-        {
-            RequestServices = new ServiceCollection().AddSingleton<TimeProvider>(clock).BuildServiceProvider()
-        };
+        await using var services = new ServiceCollection().AddSingleton<TimeProvider>(clock)
+            .AddSingleton<IPrincipalValidity, AlwaysValidPrincipal>().BuildServiceProvider();
+        var context = new DefaultHttpContext { RequestServices = services };
         var body = new FlushTickingStream(clock);
         context.Response.Body = body;
         await VesselEventEndpoints.StreamAsync(after, reader, owner,

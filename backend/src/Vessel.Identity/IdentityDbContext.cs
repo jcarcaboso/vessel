@@ -99,33 +99,33 @@ public sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> option
     public DbSet<IdentitySession> Sessions => Set<IdentitySession>();
     public DbSet<Invitation> Invitations => Set<Invitation>();
 
-    protected override void OnModelCreating(ModelBuilder model)
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        model.HasDefaultSchema(schema.Name);
-        var users = model.Entity<IdentityUser>();
+        modelBuilder.HasDefaultSchema(schema.Name);
+        var users = modelBuilder.Entity<IdentityUser>();
         users.ToTable("users", table =>
         {
             table.HasCheckConstraint("ck_users_role", "role IN ('member', 'operator')");
             table.HasCheckConstraint("ck_users_status", "status IN ('active', 'suspended')");
         });
         users.Property(x => x.DisplayName).HasMaxLength(60);
-        var wallets = model.Entity<UserWallet>();
+        var wallets = modelBuilder.Entity<UserWallet>();
         wallets.ToTable("user_wallets");
         wallets.Property(x => x.Address).HasColumnType("character(42)");
         wallets.Property(x => x.Label).HasMaxLength(40);
         wallets.HasIndex(x => x.Address).IsUnique();
         wallets.HasOne<IdentityUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
-        var challenges = model.Entity<AuthChallenge>();
+        var challenges = modelBuilder.Entity<AuthChallenge>();
         challenges.ToTable("auth_challenges", table =>
             table.HasCheckConstraint("ck_auth_challenges_purpose", "purpose IN ('sign-in', 'link', 'step-up')"));
         challenges.Property(x => x.Address).HasColumnType("character(42)");
         challenges.HasIndex(x => x.ExpiresAt);
-        var registrations = model.Entity<PendingRegistration>();
+        var registrations = modelBuilder.Entity<PendingRegistration>();
         registrations.ToTable("pending_registrations");
         registrations.Property(x => x.Address).HasColumnType("character(42)");
         registrations.HasIndex(x => x.TokenHash).IsUnique();
         registrations.HasIndex(x => x.ExpiresAt);
-        var sessions = model.Entity<IdentitySession>();
+        var sessions = modelBuilder.Entity<IdentitySession>();
         sessions.ToTable("sessions", table =>
             table.HasCheckConstraint("ck_sessions_live_wallet", "revoked_at IS NOT NULL OR wallet_id IS NOT NULL"));
         sessions.Property(x => x.UserAgentSummary).HasMaxLength(80);
@@ -134,12 +134,12 @@ public sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> option
         sessions.HasOne<IdentityUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         sessions.HasOne<UserWallet>().WithMany().HasForeignKey(x => x.WalletId).OnDelete(DeleteBehavior.SetNull);
         sessions.HasOne<UserWallet>().WithMany().HasForeignKey(x => x.StepUpWalletId).OnDelete(DeleteBehavior.SetNull);
-        var invitations = model.Entity<Invitation>();
+        var invitations = modelBuilder.Entity<Invitation>();
         invitations.ToTable("invitations", table =>
             table.HasCheckConstraint("ck_invitations_uses", "max_uses > 0 AND uses >= 0 AND uses <= max_uses"));
         invitations.Property(x => x.Note).HasMaxLength(80);
         invitations.HasIndex(x => x.CodeHash).IsUnique();
-        foreach (var entity in model.Model.GetEntityTypes())
+        foreach (var entity in modelBuilder.Model.GetEntityTypes())
             foreach (var property in entity.GetProperties())
                 property.SetColumnName(Regex.Replace(property.Name, "([a-z0-9])([A-Z])", "$1_$2").ToLowerInvariant());
     }

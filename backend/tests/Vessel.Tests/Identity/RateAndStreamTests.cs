@@ -180,7 +180,7 @@ public sealed class StreamRevalidationTests
     public async Task Revalidation_exceptions_end_the_response_instead_of_leaking_or_leaving_it_running()
     {
         var clock = new ManualTime(DateTimeOffset.UtcNow);
-        await using var validation = new PrincipalRevalidation(new ThrowingPrincipal(), default, clock);
+        await using var validation = new PrincipalRevalidation(new ThrowingPrincipal(), clock, default);
         clock.Advance(TimeSpan.FromSeconds(15));
         await Eventually.True(() => validation.Token.IsCancellationRequested, "A failing revalidation must terminate the stream.");
         Assert.True(validation.Token.IsCancellationRequested);

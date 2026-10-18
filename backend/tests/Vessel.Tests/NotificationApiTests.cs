@@ -5,6 +5,8 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection;
+using Vessel.Application.Ownership;
 using Vessel.Api;
 using Vessel.Application.Events;
 using Vessel.Application.Notifications;
@@ -84,7 +86,8 @@ public sealed class NotificationApiTests
         var owner = new CoreOwner(Guid.NewGuid());
         using var cancellation = new CancellationTokenSource();
         using var body = new MemoryStream();
-        var context = new DefaultHttpContext { RequestAborted = cancellation.Token };
+        await using var services = new ServiceCollection().AddSingleton<IPrincipalValidity, AlwaysValidPrincipal>().BuildServiceProvider();
+        var context = new DefaultHttpContext { RequestAborted = cancellation.Token, RequestServices = services };
         context.Response.Body = body;
         var epoch = Guid.NewGuid().ToString("N");
         var at = DateTimeOffset.UtcNow;
