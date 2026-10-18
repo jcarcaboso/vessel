@@ -78,7 +78,7 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/MonitorStore.cs|11fb326c24d434a2b59624a7e4a796561d98ef3e2291f2682033d47b113996e3",
             "Vessel.Persistence/MonitorStore.cs|5d0a1ed4c9cf1315a1cb064478718b843e28efcb64c8bb63578411302ca9e1be",
             "Vessel.Persistence/MonitorStore.cs|2b6dd27282cdf69a0bfa64cbc1a4de96621d46d16d63d39f96373947271daf1d",
-            "Vessel.Persistence/SystemMonitorStore.cs|e2037cb3b7902344c9316ae23e538c8738f2a6ba7b788d164ef4fd2597e43b2e",
+            "Vessel.Persistence/SystemMonitorStore.cs|f3c72b9ad177c68dc7d7c9b448086edca70b0056e135220353626110140e4c8d",
             "Vessel.Persistence/ServerStateStore.cs|40c74c937dd0eb512282090d98087bea4726000d71185d726dbbdd89e80b5b51",
             "Vessel.Persistence/ServerStateStore.cs|4de6036152e376cb02952ca7410a4db74f2a434f16091e168cf64995f90293f8",
             "Vessel.Persistence/ServerStateStore.cs|ee73f5478e13936ed833caed3737b495efb924b2d70cbf4c9d46ca0f8ff1593a",

@@ -6,7 +6,7 @@ namespace Vessel.Persistence;
 
 public sealed class SystemMonitorStore(NpgsqlDataSource data, TimeProvider time) : ISystemMonitorStore
 {
-    public async Task<IReadOnlyList<DueMonitorCandidate>> DueCandidatesAsync(DueMonitorKey? after, int limit, CancellationToken ct)
+    public async Task<IReadOnlyList<DueMonitorCandidate>> DueCandidatesAsync(DueMonitorKey? after, DateTimeOffset dueBy, int limit, CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(limit, 1000);
@@ -22,12 +22,14 @@ public sealed class SystemMonitorStore(NpgsqlDataSource data, TimeProvider time)
                         WHERE d.venue_id = a."VenueId" AND d.retry_after_until > @now)
             ), ranked AS (
                 SELECT *, ROW_NUMBER() OVER (PARTITION BY owner_id ORDER BY due_at, account_id) AS owner_row
-                FROM due WHERE @after_due IS NULL OR (due_at, owner_id, account_id) > (@after_due, @after_owner, @after_account)
+                FROM due WHERE due_at <= @due_by
+                    AND (@after_due IS NULL OR (due_at, owner_id, account_id) > (@after_due, @after_owner, @after_account))
             )
             SELECT owner_id, account_id, venue_id, due_at FROM ranked WHERE owner_row <= 2
             ORDER BY due_at, owner_id, account_id LIMIT @limit
             """);
         command.Parameters.AddWithValue("now", time.GetUtcNow());
+        command.Parameters.AddWithValue("due_by", NpgsqlDbType.TimestampTz, dueBy.ToUniversalTime());
         command.Parameters.AddWithValue("after_due", NpgsqlDbType.TimestampTz, (object?)after?.DueAt ?? DBNull.Value);
         command.Parameters.AddWithValue("after_owner", NpgsqlDbType.Uuid, (object?)after?.OwnerId ?? DBNull.Value);
         command.Parameters.AddWithValue("after_account", NpgsqlDbType.Uuid, (object?)after?.AccountId ?? DBNull.Value);

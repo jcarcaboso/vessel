@@ -403,6 +403,46 @@ public sealed class MultiOwnerWorkerTests
         Assert.Equal(now, (await fixture.Host.Services.GetRequiredService<IServerStateStore>().HeartbeatAsync(default))!.HeartbeatAtUtc);
     }
 
+    [PostgresFact]
+    public async Task A_once_skipped_account_is_revisited_when_the_bounded_scan_cycle_wraps()
+    {
+        await using var fixture = await Fixture.CreateAsync(secondAccounts: 4, concurrency: 1);
+        fixture.Host.Services.GetRequiredService<MonitorOptions>().Interval = TimeSpan.FromMinutes(1);
+        foreach (var owner in new[] { fixture.First, fixture.Second })
+        {
+            await using var scope = fixture.Host.Services.GetRequiredService<IOwnerScopeFactory>().Create(owner);
+            await scope.Services.GetRequiredService<MonitorCoordinator>().DiscoverAsync(["hyperliquid"], fixture.Clock.GetUtcNow(), default);
+        }
+        fixture.Venue.Release.TrySetResult();
+        var scheduler = fixture.Host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
+        await using (var held = fixture.Database.Context(fixture.First))
+        {
+            await using var tx = await held.Database.BeginTransactionAsync();
+            var account = fixture.Accounts[fixture.First];
+            await held.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM accounts WHERE \"Id\" = {account} FOR UPDATE");
+            await scheduler.TickAsync(default);
+            await fixture.EventuallyAsync(async () =>
+            {
+                await using var db = fixture.Database.Context(fixture.Second);
+                return await db.Set<MonitorAccount>().AllAsync(m => m.ManualState == "idle");
+            });
+            await tx.RollbackAsync();
+        }
+        for (var tick = 0; tick < 12; tick++)
+        {
+            await Task.Delay(50);
+            fixture.Clock.Advance(TimeSpan.FromSeconds(30));
+            await scheduler.TickAsync(default);
+            await fixture.EventuallyAsync(async () =>
+            {
+                await using var db = fixture.Database.Context(fixture.Second);
+                return await db.Set<MonitorAccount>().AllAsync(m => m.ManualState == "idle");
+            });
+        }
+        Assert.True(fixture.Venue.Reads.Any(o => o == fixture.First),
+            $"Once-locked owner has zero runs after six minutes; other owner has {fixture.Venue.Reads.Count(o => o == fixture.Second)} runs.");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         public string Heartbeat { get; } = Path.Combine(Path.GetTempPath(), "vessel-owner-heartbeat-" + Guid.NewGuid().ToString("N"));

@@ -521,8 +521,9 @@ Monitor commands for a suspended owner are dropped and logged by ID; for an unkn
 
 - **Leases.** `MonitorLease` gains `OwnerId`. The existing discovery record `MonitorCandidate` (`Application/Monitoring/Contracts.cs:56`, which carries a tracked `MonitorAccount`) stays as it is.
 - **Discovery** stays owner-scoped (the existing EF code) and iterates `ActiveOwnersAsync` pages.
-- **Candidates** come from `ISystemMonitorStore.DueCandidatesAsync(DueMonitorKey? after, int limit)`. It returns `DueMonitorCandidate(OwnerId, AccountId, VenueId, DueAt)`, where `DueMonitorKey = (DueAt, OwnerId, AccountId)`. It is a lock-free system query across owners, with keyset pages in that order and at most 2 candidates per owner per page (`ROW_NUMBER() OVER (PARTITION BY owner)`).
+- **Candidates** come from `ISystemMonitorStore.DueCandidatesAsync(DueMonitorKey? after, DateTimeOffset dueBy, int limit)`. It returns `DueMonitorCandidate(OwnerId, AccountId, VenueId, DueAt)`, where `DueMonitorKey = (DueAt, OwnerId, AccountId)`. It is a lock-free system query across owners, with keyset pages in that order and at most 2 candidates per owner per page (`ROW_NUMBER() OVER (PARTITION BY owner)`).
   - The scheduler keeps the continuation across ticks, so later owners cannot starve. It skips suspended owners (directory status, cached for one tick) and owners at capacity.
+  - The continuation walks a **bounded scan cycle**: the bound is the time the cycle started, and only work due by then is considered. Work rescheduled during the cycle waits for the next one. When a cycle's pages run out, the scheduler starts a new cycle (at most once per tick), so an account skipped earlier (row locked, owner or venue at capacity, owner failure) is revisited instead of starving behind recurring work.
 - **Claiming.** Each candidate is claimed in **its own transaction** (one account) in its owner's scope, re-checking owner status, deadlines and both capacities. The scheduler no longer calls `ClaimDueAsync`; its multi-row claim can deadlock on venue locks.
 - **Lock order:** account row, monitor row, owner budget lock (`vessel-monitor-budget:{owner}`), venue budget lock (`vessel-venue-budget:{venue}`). It is the same in `MonitorCoordinator`, `ClaimAsync` and Refresh admission. A transaction never takes two venue locks. `ReadCapacityAsync` takes `venueId`.
 - **The owned-entity rule stays.** The `VesselDbContext` owner filter and the mixed-owner save guard are not weakened.
@@ -701,6 +702,7 @@ See §7. The stream endpoints get `IPrincipalValidity` from DI: `AlwaysValidPrin
 ### B2
 
 - Candidate pages dominated by suspended or capped owners do not starve others.
+- An account skipped once (row locked) is revisited at the next scan cycle while another owner's recurring work stays due.
 - Two owners × two venues claim concurrently without deadlock.
 - The venue count sees its own lease.
 - A server-wide venue deadline holds across owners; a 429 recorded during a rolled-back credential save survives.
@@ -798,3 +800,4 @@ Cross-model verification of the first lanes found gaps the contract left open. T
 | D1 review | Stale-generation responses, errors, stream readers and side effects are discarded, as §11 requires; generation-bound streams reopen under the current generation | §11 |
 | D1 review | The "Signed in as someone else in another tab" notice is shown after a successful reload too, and removed only once presented | §11 |
 | D1 review | The remember checkbox is locked from the moment signing starts | §11 |
+| B2 review | Candidate scans run in bounded cycles (only work due by the cycle start), so accounts skipped during a cycle are revisited at the next wrap; a Check made mid-cycle waits for the next cycle when workers are saturated | §9.3 |
