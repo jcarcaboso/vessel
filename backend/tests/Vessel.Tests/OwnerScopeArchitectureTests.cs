@@ -192,6 +192,8 @@ public sealed class OwnerScopeArchitectureTests
             // Not SQL: design-time DbContext factory error messages.
             "Vessel.Identity/IdentityDbContext.cs|e1b7a668a5e3ab1cf3318d78321688ad059827b7d660f00bda0ac249e2afee69",
             "Vessel.Persistence/VesselDbContextFactory.cs|e1b7a668a5e3ab1cf3318d78321688ad059827b7d660f00bda0ac249e2afee69",
+            // Not SQL: check-config usage text ("--Vessel:Key=value" and the word "do").
+            "Vessel.Api/ConfigurationCheckCommand.cs|ed23367322632085581515ce59e3a4ab16f07ac9f7dc62ae7df4d6fc17700445",
             // Not SQL: identity command names "reset-after-restore" and "revoke-sessions".
             "Vessel.Identity/IdentityAdministration.cs|de972956ff71edac782269c6c600a1fd82dc90c14f4363d70e3287828933c5db",
             "Vessel.Identity/IdentityAdministration.cs|d0a010615ff67a2fdcaabb9a9ea71fda1e68f0cb866d887bd960e2daac2ce4e2",
