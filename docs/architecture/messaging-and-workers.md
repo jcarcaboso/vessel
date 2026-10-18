@@ -618,12 +618,19 @@ sequenceDiagram
 
 Only system stores (singleton `NpgsqlDataSource`, no `VesselDbContext`) access
 server subscription registrations, owner discovery/inventory, monitor candidates
-and server heartbeat/venue deadline tables. Owner-specific work always resolves
+and server heartbeat/venue deadline tables (including `NotificationWorkerState`
+and `server_notification_heartbeats`). Owner-specific work always resolves
 inside `IOwnerScopeFactory`. `OwnerScopeArchitectureTests` inventories reviewed
 unfiltered SQL and forbids plain background scope creation/`IgnoreQueryFilters`.
 
-`20261017193000_ServerMonitorState` copies MAX deadlines by venue, creates empty
-per-deployment heartbeats and drops `monitor_heartbeats`/`monitor_venue_budgets`.
+`20261018110000_ServerMonitorState` copies MAX deadlines by venue, creates empty
+per-deployment monitor heartbeats and drops `monitor_heartbeats`/`monitor_venue_budgets`.
+The preceding `20261018100000_ServerEventSubscriptions` separates server
+registration from per-owner progress; both IDs replace unshipped October 17 IDs.
+`20261018120000_ServerNotificationState` then creates empty
+`server_notification_heartbeats` and **drops/replaces** `notification_heartbeats`;
+no owner liveness is carried forward. Recreate disposable databases that applied
+the old IDs; never rewrite migration-history rows.
 **Stop all API/worker replicas and back up before migration.** Old images require
 a pre-upgrade database restore, not a down migration. After restore, keep hosts
 stopped, run identity reset/reconciliation in Wallet mode and rotate the event
@@ -634,11 +641,14 @@ epoch before provisioning/starting. See the [deployment runbook](../../deploy/RE
 The `notifications` module (plan: [notification-hub-plan.md](notification-hub-plan.md); browser contract: [notification-hub-api-contract.md](notification-hub-api-contract.md)).
 
 - **Subscription** `notifications`, filter `#`, default limits. `NotificationHub` (Application) is its keyed `IVesselEventSubscriber`; unknown types are skipped.
+- **Multi-owner delivery.** One server-wide registration, per-owner progress/receipts. `WorkerHost.Configure` calls `AddVesselIdentityDirectory` for every module: Token selects the fixed owner, Wallet selects `IdentityOwnerDirectory`. Live suspended-owner deliveries are acknowledged without a notification; active owners (including newly registered users) get assigned scopes and retained catch-up without re-provisioning. Notification retention enumerates retained owners, including suspended owners, in separate scopes. API, preferences, cursor/unread counts and popup claims are owner-scoped; operators have no journal bypass.
+- **Test-event limit.** `/api/notifications/test` admits 6 requests/minute/user/API-process through `UserReadLimits`, besides the database per-owner cooldown (10 s by default); 429 with `Retry-After`. No venue call.
 - **Run events** (`play.*`, `execution.*`, `link.*`) group per account and `runId` under an advisory lock: the handler reads the run's retained, uncovered events (index `ix_events_run`), keeps each one that passes every check itself, and writes one notification with a source row per covered event. Detail-only batches write nothing, so a later batch can include them.
 - **Standalone events** (`discrepancy.*`, `monitor.state-changed`, `credential.expiring`, `notification.test-requested`) parse their subject and revision from the dedup key (`NotificationIdentity`), order generations by event sequence, withdraw superseded unread notifications first, then create one only if the decision rule, preferences and current state allow.
-- **Records** are raw-SQL tables without foreign keys to accounts or Plays: `notifications`, `notification_sources`, `notification_deliveries`, `notification_cursors` (feed sequence, unread count, reset version, test cooldown), `notification_preferences`, `notification_heartbeats`. Every delivery state change takes the owner's cursor row first.
+- **Records** are raw-SQL tables without foreign keys to accounts or Plays: `notifications`, `notification_sources`, `notification_deliveries`, `notification_cursors` (feed sequence, unread count, reset version, test cooldown), `notification_preferences`. Notification health alone is system state in
+  `server_notification_heartbeats`, accessed through `NotificationWorkerState`. Every delivery state change takes the owner's cursor row first.
 - **Locks.** Hub: dispatcher locks → run or subject advisory lock → cursor row → rows. API and retention: cursor → rows. Disable: management and account locks → cursor. Deletion: account lock → events and receipts → cursor. The hub never locks an account; it rechecks the account's enabled state after taking the cursor.
-- **Worker services** (`case "notifications"`): `NotificationHeartbeat` (an `IMaintenanceHeartbeat`: file and row after each productive maintenance pass) and `NotificationRetentionService` (hourly, `RetentionDays`).
+- **Worker services** (`case "notifications"`): `NotificationHeartbeat` (an `IMaintenanceHeartbeat`: module-specific file and per-deployment system row after each productive maintenance pass) and `NotificationRetentionService` (hourly, `RetentionDays`).
 - **API**: `/api/notifications/*` and notification frames on `/api/events/stream?notificationsAfter=`; see the contract.
 
 ## Configuration reference
@@ -746,31 +756,35 @@ docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dl
   deregister-event-subscription <name>
 ```
 
-`/app/migrate` runs `/app/migrate-ef`, then `provision-messaging`: envelope storage and the `messaging_deployments` row of every configured deployment, then insert-only subscription registrations, then broker topology. It is idempotent. The `migrate` service uses the broker administrator. Exit code 2 prints the usage; 1 is a failure.
+`/app/migrate` first validates auth mode/token/Wallet origin, then runs
+`/app/migrate-identity-ef`, `/app/migrate-ef`, `identity ensure-owner`, then
+`provision-messaging`: envelope storage and the `messaging_deployments` row of every configured deployment, then insert-only subscription registrations, then broker topology. It is idempotent. The `migrate` service uses the broker administrator. Exit code 2 prints the usage; 1 is a failure.
 
 ### Upgrade
 
 ```sh
 docker compose pull
-docker compose stop web api worker
+docker compose stop web api worker worker-notifications
 docker compose up -d
 docker compose ps -a
 ```
 
-`up` runs `migrate` (EF bundle and provisioning) before API and worker start; a failed migration blocks them. A worker stopped mid-run loses nothing: the next run repeats the work. Do not use `docker compose restart` to upgrade. See [deploy/README.md](../../deploy/README.md#upgrade).
+`up` runs `migrate` (identity → journal → owner bootstrap → provisioning) before
+API and both workers start; a failed migration blocks them. A worker stopped mid-run loses nothing: the next run repeats the work. Do not use `docker compose restart` to upgrade. See [deploy/README.md](../../deploy/README.md#upgrade).
 
 ### Backup
 
-Stop web, API and worker, dump PostgreSQL, archive the stopped object store, start again (commands in [deploy/README.md](../../deploy/README.md#backups)). The RabbitMQ volume is excluded: subscribers recover unsettled events from PostgreSQL. Keep the credential key ring separate.
+Stop web, API and **both workers on every host/replica**, dump both PostgreSQL schemas together, archive the stopped object store, start again (commands in [deploy/README.md](../../deploy/README.md#backups)). The RabbitMQ volume is excluded: subscribers recover unsettled events from PostgreSQL. Keep the credential key ring separate.
 
 ### Restore
 
-Into fresh volumes: stop every host → restore PostgreSQL (and objects) → `rotate-event-epoch` → `migrate` → start. The rotation is what makes old browser cursors reset even after the restored stream reaches their sequence; skipping it lets a browser trust events from another history. RabbitMQ starts empty; envelopes still in the restored outbox are sent and catch-up redelivers unsettled events. Full steps: [deploy/README.md](../../deploy/README.md#isolated-restore).
+Into fresh volumes: stop every host → restore PostgreSQL (both schemas, and objects) → Wallet `identity reset-after-restore`
+and trusted-record reconciliation → `rotate-event-epoch` → `migrate` → start. The rotation is what makes old browser cursors reset even after the restored stream reaches their sequence; skipping it lets a browser trust events from another history. RabbitMQ starts empty; envelopes still in the restored outbox are sent and catch-up redelivers unsettled events. Full steps: [deploy/README.md](../../deploy/README.md#isolated-restore).
 
 ### Broker volume lost or broker replaced
 
 ```sh
-docker compose stop api worker
+docker compose stop api worker worker-notifications
 docker compose up -d --wait rabbitmq
 docker compose run --rm migrate
 docker compose up -d

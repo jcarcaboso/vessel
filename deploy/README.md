@@ -42,7 +42,8 @@ journal deletion and no password/email recovery.
 
 ### Identity settings
 
-API, worker, migration/provisioning and offline hosts must read the same settings.
+API, both workers (`worker` and `worker-notifications`), migration/provisioning
+and offline hosts must read the same authentication settings.
 Invalid settings refuse startup; validation names keys, never secret values.
 Environment variable spelling replaces `:` with `__`; arrays use `__0`, `__1`,
 etc. Lists below are configuration arrays, not comma-separated strings.
@@ -607,10 +608,28 @@ event type, writes in-app notifications in the receipt's own transaction, and
 deletes notifications older than `Vessel__Notifications__RetentionDays` (default
 90) hourly. It never opens venue tokens, so it gets no credential key ring. After
 each maintenance pass in which every catch-up succeeded it writes its own heartbeat
-row and the file `Vessel__Notifications__HeartbeatFile` (default
+row in `server_notification_heartbeats` (one per configured deployment, through
+`NotificationWorkerState`, not an owner journal) and the file `Vessel__Notifications__HeartbeatFile` (default
 `/tmp/vessel-notifications-heartbeat`); `/app/worker-health` reads that file when
 the worker's first module is `notifications`. The API reports it as
 `workerOnline` in `GET /api/notifications/head`, separately from the monitor.
+
+Wallet mode gives `worker-notifications` the same `Vessel__Auth__Mode`, empty
+`Vessel__Auth__Token` and Wallet settings as `worker`; retain the Wallet overlay
+on every command. `WorkerHost.Configure` calls `AddVesselIdentityDirectory` for
+**every** module, replacing Token's fixed-owner directory with
+`IdentityOwnerDirectory` in Wallet mode. The Hub discovers active/new owners
+without re-provisioning: registration is server-wide, but receipts/progress,
+notifications, preferences, feed cursors, unread counts, popup claims and API
+reads/writes are owner-scoped. Operator role never reads another journal.
+Suspended owners' live deliveries are acknowledged **without** producing
+notifications; active-owner handling resumes through retained catch-up after
+restore/unsuspension. Retention runs per retained owner, including suspended
+owners, without a request scope.
+
+`POST /api/notifications/test` has a **6 requests/minute/user/API-process** budget
+in addition to the stored per-owner test cooldown (default 10 seconds). A 429
+includes `Retry-After`; this is not a deployment-wide quota or a venue call.
 
 Provisioning registers the `notifications` subscription whichever services run.
 An installation that never starts `worker-notifications` keeps working without
@@ -692,7 +711,7 @@ read -rs NEW_PASSWORD   # a new URL-safe value, for example from: openssl rand -
 printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl change_password <administrator-user>
 unset NEW_PASSWORD
 # Edit RABBITMQ_PASSWORD in .env, then recreate what uses the administrator:
-docker compose up -d --force-recreate api worker   # only if RABBITMQ_APP_USER is not set
+docker compose up -d --force-recreate api worker worker-notifications   # only if RABBITMQ_APP_USER is not set
 docker compose run --rm migrate                    # confirms provisioning works with the new password
 ```
 
@@ -703,7 +722,7 @@ read -rs NEW_PASSWORD
 printf '%s' "$NEW_PASSWORD" | docker compose exec -T rabbitmq rabbitmqctl change_password <application-user>
 unset NEW_PASSWORD
 # Edit RABBITMQ_APP_PASSWORD in .env, then:
-docker compose up -d --force-recreate api worker
+docker compose up -d --force-recreate api worker worker-notifications
 ```
 
 Recreate every other service that uses the same user too, for example additional worker services. Between the broker change and the recreation, the running hosts keep their existing connections; a reconnect with the old password fails until they are recreated, and their outboxes hold publications meanwhile.
@@ -721,7 +740,7 @@ unset NEW_PASSWORD
 # configure, write (commands are published through the default exchange), read
 docker compose exec rabbitmq rabbitmqctl set_permissions -p / vessel-app \
   '^vessel\..*' '^(vessel\..*|amq\.default)$' '^vessel\..*'
-docker compose up -d --force-recreate api worker
+docker compose up -d --force-recreate api worker worker-notifications
 ```
 
 The management page is published for troubleshooting and bound to loopback by
@@ -883,15 +902,26 @@ The packaged `deploy/migrate` now refuses an empty/whitespace Token, invalid
 mode, or Wallet mode with a token or missing origin **before either EF bundle**.
 Do not bypass that wrapper when upgrading.
 
-**Stop every API and worker process, on every replica, and take a private,
-verified backup first.** This is not a rolling upgrade. B2's
-`20261017193000_ServerMonitorState` copies the maximum venue deadline, creates
-empty per-deployment heartbeats and drops the old per-owner monitor tables.
-Rolling back to an older image requires **restoring the pre-upgrade backup**;
-there is no supported down-migration path. Identity's
-`20261017155708_InitialIdentity` has its own schema and migration history; B1's
-`20261017120000_ServerEventSubscriptions` separates registration from
-per-owner progress. The database role needs database `CREATE` privilege.
+**Stop every API and worker process on every host/replica, including
+`worker-notifications`, and take a private, verified backup first.** This is not a
+rolling upgrade. This rebased delivery also includes the breaking OrderIdentity
+change above: a v0.2.0 database with imported orders/fills/links must be recreated;
+these identity migrations do not supply an order backfill.
+
+Identity's `20261017155708_InitialIdentity` uses its own schema/history. The
+journal bundle applies main's migrations (including OrderIdentity and
+`20261017180000_NotificationHub`), followed in order by:
+
+| Journal migration | Effect |
+| --- | --- |
+| `20261018100000_ServerEventSubscriptions` | Server-wide subscription registrations, separate per-owner progress. Renamed from the unshipped `20261017120000_ServerEventSubscriptions`. |
+| `20261018110000_ServerMonitorState` | Copies MAX venue deadlines, creates empty per-deployment monitor heartbeats, drops `monitor_heartbeats` and `monitor_venue_budgets`. Renamed from the unshipped `20261017193000_ServerMonitorState`. |
+| `20261018120000_ServerNotificationState` | Creates **empty** `server_notification_heartbeats` keyed by deployment and **drops/replaces** `notification_heartbeats`. Owner liveness is not copied; the notifications worker must complete a productive pass. |
+
+Do not rename applied migration-history rows or run old and new hosts together.
+Recreate disposable databases that applied the old development IDs. Rolling back
+to an older image requires **restoring the pre-upgrade backup**, not down
+migrations. The database role needs database `CREATE` privilege.
 
 Use the explicit `migrate` service: **identity bundle, then journal bundle**, then
 `identity ensure-owner`, then messaging provisioning. No application host

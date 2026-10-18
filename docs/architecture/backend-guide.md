@@ -92,13 +92,42 @@ selection and server venue/heartbeat state. Reviewed raw SQL and the absence of
 Explicit packaged migrations run identity first, journal second, then
 `identity ensure-owner` and messaging provisioning; never at host startup.
 The database role needs database `CREATE` for `CREATE SCHEMA`. Stop all API and
-worker replicas and back up before `20261017193000_ServerMonitorState`: it drops
-the old per-owner monitor state; rollback restores the backup. Wallet readiness
+worker replicas (including `worker-notifications`) on **all hosts** and back up
+before applying the journal sequence `20261018100000_ServerEventSubscriptions`
+(server registration/per-owner progress), `20261018110000_ServerMonitorState`
+(MAX venue deadlines; drops/replaces old monitor state), then
+`20261018120000_ServerNotificationState` (creates empty
+`server_notification_heartbeats`, **drops/replaces** `notification_heartbeats`).
+The first two replace the unshipped October 17 IDs; recreate disposable databases
+that applied them, never rewrite migration history. Rollback restores the
+pre-upgrade backup. Main's separate OrderIdentity migration still refuses retained
+orders/fills/links; identity does not add a backfill. Wallet readiness
 also requires an active operator with a linked wallet. After any restore, run
 `identity reset-after-restore`, reconcile against trusted later records and
 rotate the event epoch before provisioning/starting hosts. See the
 [delivery contract](multi-user-delivery-contract.md), [state/evidence](multi-user-state.md)
 and [worker reference](messaging-and-workers.md).
+
+## Multi-user Notification Hub
+
+The `notifications` module shares `WorkerHost`'s mode-aware identity directory,
+not the configured bootstrap owner for all deliveries. Registration is server-wide;
+progress/receipts, notifications, preferences, feed/unread cursor, popup claims and
+`/api/notifications/*` are owner-scoped. A suspended owner's live event is
+acknowledged without producing a notification; active/new owners are handled in
+assigned scopes, with retained catch-up and no re-provisioning. Retention visits
+retained owners (including suspended ones) with explicit scopes. The browser uses
+the session transport and the server claim, never a device-global shown marker.
+
+`NotificationWorkerState` is a system `NpgsqlDataSource` store over
+`server_notification_heartbeats(deployment, seen_at)`, separate from journal and
+monitor state. `NotificationHeartbeat` writes its own file and records the row
+only after productive subscription maintenance; health starts empty after the
+migration. Healthy notifications never make a stopped monitor look online.
+`POST /api/notifications/test` is capped at **6 requests/minute/user/API-process**
+(`UserReadLimits`), in addition to the stored per-owner cooldown; 429 supplies
+`Retry-After`. See [worker reference](messaging-and-workers.md#notification-hub)
+and the [integration decisions](multi-user-delivery-contract.md#16-implementation-round-clarifications).
 
 ## How a request flows
 

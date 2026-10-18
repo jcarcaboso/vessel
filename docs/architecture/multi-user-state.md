@@ -1,7 +1,7 @@
 # Multi-user wallet sign-in — delivery state
 
-October 18, 2026. P4, based on `be9474b` (the verified A1 → B1 → A2 → B2 →
-C1 → D1 stack), on `t3/mu-p4-deploy-docs`. This is implementation/verification
+October 18, 2026. P4 rebased onto D1 `a336bb3` (the integrated A1 → B1 → A2 →
+B2 → C1 → D1 stack on main `43ebaa0`), on `t3/mu-p4-deploy-docs`. This is implementation/verification
 state, not a merged release, a published image or a deployed installation.
 Authority: [delivery contract](multi-user-delivery-contract.md), including §16;
 review history: [review log](multi-user-review-log.md#implementation-round--october-18-2026).
@@ -16,7 +16,7 @@ The original analysis/prototype is historical, not an implementation gate.
 | A2 identity accounts | Profile/revision, linked wallets (20 cap), sessions, action-bound single-use step-up, offline suspension/role/recovery commands and restore reset. | Identity account/administration/readiness/wallet-cap tests and full suite; independent Opus verification and §16 decisions. |
 | B2 monitor/limits | Fair candidate/claim scheduling, account `SKIP LOCKED`, database-backed cross-owner venue capacity/deadlines, per-deployment heartbeats, per-user API budgets; registration constant enabled. | Multi-owner monitor/worker/limits tests, migration tests and full suite; independent Opus fixes verified. |
 | C1 isolation | Positive-control HTTP isolation, exact hidden-resource responses, per-attempt state snapshots, mutation probes, Token and Wallet harnesses. | 66 isolation cases in the inherited verified stack; rerun evidence below. Opus implementation, independent Sol review/fixes. |
-| D1 frontend | Mode discovery, EIP-6963 sign-in/registration/profile/step-up, account menu, generation and terminal-session transport, cross-tab teardown, scoped preferences. | 2,307 Vitest cases, typecheck/lint/build; independent Sol reviews/fixes. |
+| D1 frontend | Mode discovery, EIP-6963 sign-in/registration/profile/step-up, account menu, generation and terminal-session transport, cross-tab teardown, scoped preferences. | Integrated D1: 2,405 Vitest cases reported by the orchestrator; prior typecheck/lint/build and independent Sol reviews/fixes. P4 changes no frontend source. |
 | P4 deployment/docs | Explicit Wallet Compose overlay (Token default unchanged), operator settings/CLI/upgrade/restore runbooks, developer references, packaged `--auth wallet` check and external noble-signed browser smoke. | Claude Opus 5.5 reviewed `0988a1b`: **ready-with-fixes**, no blockers. Scoped follow-up fixes and rerun evidence below; no independent re-review is claimed. |
 
 D1–D12 are **adopted working defaults**, not answers retroactively attributed to
@@ -26,7 +26,50 @@ Wallet over HTTPS; start with registration `Closed` until the acceptance
 checklist is complete. User IDs preserve existing journal owner GUIDs and
 credential-encryption bindings. Operator role grants no journal bypass.
 
-## Verification evidence
+## Integration with main — October 18, 2026
+
+P4's original `4ffc714` is retained as `t3/mu-p4-deploy-docs-pre-main`.
+`git rebase --onto t3/mu-d1-frontend-identity 08d07e7` replayed the six P4 commits
+onto `a336bb3`; conflicts in `deploy/README.md`, `backend-guide.md` and
+`messaging-and-workers.md` were resolved in the original docs commit. Main's
+Notification Hub, order-identity breaking-upgrade warning, October 17 backend
+pass, module-aware health, release/e2e scripts and development runner remain;
+P4's Wallet overlay, persistent fail-closed mode/Compose files, migration
+preflight, noble signer, remote Firefox and restore reset remain.
+
+Both workers receive the same auth mode/token mapping. The Wallet overlay also
+gives `worker-notifications` the empty bearer and Wallet settings: its common
+`WorkerHost.Configure` calls `AddVesselIdentityDirectory` for every module, so it
+uses `IdentityOwnerDirectory`, not a single bootstrap owner. The Hub's registration
+is server-wide with per-owner progress/receipts; notifications, preferences, API,
+feed cursors, unread counts, claims and retention are owner-scoped. Suspended-owner
+live deliveries are acknowledged without notifications; retained catch-up resumes
+when active. Retention visits retained owners, including suspended users. The
+browser uses session transport and the owner's server claim as the "shown once"
+marker. The test-event endpoint allows **6 requests/minute/user/API-process**
+in addition to the stored owner cooldown, with 429/`Retry-After`.
+
+Notification health is per deployment through `NotificationWorkerState`, in
+`server_notification_heartbeats`, separate from monitor health. Stop **all**
+API/worker hosts/replicas, including notifications, and back up both schemas first:
+identity bundle → journal bundle (main's migrations, then
+`20261018100000_ServerEventSubscriptions` → `20261018110000_ServerMonitorState`
+→ `20261018120000_ServerNotificationState`) → owner bootstrap → messaging
+provisioning → hosts. The first two IDs replace unshipped October 17 IDs;
+recreate development databases that applied them, never edit history. The last
+migration creates empty notification deployment health and **drops/replaces**
+`notification_heartbeats`; a productive pass must establish liveness anew. Monitor
+state also replaces tables. No rolling upgrade; rollback restores the pre-upgrade
+backup. Main's OrderIdentity retained-data refusal/backfill limit still applies.
+
+The orchestrator reports **3,111** backend tests on integrated B2, **3,185** on C1
+and **2,405** Vitest cases on D1. These are inherited lane evidence, not P4 reruns.
+The integration review row intentionally leaves the Opus verdict for the
+orchestrator. Fresh P4 commands/results are recorded here after serial isolated
+checks; the earlier evidence below is historical and does not imply rerunning
+its complete backend/frontend suites on this rebase.
+
+## Original P4 verification evidence (before integration with main)
 
 All commands ran only in `/home/ops/.local/share/vessel-mu/worktrees/p4`.
 JavaScript used pinned pnpm 12.8.1; Node 24.18.0; .NET SDK 10.0.302 from
@@ -228,12 +271,12 @@ official download, and the supplied shell launched and ran the smoke successfull
 
 - The timing-sensitive frontend comparison in
   `frontend/src/features/identity/sign-in-machine.test.ts` (two `new Date()`
-  fixtures built a millisecond apart) is fixed on D1 (`08d07e7`): the unchanged
+  fixtures built a millisecond apart) is fixed on old D1 `08d07e7` (now integrated at `a336bb3`): the unchanged
   signing state is now compared with the same fixture. P4 changed no
   frontend/backend source or tests.
-- The development `pnpm db:migrate` helper remains journal-only plus messaging
-  provisioning, not a complete Wallet bootstrap. The packaged `/app/migrate`
-  sequence is the verified identity/journal/bootstrap path for this delivery.
+- The development runner from main is retained; use the packaged `/app/migrate`
+  sequence for the verified identity/journal/bootstrap path and the explicit
+  Wallet overlay for deployment. No automatic installation migration is added.
 - No WalletConnect, smart-contract wallet verification, user/journal deletion,
   admin journal browsing or venue signing/trading.
 - Public market-data backoff and Lighter's process-local semaphore are not a

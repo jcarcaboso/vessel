@@ -98,6 +98,26 @@ then remove the old key. The in-memory stores switch keys after sign-in, and
 user changes always reload. Token mode retains its legacy keys. Theme and chart
 settings are not journal/financial data.
 
+## Notifications and user sessions
+
+`useInAppNotifications` and every notification API call use the current session
+transport (`X-Vessel-User`, cookie, generation/terminal-session rules), not a bearer
+captured before sign-in. Preferences, page rows, feed cursors, unread counts and
+popup claims belong to the authenticated owner. The server's owner-scoped claim
+is the authoritative "shown once" marker across tabs/reloads; never persist a
+device-global marker. User change reloads before adopting another journal's state.
+Suspension ends the session, while the worker acknowledges that owner's live
+events without creating notifications; operators cannot inspect another feed.
+
+The head's `workerOnline` is **deployment** health from `NotificationWorkerState`
+(`server_notification_heartbeats`), not the signed-in user's activity and not the
+monitor's heartbeat. `20261018120000_ServerNotificationState` drops/replaces the
+old owner-heartbeat table; all hosts stop before upgrading. It follows the renamed
+`20261018100000_ServerEventSubscriptions` and `20261018110000_ServerMonitorState`
+after the separate identity bundle. See [upgrade order](../../deploy/README.md#multi-user-wallet-sign-in-this-delivery).
+The test button uses `/api/notifications/test`: **6 requests/minute/user/API-process**,
+plus the stored owner cooldown; honor 429/`Retry-After`, do not retry automatically.
+
 ## Routing and the shell
 
 `useHashPage` owns the current hash page and navigation listener for
