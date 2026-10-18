@@ -64,6 +64,47 @@ export function SignInGate({ registration, originAccepted, children, channels, n
   useEffect(() => { if (signingIn && notice) clearNotice() }, [signingIn, notice])
   const noticePresented = useCallback(() => { setNotice(null); clearNotice() }, [])
 
+  /**
+   * Probes the cookie's session and follows it: a 401 or suspension ends the tab like any session call, another
+   * person reloads, and this tab's own session replaces the gate's copy (wallet, profile) without touching the
+   * workspace, so a same-user adoption never leaves the old sign-in wallet on screen or in a removal decision.
+   *
+   * Each probe belongs to the controller and session generation it started under. A newer probe, an adoption or a
+   * teardown aborts it, and an answer that arrives after any of them is dropped, a 401 included: it may describe the
+   * session this tab has since left. The profile only moves forward by `UserDto.revision`, so a probe answered
+   * before a save never restores the old name.
+   */
+  const checkSession = useCallback(async (current: SessionController): Promise<SessionCheck> => {
+    probes.get(current)?.abort()
+    const attempt = new AbortController()
+    probes.set(current, attempt)
+    const generation = current.generation
+    const superseded = () => attempt.signal.aborted || current.generation !== generation || current.sessionGeneration.ended.aborted
+    const settled = () => current.sessionGeneration.ended.aborted ? 'ended' : 'unknown'
+    let fresh: SessionDto
+    try { fresh = await api.session(AbortSignal.any([attempt.signal, current.sessionGeneration.ended])) } catch (cause) {
+      if (superseded()) return settled()
+      if (cause instanceof ApiError && (cause.status === 401 || cause.code === 'user-suspended')) {
+        current.handleFailure({ status: cause.status === 401 ? 401 : 403, ...cause.code ? { code: cause.code } : {}, generation })
+      }
+      return settled()
+    } finally { if (probes.get(current) === attempt) probes.delete(current) }
+    if (superseded()) return settled()
+    const check = current.observe(fresh)
+    // The updater, not a ref, checks that this controller still owns the gate; after unmount it does nothing.
+    if (check === 'current') {
+      setState(state => {
+        if (state.kind !== 'ready' || state.ready.controller !== current) return state
+        const user = newerUser(state.ready.session.user, fresh.user)
+        return { kind: 'ready', ready: {
+          ...state.ready, session: { ...fresh, user },
+          // The wallet's announced name belongs to the sign-in this tab made; another tab's wallet is unknown here.
+          walletName: fresh.wallet.id === state.ready.session.wallet.id ? state.ready.walletName : null,
+          system: { ...state.ready.system, owner: { ...state.ready.system.owner, displayName: user.displayName } } } }
+      })
+    }
+    return check
+  }, [api])
   const enter = useCallback(async (session: SessionDto, fresh: boolean, walletName: string | null) => {
     if (!mounted.current) return
     setState({ kind: 'loading' })
@@ -75,6 +116,9 @@ export function SignInGate({ registration, originAccepted, children, channels, n
       onSuspended: () => { controller.dispose(); setState({ kind: 'suspended' }) },
     })
     controllerRef.current = controller
+    // Adopting another tab's session of this user changes which wallet signed this tab in. The workspace shows the
+    // session it started with (generation 0), so an adoption while it loads is followed once it is on screen.
+    controller.sessionGeneration.subscribe(() => { void checkSession(controller) })
     if (fresh) controller.announceSignIn()
     try {
       const credentials = controller.credentials()
@@ -83,12 +127,13 @@ export function SignInGate({ registration, originAccepted, children, channels, n
       const workspace = createWorkspaceApi(credentials, controller.handleFailure)
       controller.markLive()
       setState({ kind: 'ready', ready: { session, system, api: workspace, controller, walletName } })
+      if (controller.generation !== 0) void checkSession(controller)
     } catch (cause) {
       // A 401 or suspension already moved the gate; anything else may be retried.
       if (controllerRef.current !== controller || cause instanceof ApiError && (cause.status === 401 || cause.code === 'user-suspended')) return
       setState({ kind: 'failed', message: errorMessage(cause, 'The workspace could not be loaded.'), retry: { session, walletName } })
     }
-  }, [channels, navigate])
+  }, [channels, navigate, checkSession])
 
   const settleProbe = useCallback((result: { session: SessionDto } | { cause: unknown }) => {
     if ('session' in result) { void enter(result.session, false, null); return }
@@ -125,40 +170,17 @@ export function SignInGate({ registration, originAccepted, children, channels, n
   }, [])
   const controller = ready?.controller ?? null
   const auth = useMemo(() => controller && createSessionAuthApi(controller.credentials(), controller.handleFailure), [controller])
-  /**
-   * Probes the cookie's session and follows it: a 401 or suspension ends the tab like any session call, another
-   * person reloads, and this tab's own session replaces the gate's copy (wallet, profile) without touching the
-   * workspace, so a same-user adoption never leaves the old sign-in wallet on screen or in a removal decision.
-   */
-  const checkSession = useCallback(async (current: SessionController): Promise<SessionCheck> => {
-    let fresh: SessionDto
-    try { fresh = await api.session() } catch (cause) {
-      if (cause instanceof ApiError && (cause.status === 401 || cause.code === 'user-suspended')) {
-        current.handleFailure({ status: cause.status === 401 ? 401 : 403, ...cause.code ? { code: cause.code } : {} })
-      }
-      return current.sessionGeneration.ended.aborted ? 'ended' : 'unknown'
-    }
-    const check = current.observe(fresh)
-    // The updater, not a ref, checks that this controller still owns the gate; after unmount it does nothing.
-    if (check === 'current') {
-      setState(state => state.kind !== 'ready' || state.ready.controller !== current ? state : { kind: 'ready', ready: {
-        ...state.ready, session: fresh,
-        // The wallet's announced name belongs to the sign-in this tab made; another tab's wallet is unknown here.
-        walletName: fresh.wallet.id === state.ready.session.wallet.id ? state.ready.walletName : null,
-        system: { ...state.ready.system, owner: { ...state.ready.system.owner, displayName: fresh.user.displayName } } } })
-    }
-    return check
-  }, [api])
-  // Adopting another tab's session of this user changes which wallet signed this tab in.
-  useEffect(() => controller?.sessionGeneration.subscribe(() => { void checkSession(controller) }), [controller, checkSession])
   const identity = useMemo<ShellIdentity | null>(() => {
     if (!ready || !controller || !auth) return null
     return {
       session: ready.session, walletName: ready.walletName, auth,
       notice: notice ? workspaceNotices[notice] : null, noticePresented,
       registerExitState: clear => controller.registerExitState(clear),
-      onProfile: (user: UserDto) => setState(current => current.kind !== 'ready' ? current : { kind: 'ready', ready: {
-        ...current.ready, session: { ...current.ready.session, user }, system: { ...current.ready.system, owner: { ...current.ready.system.owner, displayName: user.displayName } } } }),
+      onProfile: (user: UserDto) => setState(current => {
+        if (current.kind !== 'ready' || newerUser(current.ready.session.user, user) !== user) return current
+        return { kind: 'ready', ready: {
+          ...current.ready, session: { ...current.ready.session, user }, system: { ...current.ready.system, owner: { ...current.ready.system.owner, displayName: user.displayName } } } }
+      }),
       checkSession: () => checkSession(controller),
       onSessionChange: listener => controller.sessionGeneration.subscribe(listener),
     }
@@ -188,4 +210,12 @@ export function SignInGate({ registration, originAccepted, children, channels, n
         ]}>{state.message} Your session may still be active on this device.</StateCard></>}
     </section>
   </main>
+}
+
+/** The probe in flight for each controller: a newer one aborts it, and the controller's teardown ends it. */
+const probes = new WeakMap<SessionController, AbortController>()
+
+/** The later of two snapshots of the same person: an older revision never replaces a newer one. */
+function newerUser(known: UserDto, next: UserDto) {
+  return next.revision < known.revision ? known : next
 }

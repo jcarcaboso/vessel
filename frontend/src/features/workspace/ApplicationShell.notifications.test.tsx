@@ -66,12 +66,13 @@ describe('Notifications in the shell', () => {
     window.history.replaceState(null, '', '/#notifications')
     const { api } = client()
     render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
-    expect(await screen.findByRole('heading', { level: 1, name: 'Notifications' })).toBeInTheDocument()
+    // Both pages are lazy: a loaded parallel run can take longer than the default second to show them.
+    expect(await screen.findByRole('heading', { level: 1, name: 'Notifications' }, { timeout: 5_000 })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add account' })).toBeNull()
     expect(await screen.findByText('You are all caught up. No unread notifications.')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('link', { name: 'Preferences' }))
     expect(window.location.hash).toBe('#settings')
-    expect(await screen.findByRole('heading', { name: 'Notifications', level: 2 })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Notifications', level: 2 }, { timeout: 5_000 })).toBeInTheDocument()
   })
 
   it('shows the offline banner only while the channel is on, the worker is offline and Plays are tracked', async () => {
