@@ -146,14 +146,12 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/MonitorDiscrepancyStore.cs|f893e1f76d22fb36ed9f16200cec96625e462cf6930d1e287e08257755036a55",
             "Vessel.Persistence/WorkspaceStore.cs|72ddfb9d33e8a6c0834c1302db460ca114f05c0e3b1259f90146155ed31066aa",
             "Vessel.Persistence/MonitorStore.cs|20cbcb1a165df294219c574b593603de1429eb3b2ab39759ffa060fe820bcae0",
-            // Venue budget upsert: inserts db.CurrentOwnerId; conflict target includes "OwnerId"; SET only "RetryAtUtc".
-            "Vessel.Persistence/MonitorStore.cs|d56f8ee8f0a974deefc5db6ff8075e06ee522a4d997125033e98fcfc4fffc976",
-            // Heartbeat upsert: inserts db.CurrentOwnerId; conflict target "OwnerId"; SET only worker and time.
-            "Vessel.Persistence/MonitorStore.cs|3e82d868b651cb76fa3345f8198c64fb6ca25eef6d67b6467f858d107a443ebc",
             // Monitor row creation after the owner-scoped account lock: inserts db.CurrentOwnerId; DO NOTHING.
-            "Vessel.Persistence/MonitorStore.cs|735aadccde047974eba3bdab728825533ce9773222d391066ebee3374953c721",
+            "Vessel.Persistence/MonitorStore.cs|586395464b82f79dcac1bbfd6571b1768bf9197512283ea27f8c445c917a08dc",
             // Monitor row lock: "AccountId" and "OwnerId" = db.CurrentOwnerId.
-            "Vessel.Persistence/MonitorStore.cs|9be267297c4452c53907e65138f54ee83de31681eedc3c3d231bd8fcf8bf4c7f",
+            "Vessel.Persistence/MonitorStore.cs|72f44c2fc895a9aac9af3b69284c3867a3c709d0ec01af43510b9184f19d203c",
+            // Background claim lock: "Id" and "OwnerId" = db.CurrentOwnerId, FOR UPDATE SKIP LOCKED.
+            "Vessel.Persistence/MonitorStore.cs|9e75433b5e6d7481a5eefd45c2235b5eb7866254bf98b31b55fca9d4cfb384e5",
             // Account enabled recheck: "OwnerId"=@owner (db.CurrentOwnerId) and "Id"=@account.
             "Vessel.Persistence/Notifications/NotificationStore.cs|9c7e4f9996ff9f771794a22d8ef4a53be2aa1826be74fb2d5a4524b050a3832b",
             // Play row lock: "Id" and "OwnerId" = db.CurrentOwnerId.
