@@ -165,6 +165,32 @@ class WalletReleaseTests(unittest.TestCase):
         self.assertIn(str(check.temp / 'compose.tls.yaml'), args)
         self.assertNotIn('Vessel__Auth__Token', run.call_args.kwargs['env'])
 
+    def test_notification_stream_uses_the_session_transport_in_wallet_mode(self):
+        check = self.check('--auth', 'wallet')
+        check.tls = True
+        check.session_cookie = '__Host-vessel-session=synthetic'
+        connection = Mock()
+        connection.getresponse.return_value.readline.side_effect = [
+            b'event: notification\n', b'data: {"notification":{"kind":"test","state":"unread"}}\n']
+        check.connect = Mock(return_value=connection)
+        check.request = Mock(side_effect=[
+            (401, [], b''), (401, [], b''), (401, [], b''),
+            (200, [('Cache-Control', 'no-store')], b''),
+            (202, [], b''), (429, [], b''), (202, [], b''),
+        ])
+        check.json = Mock(side_effect=[
+            {'nextCursor': '0.0.0'}, {'popups': [{'id': 'test', 'content': {'title': 'Test notification'}}]},
+            {'popups': []}, {'state': 'read'}, {'unreadCount': 0},
+        ])
+        check.compose = Mock()
+        check.wait_notifications = Mock()
+        with patch.object(verify_release.time, 'sleep'), patch('builtins.print'):
+            check.notifications()
+        connection.request.assert_called_once_with(
+            'GET', '/api/events/stream?after=0&notificationsAfter=0.0.0', headers=check.auth_headers())
+        self.assertNotIn('Authorization', connection.request.call_args.kwargs['headers'])
+        connection.close.assert_called_once()
+
     def test_cookie_assertions_require_every_host_cookie_attribute(self):
         check = self.check('--auth', 'wallet')
         name = '__Host-vessel-session'

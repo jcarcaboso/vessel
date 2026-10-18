@@ -488,7 +488,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         connection = self.connect()
         try:
             connection.request('GET', '/api/events/stream?after=0&notificationsAfter=' + head['nextCursor'],
-                               headers={'Authorization': 'Bearer ' + self.token})
+                               headers=self.auth_headers())
             response = connection.getresponse()
             self.expect(self.request('/api/notifications/test', 'POST')[0] == 202, 'test notification requested', 'notifications')
             self.expect(self.request('/api/notifications/test', 'POST')[0] == 429, 'test notification cooldown refuses a repeat', 'notifications')

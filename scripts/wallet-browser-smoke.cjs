@@ -210,6 +210,15 @@ async function main() {
     const beforeB = await call(pageB, '/api/notifications?tab=all', 'GET', undefined, sessionB.user.id)
     assert.equal(beforeB.status, 200)
     const bIds = beforeB.body.items.map(item => item.id)
+    // The operator already received the packaged API test events. Settle its
+    // own backlog before checking that A cannot cause a popup in B's context.
+    for (const item of beforeB.body.items) {
+      assert.equal((await call(pageB, '/api/notifications/' + item.id + '/read',
+        'POST', undefined, sessionB.user.id)).status, 200)
+    }
+    await pageB.reload()
+    await pageB.getByRole('region', { name: 'Overview summary', exact: true }).waitFor()
+    assert.equal(await pageB.getByText('Test notification', { exact: true }).count(), 0)
     assert.equal((await call(pageA, '/api/notifications/test', 'POST', undefined, ownerA)).status, 202)
     let notification
     for (let attempt = 0; attempt < 60; attempt++) {
