@@ -5,28 +5,85 @@ namespace Vessel.Tests;
 
 /// <summary>
 /// Decides which C# string literals are raw SQL that needs an entry in the reviewed ownerless inventory
-/// (contract §9.1). It is deliberately conservative: a literal is exempt only when every statement in it
-/// carries an owner predicate in a WHERE/ON/AND position or inserts the owner value into the owner column.
+/// (contract §9.1). Only a small, demonstrably owner-safe subset is exempt; everything else is reviewed:
+/// <list type="bullet">
+/// <item>a single-table SELECT, UPDATE or DELETE whose top-level WHERE has an exact owner-equality conjunct;</item>
+/// <item>a single-row INSERT whose owner column receives the owner value (or an INSERT … SELECT from an owner-scoped
+/// single table or from <c>unnest</c> of parameters), with ON CONFLICT DO UPDATE only on a target that includes the owner column.</item>
+/// </list>
+/// Comments, quoted strings and quoted identifiers are removed first. CTEs, set operations, OR, NOT/IS around the
+/// owner predicate, joins, subqueries, multi-row VALUES and text spliced into parameterised SQL are never exempt.
+/// Interpolation holes in SQL without @parameters are taken as EF Core parameters.
 /// </summary>
 internal static class OwnerlessSqlClassifier
 {
-    // Core DML starters keep the original case-insensitive match; the other statement starters are SQL-style
-    // upper case only, so prose such as "Set ConnectionStrings__Vessel" or "Do not switch" is not SQL.
-    private static readonly Regex CoreStarter = new(@"^(SELECT|INSERT|UPDATE|DELETE|WITH)\b", RegexOptions.IgnoreCase);
+    private const RegexOptions Ci = RegexOptions.IgnoreCase;
+
+    // Core DML starters keep the original case-insensitive match. The other statement starters match in SQL-style
+    // upper case, or in any case when the next tokens follow that statement's grammar, so prose such as
+    // "Set ConnectionStrings__Vessel", "Do not switch" or "refresh" is not SQL while "truncate accounts" is.
+    private static readonly Regex CoreStarter = new(@"^(SELECT|INSERT|UPDATE|DELETE|WITH)\b", Ci);
     private static readonly Regex OtherStarter = new(
         @"^(MERGE|TRUNCATE|LOCK|CALL|COPY|DO|SET|RESET|VALUES|TABLE|EXPLAIN|CREATE|ALTER|DROP|GRANT|REVOKE|COMMENT|" +
         @"REFRESH|VACUUM|ANALYZE|REINDEX|CLUSTER|DISCARD|NOTIFY|LISTEN|UNLISTEN|PREPARE|EXECUTE|DECLARE|FETCH|MOVE|IMPORT)\b");
+    private static readonly Regex AnyCaseStarter = new(OtherStarter.ToString(), Ci);
+    private const string Name = @"[\w.""]+";
+    private const string Ddl = @"\s+(?:or\s+replace\s+|unique\s+|temp(?:orary)?\s+|unlogged\s+|global\s+|local\s+|materialized\s+|" +
+        @"foreign\s+|default\s+|event\s+|text\s+search\s+|access\s+method\s+|large\s+object\s+|if\s+(?:not\s+)?exists\s+)*" +
+        @"(?:table|index|view|schema|function|procedure|trigger|type|extension|sequence|role|user|group|database|policy|domain|" +
+        @"aggregate|operator|rule|publication|subscription|server|statistics|collation|cast|conversion|language|tablespace|" +
+        @"transform|privileges|owned|routine|wrapper|data|mapping|template|parser|dictionary|configuration)\b";
+    private const string Privilege = @"\s+(?:all|select|insert|update|delete|truncate|references|trigger|usage|create|connect|" +
+        @"temporary|temp|execute|maintain|set|alter\s+system|grant\s+option\s+for|admin\s+option\s+for)\b|\s+[\w""]+(?:\s*,\s*[\w""]+)*\s+(?:to|from)\b";
+    private const string Maintenance = @"\s*(?:$|;|\()|\s+(?:full|freeze|verbose|analyze|skip_locked)\b|\s+" + Name + @"\s*(?:$|[;,(])";
+    private const string Fetch = @"\s+(?:next|prior|first|last|absolute|relative|all|forward|backward|from|in|[-+]?\d+)\b";
+    private static readonly Dictionary<string, Regex> StatementGrammar = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["MERGE"] = @"\s+into\b",
+        ["TRUNCATE"] = @"\s+(?:table\s+)?(?:only\s+)?" + Name + @"\s*(?:[,;*]|$|restart\b|continue\b|cascade\b|restrict\b)",
+        ["LOCK"] = @"\s+(?:table\s+)?(?:only\s+)?" + Name + @"\s*(?:[,;*]|$|in\b|nowait\b)",
+        ["CALL"] = @"\s+" + Name + @"\s*\(",
+        ["COPY"] = @"\s*\(|\s+" + Name + @"\s*(?:\(|from\b|to\b)",
+        ["DO"] = @"\s*\$|\s+language\b",
+        ["SET"] = @"\s+(?:session|local|transaction|constraints|role|time\s+zone|names|schema|search_path)\b|\s+[\w.]+\s*(?:=|to\b)",
+        ["RESET"] = @"\s+(?:all|role|session\s+authorization|[\w.]+)\s*(?:;|$)",
+        ["VALUES"] = @"\s*\(",
+        ["TABLE"] = @"\s+(?:only\s+)?" + Name + @"\s*\*?\s*(?:;|$)",
+        ["EXPLAIN"] = @"\s*\(|\s+(?:analyze|verbose|select|insert|update|delete|merge|with|values|table|execute|create|declare)\b",
+        ["CREATE"] = Ddl, ["ALTER"] = Ddl, ["DROP"] = Ddl,
+        ["GRANT"] = Privilege, ["REVOKE"] = Privilege,
+        ["COMMENT"] = @"\s+on\b",
+        ["REFRESH"] = @"\s+materialized\b",
+        ["VACUUM"] = Maintenance, ["ANALYZE"] = Maintenance,
+        ["REINDEX"] = @"\s*\(|\s+(?:index|table|schema|database|system)\b",
+        ["CLUSTER"] = @"\s*(?:$|;|\()|\s+verbose\b|\s+" + Name + @"\s*(?:$|;|using\b)",
+        ["DISCARD"] = @"\s+(?:all|plans|sequences|temp|temporary)\b",
+        ["NOTIFY"] = @"\s+\w+\s*(?:$|[;,])",
+        ["LISTEN"] = @"\s+(?:\w+|\*)\s*(?:$|;)", ["UNLISTEN"] = @"\s+(?:\w+|\*)\s*(?:$|;)",
+        ["PREPARE"] = @"\s+transaction\b|\s+\w+\s*(?:\(|as\b)",
+        ["EXECUTE"] = @"\s+\w+\s*(?:\(|;|$)",
+        ["DECLARE"] = @"\s+\w+\s+(?:(?:binary|asensitive|insensitive|no|scroll)\s+)*cursor\b",
+        ["FETCH"] = Fetch, ["MOVE"] = Fetch,
+        ["IMPORT"] = @"\s+foreign\s+schema\b",
+    }.ToDictionary(p => p.Key, p => new Regex(@"^(?:" + p.Value + ")", Ci), StringComparer.OrdinalIgnoreCase);
     private static readonly Regex LeadingNoise = new(@"^(?:\s+|\(|--[^\n]*(?:\n|$)|/\*[\s\S]*?\*/)+");
-    private static readonly Regex Comments = new(@"--[^\n]*|/\*[\s\S]*?\*/");
 
     private const string OwnerColumn = @"(?:\w+\.)?(?:owner_id|""OwnerId"")";
     private const string OwnerValue = @"(?:@owner(?:Id)?\b|\{\s*(?:[\w.]+\.)?(?:Current)?Owner(?:Id)?(?:\.Value)?\s*\})";
-    private static readonly Regex OwnerPredicate = new(
-        $@"\b(?:WHERE|ON|AND)\s+\(?\s*(?:{OwnerColumn}\s*=\s*{OwnerValue}|{OwnerValue}\s*=\s*{OwnerColumn})",
-        RegexOptions.IgnoreCase);
-    private static readonly Regex OwnerColumnOnly = new($"^{OwnerColumn}$", RegexOptions.IgnoreCase);
-    private static readonly Regex OwnerValueOnly = new($"^{OwnerValue}$", RegexOptions.IgnoreCase);
-    private static readonly Regex InsertTarget = new(@"\bINSERT\s+INTO\s+[\w.""]+\s*\(", RegexOptions.IgnoreCase);
+    private const string Table = @"(?:(?:\w+|""_"")\.)?(?:\w+|""_"")";
+    private static readonly Regex OwnerEquality = new($@"^(?:{OwnerColumn}\s*=\s*{OwnerValue}|{OwnerValue}\s*=\s*{OwnerColumn})$", Ci);
+    private static readonly Regex OwnerColumnOnly = new($"^{OwnerColumn}$", Ci);
+    private static readonly Regex OwnerValueOnly = new($"^{OwnerValue}$", Ci);
+    private static readonly Regex Unsupported = new(
+        @"\b(?:OR|UNION|INTERSECT|EXCEPT|JOIN|USING|LATERAL|BETWEEN)\b|\bWITH\b(?!\s+ORDINALITY\b)|\(\s*(?:SELECT|VALUES|TABLE|WITH)\b", Ci);
+    private static readonly Regex SingleTable = new($@"^\s*{Table}(?:\s+(?:AS\s+)?\w+)?\s*$", Ci);
+    private static readonly Regex InsertHead = new($@"^INSERT\s+INTO\s+{Table}(?:\s+AS\s+\w+)?\s*\(", Ci);
+    private static readonly Regex InsertTail = new(
+        @"^\s*(?:ON\s+CONFLICT\s*(?:\((?<target>[^()]*)\))?\s*DO\s+(?:NOTHING|(?<update>UPDATE\s+SET\b[\s\S]*?)))?\s*(?:RETURNING\b[\s\S]*)?$", Ci);
+    private static readonly Regex UnnestSource = new(
+        @"^\s*unnest\s*\(\s*(?:@\w+\s*,\s*)*@\w+\s*\)(?:\s+WITH\s+ORDINALITY)?(?:\s+(?:AS\s+)?\w+(?:\s*\(\s*\w+(?:\s*,\s*\w+)*\s*\))?)?" +
+        @"(?:\s+ORDER\s+BY\s+[\w.]+(?:\s*,\s*[\w.]+)*)?\s*$", Ci);
+    private static readonly Regex WhereEnd = new(@"\b(?:ORDER\s+BY|GROUP\s+BY|HAVING|WINDOW|LIMIT|OFFSET|FETCH|FOR|RETURNING)\b", Ci);
 
     /// <summary>The SQL text a source literal token (including its quotes and $/@ prefix) produces at runtime.</summary>
     public static string Text(string token)
@@ -52,59 +109,201 @@ internal static class OwnerlessSqlClassifier
     public static bool IsSql(string text)
     {
         var start = LeadingNoise.Replace(text, "", 1);
-        return CoreStarter.IsMatch(start) || OtherStarter.IsMatch(start);
+        if (CoreStarter.IsMatch(start) || OtherStarter.IsMatch(start)) return true;
+        var keyword = AnyCaseStarter.Match(start);
+        return keyword.Success && StatementGrammar[keyword.Value].IsMatch(start[keyword.Length..]);
     }
 
-    /// <summary>True when the text is SQL and at least one of its statements is not provably owner scoped.</summary>
+    /// <summary>True when the text is SQL and at least one of its statements is outside the owner-safe subset.</summary>
     public static bool RequiresReview(string text) =>
-        IsSql(text) && Comments.Replace(text, " ").Split(';').Any(s => !string.IsNullOrWhiteSpace(s) && !OwnerScoped(s));
+        IsSql(text) && (Normalize(text) is not { } sql ||
+                        sql.Split(';').Any(s => !string.IsNullOrWhiteSpace(s) && !OwnerScoped(s.Trim())));
 
-    private static bool OwnerScoped(string statement) =>
-        OwnerPredicate.IsMatch(statement) || InsertTarget.Matches(statement).Any(m => InsertsOwner(statement, m.Index + m.Length));
+    private static bool OwnerScoped(string statement)
+    {
+        if (Flatten(statement) is not { } flat || Unsupported.IsMatch(statement)) return false;
+        // A {hole} in SQL that also binds @parameters is spliced text, not a parameter.
+        if (statement.Contains('@') && statement.Contains('{')) return false;
+        if (Regex.IsMatch(statement, @"^INSERT\b", Ci)) return InsertsOwner(statement);
+        return Regex.IsMatch(statement, @"^(?:SELECT|UPDATE|DELETE)\b", Ci) && Filtered(statement, flat);
+    }
+
+    // A single-table SELECT/UPDATE/DELETE whose top-level WHERE has an exact owner-equality conjunct.
+    private static bool Filtered(string statement, string flat)
+    {
+        var where = Regex.Match(flat, @"\bWHERE\b", Ci);
+        if (!where.Success) return false;
+        var head = flat[..where.Index];
+        string target;
+        if (Regex.IsMatch(head, @"^SELECT\b", Ci))
+        {
+            var from = Regex.Match(head, @"\bFROM\b", Ci);
+            if (!from.Success) return false;
+            target = head[(from.Index + from.Length)..];
+        }
+        else
+        {
+            var update = Regex.Match(head, @"^UPDATE\s+(?:ONLY\s+)?(?<t>[\s\S]*?)\s+SET\b(?<set>[\s\S]*)$", Ci);
+            var delete = Regex.Match(head, @"^DELETE\s+FROM\s+(?:ONLY\s+)?(?<t>[\s\S]*)$", Ci);
+            if (update.Success && Regex.IsMatch(update.Groups["set"].Value, @"\bFROM\b", Ci)) return false;
+            target = update.Success ? update.Groups["t"].Value : delete.Success ? delete.Groups["t"].Value : "";
+        }
+        if (!SingleTable.IsMatch(target)) return false;
+        var start = where.Index + where.Length;
+        var end = WhereEnd.Match(flat, start);
+        return Conjuncts(statement[start..(end.Success ? end.Index : flat.Length)]).Any(c => OwnerEquality.IsMatch(c));
+    }
+
+    // The top-level AND operands of a condition, with fully parenthesised AND groups expanded.
+    private static IEnumerable<string> Conjuncts(string condition)
+    {
+        if (Flatten(condition) is not { } flat) yield break;
+        var start = 0;
+        foreach (var end in Regex.Matches(flat, @"\bAND\b", Ci).Select(m => m.Index).Append(flat.Length))
+        {
+            var part = condition[start..end].Trim();
+            start = Math.Min(end + 3, flat.Length);
+            if (part.StartsWith('(') && Closing(part, 0) == part.Length - 1)
+                foreach (var inner in Conjuncts(part[1..^1])) yield return inner;
+            else yield return part;
+        }
+    }
 
     // An INSERT writes its own owner when the value at the owner column's position is the owner parameter.
-    private static bool InsertsOwner(string statement, int columnsStart)
+    private static bool InsertsOwner(string statement)
     {
-        var columns = TopLevel(statement, columnsStart, out var after);
+        var head = InsertHead.Match(statement);
+        if (!head.Success) return false;
+        var columns = Items(statement, head.Length - 1, out var after);
         var owner = columns.FindIndex(c => OwnerColumnOnly.IsMatch(c));
-        if (owner < 0) return false;
         var rest = statement[after..];
-        var values = Regex.Match(rest, @"^\s*VALUES\s*\(", RegexOptions.IgnoreCase);
-        var select = Regex.Match(rest, @"^\s*SELECT\s+", RegexOptions.IgnoreCase);
-        var row = values.Success ? TopLevel(rest, values.Length, out _)
-            : select.Success ? SelectList(rest[select.Length..]) : [];
-        return owner < row.Count && OwnerValueOnly.IsMatch(row[owner]);
+        List<string> row;
+        string tail;
+        var values = Regex.Match(rest, @"^\s*VALUES\s*\(", Ci);
+        if (values.Success)
+        {
+            row = Items(rest, values.Length - 1, out var rowEnd);
+            tail = rest[rowEnd..];
+            if (tail.TrimStart().StartsWith(',')) return false; // multi-row VALUES
+        }
+        else if (Regex.IsMatch(rest, @"^\s*SELECT\b", Ci) && Flatten(rest) is { } flat)
+        {
+            var split = Regex.Match(flat, @"\b(?:ON\s+CONFLICT|RETURNING)\b", Ci);
+            var query = rest[..(split.Success ? split.Index : rest.Length)].Trim();
+            tail = split.Success ? rest[split.Index..] : "";
+            var from = Regex.Match(Flatten(query)!, @"\bFROM\b", Ci);
+            if (from.Success && !UnnestSource.IsMatch(query[(from.Index + from.Length)..]) && !Filtered(query, Flatten(query)!))
+                return false;
+            var list = query[6..(from.Success ? from.Index : query.Length)];
+            row = Split(list);
+        }
+        else return false;
+        if (owner < 0 || owner >= row.Count || !OwnerValueOnly.IsMatch(row[owner])) return false;
+        var conflict = InsertTail.Match(tail);
+        return conflict.Success && (!conflict.Groups["update"].Success ||
+                                    conflict.Groups["target"].Value.Split(',').Any(c => OwnerColumnOnly.IsMatch(c.Trim())));
     }
 
-    // Splits the comma-separated list that starts after an opening parenthesis, up to its closing parenthesis.
-    private static List<string> TopLevel(string text, int start, out int end)
+    // Removes comments, quoted strings and quoted identifiers (keeping "OwnerId") so that only SQL structure remains;
+    // null when the text cannot be tokenised (an unterminated quote or comment, or a hole inside an identifier).
+    private static string? Normalize(string text)
     {
-        var items = new List<string>();
-        var depth = 0;
-        var item = start;
-        for (end = start; end < text.Length; end++)
+        var sql = new StringBuilder(text.Length);
+        for (var i = 0; i < text.Length;)
         {
-            var c = text[end];
+            if (At(text, i, "--"))
+            {
+                while (i < text.Length && text[i] != '\n') i++;
+                sql.Append(' ');
+            }
+            else if (At(text, i, "/*"))
+            {
+                // PostgreSQL block comments nest.
+                for (var depth = 0; ;)
+                {
+                    if (i >= text.Length) return null;
+                    if (At(text, i, "/*")) { depth++; i += 2; }
+                    else if (At(text, i, "*/")) { i += 2; if (--depth == 0) break; }
+                    else i++;
+                }
+                sql.Append(' ');
+            }
+            else if (text[i] == '\'')
+            {
+                var escapes = i > 0 && text[i - 1] is 'E' or 'e' && (i == 1 || !IsWord(text[i - 2]));
+                for (i++; ; i++)
+                {
+                    if (i >= text.Length) return null;
+                    if (escapes && text[i] == '\\') i++;
+                    else if (At(text, i, "''")) i++;
+                    else if (text[i] == '\'') { i++; break; }
+                }
+                sql.Append("''");
+            }
+            else if (text[i] == '$' && (i == 0 || !IsWord(text[i - 1])) &&
+                     Regex.Match(text[i..], @"^\$(?:[A-Za-z_]\w*)?\$") is { Success: true } tag)
+            {
+                var close = text.IndexOf(tag.Value, i + tag.Length, StringComparison.Ordinal);
+                if (close < 0) return null;
+                i = close + tag.Length;
+                sql.Append("''");
+            }
+            else if (text[i] == '"')
+            {
+                var name = new StringBuilder();
+                for (i++; ; i++)
+                {
+                    if (i >= text.Length) return null;
+                    if (At(text, i, "\"\"")) { name.Append('"'); i++; }
+                    else if (text[i] == '"') { i++; break; }
+                    else name.Append(text[i]);
+                }
+                if (name.ToString().Contains('{')) return null;
+                sql.Append(name.ToString() == "OwnerId" ? "\"OwnerId\"" : "\"_\"");
+            }
+            else sql.Append(text[i++]);
+        }
+        return sql.ToString();
+    }
+
+    // The text with everything inside parentheses and braces blanked, so regexes only see the top level; null when unbalanced.
+    private static string? Flatten(string text)
+    {
+        var flat = new StringBuilder(text.Length);
+        var depth = 0;
+        foreach (var c in text)
+        {
+            if (c is ')' or '}' && --depth < 0) return null;
+            flat.Append(depth > 0 ? ' ' : c);
             if (c is '(' or '{') depth++;
-            else if (c is '}' || c == ')' && depth > 0) depth--;
-            else if (c == ')') { items.Add(text[item..end].Trim()); end++; return items; }
-            else if (c == ',' && depth == 0) { items.Add(text[item..end].Trim()); item = end + 1; }
         }
-        return [];
+        return depth == 0 ? flat.ToString() : null;
     }
 
-    // The select list of INSERT ... SELECT, ending at its top-level FROM (subqueries in the list are skipped).
-    private static List<string> SelectList(string text)
+    private static int Closing(string text, int open) =>
+        Flatten(text[open..]) is { } flat ? open + flat.IndexOf(text[open] == '(' ? ')' : '}', 1) : -1;
+
+    // The comma-separated items inside the parentheses that open at the given index.
+    private static List<string> Items(string text, int open, out int end)
     {
-        var depth = 0;
-        for (var i = 0; i < text.Length; i++)
-        {
-            if (text[i] is '(' or '{') depth++;
-            else if (text[i] is ')' or '}') depth--;
-            else if (depth == 0 && Regex.IsMatch(text[i..], @"^\bFROM\b", RegexOptions.IgnoreCase) &&
-                     (i == 0 || !char.IsLetterOrDigit(text[i - 1]) && text[i - 1] != '_'))
-                return TopLevel(text[..i] + ")", 0, out _);
-        }
-        return TopLevel(text + ")", 0, out _);
+        var close = Closing(text, open);
+        if (close < 0) { end = text.Length; return []; }
+        end = close + 1;
+        return Split(text[(open + 1)..close]);
     }
+
+    private static List<string> Split(string list)
+    {
+        var flat = Flatten(list);
+        if (flat is null) return [];
+        var items = new List<string>();
+        var start = 0;
+        for (var i = 0; i <= flat.Length; i++)
+            if (i == flat.Length || flat[i] == ',') { items.Add(list[start..i].Trim()); start = i + 1; }
+        return items;
+    }
+
+    private static bool At(string text, int index, string token) => string.CompareOrdinal(text, index, token, 0, token.Length) == 0;
+
+    private static bool IsWord(char c) => char.IsLetterOrDigit(c) || c == '_';
 }
