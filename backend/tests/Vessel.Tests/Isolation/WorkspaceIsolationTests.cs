@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Credentials;
+using Vessel.Application.Plays;
 using Vessel.Application.Workspace;
 
 namespace Vessel.Tests.Isolation;
@@ -18,10 +19,15 @@ public abstract class WorkspaceIsolationCases(IsolationHost api)
     public async Task Portfolios_of_another_owner_answer_like_unknown_ones_and_stay_unchanged()
     {
         var (a, b) = await api.Owners();
-        var name = Isolated.Marker("portfolio-a");
-        var portfolio = await a.Portfolio(name);
+        var portfolio = await a.Portfolio(Isolated.Marker("portfolio-a-initial"));
         var account = (await a.ManualAccount(Isolated.Marker("account-a"), portfolio)).GetProperty("id").GetGuid();
-        Assert.Equal(name, (await a.GetJson($"/api/portfolios/{portfolio}")).GetProperty("name").GetString());
+        // Positive control: A renames and re-icons its own portfolio through the route B attempts below, so a handler
+        // that refused every request would fail here rather than pass as isolation.
+        var name = Isolated.Marker("portfolio-a");
+        var patched = await a.Send(HttpMethod.Patch, $"/api/portfolios/{portfolio}", new UpdatePortfolioRequest(name, "rocket"));
+        Assert.Equal((name, "rocket"), (patched.GetProperty("name").GetString(), patched.GetProperty("icon").GetString()));
+        var read = await a.GetJson($"/api/portfolios/{portfolio}");
+        Assert.Equal((name, "rocket"), (read.GetProperty("name").GetString(), read.GetProperty("icon").GetString()));
         var state = await Snapshot.Of(a, "/api/portfolios", $"/api/portfolios/{portfolio}", $"/api/accounts/{account}");
         await b.Portfolio(Isolated.Marker("portfolio-b"));
 
@@ -48,14 +54,43 @@ public abstract class WorkspaceIsolationCases(IsolationHost api)
     {
         var (a, b) = await api.Owners();
         var portfolio = await a.Portfolio(Isolated.Marker("portfolio-a"));
-        var name = Isolated.Marker("account-a");
-        var created = await a.ManualAccount(name, portfolio);
+        var created = await a.ManualAccount(Isolated.Marker("account-a-initial"), portfolio);
         var account = created.GetProperty("id").GetGuid();
-        var revision = created.GetProperty("settingsRevision").GetInt64();
-        Assert.Equal(name, (await a.GetJson($"/api/accounts/{account}")).GetProperty("name").GetString());
-        var paths = new[] { "/api/accounts", $"/api/accounts/{account}", "/api/portfolios", "/api/overview" };
-        var state = await Snapshot.Of(a, paths);
+        // Positive controls: A renames, disables and unlinks its own account through the route B attempts below, then
+        // re-enables and relinks it, so a handler that refused every request would fail here rather than pass.
+        var name = Isolated.Marker("account-a");
+        var disabled = await a.Send(HttpMethod.Put, $"/api/accounts/{account}",
+            new UpdateAccountRequest(name, null, false, created.GetProperty("settingsRevision").GetInt64()));
+        Assert.Equal((name, JsonValueKind.Null, false), (disabled.GetProperty("name").GetString(), disabled.GetProperty("portfolioId").ValueKind,
+            disabled.GetProperty("isEnabled").GetBoolean()));
+        var enabled = await a.Send(HttpMethod.Put, $"/api/accounts/{account}",
+            new UpdateAccountRequest(name, portfolio, true, disabled.GetProperty("settingsRevision").GetInt64()));
+        var revision = enabled.GetProperty("settingsRevision").GetInt64();
+        Assert.True(revision > disabled.GetProperty("settingsRevision").GetInt64());
+        var read = await a.GetJson($"/api/accounts/{account}");
+        Assert.Equal((name, portfolio, true, revision), (read.GetProperty("name").GetString(), read.GetProperty("portfolioId").GetGuid(),
+            read.GetProperty("isEnabled").GetBoolean(), read.GetProperty("settingsRevision").GetInt64()));
 
+        // Both owners retain imported facts of the same native source, with identical source fill, order and funding IDs.
+        var venue = (await a.SyncedVenueAccount(Isolated.Marker("venue-a"), portfolio)).GetProperty("id").GetGuid();
+        var ownVenue = (await b.SyncedVenueAccount(Isolated.Marker("venue-b"))).GetProperty("id").GetGuid();
+        string[] facts = ["imported_fills", "imported_orders", "funding_payments", "account_funding_states"];
+        foreach (var owner in new[] { a, b })
+        {
+            var rows = await Persisted.Rows(owner.Journal!, owner.Id);
+            Assert.All(facts, table => Assert.True(rows[table].Rows > 0, $"{table} is empty for {owner.Id}."));
+        }
+        var paths = new[] { "/api/accounts", $"/api/accounts/{account}", $"/api/accounts/{venue}", $"/api/accounts/{venue}/fills",
+            "/api/portfolios", "/api/overview" };
+        var state = await Snapshot.Of(a, paths);
+        // Positive control for delete: B deletes its own synced account and its retained facts go with it; A's account
+        // on the same source, its fills, orders and funding stay byte-identical.
+        await state.After(() => b.Send(HttpMethod.Delete, $"/api/accounts/{ownVenue}", expected: HttpStatusCode.NoContent));
+        await b.Send(HttpMethod.Get, $"/api/accounts/{ownVenue}", expected: HttpStatusCode.NotFound);
+        var deleted = await Persisted.Rows(b.Journal!, b.Id);
+        Assert.All(facts.Append("accounts"), table => Assert.Equal(0, deleted[table].Rows));
+
+        // Refusal baselines follow the positive controls: A's state above, with an account B could validly update.
         var own = await b.ManualAccount(Isolated.Marker("account-b"));
         var ownId = own.GetProperty("id").GetGuid();
         var ownRevision = own.GetProperty("settingsRevision").GetInt64();
@@ -63,7 +98,8 @@ public abstract class WorkspaceIsolationCases(IsolationHost api)
         // Disable, rename and move through the route: the request is otherwise valid for an owned account.
         await state.After(() => Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Put, id => $"/api/accounts/{id}",
             _ => new UpdateAccountRequest("taken-by-b", null, false, revision))));
-        await state.After(() => Isolated.NotFound(b, account, Isolated.Request(HttpMethod.Delete, id => $"/api/accounts/{id}")));
+        foreach (var target in new[] { account, venue })
+            await state.After(() => Isolated.NotFound(b, target, Isolated.Request(HttpMethod.Delete, id => $"/api/accounts/{id}")));
 
         // A foreign portfolio in a body answers like an unknown portfolio, and creates or moves nothing.
         var both = await Snapshot.Of((a, paths), (b, ["/api/accounts", "/api/portfolios"]));
@@ -73,9 +109,9 @@ public abstract class WorkspaceIsolationCases(IsolationHost api)
             id => new UpdateAccountRequest("moved-into-foreign", id, true, ownRevision))));
 
         var list = await b.GetText("/api/accounts");
-        Isolated.NoLeak(list, account, name, portfolio);
+        Isolated.NoLeak(list, account, name, portfolio, venue);
         Assert.Single((await b.GetJson("/api/accounts")).EnumerateArray());
-        Isolated.NoLeak(await b.GetText("/api/overview"), account, name, portfolio);
+        Isolated.NoLeak(await b.GetText("/api/overview"), account, name, portfolio, venue);
     }
 
     [PostgresFact]
@@ -222,6 +258,12 @@ public abstract class WorkspaceIsolationCases(IsolationHost api)
             Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
             Assert.Equal(subscriptions + 1, api.Venues.Stream.Subscriptions.Count);
         }
+        // Persisted records beside the imported facts, so the snapshot's fingerprints cover nonempty monitor, event and
+        // notification rows: an active Play makes the account monitored and appends its events; a test notification.
+        await Planned(a, account);
+        await using (var hub = await IsolationNotifications.CreateAsync(api, a)) await hub.Send(a);
+        var rows = await Persisted.Rows(a.Journal!, a.Id);
+        Assert.All(Seeded, table => Assert.True(rows[table].Rows > 0, $"{table} is empty."));
         var reads = api.Venues.Reader.Fixture.Reads;
         var orderReads = api.Venues.Orders.Reads;
         var state = await Snapshot.Of(a, $"/api/accounts/{account}", $"/api/accounts/{account}/snapshot", $"/api/accounts/{account}/fills");
@@ -241,6 +283,59 @@ public abstract class WorkspaceIsolationCases(IsolationHost api)
         // A refresh of a foreign account answers like an unknown one and never reads the venue for it.
         await state.After(() => Isolated.SameAsUnknown(b, account, Isolated.Request(HttpMethod.Post, id => $"/api/accounts/{id}/sync")));
         Assert.Equal((reads, orderReads), (api.Venues.Reader.Fixture.Reads, api.Venues.Orders.Reads));
+    }
+
+    /// <summary>Owner-scoped tables a synced account with an active Play and a notification fills.</summary>
+    private static readonly string[] Seeded =
+    [
+        "imported_fills", "imported_orders", "funding_payments", "account_funding_states", "account_snapshots", "plays",
+        "monitor_accounts", "events", "event_cursors", "notifications", "notification_deliveries", "notification_sources"
+    ];
+
+    private static async Task Planned(Owner owner, Guid account)
+    {
+        var draft = await owner.Post("/api/plays", new CreatePlayRequest(account, "BTC", "venue", Isolated.Marker("monitored"), TestPlays.Plan()),
+            HttpStatusCode.Created);
+        await owner.Post($"/api/plays/{draft.GetProperty("summary").GetProperty("id").GetGuid()}/status",
+            new ChangePlayStatusRequest(draft.GetProperty("summary").GetProperty("version").GetInt64(), "planned"));
+    }
+
+    /// <summary>
+    /// Self-test of <see cref="Snapshot"/>: a change to persisted funding that none of the snapshot's responses show
+    /// (the account, its snapshot and its fills) must still fail <see cref="Snapshot.Unchanged"/>.
+    /// </summary>
+    [PostgresFact]
+    public async Task Snapshot_fails_on_a_persisted_funding_change_no_snapshot_path_shows()
+    {
+        var a = await api.Owner();
+        var account = (await a.SyncedVenueAccount(Isolated.Marker("venue-a"))).GetProperty("id").GetGuid();
+        string[] paths = [$"/api/accounts/{account}", $"/api/accounts/{account}/snapshot", $"/api/accounts/{account}/fills"];
+        var responses = await Isolated.State(a, paths);
+        var state = await Snapshot.Of(a, paths);
+        await state.Unchanged();
+        foreach (var (table, change, undo) in new[]
+        {
+            ("funding_payments", "\"Amount\" = \"Amount\" + 123", "\"Amount\" = \"Amount\" - 123"),
+            ("account_funding_states", "\"LastAttemptToUtc\" = \"LastAttemptToUtc\" + interval '1 second'",
+                "\"LastAttemptToUtc\" = \"LastAttemptToUtc\" - interval '1 second'")
+        })
+        {
+            Assert.Equal(1, await Update(a, table, change));
+            // The responses do not show it; only the persisted fingerprint does.
+            Assert.Equal(responses, await Isolated.State(a, paths));
+            await Assert.ThrowsAnyAsync<Xunit.Sdk.XunitException>(state.Unchanged);
+            Assert.Equal(1, await Update(a, table, undo));
+            await state.Unchanged();
+        }
+    }
+
+    private async Task<int> Update(Owner owner, string table, string set)
+    {
+        await using var connection = new Npgsql.NpgsqlConnection(api.Database.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new Npgsql.NpgsqlCommand($"UPDATE {table} SET {set} WHERE \"OwnerId\" = @owner", connection);
+        command.Parameters.AddWithValue("owner", owner.Id);
+        return await command.ExecuteNonQueryAsync();
     }
 
     [PostgresFact]

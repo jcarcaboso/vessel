@@ -77,6 +77,8 @@ export function StateCard({ icon, tone = 'plain', title, children, actions = [] 
     <h2>{title}</h2>
     <p>{children}</p>
     {actions.length > 0 && <div className="sign-in-actions">{actions.map(action =>
-      <Button key={action.label} size="sm" variant={action.primary ? 'default' : 'ghost'} onClick={action.onClick} disabled={action.disabled}>{action.label}</Button>)}</div>}
+      // A disabled action is waiting (a countdown), so it reads as muted text in an outline, not a faded fill.
+      <Button key={action.label} size="sm" variant={action.disabled ? 'outline' : action.primary ? 'default' : 'ghost'} onClick={action.onClick}
+        disabled={action.disabled} className={action.disabled ? 'identity-waiting' : undefined}>{action.label}</Button>)}</div>}
   </div>
 }

@@ -224,7 +224,11 @@ export function createApiCall(credentials: string | ApiCredentials, onUnauthoriz
         throw new ApiError('http', read ? sessionChangedRead : sessionChangedWrite, undefined, undefined, 'session-changed')
       }
       if (outcome.ok) return outcome.value
-      if (outcome.failure) onUnauthorized?.({ ...outcome.failure, ...generation !== undefined ? { generation } : {} })
+      if (outcome.failure) {
+        onUnauthorized?.({ ...outcome.failure, ...generation !== undefined ? { generation } : {} })
+        // The 401 that ended the session belongs to the teardown too: its caller must not report a failure.
+        if (source?.ended.aborted) return afterSessionEnded()
+      }
       throw outcome.error
     }
   }

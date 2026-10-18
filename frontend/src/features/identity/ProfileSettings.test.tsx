@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Tooltip } from 'radix-ui'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -7,6 +7,7 @@ import { ApiError } from '@/api/errors'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { challengeFixture, secondWalletFixture, sessionFixture, sessionRowsFixture, walletFixture } from '@/test/identity-fixture'
 import { ProfileSettings } from './ProfileSettings'
+import type { SessionCheck } from './session'
 import type { ShellIdentity } from './types'
 import { WalletSignFlow } from './WalletSignFlow'
 
@@ -47,13 +48,17 @@ beforeEach(() => {
 })
 afterEach(() => window.removeEventListener('eip6963:requestProvider', announcer))
 
-function mount() {
+/** `check` is the server's answer to the session probe after a removal; `change` adopts another tab's session. */
+function mount(check: SessionCheck = 'current') {
+  const changes = new Set<() => void>()
   const identity: ShellIdentity = {
     session: sessionFixture, walletName: 'Rabby Wallet', auth: createSessionAuthApi({ userId: sessionFixture.user.id, sessionId: sessionFixture.session.id }),
-    registerExitState: () => () => {}, onProfile: vi.fn(), endSession: vi.fn(),
+    registerExitState: () => () => {}, onProfile: vi.fn(), checkSession: vi.fn(async () => check),
+    onSessionChange: listener => { changes.add(listener); return () => { changes.delete(listener) } },
   }
+  const change = () => act(() => { for (const listener of [...changes]) listener() })
   render(<Tooltip.Provider><NotificationProvider><ProfileSettings identity={identity} onSignOut={vi.fn()} /></NotificationProvider></Tooltip.Provider>)
-  return { identity, user: userEvent.setup() }
+  return { identity, change, user: userEvent.setup() }
 }
 
 async function confirmWithRabby(user: ReturnType<typeof userEvent.setup>) {
@@ -77,7 +82,7 @@ describe('Profile & sign-in', () => {
   it('shows last-wallet before any step-up and closes the stale removal dialog', async () => {
     routes[`DELETE /api/auth/wallets/${secondWalletFixture.id}`] = () => problem(409, 'last-wallet')
     const { user } = mount()
-    await user.click((await screen.findAllByRole('button', { name: /Remove/ }))[1]!)
+    await user.click((await screen.findAllByRole('button', { name: /Remove/ }))[0]!)
     await user.click(await screen.findByRole('button', { name: 'Remove wallet' }))
     expect(await screen.findByText(authErrorMessage('last-wallet')!)).toBeVisible()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
@@ -134,19 +139,20 @@ describe('Profile & sign-in', () => {
     routes[`DELETE /api/auth/wallets/${secondWalletFixture.id}`] = [() => problem(403, 'step-up-required'), () => new Response(null, { status: 204 })]
     const { user, identity } = mount()
     const removes = await screen.findAllByRole('button', { name: /Remove/ })
-    await user.click(removes[1]!)
+    await user.click(removes[0]!)
     await user.click(await screen.findByRole('button', { name: 'Remove wallet' }))
     await confirmWithRabby(user)
     await waitFor(() => expect(sent(`/api/auth/wallets/${secondWalletFixture.id}`, 'DELETE')).toHaveLength(2))
     expect(sent('/api/auth/step-up/challenge')[0]!.body).toEqual({ action: 'wallet.remove', target: secondWalletFixture.id, address: walletFixture.address })
     expect(sent('/api/auth/step-up')[0]!.body).toEqual({ challengeId: challengeFixture().challengeId, signature })
-    expect(identity.endSession).not.toHaveBeenCalled()
+    expect(await screen.findByText('Sign-in wallet removed.')).toBeVisible()
+    expect(identity.checkSession).toHaveBeenCalledOnce()
   })
 
   it('does not retry a second time when the server still asks for a step-up', async () => {
     routes[`DELETE /api/auth/wallets/${secondWalletFixture.id}`] = () => problem(403, 'step-up-required')
     const { user } = mount()
-    await user.click((await screen.findAllByRole('button', { name: /Remove/ }))[1]!)
+    await user.click((await screen.findAllByRole('button', { name: /Remove/ }))[0]!)
     await user.click(await screen.findByRole('button', { name: 'Remove wallet' }))
     await confirmWithRabby(user)
     expect(await screen.findByText('Confirm with a wallet already linked to this journal to continue.')).toBeVisible()
@@ -157,21 +163,64 @@ describe('Profile & sign-in', () => {
     account = '0x19B4c7aE02F3d81e6C5a9b0D2E7f4A3c8D1e0a53'
     routes[`DELETE /api/auth/wallets/${secondWalletFixture.id}`] = () => problem(403, 'step-up-required')
     const { user } = mount()
-    await user.click((await screen.findAllByRole('button', { name: /Remove/ }))[1]!)
+    await user.click((await screen.findAllByRole('button', { name: /Remove/ }))[0]!)
     await user.click(await screen.findByRole('button', { name: 'Remove wallet' }))
     const dialog = await screen.findByRole('dialog', { name: 'Confirm with a linked wallet' })
     await user.click(await within(dialog).findByRole('button', { name: /Rabby Wallet/ }))
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('This address isn’t linked to your journal.')
     expect(sent('/api/auth/step-up/challenge')).toHaveLength(0)
+    // Trying the same address again can only fail: another wallet is the primary way on.
+    expect(within(dialog).queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Other wallets' })).toHaveClass('sign-in-primary')
   })
 
-  it('leaves this tab when the removed wallet signed this session', async () => {
-    routes[`DELETE /api/auth/wallets/${walletFixture.id}`] = () => new Response(null, { status: 204 })
-    const { user, identity } = mount()
+  it('hides the label and Try again when the wallet to link is already linked', async () => {
+    const { user } = mount()
+    await user.click(await screen.findByRole('button', { name: 'Link wallet' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Link another wallet' })
+    await user.click(await within(dialog).findByRole('button', { name: /Rabby Wallet/ }))
+    await user.click(await within(dialog).findByRole('button', { name: 'Sign with Rabby Wallet' }))
+    await within(dialog).findByText(/Now sign with the wallet you want to add/)
+    await user.click(await within(dialog).findByRole('button', { name: /Rabby Wallet/ }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('This wallet is already linked to your journal.')
+    expect(within(dialog).queryByLabelText(/Label/)).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Other wallets' })).toHaveClass('sign-in-primary')
+    expect(sent('/api/auth/wallets/challenge')).toHaveLength(0)
+  })
+
+  it('offers Remove only on the wallets that did not sign this session', async () => {
+    mount()
+    const ledger = (await screen.findByText('Ledger')).closest('li')!
+    const hot = screen.getByText('Hot wallet').closest('li')!
+    expect(within(ledger).getByRole('button', { name: 'Remove' })).toBeVisible()
+    expect(within(hot).queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
+    expect(within(hot).getByText('This session')).toBeVisible()
+  })
+
+  it('leaves this tab when the server says the removal ended this session, whatever the row said', async () => {
+    // The row said "not this session", but another tab had moved this tab's cookie onto that wallet's session.
+    routes[`DELETE /api/auth/wallets/${secondWalletFixture.id}`] = () => new Response(null, { status: 204 })
+    const { user, identity } = mount('ended')
     await user.click((await screen.findAllByRole('button', { name: /Remove/ }))[0]!)
-    expect(await screen.findByText(/Removing it signs you out here/)).toBeVisible()
-    await user.click(screen.getByRole('button', { name: 'Remove wallet' }))
-    await waitFor(() => expect(identity.endSession).toHaveBeenCalledOnce())
+    await user.click(await screen.findByRole('button', { name: 'Remove wallet' }))
+    await waitFor(() => expect(identity.checkSession).toHaveBeenCalledOnce())
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen.queryByText('Sign-in wallet removed.')).not.toBeInTheDocument()
+    expect(sent('/api/auth/wallets', 'GET')).toHaveLength(1)
+  })
+
+  it('drops a removal prepared under the old session when this tab adopts another', async () => {
+    routes[`DELETE /api/auth/wallets/${secondWalletFixture.id}`] = () => problem(403, 'step-up-required')
+    const { user, change } = mount()
+    await user.click((await screen.findAllByRole('button', { name: /Remove/ }))[0]!)
+    await user.click(await screen.findByRole('button', { name: 'Remove wallet' }))
+    await screen.findByRole('dialog', { name: 'Confirm with a linked wallet' })
+    await change()
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(sent('/api/auth/wallets', 'GET')).toHaveLength(2))
+    expect(sent(`/api/auth/wallets/${secondWalletFixture.id}`, 'DELETE')).toHaveLength(1)
+    expect(sent('/api/auth/step-up/challenge')).toHaveLength(0)
   })
 
   it('links a wallet: step-up first, then the new wallet signs its own message', async () => {
@@ -185,7 +234,11 @@ describe('Profile & sign-in', () => {
     expect(await within(dialog).findByText(/Now sign with the wallet you want to add/)).toBeVisible()
     account = '0x19B4c7aE02F3d81e6C5a9b0D2E7f4A3c8D1e0a53'
     await user.click(await within(dialog).findByRole('button', { name: /Rabby Wallet/ }))
-    await user.type(await within(dialog).findByLabelText(/Label/), 'Phone')
+    // The announced wallet name is the suggested label; the person's own text replaces it.
+    const label = await within(dialog).findByLabelText(/Label/)
+    expect(label).toHaveValue('Rabby Wallet')
+    await user.clear(label)
+    await user.type(label, 'Phone')
     await user.click(within(dialog).getByRole('button', { name: 'Sign with Rabby Wallet' }))
     await waitFor(() => expect(sent('/api/auth/wallets')).toHaveLength(1))
     expect(sent('/api/auth/step-up/challenge')[0]!.body).toEqual({ action: 'wallet.link', address: walletFixture.address })
@@ -204,7 +257,8 @@ describe('Profile & sign-in', () => {
     await within(dialog).findByText(/Now sign with the wallet you want to add/)
     account = '0x19B4c7aE02F3d81e6C5a9b0D2E7f4A3c8D1e0a53'
     await user.click(await within(dialog).findByRole('button', { name: /Rabby Wallet/ }))
-    await user.type(await within(dialog).findByLabelText(/Label/), 'Desk')
+    await user.clear(await within(dialog).findByLabelText(/Label/))
+    await user.type(within(dialog).getByLabelText(/Label/), 'Desk')
     await user.click(within(dialog).getByRole('button', { name: 'Sign with Rabby Wallet' }))
     await waitFor(() => expect(within(dialog).getByLabelText(/Label/)).toHaveAttribute('aria-invalid', 'true'))
     expect(within(dialog).getByLabelText(/Label/)).toHaveAccessibleDescription('Use at most 40 printable characters for the label.')
@@ -256,7 +310,7 @@ describe('Profile & sign-in', () => {
 
     it('returns to the row\'s Remove button when the removal dialog is cancelled', async () => {
       const { user } = mount()
-      const remove = (await screen.findAllByRole('button', { name: /Remove/ }))[1]!
+      const remove = (await screen.findAllByRole('button', { name: /Remove/ }))[0]!
       await user.click(remove)
       await user.click(await screen.findByRole('button', { name: 'Cancel' }))
       await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
@@ -266,7 +320,7 @@ describe('Profile & sign-in', () => {
     it('returns from a nested step-up to the dialog underneath', async () => {
       routes[`DELETE /api/auth/wallets/${secondWalletFixture.id}`] = () => problem(403, 'step-up-required')
       const { user } = mount()
-      await user.click((await screen.findAllByRole('button', { name: /Remove/ }))[1]!)
+      await user.click((await screen.findAllByRole('button', { name: /Remove/ }))[0]!)
       const removal = await screen.findByRole('dialog', { name: 'Remove sign-in wallet?' })
       const confirm = within(removal).getByRole('button', { name: 'Remove wallet' })
       await user.click(confirm)

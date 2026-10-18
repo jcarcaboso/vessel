@@ -83,20 +83,22 @@ export function AccountPicker({ labelledBy, id, value, onChange, accounts, choic
     spoken(accountLabel(a), venues.name(a.venueId), withSource && a.source !== undefined && a.name.trim() ? shortSource(a.source) ?? 'Manual record' : null)
   const option = (item: Item, index: number) => {
     const selected = item.value === value
+    // React refuses `key` inside a spread; it is passed on its own.
+    const key = `${item.kind}:${item.value}`
     const common = {
-      key: `${item.kind}:${item.value}`, id: optionId(index), role: 'option' as const, 'aria-selected': selected,
+      id: optionId(index), role: 'option' as const, 'aria-selected': selected,
       className: `account-picker-option${index === active ? ' is-active' : ''}${selected ? ' is-selected' : ''}`,
       onPointerMove: () => { if (index !== active) setActive(index) },
       // Keep focus in the search field; the click chooses.
       onMouseDown: (event: { preventDefault: () => void }) => event.preventDefault(),
       onClick: () => choose(item.value),
     }
-    if (item.kind === 'choice') return <div {...common} aria-label={spoken(item.choice.label, item.choice.detail)}>
+    if (item.kind === 'choice') return <div key={key} {...common} aria-label={spoken(item.choice.label, item.choice.detail)}>
       <IdentityTile>{item.choice.icon}</IdentityTile>
       <span className="account-picker-text"><span className="account-name">{item.choice.label}</span>{item.choice.detail && <small>{item.choice.detail}</small>}</span>
     </div>
     const a = item.account
-    return <div {...common} title={accountTitle(a, venues.name(a.venueId))} aria-label={spoken(accountSpoken(a), a.detail, a.balance)}>
+    return <div key={key} {...common} title={accountTitle(a, venues.name(a.venueId))} aria-label={spoken(accountSpoken(a), a.detail, a.balance)}>
       <AccountAvatar venueId={a.venueId} size="lg" halo selected={selected} />
       <span className="account-picker-text">
         <span className="account-picker-line"><AccountName account={a} /></span>

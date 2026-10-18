@@ -5,6 +5,7 @@ import { ApiError } from '@/api/errors'
 import { SourceChip } from '@/components/accounts/AccountIdentity'
 import { Button } from '@/components/ui/button'
 import { InfoTip } from '@/components/ui/info-tip'
+import { checksumAddress } from '@/lib/eip55'
 import { Input } from '@/components/ui/input'
 import { initialSignIn, signIn, type SignInError, type SignInEvent, type SignInState } from './sign-in-machine'
 import { challengeLifetime, clock, useCountdown } from './countdown'
@@ -202,7 +203,7 @@ function Pending({ wallet, title, detail, actions }: { wallet: BrowserWallet; ti
 function Identity({ wallet, address, children }: { wallet: BrowserWallet; address: string; children?: ReactNode }) {
   return <div className="identity-row">
     <WalletMark wallet={wallet} />
-    <span className="identity-row-meta"><strong>{wallet.name}</strong><span><SourceChip source={address} /></span></span>
+    <span className="identity-row-meta"><strong title={wallet.name}>{wallet.name}</strong><span><SourceChip source={checksumAddress(address)} /></span></span>
     {children}
   </div>
 }
@@ -225,7 +226,8 @@ function Signing({ state, remember, onRemember, onSign, onCancel, onExpired }: {
       <label className="sign-in-remember"><input type="checkbox" checked={remember} disabled={waiting} onChange={event => onRemember(event.target.checked)} />Keep me signed in on this device</label>
       <div className="sign-in-actions">
         <Button size="lg" className="sign-in-primary" onClick={onSign} disabled={!challenge || waiting} aria-busy={waiting}>
-          {waiting ? <><span className="identity-spinner" aria-hidden="true" />Waiting for {wallet.name}…</> : `Sign with ${wallet.name}`}
+          {waiting ? <><span className="identity-spinner" aria-hidden="true" /><span className="identity-truncate">Waiting for {wallet.name}…</span></>
+            : <span className="identity-truncate">Sign with {wallet.name}</span>}
         </Button>
         <Button size="lg" variant="outline" onClick={onCancel}>Cancel</Button>
       </div>
@@ -255,8 +257,8 @@ function CreateJournal({ state, onSubmit, onCancel }: {
     <form className="sign-in-body" onSubmit={submit} noValidate aria-busy={state.submitting}>
       <div className="identity-row">
         <UserAvatar name={name || state.wallet.name} address={state.address} />
-        <span className="identity-row-meta"><strong>Signed with {state.wallet.name}</strong>
-          <span><SourceChip source={state.address} /><span className="identity-pill is-good">Verified</span></span></span>
+        <span className="identity-row-meta"><strong title={state.wallet.name}>Signed with {state.wallet.name}</strong>
+          <span><SourceChip source={checksumAddress(state.address)} /><span className="identity-pill is-good">Verified</span></span></span>
       </div>
       <div className="identity-field">
         <label htmlFor="journal-name">Display name</label>
@@ -275,11 +277,23 @@ function CreateJournal({ state, onSubmit, onCancel }: {
         <span><strong>This wallet is your key.</strong> There is no email or password reset. Link a second wallet in Settings once you're in.</span></div>
       {error && error.field === null && <p className="error" role="alert">{error.message}</p>}
       <div className="sign-in-actions">
-        <Button type="submit" size="lg" className="sign-in-primary" disabled={state.submitting}>{state.submitting ? 'Creating…' : 'Create journal'}</Button>
+        {/* A new rate limit restarts the wait; the deadline string is unique to each refusal. */}
+        <CreateButton key={state.error?.retryAt ?? 'ready'} submitting={state.submitting} retryAt={state.error?.retryAt ?? null} />
         <Button type="button" size="lg" variant="ghost" onClick={onCancel} disabled={state.submitting}>Use another wallet</Button>
       </div>
     </form>
   </>
+}
+
+/** Create journal, held back until a rate limit's deadline passes (at most an hour). */
+function CreateButton({ submitting, retryAt }: { submitting: boolean; retryAt: string | null }) {
+  const [lifetime] = useState(() => retryAt ? Math.max(0, Math.min(60 * 60_000, Date.parse(retryAt) - Date.now() || 0)) : null)
+  const [ready, setReady] = useState(lifetime === null || lifetime === 0)
+  const seconds = useCountdown(lifetime, useCallback(() => setReady(true), []))
+  const waiting = !ready && !!seconds
+  return <Button type="submit" size="lg" variant={waiting ? 'outline' : 'default'} className={waiting ? 'sign-in-primary identity-waiting' : 'sign-in-primary'}
+    disabled={submitting || waiting}>
+    {submitting ? 'Creating…' : waiting ? `Create journal in ${clock(seconds)}` : 'Create journal'}</Button>
 }
 
 function RateLimited({ retryAt, onRetry, onReset }: { retryAt: string | null; onRetry: () => void; onReset: () => void }) {
@@ -308,7 +322,7 @@ function Failure({ state, onReset, onRetry, onUseAddress, onReconnect }: {
         {name} already has a request waiting. Open the wallet to finish or reject it, then try again.</StateCard>
       case 'expired': return <StateCard icon={<Clock size={16} />} tone="warn" title="Request expired" actions={[{ label: 'Start again', primary: true, onClick: state.address ? onRetry : onReset }]}>Sign-in requests last five minutes. Start a new one.</StateCard>
       case 'switched': return <StateCard icon={<ArrowLeftRight size={16} />} tone="warn" title="Wallet switched account" actions={[{ label: 'Use new address', primary: true, onClick: () => onUseAddress(error.address) }, other]}>
-        {name} now uses <SourceChip source={error.address} />. Sign with the address you connected, or start again with the new one.</StateCard>
+        {name} now uses <SourceChip source={checksumAddress(error.address)} />. Sign with the address you connected, or start again with the new one.</StateCard>
       case 'disconnected': return <StateCard icon={<Unplug size={16} />} tone="warn" title="Wallet disconnected" actions={[{ label: 'Connect again', primary: true, onClick: onReconnect }, other]}>
         {name} ended the connection. Connect again or choose another wallet.</StateCard>
       case 'invitation': return <StateCard icon={<Ticket size={16} />} tone="info" title="Invitation needed" actions={[{ label: 'Start again', primary: true, onClick: onReset }]}>

@@ -37,7 +37,7 @@ export function AccountMenu({ identity, onProfile, onSessions, onSignOut }: {
         onCloseAutoFocus={event => { if (movesFocus.current) { movesFocus.current = false; event.preventDefault() } }}>
         <div className="account-menu-head">
           <UserAvatar name={user.displayName} address={wallet.address} size="lg" />
-          <span><strong>{user.displayName}</strong><small><SourceChip source={wallet.address} />{identity.walletName && <>via {identity.walletName}</>}</small></span>
+          <span><strong>{user.displayName}</strong><small><SourceChip source={wallet.address} />{identity.walletName && <span className="identity-truncate" title={identity.walletName}>via {identity.walletName}</span>}</small></span>
         </div>
         <DropdownMenu.Item className="account-menu-item" onSelect={onProfile}><UserRound size={16} aria-hidden="true" />Profile &amp; sign-in</DropdownMenu.Item>
         <DropdownMenu.Item className="account-menu-item" onSelect={() => { movesFocus.current = true; onSessions() }}><Monitor size={16} aria-hidden="true" />Sessions

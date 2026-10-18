@@ -88,6 +88,12 @@ function openChannel(factory: SessionChannelFactory) {
   try { return factory(sessionChannelName) } catch { return null }
 }
 
+/**
+ * What a fresh session probe found: this tab's session (`current`), a newer one of the same user this tab has not
+ * adopted yet (`stale`), the end of the session (`ended`, already torn down) or nothing (`unknown`, it failed).
+ */
+export type SessionCheck = 'current' | 'stale' | 'ended' | 'unknown'
+
 export interface SessionControllerOptions {
   session: SessionDto
   channels?: SessionChannelFactory
@@ -165,6 +171,21 @@ export class SessionController {
     this.end()
     writeNotice(notice)
     this.leave(!this.live)
+  }
+
+  /**
+   * Compares a fresh `GET /api/auth/session` answer with this tab. Another person's session reloads like their
+   * sign-in message; a different session of this user is `stale` (its message adopts it, never this answer).
+   */
+  observe(fresh: SessionDto): SessionCheck {
+    if (this.ended) return 'ended'
+    if (fresh.user.id !== this.userId) {
+      this.end()
+      writeNotice(notices.otherUser)
+      this.leave()
+      return 'ended'
+    }
+    return fresh.session.id === this.sessionIdValue ? 'current' : 'stale'
   }
 
   /** Tells other tabs this tab signed in. */

@@ -8,7 +8,7 @@ import { clearCandleCache } from '@/features/market/candleCache'
 import { scopePreferences } from '@/lib/preference-scope'
 import { SignInBrand, StateCard } from './IdentityParts'
 import { SignInScreen } from './SignInScreen'
-import { clearNotice, notices, readNotice, reloadToSignIn, SessionController, takeLanding, workspaceNotices, type Notice, type SessionChannelFactory } from './session'
+import { clearNotice, readNotice, reloadToSignIn, SessionController, takeLanding, workspaceNotices, type Notice, type SessionChannelFactory, type SessionCheck } from './session'
 import type { ShellIdentity } from './types'
 import type { BrowserWallet } from './wallets/discovery'
 
@@ -125,6 +125,32 @@ export function SignInGate({ registration, originAccepted, children, channels, n
   }, [])
   const controller = ready?.controller ?? null
   const auth = useMemo(() => controller && createSessionAuthApi(controller.credentials(), controller.handleFailure), [controller])
+  /**
+   * Probes the cookie's session and follows it: a 401 or suspension ends the tab like any session call, another
+   * person reloads, and this tab's own session replaces the gate's copy (wallet, profile) without touching the
+   * workspace, so a same-user adoption never leaves the old sign-in wallet on screen or in a removal decision.
+   */
+  const checkSession = useCallback(async (current: SessionController): Promise<SessionCheck> => {
+    let fresh: SessionDto
+    try { fresh = await api.session() } catch (cause) {
+      if (cause instanceof ApiError && (cause.status === 401 || cause.code === 'user-suspended')) {
+        current.handleFailure({ status: cause.status === 401 ? 401 : 403, ...cause.code ? { code: cause.code } : {} })
+      }
+      return current.sessionGeneration.ended.aborted ? 'ended' : 'unknown'
+    }
+    const check = current.observe(fresh)
+    // The updater, not a ref, checks that this controller still owns the gate; after unmount it does nothing.
+    if (check === 'current') {
+      setState(state => state.kind !== 'ready' || state.ready.controller !== current ? state : { kind: 'ready', ready: {
+        ...state.ready, session: fresh,
+        // The wallet's announced name belongs to the sign-in this tab made; another tab's wallet is unknown here.
+        walletName: fresh.wallet.id === state.ready.session.wallet.id ? state.ready.walletName : null,
+        system: { ...state.ready.system, owner: { ...state.ready.system.owner, displayName: fresh.user.displayName } } } })
+    }
+    return check
+  }, [api])
+  // Adopting another tab's session of this user changes which wallet signed this tab in.
+  useEffect(() => controller?.sessionGeneration.subscribe(() => { void checkSession(controller) }), [controller, checkSession])
   const identity = useMemo<ShellIdentity | null>(() => {
     if (!ready || !controller || !auth) return null
     return {
@@ -133,9 +159,10 @@ export function SignInGate({ registration, originAccepted, children, channels, n
       registerExitState: clear => controller.registerExitState(clear),
       onProfile: (user: UserDto) => setState(current => current.kind !== 'ready' ? current : { kind: 'ready', ready: {
         ...current.ready, session: { ...current.ready.session, user }, system: { ...current.ready.system, owner: { ...current.ready.system.owner, displayName: user.displayName } } } }),
-      endSession: () => controller.teardown(notices.ended),
+      checkSession: () => checkSession(controller),
+      onSessionChange: listener => controller.sessionGeneration.subscribe(listener),
     }
-  }, [ready, controller, auth, notice, noticePresented])
+  }, [ready, controller, auth, notice, noticePresented, checkSession])
 
   if (state.kind === 'ready' && identity) return children(state.ready.system, () => signOut(state.ready), state.ready.api, identity)
   if (state.kind === 'sign-in') return <SignInScreen api={api} registration={registration} originAccepted={originAccepted} notice={notice}

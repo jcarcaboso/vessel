@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/errors'
 import { challengeFixture, sessionFixture, walletFixture } from '@/test/identity-fixture'
 import { initialSignIn, signIn, signInError, type SignInEvent, type SignInState } from './sign-in-machine'
@@ -44,6 +44,21 @@ describe('sign-in state machine', () => {
     expect(signIn(submitting, { type: 'registration-failed', error: coded('registration-closed', 403) }))
       .toMatchObject({ step: 'failed', error: { kind: 'closed' } })
     expect(signIn(submitting, { type: 'registered', session: sessionFixture })).toEqual({ step: 'signed-in', session: sessionFixture })
+  })
+
+  it('keeps the parsed Retry-After of a rate-limited registration, and the form', async () => {
+    const { createPublicAuthApi } = await import('@/api/auth')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'rate-limited' }), { status: 429, headers: { 'Retry-After': '120' } })))
+    const cause = await createPublicAuthApi().register({ registration: 'reg-token', displayName: 'Sam', remember: false })
+      .then(() => { throw new Error('expected a refusal') }, (error: ApiError) => error)
+    expect(cause.retryAtUtc).toEqual(expect.any(String))
+    const submitting = signIn(run({ type: 'choose', wallet }, { type: 'connected', address }, { type: 'challenge', challenge: challengeFixture() },
+      { type: 'sign' }, { type: 'signed' }, { type: 'verified', result: { status: 'registration-required', registration: 'reg-token', requiresInvitation: true, expiresAt: challengeFixture().expiresAt } }),
+    { type: 'register' })
+    expect(signIn(submitting, { type: 'registration-failed', error: cause })).toMatchObject({
+      step: 'registration', registration: 'reg-token', requiresInvitation: true, submitting: false,
+      error: { field: null, message: expect.stringMatching(/^Too many requests\. Wait 1(19|20) seconds before trying again\.$/), retryAt: cause.retryAtUtc },
+    })
   })
 
   it('shows the switched-account state only while the message waits for a signature', () => {

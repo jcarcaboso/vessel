@@ -341,6 +341,7 @@ The guard applies to cookie-authenticated unsafe methods (POST, PUT, PATCH, DELE
 ### Streams
 
 - The event stream and market streams call `IPrincipalValidity.StillValidAsync` on a **15 s timer that runs regardless of traffic**, and end the response when it turns false or the check fails.
+- Each check has a 10 s deadline on the injected clock that does not depend on the check honouring cancellation; a check that times out fails closed and ends the response, so a revoked session's stream ends within about 25 s even while the identity database stalls. The deadline also cancels the database command.
 - Revalidation never extends the idle expiry.
 - `Vessel:Events:MaxStreams` caps event streams per process, beside the existing 4 per owner. A refusal answers 429 with `Retry-After: 5`.
 
@@ -521,8 +522,9 @@ Monitor commands for a suspended owner are dropped and logged by ID; for an unkn
 
 - **Leases.** `MonitorLease` gains `OwnerId`. The existing discovery record `MonitorCandidate` (`Application/Monitoring/Contracts.cs:56`, which carries a tracked `MonitorAccount`) stays as it is.
 - **Discovery** stays owner-scoped (the existing EF code) and iterates `ActiveOwnersAsync` pages.
-- **Candidates** come from `ISystemMonitorStore.DueCandidatesAsync(DueMonitorKey? after, int limit)`. It returns `DueMonitorCandidate(OwnerId, AccountId, VenueId, DueAt)`, where `DueMonitorKey = (DueAt, OwnerId, AccountId)`. It is a lock-free system query across owners, with keyset pages in that order and at most 2 candidates per owner per page (`ROW_NUMBER() OVER (PARTITION BY owner)`).
+- **Candidates** come from `ISystemMonitorStore.DueCandidatesAsync(DueMonitorKey? after, DateTimeOffset dueBy, int limit)`. It returns `DueMonitorCandidate(OwnerId, AccountId, VenueId, DueAt)`, where `DueMonitorKey = (DueAt, OwnerId, AccountId)`. It is a lock-free system query across owners, with keyset pages in that order and at most 2 candidates per owner per page (`ROW_NUMBER() OVER (PARTITION BY owner)`).
   - The scheduler keeps the continuation across ticks, so later owners cannot starve. It skips suspended owners (directory status, cached for one tick) and owners at capacity.
+  - The continuation walks a **bounded scan cycle**: the bound is the time the cycle started, and only work due by then is considered. Work rescheduled during the cycle waits for the next one. When a cycle's pages run out, the scheduler starts a new cycle (at most once per tick), so an account skipped earlier (row locked, owner or venue at capacity, owner failure) is revisited instead of starving behind recurring work.
 - **Claiming.** Each candidate is claimed in **its own transaction** (one account) in its owner's scope, re-checking owner status, deadlines and both capacities. The scheduler no longer calls `ClaimDueAsync`; its multi-row claim can deadlock on venue locks.
 - **Lock order:** account row, monitor row, owner budget lock (`vessel-monitor-budget:{owner}`), venue budget lock (`vessel-venue-budget:{venue}`). It is the same in `MonitorCoordinator`, `ClaimAsync` and Refresh admission. A transaction never takes two venue locks. `ReadCapacityAsync` takes `venueId`.
 - **The owned-entity rule stays.** The `VesselDbContext` owner filter and the mixed-owner save guard are not weakened.
@@ -707,6 +709,7 @@ owner real-wallet/non-mainnet EOA check pass and are recorded in
 ### B2
 
 - Candidate pages dominated by suspended or capped owners do not starve others.
+- An account skipped once (row locked) is revisited at the next scan cycle while another owner's recurring work stays due.
 - Two owners × two venues claim concurrently without deadlock.
 - The venue count sees its own lease.
 - A server-wide venue deadline holds across owners; a 429 recorded during a rolled-back credential save survives.
@@ -799,8 +802,10 @@ Cross-model verification of the first lanes found gaps the contract left open. T
 | A1 review | The request guard treats every method except GET, HEAD, OPTIONS and TRACE as unsafe, compared case-insensitively | §7 |
 | A1 review | A reused binding cookie keeps its value but is re-issued with a fresh lifetime on every challenge | §6, §7 |
 | A1 review | Stream endpoints resolve `IPrincipalValidity` as a required service; there is no "always valid" fallback | §7, §9.5 |
+| A1 review | Each stream revalidation check has a 10 s deadline independent of the database task; a timeout fails closed and ends the stream | §7 |
 | B1 review | The interim scheduler isolates failures per owner: one owner's error never stops discovery, claims or heartbeats for later owners | §9.1, §9.3 |
 | B1 review | `retry-event-receipts` requires `--owner <guid>` or `--all-owners`; with `--all-owners`, `--limit` applies per owner | §8, P4 runbook |
+| B1 review | The raw-SQL inventory detects statements after leading comments, whitespace and parentheses, including non-DML starters such as `SET`, `LOCK` and `TRUNCATE`. A statement is exempt only with an owner predicate after `WHERE`/`ON`/`AND` (comments ignored), or an `INSERT` whose owner column receives the owner value; mentioning `@owner` elsewhere is not enough | §9.1 |
 | D1 review | Display names, labels and notes: trim, then reject Unicode categories Cc, Cf, Cs, Cn, Zl and Zp; lengths count UTF-16 code units (60, 40 and 80); private-use characters are allowed. The frontend mirrors the server rule; the server stays authoritative | §6, §11 |
 | D1 review | The browser sends only a `0x`-prefixed 130-hex-digit signature. Any other hex string, including ERC-6492, shows the `signature-unsupported` state without spending the challenge | §5, §11 |
 | D1 review | A teardown before the shell is on screen still reloads. It sets the one-shot `sessionStorage['vessel:device:landing'] = 'sign-in'`, and the next load shows the chooser without probing, so a failing cookie cannot loop. "Use another wallet" on the suspended screen does the same | §11 |
@@ -822,3 +827,8 @@ Cross-model verification of the first lanes found gaps the contract left open. T
 | Integration with main | Notification heartbeat is per deployment through the system `NotificationWorkerState` store and `server_notification_heartbeats`, separate from monitor health. Empty until a productive notifications maintenance pass; never copy per-owner liveness | §9.4; worker reference |
 | Integration with main | Test-notification admission is 6 requests/minute/user/API-process (`UserReadLimits`) plus the stored per-owner cooldown; 429 with `Retry-After`, no venue call | §9.4; `/api/notifications/test` |
 | Integration with main | Rename unshipped `20261017120000_ServerEventSubscriptions` → `20261018100000_ServerEventSubscriptions` and `20261017193000_ServerMonitorState` → `20261018110000_ServerMonitorState`; add `20261018120000_ServerNotificationState` (creates empty `server_notification_heartbeats`, drops/replaces `notification_heartbeats`). Stop every API/worker on all hosts and back up both schemas; identity → journal → ensure-owner → provision → start. Recreate development databases with old IDs, never edit history; rollback restores backup | §8, §10; deployment upgrade/restore runbook |
+| B2 review | Candidate scans run in bounded cycles (only work due by the cycle start), so accounts skipped during a cycle are revisited at the next wrap; a Check made mid-cycle waits for the next cycle when workers are saturated | §9.3 |
+| D1 review | Adopting a same-user session from another tab re-probes `/api/auth/session` and refreshes the shell's session, wallet and profile lists without touching drafts; open removal dialogs and their step-ups are dropped. After a wallet removal the server's session probe, not the removed row, decides whether this tab ended | §11 |
+| D1 review | The session call whose own 401 ends the session never settles, like the calls pending at the teardown; 403s that end nothing still reject | §11 |
+| D1 review | Profile offers Remove only on wallets that did not sign this session (mockup screen 8); that wallet is removed from another session. A link suggests the new wallet's announced name as its label | §11 |
+| D1 review | A rate-limited registration keeps the form and holds Create journal until the `Retry-After` deadline, like the other sign-in waits. Sign-in screens show addresses in EIP-55 form; wallet calls keep the address as the wallet shared it | §11 |

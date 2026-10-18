@@ -164,6 +164,24 @@ describe('session generation', () => {
     expect(failure).not.toHaveBeenCalled()
   })
 
+  it('keeps the call whose 401 ends the session pending, and still rejects a 403 that ends nothing', async () => {
+    const ended = new AbortController(), tab = { ...generation(), ended: ended.signal }
+    const failure = vi.fn((answer: AuthFailure) => { if (answer.status === 401) ended.abort() })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(problem(403, 'forbidden'))
+      .mockResolvedValueOnce(problem(401, 'session-required')))
+    const call = createApiCall({ kind: 'session', userId, sessionId, generation: tab }, failure)
+    const validate = (value: unknown): value is undefined => value === undefined
+    await expect(call('/api/example', { method: 'DELETE', timeout: 1_000, validate })).rejects.toMatchObject({ status: 403 })
+    expect(ended.signal.aborted).toBe(false)
+    const settled = vi.fn()
+    void call('/api/example', { method: 'DELETE', timeout: 1_000, validate }).then(settled, settled)
+    await vi.waitFor(() => expect(failure).toHaveBeenCalledTimes(2))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(ended.signal.aborted).toBe(true)
+    expect(settled).not.toHaveBeenCalled()
+  })
+
   it('leaves calls without a generation, and Token mode, exactly as before', async () => {
     const fetch = vi.fn().mockImplementation(async () => json('ok'))
     vi.stubGlobal('fetch', fetch)
