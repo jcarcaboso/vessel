@@ -12,10 +12,18 @@ async function main() {
   const engine = process.env.VESSEL_BROWSER || 'chromium'
   assert.ok(['chromium', 'firefox'].includes(engine))
   const playwright = require(process.env.PLAYWRIGHT_MODULE || 'playwright')
-  const browser = await playwright[engine].launch({
+  const endpoint = process.env[`PLAYWRIGHT_${engine.toUpperCase()}_WS_ENDPOINT`]
+  if (endpoint) {
+    const url = new URL(endpoint)
+    assert.ok(url.protocol === 'ws:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) &&
+      !url.username && !url.password, 'remote browser endpoint must be a loopback ws: URL')
+  }
+  const browser = endpoint ? await playwright[engine].connect(endpoint, { timeout: 60000 }) : await playwright[engine].launch({
     headless: true,
     ...(engine === 'chromium' && process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
   })
+  assert.equal(browser.browserType().name(), engine)
+  console.log(`Wallet ${engine}: ${browser.version()} (${endpoint ? 'remote' : 'local'})`)
   const contexts = [], errors = [], violations = []
   let checks = 0
   const pass = label => { checks++; console.log(`PASS [wallet-${engine}] ${label}`) }
@@ -25,10 +33,15 @@ async function main() {
     const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1512, height: 1120 } })
     contexts.push(context)
     const wallets = await Promise.all([index, ...recovery ? [recovery] : []].map(signer))
+    let bindingChecked = false
     await context.exposeFunction('syntheticWalletRequest', async (slot, method, params) => {
       const wallet = wallets[slot]
       if (method === 'eth_requestAccounts') return [wallet.address]
       assert.equal(method, 'personal_sign')
+      if (!bindingChecked) {
+        hostCookie(await context.cookies(base), '__Host-vessel-signin')
+        bindingChecked = true
+      }
       assert.equal(params[1].toLowerCase(), wallet.address)
       return wallet.sign(params[0].startsWith('0x') ? Buffer.from(params[0].slice(2), 'hex').toString('utf8') : params[0])
     })
@@ -61,10 +74,30 @@ async function main() {
     return context
   }
 
+  function hostCookie(cookies, name) {
+    const cookie = cookies.find(item => item.name === name)
+    assert.ok(cookie && cookie.secure && cookie.httpOnly && cookie.sameSite === 'Strict' &&
+      cookie.path === '/' && cookie.domain === new URL(base).hostname, `${name} must be a secure host-only cookie`)
+  }
+
+  async function issuedCookie(response, name) {
+    const values = (await response.headerValues('set-cookie')).filter(value => value.startsWith(name + '='))
+    assert.equal(values.length, 1)
+    for (const attribute of ['Secure', 'HttpOnly', 'SameSite=Strict', 'Path=/']) {
+      assert.ok(values[0].split(';').some(part => part.trim().toLowerCase() === attribute.toLowerCase()))
+    }
+    assert.ok(!/;\s*domain\s*=/i.test(values[0]), `${name} must omit Domain`)
+  }
+
   async function signIn(page, name) {
     await page.goto(base)
     await page.getByRole('button', { name: /Synthetic wallet/ }).click()
+    const challenge = page.waitForResponse(response => response.url().endsWith('/api/auth/challenge') &&
+      response.request().method() === 'POST')
+    const issued = page.waitForResponse(response => response.url().endsWith(name ? '/api/auth/register' : '/api/auth/verify') &&
+      response.request().method() === 'POST')
     await page.getByRole('button', { name: 'Sign with Synthetic wallet', exact: true }).click()
+    await issuedCookie(await challenge, '__Host-vessel-signin')
     if (name) {
       await page.getByRole('heading', { name: 'Create your journal', exact: true }).waitFor()
       await page.getByLabel('Display name', { exact: true }).fill(name)
@@ -72,6 +105,7 @@ async function main() {
       await page.getByRole('button', { name: 'Create journal', exact: true }).click()
     }
     await page.getByRole('region', { name: 'Overview summary', exact: true }).waitFor()
+    await issuedCookie(await issued, '__Host-vessel-session')
     const session = await call(page, '/api/auth/session')
     assert.equal(session.status, 200)
     return session.body
@@ -99,10 +133,8 @@ async function main() {
     const sessionA = await signIn(pageA, `Synthetic ${engine}`)
     const ownerA = sessionA.user.id
     pass('EIP-6963 chooser → external EOA signature → invitation → journal → shell')
-    const cookies = await a.cookies(base)
-    const cookie = cookies.find(item => item.name === '__Host-vessel-session')
-    assert.ok(cookie && cookie.secure && cookie.httpOnly && cookie.sameSite === 'Strict' && cookie.path === '/')
-    pass('HTTPS session cookie is __Host-, Secure, HttpOnly and SameSite=Strict')
+    hostCookie(await a.cookies(base), '__Host-vessel-session')
+    pass('HTTPS binding/session cookies are __Host-, Secure, HttpOnly, SameSite=Strict, Path=/ with no Domain')
 
     const portfolio = await call(pageA, '/api/portfolios', 'POST', { name: `Private ${engine}`, icon: 'folder' }, ownerA)
     assert.equal(portfolio.status, 201)
@@ -200,12 +232,13 @@ async function main() {
     await revokerPage.getByRole('menuitem', { name: 'Profile & sign-in', exact: true }).click()
     const revoke = revokerPage.waitForResponse(response =>
       response.url().endsWith('/api/auth/sessions/' + sessionA.session.id) && response.request().method() === 'DELETE')
+    assert.equal(await streamPage.evaluate(() => window.streamResult.ended), false, 'stream must still be open before revocation')
     const started = Date.now()
     await revokerPage.getByRole('button', { name: /^Sign out .* session$/ }).click()
     assert.equal((await revoke).status(), 204)
     await streamPage.waitForFunction(() => window.streamResult.ended, null, { timeout: 20000 })
     const elapsed = await streamPage.evaluate(() => window.streamResult.endedAt) - started
-    assert.ok(elapsed <= 20000, `stream revocation took ${elapsed} ms`)
+    assert.ok(elapsed >= 0 && elapsed <= 20000, `stream revocation took ${elapsed} ms`)
     pass(`frontend bodyless DELETE revokes a session; server closes its open stream in ${elapsed} ms (15 s + 5 s margin)`)
     assert.equal((await call(streamPage, '/api/auth/session')).status, 401)
     await revokerPage.getByRole('button', { name: /account menu$/ }).click()

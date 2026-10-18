@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import secrets
 import select
+import shlex
 import shutil
 import socket
 import ssl
@@ -72,6 +73,7 @@ class Check:
         self.wallet = args.auth == 'wallet'
         self.session_cookie = None
         self.session = None
+        self.browser_container = None
 
     def prepare(self):
         for file in ('compose.yaml', 'compose.tls.yaml', 'compose.wallet.yaml', 'compose.credentials.yaml', 'compose.storage-local.yaml', 'Caddyfile'):
@@ -157,7 +159,9 @@ class Check:
 
     def write_env(self, network):
         (self.temp / '.env').write_text(f'''POSTGRES_PASSWORD={self.database_password}
-Vessel__Auth__Token={self.token}
+VESSEL_AUTH_MODE={'Wallet' if self.wallet else 'Token'}
+Vessel__Auth__Token={'' if self.wallet else self.token}
+VESSEL_IDENTITY_REGISTRATION=Invitation
 Vessel__Auth__OwnerId={self.owner}
 VESSEL_S3_ACCESS_KEY_ID={self.s3_access}
 VESSEL_S3_SECRET_ACCESS_KEY={self.s3_secret}
@@ -736,6 +740,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
                          f'tar -xzf - -C {directory} && chown -R {uid}:{uid} {directory}', project=project, stdin=source, stdout=subprocess.DEVNULL)
         # Reset restored identities before any host starts, then rotate the event epoch.
         if self.wallet:
+            self.expect(self.sql(f"SELECT count(*) FROM identity.sessions WHERE id = '{self.session['session']['id']}' AND revoked_at IS NULL", project) == '1',
+                        'restored pre-revocation backup resurrects the live operator session before reset', 'wallet')
             self.identity('reset-after-restore', '--keep-active', self.owner, project=project)
             self.expect(self.sql('SELECT count(*) FROM identity.sessions WHERE revoked_at IS NULL', project) == '0',
                         'restore reset revokes sessions resurrected by the pre-revocation backup', 'wallet')
@@ -779,10 +785,88 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
                     self.sql("SELECT count(*) FROM event_receipts WHERE subscription = 'verification'", project) == '0',
                     'verification subscription deregistered with its receipts', 'restore')
 
+    def start_browser_server(self):
+        # Mount only the external tooling and this one public forwarder file,
+        # never the private temp directory containing .env and the key ring.
+        module = Path(self.args.browser_module)
+        if not module.is_absolute() or module.name != 'playwright' or module.parent.name != 'node_modules':
+            raise ValueError('--wallet-browser-image requires an absolute node_modules/playwright module path')
+        forwarder = self.temp / 'browser-forwarder.cjs'
+        forwarder.write_text(f"""const net = require('node:net');
+for (const host of ['127.0.0.1', '::1']) {{
+  net.createServer(client => {{
+    const upstream = net.connect(443, 'tls');
+    client.on('error', () => upstream.destroy());
+    upstream.on('error', () => client.destroy());
+    client.pipe(upstream).pipe(client);
+  }}).listen({self.https_port}, host);
+}}
+""")
+        forwarder.chmod(0o644)
+        server_port, path = port(), secrets.token_hex(24)
+        self.browser_container = self.name + '-browser'
+        run('docker', 'run', '-d', '--rm', '--init', '--user', 'pwuser',
+            '--memory', '2g', '--cpus', '2', '--network', self.name + '_default',
+            '-p', f'127.0.0.1:{server_port}:3000', '--name', self.browser_container,
+            '-v', f'{module.parent.parent}:{module.parent.parent}:ro',
+            '-v', f'{forwarder}:/vessel-browser-forwarder.cjs:ro',
+            '--entrypoint', '/bin/sh', self.args.wallet_browser_image, '-c',
+            f'node /vessel-browser-forwarder.cjs & exec node {shlex.quote(str(module / "cli.js"))} '
+            f'run-server --host 0.0.0.0 --port 3000 --path /{path} --max-clients 1',
+            stdout=subprocess.DEVNULL, env=verification_environment())
+        for _ in range(60):
+            connection = http.client.HTTPConnection('127.0.0.1', server_port, timeout=1)
+            try:
+                # Rootless Docker's port proxy accepts TCP before Node listens.
+                # Require the server's own endpoint response, not just a socket.
+                connection.request('GET', '/json')
+                response = connection.getresponse()
+                if response.status == 200 and json.loads(response.read()).get('wsEndpointPath') == '/' + path:
+                    return f'ws://127.0.0.1:{server_port}/{path}'
+            except (OSError, http.client.HTTPException, ValueError):
+                pass
+            finally:
+                connection.close()
+            time.sleep(1)
+        logs = run('docker', 'logs', self.browser_container, capture_output=True, text=True, check=False)
+        raise RuntimeError('Isolated Playwright server did not become ready: ' + logs.stdout + logs.stderr)
+
+    def stop_browser_server(self):
+        if self.browser_container:
+            result = run('docker', 'rm', '-f', self.browser_container, capture_output=True, text=True, check=False)
+            if result.returncode and 'No such container' not in result.stderr:
+                raise RuntimeError('Cannot remove isolated browser server: ' + result.stderr.strip())
+            self.browser_container = None
+
+    def browser_smokes(self):
+        # Never connect to a caller's browser server, even for the local engine.
+        env = {key: value for key, value in os.environ.items()
+               if not re.fullmatch(r'PLAYWRIGHT_.*_WS_ENDPOINT', key)}
+        env.update({'VESSEL_RELEASE_URL': self.url, 'VESSEL_RELEASE_CHART_ACCOUNT': self.chart_account,
+                    'PLAYWRIGHT_MODULE': self.args.browser_module, 'VESSEL_RELEASE_SYNTHETIC': '1'})
+        if not self.wallet:
+            env['VESSEL_RELEASE_TOKEN'] = self.token
+            run('node', str(ROOT / 'scripts/release-browser-smoke.cjs'), env=env)
+            return
+        env.pop('VESSEL_RELEASE_TOKEN', None)
+        env['VESSEL_RELEASE_INVITATION'] = self.identity('invite', '--max-uses', '2').stdout.strip().splitlines()[-1]
+        try:
+            for browser in self.args.wallet_browsers.split(','):
+                browser_env = {**env, 'VESSEL_BROWSER': browser}
+                if browser == 'firefox' and self.args.wallet_browser_image:
+                    browser_env['PLAYWRIGHT_FIREFOX_WS_ENDPOINT'] = self.start_browser_server()
+                run('node', str(ROOT / 'scripts/wallet-browser-smoke.cjs'), env=browser_env)
+        finally:
+            self.stop_browser_server()
+
     def cleanup(self):
         self.fixture = False
         self.tls = True
         errors = []
+        try:
+            self.stop_browser_server()
+        except RuntimeError:
+            errors.append('browser server')
         if (self.temp / 'local.yaml').exists():
             for project in self.projects:
                 result = self.compose('down', '-v', '--remove-orphans', project=project, stdout=subprocess.DEVNULL, check=False)
@@ -799,6 +883,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
 
     def main(self):
         try:
+            if self.args.wallet_browser_image:
+                run('docker', 'image', 'inspect', self.args.wallet_browser_image, stdout=subprocess.DEVNULL)
             if self.wallet:
                 self.wallet_signature()  # Fail before building if external test dependencies are missing.
             self.prepare()
@@ -829,14 +915,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
                 self.matrix()
                 self.transport_fixture()
             if self.args.browser_module:
-                env = {**os.environ, 'VESSEL_RELEASE_URL': self.url, 'VESSEL_RELEASE_TOKEN': self.token, 'VESSEL_RELEASE_CHART_ACCOUNT': self.chart_account, 'PLAYWRIGHT_MODULE': self.args.browser_module, 'VESSEL_RELEASE_SYNTHETIC': '1'}
-                if self.wallet:
-                    env['VESSEL_RELEASE_INVITATION'] = self.identity('invite', '--max-uses', '2').stdout.strip().splitlines()[-1]
-                    for browser in self.args.wallet_browsers.split(','):
-                        run('node', str(ROOT / 'scripts/wallet-browser-smoke.cjs'),
-                            env={**env, 'VESSEL_BROWSER': browser})
-                else:
-                    run('node', str(ROOT / 'scripts' / 'release-browser-smoke.cjs'), env=env)
+                self.browser_smokes()
             self.restore()
             if self.wallet:
                 status, _, _ = self.request('/api/auth/sign-out', 'POST', {'expectedSessionId': self.session['session']['id']})
@@ -853,9 +932,12 @@ def parse_args(args=None):
     parser.add_argument('--storage', choices=('s3', 'local'), default='s3', help='Storage/restore path to check (default: private RustFS).')
     parser.add_argument('--auth', choices=('token', 'wallet'), default='token', help='Authentication to verify (default: token). Wallet requires external NOBLE_MODULE_DIR.')
     parser.add_argument('--wallet-browsers', default='chromium,firefox', help='Wallet browser engines, comma separated (default: chromium,firefox).')
+    parser.add_argument('--wallet-browser-image', help='Pre-pulled matching Playwright image for isolated remote Firefox; requires --auth wallet --browser-module.')
     parsed = parser.parse_args(args)
     if not parsed.wallet_browsers or any(browser not in ('chromium', 'firefox') for browser in parsed.wallet_browsers.split(',')):
         parser.error('--wallet-browsers must be chromium, firefox or chromium,firefox')
+    if parsed.wallet_browser_image and (parsed.auth != 'wallet' or not parsed.browser_module):
+        parser.error('--wallet-browser-image requires --auth wallet --browser-module')
     return parsed
 
 
