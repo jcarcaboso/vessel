@@ -96,6 +96,8 @@ public abstract class MonitorIsolationCases(IsolationHost api)
         // admitted, not hidden behind a cooldown that only the positive controls below have escaped.
         var now = api.Clock.Now;
         api.Clock.Now = now.AddMinutes(2);
+        // A worker is alive at that clock, so the positive controls are admitted rather than refused as offline.
+        await api.MonitorOnline();
         try
         {
             var state = await Snapshot.Of(a, $"/api/accounts/{account}/monitor", "/api/monitor");

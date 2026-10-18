@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Nethereum.Signer;
+using Npgsql;
 using Vessel.Application.Credentials;
 using Vessel.Application.MarketData;
 using Vessel.Application.Plays;
@@ -169,6 +170,22 @@ public abstract class IsolationHost : IAsyncLifetime
     }
 
     protected virtual Task CleanUpAsync() => Task.CompletedTask;
+
+    /// <summary>
+    /// The monitor deployment's heartbeat, set to the suite clock: a Check is admitted only while a worker is seen
+    /// alive, never after the clock has moved past its timeout. Set rather than raised, so a case that moved the clock
+    /// forward and back can make it current again.
+    /// </summary>
+    internal async Task MonitorOnline()
+    {
+        await using var data = NpgsqlDataSource.Create(Database.ConnectionString);
+        await using var command = data.CreateCommand("""
+            INSERT INTO server_monitor_heartbeats (deployment, seen_at) VALUES ('monitor', @now)
+            ON CONFLICT (deployment) DO UPDATE SET seen_at = EXCLUDED.seen_at
+            """);
+        command.Parameters.AddWithValue("now", Clock.Now);
+        await command.ExecuteNonQueryAsync();
+    }
 
     /// <summary>Two fresh journal owners on this server.</summary>
     internal async Task<(Owner A, Owner B)> Owners() => (await Owner(), await Owner());

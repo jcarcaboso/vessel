@@ -7,6 +7,7 @@ using Vessel.Application.Ownership;
 using Vessel.Application.Plays;
 using Vessel.Application.Venues;
 using Vessel.Domain.Monitoring;
+using Vessel.Infrastructure.Monitoring;
 using Vessel.Persistence;
 
 namespace Vessel.Tests.Isolation;

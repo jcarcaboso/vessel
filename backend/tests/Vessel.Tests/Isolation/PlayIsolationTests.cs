@@ -134,6 +134,8 @@ public abstract class PlayIsolationCases(IsolationHost api)
         // admitted and change A's monitor state, not hide behind a cooldown the positive control has escaped.
         var now = api.Clock.Now;
         api.Clock.Now = now.AddMinutes(2);
+        // A worker is alive at that clock, so the positive controls are admitted rather than refused as offline.
+        await api.MonitorOnline();
         try
         {
             var state = await Snapshot.Of((a, paths), (b, bPaths));

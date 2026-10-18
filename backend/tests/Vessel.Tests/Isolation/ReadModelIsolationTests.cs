@@ -71,8 +71,8 @@ public abstract class ReadModelIsolationCases(IsolationHost api)
             var aFills = await aDb.Fills.Select(f => f.SourceFillId).OrderBy(id => id).ToListAsync();
             Assert.Equal(["entry-fill", "exit-fill"], aFills);
             Assert.Equal(aFills, await bDb.Fills.Select(f => f.SourceFillId).OrderBy(id => id).ToListAsync());
-            Assert.Equal(await aDb.Orders.Select(o => o.OrderId).OrderBy(id => id).ToListAsync(),
-                await bDb.Orders.Select(o => o.OrderId).OrderBy(id => id).ToListAsync());
+            Assert.Equal(await aDb.Orders.Select(o => o.ExternalOrderId).OrderBy(id => id).ToListAsync(),
+                await bDb.Orders.Select(o => o.ExternalOrderId).OrderBy(id => id).ToListAsync());
             Assert.Equal([IsolationVenues.FundedReader.FundingId], await aDb.FundingPayments.Select(p => p.SourceId).ToListAsync());
             Assert.Equal([IsolationVenues.FundedReader.FundingId], await bDb.FundingPayments.Select(p => p.SourceId).ToListAsync());
             Assert.Equal(1, await aDb.Accounts.CountAsync(x => x.Address == IsolationVenues.Address));
