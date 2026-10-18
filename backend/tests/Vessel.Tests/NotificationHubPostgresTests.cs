@@ -399,6 +399,7 @@ public sealed class NotificationHubPostgresTests
             services.AddLogging();
             services.AddSingleton<Vessel.Application.Ownership.IJournalOwnerContext>(new CoreOwner(Owner));
             services.AddSingleton<TimeProvider>(Clock);
+            services.AddSingleton<IJournalOwnerDirectory>(new ConfiguredOwnerDirectory(Owner));
             services.AddVesselPersistence(configuration);
             services.AddVesselEvents(configuration);
             services.AddScoped<IVesselEventOutbox, NoOutbox>();

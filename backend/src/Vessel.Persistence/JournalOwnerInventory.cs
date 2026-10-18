@@ -44,6 +44,12 @@ public sealed class JournalOwnerInventory(NpgsqlDataSource data) : IJournalOwner
                 UNION SELECT owner_id FROM event_fills
                 UNION SELECT owner_id FROM event_subscriptions
                 UNION SELECT owner_id FROM event_receipts
+                UNION SELECT owner_id FROM notification_preferences
+                UNION SELECT owner_id FROM notifications
+                UNION SELECT owner_id FROM notification_sources
+                UNION SELECT owner_id FROM notification_deliveries
+                UNION SELECT owner_id FROM notification_cursors
+                UNION SELECT owner_id FROM notification_heartbeats
             ) owners WHERE (@after IS NULL OR owner_id>@after) ORDER BY owner_id LIMIT @limit
             """);
         command.Parameters.AddWithValue("after", NpgsqlTypes.NpgsqlDbType.Uuid, (object?)after ?? DBNull.Value);

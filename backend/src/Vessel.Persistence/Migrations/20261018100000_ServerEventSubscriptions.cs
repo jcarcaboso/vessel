@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Vessel.Persistence.Migrations;
 
 [DbContext(typeof(VesselDbContext))]
-[Migration("20261017120000_ServerEventSubscriptions")]
+[Migration("20261018100000_ServerEventSubscriptions")]
 public sealed class ServerEventSubscriptions : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder) => migrationBuilder.Sql("""

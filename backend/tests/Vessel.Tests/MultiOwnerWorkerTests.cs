@@ -1,3 +1,4 @@
+using Vessel.Infrastructure.Monitoring;
 using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Security.Claims;

@@ -143,7 +143,7 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
         await HeartbeatAsync(productive, ct);
     }
 
-    private async Task HeartbeatAsync(IReadOnlyList<Guid> productive, CancellationToken ct)
+    private async Task HeartbeatAsync(List<Guid> productive, CancellationToken ct)
     {
         if (productive.Count == 0) return;
         var file = options.HeartbeatFile;

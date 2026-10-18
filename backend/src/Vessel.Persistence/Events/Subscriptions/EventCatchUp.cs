@@ -113,7 +113,7 @@ public sealed class EventCatchUp(VesselDbContext db, UnitOfWork work, EventDispa
         }, ct);
     }
 
-    private Task LockRetentionAsync(CancellationToken ct) =>
+    private Task<object?> LockRetentionAsync(CancellationToken ct) =>
         VesselEventSql.ScalarAsync(db, "SELECT pg_advisory_xact_lock_shared(@key)", ct,
             ("key", VesselEventSql.RetentionLock(db.CurrentOwnerId)));
 

@@ -15,7 +15,7 @@ namespace Vessel.Messaging;
 /// </summary>
 public sealed class SubscriptionMaintenanceService(MessagingHost host, IOwnerScopeFactory scopes,
     IJournalOwnerDirectory owners, SystemEventSubscriptionStore store, TimeProvider time,
-    ILogger<SubscriptionMaintenanceService> logger, IEnumerable<IMaintenanceHeartbeat> heartbeats) : BackgroundService
+    ILogger<SubscriptionMaintenanceService> logger, IEnumerable<IMaintenanceHeartbeat>? heartbeats = null) : BackgroundService
 {
     private readonly Dictionary<string, Guid?> continuations = new(StringComparer.Ordinal);
     private static readonly TimeSpan RetentionInterval = TimeSpan.FromHours(1);
@@ -40,31 +40,38 @@ public sealed class SubscriptionMaintenanceService(MessagingHost host, IOwnerSco
                     logger.LogWarning("Event retention failed with {ErrorType}.", error.GetType().Name);
                 }
             }
-            var productive = true;
-            foreach (var subscription in host.RunningSubscriptions)
+            await RunCatchUpPassAsync(stoppingToken);
+        } while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+
+    public async Task<bool> RunCatchUpPassAsync(CancellationToken ct)
+    {
+        var productive = true;
+        foreach (var subscription in host.RunningSubscriptions)
+        {
+            try
             {
-                try
-                {
-                    await RunCatchUpAsync(subscription, stoppingToken);
-                }
-                catch (Exception error) when (!stoppingToken.IsCancellationRequested)
+                productive &= await RunCatchUpAsync(subscription, ct);
+            }
+            catch (Exception error) when (!ct.IsCancellationRequested)
+            {
+                productive = false;
+                logger.LogWarning("Catch-up for subscription {Subscription} failed with {ErrorType}.",
+                    subscription.Name, error.GetType().Name);
+            }
+        }
+        // A caught per-owner failure is still an unproductive pass, even though later owners keep running.
+        if (productive)
+            foreach (var heartbeat in heartbeats ?? [])
+            {
+                try { await heartbeat.BeatAsync(ct); }
+                catch (Exception error) when (!ct.IsCancellationRequested)
                 {
                     productive = false;
-                    logger.LogWarning("Catch-up for subscription {Subscription} failed with {ErrorType}.",
-                        subscription.Name, error.GetType().Name);
+                    logger.LogWarning("A maintenance heartbeat failed with {ErrorType}.", error.GetType().Name);
                 }
             }
-            // Only a pass in which every catch-up succeeded is productive; liveness alone is not health.
-            if (productive)
-                foreach (var heartbeat in heartbeats)
-                {
-                    try { await heartbeat.BeatAsync(stoppingToken); }
-                    catch (Exception error) when (!stoppingToken.IsCancellationRequested)
-                    {
-                        logger.LogWarning("A maintenance heartbeat failed with {ErrorType}.", error.GetType().Name);
-                    }
-                }
-        } while (await timer.WaitForNextTickAsync(stoppingToken));
+        return productive;
     }
 
     public async Task RunRetentionAsync(CancellationToken ct)
@@ -90,26 +97,29 @@ public sealed class SubscriptionMaintenanceService(MessagingHost host, IOwnerSco
         }
     }
 
-    public async Task RunCatchUpAsync(EventSubscription subscription, CancellationToken ct)
+    public async Task<bool> RunCatchUpAsync(EventSubscription subscription, CancellationToken ct)
     {
         continuations.TryGetValue(subscription.Name, out var after);
         var page = await store.CatchUpOwnersAsync(subscription, after, time.GetUtcNow(), ct);
+        var productive = true;
         foreach (var owner in page)
         {
             continuations[subscription.Name] = owner;
-            if (await owners.StatusAsync(owner, ct) != JournalOwnerStatus.Active) continue;
             try
             {
+                if (await owners.StatusAsync(owner, ct) != JournalOwnerStatus.Active) continue;
                 await using var scope = scopes.Create(owner);
                 await scope.Services.GetRequiredService<EventCatchUp>().RunAsync(subscription, ct);
             }
             catch (Exception error) when (!ct.IsCancellationRequested)
             {
+                productive = false;
                 logger.LogWarning("Catch-up for subscription {Subscription}, owner {OwnerId} failed with {ErrorType}.",
                     subscription.Name, owner, error.GetType().Name);
             }
         }
         if (page.Count < 100) continuations[subscription.Name] = null;
+        return productive;
     }
 }
 

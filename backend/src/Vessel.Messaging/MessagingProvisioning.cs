@@ -74,7 +74,7 @@ public static class MessagingProvisioning
 
     /// <summary>The bounded admin retry for a compiled-in subscription's failed receipts.</summary>
     public static async Task<int> RetryFailedAsync(IConfiguration configuration, string subscription, int limit, int extraAttempts,
-        CancellationToken cancellationToken, Guid? ownerId, bool allOwners)
+        Guid? ownerId, bool allOwners, CancellationToken cancellationToken)
     {
         if (allOwners == ownerId.HasValue || ownerId == Guid.Empty)
             throw new ArgumentException("Specify --owner <guid> or --all-owners.");

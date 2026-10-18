@@ -57,7 +57,7 @@ public static class MessagingCommands
                         : $"Subscription {name} was not registered; its queue was removed if present.");
                     return 0;
                 case ["retry-event-receipts", var name, .. var options] when Options(options, out var limit, out var attempts, out var owner, out var allOwners):
-                    var retried = await MessagingProvisioning.RetryFailedAsync(configuration, name, limit, attempts, ct, owner, allOwners);
+                    var retried = await MessagingProvisioning.RetryFailedAsync(configuration, name, limit, attempts, owner, allOwners, ct);
                     await output.WriteLineAsync($"Returned {retried} failed receipt(s) of {name} to pending with {attempts} more attempt(s).");
                     return 0;
                 default:
