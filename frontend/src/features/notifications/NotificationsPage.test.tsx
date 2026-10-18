@@ -2,7 +2,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Tooltip } from 'radix-ui'
 import { useState } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { WorkspaceApi } from '@/api/workspace'
 import type { InAppNotification, NotificationQuery } from '@/api/notifications'
 import { ApiError } from '@/api/errors'
@@ -70,6 +70,10 @@ describe('Notifications page', () => {
     const withdrawn = notificationWith(2, { state: 'withdrawn', content: { ...notificationFixture.content, subject: { ...notificationFixture.content.subject, accountId: null, accountName: 'Old account' } } })
     const api = { notifications: vi.fn((query: NotificationQuery) => Promise.resolve(pageOf(query.tab === 'all' ? [late, withdrawn] : [late], query, { unread: 1, all: 2 }))) } as unknown as WorkspaceApi
     const { inApp } = hub()
+    // Relative times are rendered against the clock; pin it near the fixture so the label stays "… ago".
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-17T10:05:00Z'))
+    onTestFinished(() => { vi.useRealTimers() })
     renderPage(api, inApp)
     const row = (await screen.findByText('Notification 1')).closest('li')!
     expect(within(row).getByText('Warning')).toBeInTheDocument()
