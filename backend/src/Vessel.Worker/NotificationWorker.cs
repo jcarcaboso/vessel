@@ -10,7 +10,7 @@ using Vessel.Persistence.Notifications;
 namespace Vessel.Worker;
 
 /// <summary>
-/// The notifications worker's health: after each maintenance pass in which every catch-up succeeded, it writes
+/// The notifications worker's health: after a pass with a successful owner or no failures, it writes
 /// <c>&lt;unix seconds&gt; &lt;timeout seconds&gt;</c> to its own heartbeat file and its own heartbeat row. It never
 /// touches the monitor's, so a healthy notifications worker cannot make a stopped monitor look online.
 /// </summary>

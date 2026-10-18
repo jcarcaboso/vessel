@@ -51,8 +51,10 @@ public sealed class NotificationServerStateTests
         Assert.Equal(true, await oldTable.ExecuteScalarAsync());
     }
 
-    [VesselEventPostgresFact]
-    public async Task Only_a_productive_cross_owner_catch_up_pass_records_the_notification_deployment_heartbeat()
+    [VesselEventPostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Only_a_productive_cross_owner_catch_up_pass_records_the_notification_deployment_heartbeat(bool secondHealthy)
     {
         await using var runtime = await NotificationOwnerTests.Runtime.CreateAsync();
         var file = Path.Combine(Path.GetTempPath(), "vessel-mu-notifications-" + Guid.NewGuid().ToString("N"));
@@ -65,12 +67,12 @@ public sealed class NotificationServerStateTests
             await runtime.RequestAsync(runtime.First);
             await runtime.RequestAsync(runtime.Second);
             runtime.Clock.Advance(TimeSpan.FromMinutes(1));
-            runtime.Directory.Checking = (owner, _) => owner == runtime.First
+            runtime.Directory.Checking = (owner, _) => owner == runtime.First || !secondHealthy
                 ? Task.FromException(new InvalidOperationException("synthetic owner failure")) : Task.CompletedTask;
-            Assert.False(await maintenance.RunCatchUpPassAsync(default));
-            Assert.Null(await state.HeartbeatAsync(default));
-            Assert.False(File.Exists(file));
-            Assert.Single((await runtime.PageAsync(runtime.Second)).Items);
+            Assert.Equal(secondHealthy, await maintenance.RunCatchUpPassAsync(default));
+            Assert.Equal(secondHealthy ? runtime.Clock.GetUtcNow() : (DateTimeOffset?)null, await state.HeartbeatAsync(default));
+            Assert.Equal(secondHealthy, File.Exists(file));
+            Assert.Equal(secondHealthy ? 1 : 0, (await runtime.PageAsync(runtime.Second)).Items.Count);
             runtime.Directory.Checking = null;
             Assert.True(await maintenance.RunCatchUpPassAsync(default));
             Assert.Equal(runtime.Clock.GetUtcNow(), await state.HeartbeatAsync(default));

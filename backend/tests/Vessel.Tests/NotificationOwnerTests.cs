@@ -98,25 +98,36 @@ public sealed class NotificationOwnerTests
             runtime.DeliverAsync(message with { OwnerId = Guid.NewGuid() }));
     }
 
-    [VesselEventPostgresFact]
-    public async Task Catch_up_isolates_an_owner_failure_and_never_beats_an_unproductive_pass()
+    [VesselEventPostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Catch_up_beats_with_a_healthy_owner_but_not_when_every_owner_fails(bool secondHealthy)
     {
         await using var runtime = await Runtime.CreateAsync();
         await runtime.RequestAsync(runtime.First);
         await runtime.RequestAsync(runtime.Second);
         runtime.Clock.Advance(TimeSpan.FromMinutes(1));
-        runtime.Directory.Checking = (owner, _) => owner == runtime.First
+        runtime.Directory.Checking = (owner, _) => owner == runtime.First || !secondHealthy
             ? Task.FromException(new InvalidOperationException("synthetic directory failure")) : Task.CompletedTask;
         var heartbeat = new CountingHeartbeat();
         var maintenance = runtime.Maintenance(heartbeat);
-        Assert.False(await maintenance.RunCatchUpPassAsync(default));
-        Assert.Equal(0, heartbeat.Beats);
+        Assert.Equal(secondHealthy, await maintenance.RunCatchUpPassAsync(default));
+        Assert.Equal(secondHealthy ? 1 : 0, heartbeat.Beats);
         Assert.Empty((await runtime.PageAsync(runtime.First)).Items);
-        Assert.Single((await runtime.PageAsync(runtime.Second)).Items);
+        Assert.Equal(secondHealthy ? 1 : 0, (await runtime.PageAsync(runtime.Second)).Items.Count);
         runtime.Directory.Checking = null;
         Assert.True(await maintenance.RunCatchUpPassAsync(default));
-        Assert.Equal(1, heartbeat.Beats);
+        Assert.Equal(secondHealthy ? 2 : 1, heartbeat.Beats);
         Assert.Single((await runtime.PageAsync(runtime.First)).Items);
+    }
+
+    [VesselEventPostgresFact]
+    public async Task Catch_up_beats_when_no_owner_needs_work_and_none_failed()
+    {
+        await using var runtime = await Runtime.CreateAsync();
+        var heartbeat = new CountingHeartbeat();
+        Assert.True(await runtime.Maintenance(heartbeat).RunCatchUpPassAsync(default));
+        Assert.Equal(1, heartbeat.Beats);
     }
 
     [VesselEventPostgresFact]

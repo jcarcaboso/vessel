@@ -46,21 +46,25 @@ public sealed class SubscriptionMaintenanceService(MessagingHost host, IOwnerSco
 
     public async Task<bool> RunCatchUpPassAsync(CancellationToken ct)
     {
-        var productive = true;
+        var succeeded = 0;
+        var failed = 0;
         foreach (var subscription in host.RunningSubscriptions)
         {
             try
             {
-                productive &= await RunCatchUpAsync(subscription, ct);
+                var result = await RunOwnerCatchUpAsync(subscription, ct);
+                succeeded += result.Succeeded;
+                failed += result.Failed;
             }
             catch (Exception error) when (!ct.IsCancellationRequested)
             {
-                productive = false;
+                failed++;
                 logger.LogWarning("Catch-up for subscription {Subscription} failed with {ErrorType}.",
                     subscription.Name, error.GetType().Name);
             }
         }
-        // A caught per-owner failure is still an unproductive pass, even though later owners keep running.
+        // Deployment health survives one owner's failure, but never an entirely failed pass.
+        var productive = succeeded > 0 || failed == 0;
         if (productive)
             foreach (var heartbeat in heartbeats ?? [])
             {
@@ -99,9 +103,16 @@ public sealed class SubscriptionMaintenanceService(MessagingHost host, IOwnerSco
 
     public async Task<bool> RunCatchUpAsync(EventSubscription subscription, CancellationToken ct)
     {
+        var result = await RunOwnerCatchUpAsync(subscription, ct);
+        return result.Succeeded > 0 || result.Failed == 0;
+    }
+
+    private async Task<(int Succeeded, int Failed)> RunOwnerCatchUpAsync(EventSubscription subscription, CancellationToken ct)
+    {
         continuations.TryGetValue(subscription.Name, out var after);
         var page = await store.CatchUpOwnersAsync(subscription, after, time.GetUtcNow(), ct);
-        var productive = true;
+        var succeeded = 0;
+        var failed = 0;
         foreach (var owner in page)
         {
             continuations[subscription.Name] = owner;
@@ -110,21 +121,21 @@ public sealed class SubscriptionMaintenanceService(MessagingHost host, IOwnerSco
                 if (await owners.StatusAsync(owner, ct) != JournalOwnerStatus.Active) continue;
                 await using var scope = scopes.Create(owner);
                 await scope.Services.GetRequiredService<EventCatchUp>().RunAsync(subscription, ct);
+                succeeded++;
             }
             catch (Exception error) when (!ct.IsCancellationRequested)
             {
-                productive = false;
-                logger.LogWarning("Catch-up for subscription {Subscription}, owner {OwnerId} failed with {ErrorType}.",
-                    subscription.Name, owner, error.GetType().Name);
+                failed++;
+                logger.LogWarning("Catch-up for owner {OwnerId} failed with {ErrorType}.", owner, error.GetType().Name);
             }
         }
         if (page.Count < 100) continuations[subscription.Name] = null;
-        return productive;
+        return (succeeded, failed);
     }
 }
 
 /// <summary>
-/// A module's health signal, written after each maintenance pass in which every catch-up the host runs succeeded.
+/// A module's health signal, written when any active owner's catch-up succeeded, or no work failed.
 /// It must clear its own signal when it cannot record it, so a stuck host never looks healthy.
 /// </summary>
 public interface IMaintenanceHeartbeat
