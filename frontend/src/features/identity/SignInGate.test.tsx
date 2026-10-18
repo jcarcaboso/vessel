@@ -562,6 +562,55 @@ describe('same-user session adoption', () => {
     unmount()
   })
 
+  // The operator restored a backup taken before the save and ran the mandatory session reset; the person then signed
+  // in again from another tab. The adopted session is authoritative although its revision is lower.
+  const restored: SessionDto = { ...sessionB, user: { ...sessionB.user, displayName: 'Restored profile', revision: 1 } }
+
+  it('takes a restored lower profile revision from a newly adopted session', async () => {
+    const { adopt, user, unmount } = mountShell(true)
+    await screen.findByText('Signed in with Hot wallet as Sam Rivera')
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+    expect(screen.getByText('Signed in with Hot wallet as New profile')).toBeVisible()
+    server = restored
+    await adopt(restored)
+    expect(await screen.findByText('Signed in with Ledger as Restored profile')).toBeVisible()
+    expect(screen.getByText('Owner Restored profile')).toBeVisible()
+    // Saves now expect the restored revision.
+    let saved = 0
+    routes['/api/auth/profile'] = () => json({ ...restored.user, displayName: 'My new name', revision: 2 + saved++ })
+    const field = screen.getByRole('textbox', { name: 'Display name' })
+    await user.clear(field)
+    await user.type(field, 'My new name')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Signed in with Ledger as My new name')).toBeVisible()
+    expect(JSON.parse(sent('/api/auth/profile').at(-1)!.init.body as string).expectedRevision).toBe(1)
+    unmount()
+  })
+
+  it('rebases to the server profile read after a revision conflict, even at a lower revision', async () => {
+    const { user, unmount } = mountShell(true)
+    await screen.findByText('Signed in with Hot wallet as Sam Rivera')
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+    expect(screen.getByText('Signed in with Hot wallet as New profile')).toBeVisible()
+    // The server now holds revision 1 for this same session.
+    server = { ...sessionFixture, user: { ...sessionFixture.user, displayName: 'Restored profile', revision: 1 } }
+    let saves = 0
+    routes['/api/auth/profile'] = () => saves++ === 0 ? problem(409, 'revision-conflict')
+      : json({ ...sessionFixture.user, displayName: 'My new name', revision: 2 })
+    const field = screen.getByRole('textbox', { name: 'Display name' })
+    await user.clear(field)
+    await user.type(field, 'My new name')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(field).toHaveValue('Restored profile'))
+    expect(screen.getByText('Signed in with Hot wallet as Restored profile')).toBeVisible()
+    await user.clear(field)
+    await user.type(field, 'My new name')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Signed in with Hot wallet as My new name')).toBeVisible()
+    expect(sent('/api/auth/profile').map(call => JSON.parse(call.init.body as string).expectedRevision)).toEqual([10, 1])
+    unmount()
+  })
+
   it('offers no destructive action on the old lists until the adopted session\'s lists load', async () => {
     const { adopt, unmount } = mountShell(true)
     await waitFor(() => expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(1))

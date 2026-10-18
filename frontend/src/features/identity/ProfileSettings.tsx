@@ -196,8 +196,11 @@ function ProfilePanel({ identity }: { identity: ShellIdentity }) {
     } catch (cause) {
       setError(errorMessage(cause, 'The display name could not be saved.'))
       if (cause instanceof ApiError && cause.code === 'revision-conflict') {
-        // Another tab changed the profile: take the current revision so the next save applies.
-        createPublicAuthApi().session().then(fresh => { if (fresh.user.id === user.id) { identity.onProfile(fresh.user); setName(fresh.user.displayName) } }, () => undefined)
+        // Another tab changed the profile, or a restore lowered it: take the server's revision so the next save applies.
+        const conflictedRevision = user.revision
+        createPublicAuthApi().session().then(fresh => {
+          if (fresh.user.id === user.id) { identity.onProfile(fresh.user, { conflictedRevision }); setName(fresh.user.displayName) }
+        }, () => undefined)
       }
     } finally { setPending(false) }
   }
