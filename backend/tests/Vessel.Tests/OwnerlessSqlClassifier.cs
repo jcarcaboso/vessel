@@ -57,6 +57,13 @@ internal static class OwnerlessSqlClassifier
         @"(?:\s+ORDER\s+BY\s+[\w.]+(?:\s*,\s*[\w.]+)*)?\s*$", Ci);
     private static readonly Regex WhereEnd = new(@"\b(?:ORDER\s+BY|GROUP\s+BY|HAVING|WINDOW|LIMIT|OFFSET|FETCH|FOR|RETURNING)\b", Ci);
 
+    /// <summary>
+    /// C# string literal tokens in source: raw (three or more quotes, any $ prefix), verbatim and regular, each with
+    /// an optional interpolation prefix.
+    /// </summary>
+    public static readonly Regex SourceLiteral =
+        new(@"\$*(?<q>""{3,})[\s\S]*?\k<q>(?!"")|\$?@""(?:[^""]|"""")*""|\$?""(?:\\.|[^""\\])*""");
+
     /// <summary>True when a source literal token (including its quotes and $/@ prefix) needs a reviewed inventory entry.</summary>
     public static bool LiteralRequiresReview(string token)
     {
@@ -79,7 +86,8 @@ internal static class OwnerlessSqlClassifier
         var literal = token.TrimStart('$');
         var raw = literal.StartsWith("\"\"\"", StringComparison.Ordinal);
         var verbatim = !raw && literal.StartsWith('@');
-        var quote = raw ? 3 : 1;
+        // A raw literal's delimiter is three or more quotes, the same number at each end.
+        var quote = raw ? literal.Length - literal.TrimStart('"').Length : 1;
         var body = literal[((verbatim ? 1 : 0) + quote)..^quote];
         if (raw) return body;
         if (verbatim) return body.Replace("\"\"", "\"", StringComparison.Ordinal);
@@ -199,7 +207,10 @@ internal static class OwnerlessSqlClassifier
         if (!SingleTable.IsMatch(target)) return false;
         var start = where.Index + where.Length;
         var end = WhereEnd.Match(flat, start);
-        return Conjuncts(statement[start..(end.Success ? end.Index : flat.Length)]).Any(c => OwnerEquality.IsMatch(c));
+        var condition = statement[start..(end.Success ? end.Index : flat.Length)];
+        // CASE … END and ARRAY[…] are not parenthesised, so an AND inside them would look like a top-level conjunct.
+        if (Regex.IsMatch(condition, @"\bCASE\b|\[(?!\])", Ci)) return false;
+        return Conjuncts(condition).Any(c => OwnerEquality.IsMatch(c));
     }
 
     // The top-level AND operands of a condition, with fully parenthesised AND groups expanded.
