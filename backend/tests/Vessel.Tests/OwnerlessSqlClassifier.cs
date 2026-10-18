@@ -11,7 +11,8 @@ namespace Vessel.Tests;
 /// <item>a single-row INSERT whose owner column receives the owner value (or an INSERT … SELECT from an owner-scoped
 /// single table or from <c>unnest</c> of parameters), with ON CONFLICT DO UPDATE only on a target that includes the owner column.</item>
 /// </list>
-/// Comments, quoted strings and quoted identifiers are removed first. CTEs, set operations, OR, NOT/IS around the
+/// Neither may assign an owner column (UPDATE SET or ON CONFLICT DO UPDATE SET), which would move rows to another owner.
+/// Comments (nested, also before the statement keyword), quoted strings and quoted identifiers are removed first. CTEs, set operations, OR, NOT/IS around the
 /// owner predicate, joins, subqueries, multi-row VALUES and text spliced into parameterised SQL are never exempt.
 /// Interpolation holes in SQL without @parameters are taken as EF Core parameters.
 /// </summary>
@@ -44,7 +45,7 @@ internal static class OwnerlessSqlClassifier
         ["LOCK"] = @"\s+(?:table\s+)?(?:only\s+)?" + Name + @"\s*(?:[,;*]|$|in\b|nowait\b)",
         ["CALL"] = @"\s+" + Name + @"\s*\(",
         ["COPY"] = @"\s*\(|\s+" + Name + @"\s*(?:\(|from\b|to\b)",
-        ["DO"] = @"\s*\$|\s+language\b",
+        ["DO"] = @"\s*(?:\$|')|\s+(?:e'|u&'|language\b)",
         ["SET"] = @"\s+(?:session|local|transaction|constraints|role|time\s+zone|names|schema|search_path)\b|\s+[\w.]+\s*(?:=|to\b)",
         ["RESET"] = @"\s+(?:all|role|session\s+authorization|[\w.]+)\s*(?:;|$)",
         ["VALUES"] = @"\s*\(",
@@ -66,11 +67,12 @@ internal static class OwnerlessSqlClassifier
         ["FETCH"] = Fetch, ["MOVE"] = Fetch,
         ["IMPORT"] = @"\s+foreign\s+schema\b",
     }.ToDictionary(p => p.Key, p => new Regex(@"^(?:" + p.Value + ")", Ci), StringComparer.OrdinalIgnoreCase);
-    private static readonly Regex LeadingNoise = new(@"^(?:\s+|\(|--[^\n]*(?:\n|$)|/\*[\s\S]*?\*/)+");
 
     private const string OwnerColumn = @"(?:\w+\.)?(?:owner_id|""OwnerId"")";
     private const string OwnerValue = @"(?:@owner(?:Id)?\b|\{\s*(?:[\w.]+\.)?(?:Current)?Owner(?:Id)?(?:\.Value)?\s*\})";
     private const string Table = @"(?:(?:\w+|""_"")\.)?(?:\w+|""_"")";
+    // Any mention of an owner column, quoted or not, qualified or not, in any case: assigning one moves rows between owners.
+    private static readonly Regex OwnerMention = new(@"(?<![\w""])(?:owner_?id|""owner_?id"")(?![\w""])", Ci);
     private static readonly Regex OwnerEquality = new($@"^(?:{OwnerColumn}\s*=\s*{OwnerValue}|{OwnerValue}\s*=\s*{OwnerColumn})$", Ci);
     private static readonly Regex OwnerColumnOnly = new($"^{OwnerColumn}$", Ci);
     private static readonly Regex OwnerValueOnly = new($"^{OwnerValue}$", Ci);
@@ -100,18 +102,60 @@ internal static class OwnerlessSqlClassifier
         {
             if (body[i] != '\\' || i + 1 == body.Length) { text.Append(body[i]); continue; }
             var next = body[++i];
-            text.Append(next switch { 'n' => '\n', 'r' => '\r', 't' => '\t', '0' => '\0', _ => next });
+            // \uXXXX, \UXXXXXXXX and \x with one to four hex digits; the compiler has already rejected malformed escapes.
+            var digits = next switch { 'u' => 4, 'U' => 8, 'x' => HexRun(body, i + 1, 4), _ => 0 };
+            if (digits > 0 && i + digits < body.Length && HexRun(body, i + 1, digits) == digits)
+            {
+                text.Append(char.ConvertFromUtf32(Convert.ToInt32(body.Substring(i + 1, digits), 16)));
+                i += digits;
+                continue;
+            }
+            text.Append(next switch
+            {
+                'n' => '\n', 'r' => '\r', 't' => '\t', '0' => '\0', 'a' => '\a', 'b' => '\b', 'f' => '\f', 'v' => '\v', 'e' => '\u001b',
+                _ => next,
+            });
         }
         return text.ToString();
+    }
+
+    private static int HexRun(string text, int start, int max)
+    {
+        var count = 0;
+        while (count < max && start + count < text.Length && Uri.IsHexDigit(text[start + count])) count++;
+        return count;
     }
 
     /// <summary>True when the text is a SQL statement (after leading comments, whitespace and parentheses).</summary>
     public static bool IsSql(string text)
     {
-        var start = LeadingNoise.Replace(text, "", 1);
+        var start = text[LeadingNoise(text)..];
         if (CoreStarter.IsMatch(start) || OtherStarter.IsMatch(start)) return true;
         var keyword = AnyCaseStarter.Match(start);
         return keyword.Success && StatementGrammar[keyword.Value].IsMatch(start[keyword.Length..]);
+    }
+
+    // The length of the leading whitespace, parentheses, line comments and (nested) block comments.
+    private static int LeadingNoise(string text)
+    {
+        var i = 0;
+        while (i < text.Length)
+        {
+            if (char.IsWhiteSpace(text[i]) || text[i] == '(') i++;
+            else if (At(text, i, "--")) { while (i < text.Length && text[i] != '\n') i++; }
+            else if (At(text, i, "/*"))
+            {
+                // PostgreSQL block comments nest; an unterminated one runs to the end.
+                for (var depth = 0; i < text.Length;)
+                {
+                    if (At(text, i, "/*")) { depth++; i += 2; }
+                    else if (At(text, i, "*/")) { i += 2; if (--depth == 0) break; }
+                    else i++;
+                }
+            }
+            else break;
+        }
+        return i;
     }
 
     /// <summary>True when the text is SQL and at least one of its statements is outside the owner-safe subset.</summary>
@@ -146,6 +190,8 @@ internal static class OwnerlessSqlClassifier
             var update = Regex.Match(head, @"^UPDATE\s+(?:ONLY\s+)?(?<t>[\s\S]*?)\s+SET\b(?<set>[\s\S]*)$", Ci);
             var delete = Regex.Match(head, @"^DELETE\s+FROM\s+(?:ONLY\s+)?(?<t>[\s\S]*)$", Ci);
             if (update.Success && Regex.IsMatch(update.Groups["set"].Value, @"\bFROM\b", Ci)) return false;
+            var set = update.Groups["set"];
+            if (update.Success && OwnerMention.IsMatch(statement.Substring(set.Index, set.Length))) return false;
             target = update.Success ? update.Groups["t"].Value : delete.Success ? delete.Groups["t"].Value : "";
         }
         if (!SingleTable.IsMatch(target)) return false;
@@ -200,11 +246,15 @@ internal static class OwnerlessSqlClassifier
         else return false;
         if (owner < 0 || owner >= row.Count || !OwnerValueOnly.IsMatch(row[owner])) return false;
         var conflict = InsertTail.Match(tail);
-        return conflict.Success && (!conflict.Groups["update"].Success ||
-                                    conflict.Groups["target"].Value.Split(',').Any(c => OwnerColumnOnly.IsMatch(c.Trim())));
+        if (!conflict.Success) return false;
+        if (!conflict.Groups["update"].Success) return true;
+        var assignments = conflict.Groups["update"].Value;
+        var condition = Flatten(assignments) is { } flatAssignments ? Regex.Match(flatAssignments, @"\bWHERE\b", Ci) : null;
+        if (condition is null || OwnerMention.IsMatch(condition.Success ? assignments[..condition.Index] : assignments)) return false;
+        return conflict.Groups["target"].Value.Split(',').Any(c => OwnerColumnOnly.IsMatch(c.Trim()));
     }
 
-    // Removes comments, quoted strings and quoted identifiers (keeping "OwnerId") so that only SQL structure remains;
+    // Removes comments, quoted strings and quoted identifiers (keeping owner columns) so that only SQL structure remains;
     // null when the text cannot be tokenised (an unterminated quote or comment, or a hole inside an identifier).
     private static string? Normalize(string text)
     {
@@ -259,7 +309,13 @@ internal static class OwnerlessSqlClassifier
                     else name.Append(text[i]);
                 }
                 if (name.ToString().Contains('{')) return null;
-                sql.Append(name.ToString() == "OwnerId" ? "\"OwnerId\"" : "\"_\"");
+                // Other owner-like names stay recognisable to OwnerMention without counting as the owner column.
+                sql.Append(name.ToString() switch
+                {
+                    "OwnerId" => "\"OwnerId\"",
+                    var n when OwnerMention.IsMatch(n) => "\"OWNER_ID\"",
+                    _ => "\"_\"",
+                });
             }
             else sql.Append(text[i++]);
         }
