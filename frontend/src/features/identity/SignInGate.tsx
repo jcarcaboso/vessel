@@ -12,7 +12,8 @@ import { clearNotice, readNotice, reloadToSignIn, SessionController, takeLanding
 import type { ShellIdentity } from './types'
 import type { BrowserWallet } from './wallets/discovery'
 
-type Ready = { session: SessionDto; system: SystemInfo; api: WorkspaceApi; controller: SessionController; walletName: string | null }
+/** `userGeneration` is the controller generation the profile in `session.user` was learned under (see `checkSession`). */
+type Ready = { session: SessionDto; system: SystemInfo; api: WorkspaceApi; controller: SessionController; walletName: string | null; userGeneration: number }
 type GateState =
   | { kind: 'probing' }
   | { kind: 'sign-in' }
@@ -71,8 +72,9 @@ export function SignInGate({ registration, originAccepted, children, channels, n
    *
    * Each probe belongs to the controller and session generation it started under. A newer probe, an adoption or a
    * teardown aborts it, and an answer that arrives after any of them is dropped, a 401 included: it may describe the
-   * session this tab has since left. The profile only moves forward by `UserDto.revision`, so a probe answered
-   * before a save never restores the old name.
+   * session this tab has since left. Within one generation the profile only moves forward by `UserDto.revision`, so a
+   * probe answered before a save never restores the old name. A probe of a newer generation than the known profile
+   * replaces it at any revision: after a restore and the mandatory session reset the server's revision may be lower.
    */
   const checkSession = useCallback(async (current: SessionController): Promise<SessionCheck> => {
     probes.get(current)?.abort()
@@ -95,9 +97,9 @@ export function SignInGate({ registration, originAccepted, children, channels, n
     if (check === 'current') {
       setState(state => {
         if (state.kind !== 'ready' || state.ready.controller !== current) return state
-        const user = newerUser(state.ready.session.user, fresh.user)
+        const user = generation > state.ready.userGeneration ? fresh.user : newerUser(state.ready.session.user, fresh.user)
         return { kind: 'ready', ready: {
-          ...state.ready, session: { ...fresh, user },
+          ...state.ready, session: { ...fresh, user }, userGeneration: generation,
           // The wallet's announced name belongs to the sign-in this tab made; another tab's wallet is unknown here.
           walletName: fresh.wallet.id === state.ready.session.wallet.id ? state.ready.walletName : null,
           system: { ...state.ready.system, owner: { ...state.ready.system.owner, displayName: user.displayName } } } }
@@ -126,7 +128,8 @@ export function SignInGate({ registration, originAccepted, children, channels, n
       if (controllerRef.current !== controller) return
       const workspace = createWorkspaceApi(credentials, controller.handleFailure)
       controller.markLive()
-      setState({ kind: 'ready', ready: { session, system, api: workspace, controller, walletName } })
+      // The session was read before any adoption, so its profile belongs to generation 0.
+      setState({ kind: 'ready', ready: { session, system, api: workspace, controller, walletName, userGeneration: 0 } })
       if (controller.generation !== 0) void checkSession(controller)
     } catch (cause) {
       // A 401 or suspension already moved the gate; anything else may be retried.
@@ -176,10 +179,14 @@ export function SignInGate({ registration, originAccepted, children, channels, n
       session: ready.session, walletName: ready.walletName, auth,
       notice: notice ? workspaceNotices[notice] : null, noticePresented,
       registerExitState: clear => controller.registerExitState(clear),
-      onProfile: (user: UserDto) => setState(current => {
-        if (current.kind !== 'ready' || newerUser(current.ready.session.user, user) !== user) return current
+      onProfile: (user: UserDto, recovery?: { conflictedRevision: number }) => setState(current => {
+        if (current.kind !== 'ready') return current
+        const known = current.ready.session.user
+        // A conflict's recovery read rebases a profile that is still the one the server refused, even to a lower revision.
+        const rebase = recovery !== undefined && known.revision === recovery.conflictedRevision
+        if (!rebase && newerUser(known, user) !== user) return current
         return { kind: 'ready', ready: {
-          ...current.ready, session: { ...current.ready.session, user }, system: { ...current.ready.system, owner: { ...current.ready.system.owner, displayName: user.displayName } } } }
+          ...current.ready, session: { ...current.ready.session, user }, userGeneration: current.ready.controller.generation, system: { ...current.ready.system, owner: { ...current.ready.system.owner, displayName: user.displayName } } } }
       }),
       checkSession: () => checkSession(controller),
       onSessionChange: listener => controller.sessionGeneration.subscribe(listener),
@@ -215,7 +222,7 @@ export function SignInGate({ registration, originAccepted, children, channels, n
 /** The probe in flight for each controller: a newer one aborts it, and the controller's teardown ends it. */
 const probes = new WeakMap<SessionController, AbortController>()
 
-/** The later of two snapshots of the same person: an older revision never replaces a newer one. */
+/** The later of two snapshots of the same person in one generation: an older revision never replaces a newer one. */
 function newerUser(known: UserDto, next: UserDto) {
   return next.revision < known.revision ? known : next
 }

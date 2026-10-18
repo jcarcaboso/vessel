@@ -13,8 +13,11 @@ export interface ShellIdentity {
   noticePresented?(): void
   /** The shell registers how to drop its unsaved-work exit state, so a forced teardown never prompts. */
   registerExitState(clear: () => void): () => void
-  /** The profile changed: the shell's greeting and owner card follow it. */
-  onProfile(user: UserDto): void
+  /**
+   * The profile changed: the shell's greeting and owner card follow it. A lower revision is ignored, except as the
+   * `recovery` read after the server refused `conflictedRevision` (e.g. after a restore): it then rebases the profile.
+   */
+  onProfile(user: UserDto, recovery?: { conflictedRevision: number }): void
   /**
    * Asks the server which session this tab's cookie holds and follows the answer: a 401 tears down like any other,
    * and this tab's session refreshes `session`. Whether a removed wallet ended this tab is the server's to say.
