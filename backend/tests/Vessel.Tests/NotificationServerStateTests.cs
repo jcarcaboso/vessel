@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Nethereum.Signer;
 using Npgsql;
@@ -49,6 +51,54 @@ public sealed class NotificationServerStateTests
         }
         await using var oldTable = data.CreateCommand("SELECT to_regclass('notification_heartbeats') IS NULL");
         Assert.Equal(true, await oldTable.ExecuteScalarAsync());
+    }
+
+    [VesselEventPostgresFact]
+    public async Task Upgrade_discards_owner_heartbeats_and_hub_stays_offline_until_a_productive_pass()
+    {
+        await using var runtime = await NotificationOwnerTests.Runtime.CreateAsync("20261018110000_ServerMonitorState");
+        await using (var seed = runtime.Services.GetRequiredService<NpgsqlDataSource>().CreateCommand("""
+            INSERT INTO notification_heartbeats(owner_id,worker_id,heartbeat_at)
+            VALUES(@first,'old-notifications',@now),(@second,'old-other-worker',@now)
+            """))
+        {
+            seed.Parameters.AddWithValue("first", runtime.First);
+            seed.Parameters.AddWithValue("second", runtime.Second);
+            seed.Parameters.AddWithValue("now", runtime.Clock.GetUtcNow());
+            Assert.Equal(2, await seed.ExecuteNonQueryAsync());
+        }
+        await using (var db = runtime.Database.Context(runtime.First))
+            await db.GetService<IMigrator>().MigrateAsync("20261018120000_ServerNotificationState");
+        Assert.Equal(0, await runtime.CountAsync("server_notification_heartbeats"));
+        await using (var oldTable = runtime.Services.GetRequiredService<NpgsqlDataSource>()
+                         .CreateCommand("SELECT to_regclass('notification_heartbeats') IS NULL"))
+            Assert.Equal(true, await oldTable.ExecuteScalarAsync());
+        await using var factory = new CoreApiFactory(runtime.First, connection: runtime.Database.ConnectionString,
+            configure: services => services.AddSingleton<TimeProvider>(runtime.Clock));
+        using var client = factory.AuthorizedClient();
+        var head = (await client.GetFromJsonAsync<NotificationHeadDto>("/api/notifications/head"))!;
+        Assert.False(head.WorkerOnline);
+        Assert.Null(head.HeartbeatAtUtc);
+        var file = Path.Combine(Path.GetTempPath(), "vessel-mu-upgrade-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var heartbeat = new NotificationHeartbeat(runtime.Services.GetRequiredService<NotificationWorkerState>(),
+                new() { Deployment = "notifications", Modules = ["notifications"] }, new() { HeartbeatFile = file }, runtime.Clock);
+            var maintenance = runtime.Maintenance(heartbeat);
+            await runtime.RequestAsync(runtime.First);
+            runtime.Clock.Advance(TimeSpan.FromMinutes(1));
+            runtime.Directory.Checking = (_, _) => Task.FromException(new InvalidOperationException("synthetic owner failure"));
+            Assert.False(await maintenance.RunCatchUpPassAsync(default));
+            Assert.Equal(0, await runtime.CountAsync("server_notification_heartbeats"));
+            Assert.False((await client.GetFromJsonAsync<NotificationHeadDto>("/api/notifications/head"))!.WorkerOnline);
+            runtime.Directory.Checking = null;
+            Assert.True(await maintenance.RunCatchUpPassAsync(default));
+            head = (await client.GetFromJsonAsync<NotificationHeadDto>("/api/notifications/head"))!;
+            Assert.True(head.WorkerOnline);
+            Assert.Equal(runtime.Clock.GetUtcNow(), head.HeartbeatAtUtc);
+            Assert.Single((await runtime.PageAsync(runtime.First)).Items);
+        }
+        finally { File.Delete(file); }
     }
 
     [VesselEventPostgresTheory]

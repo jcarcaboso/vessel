@@ -298,9 +298,9 @@ public sealed class NotificationOwnerTests
         public IOwnerScopeFactory Scopes => Services.GetRequiredService<IOwnerScopeFactory>();
         public SystemEventSubscriptionStore Store => Services.GetRequiredService<SystemEventSubscriptionStore>();
         public EventSubscription Subscription => module.Subscriptions[0];
-        public static async Task<Runtime> CreateAsync()
+        public static async Task<Runtime> CreateAsync(string? targetMigration = null)
         {
-            var runtime = new Runtime(await CoreDatabase.CreateAsync());
+            var runtime = new Runtime(await CoreDatabase.CreateAsync(targetMigration));
             Assert.True(await runtime.Store.RegisterAsync(runtime.Subscription, default));
             return runtime;
         }
