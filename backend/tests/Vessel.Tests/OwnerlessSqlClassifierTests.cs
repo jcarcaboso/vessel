@@ -36,6 +36,8 @@ public sealed class OwnerlessSqlClassifierTests
     [InlineData("begin; DELETE FROM accounts; commit;")]
     [InlineData("note: -- then delete from accounts")]
     [InlineData("Show all; delete from accounts")]
+    [InlineData("UPDATE accounts SET name='overwritten' WHERE CASE WHEN false AND owner_id=@owner AND false THEN true ELSE true END")]
+    [InlineData("SELECT * FROM accounts WHERE ARRAY[false AND owner_id=@owner AND false,true] @> ARRAY[true]")]
     public void Ownerless_or_disguised_sql_needs_review(string sql) => Assert.True(OwnerlessSqlClassifier.RequiresReview(sql));
 
     [Theory]
@@ -138,6 +140,12 @@ public sealed class OwnerlessSqlClassifierTests
         Assert.Equal("\uD800x", OwnerlessSqlClassifier.Text("$\"\\uD800x\""));
         Assert.Equal("SELECT '😀' FROM accounts", OwnerlessSqlClassifier.Text("\"SELECT '\\uD83D\\uDE00' FROM accounts\""));
         Assert.False(OwnerlessSqlClassifier.LiteralRequiresReview("\"\\xD83D\\xDE00\""));
+        // Raw literals may use more than three delimiter quotes; the whole token is found and its body read exactly.
+        Assert.Equal("\"\"\"\"DELETE FROM accounts\"\"\"\"",
+            OwnerlessSqlClassifier.SourceLiteral.Match("const string Unsafe = \"\"\"\"DELETE FROM accounts\"\"\"\";").Value);
+        Assert.Equal("DELETE FROM accounts", OwnerlessSqlClassifier.Text("\"\"\"\"DELETE FROM accounts\"\"\"\""));
+        Assert.True(OwnerlessSqlClassifier.LiteralRequiresReview("\"\"\"\"DELETE FROM accounts\"\"\"\""));
+        Assert.True(OwnerlessSqlClassifier.LiteralRequiresReview("$$\"\"\"\"\"DELETE FROM accounts\"\"\"\"\""));
         Assert.True(OwnerlessSqlClassifier.LiteralRequiresReview("\"SELECT '\\uD800' FROM accounts\""));
     }
 
