@@ -1,5 +1,6 @@
 import type { Challenge, SessionDto, VerifyResult } from '@/api/auth'
 import { ApiError, rateLimitMessage } from '@/api/errors'
+import { checksumAddress } from '@/lib/eip55'
 import { shortSource } from '@/lib/format'
 import type { BrowserWallet } from './wallets/discovery'
 import { WalletError, sameAddress } from './wallets/provider'
@@ -23,7 +24,8 @@ export interface RegistrationForm {
   registration: string
   requiresInvitation: boolean
   submitting: boolean
-  error: { field: 'displayName' | 'invitation' | null; message: string } | null
+  /** `retryAt` is a rate limit's deadline: Create journal waits for it, keeping the form as typed. */
+  error: { field: 'displayName' | 'invitation' | null; message: string; retryAt?: string } | null
 }
 
 /**
@@ -91,7 +93,7 @@ export function flowErrorText(error: SignInError): string {
     case 'declined': return error.during === 'connect' ? 'No address was shared. Try again or choose another wallet.' : 'Nothing was signed. Try again or choose another wallet.'
     case 'pending': return 'The wallet already has a request waiting. Open it to finish or reject it, then try again.'
     case 'expired': return 'This request expired after five minutes. Start again.'
-    case 'switched': return `The wallet switched to ${shortSource(error.address)}. Start again with the address you want to use.`
+    case 'switched': return `The wallet switched to ${shortSource(checksumAddress(error.address))}. Start again with the address you want to use.`
     case 'disconnected': return 'The wallet ended the connection. Connect again or choose another wallet.'
     case 'invitation': return 'This server only admits invited wallets.'
     case 'unsupported': return 'This signature format isn’t supported yet, as with Safe and other smart accounts. Use a regular wallet address.'
@@ -140,7 +142,11 @@ export function signIn(state: SignInState, event: SignInEvent): SignInState {
       if (code === 'display-name-invalid') return { ...state, submitting: false, error: { field: 'displayName', message } }
       if (code === 'invitation-required' || code === 'invitation-invalid')
         return { ...state, submitting: false, requiresInvitation: true, error: { field: 'invitation', message } }
-      if (code === 'rate-limited' || code === undefined || event.error instanceof ApiError && event.error.kind === 'unavailable')
+      if (event.error instanceof ApiError && (event.error.status === 429 || code === 'rate-limited')) {
+        const retryAt = event.error.retryAtUtc
+        return { ...state, submitting: false, error: { field: null, message: rateLimitMessage(retryAt), ...retryAt ? { retryAt } : {} } }
+      }
+      if (code === undefined || event.error instanceof ApiError && event.error.kind === 'unavailable')
         return { ...state, submitting: false, error: { field: null, message } }
       return fail(state, signInError(event.error))
     }

@@ -14,6 +14,7 @@ import { focusedControl, openDialog, returnFocus } from './return-focus'
 import { signingMeaning } from './SignInScreen'
 import type { ShellIdentity } from './types'
 import { WalletSignFlow } from './WalletSignFlow'
+import type { BrowserWallet } from './wallets/discovery'
 import { sameAddress } from './wallets/provider'
 
 const day = (at: string) => new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -61,6 +62,18 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
     return () => controller.abort()
   }, [auth, reloadKey])
 
+  // Adopting another tab's session of this user moves which wallet is current: the lists reload, and a removal
+  // prepared under the old session (its dialog or its step-up) is dropped instead of acting on a stale row.
+  const { onSessionChange } = identity
+  const pendingStepUp = useRef<StepUpRequest | null>(null)
+  useEffect(() => { pendingStepUp.current = stepUp }, [stepUp])
+  useEffect(() => onSessionChange(() => {
+    setRemoving(null)
+    const pending = pendingStepUp.current
+    if (pending?.action === 'wallet.remove') { pending.resolve(false); setStepUp(null) }
+    reload()
+  }), [onSessionChange, reload])
+
   const requestStepUp = useCallback((action: StepUpAction, target?: WalletDto) => new Promise<boolean>(resolve => {
     setStepUp({ action, ...target ? { target } : {}, opener: focusedControl(), resolve })
   }), [])
@@ -82,8 +95,9 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
       // The row is about to go; land on the list instead.
       removeOpener.current = walletsHeading.current
       setRemoving(null)
-      // The server revoked this wallet's sessions; when that includes this tab, leave now.
-      if (wallet.current) { identity.endSession(); return }
+      // The server revoked this wallet's sessions. Whether that included this tab is the server's answer, not this
+      // row's: another tab may have moved this tab onto a session another wallet signed in.
+      if (await identity.checkSession() === 'ended') return
       notify({ tone: 'success', message: 'Sign-in wallet removed.' })
       reload()
     } catch (cause) {
@@ -137,9 +151,7 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
     {removing && <Dialog open onOpenChange={next => { if (!next) setRemoving(null) }}>
       <DialogContent className="workspace-dialog" onCloseAutoFocus={event => returnFocus(() => removeOpener.current, () => walletsHeading.current)(event)}>
         <DialogHeader><DialogTitle>Remove sign-in wallet?</DialogTitle>
-          <DialogDescription>{removing.current
-            ? 'This wallet signed in this session. Removing it signs you out here and on every device it signed in.'
-            : 'This wallet will no longer sign in to this journal, and its sessions end.'} You'll confirm with a linked wallet.</DialogDescription></DialogHeader>
+          <DialogDescription>This wallet will no longer sign in to this journal, and its sessions end. You'll confirm with a linked wallet.</DialogDescription></DialogHeader>
         <p><SourceChip source={removing.address} /> {removing.label}</p>
         <DialogFooter><Button variant="outline" onClick={() => setRemoving(null)}>Cancel</Button>
           <Button variant="destructive" onClick={() => { void remove(removing) }}>Remove wallet</Button></DialogFooter>
@@ -228,7 +240,8 @@ function WalletRow({ wallet, only, auth, onRemove, onChanged }: {
     {wallet.current && <span className="identity-pill is-brand">This session</span>}
     {!editing && <span className="profile-row-actions">
       <Button ref={renameButton} variant="ghost" size="sm" aria-label={`Rename ${name}`} title="Rename" onClick={() => setEditing(true)}><Pencil size={14} aria-hidden="true" /></Button>
-      {!only && <Button variant="ghost" size="sm" className="profile-danger" onClick={onRemove}><Trash2 size={14} aria-hidden="true" />Remove</Button>}
+      {/* As on mockup screen 8, the wallet that signed this session is removed from another session. */}
+      {!only && !wallet.current && <Button variant="ghost" size="sm" className="profile-danger" onClick={onRemove}><Trash2 size={14} aria-hidden="true" />Remove</Button>}
     </span>}
   </li>
 }
@@ -271,6 +284,11 @@ function LinkWalletDialog({ identity, wallets, onStepUp, onClose, onLinked, onLi
   const [phase, setPhase] = useState<'confirm' | 'link'>('confirm')
   const [label, setLabel] = useState('')
   const [labelError, setLabelError] = useState<string | null>(null)
+  // The new wallet's announced name is the suggested label until the person types their own.
+  const labelEdited = useRef(false)
+  const suggestLabel = useCallback((wallet: BrowserWallet) => {
+    if (!labelEdited.current) setLabel(cleanLabel(wallet.name) ?? '')
+  }, [])
   const accept = useMemo(() => linkedOnly(wallets), [wallets])
   const [confirmedWith, setConfirmedWith] = useState<string | null>(null)
   return <Dialog open onOpenChange={next => { if (!next) onClose() }}>
@@ -308,9 +326,9 @@ function LinkWalletDialog({ identity, wallets, onStepUp, onClose, onLinked, onLi
               throw cause
             }
           }}
-          onDone={onLinked} onCancel={onClose}>
+          onDone={onLinked} onCancel={onClose} onWallet={suggestLabel}>
           <div className="identity-field"><label htmlFor="link-label">Label <small>· optional</small></label>
-            <Input id="link-label" value={label} onChange={event => { setLabel(event.target.value); setLabelError(null) }} maxLength={walletLabelLimit * 2}
+            <Input id="link-label" value={label} onChange={event => { labelEdited.current = true; setLabel(event.target.value); setLabelError(null) }} maxLength={walletLabelLimit * 2}
               aria-invalid={labelError !== null} aria-describedby={labelError ? 'link-label-error' : undefined} />
             {labelError && <p id="link-label-error" className="error" role="alert">{labelError}</p>}</div>
         </WalletSignFlow>}

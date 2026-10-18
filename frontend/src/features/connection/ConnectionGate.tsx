@@ -45,7 +45,7 @@ export function ConnectionGate({ children }: { children: (system: SystemInfo, di
       <section className="panel connection-card" aria-labelledby="connection-title">
         <div className="connection-brand" aria-hidden="true"><span className="shell-monogram"><VesselMark size={26} /></span><span>vessel<small>The trading journal</small></span></div>
         <h1 id="connection-title">Connect to your diary</h1>
-        <form onSubmit={(event) => { void connect(event) }} aria-busy={pending}>
+        <form className="connection-form" onSubmit={(event) => { void connect(event) }} aria-busy={pending}>
           <div className="connection-label"><label htmlFor="api-token">API token</label><InfoTip icon={LockKeyhole} label="How the token is kept" side="right">{tokenPolicy}</InfoTip></div>
           <Input id="api-token" type="password" autoComplete="off" spellCheck={false}
             value={token} onChange={(event) => setToken(event.target.value)} disabled={pending}

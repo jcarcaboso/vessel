@@ -59,12 +59,13 @@ describe('a session that ends while a request is pending', () => {
     })
     vi.stubGlobal('fetch', fetch)
     const identity: ShellIdentity = { session: sessionFixture, walletName: null, auth: createSessionAuthApi(tab.controller.credentials(), tab.controller.handleFailure),
-      registerExitState: () => () => {}, onProfile: vi.fn(), endSession: () => tab.controller.dispose() }
+      registerExitState: () => () => {}, onProfile: vi.fn(), checkSession: vi.fn(async () => 'current' as const),
+      onSessionChange: listener => tab.controller.sessionGeneration.subscribe(listener) }
     const view = render(<Tooltip.Provider><NotificationProvider><ProfileSettings identity={identity} onSignOut={vi.fn()} /></NotificationProvider></Tooltip.Provider>)
     try {
       const user = userEvent.setup()
       const removes = await screen.findAllByRole('button', { name: 'Remove' })
-      await user.click(removes[1]!)
+      await user.click(removes[0]!)
       await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove wallet' }))
       await waitFor(() => expect(fetch.mock.calls.some(([, init]) => init.method === 'DELETE')).toBe(true))
       const sent = fetch.mock.calls.length

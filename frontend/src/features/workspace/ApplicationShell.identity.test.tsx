@@ -48,7 +48,8 @@ async function mount(role: 'member' | 'operator' = 'member', extra: Partial<Shel
     overview: vi.fn().mockResolvedValue(emptyOverview), ...options.api }
   const identity: ShellIdentity = {
     session, walletName: 'Rabby Wallet', auth: createSessionAuthApi(controller.credentials(), controller.handleFailure),
-    registerExitState: clear => controller.registerExitState(clear), onProfile: vi.fn(), endSession: () => controller.teardown(notices.ended),
+    registerExitState: clear => controller.registerExitState(clear), onProfile: vi.fn(), checkSession: vi.fn(async () => 'current' as const),
+    onSessionChange: listener => controller.sessionGeneration.subscribe(listener),
     ...extra,
   }
   const disconnect = vi.fn()
@@ -75,11 +76,14 @@ describe('Wallet-mode session teardown in the shell', () => {
     dirty()
     expect(unload()).toBe(true)
     routes[source === 'profile' ? '/api/auth/sessions' : '/api/notifications/head'] = () => problem(401, 'session-expired')
+    const settled = vi.fn()
     await act(async () => {
-      await expect(source === 'profile' ? identity.auth.sessions()
-        : createWorkspaceApi(controller.credentials(), controller.handleFailure).notificationHead()).rejects.toMatchObject({ status: 401 })
+      void (source === 'profile' ? identity.auth.sessions()
+        : createWorkspaceApi(controller.credentials(), controller.handleFailure).notificationHead()).then(settled, settled)
+      await vi.waitFor(() => expect(navigate).toHaveBeenCalledOnce())
     })
-    expect(navigate).toHaveBeenCalledOnce()
+    // The call that ended the session belongs to the teardown: its caller never reports a failure.
+    expect(settled).not.toHaveBeenCalled()
     expect(unload()).toBe(false)
     expect(sessionStorage.getItem(noticeKey)).toBe(notices.ended)
     expect(screen.queryByRole('complementary', { name: 'Main navigation' })).toBeNull()
@@ -165,7 +169,8 @@ describe('account menu', () => {
     expect(screen.queryByRole('heading', { name: 'Private session' })).not.toBeInTheDocument()
     const wallets = await screen.findByRole('region', { name: /Sign-in wallets/ })
     expect(await within(wallets).findByText('This session')).toBeVisible()
-    expect(within(wallets).getAllByRole('button', { name: /Remove/ })).toHaveLength(2)
+    // Only the wallet that did not sign this session offers Remove.
+    expect(within(wallets).getAllByRole('button', { name: /Remove/ })).toHaveLength(1)
     const sessions = screen.getByRole('region', { name: 'Sessions' })
     expect(within(sessions).getByText('This browser')).toBeVisible()
     expect(within(sessions).getByRole('button', { name: 'Sign out Safari on iOS session' })).toBeVisible()
@@ -185,8 +190,7 @@ describe('account menu', () => {
     await user.click(screen.getByRole('button', { name: /^Sam Rivera, account menu/ }))
     await user.click(await screen.findByRole('menuitem', { name: 'Profile & sign-in' }))
     const wallets = await screen.findByRole('region', { name: /Sign-in wallets/ })
-    const removes = await within(wallets).findAllByRole('button', { name: /Remove/ })
-    await user.click(removes[1]!)
+    await user.click(await within(wallets).findByRole('button', { name: /Remove/ }))
     await user.click(await screen.findByRole('button', { name: 'Remove wallet' }))
     expect(await screen.findByRole('dialog', { name: 'Confirm with a linked wallet' })).toBeVisible()
     expect(navigate).not.toHaveBeenCalled()

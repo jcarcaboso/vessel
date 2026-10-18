@@ -1,9 +1,11 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Tooltip } from 'radix-ui'
 import { createPublicAuthApi, type SessionDto } from '@/api/auth'
 import { ApiError } from '@/api/errors'
-import { challengeFixture, sessionFixture, walletFixture } from '@/test/identity-fixture'
+import { NotificationProvider } from '@/components/notifications/NotificationProvider'
+import { challengeFixture, secondWalletFixture, sessionFixture, sessionRowsFixture, walletFixture } from '@/test/identity-fixture'
 import { channelBus } from '@/test/session-channel'
 import { systemFixture } from '@/test/system-fixture'
 import { lastWalletKey } from './wallets/discovery'
@@ -11,6 +13,7 @@ import type { WalletProvider } from './wallets/provider'
 import { landingKey, noticeKey, notices, workspaceNotices } from './session'
 import { SignInGate } from './SignInGate'
 import { SignInScreen } from './SignInScreen'
+import { ProfileSettings } from './ProfileSettings'
 
 const address = walletFixture.address
 const other = '0x19B4c7aE02F3d81e6C5a9b0D2E7f4A3c8D1e0a53'
@@ -24,14 +27,14 @@ let calls: Array<{ path: string; init: RequestInit }>
 let wallet: WalletProvider & { emit: (event: string, value?: unknown) => void; requests: Array<{ method: string; params?: unknown[] }> }
 let announcer: () => void
 
-function walletProvider(sign: () => Promise<unknown> = async () => signature) {
+function walletProvider(sign: () => Promise<unknown> = async () => signature, account = address) {
   const listeners = new Map<string, Set<(...args: unknown[]) => void>>()
   const requests: Array<{ method: string; params?: unknown[] }> = []
   return {
     requests,
     request: vi.fn(async (args: { method: string; params?: unknown[] }) => {
       requests.push(args)
-      if (args.method === 'eth_requestAccounts') return [address]
+      if (args.method === 'eth_requestAccounts') return [account]
       if (args.method === 'personal_sign') return sign()
       throw Object.assign(new Error('unexpected'), { code: 4200 })
     }),
@@ -241,6 +244,34 @@ describe('wallet sign-in', () => {
     expect(localStorage.getItem(lastWalletKey)).toBe('io.rabby')
   })
 
+  it('shows the checksum address a wallet shared in lower case, and signs with the address as shared', async () => {
+    const checksummed = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed' // An EIP-55 test vector.
+    wallet = walletProvider(undefined, checksummed.toLowerCase())
+    const { user } = mount()
+    await user.click(await screen.findByRole('button', { name: /Rabby Wallet/ }))
+    await screen.findByRole('timer')
+    expect(screen.getByText('0x5aAe…eAed')).toHaveAttribute('title', checksummed)
+    await user.click(screen.getByRole('button', { name: 'Sign with Rabby Wallet' }))
+    await screen.findByText(/^Shell for Sam Rivera/)
+    expect((wallet.requests[1]!.params as [string, string])[1]).toBe(checksummed.toLowerCase())
+  })
+
+  it('truncates a long announced wallet name without widening the card, keeping the full name accessible', async () => {
+    const long = 'A'.repeat(40)
+    window.removeEventListener('eip6963:requestProvider', announcer)
+    announcer = () => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', {
+      detail: { info: { uuid: 'long-uuid', name: long, icon: null, rdns: 'test.long' }, provider: wallet },
+    }))
+    window.addEventListener('eip6963:requestProvider', announcer)
+    const { user } = mount()
+    await user.click(await screen.findByRole('button', { name: new RegExp(long) }))
+    await screen.findByRole('timer')
+    const sign = screen.getByRole('button', { name: `Sign with ${long}` })
+    expect(sign).toHaveClass('sign-in-primary')
+    expect(sign.querySelector('.identity-truncate')).toHaveTextContent(`Sign with ${long}`)
+    expect(screen.getByTitle(long).tagName).toBe('STRONG')
+  })
+
   it('creates a journal for a new wallet, asking for an invitation when the server requires one', async () => {
     routes['/api/auth/verify'] = () => json({ status: 'registration-required', registration: 'pending-registration-token', requiresInvitation: true, expiresAt: challengeFixture().expiresAt })
     routes['/api/auth/register'] = () => json({ session: sessionFixture }, 201)
@@ -382,12 +413,104 @@ describe('wallet sign-in', () => {
     const { user } = mount()
     await user.click(await screen.findByRole('button', { name: /Rabby Wallet/ }))
     expect(await screen.findByRole('heading', { name: 'Too many attempts' })).toBeVisible()
-    expect(screen.getByRole('button', { name: /Try again in 1:(29|30)/ })).toBeDisabled()
+    const wait = screen.getByRole('button', { name: /Try again in 1:(29|30)/ })
+    expect(wait).toBeDisabled()
+    // Waiting reads as muted text in an outline, not a faded primary fill.
+    expect(wait).toHaveClass('identity-waiting')
+    expect(wait).not.toHaveClass('bg-primary')
+  })
+
+  it('holds Create journal until a registration rate limit passes, keeping what was typed', async () => {
+    routes['/api/auth/verify'] = () => json({ status: 'registration-required', registration: 'pending', requiresInvitation: true, expiresAt: challengeFixture().expiresAt })
+    routes['/api/auth/register'] = () => new Response(JSON.stringify({ code: 'rate-limited' }), { status: 429, headers: { 'Retry-After': '90' } })
+    const { user } = mount()
+    await user.click(await screen.findByRole('button', { name: /Rabby Wallet/ }))
+    await user.click(await screen.findByRole('button', { name: 'Sign with Rabby Wallet' }))
+    await user.type(await screen.findByLabelText('Display name'), 'Sam')
+    await user.type(screen.getByLabelText(/Invitation code/), 'VSL-CODE')
+    await user.click(screen.getByRole('button', { name: 'Create journal' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Wait (89|90) seconds before trying again\./)
+    const create = screen.getByRole('button', { name: /^Create journal in 1:(29|30)$/ })
+    expect(create).toBeDisabled()
+    expect(create).toHaveClass('identity-waiting')
+    expect(screen.getByLabelText('Display name')).toHaveValue('Sam')
+    expect(screen.getByLabelText(/Invitation code/)).toHaveValue('VSL-CODE')
+    expect(sent('/api/auth/register')).toHaveLength(1)
   })
 
   it('says when no browser wallet is found', async () => {
     window.removeEventListener('eip6963:requestProvider', announcer)
     mount()
     expect(await screen.findByRole('heading', { name: 'No browser wallet found' }, { timeout: 2_000 })).toBeVisible()
+  })
+})
+
+describe('same-user session adoption', () => {
+  // Tab A signed in with the hot wallet; another tab of the same user then signed in with the Ledger (session B).
+  const sessionB: SessionDto = { ...sessionFixture, wallet: { ...secondWalletFixture, current: true },
+    session: { ...sessionFixture.session, id: '11111111-2222-4333-8444-555555555555' } }
+  let server: SessionDto | null
+  beforeEach(() => {
+    server = sessionFixture
+    routes['/api/auth/session'] = () => server ? json(server) : problem(401, 'session-revoked')
+    routes['/api/auth/wallets'] = () => json([walletFixture, secondWalletFixture].map(row => ({ ...row, current: row.id === server?.wallet.id })))
+    routes['/api/auth/sessions'] = () => json(sessionRowsFixture)
+  })
+
+  function mountProfile() {
+    const bus = channelBus(), navigate = vi.fn()
+    const view = render(<Tooltip.Provider><NotificationProvider><SignInGate registration="invitation" originAccepted channels={bus.factory} navigate={navigate}>
+      {(_system, _disconnect, _api, identity) => <><p>Signed in with {identity.session.wallet.label} via {identity.walletName ?? 'unknown'}</p>
+        <ProfileSettings identity={identity} onSignOut={vi.fn()} /></>}
+    </SignInGate></NotificationProvider></Tooltip.Provider>)
+    const adopt = () => act(async () => { server = sessionB; bus.send({ type: 'signed-in', userId: sessionB.user.id, sessionId: sessionB.session.id }) })
+    return { ...view, navigate, adopt, user: userEvent.setup() }
+  }
+  const rowOf = (label: string) => screen.getByText(label, { selector: 'strong *, strong' }).closest('li')!
+
+  it('refreshes the sign-in wallet and the lists, and removing the old wallet keeps the tab', async () => {
+    const { navigate, adopt, user, unmount } = mountProfile()
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(1))
+    expect(screen.getByText('Signed in with Hot wallet via unknown')).toBeVisible()
+    await adopt()
+    expect(await screen.findByText('Signed in with Ledger via unknown')).toBeVisible()
+    await waitFor(() => expect(within(rowOf('Ledger')).getByText('This session')).toBeVisible())
+    routes[`/api/auth/wallets/${walletFixture.id}`] = () => new Response(null, { status: 204 })
+    await user.click(within(rowOf('Hot wallet')).getByRole('button', { name: 'Remove' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/will no longer sign in to this journal/)).toBeVisible()
+    await user.click(within(dialog).getByRole('button', { name: 'Remove wallet' }))
+    expect(await screen.findByText('Sign-in wallet removed.')).toBeVisible()
+    expect(navigate).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem(noticeKey)).toBeNull()
+    unmount()
+  })
+
+  it('closes a removal dialog prepared under the old session', async () => {
+    const { adopt, user, unmount } = mountProfile()
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(1))
+    await user.click(within(rowOf('Ledger')).getByRole('button', { name: 'Remove' }))
+    expect(await screen.findByRole('dialog', { name: 'Remove sign-in wallet?' })).toBeVisible()
+    await adopt()
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(sent(`/api/auth/wallets/${secondWalletFixture.id}`)).toHaveLength(0)
+    // The Ledger now signs this tab, so it is no longer offered for removal here.
+    await waitFor(() => expect(within(rowOf('Ledger')).getByText('This session')).toBeVisible())
+    expect(within(rowOf('Ledger')).queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
+    unmount()
+  })
+
+  it('leaves when the server says a removal ended this tab, though the row said otherwise', async () => {
+    const { navigate, user, unmount } = mountProfile()
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(1))
+    // Another tab moved the shared cookie onto the Ledger's session before any message reached this tab.
+    server = sessionB
+    routes[`/api/auth/wallets/${secondWalletFixture.id}`] = () => { server = null; return new Response(null, { status: 204 }) }
+    await user.click(within(rowOf('Ledger')).getByRole('button', { name: 'Remove' }))
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove wallet' }))
+    await waitFor(() => expect(navigate).toHaveBeenCalledOnce())
+    expect(sessionStorage.getItem(noticeKey)).toBe(notices.ended)
+    expect(screen.queryByText('Sign-in wallet removed.')).not.toBeInTheDocument()
+    unmount()
   })
 })

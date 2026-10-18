@@ -39,9 +39,13 @@ describe('forced teardown', () => {
     const { controller, navigate } = live()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'session-revoked' }), { status: 401 })))
     const api = createWorkspaceApi(controller.credentials(), controller.handleFailure)
-    await expect(api.overview()).rejects.toMatchObject({ status: 401 })
-    expect(navigate).toHaveBeenCalledOnce()
+    const settled = vi.fn()
+    void api.overview().then(settled, settled)
+    await vi.waitFor(() => expect(navigate).toHaveBeenCalledOnce())
     expect(sessionStorage.getItem(noticeKey)).toBe(notices.ended)
+    // The request that ended the session is part of the teardown: its caller never shows a failure.
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(settled).not.toHaveBeenCalled()
   })
 
   it.each(['csrf-rejected', 'origin-rejected', 'operator-required', 'step-up-required', undefined])('never tears down for a 403 %s', code => {
@@ -178,6 +182,22 @@ describe('cross-tab messages', () => {
     expect(navigate).not.toHaveBeenCalled()
     controller.dispose()
     expect(bus.open()).toBe(0)
+  })
+})
+
+describe('session probes', () => {
+  it('reports this tab\'s session, a newer one it has not adopted, and reloads for another person', () => {
+    const { controller, navigate } = live()
+    expect(controller.observe(sessionFixture)).toBe('current')
+    expect(controller.observe({ ...sessionFixture, session: { ...sessionFixture.session, id: newSession } })).toBe('stale')
+    // A probe answer never adopts a session: only the other tab's message does.
+    expect(controller.sessionId).toBe(sessionFixture.session.id)
+    expect(controller.generation).toBe(0)
+    expect(navigate).not.toHaveBeenCalled()
+    expect(controller.observe({ ...sessionFixture, user: { ...sessionFixture.user, id: otherUser } })).toBe('ended')
+    expect(takeNotice()).toBe(notices.otherUser)
+    expect(navigate).toHaveBeenCalledOnce()
+    expect(controller.observe(sessionFixture)).toBe('ended')
   })
 })
 

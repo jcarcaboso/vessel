@@ -6,14 +6,20 @@
 .sign-in-head .sign-in-brand { margin-bottom: 0; }
 .sign-in-card h1 { margin-bottom: 0; font-size: var(--text-2xl); }
 .sign-in-lede { margin-top: 7px; color: var(--muted-foreground); font-size: var(--text-sm); }
-.sign-in-body { display: grid; gap: 14px; margin-top: 22px; }
+/*
+ * A wallet announces its own name (up to 40 characters, possibly one unbroken word): text breaks anywhere, names in
+ * rows and buttons truncate with the full name in the title or accessible name, and nothing widens the card.
+ */
+.sign-in-card, .identity-dialog { overflow-wrap: anywhere; }
+.identity-truncate { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sign-in-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 22px; }
 .sign-in-body + .sign-in-body { margin-top: 14px; }
 .sign-in-notice { padding: 9px 12px; border-radius: var(--radius-control); border: 1px solid var(--brand-line); background: var(--brand-wash); color: var(--foreground); font-size: var(--text-sm); }
 
 .sign-in-steps { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: var(--text-2xs); font-weight: 600; color: var(--muted-foreground); }
 .sign-in-steps li { display: inline-flex; align-items: center; gap: 5px; }
 .sign-in-steps li + li::before { content: ''; width: 12px; height: 1px; margin-right: 1px; background: var(--line); }
-.sign-in-steps i { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; font-style: normal; font-size: 10px; background: var(--muted); border: 1px solid var(--line); }
+.sign-in-steps i { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; font-style: normal; font-size: var(--text-2xs); background: var(--muted); border: 1px solid var(--line); }
 .sign-in-steps .is-done i { background: color-mix(in srgb, var(--ring) 22%, var(--muted)); color: var(--brand-ink); border-color: var(--brand-line); }
 .sign-in-steps .is-current { color: var(--foreground); }
 .sign-in-steps .is-current i { background: var(--ring); color: var(--primary-foreground); border-color: transparent; box-shadow: 0 0 0 3px var(--brand-wash); }
@@ -77,13 +83,13 @@
 
 .identity-row { display: flex; align-items: center; gap: 11px; padding: 10px 12px; border-radius: var(--radius-panel); background: var(--surface-sunken); border: 1px solid var(--line); }
 .identity-row-meta { flex: 1; min-width: 0; display: grid; gap: 4px; }
-.identity-row-meta strong { font-weight: 600; }
+.identity-row-meta strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .identity-row-meta > span { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
 .message-preview { margin: 0; border-radius: var(--radius-panel); border: 1px solid var(--line); background: var(--field); overflow: hidden; }
 .message-preview figcaption { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface-sunken); color: var(--muted-foreground); font-size: var(--text-xs); }
 .message-preview figcaption b { color: var(--foreground); font-weight: 600; }
-.message-timer { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.message-timer { display: inline-flex; flex: none; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .message-preview pre { max-height: 260px; margin: 0; padding: 11px 12px; overflow: auto; font: var(--text-2xs)/1.6 ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace; color: color-mix(in srgb, var(--foreground) 82%, var(--muted-foreground)); white-space: pre-wrap; overflow-wrap: anywhere; }
 .message-preview pre:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .message-domain { color: var(--brand-ink); }
@@ -95,7 +101,9 @@
 .sign-in-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .sign-in-actions.is-split { justify-content: space-between; margin-top: 20px; }
 .sign-in-actions.is-end { justify-content: flex-end; }
-.sign-in-actions .sign-in-primary { flex: 1; }
+.sign-in-actions .sign-in-primary { flex: 1; min-width: 0; }
+/* A countdown button: readable muted text instead of the faded disabled fill. */
+.identity-waiting:disabled { opacity: 1; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 
 .identity-field { display: grid; gap: 6px; }
 .identity-field label { display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); font-weight: 500; }
@@ -134,7 +142,7 @@
 .account-menu-head { display: flex; align-items: center; gap: 11px; padding: 10px 10px 12px; margin-bottom: 5px; border-bottom: 1px solid var(--line); }
 .account-menu-head > span { display: grid; gap: 4px; min-width: 0; }
 .account-menu-head strong { font-size: var(--text-md); font-weight: 620; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.account-menu-head small { display: flex; align-items: center; gap: 5px; color: var(--muted-foreground); font-size: var(--text-xs); }
+.account-menu-head small { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--muted-foreground); font-size: var(--text-xs); }
 .account-menu-item {
   display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: var(--radius-control); outline: none; cursor: pointer;
   font-size: var(--text-sm); color: color-mix(in srgb, var(--foreground) 90%, var(--muted-foreground));
@@ -171,7 +179,7 @@
 .profile-sign-out { display: flex; justify-content: flex-end; }
 
 .identity-dialog { max-width: 480px; }
-.sign-flow { display: grid; gap: 14px; }
+.sign-flow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 
 @media (max-width: 960px) { .profile-split { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 560px) {

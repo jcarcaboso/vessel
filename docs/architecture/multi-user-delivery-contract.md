@@ -798,3 +798,7 @@ Cross-model verification of the first lanes found gaps the contract left open. T
 | D1 review | Stale-generation responses, errors, stream readers and side effects are discarded, as §11 requires; generation-bound streams reopen under the current generation | §11 |
 | D1 review | The "Signed in as someone else in another tab" notice is shown after a successful reload too, and removed only once presented | §11 |
 | D1 review | The remember checkbox is locked from the moment signing starts | §11 |
+| D1 review | Adopting a same-user session from another tab re-probes `/api/auth/session` and refreshes the shell's session, wallet and profile lists without touching drafts; open removal dialogs and their step-ups are dropped. After a wallet removal the server's session probe, not the removed row, decides whether this tab ended | §11 |
+| D1 review | The session call whose own 401 ends the session never settles, like the calls pending at the teardown; 403s that end nothing still reject | §11 |
+| D1 review | Profile offers Remove only on wallets that did not sign this session (mockup screen 8); that wallet is removed from another session. A link suggests the new wallet's announced name as its label | §11 |
+| D1 review | A rate-limited registration keeps the form and holds Create journal until the `Retry-After` deadline, like the other sign-in waits. Sign-in screens show addresses in EIP-55 form; wallet calls keep the address as the wallet shared it | §11 |

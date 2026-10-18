@@ -4,6 +4,7 @@ import { challengeAddress, type Challenge } from '@/api/auth'
 import { ApiError } from '@/api/errors'
 import { SourceChip } from '@/components/accounts/AccountIdentity'
 import { Button } from '@/components/ui/button'
+import { checksumAddress } from '@/lib/eip55'
 import { challengeLifetime, useCountdown } from './countdown'
 import { MessagePreview, WalletButton, WalletMark } from './IdentityParts'
 import { flowErrorText, signInError, type SignInError } from './sign-in-machine'
@@ -19,7 +20,8 @@ type Flow =
   | { step: 'completing'; wallet: BrowserWallet; address: string }
   // Not watched: the person may switch the wallet to a linked account to confirm.
   | { step: 'stepping-up'; wallet: BrowserWallet; address: string }
-  | { step: 'failed'; wallet: BrowserWallet | null; address: string | null; message: string }
+  // `refused`: `accept` turned the address down, so only another wallet or account can continue.
+  | { step: 'failed'; wallet: BrowserWallet | null; address: string | null; message: string; refused?: boolean }
 
 export interface WalletSignFlowProps {
   /** The caption over the message, e.g. "Confirm" or "Link wallet". */
@@ -36,6 +38,8 @@ export interface WalletSignFlowProps {
   onStepUp?: () => Promise<boolean>
   onDone: () => void
   onCancel: () => void
+  /** Hears the browser wallet the person chose, e.g. to suggest its name as a label. */
+  onWallet?: (wallet: BrowserWallet) => void
   /** Extra fields shown with the message, such as a label. */
   children?: ReactNode
 }
@@ -44,7 +48,7 @@ export interface WalletSignFlowProps {
  * Choose a browser wallet, connect, show the server's message and sign it: the shared part of step-up and linking.
  * Only `eth_requestAccounts` and `personal_sign` are called; each run discards the answers of the run it replaced.
  */
-export function WalletSignFlow({ purpose, accept, requestChallenge, complete, onStepUp, onDone, onCancel, children }: WalletSignFlowProps) {
+export function WalletSignFlow({ purpose, accept, requestChallenge, complete, onStepUp, onDone, onCancel, onWallet, children }: WalletSignFlowProps) {
   const { wallets, settled } = useBrowserWallets()
   const [lastRdns] = useState(readLastWallet)
   const [flow, setFlowState] = useState<Flow>({ step: 'choose' })
@@ -78,7 +82,7 @@ export function WalletSignFlow({ purpose, accept, requestChallenge, complete, on
   const prepare = useCallback(async (current: typeof run.current, wallet: BrowserWallet, address: string) => {
     setFlow({ step: 'preparing', wallet, address })
     const refused = accept?.(address)
-    if (refused) { setFlow({ step: 'failed', wallet, address, message: refused }); return }
+    if (refused) { setFlow({ step: 'failed', wallet, address, message: refused, refused: true }); return }
     for (;;) {
       try {
         const challenge = await requestChallenge(address, current.controller.signal)
@@ -102,6 +106,7 @@ export function WalletSignFlow({ purpose, accept, requestChallenge, complete, on
   const connect = useCallback(async (wallet: BrowserWallet) => {
     const current = begin()
     steppedUp.current = false
+    onWallet?.(wallet)
     setFlow({ step: 'connecting', wallet })
     try {
       const address = await requestAccount(wallet.provider)
@@ -109,7 +114,7 @@ export function WalletSignFlow({ purpose, accept, requestChallenge, complete, on
     } catch (error) {
       if (run.current === current) fail(wallet, null, signInError(error, 'connect'))
     }
-  }, [begin, fail, prepare, setFlow])
+  }, [begin, fail, onWallet, prepare, setFlow])
 
   async function sign() {
     if (flow.step !== 'ready' || flow.waiting) return
@@ -164,7 +169,7 @@ export function WalletSignFlow({ purpose, accept, requestChallenge, complete, on
   </div>
   const identity = 'wallet' in flow && flow.wallet && <div className="identity-row">
     <WalletMark wallet={flow.wallet} />
-    <span className="identity-row-meta"><strong>{flow.wallet.name}</strong>{'address' in flow && flow.address && <span><SourceChip source={flow.address} /></span>}</span>
+    <span className="identity-row-meta"><strong title={flow.wallet.name}>{flow.wallet.name}</strong>{'address' in flow && flow.address && <span><SourceChip source={checksumAddress(flow.address)} /></span>}</span>
     <Button variant="ghost" size="sm" onClick={back}>Change</Button>
   </div>
   return <div className="sign-flow" aria-busy={flow.step === 'connecting' || flow.step === 'preparing' || flow.step === 'completing' || flow.step === 'stepping-up'}>
@@ -173,20 +178,23 @@ export function WalletSignFlow({ purpose, accept, requestChallenge, complete, on
     {flow.step === 'preparing' && <p className="muted" role="status">Preparing the message…</p>}
     {flow.step === 'ready' && <ReadyMessage key={flow.challenge.challengeId} challenge={flow.challenge} purpose={purpose} onExpired={expire} />}
     {/* Still editable after a refusal (a label the server refused), before Try again asks for a fresh message. */}
-    {(flow.step === 'ready' || flow.step === 'failed' && flow.address) && children}
+    {(flow.step === 'ready' || flow.step === 'failed' && flow.address && !flow.refused) && children}
     {flow.step === 'completing' && <p className="muted" role="status">Checking the signature…</p>}
     {flow.step === 'stepping-up' && <p className="muted" role="status">Confirm with a linked wallet to continue.</p>}
     {flow.step === 'failed' && <p className="error" role="alert">{flow.message}</p>}
     <div className="sign-in-actions">
       {flow.step === 'ready' && <Button className="sign-in-primary" onClick={() => { void sign() }} disabled={flow.waiting} aria-busy={flow.waiting}>
-        {flow.waiting ? <><span className="identity-spinner" aria-hidden="true" />Waiting for {flow.wallet.name}…</> : `Sign with ${flow.wallet.name}`}</Button>}
-      {flow.step === 'failed' && flow.wallet && <Button className="sign-in-primary" onClick={() => {
+        {flow.waiting ? <><span className="identity-spinner" aria-hidden="true" /><span className="identity-truncate">Waiting for {flow.wallet.name}…</span></>
+          : <span className="identity-truncate">Sign with {flow.wallet.name}</span>}</Button>}
+      {flow.step === 'failed' && flow.wallet && !flow.refused && <Button className="sign-in-primary" onClick={() => {
         const wallet = flow.wallet!
         steppedUp.current = false
         if (flow.address) void prepare(begin(), wallet, flow.address)
         else void connect(wallet)
       }}>Try again</Button>}
-      {flow.step === 'failed' && <Button variant="ghost" onClick={back}><ArrowLeft size={15} aria-hidden="true" />Other wallets</Button>}
+      {/* After a refused address, trying the same one again can only fail: another wallet is the way on. */}
+      {flow.step === 'failed' && <Button {...flow.refused ? { className: 'sign-in-primary' } : { variant: 'ghost' as const }} onClick={back}>
+        <ArrowLeft size={15} aria-hidden="true" />Other wallets</Button>}
       <Button variant="outline" onClick={() => { begin(); onCancel() }}>Cancel</Button>
     </div>
   </div>
