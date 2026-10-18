@@ -59,7 +59,7 @@ describe('a session that ends while a request is pending', () => {
     })
     vi.stubGlobal('fetch', fetch)
     const identity: ShellIdentity = { session: sessionFixture, walletName: null, auth: createSessionAuthApi(tab.controller.credentials(), tab.controller.handleFailure),
-      registerExitState: () => () => {}, onProfile: vi.fn(), checkSession: vi.fn(async () => 'current' as const),
+      registerExitState: () => () => {}, profileRead: () => ({ generation: 0, epoch: 0 }), onProfile: vi.fn(() => true), checkSession: vi.fn(async () => 'current' as const),
       onSessionChange: listener => tab.controller.sessionGeneration.subscribe(listener) }
     const view = render(<Tooltip.Provider><NotificationProvider><ProfileSettings identity={identity} onSignOut={vi.fn()} /></NotificationProvider></Tooltip.Provider>)
     try {

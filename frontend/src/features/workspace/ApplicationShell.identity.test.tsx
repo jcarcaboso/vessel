@@ -48,7 +48,7 @@ async function mount(role: 'member' | 'operator' = 'member', extra: Partial<Shel
     overview: vi.fn().mockResolvedValue(emptyOverview), ...options.api }
   const identity: ShellIdentity = {
     session, walletName: 'Rabby Wallet', auth: createSessionAuthApi(controller.credentials(), controller.handleFailure),
-    registerExitState: clear => controller.registerExitState(clear), onProfile: vi.fn(), checkSession: vi.fn(async () => 'current' as const),
+    registerExitState: clear => controller.registerExitState(clear), profileRead: () => ({ generation: 0, epoch: 0 }), onProfile: vi.fn(() => true), checkSession: vi.fn(async () => 'current' as const),
     onSessionChange: listener => controller.sessionGeneration.subscribe(listener),
     ...extra,
   }

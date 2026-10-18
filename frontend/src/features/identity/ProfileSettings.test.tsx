@@ -53,7 +53,7 @@ function mount(check: SessionCheck = 'current') {
   const changes = new Set<() => void>()
   const identity: ShellIdentity = {
     session: sessionFixture, walletName: 'Rabby Wallet', auth: createSessionAuthApi({ userId: sessionFixture.user.id, sessionId: sessionFixture.session.id }),
-    registerExitState: () => () => {}, onProfile: vi.fn(), checkSession: vi.fn(async () => check),
+    registerExitState: () => () => {}, profileRead: () => ({ generation: 0, epoch: 0 }), onProfile: vi.fn(() => true), checkSession: vi.fn(async () => check),
     onSessionChange: listener => { changes.add(listener); return () => { changes.delete(listener) } },
   }
   const change = () => act(() => { for (const listener of [...changes]) listener() })

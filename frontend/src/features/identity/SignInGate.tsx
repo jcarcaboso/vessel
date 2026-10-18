@@ -9,11 +9,11 @@ import { scopePreferences } from '@/lib/preference-scope'
 import { SignInBrand, StateCard } from './IdentityParts'
 import { SignInScreen } from './SignInScreen'
 import { clearNotice, readNotice, reloadToSignIn, SessionController, takeLanding, workspaceNotices, type Notice, type SessionChannelFactory, type SessionCheck } from './session'
-import type { ShellIdentity } from './types'
+import type { ProfileRead, ShellIdentity } from './types'
 import type { BrowserWallet } from './wallets/discovery'
 
-/** `userGeneration` is the controller generation the profile in `session.user` was learned under (see `checkSession`). */
-type Ready = { session: SessionDto; system: SystemInfo; api: WorkspaceApi; controller: SessionController; walletName: string | null; userGeneration: number }
+/** `session.user` mirrors the controller's profile record (see `profiles`). */
+type Ready = { session: SessionDto; system: SystemInfo; api: WorkspaceApi; controller: SessionController; walletName: string | null }
 type GateState =
   | { kind: 'probing' }
   | { kind: 'sign-in' }
@@ -72,15 +72,18 @@ export function SignInGate({ registration, originAccepted, children, channels, n
    *
    * Each probe belongs to the controller and session generation it started under. A newer probe, an adoption or a
    * teardown aborts it, and an answer that arrives after any of them is dropped, a 401 included: it may describe the
-   * session this tab has since left. Within one generation the profile only moves forward by `UserDto.revision`, so a
-   * probe answered before a save never restores the old name. A probe of a newer generation than the known profile
-   * replaces it at any revision: after a restore and the mandatory session reset the server's revision may be lower.
+   * session this tab has since left. The probe's profile applies only if no authoritative profile change (profile
+   * epoch) happened since it started; the session and wallet still follow it. Within one generation the profile only
+   * moves forward by `UserDto.revision`, so a probe answered before a save never restores the old name. A probe of a
+   * newer generation than the known profile replaces it at any revision: after a restore and the mandatory session
+   * reset the server's revision may be lower.
    */
   const checkSession = useCallback(async (current: SessionController): Promise<SessionCheck> => {
     probes.get(current)?.abort()
     const attempt = new AbortController()
     probes.set(current, attempt)
     const generation = current.generation
+    const read = profileRead(current)
     const superseded = () => attempt.signal.aborted || current.generation !== generation || current.sessionGeneration.ended.aborted
     const settled = () => current.sessionGeneration.ended.aborted ? 'ended' : 'unknown'
     let fresh: SessionDto
@@ -93,13 +96,18 @@ export function SignInGate({ registration, originAccepted, children, channels, n
     } finally { if (probes.get(current) === attempt) probes.delete(current) }
     if (superseded()) return settled()
     const check = current.observe(fresh)
-    // The updater, not a ref, checks that this controller still owns the gate; after unmount it does nothing.
     if (check === 'current') {
+      const known = profiles.get(current)
+      if (known && known.user.id === fresh.user.id && known.epoch === read.epoch &&
+          (generation > known.generation || fresh.user.revision > known.user.revision)) {
+        profiles.set(current, { user: fresh.user, generation, epoch: known.epoch + 1 })
+      }
+      // The updater, not a ref, checks that this controller still owns the gate; after unmount it does nothing.
       setState(state => {
         if (state.kind !== 'ready' || state.ready.controller !== current) return state
-        const user = generation > state.ready.userGeneration ? fresh.user : newerUser(state.ready.session.user, fresh.user)
+        const user = profiles.get(current)?.user ?? state.ready.session.user
         return { kind: 'ready', ready: {
-          ...state.ready, session: { ...fresh, user }, userGeneration: generation,
+          ...state.ready, session: { ...fresh, user },
           // The wallet's announced name belongs to the sign-in this tab made; another tab's wallet is unknown here.
           walletName: fresh.wallet.id === state.ready.session.wallet.id ? state.ready.walletName : null,
           system: { ...state.ready.system, owner: { ...state.ready.system.owner, displayName: user.displayName } } } }
@@ -118,6 +126,8 @@ export function SignInGate({ registration, originAccepted, children, channels, n
       onSuspended: () => { controller.dispose(); setState({ kind: 'suspended' }) },
     })
     controllerRef.current = controller
+    // The session was read before any adoption, so its profile belongs to generation 0.
+    profiles.set(controller, { user: session.user, generation: 0, epoch: 0 })
     // Adopting another tab's session of this user changes which wallet signed this tab in. The workspace shows the
     // session it started with (generation 0), so an adoption while it loads is followed once it is on screen.
     controller.sessionGeneration.subscribe(() => { void checkSession(controller) })
@@ -128,8 +138,9 @@ export function SignInGate({ registration, originAccepted, children, channels, n
       if (controllerRef.current !== controller) return
       const workspace = createWorkspaceApi(credentials, controller.handleFailure)
       controller.markLive()
-      // The session was read before any adoption, so its profile belongs to generation 0.
-      setState({ kind: 'ready', ready: { session, system, api: workspace, controller, walletName, userGeneration: 0 } })
+      // An adoption probe answered while the workspace loaded may already have moved the profile.
+      const user = profiles.get(controller)?.user ?? session.user
+      setState({ kind: 'ready', ready: { session: { ...session, user }, system, api: workspace, controller, walletName } })
       if (controller.generation !== 0) void checkSession(controller)
     } catch (cause) {
       // A 401 or suspension already moved the gate; anything else may be retried.
@@ -179,15 +190,22 @@ export function SignInGate({ registration, originAccepted, children, channels, n
       session: ready.session, walletName: ready.walletName, auth,
       notice: notice ? workspaceNotices[notice] : null, noticePresented,
       registerExitState: clear => controller.registerExitState(clear),
-      onProfile: (user: UserDto, recovery?: { conflictedRevision: number }) => setState(current => {
-        if (current.kind !== 'ready') return current
-        const known = current.ready.session.user
-        // A conflict's recovery read rebases a profile that is still the one the server refused, even to a lower revision.
-        const rebase = recovery !== undefined && known.revision === recovery.conflictedRevision
-        if (!rebase && newerUser(known, user) !== user) return current
-        return { kind: 'ready', ready: {
-          ...current.ready, session: { ...current.ready.session, user }, userGeneration: current.ready.controller.generation, system: { ...current.ready.system, owner: { ...current.ready.system.owner, displayName: user.displayName } } } }
-      }),
+      profileRead: () => profileRead(controller),
+      onProfile: (user: UserDto, recovery?: ProfileRead) => {
+        const known = profiles.get(controller)
+        if (!known || known.user.id !== user.id) return false
+        // A save's answer moves the profile forward. A conflict's recovery read rebases it, even to a lower revision,
+        // but only if it started in this generation and no other authoritative change happened while it ran.
+        if (recovery ? recovery.generation !== controller.generation || recovery.epoch !== known.epoch : user.revision < known.user.revision) return false
+        profiles.set(controller, { user, generation: controller.generation, epoch: known.epoch + 1 })
+        setState(current => {
+          if (current.kind !== 'ready' || current.ready.controller !== controller) return current
+          const latest = profiles.get(controller)?.user ?? user
+          return { kind: 'ready', ready: {
+            ...current.ready, session: { ...current.ready.session, user: latest }, system: { ...current.ready.system, owner: { ...current.ready.system.owner, displayName: latest.displayName } } } }
+        })
+        return true
+      },
       checkSession: () => checkSession(controller),
       onSessionChange: listener => controller.sessionGeneration.subscribe(listener),
     }
@@ -222,7 +240,14 @@ export function SignInGate({ registration, originAccepted, children, channels, n
 /** The probe in flight for each controller: a newer one aborts it, and the controller's teardown ends it. */
 const probes = new WeakMap<SessionController, AbortController>()
 
-/** The later of two snapshots of the same person in one generation: an older revision never replaces a newer one. */
-function newerUser(known: UserDto, next: UserDto) {
-  return next.revision < known.revision ? known : next
+/**
+ * Each controller's authoritative profile: the user, the session generation it was learned under and its profile
+ * epoch. The epoch increases on every authoritative change (a newer generation's profile, a newer revision, a save, a
+ * conflict rebase), so an asynchronous profile read applies its snapshot only if the generation and epoch it started
+ * under are still current. Kept beside the controller, not in React state, so each decision sees the latest change.
+ */
+const profiles = new WeakMap<SessionController, { user: UserDto; generation: number; epoch: number }>()
+
+function profileRead(controller: SessionController): ProfileRead {
+  return { generation: controller.generation, epoch: profiles.get(controller)?.epoch ?? -1 }
 }

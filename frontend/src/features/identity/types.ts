@@ -1,6 +1,9 @@
 import type { SessionAuthApi, SessionDto, UserDto } from '@/api/auth'
 import type { SessionCheck } from './session'
 
+/** The session generation and profile epoch an asynchronous profile read started under. */
+export interface ProfileRead { generation: number; epoch: number }
+
 /** What the workspace shell gets in Wallet mode. Token mode passes nothing, and the shell behaves as before. */
 export interface ShellIdentity {
   session: SessionDto
@@ -13,11 +16,14 @@ export interface ShellIdentity {
   noticePresented?(): void
   /** The shell registers how to drop its unsaved-work exit state, so a forced teardown never prompts. */
   registerExitState(clear: () => void): () => void
+  /** Captured when an asynchronous profile read starts (see `onProfile`). */
+  profileRead(): ProfileRead
   /**
-   * The profile changed: the shell's greeting and owner card follow it. A lower revision is ignored, except as the
-   * `recovery` read after the server refused `conflictedRevision` (e.g. after a restore): it then rebases the profile.
+   * The profile changed: the shell's greeting and owner card follow it, and true is returned. A save's answer at a
+   * lower revision is ignored. A `recovery` read after a revision conflict (e.g. after a restore) rebases the profile
+   * even to a lower revision, but only if the generation and profile epoch it captured when it started are current.
    */
-  onProfile(user: UserDto, recovery?: { conflictedRevision: number }): void
+  onProfile(user: UserDto, recovery?: ProfileRead): boolean
   /**
    * Asks the server which session this tab's cookie holds and follows the answer: a 401 tears down like any other,
    * and this tab's session refreshes `session`. Whether a removed wallet ended this tab is the server's to say.
