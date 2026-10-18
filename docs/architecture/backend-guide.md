@@ -332,7 +332,9 @@ Journal-owned entities carry `OwnerId` and use owner-scoped relationships. The s
 | `play_evidence` | `PlayEvidence` | Metadata; bytes live in the evidence object store. |
 | `sizing_settings` | `SizingSettings` | Risk per trade. |
 | `funding_payments`, `account_funding_states` | `FundingPayment`, … | Signed funding settlements with native identities, and the covered window per account. |
-| `monitor_accounts`, `monitor_heartbeats`, `monitor_venue_budgets`, `monitor_exit_watches` | | Monitor state, lease and schedule per account; worker heartbeat; venue `Retry-After`; watched exits. |
+| `monitor_accounts`, `monitor_exit_watches` | | Owner-scoped monitor state, lease/schedule per account and watched exits. |
+| `server_monitor_heartbeats`, `server_venue_deadlines`, `server_notification_heartbeats` | (system SQL stores) | Monitor/notification health per deployment, venue `Retry-After` across owners. No journal context. |
+| `notifications`, `notification_sources`, `notification_deliveries`, `notification_cursors`, `notification_preferences` | (SQL, `Persistence/Notifications`) | Owner-scoped Hub output, handled sources, delivery/claim state, feed/unread cursor and preferences. |
 | `play_discrepancies` | | Venue-versus-Play discrepancies and their lifecycle. |
 | `events`, `event_cursors`, `event_dedup`, `event_fills`, `event_baselines` | (SQL, `Persistence/Events`) | The event log, per-owner sequence and epoch, de-duplication and captured fill baselines. |
 | `event_subscriptions`, `event_receipts`, `messaging_deployments` | (SQL) | Subscription registrations, low-water marks and per-event receipts; provisioned deployments. |
