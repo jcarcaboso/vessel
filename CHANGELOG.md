@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+## 0.3.0 - October 18, 2026
+
+Release notes: [docs/releases/v0.3.0.md](docs/releases/v0.3.0.md).
+
+### Added
+
+- Opt-in Wallet sign-in for Ethereum externally owned accounts, with separate
+  owner-scoped journals, invitations and revocable server sessions. Token mode
+  remains the default. Wallet signatures are sign-in proofs, never transactions
+  or venue permissions.
+- Profile, linked-wallet and session management, action-bound wallet step-up,
+  and offline operator commands for invitations, access and restore recovery.
+- Multi-owner background monitoring and event subscriptions, database-wide
+  venue read admission and per-user API limits. Suspended users cannot start
+  new monitor or notification work.
+- In-app Notification Hub: a Notifications page, unread badge, preferences,
+  test notifications and timed popups claimed once across tabs. A separate
+  `worker-notifications` service delivers notifications and catches up from
+  retained events.
+- Bounded 30-day settled funding imports for Hyperliquid, RISEx, Lighter and
+  Lighter on Robinhood Chain, with exact signed payments, attribution coverage
+  and attributable/unassigned Activity views.
+
+### Changed
+
+- Account pickers and allocation legends show account identity. Lighter import
+  diagnostics distinguish excluded history from valid reported executions.
+- The workspace loads after the connection screen; React has a separate vendor
+  chunk. Backend reads, event capture and JSON parsing are bounded more tightly.
+- Health reports monitor and notification deployments separately. Offline
+  monitor checks are refused explicitly; expired unclaimed work is completed
+  rather than left pending.
+- Migration runs validate configuration before opening a database or applying
+  either EF bundle. Wallet session streams close if identity revalidation
+  stalls; frontend identity updates reject stale cross-tab responses.
+
 ### Changed (breaking)
 
 - Order identity: Play order links now reference Vessel's internal order ID,
@@ -16,6 +52,42 @@
 - **Database:** the `OrderIdentity` migration has no backfill and refuses to
   run when imported orders, fills or Play order links exist. Recreate the
   database before applying it.
+
+### Upgrade
+
+- Stop all API, web and worker instances on every host, including the new
+  `worker-notifications`, and back up both database schemas, evidence and
+  credential keys. This is not a rolling upgrade. Do not bypass the order
+  migration guard or delete individual tables to force an upgrade.
+- The identity bundle adds `20261017155708_InitialIdentity`. Journal migrations
+  since v0.2.0 are `20261016174509_FundingPayments`,
+  `20261017091636_OrderIdentity`, `20261017180000_NotificationHub`,
+  `20261018100000_ServerEventSubscriptions`,
+  `20261018110000_ServerMonitorState` and
+  `20261018120000_ServerNotificationState`. Server heartbeat migrations replace
+  owner heartbeat tables; old and new hosts must not run together.
+- Use the explicit `migrate` service: configuration validation, identity bundle,
+  journal bundle, owner bootstrap and messaging provisioning, in that order.
+  Nothing migrates at application startup. Rollback requires the pre-upgrade
+  backup and matching old images, not down migrations.
+- Wallet mode needs an allowed HTTPS origin, an empty bearer token and explicit
+  binding of the operator's public wallet address. Keep registration `Closed`
+  until real-wallet acceptance is complete. After restore, reconcile identity
+  records and run `identity reset-after-restore` as well as event-epoch rotation
+  before starting hosts. See [the deployment guide](deploy/README.md).
+
+### Known limits
+
+- Real-wallet compatibility, including a non-mainnet-connected EOA, still awaits
+  owner acceptance. Automated Chromium/Firefox checks use synthetic signatures.
+  WalletConnect, smart-contract wallets, user deletion and public `Open` or
+  `AllowList` registration are not supported.
+- Funding remains separate from execution net while the execution-PnL funding
+  basis is unknown. It does not change Review, sizing or Play attribution.
+- Notifications are in-app only. External channels, browser system
+  notifications and drawing/price alerts remain out of scope.
+- Venue checks remain periodic and read-only. Per-user API rate limits are
+  per process; they are not a global cap on every venue HTTP call.
 
 ## 0.2.0 - October 16, 2026
 
