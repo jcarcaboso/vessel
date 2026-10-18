@@ -93,6 +93,9 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
     private readonly List<Task> running = [];
     // One scan cycle walks the work due by its start in key order, across ticks. Skipped accounts (locked, capped,
     // failed) are revisited by the next cycle; work rescheduled during a cycle lands after its bound and waits too.
+    // Candidate pages hide no row, so a tick may stop after a bounded number of pages and continue next tick.
+    private const int CandidatePageSize = 100;
+    internal const int CandidatePagesPerTick = 10;
     private DueMonitorKey? continuation;
     private DateTimeOffset? cycleBound;
 
@@ -143,10 +146,10 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
         var capped = new HashSet<Guid>();
         var cappedVenues = new HashSet<string>(StringComparer.Ordinal);
         var wrapped = false;
-        while (running.Count < options.WorkerConcurrency)
+        for (var pages = 0; running.Count < options.WorkerConcurrency && pages < CandidatePagesPerTick; pages++)
         {
             cycleBound ??= time.GetUtcNow();
-            var page = await candidates.DueCandidatesAsync(continuation, cycleBound.Value, 100, ct);
+            var page = await candidates.DueCandidatesAsync(continuation, cycleBound.Value, CandidatePageSize, ct);
             if (page.Count == 0)
             {
                 // The cycle is exhausted. Start a fresh one at once (at most once per tick) unless it had just begun.
