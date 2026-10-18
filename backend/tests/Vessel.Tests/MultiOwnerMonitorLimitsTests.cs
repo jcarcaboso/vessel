@@ -45,35 +45,36 @@ public sealed class MultiOwnerMonitorLimitsTests
     }
 
     [PostgresFact]
-    public async Task Candidate_keysets_are_lock_free_bounded_and_fair_per_owner_per_page()
+    public async Task Candidate_keysets_are_lock_free_bounded_and_hide_no_due_row()
     {
         await using var database = await CoreDatabase.CreateAsync();
         var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         var first = Guid.Parse("11111111-0000-0000-0000-000000000001");
         var second = Guid.Parse("22222222-0000-0000-0000-000000000002");
-        await SeedAsync(database, first, "hyperliquid", now, 8);
-        await SeedAsync(database, second, "risex", now, 3);
+        var seeded = (await SeedAsync(database, first, "hyperliquid", now, 8)).Concat(await SeedAsync(database, second, "risex", now, 3)).ToArray();
         await using var data = NpgsqlDataSource.Create(database.ConnectionString);
         var system = new SystemMonitorStore(data, new ManualTime(now));
-        var page = await system.DueCandidatesAsync(null, now, 100, default);
+        var page = await system.DueCandidatesAsync(null, now, 4, default);
+        // Pages follow (due, owner, account) order with no per-owner cut, so a continuation never passes a hidden row.
         Assert.Equal(4, page.Count);
-        Assert.All(page.GroupBy(c => c.OwnerId), group => Assert.Equal(2, group.Count()));
+        Assert.All(page, candidate => Assert.Equal(first, candidate.OwnerId));
         Assert.All(page, candidate => Assert.Equal(now, candidate.DueAt));
         // A row lock does not block the system discovery query.
         await using var locked = database.Context(first);
         await using var transaction = await locked.Database.BeginTransactionAsync();
         await locked.Database.ExecuteSqlRawAsync("SELECT 1 FROM monitor_accounts FOR UPDATE");
-        Assert.Equal(page, await system.DueCandidatesAsync(null, now, 100, default).WaitAsync(TimeSpan.FromSeconds(5)));
-        var next = await system.DueCandidatesAsync(page[^1].Key, now, 100, default);
-        Assert.Single(next);
-        Assert.Equal(second, next[0].OwnerId);
-        Assert.Empty(await system.DueCandidatesAsync(next[0].Key, now, 100, default));
+        Assert.Equal(page, await system.DueCandidatesAsync(null, now, 4, default).WaitAsync(TimeSpan.FromSeconds(5)));
+        var walked = page.ToList();
+        for (var next = page; next.Count > 0; walked.AddRange(next))
+            next = await system.DueCandidatesAsync(walked[^1].Key, now, 4, default);
+        Assert.Equal(seeded.Order(), walked.Select(c => c.AccountId).Order());
+        Assert.Equal(walked.OrderBy(c => c.OwnerId).ThenBy(c => c.AccountId).Select(c => c.AccountId), walked.Select(c => c.AccountId));
         // A scan cycle's bound excludes work that became due after the cycle started.
         Assert.Empty(await system.DueCandidatesAsync(null, now.AddSeconds(-1), 100, default));
     }
 
     [PostgresFact]
-    public async Task Throttled_venue_cannot_take_an_owners_two_candidate_slots_from_another_venue()
+    public async Task Throttled_venue_rows_are_filtered_before_paging_so_another_venue_stays_visible()
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
@@ -92,7 +93,10 @@ public sealed class MultiOwnerMonitorLimitsTests
             Assert.Equal("risex", candidate.VenueId);
         }
         clock.Advance(TimeSpan.FromHours(1));
-        Assert.Equal(throttled.Order(), (await system.DueCandidatesAsync(null, clock.GetUtcNow(), 100, default)).Select(c => c.AccountId).Order());
+        // Once the deadline passes, the earlier-due throttled rows come first and the other venue's row stays visible.
+        var resumed = (await system.DueCandidatesAsync(null, clock.GetUtcNow(), 100, default)).Select(c => c.AccountId).ToArray();
+        Assert.Equal(throttled.Order(), resumed[..2].Order());
+        Assert.Equal(available, resumed[2]);
     }
 
     [PostgresFact]
