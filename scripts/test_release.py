@@ -1,10 +1,16 @@
 import json
+import importlib.util
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import release
+
+spec = importlib.util.spec_from_file_location('verify_release', Path(__file__).with_name('verify-release.py'))
+verify_release = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(verify_release)
 
 REVISION = 'a' * 40
 
@@ -122,6 +128,63 @@ class ReleasePublishTests(unittest.TestCase):
             release.expect_metadata('ref', image(platform=('linux', 'arm64')), '1.2.3')
         with self.assertRaisesRegex(release.ReleaseError, "labelled version '1.2.2'"):
             release.expect_metadata('ref', image(version='1.2.2'), '1.2.3')
+
+
+class WalletReleaseTests(unittest.TestCase):
+    def check(self, *args):
+        check = verify_release.Check(verify_release.parse_args(list(args)))
+        self.addCleanup(shutil.rmtree, check.temp)
+        return check
+
+    def test_token_remains_the_default_and_uses_only_a_bearer(self):
+        check = self.check()
+        self.assertFalse(check.wallet)
+        self.assertEqual({'Authorization': 'Bearer ' + check.token}, check.auth_headers())
+        self.assertEqual({}, check.auth_headers(False))
+
+    def test_wallet_headers_never_send_the_token_and_bind_the_owner(self):
+        check = self.check('--auth', 'wallet')
+        check.tls = True
+        check.session_cookie = '__Host-vessel-session=synthetic'
+        headers = check.auth_headers()
+        self.assertNotIn('Authorization', headers)
+        self.assertEqual(check.owner, headers['X-Vessel-User'])
+        self.assertEqual(check.session_cookie, headers['Cookie'])
+        self.assertEqual(check.url, headers['Origin'])
+        self.assertEqual('1', headers['X-Vessel-Request'])
+        self.assertNotIn('Cookie', check.auth_headers(False))
+
+    def test_wallet_compose_applies_overlay_to_every_command_and_ignores_caller_secrets(self):
+        check = self.check('--auth', 'wallet')
+        check.tls = True
+        with patch.object(verify_release, 'run') as run, patch.dict('os.environ', {'Vessel__Auth__Token': 'caller-secret'}):
+            check.compose('config')
+        args = run.call_args.args
+        self.assertIn(str(check.temp / 'compose.wallet.yaml'), args)
+        self.assertIn(str(check.temp / 'compose.tls.yaml'), args)
+        self.assertNotIn('Vessel__Auth__Token', run.call_args.kwargs['env'])
+
+    def test_cookie_assertions_require_every_host_cookie_attribute(self):
+        check = self.check('--auth', 'wallet')
+        name = '__Host-vessel-session'
+        value = name + '=synthetic; Path=/; Secure; HttpOnly; SameSite=Strict'
+        with patch('builtins.print'):
+            self.assertEqual(name + '=synthetic', check.cookie([('Set-Cookie', value)], name))
+            for missing in ('; Path=/', '; Secure', '; HttpOnly', '; SameSite=Strict'):
+                with self.assertRaises(AssertionError, msg=missing):
+                    check.cookie([('Set-Cookie', value.replace(missing, ''))], name)
+            with self.assertRaises(AssertionError):
+                check.cookie([('Set-Cookie', value + '; Domain=localhost')], name)
+
+    def test_bootstrap_requires_no_wallet_readiness_before_binding_synthetic_operator(self):
+        check = self.check('--auth', 'wallet')
+        check.compose = Mock(return_value=Mock(stdout='{"reason":"no-operator-wallet"}'))
+        check.identity = Mock()
+        check.wallet_signature = Mock(return_value={'address': '0x' + '1' * 40})
+        with patch('builtins.print'):
+            check.wallet_bootstrap()
+        self.assertIn(('run', '--rm', 'migrate'), [call.args for call in check.compose.call_args_list])
+        check.identity.assert_called_once_with('bind-wallet', '--user', check.owner, '--address', '0x' + '1' * 40)
 
 
 if __name__ == '__main__':

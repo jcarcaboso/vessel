@@ -4,6 +4,7 @@ import argparse
 import base64
 import gzip
 import http.client
+from http.cookies import SimpleCookie
 import json
 import os
 from pathlib import Path
@@ -68,9 +69,12 @@ class Check:
         self.counts = {}
         self.tls = False
         self.fixture = False
+        self.wallet = args.auth == 'wallet'
+        self.session_cookie = None
+        self.session = None
 
     def prepare(self):
-        for file in ('compose.yaml', 'compose.tls.yaml', 'compose.credentials.yaml', 'compose.storage-local.yaml', 'Caddyfile'):
+        for file in ('compose.yaml', 'compose.tls.yaml', 'compose.wallet.yaml', 'compose.credentials.yaml', 'compose.storage-local.yaml', 'Caddyfile'):
             shutil.copyfile(ROOT / 'deploy' / file, self.temp / file)
         # Pick an unused subnet, not the development or deployment defaults.
         networks = [json.loads(line) for line in run('docker', 'network', 'ls', '--format', 'json', capture_output=True, text=True).stdout.splitlines()]
@@ -85,6 +89,10 @@ class Check:
             raise RuntimeError('No free verification subnet.')
         self.network = f'172.29.{octet}'
         self.write_env(self.network)
+        wallet_verifier = (f'''      Vessel__Auth__Mode: Wallet
+      Vessel__Auth__Token: ""
+      Vessel__Identity__Origins__0: https://localhost:{self.https_port}
+''' if self.wallet else '')
         (self.temp / 'local.yaml').write_text(f'''services:
   api:
     image: {self.images['api']}
@@ -107,7 +115,7 @@ class Check:
     pull_policy: never
     entrypoint: ["/app/worker"]
     environment:
-      DOTNET_ENVIRONMENT: Production
+{wallet_verifier}      DOTNET_ENVIRONMENT: Production
       Vessel__Worker__Modules__0: verification
       Vessel__Worker__Deployment: verification
       Vessel__Messaging__Verification: "true"
@@ -165,6 +173,7 @@ VESSEL_TLS_HOST=localhost
 VESSEL_TLS_HTTP_BIND=127.0.0.1:{self.redirect_port}
 VESSEL_TLS_HTTPS_BIND=127.0.0.1:{self.https_port}
 VESSEL_TLS_DIRECTIVE=tls internal
+VESSEL_IDENTITY_ORIGIN=https://localhost:{self.https_port}
 VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
 ''')
         (self.temp / '.env').chmod(0o600)
@@ -175,6 +184,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             files.append('compose.storage-local.yaml')
         if self.tls:
             files.append('compose.tls.yaml')
+        if self.wallet:
+            files.append('compose.wallet.yaml')
         if self.fixture:
             files.append('fixture.yaml')
         cmd = ['docker', 'compose', '--project-directory', str(self.temp), '-p', project or self.name]
@@ -200,9 +211,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         return http.client.HTTPConnection('127.0.0.1', self.http_port, timeout=15)
 
     def request(self, path, method='GET', body=None, headers=None, auth=True):
-        headers = {'Host': f'localhost:{self.https_port if self.tls else self.http_port}', **(headers or {})}
-        if auth:
-            headers.setdefault('Authorization', f'Bearer {self.token}')
+        headers = {**self.auth_headers(auth), **(headers or {})}
+        headers['Host'] = f'localhost:{self.https_port if self.tls else self.http_port}'
         if isinstance(body, dict):
             headers['Content-Type'] = 'application/json'
             body = json.dumps(body).encode()
@@ -213,6 +223,66 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             return response.status, response.getheaders(), response.read()
         finally:
             conn.close()
+
+    def auth_headers(self, auth=True):
+        if not self.wallet:
+            return {'Authorization': f'Bearer {self.token}'} if auth else {}
+        headers = {'Origin': self.url, 'Sec-Fetch-Site': 'same-origin', 'X-Vessel-Request': '1'}
+        if auth and self.session_cookie:
+            headers.update({'Cookie': self.session_cookie, 'X-Vessel-User': self.owner})
+        return headers
+
+    def identity(self, *args, project=None):
+        return self.compose('run', '--rm', '--no-deps', '--entrypoint', 'dotnet', 'migrate',
+                            '/app/Vessel.Api.dll', 'identity', *args, project=project,
+                            capture_output=True, text=True)
+
+    def wallet_signature(self, message=None):
+        result = run('node', str(ROOT / 'scripts/wallet-test-signer.cjs'),
+                     input=json.dumps({'wallet': 1, 'message': message}),
+                     env={**os.environ, 'VESSEL_RELEASE_SYNTHETIC': '1'}, capture_output=True, text=True)
+        return json.loads(result.stdout)
+
+    def wallet_sign_in(self):
+        address = self.wallet_signature()['address']
+        status, headers, data = self.request('/api/auth/challenge', 'POST', {'address': address}, auth=False)
+        self.expect(status == 200, 'real API issues an EOA sign-in challenge', 'wallet')
+        binding = self.cookie(headers, '__Host-vessel-signin')
+        challenge = json.loads(data)
+        signature = self.wallet_signature(challenge['message'])['signature']
+        status, headers, data = self.request('/api/auth/verify', 'POST',
+            {'challengeId': challenge['challengeId'], 'signature': signature, 'remember': False},
+            {'Cookie': binding}, auth=False)
+        self.expect(status == 200 and json.loads(data)['status'] == 'signed-in',
+                    'external noble EOA signature signs in through the API', 'wallet')
+        self.session_cookie = self.cookie(headers, '__Host-vessel-session')
+        self.session = json.loads(data)['session']
+        self.expect(self.session['user']['id'] == self.owner, 'operator preserves the journal owner GUID', 'wallet')
+
+    def cookie(self, headers, name):
+        values = [value for key, value in headers if key.lower() == 'set-cookie' and value.startswith(name + '=')]
+        self.expect(len(values) == 1, name + ' issued exactly once', 'wallet')
+        jar = SimpleCookie()
+        jar.load(values[0])
+        cookie = jar[name]
+        self.expect(bool(cookie['secure']) and bool(cookie['httponly']) and
+                    cookie['samesite'].lower() == 'strict' and cookie['path'] == '/' and not cookie['domain'],
+                    name + ' is Secure, HttpOnly, SameSite=Strict, host-only, Path=/', 'wallet')
+        return name + '=' + cookie.value
+
+    def wallet_bootstrap(self):
+        self.compose('up', '-d', '--wait', 'postgres', 'rabbitmq', stdout=subprocess.DEVNULL)
+        self.compose('run', '--rm', 'migrate', stdout=subprocess.DEVNULL)
+        self.compose('up', '-d', 'api', stdout=subprocess.DEVNULL)
+        for _ in range(60):
+            result = self.compose('exec', '-T', 'api', 'curl', '--silent', 'http://localhost:8080/health/ready',
+                                  capture_output=True, text=True, check=False)
+            if 'no-operator-wallet' in result.stdout:
+                break
+            time.sleep(1)
+        self.expect('no-operator-wallet' in result.stdout,
+                    'migrate ensures owner; readiness blocks until an operator wallet is bound', 'wallet')
+        self.identity('bind-wallet', '--user', self.owner, '--address', self.wallet_signature()['address'])
 
     def oversize_upload(self, path, length):
         # Send only while no answer is waiting. The proxy answers once the limit is passed and closes; writing on
@@ -350,7 +420,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         connection = self.connect()
         try:
             connection.request('GET', '/api/events/stream?after=' + after,
-                               headers={'Authorization': 'Bearer ' + self.token})
+                               headers=self.auth_headers())
             response = connection.getresponse()
             self.expect(response.status == 200 and
                         response.getheader('Content-Type', '').startswith('text/event-stream'),
@@ -470,11 +540,19 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
     def matrix(self):
         status, _, _ = self.request('/api/accounts/00000000-0000-0000-0000-000000000001/credential', 'PUT', {}, {'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '198.51.100.77', 'Forwarded': 'proto=https'})
         self.expect(status == (400 if self.tls else 403), 'credential HTTPS guard cannot be bypassed on HTTP; TLS reaches validation')
-        for _ in range(21):
-            status, _, _ = self.request('/api/system', headers={'Authorization': 'Bearer wrong'})
-        self.expect(status == 429, 'wrong-token limiter reaches 429')
-        self.expect(self.request('/api/system', headers={'Authorization': 'Bearer wrong', 'X-Forwarded-For': '203.0.113.88'})[0] == 429, 'forged client IP does not reset limiter')
-        self.expect(self.request('/api/system')[0] == 200, 'valid token remains usable after limiter')
+        if self.wallet:
+            self.expect(self.request('/api/system', auth=False, headers={'Authorization': 'Bearer ' + self.token})[0] == 401,
+                        'Wallet mode never accepts a bearer token', 'wallet')
+            self.expect(self.request('/api/portfolios', 'POST', {'name': 'Rejected'}, {'Origin': 'https://evil.invalid'})[0] == 403,
+                        'guarded write rejects an untrusted origin', 'wallet')
+            self.expect(self.request('/api/portfolios', 'POST', {'name': 'Rejected'}, {'X-Vessel-User': str(uuid.uuid4())})[0] == 401,
+                        'guarded write rejects a stale user header', 'wallet')
+        else:
+            for _ in range(21):
+                status, _, _ = self.request('/api/system', headers={'Authorization': 'Bearer wrong'})
+            self.expect(status == 429, 'wrong-token limiter reaches 429')
+            self.expect(self.request('/api/system', headers={'Authorization': 'Bearer wrong', 'X-Forwarded-For': '203.0.113.88'})[0] == 429, 'forged client IP does not reset limiter')
+            self.expect(self.request('/api/system')[0] == 200, 'valid token remains usable after limiter')
         for path in ('/api/accounts', '/health/ready'):
             status, headers, _ = self.request(path, headers={'Accept-Encoding': 'gzip'})
             self.expect(status == 200 and not any(k.lower() == 'content-encoding' for k, _ in headers), path + ' not gzip')
@@ -627,8 +705,16 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         if self.args.storage == 's3':
             # RustFS stores object metadata too; take its complete volume offline.
             self.compose('stop', 'rustfs', stdout=subprocess.DEVNULL)
+        if self.wallet:
+            self.expect(self.sql(f"SELECT count(*) FROM identity.sessions WHERE id = '{self.session['session']['id']}' AND revoked_at IS NULL") == '1',
+                        'backup starts with the operator session live', 'wallet')
         with (self.temp / 'vessel.dump').open('wb') as out:
             self.compose('exec', '-T', 'postgres', 'pg_dump', '-U', 'vessel', '-d', 'vessel', '-Fc', stdout=out)
+        if self.wallet:
+            self.restored_revoked_cookie = self.session_cookie
+            self.identity('revoke-sessions', '--user', self.owner)
+            self.expect(self.sql('SELECT count(*) FROM identity.sessions WHERE revoked_at IS NULL') == '0',
+                        'session revoked AFTER backup, before restoring the older database', 'wallet')
         with (self.temp / 'evidence.tar.gz').open('wb') as out:
             self.compose('run', '--rm', '--no-deps', '-T', '--entrypoint', 'tar', service, '-C', directory, '-czf', '-', '.', stdout=out)
         # Copy the same ring bytes to a separate restoration location and mount it.
@@ -636,7 +722,7 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', '--entrypoint', 'sh', 'api', '-c', 'cat /run/secrets/vessel-credential-keys.json', stdout=out)
         # Original network must be removed before restore, not merely stopped.
         self.compose('down', '-v', '--remove-orphans', stdout=subprocess.DEVNULL)
-        self.tls = False
+        self.tls = self.wallet
         project = self.projects[1]
         self.write_env(self.network)
         run('docker', 'run', '--rm', '--user', '0', '-v', f'{self.temp}:/backup', 'node:24-bookworm-slim', 'sh', '-c', 'cp /backup/ring.backup /backup/secrets/restored.json && chown 1654:1654 /backup/secrets/restored.json && chmod 600 /backup/secrets/restored.json', stdout=subprocess.DEVNULL)
@@ -648,12 +734,20 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         with (self.temp / 'evidence.tar.gz').open('rb') as source:
             self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', '--entrypoint', 'sh', service, '-c',
                          f'tar -xzf - -C {directory} && chown -R {uid}:{uid} {directory}', project=project, stdin=source, stdout=subprocess.DEVNULL)
-        # The documented restore procedure: rotate the event stream epoch, then migrate and provision.
+        # Reset restored identities before any host starts, then rotate the event epoch.
+        if self.wallet:
+            self.identity('reset-after-restore', '--keep-active', self.owner, project=project)
+            self.expect(self.sql('SELECT count(*) FROM identity.sessions WHERE revoked_at IS NULL', project) == '0',
+                        'restore reset revokes sessions resurrected by the pre-revocation backup', 'wallet')
         self.compose('run', '--rm', '--no-deps', '--entrypoint', 'dotnet', 'migrate', '/app/Vessel.Api.dll', 'rotate-event-epoch',
                      project=project, stdout=subprocess.DEVNULL)
         self.compose('run', '--rm', 'migrate', project=project, stdout=subprocess.DEVNULL)
         self.compose('up', '-d', '--wait', project=project, stdout=subprocess.DEVNULL)
         self.ready()
+        if self.wallet:
+            self.expect(self.request('/api/auth/session', headers={'Cookie': self.restored_revoked_cookie})[0] == 401,
+                        'restored previously revoked session cannot authenticate after reset', 'wallet')
+            self.wallet_sign_in()
         self.wait_event_delivery(self.restore_event_id, project)
         self.wait_outbox_drained(project)
         restored_events = self.json('/api/events?limit=200')
@@ -695,7 +789,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
                 if result.returncode:
                     errors.append(project)
         # Temp ring is owned by the API UID. Remove only this check's directory.
-        run('docker', 'run', '--rm', '--user', '0', '-v', f'{self.temp}:/check', 'node:24-bookworm-slim', 'sh', '-c', 'rm -rf /check/secrets', stdout=subprocess.DEVNULL)
+        if (self.temp / 'secrets').exists():
+            run('docker', 'run', '--rm', '--user', '0', '-v', f'{self.temp}:/check', 'node:24-bookworm-slim', 'sh', '-c', 'rm -rf /check/secrets', stdout=subprocess.DEVNULL)
         shutil.rmtree(self.temp)
         for image in self.images.values():
             run('docker', 'image', 'rm', image, stdout=subprocess.DEVNULL, check=False)
@@ -704,6 +799,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
 
     def main(self):
         try:
+            if self.wallet:
+                self.wallet_signature()  # Fail before building if external test dependencies are missing.
             self.prepare()
             for kind, file in (('api', 'backend/Dockerfile'), ('web', 'frontend/Dockerfile')):
                 run('docker', 'build', '--platform', 'linux/amd64', '-f', str(ROOT / file), '-t', self.images[kind], str(ROOT), stdout=subprocess.DEVNULL)
@@ -712,30 +809,55 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             for proxy in ('0.0.0.0', '172.29.100.0/24', '1.2.3.4; include /evil;', '1.2.3.4\n5.6.7.8'):
                 invalid = subprocess.run(['docker', 'run', '--rm', '-e', 'VESSEL_TRUSTED_PROXY=' + proxy, '--entrypoint', '/docker-entrypoint.d/19-trusted-proxy.sh', self.images['web']], capture_output=True)
                 self.expect(invalid.returncode != 0, 'invalid nginx trusted peer rejected: ' + repr(proxy), 'image')
+            if self.wallet:
+                self.tls = True
+                self.wallet_bootstrap()
             self.compose('up', '-d', '--wait', stdout=subprocess.DEVNULL)
             self.ready()
+            if self.wallet:
+                self.wallet_sign_in()
             self.seed()
             self.worker()
             self.monitor()
             self.notifications()
             self.matrix()
             self.transport_fixture()
-            self.tls = True
-            self.compose('up', '-d', '--wait', stdout=subprocess.DEVNULL)
-            self.ready()
-            self.matrix()
-            self.transport_fixture()
+            if not self.wallet:
+                self.tls = True
+                self.compose('up', '-d', '--wait', stdout=subprocess.DEVNULL)
+                self.ready()
+                self.matrix()
+                self.transport_fixture()
             if self.args.browser_module:
                 env = {**os.environ, 'VESSEL_RELEASE_URL': self.url, 'VESSEL_RELEASE_TOKEN': self.token, 'VESSEL_RELEASE_CHART_ACCOUNT': self.chart_account, 'PLAYWRIGHT_MODULE': self.args.browser_module, 'VESSEL_RELEASE_SYNTHETIC': '1'}
-                run('node', str(ROOT / 'scripts' / 'release-browser-smoke.cjs'), env=env)
+                if self.wallet:
+                    env['VESSEL_RELEASE_INVITATION'] = self.identity('invite', '--max-uses', '2').stdout.strip().splitlines()[-1]
+                    for browser in self.args.wallet_browsers.split(','):
+                        run('node', str(ROOT / 'scripts/wallet-browser-smoke.cjs'),
+                            env={**env, 'VESSEL_BROWSER': browser})
+                else:
+                    run('node', str(ROOT / 'scripts' / 'release-browser-smoke.cjs'), env=env)
             self.restore()
+            if self.wallet:
+                status, _, _ = self.request('/api/auth/sign-out', 'POST', {'expectedSessionId': self.session['session']['id']})
+                self.expect(status == 204 and self.request('/api/auth/session')[0] == 401,
+                            'sign-out revokes the HTTPS session', 'wallet')
             print('Matrix counts: ' + json.dumps(self.counts, sort_keys=True), flush=True)
         finally:
             self.cleanup()
 
 
-if __name__ == '__main__':
+def parse_args(args=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--browser-module', help='Absolute existing Playwright module path, no dependency install.')
     parser.add_argument('--storage', choices=('s3', 'local'), default='s3', help='Storage/restore path to check (default: private RustFS).')
-    Check(parser.parse_args()).main()
+    parser.add_argument('--auth', choices=('token', 'wallet'), default='token', help='Authentication to verify (default: token). Wallet requires external NOBLE_MODULE_DIR.')
+    parser.add_argument('--wallet-browsers', default='chromium,firefox', help='Wallet browser engines, comma separated (default: chromium,firefox).')
+    parsed = parser.parse_args(args)
+    if not parsed.wallet_browsers or any(browser not in ('chromium', 'firefox') for browser in parsed.wallet_browsers.split(',')):
+        parser.error('--wallet-browsers must be chromium, firefox or chromium,firefox')
+    return parsed
+
+
+if __name__ == '__main__':
+    Check(parse_args()).main()

@@ -1,3 +1,5 @@
+# Token remains the default. To opt in to wallet sign-in, see README "Sign-in mode"
+# and include compose.wallet.yaml on all commands (plus an HTTPS proxy).
 services:
   rustfs:
     image: rustfs/rustfs:1.0.1
@@ -95,7 +97,8 @@ services:
     image: skorcius/vessel:api-${VESSEL_VERSION:-0.2.0}
     environment:
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      Vessel__Auth__Token: ${Vessel__Auth__Token:?Set a generated token of at least 32 characters}
+      # Required by the API in Token mode; Wallet overlay explicitly clears it.
+      Vessel__Auth__Token: ${Vessel__Auth__Token:-}
       Vessel__Auth__OwnerId: ${Vessel__Auth__OwnerId:?Set a non-empty GUID}
       Vessel__Auth__OwnerName: ${Vessel__Auth__OwnerName:-Owner}
       Vessel__Evidence__Storage__Provider: S3
