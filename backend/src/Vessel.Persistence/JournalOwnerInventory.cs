@@ -33,8 +33,6 @@ public sealed class JournalOwnerInventory(NpgsqlDataSource data) : IJournalOwner
                 UNION SELECT "OwnerId" FROM diary_requests
                 UNION SELECT "OwnerId" FROM sizing_settings
                 UNION SELECT "OwnerId" FROM monitor_accounts
-                UNION SELECT "OwnerId" FROM monitor_heartbeats
-                UNION SELECT "OwnerId" FROM monitor_venue_budgets
                 UNION SELECT "OwnerId" FROM monitor_exit_watches
                 UNION SELECT "OwnerId" FROM play_discrepancies
                 UNION SELECT owner_id FROM event_cursors
@@ -49,7 +47,6 @@ public sealed class JournalOwnerInventory(NpgsqlDataSource data) : IJournalOwner
                 UNION SELECT owner_id FROM notification_sources
                 UNION SELECT owner_id FROM notification_deliveries
                 UNION SELECT owner_id FROM notification_cursors
-                UNION SELECT owner_id FROM notification_heartbeats
             ) owners WHERE (@after IS NULL OR owner_id>@after) ORDER BY owner_id LIMIT @limit
             """);
         command.Parameters.AddWithValue("after", NpgsqlTypes.NpgsqlDbType.Uuid, (object?)after ?? DBNull.Value);

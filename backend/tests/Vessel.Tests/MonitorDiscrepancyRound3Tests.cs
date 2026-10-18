@@ -176,7 +176,7 @@ public sealed class MonitorDiscrepancyRound3PostgresTests
             PendingSinceUtc = null, LastObservedAtUtc = f.Clock.Now };
         await using (var seed = database.Scope(f)) { seed.Db.Add(row); await seed.Db.SaveChangesAsync(); }
         await using (var scope = database.Scope(f))
-            Assert.True(await new MonitorStore(scope.Db, scope.Work).EligibleAsync(f.Account.Id, f.Clock.Now, default));
+            Assert.True(await MonitorTestPaths.Store(scope.Db, scope.Work).EligibleAsync(f.Account.Id, f.Clock.Now, default));
         await using (var scope = database.Scope(f))
         {
             (await scope.Db.Set<PlayDiscrepancy>().SingleAsync()).UnverifiableAtUtc = f.Clock.Now;
@@ -184,7 +184,7 @@ public sealed class MonitorDiscrepancyRound3PostgresTests
             await scope.Db.SaveChangesAsync();
         }
         await using (var scope = database.Scope(f))
-            Assert.False(await new MonitorStore(scope.Db, scope.Work).EligibleAsync(f.Account.Id, f.Clock.Now, default));
+            Assert.False(await MonitorTestPaths.Store(scope.Db, scope.Work).EligibleAsync(f.Account.Id, f.Clock.Now, default));
     }
 
     [PostgresFact] // Finding 3: the outcome is persisted.
@@ -232,7 +232,7 @@ public sealed class MonitorDiscrepancyRound3PostgresTests
         }
         f.Advance(61);
         await using var scope = database.Scope(f);
-        var monitor = new MonitorStore(scope.Db, scope.Work);
+        var monitor = MonitorTestPaths.Store(scope.Db, scope.Work);
         var coordinator = new MonitorCoordinator(new MonitorWorkerOnline(monitor, f.Clock), new WorkspaceStore(scope.Db, scope.Work), new NoImporter(),
             TestVenues.With(new FixedReader(f), new FixedOrders(f)), new NoCredentials(), scope.Work, scope.Events, new NoCommands(),
             new CoreOwner(f.Account.OwnerId), new MonitorOptions(), f.Clock, scope.Service);

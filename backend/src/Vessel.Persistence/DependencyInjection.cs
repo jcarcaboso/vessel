@@ -25,6 +25,12 @@ public static class DependencyInjection
             return NpgsqlDataSource.Create(connection);
         });
         services.TryAddSingleton<IJournalOwnerInventory, JournalOwnerInventory>();
+        // Every worker registers persistence, including deployments that do not run the monitor module.
+        var deployments = config.GetSection("Vessel:Messaging:Deployments").GetChildren().ToArray();
+        services.TryAddSingleton(new Vessel.Application.Monitoring.MonitorDeployments(deployments.Length == 0 ? ["monitor"] : deployments
+            .Where(d => d.GetChildren().Any(m => m.Value == "monitor")).Select(d => d.Key).ToArray()));
+        services.TryAddSingleton<Vessel.Application.Monitoring.IServerStateStore, ServerStateStore>();
+        services.TryAddSingleton<Vessel.Application.Monitoring.ISystemMonitorStore, SystemMonitorStore>();
         // Resolve only when persistence is consumed. Metadata and liveness do not open a database.
         services.AddDbContext<VesselDbContext>(options =>
         {

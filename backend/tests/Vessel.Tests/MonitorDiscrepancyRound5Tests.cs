@@ -79,7 +79,7 @@ public sealed class MonitorDiscrepancyRound5Tests
             await second.Work.ExecuteAsync(async () =>
             {
                 await second.Store.LockAsync(f.Account.Id, default);
-                var monitor = new MonitorStore(second.Db, second.Work);
+                var monitor = MonitorTestPaths.Store(second.Db, second.Work);
                 await monitor.UpdateWatchesAsync(f.Account.Id, f.Observation().Read.Orders!, f.Clock.Now, default);
                 await second.Work.SaveChangesAsync(default);
                 return await second.Service.EvaluateAsync(f.Observation(), default);
@@ -102,11 +102,11 @@ public sealed class MonitorDiscrepancyRound5Tests
             fourth.Db.AddRange(f.Store.Orders.Where(x => x.ExternalOrderId == "new-entry"));
             fourth.Db.AddRange(f.Store.Fills.Where(x => x.ExternalOrderId == "new-entry"));
             await fourth.Db.SaveChangesAsync();
-            Assert.True(await new MonitorStore(fourth.Db, fourth.Work).EligibleAsync(f.Account.Id, f.Clock.Now, default));
+            Assert.True(await MonitorTestPaths.Store(fourth.Db, fourth.Work).EligibleAsync(f.Account.Id, f.Clock.Now, default));
             await fourth.Work.ExecuteAsync(async () =>
             {
                 await fourth.Store.LockAsync(f.Account.Id, default);
-                var monitor = new MonitorStore(fourth.Db, fourth.Work);
+                var monitor = MonitorTestPaths.Store(fourth.Db, fourth.Work);
                 await monitor.UpdateWatchesAsync(f.Account.Id, f.Observation().Read.Orders!, f.Clock.Now, default);
                 await fourth.Work.SaveChangesAsync(default);
                 return await fourth.Service.EvaluateAsync(f.Observation(), default);
@@ -201,7 +201,7 @@ public sealed class MonitorDiscrepancyRound5Tests
     private static (MonitorDiscrepancyService, MonitorStore, MonitorCoordinator) Monitor(DiscrepancyDatabaseScope scope, DiscrepancyFixture f, MonitorOptions options)
     {
         var evaluator = new MonitorDiscrepancyService(scope.Store, scope.Work, new CoreOwner(f.Account.OwnerId), scope.Events, options, f.Clock);
-        var monitor = new MonitorStore(scope.Db, scope.Work);
+        var monitor = MonitorTestPaths.Store(scope.Db, scope.Work);
         return (evaluator, monitor, new MonitorCoordinator(monitor, new WorkspaceStore(scope.Db, scope.Work), new NoImporter(),
             TestVenues.With(new FixedReader(f), new FixedOrders(f)), new NoCredentials(), scope.Work, scope.Events, new NoCommands(),
             new CoreOwner(f.Account.OwnerId), options, f.Clock, evaluator));

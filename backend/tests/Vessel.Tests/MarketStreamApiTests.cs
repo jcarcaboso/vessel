@@ -102,7 +102,7 @@ public sealed class MarketStreamApiTests
         var (owner, store, account) = Setup(); var stream = new FakeMarketStream();
         await using var factory = new CoreApiFactory(owner, store, stream: stream);
         var limiter = factory.Services.GetRequiredService<MarketStreamLimiter>();
-        var leases = Enumerable.Range(0, MarketStreamLimiter.MaxStreams).Select(_ => limiter.TryAcquire()!).ToList();
+        var leases = Enumerable.Range(0, MarketStreamLimiter.MaxStreams).Select(_ => limiter.TryAcquire(Guid.NewGuid())!).ToList();
         using var client = factory.AuthorizedClient();
         var response = await client.GetAsync(Url(account.Id, "instrument=BTC&interval=1m"));
         Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
@@ -193,7 +193,7 @@ public sealed class MarketStreamApiTests
     {
         var (_, store, account) = Setup(disabled: true);
         var limiter = new MarketStreamLimiter();
-        var leases = Enumerable.Range(0, 8).Select(_ => limiter.TryAcquire()!).ToList();
+        var leases = Enumerable.Range(0, 8).Select(_ => limiter.TryAcquire(Guid.NewGuid())!).ToList();
         var service = Service(store, new FakeMarketStream { VenueId = "other" }, limiter);
         Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.OpenAsync(Guid.NewGuid(), null, null, default))).StatusCode);
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.OpenAsync(account.Id, null, null, default))).StatusCode);
@@ -207,20 +207,20 @@ public sealed class MarketStreamApiTests
     }
 
     [Fact]
-    public async Task Service_allows_eight_streams_and_frees_slots_on_dispose()
+    public async Task Service_allows_four_streams_per_user_and_frees_slots_on_dispose()
     {
         var (_, store, account) = Setup(); var stream = new FakeMarketStream(); var limiter = new MarketStreamLimiter();
         var service = Service(store, stream, limiter);
         var sessions = new List<MarketStreamSession>();
-        for (var i = 0; i < 8; i++) sessions.Add(await service.OpenAsync(account.Id, "BTC", "1m", default));
+        for (var i = 0; i < 4; i++) sessions.Add(await service.OpenAsync(account.Id, "BTC", "1m", default));
         var busy = await Assert.ThrowsAsync<ProblemException>(() => service.OpenAsync(account.Id, "ETH", "1m", default));
         Assert.Equal(429, busy.StatusCode);
-        Assert.Equal(8, stream.Subscriptions.Count);
+        Assert.Equal(4, stream.Subscriptions.Count);
         sessions[0].Dispose();
         sessions[0].Dispose();
         Assert.True(stream.Subscriptions.First().Disposed);
         sessions.Add(await service.OpenAsync(account.Id, "ETH", "1m", default));
-        Assert.Equal(8, limiter.Active);
+        Assert.Equal(4, limiter.Active);
         sessions.ForEach(session => session.Dispose());
         Assert.Equal(0, limiter.Active);
     }

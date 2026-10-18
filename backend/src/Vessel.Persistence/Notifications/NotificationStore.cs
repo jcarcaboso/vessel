@@ -19,7 +19,7 @@ namespace Vessel.Persistence.Notifications;
 /// the owner's <c>notification_cursors</c> row first (held to commit), so the feed sequence, unread count and reset
 /// version change together and in commit order. Popup claims change only <c>shown_at</c> and need no cursor.
 /// </summary>
-public sealed class NotificationStore(VesselDbContext db, TimeProvider time) : INotificationHubStore, INotificationStore
+public sealed class NotificationStore(VesselDbContext db, TimeProvider time, NotificationWorkerState workerState) : INotificationHubStore, INotificationStore
 {
     private Guid Owner => db.CurrentOwnerId;
     private const string Delivery = """
@@ -361,7 +361,9 @@ public sealed class NotificationStore(VesselDbContext db, TimeProvider time) : I
 
     public Task<int> RetainAsync(DateTimeOffset cutoff, CancellationToken ct) => VesselEventSql.ParticipateAsync(db, async () =>
     {
-        await LockCursorAsync(db, ct);
+        // Retention never creates progress. Source-only owners can still age out handled events.
+        await VesselEventSql.ScalarAsync(db, "SELECT 1 FROM notification_cursors WHERE owner_id=@owner FOR UPDATE",
+            ct, ("owner", Owner));
         var deleted = await DeleteNotificationsAsync(db, "n.created_at < @cutoff", ct, P("cutoff", cutoff));
         await VesselEventSql.ExecuteAsync(db, """
             DELETE FROM notification_sources WHERE owner_id=@owner AND notification_id IS NULL AND event_id IN (
@@ -370,18 +372,7 @@ public sealed class NotificationStore(VesselDbContext db, TimeProvider time) : I
         return deleted;
     }, ct);
 
-    public Task RecordHeartbeatAsync(string workerId, DateTimeOffset now, CancellationToken ct) => VesselEventSql.ParticipateAsync(db, () =>
-        VesselEventSql.ExecuteAsync(db, """
-            INSERT INTO notification_heartbeats(owner_id,worker_id,heartbeat_at) VALUES(@owner,@worker,@now)
-            ON CONFLICT (owner_id) DO UPDATE SET worker_id=EXCLUDED.worker_id,heartbeat_at=EXCLUDED.heartbeat_at
-            WHERE notification_heartbeats.heartbeat_at<EXCLUDED.heartbeat_at
-            """, ct, ("owner", Owner), ("worker", workerId), ("now", now)), ct);
-
-    public async Task<DateTimeOffset?> HeartbeatAsync(CancellationToken ct)
-    {
-        await using var reader = await ReaderAsync("SELECT heartbeat_at FROM notification_heartbeats WHERE owner_id=@owner", ct, P("owner", Owner));
-        return await reader.Rows.ReadAsync(ct) ? reader.Rows.GetFieldValue<DateTimeOffset>(0) : null;
-    }
+    public Task<DateTimeOffset?> HeartbeatAsync(CancellationToken ct) => workerState.HeartbeatAsync(ct);
 
     public async Task<NotificationSubscriptionHealth> SubscriptionHealthAsync(CancellationToken ct)
     {

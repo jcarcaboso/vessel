@@ -60,21 +60,36 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/EvidenceStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             "Vessel.Persistence/ExecutionStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             // System discovery returns owner IDs only, including every notification table and suspended owners.
-            "Vessel.Persistence/JournalOwnerInventory.cs|d3c50a4eb37bd63d3c1d6f6c83a77bfc5c8368ea3ad3bcfc4c5c045e373c1b9d",
+            "Vessel.Persistence/JournalOwnerInventory.cs|bb06887355cced7bbc1fff79100360708d49bf80f3cc431f57d1891bb7aa623b",
             // Notification paging assembles both statements with the constant `visible` fragment, which
             // includes n.owner_id=@owner; parameters always bind the current scope's owner.
             "Vessel.Persistence/Notifications/NotificationStore.cs|d03c88d4e53ec73a5f089f774c05085e0223717c18d88d256fe7b673ca4ec6c7",
             "Vessel.Persistence/Notifications/NotificationStore.cs|d30491db273f29ecb15d7b278b9db3d849a3e75af4d2d5cbad9aef0e1a5807c8",
             // Advisory key is prefixed with the scope's owner GUID; it accesses no owner rows.
             "Vessel.Persistence/Notifications/NotificationStore.cs|24e428e35918edb014abb289e0a62af4270d36e3b2494a023e892e5068fb1ed2",
+            // System-only notification health: configured deployment IDs, no owner rows or owner transaction.
+            "Vessel.Persistence/Notifications/NotificationWorkerState.cs|5f9192e9e09f282f927f5e2cc48e654e01ee119cf0a935c10218dff4fc629238",
+            "Vessel.Persistence/Notifications/NotificationWorkerState.cs|f75cf6a3ee0394344375a8242df94a8756058aa8f107353fef28663d45c69553",
+            // Retention discovery returns only notification cursor/source owner IDs in bounded index-keyset pages.
+            // No journal facts, owner directory or status filter: suspended owners' derived alerts still expire.
+            "Vessel.Persistence/Notifications/SystemNotificationStore.cs|4cf27d1a1a94c5bc022ecda2a317013fd1e76b1f37682a7ed6550510acd42dc7",
             // Not SQL: server-authored notification title beginning with the word "Update".
             "Vessel.Application/Notifications/NotificationComposer.cs|fb59481d31b3a452f939961f54a0da2ba0ebfb1c04c24b7cd273dcf14f79c639",
-            "Vessel.Persistence/MonitorStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             "Vessel.Persistence/PlayStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             "Vessel.Persistence/WorkspaceStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
+            // B2: reviewed system discovery/state, transactional venue count and budget-lock statements.
+            "Vessel.Persistence/MonitorStore.cs|11fb326c24d434a2b59624a7e4a796561d98ef3e2291f2682033d47b113996e3",
+            "Vessel.Persistence/MonitorStore.cs|5d0a1ed4c9cf1315a1cb064478718b843e28efcb64c8bb63578411302ca9e1be",
+            "Vessel.Persistence/MonitorStore.cs|2b6dd27282cdf69a0bfa64cbc1a4de96621d46d16d63d39f96373947271daf1d",
+            // System due-candidate discovery (§9.1): keys only, every owner in (due, owner, account) order with no per-owner
+            // cut; each claim then rechecks status, deadlines and budgets inside that owner's scope.
+            "Vessel.Persistence/SystemMonitorStore.cs|d006eb6260b4719db6fcb5d4b50581c7496ae0e5bd6dbbebf9df0fdb498e664d",
+            "Vessel.Persistence/ServerStateStore.cs|40c74c937dd0eb512282090d98087bea4726000d71185d726dbbdd89e80b5b51",
+            "Vessel.Persistence/ServerStateStore.cs|4de6036152e376cb02952ca7410a4db74f2a434f16091e168cf64995f90293f8",
+            "Vessel.Persistence/ServerStateStore.cs|ee73f5478e13936ed833caed3737b495efb924b2d70cbf4c9d46ca0f8ff1593a",
+            "Vessel.Persistence/ServerStateStore.cs|6973e58fc649dacc48f32b3733651715ab8955080a0b79a97ecf85be116dc12c",
+            "Vessel.Persistence/ServerStateStore.cs|e6dc41ee45eddfeaad9785f33c42534223f79ae4627170351a604402d4b9f9fb",
             // Reviewed outside the classifier's owner-safe subset (joins, subqueries, CTEs, OR inside AND-ed groups):
-            // Due-account claim: a."OwnerId" is the scope owner; monitor_accounts joins by the account's own ID.
-            "Vessel.Persistence/MonitorStore.cs|a3a1b551fac4488488c59e912f3554f1750dfa35ecb473c5ac7683c8714ab4c2",
             // Run grouping: e.owner_id=@owner; cursor, subscription and sources join on e.owner_id.
             "Vessel.Persistence/Notifications/NotificationStore.cs|2e4a474f20be70278c263306f2ab99290e08adba7c8fe44ab05fc4e3a86c17eb",
             // Subject sources: CTE and s are owner-filtered; deliveries join on s.owner_id; the OR is inside an AND.
@@ -131,14 +146,12 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/MonitorDiscrepancyStore.cs|f893e1f76d22fb36ed9f16200cec96625e462cf6930d1e287e08257755036a55",
             "Vessel.Persistence/WorkspaceStore.cs|72ddfb9d33e8a6c0834c1302db460ca114f05c0e3b1259f90146155ed31066aa",
             "Vessel.Persistence/MonitorStore.cs|20cbcb1a165df294219c574b593603de1429eb3b2ab39759ffa060fe820bcae0",
-            // Venue budget upsert: inserts db.CurrentOwnerId; conflict target includes "OwnerId"; SET only "RetryAtUtc".
-            "Vessel.Persistence/MonitorStore.cs|d56f8ee8f0a974deefc5db6ff8075e06ee522a4d997125033e98fcfc4fffc976",
-            // Heartbeat upsert: inserts db.CurrentOwnerId; conflict target "OwnerId"; SET only worker and time.
-            "Vessel.Persistence/MonitorStore.cs|3e82d868b651cb76fa3345f8198c64fb6ca25eef6d67b6467f858d107a443ebc",
             // Monitor row creation after the owner-scoped account lock: inserts db.CurrentOwnerId; DO NOTHING.
-            "Vessel.Persistence/MonitorStore.cs|735aadccde047974eba3bdab728825533ce9773222d391066ebee3374953c721",
+            "Vessel.Persistence/MonitorStore.cs|586395464b82f79dcac1bbfd6571b1768bf9197512283ea27f8c445c917a08dc",
             // Monitor row lock: "AccountId" and "OwnerId" = db.CurrentOwnerId.
-            "Vessel.Persistence/MonitorStore.cs|9be267297c4452c53907e65138f54ee83de31681eedc3c3d231bd8fcf8bf4c7f",
+            "Vessel.Persistence/MonitorStore.cs|72f44c2fc895a9aac9af3b69284c3867a3c709d0ec01af43510b9184f19d203c",
+            // Background claim lock: "Id" and "OwnerId" = db.CurrentOwnerId, FOR UPDATE SKIP LOCKED.
+            "Vessel.Persistence/MonitorStore.cs|9e75433b5e6d7481a5eefd45c2235b5eb7866254bf98b31b55fca9d4cfb384e5",
             // Account enabled recheck: "OwnerId"=@owner (db.CurrentOwnerId) and "Id"=@account.
             "Vessel.Persistence/Notifications/NotificationStore.cs|9c7e4f9996ff9f771794a22d8ef4a53be2aa1826be74fb2d5a4524b050a3832b",
             // Play row lock: "Id" and "OwnerId" = db.CurrentOwnerId.

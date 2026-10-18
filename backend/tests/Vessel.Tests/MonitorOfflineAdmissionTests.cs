@@ -23,7 +23,7 @@ public sealed partial class MonitorPostgresTests
     {
         var work = TestUnitOfWork.For(db);
         var options = new MonitorOptions();
-        return new(new MonitorStore(db, work, options), new WorkspaceStore(db, work), new Importer(),
+        return new(MonitorTestPaths.Store(db, work, options), new WorkspaceStore(db, work), new Importer(),
             TestVenues.With(new Reader(), new Orders()), new Credentials(), work, sink ?? new EventSink(), commands,
             new CoreOwner(owner), options, clock);
     }
@@ -51,7 +51,7 @@ public sealed partial class MonitorPostgresTests
         Assert.Null(await RowAsync(database, owner));
 
         // A worker that stopped: its heartbeat is older than the timeout.
-        await new MonitorStore(db, TestUnitOfWork.For(db)).RecordHeartbeatAsync("worker",
+        await MonitorServerState.For(db).RecordHeartbeatAsync("monitor",
             clock.Now - new MonitorOptions().HeartbeatTimeout - TimeSpan.FromSeconds(1), default);
         var stale = await Assert.ThrowsAsync<ProblemException>(() => coordinator.RequestAsync(id, default));
         Assert.Equal(503, stale.StatusCode);
@@ -68,7 +68,7 @@ public sealed partial class MonitorPostgresTests
         var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
         await using var db = database.Context(owner);
         await SeedPlannedAsync(db, clock.Now);
-        await new MonitorStore(db, TestUnitOfWork.For(db)).RecordHeartbeatAsync("worker", clock.Now.AddSeconds(-10), default);
+        await MonitorServerState.For(db).RecordHeartbeatAsync("monitor", clock.Now.AddSeconds(-10), default);
         var commands = new CountingCommands();
         var accepted = await OfflineAware(db, owner, clock, commands).RequestAsync(id, default);
         Assert.Equal(("pending", "owner", true), (accepted.Monitor.ManualState, accepted.Monitor.RunTrigger, accepted.Monitor.WorkerOnline));
@@ -85,15 +85,15 @@ public sealed partial class MonitorPostgresTests
         var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
         await using var db = database.Context(owner);
         await SeedPlannedAsync(db, clock.Now);
-        var store = new MonitorStore(db, TestUnitOfWork.For(db));
-        await store.RecordHeartbeatAsync("worker", clock.Now, default);
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
+        await MonitorServerState.For(db).RecordHeartbeatAsync("monitor", clock.Now, default);
         var coordinator = OfflineAware(db, owner, clock, new CountingCommands());
         await coordinator.RequestAsync(id, default);
         // Just inside the threshold the request is still waiting for its worker.
         clock.Now += Unclaimed - TimeSpan.FromSeconds(1);
         var refresh = await Assert.ThrowsAsync<MonitorAdmissionException>(() => coordinator.AdmitRefreshAsync(id, "api", default));
         Assert.Equal(30, refresh.RetryAfter);
-        await store.RecordHeartbeatAsync("worker", clock.Now, default);
+        await MonitorServerState.For(db).RecordHeartbeatAsync("monitor", clock.Now, default);
         Assert.Equal(30, (await Assert.ThrowsAsync<MonitorAdmissionException>(() => coordinator.RequestAsync(id, default))).RetryAfter);
         Assert.Equal("pending", (await RowAsync(database, owner))!.ManualState);
     }
@@ -106,8 +106,8 @@ public sealed partial class MonitorPostgresTests
         var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
         await using var db = database.Context(owner);
         await SeedPlannedAsync(db, clock.Now);
-        var store = new MonitorStore(db, TestUnitOfWork.For(db));
-        await store.RecordHeartbeatAsync("worker", clock.Now, default);
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
+        await MonitorServerState.For(db).RecordHeartbeatAsync("monitor", clock.Now, default);
         var coordinator = OfflineAware(db, owner, clock, new CountingCommands());
         var requested = clock.Now;
         await coordinator.RequestAsync(id, default);
@@ -125,7 +125,7 @@ public sealed partial class MonitorPostgresTests
 
         // The worker returns: its next scheduled claim runs the outstanding check.
         clock.Now += TimeSpan.FromSeconds(5);
-        await store.RecordHeartbeatAsync("worker", clock.Now, default);
+        await MonitorServerState.For(db).RecordHeartbeatAsync("monitor", clock.Now, default);
         var claimed = Assert.Single(await store.ClaimDueAsync("worker", clock.Now, 2, default));
         Assert.Equal((id, "monitor"), (claimed.AccountId, claimed.Trigger));
         Assert.True(await coordinator.RunAsync(claimed, default));
@@ -141,8 +141,8 @@ public sealed partial class MonitorPostgresTests
         var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
         await using var db = database.Context(owner);
         await SeedPlannedAsync(db, clock.Now);
-        var store = new MonitorStore(db, TestUnitOfWork.For(db));
-        await store.RecordHeartbeatAsync("worker", clock.Now, default);
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
+        await MonitorServerState.For(db).RecordHeartbeatAsync("monitor", clock.Now, default);
         var commands = new CountingCommands();
         var coordinator = OfflineAware(db, owner, clock, commands);
         var first = await coordinator.RequestAsync(id, default);
@@ -150,7 +150,7 @@ public sealed partial class MonitorPostgresTests
         // Still offline: refused without touching the stale request.
         Assert.Equal(503, (await Assert.ThrowsAsync<ProblemException>(() => coordinator.RequestAsync(id, default))).StatusCode);
         Assert.Equal((first.RequestId, "pending"), ((await RowAsync(database, owner))!.RequestId!.Value, (await RowAsync(database, owner))!.ManualState));
-        await store.RecordHeartbeatAsync("worker", clock.Now, default);
+        await MonitorServerState.For(db).RecordHeartbeatAsync("monitor", clock.Now, default);
         var second = await coordinator.RequestAsync(id, default);
         Assert.NotEqual(first.RequestId, second.RequestId);
         Assert.Equal(2, commands.Count);
@@ -182,15 +182,15 @@ public sealed partial class MonitorPostgresTests
         var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
         await using var db = database.Context(owner);
         await SeedPlannedAsync(db, clock.Now);
-        var store = new MonitorStore(db, TestUnitOfWork.For(db));
-        await store.RecordHeartbeatAsync("worker", clock.Now, default);
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
+        await MonitorServerState.For(db).RecordHeartbeatAsync("monitor", clock.Now, default);
         var sink = new EventSink();
         var coordinator = OfflineAware(db, owner, clock, new CountingCommands(), sink);
         var requested = clock.Now;
         var first = await coordinator.RequestAsync(id, default);
         Assert.DoesNotContain(sink.Drafts, d => d.Type == "monitor.run-completed");
         clock.Now += Unclaimed;
-        await store.RecordHeartbeatAsync("worker", clock.Now, default);
+        await MonitorServerState.For(db).RecordHeartbeatAsync("monitor", clock.Now, default);
         Guid replacement;
         if (byCheck) replacement = (await coordinator.RequestAsync(id, default)).RequestId;
         else replacement = (await coordinator.AdmitRefreshAsync(id, "api", default)).RequestId;
@@ -212,7 +212,7 @@ public sealed partial class MonitorPostgresTests
         var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
         await using var db = database.Context(owner);
         await SeedPlannedAsync(db, clock.Now);
-        await new MonitorStore(db, TestUnitOfWork.For(db)).RecordHeartbeatAsync("worker", clock.Now, default);
+        await MonitorServerState.For(db).RecordHeartbeatAsync("monitor", clock.Now, default);
         var sink = new EventSink();
         var coordinator = OfflineAware(db, owner, clock, new CountingCommands(), sink);
         var first = await coordinator.RequestAsync(id, default);

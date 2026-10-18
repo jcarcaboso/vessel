@@ -59,7 +59,7 @@ public sealed class VenueRateLimitTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var store = new Vessel.Persistence.MonitorStore(db, TestUnitOfWork.For(db));
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
         await store.DeferVenueAsync("hyperliquid", DateTimeOffset.MaxValue, Now, default);
         Assert.Equal(Now.AddHours(1), await store.VenueRetryAtAsync("hyperliquid", default));
     }

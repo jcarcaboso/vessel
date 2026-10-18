@@ -176,7 +176,7 @@ public sealed class FundingPostgresTests
         Assert.False((await db.FundingStates.SingleAsync()).LastReadComplete);
         Assert.Empty(await db.FundingPayments.ToListAsync());
         Assert.Equal(reader.FundingRetryAtUtc,
-            await new MonitorStore(db, TestUnitOfWork.For(db)).VenueRetryAtAsync("hyperliquid", default));
+            await MonitorTestPaths.Store(db, TestUnitOfWork.For(db)).VenueRetryAtAsync("hyperliquid", default));
         Assert.Equal(0, orders.Reads);
         await Assert.ThrowsAsync<MonitorAdmissionException>(() =>
             MonitorTestPaths.RefreshAsync(db, owner, venues, other.Id, time: clock));

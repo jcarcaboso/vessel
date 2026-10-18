@@ -160,7 +160,7 @@ public sealed class MonitorDiscrepancyRound7Tests
     }
     private static (MonitorStore, MonitorCoordinator) Create(DiscrepancyDatabaseScope scope, DiscrepancyFixture f, Reader reader, IMonitorEvaluator? evaluation = null, Orders? orders = null)
     {
-        var monitor = new MonitorStore(scope.Db, scope.Work);
+        var monitor = MonitorTestPaths.Store(scope.Db, scope.Work);
         return (monitor, new(monitor, new WorkspaceStore(scope.Db, scope.Work), new NoImporter(),
             TestVenues.With(reader, orders ?? new Orders(f)), new NoCredentials(), scope.Work, scope.Events, new NoCommands(),
             new CoreOwner(f.Account.OwnerId), new MonitorOptions(), f.Clock, evaluation ?? scope.Service));

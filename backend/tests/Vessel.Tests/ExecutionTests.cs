@@ -829,7 +829,7 @@ public sealed class ExecutionPostgresTests
         h.Orders.Fail = true;
         // A failed check is recorded on the account monitor for the owner, with a fixed message and never the venue's text.
         Assert.Equal("planned", (await h.CheckAsync(play.Summary.Id, expectCompleted: false)).Status);
-        var monitor = (await new MonitorStore(h.Db, TestUnitOfWork.For(h.Db)).FindAsync(account, default))!;
+        var monitor = (await MonitorTestPaths.Store(h.Db, TestUnitOfWork.For(h.Db)).FindAsync(account, default))!;
         Assert.Equal(("degraded", "The venue check failed. Monitoring will retry."), (monitor.State, monitor.Error));
         Assert.DoesNotContain("secret", monitor.Error);
     }

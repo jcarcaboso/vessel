@@ -32,7 +32,7 @@ public sealed partial class MonitorPostgresTests
         var coordinator = Coordinator(db, owner, new Reader(), clock: clock,
             orders: new Orders { Failure = new VenueCredentialRejectedException() });
         var request = await coordinator.RequestAsync(id, default);
-        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
         var lease = (await store.ClaimAsync(id, request.RequestId, "worker", clock.Now, default))!;
         Assert.False(await coordinator.RunAsync(lease, default));
         var row = (await store.FindAsync(id, default))!;
@@ -60,7 +60,7 @@ public sealed partial class MonitorPostgresTests
         await db.SaveChangesAsync();
         var sink = new EventSink();
         var coordinator = Coordinator(db, owner, new Reader(), sink, clock);
-        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
         var first = await coordinator.RequestAsync(id, default);
         Assert.Equal("pending", first.Monitor.ManualState);
         Assert.True(await coordinator.RunAsync((await store.ClaimAsync(id, first.RequestId, "worker", clock.Now, default))!, default));
@@ -99,7 +99,7 @@ public sealed partial class MonitorPostgresTests
         await db.SaveChangesAsync();
         var sink = new EventSink();
         var coordinator = Coordinator(db, owner, new Reader(), sink, clock);
-        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
         await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default);
         var lease = Assert.Single(await store.ClaimDueAsync("scheduler", clock.Now, 2, default));
         Assert.Equal("scheduled", (await coordinator.AccountAsync(id, default)).RunTrigger);
@@ -134,14 +134,14 @@ public sealed partial class MonitorPostgresTests
             var coordinator = Coordinator(worker, owner, new Reader { Failure = new VenueRateLimitException(deadline) }, clock: clock);
             var lease = await coordinator.AdmitRefreshAsync(ids[0], "api", default);
             Assert.False(await coordinator.RunAsync(lease, default));
-            var row = (await new MonitorStore(worker, TestUnitOfWork.For(worker)).FindAsync(ids[0], default))!;
+            var row = (await MonitorTestPaths.Store(worker, TestUnitOfWork.For(worker)).FindAsync(ids[0], default))!;
             // A refresh never schedules a check; the venue deadline still gates manual work.
             Assert.Null(row.NextRunAtUtc);
             Assert.Equal(deadline, row.NextManualAllowedAtUtc);
         }
         await using (var anotherProcess = database.Context(owner))
         {
-            var store = new MonitorStore(anotherProcess, TestUnitOfWork.For(anotherProcess));
+            var store = MonitorTestPaths.Store(anotherProcess, TestUnitOfWork.For(anotherProcess));
             await store.DeferVenueAsync("hyperliquid", clock.Now.AddSeconds(120), clock.Now, default);
             Assert.Equal(deadline, await store.VenueRetryAtAsync("hyperliquid", default));
             Assert.Null(await store.VenueRetryAtAsync("risex", default));
@@ -162,13 +162,14 @@ public sealed partial class MonitorPostgresTests
         var foreignId = (await AccountsAsync(database, foreignOwner, 1)).Single();
         await using (var foreign = database.Context(foreignOwner))
         {
-            Assert.Null(await new MonitorStore(foreign, TestUnitOfWork.For(foreign)).VenueRetryAtAsync("hyperliquid", default));
-            Assert.NotNull(await Coordinator(foreign, foreignOwner, new Reader(), clock: clock).AdmitRefreshAsync(foreignId, "foreign", default));
+            Assert.Equal(deadline, await MonitorTestPaths.Store(foreign, TestUnitOfWork.For(foreign)).VenueRetryAtAsync("hyperliquid", default));
+            Assert.Equal(600, (await Assert.ThrowsAsync<MonitorAdmissionException>(() =>
+                Coordinator(foreign, foreignOwner, new Reader(), clock: clock).AdmitRefreshAsync(foreignId, "foreign", default))).RetryAfter);
         }
         clock.Now = deadline;
         await using (var resumed = database.Context(owner))
         {
-            var store = new MonitorStore(resumed, TestUnitOfWork.For(resumed));
+            var store = MonitorTestPaths.Store(resumed, TestUnitOfWork.For(resumed));
             Assert.Equal(pending, (await store.ClaimAsync(ids[1], pending, "command", clock.Now, default))!.RequestId);
             Assert.Single(await store.ClaimDueAsync("scheduler", clock.Now, 2, default));
         }
@@ -184,10 +185,10 @@ public sealed partial class MonitorPostgresTests
         var coordinator = Coordinator(db, owner, new Reader { BeforeRead = _ => throw new Exception("Must not read.") }, clock: clock);
         var lease = await coordinator.AdmitRefreshAsync(id, "api", default);
         await using (var concurrent = database.Context(owner))
-            await new MonitorStore(concurrent, TestUnitOfWork.For(concurrent))
+            await MonitorTestPaths.Store(concurrent, TestUnitOfWork.For(concurrent))
                 .DeferVenueAsync("hyperliquid", clock.Now.AddSeconds(600), clock.Now, default);
         Assert.Equal(600, (await Assert.ThrowsAsync<MonitorAdmissionException>(() => coordinator.RunAsync(lease, default))).RetryAfter);
-        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
         // Review L1: the owner was answered with 429, so the refresh is released, not left pending for the worker.
         var released = (await store.FindAsync(id, default))!;
         Assert.Equal("idle", released.ManualState);
@@ -267,14 +268,14 @@ public sealed partial class MonitorPostgresTests
         Assert.Equal("pending", accepted.Monitor.ManualState);
         await using (var worker = database.Context(owner))
         {
-            var store = new MonitorStore(worker, TestUnitOfWork.For(worker));
+            var store = MonitorTestPaths.Store(worker, TestUnitOfWork.For(worker));
             var lease = Assert.Single(await store.ClaimDueAsync("scheduler", DateTimeOffset.UtcNow, 2, default));
             Assert.Equal(accepted.RequestId, lease.RequestId);
             Assert.Null(await store.ClaimAsync(id, accepted.RequestId, "duplicate-command", DateTimeOffset.UtcNow, default));
             Assert.True(await Coordinator(worker, owner, new Reader()).RunAsync(lease, default));
         }
         await using var replay = database.Context(owner);
-        Assert.Null(await new MonitorStore(replay, TestUnitOfWork.For(replay))
+        Assert.Null(await MonitorTestPaths.Store(replay, TestUnitOfWork.For(replay))
             .ClaimAsync(id, accepted.RequestId, "delayed-command", DateTimeOffset.UtcNow, default));
         await Assert.ThrowsAsync<MonitorAdmissionException>(() => Coordinator(replay, owner, new Reader()).RequestAsync(id, default));
     }
@@ -295,7 +296,7 @@ public sealed partial class MonitorPostgresTests
         play.Cancel(CancelReason.ChangedMind, null, now);
         db.AddRange(play, order, link);
         await db.SaveChangesAsync();
-        var work = TestUnitOfWork.For(db); var store = new MonitorStore(db, work);
+        var work = TestUnitOfWork.For(db); var store = MonitorTestPaths.Store(db, work);
         Assert.True(await store.EligibleAsync(id, DateTimeOffset.UtcNow, default));
         async Task Observe(VenueOrderReadResult read) => await work.ExecuteAsync(async () =>
         {
@@ -419,7 +420,7 @@ public sealed partial class MonitorPostgresTests
         await using var third = database.Context(owner);
         Assert.Equal(30, (await Assert.ThrowsAsync<MonitorAdmissionException>(() =>
             Coordinator(third, owner, new Reader()).AdmitRefreshAsync(ids[2], "third", default))).RetryAfter);
-        Assert.False(await new MonitorStore(third, TestUnitOfWork.For(third))
+        Assert.False(await MonitorTestPaths.Store(third, TestUnitOfWork.For(third))
             .RenewAsync(lease with { Generation = lease.Generation - 1 }, DateTimeOffset.UtcNow, default));
         var otherOwner = Guid.NewGuid();
         var otherId = (await AccountsAsync(database, otherOwner, 1)).Single();
@@ -509,12 +510,12 @@ public sealed partial class MonitorPostgresTests
         await SeedPlannedAsync(db, clock.Now);
         var monitor = Coordinator(db, owner, reader, clock: clock);
         var accepted = await monitor.RequestAsync(id, default);
-        var original = (await new MonitorStore(db, TestUnitOfWork.For(db)).ClaimAsync(id, accepted.RequestId, "lost-worker", clock.Now, default))!;
+        var original = (await MonitorTestPaths.Store(db, TestUnitOfWork.For(db)).ClaimAsync(id, accepted.RequestId, "lost-worker", clock.Now, default))!;
         var running = monitor.RunAsync(original, default);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         clock.Now += MonitorOptions.Lease;
         await using var recovered = database.Context(owner);
-        var next = await new MonitorStore(recovered, TestUnitOfWork.For(recovered))
+        var next = await MonitorTestPaths.Store(recovered, TestUnitOfWork.For(recovered))
             .ClaimAsync(id, original.RequestId, "new-worker", clock.Now, default);
         Assert.NotNull(next);
         Assert.Equal(original.Generation + 1, next.Generation);
@@ -526,29 +527,29 @@ public sealed partial class MonitorPostgresTests
     }
 
     [PostgresFact]
-    public async Task Heartbeat_and_account_monitor_rows_are_owner_scoped()
+    public async Task Heartbeat_is_server_wide_but_account_monitor_rows_stay_owner_scoped()
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
         await using (var db = database.Context(owner))
         {
             _ = await Coordinator(db, owner, new Reader()).AdmitRefreshAsync(id, "worker", default);
-            await new MonitorStore(db, TestUnitOfWork.For(db)).RecordHeartbeatAsync("worker", DateTimeOffset.UtcNow, default);
+            await MonitorServerState.For(db).RecordHeartbeatAsync("monitor", DateTimeOffset.UtcNow, default);
         }
         await using var foreign = database.Context(Guid.NewGuid());
         Assert.Empty(await foreign.Set<MonitorAccount>().ToListAsync());
-        Assert.Null(await new MonitorStore(foreign, TestUnitOfWork.For(foreign)).HeartbeatAsync(default));
+        Assert.NotNull(await MonitorTestPaths.Store(foreign, TestUnitOfWork.For(foreign)).HeartbeatAsync(default));
         Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() =>
             Coordinator(foreign, foreign.CurrentOwnerId, new Reader()).AccountAsync(id, default))).StatusCode);
         var ownId = (await AccountsAsync(database, foreign.CurrentOwnerId, 1)).Single();
         _ = await Coordinator(foreign, foreign.CurrentOwnerId, new Reader()).AdmitRefreshAsync(ownId, "other-worker", default);
-        var ownStore = new MonitorStore(foreign, TestUnitOfWork.For(foreign));
-        await ownStore.RecordHeartbeatAsync("other-worker", DateTimeOffset.UtcNow, default);
+        var ownStore = MonitorTestPaths.Store(foreign, TestUnitOfWork.For(foreign));
+        await MonitorServerState.For(foreign).RecordHeartbeatAsync("monitor", DateTimeOffset.UtcNow, default);
         Assert.Equal(ownId, (await foreign.Set<MonitorAccount>().SingleAsync()).AccountId);
-        Assert.Equal("other-worker", (await ownStore.HeartbeatAsync(default))!.WorkerId);
+        Assert.Equal("monitor", (await ownStore.HeartbeatAsync(default))!.Deployment);
         await using var original = database.Context(owner);
         Assert.Equal(id, (await original.Set<MonitorAccount>().SingleAsync()).AccountId);
-        Assert.Equal("worker", (await new MonitorStore(original, TestUnitOfWork.For(original)).HeartbeatAsync(default))!.WorkerId);
+        Assert.Equal("monitor", (await MonitorTestPaths.Store(original, TestUnitOfWork.For(original)).HeartbeatAsync(default))!.Deployment);
     }
 
     [PostgresFact]
@@ -559,7 +560,7 @@ public sealed partial class MonitorPostgresTests
         var now = DateTimeOffset.UtcNow;
         await using var db = database.Context(owner);
         var (play, _) = await SeedCancelledWithStopAsync(db, now);
-        var work = TestUnitOfWork.For(db); var store = new MonitorStore(db, work);
+        var work = TestUnitOfWork.For(db); var store = MonitorTestPaths.Store(db, work);
         // RISEx always reports OpenOrdersComplete:false; the scheduled check sees the stop explicitly cancelled.
         await work.ExecuteAsync(async () =>
         {
@@ -581,7 +582,7 @@ public sealed partial class MonitorPostgresTests
         await using var db = database.Context(owner);
         var (play, _) = await SeedCancelledWithStopAsync(db, now);
         var options = new MonitorOptions { WatchLifetime = TimeSpan.FromHours(2) };
-        var work = TestUnitOfWork.For(db); var store = new MonitorStore(db, work, options);
+        var work = TestUnitOfWork.For(db); var store = MonitorTestPaths.Store(db, work, options);
         async Task Observe(VenueOrderReadResult? read, DateTimeOffset at) => await work.ExecuteAsync(async () =>
         {
             await store.UpdateWatchesAsync(id, read, at, default);
@@ -612,7 +613,7 @@ public sealed partial class MonitorPostgresTests
         await SeedPlannedAsync(db, clock.Now);
         var coordinator = Coordinator(db, owner, new Reader(), clock: clock);
         var lease = await coordinator.AdmitRefreshAsync(id, "api", default);
-        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
         await store.DeferVenueAsync("hyperliquid", clock.Now.AddSeconds(120), clock.Now, default);
         await Assert.ThrowsAsync<MonitorAdmissionException>(() => coordinator.RunAsync(lease, default));
         db.ChangeTracker.Clear();
@@ -629,7 +630,7 @@ public sealed partial class MonitorPostgresTests
         await using var db = database.Context(owner);
         await SeedPlannedAsync(db, clock.Now);
         _ = await Coordinator(db, owner, new Reader(), clock: clock).AdmitRefreshAsync(id, "api-crashed", default);
-        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
         clock.Now += MonitorOptions.Lease + TimeSpan.FromSeconds(1);
         db.ChangeTracker.Clear();
         // Nothing was scheduled for checks, so the abandoned refresh yields no run at all.
@@ -712,7 +713,7 @@ public sealed partial class MonitorPostgresTests
         };
         var coordinator = Coordinator(db, owner, reader, clock: clock);
         var accepted = await coordinator.RequestAsync(id, default);
-        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
         var lease = (await store.ClaimAsync(id, accepted.RequestId, "worker", clock.Now, default))!;
         Assert.False(await coordinator.RunAsync(lease, default));
         db.ChangeTracker.Clear();
@@ -737,7 +738,7 @@ public sealed partial class MonitorPostgresTests
         db.Add(row);
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
-        var lease = Assert.Single(await new MonitorStore(db, TestUnitOfWork.For(db)).ClaimDueAsync("scheduler", now, 2, default));
+        var lease = Assert.Single(await MonitorTestPaths.Store(db, TestUnitOfWork.For(db)).ClaimDueAsync("scheduler", now, 2, default));
         Assert.Equal("monitor", lease.Trigger);
     }
 
@@ -753,7 +754,7 @@ public sealed partial class MonitorPostgresTests
         var failing = true;
         var reader = new Reader { BeforeRead = _ => failing ? throw new HttpRequestException("down") : Task.CompletedTask };
         var coordinator = Coordinator(db, owner, reader, sink, clock);
-        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
         async Task CheckAsync(bool fail)
         {
             failing = fail;
@@ -786,7 +787,7 @@ public sealed partial class MonitorPostgresTests
         var coordinator = Coordinator(db, owner, new Reader(), sink, clock);
         Assert.Equal(1, await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default));
         Assert.Equal(0, await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default));
-        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
         await coordinator.RunAsync(Assert.Single(await store.ClaimDueAsync("scheduler", clock.Now, 2, default)), default);
         Assert.Equal("live", (await store.FindAsync(id, default))!.State);
         db.ChangeTracker.Clear();
@@ -819,7 +820,7 @@ public sealed partial class MonitorPostgresTests
         play.Cancel(CancelReason.ChangedMind, null, now);
         db.AddRange(play, order, link);
         await db.SaveChangesAsync();
-        var work = TestUnitOfWork.For(db); var store = new MonitorStore(db, work);
+        var work = TestUnitOfWork.For(db); var store = MonitorTestPaths.Store(db, work);
         // The cancelled Play has no active Plays beside it: only the resting entry keeps the account monitored.
         Assert.True(await store.EligibleAsync(id, now.AddSeconds(1), default));
         VenueOrder Entry(VenueOrderStatus status, DateTimeOffset at) => new("entry-order", "BTC", "buy", "Limit", 100, null,
@@ -854,7 +855,7 @@ public sealed partial class MonitorPostgresTests
             OldestRawFillAtUtc = clock.Now.AddMinutes(-1), OmittedExecutions = 1 } };
         var coordinator = Coordinator(db, owner, reader, clock: clock);
         var accepted = await coordinator.RequestAsync(id, default);
-        var lease = (await new MonitorStore(db, TestUnitOfWork.For(db)).ClaimAsync(id, accepted.RequestId, "worker", clock.Now, default))!;
+        var lease = (await MonitorTestPaths.Store(db, TestUnitOfWork.For(db)).ClaimAsync(id, accepted.RequestId, "worker", clock.Now, default))!;
         Assert.True(await coordinator.RunAsync(lease, default));
         db.ChangeTracker.Clear();
         var row = await db.Set<MonitorAccount>().SingleAsync();
@@ -897,7 +898,7 @@ public sealed partial class MonitorPostgresTests
             new Reader { Failure = new HttpRequestException("https://venue.invalid/?token=ro:SENTINEL-SECRET body") },
             log: new MonitorRunLog(logs));
         var accepted = await coordinator.RequestAsync(id, default);
-        var lease = (await new MonitorStore(db, TestUnitOfWork.For(db)).ClaimAsync(id, accepted.RequestId, "worker", DateTimeOffset.UtcNow, default))!;
+        var lease = (await MonitorTestPaths.Store(db, TestUnitOfWork.For(db)).ClaimAsync(id, accepted.RequestId, "worker", DateTimeOffset.UtcNow, default))!;
         Assert.False(await coordinator.RunAsync(lease, default));
         var message = Assert.Single(logs.Messages);
         Assert.Contains(nameof(HttpRequestException), message);
@@ -945,7 +946,7 @@ public sealed partial class MonitorPostgresTests
         await SeedPlannedAsync(db, clock.Now);
         var coordinator = Coordinator(db, owner, new Reader(), clock: clock);
         var accepted = await coordinator.RequestAsync(id, default);
-        var store = new MonitorStore(db, TestUnitOfWork.For(db));
+        var store = MonitorTestPaths.Store(db, TestUnitOfWork.For(db));
         var lease = (await store.ClaimAsync(id, accepted.RequestId, "dead-worker", clock.Now, default))!;
         await DisableAsync(db);
         // The holder may still be alive: its lease fences the row, and its own run settles it.
@@ -998,7 +999,7 @@ public sealed partial class MonitorPostgresTests
         var now = DateTimeOffset.UtcNow;
         await using var db = database.Context(owner);
         var (play, _) = await SeedCancelledWithStopAsync(db, now);
-        var work = TestUnitOfWork.For(db); var store = new MonitorStore(db, work);
+        var work = TestUnitOfWork.For(db); var store = MonitorTestPaths.Store(db, work);
         async Task<string> Observe(DateTimeOffset statusAt, DateTimeOffset observed, bool complete)
         {
             await work.ExecuteAsync(async () =>
@@ -1079,7 +1080,7 @@ public sealed partial class MonitorPostgresTests
     {
         var work = TestUnitOfWork.For(db);
         options ??= new MonitorOptions();
-        return new(new MonitorWorkerOnline(new MonitorStore(db, work, options), clock ?? TimeProvider.System), new WorkspaceStore(db, work), importer ?? new Importer(), TestVenues.With(reader, orders ?? new Orders()),
+        return new(new MonitorWorkerOnline(MonitorTestPaths.Store(db, work, options), clock ?? TimeProvider.System), new WorkspaceStore(db, work), importer ?? new Importer(), TestVenues.With(reader, orders ?? new Orders()),
             new Credentials(), work, sink ?? new EventSink(), new Commands(), new CoreOwner(owner),
             options, clock ?? TimeProvider.System, log: log);
     }

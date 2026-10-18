@@ -8,7 +8,7 @@ namespace Vessel.Identity;
 
 public static class IdentityRegistrationGate
 {
-    public const bool MultiOwnerReady = false;
+    public const bool MultiOwnerReady = true;
 }
 
 public sealed record IdentitySettings

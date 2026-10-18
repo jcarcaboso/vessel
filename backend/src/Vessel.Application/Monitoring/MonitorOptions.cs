@@ -3,6 +3,8 @@ namespace Vessel.Application.Monitoring;
 public sealed class MonitorOptions
 {
     public const string Section = "Vessel:Monitor";
+    public int WorkerConcurrency { get; set; } = 2;
+    public int VenueReadConcurrency { get; set; } = 4;
     public TimeSpan Interval { get; set; } = TimeSpan.FromMinutes(10);
     public TimeSpan ProtectionGrace { get; set; } = TimeSpan.FromMinutes(10);
     /// <summary>Gates manual Check and Refresh only, never a scheduled claim. At most <see cref="Interval"/>.</summary>
@@ -19,6 +21,8 @@ public sealed class MonitorOptions
 
     public void Validate()
     {
+        if (WorkerConcurrency is < 1 or > 64 || VenueReadConcurrency is < 1 or > 64)
+            throw new InvalidOperationException("Monitor concurrency must be between 1 and 64.");
         if (Interval < TimeSpan.FromMinutes(1) || Interval > TimeSpan.FromMinutes(60))
             throw new InvalidOperationException("Vessel:Monitor:Interval must be between 1 and 60 minutes.");
         if (ManualCooldown < TimeSpan.Zero || ManualCooldown > Interval)

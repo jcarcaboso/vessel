@@ -213,13 +213,16 @@ public sealed class CandleCachingTests
     public async Task Refresh_bypasses_replaces_and_coalesces_identical_requests()
     {
         var (_, store, account) = Setup(); var clock = new Clock(); var reader = new Reader();
-        var service = new CandleService(store, TestVenues.With(reader), new CandleCache(clock), clock);
+        var cache = new CandleCache(clock);
+        var service = new CandleService(store, TestVenues.With(reader), cache, clock);
         var original = await service.CandlesAsync(account.Id, "BTC", "1h", null, default);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         reader.Wait = ct => release.Task.WaitAsync(ct);
         reader.Empty = true;
         var first = service.CandlesAsync(account.Id, "BTC", "1h", null, default, "true");
-        var second = service.CandlesAsync(account.Id, "BTC", "1h", null, default, "true");
+        var (otherOwner, otherStore, otherAccount) = Setup();
+        var other = new CandleService(otherStore, TestVenues.With(reader), cache, clock, new CoreOwner(otherOwner));
+        var second = other.CandlesAsync(otherAccount.Id, "BTC", "1h", null, default, "true");
         var normal = service.CandlesAsync(account.Id, "BTC", "1h", null, default, "false");
         Assert.Equal(2, reader.Reads);
         release.SetResult();

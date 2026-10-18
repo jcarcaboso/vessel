@@ -77,7 +77,7 @@ public sealed class MonitorOrderIdentityTests
         await database.Seed(f);
         var link = f.Store.Links.Single(x => x.PlayId == btc.Id);
         await using var scope = database.Scope(f);
-        var monitor = new MonitorStore(scope.Db, scope.Work);
+        var monitor = MonitorTestPaths.Store(scope.Db, scope.Work);
         async Task<MonitorExitWatch> Update(string contract, VenueOrderStatus status, bool complete)
         {
             f.Advance(1);

@@ -266,7 +266,7 @@ public sealed class MonitorDiscrepancyReviewPostgresTests
         f.Play.MarkClosed("fixture", f.Clock.Now.AddMinutes(-1));
         await database.Seed(f);
         await using var scope = database.Scope(f);
-        var store = new MonitorStore(scope.Db, scope.Work);
+        var store = MonitorTestPaths.Store(scope.Db, scope.Work);
         Assert.True(await store.EligibleAsync(f.Account.Id, f.Clock.Now, default));
         await scope.Work.ExecuteAsync(async () =>
         {

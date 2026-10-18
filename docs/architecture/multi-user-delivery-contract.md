@@ -522,8 +522,9 @@ Monitor commands for a suspended owner are dropped and logged by ID; for an unkn
 
 - **Leases.** `MonitorLease` gains `OwnerId`. The existing discovery record `MonitorCandidate` (`Application/Monitoring/Contracts.cs:56`, which carries a tracked `MonitorAccount`) stays as it is.
 - **Discovery** stays owner-scoped (the existing EF code) and iterates `ActiveOwnersAsync` pages.
-- **Candidates** come from `ISystemMonitorStore.DueCandidatesAsync(DueMonitorKey? after, int limit)`. It returns `DueMonitorCandidate(OwnerId, AccountId, VenueId, DueAt)`, where `DueMonitorKey = (DueAt, OwnerId, AccountId)`. It is a lock-free system query across owners, with keyset pages in that order and at most 2 candidates per owner per page (`ROW_NUMBER() OVER (PARTITION BY owner)`).
+- **Candidates** come from `ISystemMonitorStore.DueCandidatesAsync(DueMonitorKey? after, DateTimeOffset dueBy, int limit)`. It returns `DueMonitorCandidate(OwnerId, AccountId, VenueId, DueAt)`, where `DueMonitorKey = (DueAt, OwnerId, AccountId)`. It is a lock-free system query across owners, with keyset pages in that order. Pages omit no due row (there is no per-owner cut), so the continuation never passes work it did not examine; owner fairness comes from the transactional owner budget and the in-tick skip of owners at capacity.
   - The scheduler keeps the continuation across ticks, so later owners cannot starve. It skips suspended owners (directory status, cached for one tick) and owners at capacity.
+  - The continuation walks a **bounded scan cycle**: the bound is the time the cycle started, and only work due by then is considered. Work rescheduled during the cycle waits for the next one. When a cycle's pages run out, the scheduler starts a new cycle (at most once per tick), so an account skipped earlier (row locked, owner or venue at capacity, owner failure) is revisited instead of starving behind recurring work. A tick reads at most 10 pages of 100 candidates and resumes from the continuation on the next tick.
 - **Claiming.** Each candidate is claimed in **its own transaction** (one account) in its owner's scope, re-checking owner status, deadlines and both capacities. The scheduler no longer calls `ClaimDueAsync`; its multi-row claim can deadlock on venue locks.
 - **Lock order:** account row, monitor row, owner budget lock (`vessel-monitor-budget:{owner}`), venue budget lock (`vessel-venue-budget:{venue}`). It is the same in `MonitorCoordinator`, `ClaimAsync` and Refresh admission. A transaction never takes two venue locks. `ReadCapacityAsync` takes `venueId`.
 - **The owned-entity rule stays.** The `VesselDbContext` owner filter and the mixed-owner save guard are not weakened.
@@ -702,6 +703,8 @@ See §7. The stream endpoints get `IPrincipalValidity` from DI: `AlwaysValidPrin
 ### B2
 
 - Candidate pages dominated by suspended or capped owners do not starve others.
+- An account skipped once (row locked) is revisited at the next scan cycle while another owner's recurring work stays due.
+- An owner's unlocked third account, behind two row-locked ones, and its manual Check are claimed while another owner's work recurs.
 - Two owners × two venues claim concurrently without deadlock.
 - The venue count sees its own lease.
 - A server-wide venue deadline holds across owners; a 429 recorded during a rolled-back credential save survives.
@@ -763,7 +766,7 @@ See §7. The stream endpoints get `IPrincipalValidity` from DI: `AlwaysValidPrin
 | `originAccepted` source | `?origin=` query value | `Origin`, else forwarded scheme and Host | The query value, because it is explicit and only a hint (§6) |
 | Loopback HTTP outside Development | HTTPS only | Cookie attributes follow the origin | HTTPS only outside Development (§3) |
 | Which reads honour venue deadlines | Every upstream path, including market data | Account reads only | Account-read paths honour and record. Market data keeps its own behaviour, explicitly out of scope (§9.4) |
-| Candidate fairness | Keyset pages continued across ticks | At most 2 per owner per page | Both (§9.3) |
+| Candidate fairness | Keyset pages continued across ticks | At most 2 per owner per page | Both at first; the per-owner cut was later removed because it hid rows from the continuation (§9.3, §16) |
 | Live session without a wallet | Nullable reference allowed only on revoked sessions | `wallet_id` NOT NULL | Nullable FK with the invariant that live sessions always have a wallet (§4) |
 | Market streams per user | — | 4 (optional) | 4 (§9.4) |
 | Sessions per user | 20 | about 50 (optional) | 20 (§3) |
@@ -801,3 +804,5 @@ Cross-model verification of the first lanes found gaps the contract left open. T
 | D1 review | Stale-generation responses, errors, stream readers and side effects are discarded, as §11 requires; generation-bound streams reopen under the current generation | §11 |
 | D1 review | The "Signed in as someone else in another tab" notice is shown after a successful reload too, and removed only once presented | §11 |
 | D1 review | The remember checkbox is locked from the moment signing starts | §11 |
+| B2 review | Candidate scans run in bounded cycles (only work due by the cycle start), so accounts skipped during a cycle are revisited at the next wrap; a Check made mid-cycle waits for the next cycle when workers are saturated | §9.3 |
+| B2 review | Candidate pages have no per-owner cut. Ranking each owner's rows before the keyset let the continuation pass rows never returned, so an owner's third account (and its Check) starved behind two locked ones. Owner fairness comes from the transactional owner budget and the in-tick capped-owner skip; a tick reads at most 10 pages of 100 and resumes from its continuation | §9.3 |

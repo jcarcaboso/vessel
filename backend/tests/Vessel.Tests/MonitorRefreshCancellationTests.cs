@@ -157,7 +157,7 @@ public sealed class MonitorRefreshCancellationTests
         var venues = TestVenues.With(reader);
         var work = TestUnitOfWork.For(db);
         var options = new MonitorOptions { ManualCooldown = Cooldown };
-        var coordinator = new MonitorCoordinator(new MonitorStore(db, work, options), new WorkspaceStore(db, work),
+        var coordinator = new MonitorCoordinator(MonitorTestPaths.Store(db, work, options), new WorkspaceStore(db, work),
             MonitorTestPaths.Execution(db, venues, time: clock), venues, new NoCredentials(), work, new NoEvents(),
             new NoCommands(), new CoreOwner(owner), options, clock);
         if (!await coordinator.RunAsync(await coordinator.AdmitRefreshAsync(id, "test-" + Guid.NewGuid().ToString("N"), ct), ct))

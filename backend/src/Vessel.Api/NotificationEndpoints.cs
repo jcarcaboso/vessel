@@ -1,5 +1,8 @@
 using System.Globalization;
 using Vessel.Application.Notifications;
+using Vessel.Application.Common;
+using Vessel.Application.MarketData;
+using Vessel.Application.Ownership;
 
 namespace Vessel.Api;
 
@@ -33,8 +36,16 @@ public static class NotificationEndpoints
             Results.Ok(await notifications.PreferencesAsync(ct)));
         group.MapPut("/preferences", async (UpdateNotificationPreferencesRequest request, NotificationService notifications,
             CancellationToken ct) => Results.Ok(await notifications.SavePreferencesAsync(request, ct)));
-        group.MapPost("/test", async (HttpContext context, NotificationService notifications, CancellationToken ct) =>
+        group.MapPost("/test", async (HttpContext context, NotificationService notifications, IJournalOwnerContext owner,
+            UserReadLimits limits, CancellationToken ct) =>
         {
+            // Per-user/process bound in both auth modes, independent of the configurable durable cooldown.
+            try { limits.Admit(owner.OwnerId, "notifications:test", 6); }
+            catch (ProblemException limited) when (limited.StatusCode == 429)
+            {
+                throw new ProblemException(429, "Too many test notifications. Wait before trying again.",
+                    "rate-limited", limited.RetryAfterSeconds);
+            }
             try
             {
                 await notifications.RequestTestAsync(ct);

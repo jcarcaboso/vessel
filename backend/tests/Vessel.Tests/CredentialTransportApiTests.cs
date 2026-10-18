@@ -96,6 +96,7 @@ public sealed class CredentialTransportApiTests(CredentialTransportApiTests.Reje
             settings: knownProxy is null ? null : new() { ["Vessel:ForwardedHeaders:KnownProxies:0"] = knownProxy },
             configure: services =>
         {
+            services.AddSingleton<Vessel.Application.Monitoring.IServerStateStore>(new MonitorServerState());
             services.AddSingleton<IVenueRegistry>(SecurityFixture.Registry(verifier, discovery)); services.AddSingleton<ICredentialVault>(vault);
             services.AddSingleton<IAccountCredentialStore>(credentials); services.AddSingleton(SecurityFixture.Clock);
             services.AddSingleton<IStartupFilter>(new Peer(IPAddress.Parse(peer)));

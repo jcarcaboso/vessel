@@ -1,3 +1,4 @@
+using Vessel.Application.Ownership;
 using System.Runtime.CompilerServices;
 using Vessel.Application.Common;
 using Vessel.Application.Venues;
@@ -17,28 +18,39 @@ public sealed record MarketStreamMessage(string? Event, object? Data)
 public sealed class MarketStreamLimiter
 {
     public const int MaxStreams = 8;
+    public const int MaxStreamsPerUser = 4;
+    private readonly Dictionary<Guid, int> users = [];
     private int active;
+    public int Active { get { lock (users) return active; } }
 
-    public int Active => Volatile.Read(ref active);
-
-    public IDisposable? TryAcquire()
+    public IDisposable? TryAcquire(Guid owner)
     {
-        if (Interlocked.Increment(ref active) <= MaxStreams) return new Lease(this);
-        Interlocked.Decrement(ref active);
-        return null;
+        lock (users)
+        {
+            var count = users.GetValueOrDefault(owner);
+            if (active >= MaxStreams || count >= MaxStreamsPerUser) return null;
+            active++;
+            users[owner] = count + 1;
+            return new Lease(this, owner);
+        }
     }
 
-    private sealed class Lease(MarketStreamLimiter owner) : IDisposable
+    private sealed class Lease(MarketStreamLimiter limiter, Guid owner) : IDisposable
     {
         private int released;
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref released, 1) == 0) Interlocked.Decrement(ref owner.active);
+            if (Interlocked.Exchange(ref released, 1) != 0) return;
+            lock (limiter.users)
+            {
+                limiter.active--;
+                if (--limiter.users[owner] == 0) limiter.users.Remove(owner);
+            }
         }
     }
 }
 
-public sealed class MarketStreamService(IWorkspaceStore store, IVenueRegistry venues, MarketStreamLimiter limiter, TimeProvider time)
+public sealed class MarketStreamService(IWorkspaceStore store, IVenueRegistry venues, MarketStreamLimiter limiter, TimeProvider time, IJournalOwnerContext? owner = null)
 {
     public static readonly TimeSpan MaxLifetime = TimeSpan.FromHours(1);
     public static readonly TimeSpan KeepaliveInterval = TimeSpan.FromSeconds(15);
@@ -56,7 +68,7 @@ public sealed class MarketStreamService(IWorkspaceStore store, IVenueRegistry ve
             throw new ProblemException(502, VenueFailure);
         ct.ThrowIfCancellationRequested();
 
-        var lease = limiter.TryAcquire() ?? throw new ProblemException(429, Busy);
+        var lease = limiter.TryAcquire(owner?.OwnerId ?? Guid.Empty) ?? throw new ProblemException(429, Busy, code: "rate-limited", retryAfterSeconds: 5);
         try
         {
             var subscription = stream.Subscribe(instrument, validInterval);
@@ -66,7 +78,7 @@ public sealed class MarketStreamService(IWorkspaceStore store, IVenueRegistry ve
         catch (MarketStreamCapacityException)
         {
             lease.Dispose();
-            throw new ProblemException(429, Busy);
+            throw new ProblemException(429, Busy, code: "rate-limited", retryAfterSeconds: 5);
         }
         catch (VenueReadException)
         {

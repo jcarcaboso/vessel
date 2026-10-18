@@ -26,16 +26,7 @@ public static class MonitorModel
         account.Property(x => x.Error).HasMaxLength(500);
         account.Property(x => x.CredentialRevision).HasMaxLength(64);
         account.HasIndex(x => new { x.OwnerId, x.NextRunAtUtc });
-
-        var heartbeat = model.Entity<MonitorHeartbeat>();
-        heartbeat.ToTable("monitor_heartbeats");
-        heartbeat.HasKey(x => x.OwnerId);
-        heartbeat.Property(x => x.WorkerId).HasMaxLength(128);
-
-        var budget = model.Entity<MonitorVenueBudget>();
-        budget.ToTable("monitor_venue_budgets");
-        budget.HasKey(x => new { x.OwnerId, x.VenueId });
-        budget.Property(x => x.VenueId).HasMaxLength(40);
+        account.HasIndex(x => new { x.NextRunAtUtc, x.OwnerId, x.AccountId }).HasDatabaseName("IX_monitor_accounts_due");
 
         var exit = model.Entity<MonitorExitWatch>();
         exit.ToTable("monitor_exit_watches", table => table.HasCheckConstraint("CK_monitor_exit_watch_outcome",

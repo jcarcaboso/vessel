@@ -1,3 +1,4 @@
+using Vessel.Application.Ownership;
 using Vessel.Application.Common;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
@@ -19,6 +20,9 @@ public sealed class CandleCache(TimeProvider time)
     public static readonly TimeSpan HistoricalLifetime = TimeSpan.FromHours(24), EmptyLifetime = TimeSpan.FromSeconds(60);
     private readonly BoundedMarketDataCache<CandleResponseDto> entries = new(time, MaxEntries, MaxStoredCandles, v => v.Candles.Count);
 
+    private readonly UserReadLimits refreshLimits = new(time);
+    public void AdmitRefresh(Guid owner, string series) => refreshLimits.Admit(owner, series, 1);
+
     public CandleResponseDto? Get(string key) => entries.Get(key);
     public Task<CandleResponseDto> GetAsync(string key, bool historical, bool refresh,
         Func<CancellationToken, Task<CandleResponseDto>> load, CancellationToken ct) =>
@@ -26,7 +30,7 @@ public sealed class CandleCache(TimeProvider time)
             historical ? HistoricalLifetime : Lifetime, ct, refresh);
 }
 
-public sealed class CandleService(IWorkspaceStore store, IVenueRegistry venues, CandleCache cache, TimeProvider time)
+public sealed class CandleService(IWorkspaceStore store, IVenueRegistry venues, CandleCache cache, TimeProvider time, IJournalOwnerContext? owner = null)
 {
     public const int MaxCandles = 500;
     /// <summary>Used when the venue's descriptor has no notice of its own.</summary>
@@ -61,6 +65,8 @@ public sealed class CandleService(IWorkspaceStore store, IVenueRegistry venues, 
         {
             throw new ProblemException(502, VenueFailure);
         }
+
+        if (refresh == "true") cache.AdmitRefresh(owner?.OwnerId ?? Guid.Empty, $"{account.VenueId}|{instrument}|{interval}");
 
         var to = endTime ?? now.ToUnixTimeMilliseconds() / CacheBucketMs * CacheBucketMs;
         var from = Math.Max(0, to - MaxCandles * step);

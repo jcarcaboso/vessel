@@ -43,7 +43,7 @@ public sealed class IdentityApiTests
         using var client = factory.CreateClient();
         var without = await client.GetFromJsonAsync<JsonElement>("/api/auth/config");
         Assert.False(without.GetProperty("originAccepted").GetBoolean());
-        Assert.Equal("closed", without.GetProperty("registration").GetString());
+        Assert.Equal("open", without.GetProperty("registration").GetString());
         var accepted = await client.GetFromJsonAsync<JsonElement>("/api/auth/config?origin=https%3A%2F%2Fvessel.test");
         Assert.True(accepted.GetProperty("originAccepted").GetBoolean());
         Assert.Equal(3, accepted.EnumerateObject().Count());

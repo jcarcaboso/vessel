@@ -64,7 +64,7 @@ public sealed class AccountOrderHistoryApiTests
     private static async Task WorkerOnline(CoreDatabase database, Guid owner, TimeProvider clock)
     {
         await using var db = database.Context(owner);
-        await new Vessel.Persistence.MonitorStore(db, TestUnitOfWork.For(db)).RecordHeartbeatAsync("test-worker", clock.GetUtcNow(), default);
+        await MonitorServerState.For(db).RecordHeartbeatAsync("monitor", clock.GetUtcNow(), default);
     }
 
     private static async Task CompleteCheck(CoreApiFactory factory, Guid accountId, HttpResponseMessage accepted,

@@ -79,7 +79,6 @@ public interface INotificationStore
     /// <summary>Records the test request time under the cursor lock; the time left when another test is too recent.</summary>
     Task<TimeSpan?> StartTestAsync(DateTimeOffset now, TimeSpan cooldown, CancellationToken ct);
     Task<int> RetainAsync(DateTimeOffset cutoff, CancellationToken ct);
-    Task RecordHeartbeatAsync(string workerId, DateTimeOffset now, CancellationToken ct);
     Task<DateTimeOffset?> HeartbeatAsync(CancellationToken ct);
     Task<NotificationSubscriptionHealth> SubscriptionHealthAsync(CancellationToken ct);
 }

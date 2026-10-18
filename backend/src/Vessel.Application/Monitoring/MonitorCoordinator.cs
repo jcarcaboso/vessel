@@ -163,7 +163,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         return new(request, await AccountAsync(accountId, ct));
     }
 
-    /// <summary>Refresh uses the same account gate and global two-read budget, but can refresh accounts without Plays.</summary>
+    /// <summary>Refresh shares the account gate, owner and venue budgets, but can refresh accounts without Plays.</summary>
     public Task<MonitorLease> AdmitRefreshAsync(Guid accountId, string readerId, CancellationToken ct) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(accountId, async (account, row) =>
         {
@@ -177,16 +177,17 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             var expired = ReleaseUnclaimed(row, now);
             var retry = await RetryAfterAsync(account.VenueId, row, now, ct);
             if (retry > 0) throw new MonitorAdmissionException(retry);
-            if (!await store.ReadCapacityAsync(now, ct)) throw new MonitorAdmissionException(30);
+            if (!await store.ReadCapacityAsync(account.VenueId, now, ct)) throw new MonitorAdmissionException(30);
             await CompleteExpiredAsync(accountId, expired, row, now, ct);
             var request = Guid.CreateVersion7();
             row.Admit(request, "refresh", now);
             row.Claim(request, readerId, now, MonitorOptions.Lease);
-            return new MonitorLease(accountId, request, row.Generation, readerId, "refresh");
+            return new MonitorLease(owner.OwnerId, accountId, request, row.Generation, readerId, "refresh");
         }, ct), ct);
 
     public async Task<bool> RunAsync(MonitorLease lease, CancellationToken ct)
     {
+        if (lease.OwnerId != owner.OwnerId) throw new InvalidOperationException("A monitor lease belongs to another owner.");
         var capture = await store.CaptureAsync(lease.AccountId, ct);
         if (capture is null) return false;
         var before = await store.FindAsync(lease.AccountId, ct);
@@ -229,6 +230,8 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                     VenueFundingReadResult funding;
                     try
                     {
+                        var retryAt = await store.VenueRetryAtAsync(capture.Account.VenueId, ct);
+                        if (retryAt > time.GetUtcNow()) throw new VenueRateLimitException(retryAt.Value);
                         funding = await fundingReader.ReadFundingAsync(capture.Account, from, to, ct);
                         ct.ThrowIfCancellationRequested();
                         VenueFundingChecks.Validate(funding, from, to);

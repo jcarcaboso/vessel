@@ -25,7 +25,7 @@ public sealed class MonitorAdmissionException(int retryAfter) : Exception("This 
 // Credential revision is a one-way digest of encrypted storage, never credential plaintext.
 public sealed record MonitorCapture(Account Account, string? CredentialRevision, DateTimeOffset? CredentialExpiresAtUtc,
     DateTimeOffset? NewestRetainedFillAtUtc = null);
-public sealed record MonitorLease(Guid AccountId, Guid RequestId, long Generation, string WorkerId, string Trigger);
+public sealed record MonitorLease(Guid OwnerId, Guid AccountId, Guid RequestId, long Generation, string WorkerId, string Trigger);
 public sealed record MonitorRead(PerpetualVenueReadResult Sync, VenueOrderReadResult? Orders,
     string? OrderError = null, bool CredentialError = false);
 public sealed record MonitorEvaluation(Guid RunId, Account Account, MonitorRead Read, DateTimeOffset? PreviousSuccessAtUtc,
@@ -86,8 +86,7 @@ public interface IMonitorStore
     /// most <see cref="VenueRateLimitException.MaxDelay"/> after <paramref name="now"/> before it is stored.
     /// </summary>
     Task DeferVenueAsync(string venueId, DateTimeOffset retryAtUtc, DateTimeOffset now, CancellationToken ct);
-    Task<MonitorHeartbeat?> HeartbeatAsync(CancellationToken ct);
-    Task RecordHeartbeatAsync(string workerId, DateTimeOffset now, CancellationToken ct);
+    Task<ServerMonitorHeartbeat?> HeartbeatAsync(CancellationToken ct);
     /// <summary>
     /// Accounts that may need scheduling changes (monitorable ones, and any with a non-idle monitor row), ordered by
     /// account ID after <paramref name="after"/>, at most <paramref name="limit"/>.
@@ -97,7 +96,7 @@ public interface IMonitorStore
     Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct);
     Task<T> LockedAsync<T>(Guid accountId, Func<Account, MonitorAccount, Task<T>> action, CancellationToken ct);
     Task<IReadOnlyList<MonitorLease>> ClaimDueAsync(string workerId, DateTimeOffset now, int limit, CancellationToken ct);
-    Task<MonitorLease?> ClaimAsync(Guid accountId, Guid requestId, string workerId, DateTimeOffset now, CancellationToken ct);
+    Task<MonitorLease?> ClaimAsync(Guid accountId, Guid? requestId, string workerId, DateTimeOffset now, CancellationToken ct);
     Task<bool> RenewAsync(MonitorLease lease, DateTimeOffset now, CancellationToken ct);
     /// <summary>
     /// Inside the account lock. With <paramref name="orders"/>, a reported terminal status ends a watch whatever the
@@ -106,6 +105,9 @@ public interface IMonitorStore
     /// </summary>
     Task UpdateWatchesAsync(Guid accountId, VenueOrderReadResult? orders, DateTimeOffset now, CancellationToken ct);
     Task<IReadOnlyList<MonitorWatchDto>> WatchesAsync(Guid playId, DateTimeOffset now, CancellationToken ct);
-    /// <summary>Inside account admission transaction. Serializes the two-read budget across API and workers.</summary>
-    Task<bool> ReadCapacityAsync(DateTimeOffset now, CancellationToken ct);
+    /// <summary>Inside account admission transaction. Locks the owner budget, then this venue budget, and checks both capacities.</summary>
+    Task<bool> ReadCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct);
+    /// <summary>Lock-free preflight only; admission rechecks under the venue budget lock.</summary>
+    Task<bool> VenueAtCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct);
+    Task<bool> OwnerAtCapacityAsync(DateTimeOffset now, CancellationToken ct);
 }
