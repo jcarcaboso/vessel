@@ -187,6 +187,35 @@ public sealed class StreamRevalidationTests
     }
 
     [Fact]
+    public async Task A_revalidation_check_that_never_completes_ends_the_response_at_its_deadline()
+    {
+        var clock = new ManualTime(DateTimeOffset.UtcNow);
+        var validity = new StalledPrincipal();
+        await using var validation = new PrincipalRevalidation(validity, clock, default);
+        clock.Advance(PrincipalRevalidation.CheckInterval);
+        await Eventually.True(() => validity.Calls == 1, "The timer must start a check without traffic.");
+        clock.Advance(PrincipalRevalidation.CheckTimeout - TimeSpan.FromSeconds(1));
+        await Task.Delay(50);
+        Assert.False(validation.Token.IsCancellationRequested);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await Eventually.True(() => validation.Token.IsCancellationRequested,
+            "A stalled check must fail closed at its deadline even when it ignores cancellation.");
+        Assert.True(validity.Cancelled.IsCancellationRequested);
+        Assert.Equal(1, validity.Calls);
+    }
+
+    [Fact]
+    public async Task Ending_a_response_during_a_stalled_check_does_not_wait_for_the_check()
+    {
+        var clock = new ManualTime(DateTimeOffset.UtcNow);
+        var validity = new StalledPrincipal();
+        var validation = new PrincipalRevalidation(validity, clock, default);
+        clock.Advance(PrincipalRevalidation.CheckInterval);
+        await Eventually.True(() => validity.Calls == 1, "The timer must start a check without traffic.");
+        await validation.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task Market_stream_revalidates_without_waiting_for_traffic_and_releases_its_subscription()
     {
         var owner = Guid.NewGuid();
@@ -239,6 +268,47 @@ public sealed class StreamRevalidationTests
         await stream.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
+    [PostgresFact]
+    public async Task A_revoked_session_stream_ends_at_the_check_deadline_while_the_sessions_table_is_locked()
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        var key = EthECKey.GenerateKey();
+        await database.SeedAsync(key);
+        var issued = await database.SignInAsync(key);
+        var principal = new CountingPrincipal(new SessionPrincipal(database.Sessions())
+        {
+            Authenticated = await database.Sessions().AuthenticateAsync(issued.Token, false, default)
+        });
+        var clock = new ManualTime(database.Clock.Now);
+        await using var provider = new ServiceCollection().AddSingleton<IPrincipalValidity>(principal)
+            .AddSingleton<TimeProvider>(clock).BuildServiceProvider();
+        using var body = new MemoryStream();
+        var context = new DefaultHttpContext { RequestServices = provider };
+        context.Response.Body = body;
+        var stream = VesselEventEndpoints.StreamAsync("0", new EmptyReader(), new CoreOwner(issued.Session.User.Id),
+            Options.Create(new VesselEventSettings { StreamPollSeconds = 60 }), Options.Create(new JsonOptions()), context);
+        await using var locker = database.CreateDbContext();
+        await locker.Sessions.ExecuteUpdateAsync(update => update.SetProperty(x => x.RevokedAt, database.Clock.Now));
+        await using var transaction = await locker.Database.BeginTransactionAsync();
+        var sessions = $"\"{database.Schema.Name}\".\"sessions\"";
+        var lockTable = "LOCK TABLE " + sessions + " IN ACCESS EXCLUSIVE MODE";
+        await locker.Database.ExecuteSqlRawAsync(lockTable);
+        clock.Advance(PrincipalRevalidation.CheckInterval);
+        await Eventually.True(() => principal.Calls == 1, "The timer must start a check without traffic.");
+        await Eventually.True(() => Waiting(locker, sessions) > 0, "The check must block on the locked sessions table.");
+        Assert.False(stream.IsCompleted);
+        clock.Advance(PrincipalRevalidation.CheckTimeout);
+        await stream.WaitAsync(TimeSpan.FromSeconds(5));
+        await Eventually.True(() => Waiting(locker, sessions) == 0, "The deadline must cancel the blocked database command.");
+        await transaction.RollbackAsync();
+    }
+
+    private static int Waiting(IdentityDbContext db, string table)
+    {
+        var sql = "SELECT count(*)::int AS \"Value\" FROM pg_locks WHERE NOT granted AND relation = '" + table + "'::regclass";
+        return db.Database.SqlQueryRaw<int>(sql).AsEnumerable().Single();
+    }
+
     private sealed class EmptyReader : IVesselEventReader
     {
         private readonly string cursor = Guid.NewGuid().ToString("N") + ".0";
@@ -248,6 +318,29 @@ public sealed class StreamRevalidationTests
     {
         public int Calls { get; private set; }
         public ValueTask<bool> StillValidAsync(CancellationToken cancellationToken) { Calls++; return ValueTask.FromResult(false); }
+    }
+    private sealed class StalledPrincipal : IPrincipalValidity
+    {
+        private int calls;
+        public int Calls => Volatile.Read(ref calls);
+        public CancellationToken Cancelled { get; private set; }
+        // Never completes, even when cancelled, like a database read stuck behind a partition.
+        public ValueTask<bool> StillValidAsync(CancellationToken cancellationToken)
+        {
+            Cancelled = cancellationToken;
+            Interlocked.Increment(ref calls);
+            return new(new TaskCompletionSource<bool>().Task);
+        }
+    }
+    private sealed class CountingPrincipal(IPrincipalValidity inner) : IPrincipalValidity
+    {
+        private int calls;
+        public int Calls => Volatile.Read(ref calls);
+        public ValueTask<bool> StillValidAsync(CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref calls);
+            return inner.StillValidAsync(cancellationToken);
+        }
     }
     private sealed class ThrowingPrincipal : IPrincipalValidity
     {
