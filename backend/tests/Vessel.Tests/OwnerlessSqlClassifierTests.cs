@@ -23,6 +23,11 @@ public sealed class OwnerlessSqlClassifierTests
     [InlineData("lock table accounts in exclusive mode")]
     [InlineData("set search_path to public")]
     [InlineData("do $$ begin delete from accounts; end $$")]
+    [InlineData("do 'begin delete from accounts; end'")]
+    [InlineData("do E'begin delete from accounts; end'")]
+    [InlineData("do language plpgsql $$ begin delete from accounts; end $$")]
+    [InlineData("/* outer /* inner */ end */ SELECT * FROM accounts")]
+    [InlineData("/* outer /* inner */ end */ truncate accounts")]
     public void Ownerless_or_disguised_sql_needs_review(string sql) => Assert.True(OwnerlessSqlClassifier.RequiresReview(sql));
 
     [Theory]
@@ -67,6 +72,14 @@ public sealed class OwnerlessSqlClassifierTests
     [InlineData("INSERT INTO monitor_accounts(\"AccountId\",\"OwnerId\") VALUES({id},{db.CurrentOwnerId}) ON CONFLICT (\"AccountId\") DO UPDATE SET \"State\"='idle'")]
     [InlineData("INSERT INTO copies(owner_id,name) SELECT @owner, name FROM accounts")]
     [InlineData("INSERT INTO copies(owner_id,name) VALUES(@owner,(SELECT max(name) FROM accounts))")]
+    // Ownership transfer: the rows are the owner's, but the assignment hands them to someone else.
+    [InlineData("UPDATE accounts SET owner_id=@other WHERE owner_id=@owner")]
+    [InlineData("UPDATE accounts a SET name=@n, a.owner_id=@other WHERE a.owner_id=@owner")]
+    [InlineData("UPDATE accounts SET \"OwnerId\"={other} WHERE \"OwnerId\"={db.CurrentOwnerId}")]
+    [InlineData("UPDATE accounts SET \"owner_id\"=@other WHERE owner_id=@owner")]
+    [InlineData("UPDATE accounts SET (name, owner_id)=(@n, @other) WHERE owner_id=@owner")]
+    [InlineData("INSERT INTO n(owner_id,id) VALUES(@owner,@id) ON CONFLICT(owner_id,id) DO UPDATE SET owner_id=@other")]
+    [InlineData("INSERT INTO n(owner_id,id) VALUES(@owner,@id) ON CONFLICT(owner_id,id) DO UPDATE SET n.\"OwnerId\"=@other RETURNING id")]
     public void Owner_predicates_outside_the_safe_subset_need_review(string sql) =>
         Assert.True(OwnerlessSqlClassifier.RequiresReview(sql));
 
@@ -81,6 +94,8 @@ public sealed class OwnerlessSqlClassifierTests
     [InlineData("Copy failed. Check local files.")]
     [InlineData("Lock callback failed.")]
     [InlineData("Values")]
+    [InlineData("Do it again.")]
+    [InlineData("/* note /* nested */ still a note */ refresh")]
     public void Prose_is_not_sql(string text) => Assert.False(OwnerlessSqlClassifier.IsSql(text));
 
     [Fact]
@@ -89,5 +104,13 @@ public sealed class OwnerlessSqlClassifierTests
         Assert.Equal("-- lookup\nSELECT \"Id\"", OwnerlessSqlClassifier.Text("\"-- lookup\\nSELECT \\\"Id\\\"\""));
         Assert.Equal("SELECT \"OwnerId\"", OwnerlessSqlClassifier.Text("$@\"SELECT \"\"OwnerId\"\"\""));
         Assert.True(OwnerlessSqlClassifier.RequiresReview(OwnerlessSqlClassifier.Text("\"-- lookup\\nSELECT * FROM accounts\"")));
+        Assert.Equal("SELECT * FROM accounts", OwnerlessSqlClassifier.Text("\"S\\u0045LECT * FROM accounts\""));
+        Assert.Equal("SELECT * FROM accounts", OwnerlessSqlClassifier.Text("$\"S\\U00000045LECT * FROM accounts\""));
+        Assert.Equal("SELECT * FROM accounts", OwnerlessSqlClassifier.Text("\"S\\x45LECT * FROM accounts\""));
+        Assert.Equal("SELECT * FROM accounts", OwnerlessSqlClassifier.Text("\"S\\x0045LECT * FROM accounts\""));
+        Assert.Equal("\a\b\f\v\u001b\0x", OwnerlessSqlClassifier.Text("\"\\a\\b\\f\\v\\e\\0x\""));
+        Assert.Equal("\U0001F600", OwnerlessSqlClassifier.Text("\"\\U0001F600\""));
+        Assert.True(OwnerlessSqlClassifier.RequiresReview(OwnerlessSqlClassifier.Text("\"S\\u0045LECT * FROM accounts\"")));
+        Assert.True(OwnerlessSqlClassifier.RequiresReview(OwnerlessSqlClassifier.Text("$\"\\x44\\x45LETE FROM accounts\"")));
     }
 }
