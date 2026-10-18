@@ -179,6 +179,15 @@ public sealed class OwnerScopeArchitectureTests
             // Not SQL: design-time DbContext factory error messages.
             "Vessel.Identity/IdentityDbContext.cs|e1b7a668a5e3ab1cf3318d78321688ad059827b7d660f00bda0ac249e2afee69",
             "Vessel.Persistence/VesselDbContextFactory.cs|e1b7a668a5e3ab1cf3318d78321688ad059827b7d660f00bda0ac249e2afee69",
+            // Not SQL: identity command names "reset-after-restore" and "revoke-sessions".
+            "Vessel.Identity/IdentityAdministration.cs|de972956ff71edac782269c6c600a1fd82dc90c14f4363d70e3287828933c5db",
+            "Vessel.Identity/IdentityAdministration.cs|d0a010615ff67a2fdcaabb9a9ea71fda1e68f0cb866d887bd960e2daac2ce4e2",
+            "Vessel.Identity/IdentityCommands.cs|de972956ff71edac782269c6c600a1fd82dc90c14f4363d70e3287828933c5db",
+            "Vessel.Identity/IdentityCommands.cs|d0a010615ff67a2fdcaabb9a9ea71fda1e68f0cb866d887bd960e2daac2ce4e2",
+            // Not SQL: reset-after-restore completion message.
+            "Vessel.Identity/IdentityAdministration.cs|05bcbd54e5313ea9342913bae8c9ca458edd7ac36a0dfdcf0493ff7afc0aab60",
+            // Not SQL: identity command usage text ("--user", "--address" … and words such as "revoke").
+            "Vessel.Identity/IdentityCommands.cs|077a1423296023055128d9ed1c94d99ecfbd28849c50709809d3ca8d2d47489b",
         ];
         // One entry per distinct path and statement text: repeating an already reviewed literal needs no new review.
         Assert.Equal(reviewed.Length, reviewed.Distinct().Count());
