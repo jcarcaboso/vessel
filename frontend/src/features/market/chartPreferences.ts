@@ -3,6 +3,7 @@ import { candleIntervals, type CandleInterval } from '@/api/candles'
 import { isDrawingKind } from '@/components/chart/drawingTools'
 import type { DrawingKind } from '@/components/chart/drawings'
 import { defaultIndicators, migrateLegacyIndicators, normalizeIndicators, type IndicatorSettings } from '@/components/chart/indicators'
+import { onPreferenceScope, preferenceKey } from '@/lib/preference-scope'
 
 /** View preferences only. No market data, tokens or draft content are stored. */
 export interface ChartPreferences {
@@ -20,10 +21,9 @@ export interface ChartPreferences {
   indicators: IndicatorSettings
 }
 
-const storageKey = 'vessel.chart.preferences.v1'
 const schemaVersion = 2
 function saveChartPreferences(preferences: ChartPreferences) {
-  try { localStorage.setItem(storageKey, JSON.stringify({ ...preferences, schemaVersion })) } catch { /* Preferences stay in memory. */ }
+  try { localStorage.setItem(preferenceKey('chart.preferences.v1'), JSON.stringify({ ...preferences, schemaVersion })) } catch { /* Preferences stay in memory. */ }
 }
 export const defaultChartPreferences: ChartPreferences = {
   interval: '1h', favorites: ['5m', '1h', '4h', '1d'], magnet: false, live: true,
@@ -34,7 +34,7 @@ const isInterval = (value: unknown): value is CandleInterval => candleIntervals.
 const ordered = (intervals: Iterable<CandleInterval>) => candleIntervals.filter(interval => new Set(intervals).has(interval))
 
 const readStorage = () => {
-  try { return localStorage.getItem(storageKey) } catch { return null }
+  try { return localStorage.getItem(preferenceKey('chart.preferences.v1')) } catch { return null }
 }
 
 export function readChartPreferences(): ChartPreferences {
@@ -76,6 +76,13 @@ const subscribe = (listener: () => void) => {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
 }
+
+// A signed-in user's own key replaces the unscoped one; charts mounted later read it.
+onPreferenceScope(() => {
+  current = undefined
+  storedText = null
+  for (const listener of listeners) listener()
+})
 
 function update(patch: Partial<ChartPreferences>) {
   const previous = snapshot()

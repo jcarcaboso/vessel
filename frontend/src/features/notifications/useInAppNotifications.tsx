@@ -51,6 +51,7 @@ export interface InAppNotifications {
  * The shell's in-app notifications: the unread count, channel switch and worker status from the shared stream,
  * and popups. Each tab claims unshown notifications only while visible and focused, so one tab shows each popup
  * once. A popup closing on its timer leaves its notification unread; its close button or a link marks it read.
+ * The durable shown marker is the server's owner-scoped delivery claim, never browser storage.
  */
 export function useInAppNotifications({ api, active, onLink, onOpenPage }: {
   api: WorkspaceApi

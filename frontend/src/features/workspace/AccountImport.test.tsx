@@ -12,6 +12,16 @@ import { CreateAccountDialog } from './CreateDialogs'
 
 beforeEach(() => vi.stubEnv('DEV', false))
 
+/**
+ * A Retry-After deadline `seconds` from now, with the clock held there: the notice counts down from the moment it
+ * renders, and a slow run must not turn 60 into 59.
+ */
+function frozenRetryAt(seconds: number) {
+  const now = Date.now()
+  vi.spyOn(Date, 'now').mockReturnValue(now)
+  return new Date(now + seconds * 1000).toISOString()
+}
+
 function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
     ...createWorkspaceApi('test-only'),
@@ -43,6 +53,45 @@ async function selectMain() {
 }
 
 describe('Wallet account import', () => {
+  it('shows the public discovery wait instead of a generic failure', async () => {
+    const api = client({ discoverAccounts: vi.fn().mockRejectedValue(new ApiError('http', 'Generic failure.', 429,
+      frozenRetryAt(60))) })
+    render(<Fixture api={api} />)
+    await userEvent.type(screen.getByLabelText('Public wallet address'), discoveryFixture.address)
+    await userEvent.click(screen.getByRole('button', { name: 'Find wallet' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Wait 60 seconds before trying again.')
+    expect(api.discoverAccounts).toHaveBeenCalledOnce()
+  })
+
+  it('shows the token-backed name-discovery wait without losing selections', async () => {
+    const api = client({ discoverAccounts: vi.fn().mockResolvedValueOnce(discoveryFixture)
+      .mockRejectedValueOnce(new ApiError('http', 'Private credential detail.', 429, frozenRetryAt(60))) })
+    render(<Fixture api={api} />)
+    await discover()
+    await selectMain()
+    await userEvent.type(screen.getByLabelText('Read-only token'), 'ro:test-only')
+    await userEvent.click(screen.getByRole('button', { name: 'Load Lighter names' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Wait 60 seconds before trying again.')
+    expect(screen.getByRole('checkbox', { name: /Main account.*9007199254740993/ })).toBeChecked()
+    expect(screen.queryByText(/Private credential detail/)).not.toBeInTheDocument()
+    expect(api.discoverAccounts).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps an imported account when token verification is rate limited and shows the wait', async () => {
+    const api = client({ saveAccountCredential: vi.fn().mockRejectedValue(new ApiError('http', 'Private credential detail.', 429,
+      frozenRetryAt(60))) })
+    const onCreated = vi.fn()
+    render(<Fixture api={api} onCreated={onCreated} />)
+    await discover()
+    await selectMain()
+    await userEvent.type(screen.getByLabelText('Read-only token'), 'ro:test-only')
+    await userEvent.click(screen.getByRole('button', { name: 'Import selected (1)' }))
+    expect(await screen.findByText(/Wait 60 seconds before trying again/)).toHaveTextContent('Imported.')
+    expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({ id: indexAccount.id }))
+    expect(api.saveAccountCredential).toHaveBeenCalledOnce()
+    expect(screen.queryByText(/Private credential detail/)).not.toBeInTheDocument()
+  })
+
   it.each(['close', 'unmount', 'API replacement'] as const)('aborts wallet discovery on %s and ignores a late result', async action => {
     let resolve!: (value: typeof discoveryFixture) => void
     const api = client({ discoverAccounts: vi.fn().mockImplementation(() => new Promise(accept => { resolve = accept })) })

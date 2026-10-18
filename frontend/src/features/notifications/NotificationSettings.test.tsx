@@ -1,11 +1,12 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { WorkspaceApi } from '@/api/workspace'
+import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import { notificationPreferencesConflict } from '@/api/notifications'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { notificationPreferencesFixture } from '@/test/notification-fixture'
+import { sessionFixture } from '@/test/identity-fixture'
 import { NotificationSettings } from './NotificationSettings'
 import type { InAppChange, InAppNotifications } from './useInAppNotifications'
 
@@ -99,6 +100,24 @@ describe('Notification settings', () => {
     expect(waiting).toBeDisabled()
     await act(async () => { await vi.advanceTimersByTimeAsync(8000) })
     expect(screen.getByRole('button', { name: 'Send test notification' })).toBeEnabled()
+  })
+
+  it.each(['7', 'Sat, 17 Oct 2026 10:00:07 GMT'])('shows a Wallet-mode wait notice and cooldown from Retry-After: %s', async retryAfter => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-17T10:00:00Z') })
+    const fetcher = vi.fn((path: string) => Promise.resolve(new Response(JSON.stringify(
+      path.endsWith('/test') ? { code: 'rate-limited', detail: 'Do not show this body.' } : notificationPreferencesFixture,
+    ), { status: path.endsWith('/test') ? 429 : 200, headers: { 'Retry-After': retryAfter } })))
+    vi.stubGlobal('fetch', fetcher)
+    show(createWorkspaceApi({ kind: 'session', userId: sessionFixture.user.id, sessionId: sessionFixture.session.id }))
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    await user.click(await screen.findByRole('button', { name: 'Send test notification' }))
+    const notice = await screen.findByText('Too many requests. Wait 7 seconds before trying again.')
+    expect(notice.closest('[role="status"]')).toHaveClass('is-warning')
+    expect(screen.queryByText('Do not show this body.')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Send test notification (wait 7 s)' })).toBeDisabled()
+    await act(async () => { await vi.advanceTimersByTimeAsync(8000) })
+    expect(screen.getByRole('button', { name: 'Send test notification' })).toBeEnabled()
+    expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/test'))).toHaveLength(1)
   })
 
   it('reports a lagging subscription and failed deliveries', async () => {

@@ -23,7 +23,7 @@ export function ReadOnlyTokenInput({ venueId, value, onChange, disabled = false 
       Create a read-only token in {venues.name(venueId)}
     </a>}
     <div className="heading-with-tip"><label htmlFor={id}>Read-only token</label>{secure && <InfoTip label="How the token is stored">
-      No wallet signing is required. Vessel verifies access before storing it encrypted; the token is never displayed again.</InfoTip>}</div>
+      Vessel never signs, sends or approves anything at a venue. It verifies access before storing it encrypted; the token is never displayed again.</InfoTip>}</div>
     <Input id={id} type="password" value={value} onChange={event => onChange(event.target.value)}
       disabled={disabled || !secure} autoComplete="new-password" spellCheck={false}
       autoCapitalize="none" maxLength={512} aria-describedby={`${id}-help`} />

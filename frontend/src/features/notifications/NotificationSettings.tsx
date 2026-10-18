@@ -100,7 +100,8 @@ export function NotificationSettings({ api, inApp }: { api: WorkspaceApi; inApp:
         const at = cause.retryAtUtc ? Date.parse(cause.retryAtUtc) : Date.now() + 10_000
         setNow(Date.now()); setCooldown({ api, until: at })
       }
-      notify({ tone: 'error', message: errorMessage(cause, 'The test notification could not be requested.') })
+      notify({ tone: cause instanceof ApiError && cause.status === 429 ? 'warning' : 'error',
+        message: errorMessage(cause, 'The test notification could not be requested.') })
     } finally {
       setTestingFor(current => current === api ? null : current)
     }

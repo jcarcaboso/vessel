@@ -1,10 +1,13 @@
 import { useSyncExternalStore } from 'react'
+import { deviceThemeKey, onPreferenceScope, preferenceKey, preferenceUser } from '@/lib/preference-scope'
 import { generatePalette } from './generator'
 import { defaultThemeId, isHexColor, mix, themes, type Theme, type ThemeColorKey, type ThemeColors, type ThemeScheme } from './themes'
 
 /**
  * The owner's theme choice and per-theme colour overrides. Appearance is a browser preference, not workspace
- * data, so it lives in localStorage and survives disconnecting; it never holds anything sensitive.
+ * data, so it lives in localStorage and survives disconnecting; it never holds anything sensitive. A signed-in
+ * user has their own key (`lib/preference-scope`); the device keeps only the last built-in theme ID for the
+ * sign-in screen.
  */
 export interface Appearance {
   themeId: string
@@ -178,7 +181,21 @@ export function applyAppearance(appearance: Appearance, root: HTMLElement = docu
 }
 
 const readStorage = () => {
-  try { return window.localStorage.getItem(storageKey) } catch { return null }
+  try { return window.localStorage.getItem(preferenceKey('appearance')) } catch { return null }
+}
+
+/** The device theme: a built-in theme ID only, never colours or a saved theme. */
+export function readDeviceTheme(): string | null {
+  try {
+    const id = window.localStorage.getItem(deviceThemeKey)
+    return themes.some(theme => theme.id === id) ? id : null
+  } catch { return null }
+}
+
+/** A signed-in user's built-in choice becomes the device theme; saved and draft themes leave it unchanged. */
+function rememberDeviceTheme(appearance: Appearance) {
+  if (!preferenceUser() || !themes.some(theme => theme.id === appearance.themeId)) return
+  try { window.localStorage.setItem(deviceThemeKey, appearance.themeId) } catch { /* Only the sign-in screen's theme is lost. */ }
 }
 
 let current: Appearance = parseAppearance(readStorage())
@@ -186,16 +203,34 @@ const listeners = new Set<() => void>()
 
 function commit(next: Appearance) {
   current = next
-  try { window.localStorage.setItem(storageKey, JSON.stringify(next)) } catch { /* Private mode keeps the choice for this page only. */ }
+  try { window.localStorage.setItem(preferenceKey('appearance'), JSON.stringify(next)) } catch { /* Private mode keeps the choice for this page only. */ }
+  rememberDeviceTheme(next)
   applyAppearance(next)
   for (const listener of listeners) listener()
 }
 
-/** Applies the stored theme before the first render, so the page never flashes the default. */
+/**
+ * Applies the stored theme before the first render, so the page never flashes the default. Before anyone signs in
+ * the device theme wins when present, otherwise the legacy key.
+ */
 export function initAppearance() {
   current = parseAppearance(readStorage())
-  applyAppearance(current)
+  const device = preferenceUser() ? null : readDeviceTheme()
+  applyAppearance(device ? { ...emptyAppearance(), themeId: device } : current)
 }
+
+/** Token mode has no device theme: show the stored appearance in case an earlier Wallet-mode page left one. */
+export function applyStoredAppearance() {
+  current = parseAppearance(readStorage())
+  applyAppearance(current)
+  for (const listener of listeners) listener()
+}
+
+// Signing in switches to the user's key: re-read, apply and remember the device theme.
+onPreferenceScope(() => {
+  applyStoredAppearance()
+  rememberDeviceTheme(current)
+})
 
 export const appearanceStore = {
   get: () => current,

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { CandleInterval } from '@/api/candles'
 import type { MarketContext, VenueCandle, WorkspaceApi } from '@/api/workspace'
 
-import { ApiError } from '@/api/errors'
+import { ApiError, errorMessage } from '@/api/errors'
 import { candleCache } from './candleCache'
 
 export type LiveMarketState = 'off' | 'connecting' | 'live' | 'reconnecting' | 'polling' | 'stale'
@@ -31,7 +31,7 @@ export interface LiveMarketOptions {
   refreshContext: () => void
 }
 
-interface Session { key: string; state: LiveMarketState; lastEventAt: string | null }
+interface Session { key: string; state: LiveMarketState; lastEventAt: string | null; notice: string | null }
 
 /**
  * Keeps a loaded chart current from the market stream: upserts candles, replaces statistics, reconnects with
@@ -56,8 +56,9 @@ export function useLiveMarket(options: LiveMarketOptions) {
     let polling = false
     let gapFill = false
     let upstreamInterrupted = false
+    let rateLimited = false
 
-    const publish = (state: LiveMarketState, eventAt?: string) => {
+    const publish = (state: LiveMarketState, eventAt?: string, notice: string | null = null) => {
       if (disposed) return
       if (state === 'live' && upstreamInterrupted) {
         upstreamInterrupted = false
@@ -65,7 +66,7 @@ export function useLiveMarket(options: LiveMarketOptions) {
       } else if (state === 'reconnecting' || state === 'stale') upstreamInterrupted = true
       setSession(previous => {
         const lastEventAt = eventAt ?? (previous?.key === key ? previous.lastEventAt : null)
-        return previous?.key === key && previous.state === state && previous.lastEventAt === lastEventAt ? previous : { key, state, lastEventAt }
+        return previous?.key === key && previous.state === state && previous.lastEventAt === lastEventAt && previous.notice === notice ? previous : { key, state, lastEventAt, notice }
       })
     }
     const hidden = () => document.visibilityState === 'hidden'
@@ -93,6 +94,15 @@ export function useLiveMarket(options: LiveMarketOptions) {
         else if (event.type === 'context') { handlers.current.onContext(event.context); publish('live', now) }
         else publish(event.status.state)
       }).then(() => ended(abort, received, openedAt), (error: unknown) => {
+        if (disposed || abort.signal.aborted || controller !== abort) return
+        if (error instanceof ApiError && error.status === 429) {
+          // Admission limits wait for an explicit Live toggle, not reconnects or REST polling.
+          rateLimited = true
+          controller = null
+          clearRetry(); clearPoll()
+          publish('stale', undefined, errorMessage(error, ''))
+          return
+        }
         if (error instanceof ApiError && (error.status === 401 || error.status === 403)) candleCache(api).invalidate()
         else if (error instanceof ApiError && (error.status === 404 || error.status === 409)) candleCache(api).invalidate(accountId)
         else ended(abort, received, openedAt)
@@ -128,7 +138,7 @@ export function useLiveMarket(options: LiveMarketOptions) {
         controller = null
         open?.abort()
         gapFill = true
-      } else if (!controller && retryTimer === undefined) {
+      } else if (!rateLimited && !controller && retryTimer === undefined) {
         gapFill = false
         upstreamInterrupted = false
         refreshAll()
@@ -161,5 +171,6 @@ export function useLiveMarket(options: LiveMarketOptions) {
   return {
     state: (enabled ? current?.state ?? 'connecting' : 'off') as LiveMarketState,
     lastEventAt: current?.lastEventAt ?? null,
+    notice: current?.notice ?? null,
   }
 }

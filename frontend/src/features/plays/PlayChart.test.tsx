@@ -212,6 +212,19 @@ describe('Chart panel', () => {
     expect(state.candles).toHaveLength(2)
   })
 
+  it('shows the candle-refresh wait and keeps loaded candles without retrying', async () => {
+    const candles = vi.fn().mockResolvedValueOnce(candleSeriesFixture)
+      .mockRejectedValueOnce(new ApiError('http', 'Generic failure.', 429, new Date(Date.now() + 60_000).toISOString()))
+    const { state, factory } = fakeAdapter()
+    render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
+      source={{ api: chartApi(candles), accountId: accountFixture.id }} createAdapter={factory} />)
+    await screen.findByText(/Updated/)
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Wait 60 seconds before trying again.')
+    expect(state.candles).toHaveLength(2)
+    expect(candles).toHaveBeenCalledTimes(2)
+  })
+
   it('opens the same chart in an expanded dialog and restores focus on Escape', async () => {
     const { state, factory } = fakeAdapter()
     render(<ChartPanel entries={entries()} selectedId="" instrument="BTC" onSelect={vi.fn()}
@@ -718,11 +731,11 @@ describe('Chart panel level editing', () => {
 })
 
 describe('Chart panel live updates', () => {
-  interface Stream { signal: AbortSignal; emit: (event: MarketStreamEvent) => void; end: () => void; fail: () => void }
+  interface Stream { signal: AbortSignal; emit: (event: MarketStreamEvent) => void; end: () => void; fail: (error?: ApiError) => void }
   function streams() {
     const opened: Stream[] = []
     const marketStream = vi.fn<WorkspaceApi['marketStream']>((_id, _query, signal, onEvent) => new Promise<void>((resolve, reject) => {
-      opened.push({ signal, emit: event => act(() => onEvent(event)), end: resolve, fail: () => reject(new ApiError('unavailable', 'Interrupted.')) })
+      opened.push({ signal, emit: event => act(() => onEvent(event)), end: resolve, fail: error => reject(error ?? new ApiError('unavailable', 'Interrupted.')) })
       signal.addEventListener('abort', () => resolve(), { once: true })
     }))
     return { opened, marketStream, last: () => opened.at(-1)! }
@@ -766,6 +779,20 @@ describe('Chart panel live updates', () => {
     expect(toggle()).toHaveTextContent('Live')
     last().emit({ type: 'status', status: { state: 'stale', observedAt: '2026-10-02T08:01:00Z' } })
     expect(toggle()).toHaveTextContent('Stale')
+  })
+
+  it('renders a stream wait notice and reconnects only after the Live toggle', async () => {
+    const { last, marketStream } = await setup()
+    last().fail(new ApiError('http', 'Generic failure.', 429, new Date(Date.now() + 5_000).toISOString()))
+    await flush()
+    expect(screen.getByText(/Wait 5 seconds before trying again/)).toHaveTextContent('Turn Live off and on to reconnect.')
+    await advance(60_000)
+    expect(marketStream).toHaveBeenCalledOnce()
+    fireEvent.click(toggle())
+    fireEvent.click(toggle())
+    await flush()
+    expect(marketStream).toHaveBeenCalledTimes(2)
+    expect(screen.queryByText(/Turn Live off/)).not.toBeInTheDocument()
   })
 
   it('upserts streamed candles without resetting the view and replaces the statistics', async () => {

@@ -11,6 +11,16 @@ import { ManageAccountDialog } from './ManageDialogs'
 
 beforeEach(() => vi.stubEnv('DEV', false))
 
+/**
+ * A Retry-After deadline `seconds` from now, with the clock held there: the notice counts down from the moment it
+ * renders, and a slow run must not turn 60 into 59.
+ */
+function frozenRetryAt(seconds: number) {
+  const now = Date.now()
+  vi.spyOn(Date, 'now').mockReturnValue(now)
+  return new Date(now + seconds * 1000).toISOString()
+}
+
 function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
     ...createWorkspaceApi('test-only'),
@@ -30,6 +40,19 @@ function Fixture({ api, enabled = true }: { api: WorkspaceApi; enabled?: boolean
 }
 
 describe('Account credential management', () => {
+  it('shows the verification wait, clears the token and does not retry the save', async () => {
+    const api = client({ saveAccountCredential: vi.fn().mockRejectedValue(new ApiError('http', 'ro:never-display', 429,
+      frozenRetryAt(60))) })
+    render(<Fixture api={api} />)
+    await screen.findByText('Valid')
+    await userEvent.type(screen.getByLabelText('Read-only token'), 'ro:fixture-only')
+    await userEvent.click(screen.getByRole('button', { name: 'Verify and replace token' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Wait 60 seconds before trying again.')
+    expect(screen.getByLabelText('Read-only token')).toHaveValue('')
+    expect(api.saveAccountCredential).toHaveBeenCalledOnce()
+    expect(document.body).not.toHaveTextContent('ro:never-display')
+  })
+
   it.each(['valid', 'expiring', 'expired', 'unavailable'] as const)('shows %s metadata, expiry and exact source identity', async status => {
     const api = client({ accountCredential: vi.fn().mockResolvedValue({
       ...credentialFixture, credential: { ...credentialFixture.credential, status },

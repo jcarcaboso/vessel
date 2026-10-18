@@ -1,7 +1,11 @@
 import { useEffect, useState, type ComponentType } from 'react'
+import { createPublicAuthApi, type AuthConfig } from '@/api/auth'
+import { errorMessage } from '@/api/errors'
 import { ConnectionGate } from '@/features/connection/ConnectionGate'
+import { applyStoredAppearance } from '@/features/settings/appearance'
 import { Button } from '@/components/ui/button'
 import type { ApplicationShell as Shell } from '@/features/workspace/ApplicationShell'
+import type { SignInGate as Gate } from '@/features/identity/SignInGate'
 
 type ShellComponent = ComponentType<Parameters<typeof Shell>[0]>
 
@@ -18,7 +22,7 @@ function ShellLoadFallback() {
   return <main className="connection-page">
     <section className="panel connection-card" role="alert">
       <h1>The workspace could not be loaded.</h1>
-      <p className="muted">The browser could not load or initialize the workspace code. This can follow a connection problem or app update. Reloading the browser asks for the API token again.</p>
+      <p className="muted">The browser could not load or initialize the workspace code. This can follow a connection problem or app update. Reloading the browser may ask you to connect or sign in again.</p>
       <Button variant="outline" onClick={() => window.location.reload()}>Reload browser</Button>
     </section>
   </main>
@@ -40,6 +44,48 @@ function DeferredShell(props: Parameters<typeof Shell>[0]) {
   return <Loaded {...props} />
 }
 
+type GateComponent = typeof Gate
+// Wallet sign-in loads only when the server is in Wallet mode, so Token mode's first screen stays as light as before.
+let signInGate: Promise<GateComponent> | null = null
+const loadSignInGate = () => signInGate ??= import('@/features/identity/SignInGate').then(module => module.SignInGate)
+
+function WalletGate({ config }: { config: Extract<AuthConfig, { mode: 'wallet' }> }) {
+  const [Loaded, setLoaded] = useState<GateComponent | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let active = true
+    loadSignInGate().then(component => { if (active) setLoaded(() => component) }, () => { if (active) setFailed(true) })
+    return () => { active = false }
+  }, [])
+  if (failed) return <ShellLoadFallback />
+  if (!Loaded) return <main className="connection-page"><p className="muted" role="status">Loading sign-in…</p></main>
+  return <Loaded registration={config.registration} originAccepted={config.originAccepted}>
+    {(system, disconnect, api, identity) => <DeferredShell system={system} disconnect={disconnect} api={api} identity={identity} />}
+  </Loaded>
+}
+
+/** The server decides the sign-in mode: the token form in Token mode, wallet sign-in in Wallet mode. */
 export function WorkspacePage() {
-  return <ConnectionGate>{(system, disconnect, api) => <DeferredShell system={system} disconnect={disconnect} api={api} />}</ConnectionGate>
+  const [config, setConfig] = useState<AuthConfig | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    const controller = new AbortController()
+    createPublicAuthApi().config(window.location.origin, controller.signal).then(next => {
+      if (controller.signal.aborted) return
+      if (next.mode === 'token') applyStoredAppearance()
+      else void loadSignInGate().catch(() => undefined)
+      setConfig(next)
+    }, (cause: unknown) => { if (!controller.signal.aborted) setError(errorMessage(cause, 'Vessel is unreachable.')) })
+    return () => controller.abort()
+  }, [attempt])
+  if (config?.mode === 'token') return <ConnectionGate>{(system, disconnect, api) => <DeferredShell system={system} disconnect={disconnect} api={api} />}</ConnectionGate>
+  if (config?.mode === 'wallet') return <WalletGate config={config} />
+  return <main className="connection-page">
+    {error ? <section className="panel connection-card" role="alert">
+      <h1>Vessel is unreachable</h1>
+      <p className="muted">{error}</p>
+      <Button variant="outline" onClick={() => { setError(null); setAttempt(value => value + 1) }}>Retry</Button>
+    </section> : <p className="muted" role="status">Connecting to Vessel…</p>}
+  </main>
 }

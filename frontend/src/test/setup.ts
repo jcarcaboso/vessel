@@ -1,8 +1,13 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
+import { resetPreferenceScope } from '@/lib/preference-scope'
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.unstubAllEnvs() })
+// Browser storage never leaks between tests: preferences, the device notice and the last-used wallet start empty.
+afterEach(() => {
+  cleanup(); vi.unstubAllGlobals(); vi.unstubAllEnvs()
+  localStorage.clear(); sessionStorage.clear(); resetPreferenceScope()
+})
 // jsdom has no layout or native scrolling; browser verification covers geometry.
 Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: vi.fn() })
 Object.defineProperty(window, 'scrollTo', { configurable: true, value: vi.fn() })

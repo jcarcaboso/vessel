@@ -17,12 +17,14 @@ vi.mock('@/features/workspace/ApplicationShell', async () => {
 
 it('starts loading the workspace on the connection screen and opens it once both are ready', async () => {
   const user = userEvent.setup()
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(systemFixture))))
+  // Token mode: the page asks the server for its sign-in mode first.
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (path: string) =>
+    new Response(JSON.stringify(path.startsWith('/api/auth/config') ? { mode: 'token' } : systemFixture))))
   render(<WorkspacePage />)
-  expect(screen.getByRole('heading', { name: 'Connect to your diary' })).toBeVisible()
+  expect(await screen.findByRole('heading', { name: 'Connect to your diary' })).toBeVisible()
   await vi.waitFor(() => expect(shell.loads).toBe(1))
 
-  await user.type(screen.getByLabelText('API token'), 'memory-only-token')
+  await user.type(await screen.findByLabelText('API token'), 'memory-only-token')
   await user.click(screen.getByRole('button', { name: 'Connect' }))
   expect(await screen.findByRole('status')).toHaveTextContent('Loading your workspace…')
 

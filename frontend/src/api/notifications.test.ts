@@ -5,6 +5,7 @@ import { monitorFrame } from './monitor'
 import { isInAppNotification, isNotificationClaim, isNotificationHead, isNotificationPage, isNotificationPreferences,
   notificationPreferencesConflict, notificationReadAllConflict, type NotificationQuery } from './notifications'
 import { eventCursor, fixtureEpoch } from '@/test/monitor-fixture'
+import { sessionFixture } from '@/test/identity-fixture'
 import { notificationCursor, notificationFixture, notificationHeadFixture, notificationPreferencesFixture, notificationWith } from '@/test/notification-fixture'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -93,11 +94,43 @@ describe('notification stream frames', () => {
   })
 })
 
-describe('notification client', () => {
+describe.each(['bearer', 'session'] as const)('%s notification client', mode => {
+  const client = () => createWorkspaceApi(mode === 'bearer' ? 'token' : {
+    kind: 'session', userId: sessionFixture.user.id, sessionId: sessionFixture.session.id,
+  })
+  it('uses this transport for every notification endpoint', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json(notificationHeadFixture))
+      .mockResolvedValueOnce(json({ items: [], page: 1, pageSize: 25, total: 0, unreadTotal: 0, allTotal: 0 }))
+      .mockResolvedValueOnce(json({ popups: [], more: 0 }))
+      .mockResolvedValueOnce(json({ ...notificationFixture, state: 'read', readAt: '2026-10-17T11:00:00Z' }))
+      .mockResolvedValueOnce(json({ read: 1 }))
+      .mockResolvedValueOnce(json(notificationPreferencesFixture))
+      .mockResolvedValueOnce(json(notificationPreferencesFixture))
+      .mockResolvedValueOnce(new Response(null, { status: 202 }))
+    vi.stubGlobal('fetch', fetcher)
+    const api = client()
+    await api.notificationHead()
+    await api.notifications(query)
+    await api.claimNotifications()
+    await api.readNotification(notificationFixture.id)
+    await api.readAllNotifications(notificationHeadFixture.nextCursor)
+    await api.notificationPreferences()
+    await api.saveNotificationPreferences({ ...notificationPreferencesFixture, expectedRevision: 3 })
+    await api.requestTestNotification()
+    expect(fetcher).toHaveBeenCalledTimes(8)
+    for (const [, init] of fetcher.mock.calls) {
+      expect(init.credentials).toBe(mode === 'session' ? 'same-origin' : 'omit')
+      expect(init.headers).toMatchObject(mode === 'session' ? { 'X-Vessel-User': sessionFixture.user.id } : { Authorization: 'Bearer token' })
+      expect(init.headers).not.toHaveProperty(mode === 'session' ? 'Authorization' : 'X-Vessel-User')
+      if (mode === 'session') expect(init.referrerPolicy).toBe('same-origin')
+    }
+  })
+
   it('sends both cursors on the stream only when a notification cursor is known', async () => {
     const fetcher = vi.fn().mockImplementation(() => Promise.resolve(new Response('', { headers: { 'Content-Type': 'text/event-stream' } })))
     vi.stubGlobal('fetch', fetcher)
-    const api = createWorkspaceApi('token')
+    const api = client()
     const signal = new AbortController().signal
     await api.monitorStream(eventCursor('5'), signal, () => undefined)
     await api.monitorStream(eventCursor('5'), signal, () => undefined, notificationCursor(7, 1))
@@ -109,7 +142,7 @@ describe('notification client', () => {
   it('builds page queries and rejects invalid filters before a request', async () => {
     const fetcher = vi.fn().mockImplementation(() => Promise.resolve(json({ items: [], page: 1, pageSize: 50, total: 0, unreadTotal: 0, allTotal: 0 })))
     vi.stubGlobal('fetch', fetcher)
-    const api = createWorkspaceApi('token')
+    const api = client()
     await api.notifications({ tab: 'all', category: 'links', severity: 'warning', page: 3, pageSize: 50 })
     expect(fetcher.mock.calls[0]![0]).toBe('/api/notifications?tab=all&category=links&severity=warning&page=3&pageSize=50')
     await expect(api.notifications({ tab: 'read' as 'all', page: 1, pageSize: 25 })).rejects.toBeInstanceOf(ApiError)
@@ -124,7 +157,7 @@ describe('notification client', () => {
       .mockResolvedValueOnce(json({ read: 4 }))
       .mockResolvedValueOnce(json({ title: 'Conflict', detail: 'Cursor ahead of the head.' }, 409))
     vi.stubGlobal('fetch', fetcher)
-    const api = createWorkspaceApi('token')
+    const api = client()
     expect(await api.claimNotifications()).toEqual({ popups: [notificationFixture], more: 2 })
     expect((await api.readNotification(notificationFixture.id)).state).toBe('read')
     expect(await api.readAllNotifications(notificationCursor(9))).toEqual({ read: 4 })
@@ -139,14 +172,14 @@ describe('notification client', () => {
   })
   it('rejects a read answer for another notification', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json(notificationWith(2))))
-    await expect(createWorkspaceApi('token').readNotification(notificationFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
+    await expect(client().readNotification(notificationFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
   })
   it('saves preferences with the expected revision and reports a stale revision as a conflict', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ ...notificationPreferencesFixture, revision: 4 }))
       .mockResolvedValueOnce(json({ title: 'Conflict' }, 409))
     vi.stubGlobal('fetch', fetcher)
-    const api = createWorkspaceApi('token')
+    const api = client()
     const fields = { enabled: true, minimumSeverity: 'warning' as const, categories: ['links' as const], expectedRevision: 3 }
     expect((await api.saveNotificationPreferences(fields)).revision).toBe(4)
     expect(fetcher.mock.calls[0]![1].method).toBe('PUT')
@@ -160,7 +193,7 @@ describe('notification client', () => {
       .mockResolvedValueOnce(new Response(null, { status: 202 }))
       .mockResolvedValueOnce(json({ title: 'A test notification was requested moments ago.' }, 429, { 'Retry-After': '7' }))
     vi.stubGlobal('fetch', fetcher)
-    const api = createWorkspaceApi('token')
+    const api = client()
     await expect(api.requestTestNotification()).resolves.toBeUndefined()
     await expect(api.requestTestNotification()).rejects.toMatchObject({ status: 429, retryAtUtc: '2026-10-17T10:00:07.000Z' })
     vi.useRealTimers()

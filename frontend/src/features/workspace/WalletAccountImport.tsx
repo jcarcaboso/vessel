@@ -69,7 +69,10 @@ function WalletImportSession({ venueId, api, portfolios, accounts, onCreated, on
       const next = await api.discoverAccounts(venueId, address.trim().toLowerCase(), controller.signal)
       if (!currentDiscovery(controller)) return
       setDiscovery(next); setNames(Object.fromEntries(next.accounts.map(a => [a.sourceId, a.name])))
-    } catch { if (currentDiscovery(controller)) setError('Could not find accounts for this wallet. Check the address and try again.') }
+    } catch (cause) {
+      if (currentDiscovery(controller)) setError(cause instanceof ApiError && cause.status === 429
+        ? errorMessage(cause, '') : 'Could not find accounts for this wallet. Check the address and try again.')
+    }
     finally { if (currentDiscovery(controller)) finish() }
   }
   async function loadNames() {
