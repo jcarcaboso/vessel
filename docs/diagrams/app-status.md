@@ -1,9 +1,8 @@
 # Vessel current-state diagrams
 
-Read with [Vessel today](../app-status.md). These diagrams describe the
-October 14, 2026 checkout at `d17f56a`, not a deployment or a future architecture.
-PR #38 remains a draft at this handoff. Waves 1 and 2 passed Sol verification
-after transport corrections; later cleanup waves remain unfinished.
+Read with [Vessel today](../app-status.md). These diagrams describe `main` on
+October 17, 2026, after the Notification Hub merged (`43ebaa0`), not a deployment
+or a future architecture.
 
 ## Screens and owner workflow
 
@@ -20,50 +19,67 @@ flowchart TD
     Plays -->|"Eligible saved closed results"| Review["Review<br/>Results and exclusion drill-down"]
     Retro -->|"Eligible results"| Review
     Review -->|"Open a Play and reflect"| Plays
-    Overview --- Settings["Settings<br/>Appearance and capabilities"]
+    Notifications["Notifications<br/>Unread count, popups, history"] -->|"Open the Play"| Plays
+    Notifications -->|"Open the account"| Accounts
+    Overview --- Settings["Settings<br/>Appearance, notification preferences, capabilities"]
 ```
 
 The [shell](../../frontend/src/features/workspace/ApplicationShell.tsx) owns
-navigation and unsaved Play state. Activity does not create Plays automatically.
+navigation, unsaved Play state and the one event stream that also carries
+notifications. Activity does not create Plays automatically.
 
 ## Runtime and trust boundaries
 
 Arrows show calls or data delivery, not project-reference dependencies.
-Application modules share one API process; these are not separate services.
+The API and the two workers are separate processes built from the same image;
+application modules inside the API are not separate services.
 
 ```mermaid
 flowchart TD
     Browser["Browser<br/>React + TypeScript + Lightweight Charts"]
     subgraph Host["Self-hosted server boundary"]
         API["ASP.NET Core 10 API<br/>Bearer authentication and owner scope"]
-        Modules["Application modules<br/>Workspace, Plays, Diary, Activity, Overview, Review, Sizing"]
+        Modules["Application modules<br/>Workspace, Plays, Diary, Activity, Overview, Review, Sizing, Notifications"]
         Market["Market data and evidence services"]
         Stores["EF Core persistence stores"]
-        DB[("PostgreSQL<br/>Owner-scoped records")]
-        Images[("Local evidence directory<br/>Original images")]
+        DB[("PostgreSQL<br/>Owner-scoped records, events, receipts, notifications")]
+        Images[("Evidence object store<br/>Local directory or S3-compatible")]
         Adapters["Read-only venue adapters"]
         Relay["Shared Hyperliquid WebSocket relay"]
+        Monitor["Monitor worker<br/>Scheduled and requested checks"]
+        Hub["Notifications worker<br/>The notifications subscription"]
+        Broker[("RabbitMQ<br/>Transport only")]
         API --> Modules
         API --> Market
         Modules --> Stores
         Market -->|"Evidence metadata"| Stores
         Stores --> DB
         Market -->|"Original bytes"| Images
-        Modules -->|"Refresh / execution checks"| Adapters
+        Modules -->|"Account refresh"| Adapters
         Market -->|"Candles / context"| Adapters
         Relay -->|"Observations via API"| API
+        Monitor -->|"Order, fill and position reads"| Adapters
+        Monitor -->|"Links, status, discrepancies, events"| DB
+        DB -->|"Outbox"| Broker
+        Broker -->|"vessel.events subscriptions"| Hub
+        Hub -->|"Notifications; catch-up reads"| DB
+        API -->|"Check wake-up (request recorded in PostgreSQL)"| Broker
+        Broker -->|"vessel.commands.monitor"| Monitor
     end
-    Browser -->|"Authenticated HTTP; SSE subscription"| API
-    API -->|"Responses and market events"| Browser
+    Browser -->|"Authenticated HTTP; the event stream; a market stream per live chart"| API
+    API -->|"Responses, events, notifications, market events"| Browser
     Adapters -->|"Read-only HTTP"| Venues["External venues<br/>Hyperliquid, RISEx, Lighter"]
     HL["Hyperliquid public market stream"] -->|"WebSocket observations"| Relay
 ```
 
 Production packaging puts nginx in front of the API and can add a TLS proxy.
-The diagram does not imply a deployed topology. Encryption keys stay in server
+PostgreSQL is the record: the event stream reads it, and a subscriber that
+missed broker messages catches up from it. The diagram does not imply a
+deployed topology. Encryption keys stay in server
 configuration; encrypted Lighter tokens stay in PostgreSQL. The browser cannot
 read them back. Venue inputs are validated before they become retained facts.
 See [backend boundaries](../architecture/backend-guide.md),
+[messaging and workers](../architecture/messaging-and-workers.md),
 [credential storage](../architecture/venue-credentials.md) and
 [deployment packaging](../../deploy/README.md).
 
@@ -79,7 +95,9 @@ flowchart TD
     Snapshot --> Overview["Overview<br/>Balances and retained-operation results"]
     Imports --> Activity["Activity<br/>Position operations from fills"]
     Activity -->|"Realized operation results"| Overview
-    Imports --> Match["Order-to-plan linking<br/>Automatic only when unambiguous"]
+    Venue --> Funding["Settled funding payments<br/>Bounded 30-day window"]
+    Funding --> Activity
+    Imports --> Match["Order-to-plan linking in monitor checks<br/>Automatic only when unambiguous"]
     Plan["Owner's saved plan"] --> Match
     Match --> Planned["Planned-origin Play<br/>Linked imported executions"]
     Manual["Explicit manual entries and exits<br/>Correction history; no venue imports"] --> ManualPlay["Manual-account Play<br/>Owner-recorded executions"]
@@ -93,6 +111,8 @@ flowchart TD
 ```
 
 Unknown costs and incomplete or contradictory executions can block scoring.
+Funding appears in Activity beside the operations; it never changes execution
+P&L, Review or sizing.
 See [diary rules](../architecture/diary-completion-contract.md),
 [Review](../architecture/portfolio-review.md) and the
 [sizing eligibility filter](../../backend/src/Vessel.Application/Sizing/SizingService.cs).
@@ -123,6 +143,7 @@ stateDiagram-v2
     end note
 ```
 
+Imported transitions happen in monitor checks, not when a Play is opened.
 Imported closure also requires complete, compatible linked executions and no
 resting entry order. A flat venue position alone is insufficient. Draft
 cancellation is an API/domain capability; the current Draft toolbar offers

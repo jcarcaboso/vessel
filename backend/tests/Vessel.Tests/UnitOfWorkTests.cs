@@ -272,6 +272,7 @@ public sealed class UnitOfWorkTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => accounts.WithManagementLockAsync(() => Task.FromResult(true), default));
         await Assert.ThrowsAsync<InvalidOperationException>(() => accounts.WithAccountLockAsync(Guid.NewGuid(), _ => Task.FromResult(true), default));
         await Assert.ThrowsAsync<InvalidOperationException>(() => plays.WithPlayLockAsync(Guid.NewGuid(), () => Task.FromResult(true), default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => plays.WithAccountLockAsync(Guid.NewGuid(), () => Task.FromResult(true), default));
         await Assert.ThrowsAsync<InvalidOperationException>(() => executions.WithAccountLockAsync(Guid.NewGuid(), () => Task.FromResult(true), default));
         await Assert.ThrowsAsync<InvalidOperationException>(() => diary.WithRequestLockAsync(Guid.NewGuid(), () => Task.FromResult(true), default));
         Assert.Null(db.Database.CurrentTransaction);

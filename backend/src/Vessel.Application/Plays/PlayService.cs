@@ -68,7 +68,11 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
 
     public async Task<PlayDto> GetAsync(Guid id, CancellationToken ct) => ToDto(await Find(id, ct));
 
-    public Task<PlayDto> CreateAsync(CreatePlayRequest request, CancellationToken ct) => unitOfWork.ExecuteAsync(async () =>
+    /// <summary>
+    /// Holds the account until the Play is saved: a deletion or disable waits for it, or it waits for them and sees
+    /// their result, so the Play never fails its account reference or lands on a deleted account.
+    /// </summary>
+    public Task<PlayDto> CreateAsync(CreatePlayRequest request, CancellationToken ct) => unitOfWork.ExecuteAsync(() => store.WithAccountLockAsync(request.AccountId, async () =>
     {
         var account = await EnabledAccount(request.AccountId, ct);
         var (instrument, source) = Instrument(account, request.Instrument, request.InstrumentSource);
@@ -80,7 +84,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         store.Add(play);
         if (review is not null) store.Add(review);
         return ToDto(play);
-    }, ct);
+    }, ct), ct);
 
     /// <summary>Holds the Play while it checks entry fills and saves, so no order links to an entry this revision changes in between.</summary>
     public Task<PlayDto> UpdateAsync(Guid id, UpdatePlayRequest request, CancellationToken ct) => unitOfWork.ExecuteAsync(() => store.WithPlayLockAsync(id, async () =>

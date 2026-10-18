@@ -124,6 +124,11 @@ public interface IPlayStore
     /// Cross-account moves first hold the owner management lock and reload the locked destination account.
     /// </summary>
     Task<T> WithPlayLockAsync<T>(Guid id, Func<Task<T>> action, CancellationToken ct, Guid? destinationAccountId = null);
+    /// <summary>
+    /// Requires an active unit of work and holds the account and execution advisory locks until its completion, so the
+    /// account cannot be deleted or disabled before a new Play is saved. Inside it the account has its committed values.
+    /// </summary>
+    Task<T> WithAccountLockAsync<T>(Guid accountId, Func<Task<T>> action, CancellationToken ct);
     /// <summary>Deletes the Play with its evidence records and returns the evidence object keys to remove.</summary>
     Task<IReadOnlyList<string>> DeleteAsync(Play play, CancellationToken ct);
 }

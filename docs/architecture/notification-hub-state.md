@@ -1,15 +1,15 @@
 # Notification Hub implementation state
 
-October 17, 2026. Implementation authorized the same day, with Sol (Codex) for design discussion and verification, as stacked pull requests. Follows the [plan](notification-hub-plan.md) and the [API contract](notification-hub-api-contract.md).
+October 17, 2026. Implementation authorized the same day, with Sol (Codex) for design discussion and verification, as stacked pull requests. All four merged into `main` the same day: #62 (N1), #63 (N2), #64 (N3) and #65 (N4), with CI passing on every layer. Follows the [plan](notification-hub-plan.md) and the [API contract](notification-hub-api-contract.md).
 
 ## Steps
 
 | Step | Scope | State |
 |---|---|---|
-| N1 | Hub core: tables and migration, `notifications` module and subscription, rules, identity parsing, relevance, run grouping, withdrawal, composer, feed cursor, unread count and reset version, store operations, account disable and deletion, retention, heartbeat | Implemented; tests below |
-| N2 | API: head, page, claim, read, read-all, preferences, test event, notification frames on the event stream | Implemented; tests below |
-| N3 | Browser: client and guards, two-cursor stream, popups, Notifications page, sidebar badge, Settings section, offline banner | Implemented; tests below |
-| N4 | Packaging and documentation: Compose service, module-aware health check, release and end-to-end scripts, development runner, operator and developer docs | Implemented; packaged verification passed |
+| N1 | Hub core: tables and migration, `notifications` module and subscription, rules, identity parsing, relevance, run grouping, withdrawal, composer, feed cursor, unread count and reset version, store operations, account disable and deletion, retention, heartbeat | Merged; tests below |
+| N2 | API: head, page, claim, read, read-all, preferences, test event, notification frames on the event stream | Merged; tests below |
+| N3 | Browser: client and guards, two-cursor stream, popups, Notifications page, sidebar badge, Settings section, offline banner | Merged; tests below |
+| N4 | Packaging and documentation: Compose service, module-aware health check, release and end-to-end scripts, development runner, operator and developer docs | Merged; packaged verification passed |
 
 ## Design review
 
@@ -108,7 +108,7 @@ Sol verified the change (round 5).
 
 The full backend suite with the change: 2,840 passed, 5 optional skips.
 
-Outside this work, Sol's sweep found a pre-existing race: creating a Play while its account is being deleted can fail the Play's account foreign key and return 500 instead of 404 or 409 (`PlayService.CreateAsync` reads the account without the account lock). It is reported, not fixed here.
+Outside this work, Sol's sweep found a pre-existing race: creating a Play while its account is being deleted can fail the Play's account foreign key and return 500 instead of 404 or 409 (`PlayService.CreateAsync` reads the account without the account lock). It is fixed in the follow-up described in [After the merge](#after-the-merge).
 
 ### Packaged release check
 
@@ -119,4 +119,10 @@ Outside this work, Sol's sweep found a pre-existing race: creating a Play while 
 Graphite and Paper, desktop and 390 px, from a local preview on an isolated synthetic database: [captures](../design/notifications/README.md).
 
 `docs/app-status.md` is a dated snapshot (October 14, `d17f56a`) that already predates the monitor and S3 storage, so it is not updated piecemeal here.
+
+## After the merge
+
+Sol's round-5 sweep found a pre-existing race outside the hub: a Play created while its account was being deleted failed the Play's account foreign key and returned 500. The follow-up makes `PlayService.CreateAsync` hold the account lock (`PlayStore.WithAccountLockAsync`, the same account row and execution advisory locks that Play edits take) from the enabled-account check until the Play is saved. A deletion that wins makes the creation answer 404; a creation that wins makes the deletion answer 409 because the account now has a Play. Two PostgreSQL tests cover both orders; both failed with the foreign-key error before the change.
+
+Sol verified the follow-up (round 6): both orders answer as intended, the reload reads committed account state, and no lock-order inversion with refresh or monitor admission, credential save, disable, portfolio moves, Play moves or the hub's disable hook. Its sweep found one more pre-existing race of the same kind. A Refresh on an account without Plays writes the monitoring baseline (`event_baselines`, `event_fills`) in a short unit of its own, and these tables have no account foreign key, so a deletion committing meanwhile left orphan rows. `EnsureMonitoringBaselineAsync` now reads the account with a key-share lock: a deletion waits for the baseline and then removes it, or wins and the baseline answers 404. Two tests in `AccountDeletionRacePostgresTests`, beside the Play creation tests, cover both orders and failed before the change. Sol confirmed the baseline lock in round 7 and found nothing above nit. PostgreSQL's statement log shows EF keeping the locking subquery, and there is no new lock-order inversion. When a deletion wins, the run fails as it would for any missing account, without a stranded lease. Sol also corrected three documentation details: the market stream is separate from the event stream, monitor eligibility includes outstanding discrepancy work and only planned venue Plays, and two links to the renamed monitor-plan heading.
 

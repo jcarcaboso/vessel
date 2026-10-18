@@ -69,8 +69,12 @@ public sealed partial class VesselEventStore(VesselDbContext db, VesselEventMuta
 
     public Task EnsureMonitoringBaselineAsync(Guid accountId, CancellationToken cancellationToken) => VesselEventSql.ParticipateAsync(db, async () =>
     {
-        if (!await db.Accounts.AnyAsync(a => a.Id == accountId && a.IsEnabled, cancellationToken))
-            throw new ProblemException(404, "Account not found.");
+        // The key-share lock keeps the account until this unit commits: a deletion waits and then removes the baseline,
+        // or wins and this answers 404, so no baseline outlives its account (these tables have no account foreign key).
+        var enabled = await db.Accounts.FromSqlInterpolated(
+                $"SELECT * FROM accounts WHERE \"Id\" = {accountId} AND \"OwnerId\" = {db.CurrentOwnerId} FOR KEY SHARE")
+            .AsNoTracking().Select(a => a.IsEnabled).ToListAsync(cancellationToken);
+        if (enabled is not [true]) throw new ProblemException(404, "Account not found.");
         // First insert wins and commits with every existing source identity. A rollback leaves neither.
         await VesselEventSql.ExecuteAsync(db, """
             WITH baseline AS (
