@@ -443,6 +443,47 @@ public sealed class MultiOwnerWorkerTests
             $"Once-locked owner has zero runs after six minutes; other owner has {fixture.Venue.Reads.Count(o => o == fixture.Second)} runs.");
     }
 
+    [PostgresFact]
+    public async Task An_owners_unlocked_third_due_account_and_its_manual_check_are_not_hidden_behind_two_locked_ones()
+    {
+        await using var fixture = await Fixture.CreateAsync(firstAccounts: 3, secondAccounts: 4, concurrency: 1);
+        fixture.Host.Services.GetRequiredService<MonitorOptions>().Interval = TimeSpan.FromMinutes(1);
+        foreach (var owner in new[] { fixture.First, fixture.Second })
+        {
+            await using var scope = fixture.Host.Services.GetRequiredService<IOwnerScopeFactory>().Create(owner);
+            await scope.Services.GetRequiredService<MonitorCoordinator>().DiscoverAsync(["hyperliquid"], fixture.Clock.GetUtcNow(), default);
+        }
+        fixture.Venue.Release.TrySetResult();
+        var scheduler = fixture.Host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
+        await using var held = fixture.Database.Context(fixture.First);
+        var ids = await held.Accounts.OrderBy(a => a.Id).Select(a => a.Id).ToArrayAsync();
+        await using (var db = fixture.Database.Context(fixture.First))
+        {
+            (await db.Set<MonitorAccount>().SingleAsync(m => m.AccountId == ids[2])).Admit(Guid.NewGuid(), "manual", fixture.Clock.GetUtcNow());
+            await db.SaveChangesAsync();
+        }
+        // The owner's two earliest-keyed accounts stay row-locked for the whole run, so each claim skips them.
+        await using var transaction = await held.Database.BeginTransactionAsync();
+        await held.Database.ExecuteSqlInterpolatedAsync($"SELECT 1 FROM accounts WHERE \"Id\" IN ({ids[0]}, {ids[1]}) FOR UPDATE");
+        for (var tick = 0; tick < 10; tick++)
+        {
+            await scheduler.TickAsync(default);
+            await fixture.EventuallyAsync(async () =>
+            {
+                await using var db = fixture.Database.Context(fixture.Second);
+                return await db.Set<MonitorAccount>().AllAsync(m => m.ManualState == "idle");
+            });
+            fixture.Clock.Advance(TimeSpan.FromSeconds(30));
+        }
+        Assert.True(fixture.Venue.Reads.Any(o => o == fixture.First),
+            $"The unlocked third account never ran; the other owner has {fixture.Venue.Reads.Count(o => o == fixture.Second)} runs.");
+        await fixture.EventuallyAsync(async () =>
+        {
+            await using var db = fixture.Database.Context(fixture.First);
+            return (await db.Set<MonitorAccount>().SingleAsync(m => m.AccountId == ids[2])).ManualState == "idle";
+        });
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         public string Heartbeat { get; } = Path.Combine(Path.GetTempPath(), "vessel-owner-heartbeat-" + Guid.NewGuid().ToString("N"));

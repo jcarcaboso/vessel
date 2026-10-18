@@ -44,6 +44,9 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
   const [sessions, setSessions] = useState<SessionRow[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  // The lists on screen were loaded under an older session of this tab: their `current` marks may be wrong, so
+  // nothing destructive is offered until the reload under the adopted session lands.
+  const [stale, setStale] = useState(false)
   const reload = useCallback(() => setReloadKey(key => key + 1), [])
   const [stepUp, setStepUp] = useState<StepUpRequest | null>(null)
   const [linking, setLinking] = useState(false)
@@ -57,17 +60,20 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
   useEffect(() => {
     const controller = new AbortController()
     Promise.all([auth.wallets(controller.signal), auth.sessions(controller.signal)]).then(([nextWallets, nextSessions]) => {
-      setWallets(nextWallets); setSessions(nextSessions); setLoadError(null)
+      if (controller.signal.aborted) return
+      setWallets(nextWallets); setSessions(nextSessions); setLoadError(null); setStale(false)
     }, (cause: unknown) => { if (!controller.signal.aborted) setLoadError(errorMessage(cause, 'Sign-in wallets and sessions could not be loaded.')) })
     return () => controller.abort()
   }, [auth, reloadKey])
 
-  // Adopting another tab's session of this user moves which wallet is current: the lists reload, and a removal
-  // prepared under the old session (its dialog or its step-up) is dropped instead of acting on a stale row.
+  // Adopting another tab's session of this user moves which wallet is current: the lists reload, their destructive
+  // actions wait for it, and a removal prepared under the old session (its dialog or its step-up) is dropped instead
+  // of acting on a stale row.
   const { onSessionChange } = identity
   const pendingStepUp = useRef<StepUpRequest | null>(null)
   useEffect(() => { pendingStepUp.current = stepUp }, [stepUp])
   useEffect(() => onSessionChange(() => {
+    setStale(true)
     setRemoving(null)
     const pending = pendingStepUp.current
     if (pending?.action === 'wallet.remove') { pending.resolve(false); setStepUp(null) }
@@ -88,7 +94,15 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
     }
   }
 
-  async function remove(wallet: WalletDto) {
+  async function remove(target: WalletDto) {
+    // Checked again at confirmation against the current list and session: the dialog may predate an adoption.
+    const wallet = stale ? undefined : wallets?.find(row => row.id === target.id)
+    if (!wallet || wallet.current || wallet.id === identity.session.wallet.id) {
+      setRemoving(null)
+      notify({ tone: 'error', message: wallet ? 'This wallet signs in this session now. Remove it from another session.' : 'The wallet list changed. Review it and try again.' })
+      reload()
+      return
+    }
     try {
       const done = await withStepUp('wallet.remove', wallet, () => auth.removeWallet(wallet.id))
       if (done === null) return
@@ -122,13 +136,13 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
         </header>
         {walletLimitReached && <p id="wallet-limit" className="field-help">{authErrorMessage('wallet-limit')}</p>}
         {wallets === null && !loadError ? <p className="muted profile-loading" role="status">Loading sign-in wallets…</p>
-          : <ul className="profile-rows">{linked.map(wallet => <WalletRow key={wallet.id} wallet={wallet} only={linked.length === 1} auth={auth}
+          : <ul className="profile-rows">{linked.map(wallet => <WalletRow key={wallet.id} wallet={wallet} only={linked.length === 1} stale={stale} auth={auth}
             onRemove={() => { removeOpener.current = focusedControl(); setRemoving(wallet) }} onChanged={reload} />)}</ul>}
       </section>
       <section className="shell-panel profile-section" aria-labelledby="sessions-heading">
         <header>
           <h2 id="sessions-heading" tabIndex={-1}>Sessions</h2>
-          <Button variant="outline" size="sm" disabled={!others.length} onClick={() => {
+          <Button variant="outline" size="sm" disabled={stale || !others.length} onClick={() => {
             auth.revokeOtherSessions().then(() => { notify({ tone: 'success', message: 'Other sessions signed out.' }); reload() },
               (cause: unknown) => notify({ tone: 'error', message: errorMessage(cause, 'Other sessions could not be signed out.') }))
           }}>Sign out other sessions</Button>
@@ -139,7 +153,7 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
             <span className="profile-row-meta"><strong>{row.userAgent ?? 'Unknown browser'}</strong>
               <small>Signed in {day(row.createdAt)} · active {ago(row.lastSeenAt)}{row.remember ? ' · kept signed in' : ''}</small></span>
             {row.current ? <span className="identity-pill is-brand">This browser</span>
-              : <Button variant="ghost" size="sm" aria-label={`Sign out ${row.userAgent ?? 'unknown browser'} session`} onClick={() => {
+              : <Button variant="ghost" size="sm" disabled={stale} aria-label={`Sign out ${row.userAgent ?? 'unknown browser'} session`} onClick={() => {
                 auth.revokeSession(row.id).then(() => { notify({ tone: 'success', message: 'Session signed out.' }); reload() },
                   (cause: unknown) => { notify({ tone: 'error', message: errorMessage(cause, 'The session could not be signed out.') }); reload() })
               }}>Sign out</Button>}
@@ -154,7 +168,7 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
           <DialogDescription>This wallet will no longer sign in to this journal, and its sessions end. You'll confirm with a linked wallet.</DialogDescription></DialogHeader>
         <p><SourceChip source={removing.address} /> {removing.label}</p>
         <DialogFooter><Button variant="outline" onClick={() => setRemoving(null)}>Cancel</Button>
-          <Button variant="destructive" onClick={() => { void remove(removing) }}>Remove wallet</Button></DialogFooter>
+          <Button variant="destructive" disabled={stale} onClick={() => { void remove(removing) }}>Remove wallet</Button></DialogFooter>
       </DialogContent>
     </Dialog>}
     {linking && <LinkWalletDialog identity={identity} wallets={linked} onStepUp={() => requestStepUp('wallet.link')}
@@ -199,8 +213,8 @@ function ProfilePanel({ identity }: { identity: ShellIdentity }) {
   </section>
 }
 
-function WalletRow({ wallet, only, auth, onRemove, onChanged }: {
-  wallet: WalletDto; only: boolean; auth: ShellIdentity['auth']; onRemove: () => void; onChanged: () => void
+function WalletRow({ wallet, only, stale, auth, onRemove, onChanged }: {
+  wallet: WalletDto; only: boolean; stale: boolean; auth: ShellIdentity['auth']; onRemove: () => void; onChanged: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [label, setLabel] = useState(wallet.label ?? '')
@@ -241,7 +255,8 @@ function WalletRow({ wallet, only, auth, onRemove, onChanged }: {
     {!editing && <span className="profile-row-actions">
       <Button ref={renameButton} variant="ghost" size="sm" aria-label={`Rename ${name}`} title="Rename" onClick={() => setEditing(true)}><Pencil size={14} aria-hidden="true" /></Button>
       {/* As on mockup screen 8, the wallet that signed this session is removed from another session. */}
-      {!only && !wallet.current && <Button variant="ghost" size="sm" className="profile-danger" onClick={onRemove}><Trash2 size={14} aria-hidden="true" />Remove</Button>}
+      {/* After an adoption the old marks may be wrong, so Remove waits for the reloaded list. */}
+      {!only && !wallet.current && !stale && <Button variant="ghost" size="sm" className="profile-danger" onClick={onRemove}><Trash2 size={14} aria-hidden="true" />Remove</Button>}
     </span>}
   </li>
 }

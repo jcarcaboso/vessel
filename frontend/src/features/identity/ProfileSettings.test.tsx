@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Tooltip } from 'radix-ui'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -221,6 +221,25 @@ describe('Profile & sign-in', () => {
     await waitFor(() => expect(sent('/api/auth/wallets', 'GET')).toHaveLength(2))
     expect(sent(`/api/auth/wallets/${secondWalletFixture.id}`, 'DELETE')).toHaveLength(1)
     expect(sent('/api/auth/step-up/challenge')).toHaveLength(0)
+  })
+
+  it('checks the target again at confirmation and never removes the wallet that now signs this session', async () => {
+    const { user } = mount()
+    await user.click(within((await screen.findByText('Ledger')).closest('li')!).getByRole('button', { name: 'Remove' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Remove sign-in wallet?' })
+    // A reload behind the dialog (here a rename) finds that the Ledger signs this session now.
+    routes['GET /api/auth/wallets'] = () => json([{ ...walletFixture, current: false }, { ...secondWalletFixture, current: true }])
+    routes[`PATCH /api/auth/wallets/${walletFixture.id}`] = () => json(walletFixture)
+    const hot = screen.getByText('Hot wallet').closest('li')!
+    // The modal makes the page behind it inert to pointers, so the rename is driven by events.
+    fireEvent.click(within(hot).getByRole('button', { name: 'Rename Hot wallet', hidden: true }))
+    fireEvent.click(within(hot).getByRole('button', { name: 'Save', hidden: true }))
+    await waitFor(() => expect(sent('/api/auth/wallets', 'GET')).toHaveLength(2))
+    await waitFor(() => expect(within(screen.getByText('Ledger', { selector: 'strong' }).closest('li')!).getByText('This session')).toBeInTheDocument())
+    await user.click(within(dialog).getByRole('button', { name: 'Remove wallet' }))
+    expect(await screen.findByText('This wallet signs in this session now. Remove it from another session.')).toBeVisible()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(sent(`/api/auth/wallets/${secondWalletFixture.id}`, 'DELETE')).toHaveLength(0)
   })
 
   it('links a wallet: step-up first, then the new wallet signs its own message', async () => {

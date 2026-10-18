@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useState } from 'react'
 import { Tooltip } from 'radix-ui'
 import { createPublicAuthApi, type SessionDto } from '@/api/auth'
 import { ApiError } from '@/api/errors'
@@ -14,6 +15,7 @@ import { landingKey, noticeKey, notices, workspaceNotices } from './session'
 import { SignInGate } from './SignInGate'
 import { SignInScreen } from './SignInScreen'
 import { ProfileSettings } from './ProfileSettings'
+import type { ShellIdentity } from './types'
 
 const address = walletFixture.address
 const other = '0x19B4c7aE02F3d81e6C5a9b0D2E7f4A3c8D1e0a53'
@@ -497,6 +499,99 @@ describe('same-user session adoption', () => {
     // The Ledger now signs this tab, so it is no longer offered for removal here.
     await waitFor(() => expect(within(rowOf('Ledger')).getByText('This session')).toBeVisible())
     expect(within(rowOf('Ledger')).queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
+    unmount()
+  })
+
+  // The third session of this user, signed in from yet another tab with the Ledger.
+  const sessionC: SessionDto = { ...sessionB, session: { ...sessionB.session, id: '11111111-2222-4333-8444-666666666666' } }
+  const deferred = <T,>() => {
+    let resolve!: (value: T) => void
+    return { promise: new Promise<T>(done => { resolve = done }), resolve }
+  }
+  /** A shell with unsaved work and a profile save, optionally with the Profile page. */
+  function Shell({ identity, profile }: { identity: ShellIdentity; profile: boolean }) {
+    const [draft, setDraft] = useState('unsaved play')
+    return <>
+      <p>Signed in with {identity.session.wallet.label} as {identity.session.user.displayName}</p>
+      <input aria-label="Draft" value={draft} onChange={event => setDraft(event.target.value)} />
+      <button onClick={() => identity.onProfile({ ...identity.session.user, displayName: 'New profile', revision: 10 })}>Save profile</button>
+      {profile && <ProfileSettings identity={identity} onSignOut={vi.fn()} />}
+    </>
+  }
+  function mountShell(profile = false) {
+    const bus = channelBus(), navigate = vi.fn()
+    const view = render(<Tooltip.Provider><NotificationProvider><SignInGate registration="invitation" originAccepted channels={bus.factory} navigate={navigate}>
+      {(system, _disconnect, _api, identity) => <><p>Owner {system.owner.displayName}</p><Shell identity={identity} profile={profile} /></>}
+    </SignInGate></NotificationProvider></Tooltip.Provider>)
+    const adopt = (session: SessionDto) => act(async () => { bus.send({ type: 'signed-in', userId: session.user.id, sessionId: session.session.id }) })
+    return { ...view, navigate, adopt, user: userEvent.setup() }
+  }
+
+  it.each([[401, 'session-revoked'], [403, 'user-suspended']] as const)('drops a late %i from the probe of a session this tab has since left', async (status, code) => {
+    const { navigate, adopt, unmount } = mountShell()
+    await screen.findByText('Signed in with Hot wallet as Sam Rivera')
+    const late = deferred<Response>()
+    routes['/api/auth/session'] = () => late.promise
+    await adopt(sessionB)
+    const probeB = sent('/api/auth/session').at(-1)!.init.signal!
+    routes['/api/auth/session'] = () => json(sessionC)
+    await adopt(sessionC)
+    expect(await screen.findByText('Signed in with Ledger as Sam Rivera')).toBeVisible()
+    // Adopting C superseded B's probe.
+    expect(probeB.aborted).toBe(true)
+    await act(async () => late.resolve(problem(status, code)))
+    expect(navigate).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem(noticeKey)).toBeNull()
+    expect(screen.queryByText('Journal suspended')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Draft')).toHaveValue('unsaved play')
+    unmount()
+  })
+
+  it('keeps a profile saved while the adoption probe was answering', async () => {
+    const { adopt, user, unmount } = mountShell()
+    await screen.findByText('Signed in with Hot wallet as Sam Rivera')
+    const late = deferred<Response>()
+    routes['/api/auth/session'] = () => late.promise
+    await adopt(sessionB)
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+    expect(screen.getByText('Signed in with Hot wallet as New profile')).toBeVisible()
+    // The probe's snapshot carries revision 1; the save made revision 10. The wallet still follows the probe.
+    await act(async () => late.resolve(json(sessionB)))
+    expect(await screen.findByText('Signed in with Ledger as New profile')).toBeVisible()
+    expect(screen.getByText('Owner New profile')).toBeVisible()
+    unmount()
+  })
+
+  it('offers no destructive action on the old lists until the adopted session\'s lists load', async () => {
+    const { adopt, unmount } = mountShell(true)
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(1))
+    const lists = deferred<Response>()
+    routes['/api/auth/wallets'] = () => lists.promise
+    server = sessionB
+    await adopt(sessionB)
+    expect(await screen.findByText('Signed in with Ledger as Sam Rivera')).toBeVisible()
+    // The old rows still mark the hot wallet as this session's and offer the Ledger, which now signs this tab.
+    expect(within(rowOf('Ledger')).queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign out other sessions' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Sign out Safari on iOS session' })).toBeDisabled()
+    await act(async () => lists.resolve(json([{ ...walletFixture, current: false }, { ...secondWalletFixture, current: true }])))
+    await waitFor(() => expect(within(rowOf('Hot wallet')).getByRole('button', { name: 'Remove' })).toBeVisible())
+    expect(within(rowOf('Ledger')).queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument()
+    unmount()
+  })
+
+  it('follows an adoption received while the workspace was loading', async () => {
+    const system = deferred<Response>()
+    let systemCalls = 0
+    routes['/api/system'] = () => ++systemCalls === 1 ? system.promise : json(systemFixture)
+    const { adopt, unmount } = mountShell()
+    await screen.findByText('Loading your workspace…')
+    server = sessionB
+    await adopt(sessionB)
+    await act(async () => system.resolve(json(systemFixture)))
+    expect(await screen.findByText('Signed in with Ledger as Sam Rivera')).toBeVisible()
+    // The system answer belonged to the old generation, so it was read again.
+    expect(systemCalls).toBe(2)
     unmount()
   })
 
