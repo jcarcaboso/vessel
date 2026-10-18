@@ -1,6 +1,6 @@
 # Deploy with Docker
 
-Vessel v0.2.0 is a self-hosted, single-owner trading diary. These examples use the
+Vessel is a self-hosted trading diary. These examples use the
 API and web images in one Docker Hub repository:
 
 - `skorcius/vessel:api-0.2.0` and `skorcius/vessel:api-latest`
@@ -13,6 +13,171 @@ Releases are published by the repository's Release workflow when an annotated
 `vX.Y.Z` tag is pushed on `main`; see the
 [`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md) and the
 [release notes](../docs/releases/). Publishing never upgrades an installation.
+
+## Sign-in mode
+
+**Token is still the default.** Existing installs need no identity settings and
+continue to use their configured owner and in-memory browser token. Wallet mode
+is an explicit operator opt-in, not a deployment or an automatic mode switch.
+These Wallet instructions require **both images built from the multi-user
+stack** (the next release); do not apply this overlay to older published images.
+The version examples here are not evidence that an already published tag contains
+this delivery. P4 itself does not bump a version or publish images.
+The implementation and automated acceptance evidence are in
+[`multi-user-state.md`](../docs/architecture/multi-user-state.md). Complete its
+§10 checklist before enabling registration for real users: the real-wallet,
+non-mainnet EOA check is **owner-pending**; unavailable browser checks must not
+be treated as passed. Start with `Closed` until that acceptance is complete.
+The D1–D12 defaults are adopted, not additional owner answers; the owner can
+change them deliberately through settings or a small reviewed code change.
+
+Wallet mode signs in an externally owned Ethereum account (EOA), creates a
+separate journal per user and supports multiple linked wallets. A signature is
+not a transaction, approval or venue action. The signed message fixes **Chain
+ID 1**; no network switch is needed, including when the wallet is connected to
+a non-mainnet network. WalletConnect and smart-contract wallets are not supported.
+Operators cannot read other users' journals through the application; host and
+database administrators still control the underlying data. There is no user or
+journal deletion and no password/email recovery.
+
+### Identity settings
+
+API, worker, migration/provisioning and offline hosts must read the same settings.
+Invalid settings refuse startup; validation names keys, never secret values.
+Environment variable spelling replaces `:` with `__`; arrays use `__0`, `__1`,
+etc. Lists below are configuration arrays, not comma-separated strings.
+Keys not mapped by the supplied Compose files must be added to `environment:`
+on each host in an operator overlay; adding an arbitrary key to `.env` alone
+does not pass it into a container.
+
+| Key | Values and default | Rules |
+| --- | --- | --- |
+| `Vessel:Auth:Mode` | `Token` (default when absent) \| `Wallet` | Any other value refuses startup |
+| `Vessel:Auth:Token` | — | Token mode: required outside Development (unchanged). Wallet mode: absent or empty, otherwise refuse to start |
+| `Vessel:Auth:OwnerId` | GUID | Token mode: as today, and the default GUID stays accepted. Wallet mode: required outside Development; used by `ensure-owner` and legacy-preference adoption. In Wallet mode only, the well-known default GUID is refused outside Development unless `Vessel:Identity:AllowLegacyDefaultOwner=true` (logged at startup as a warning) |
+| `Vessel:Auth:OwnerName` | `Owner` | Display name given by `ensure-owner` |
+| `Vessel:Identity:Origins` | list | Wallet mode: required, at least one entry. Each entry is normalized to `scheme://host[:port]` (lower-case host, no path, no default port, no trailing slash). **Outside Development every origin must be `https://`.** In Development `http://` origins are allowed |
+| `Vessel:Identity:Registration` | `Invitation` | `Closed`, `Invitation`, `AllowList`, `Open`. B2 enabled registration; operator opt-in and the §10 acceptance checklist still apply |
+| `Vessel:Identity:AllowList` | empty | `0x` addresses, normalized to lower case |
+| `Vessel:Identity:Session:IdleHours` / `AbsoluteHours` | 12 / 24 | 1–720; idle ≤ absolute |
+| `Vessel:Identity:Session:RememberIdleDays` / `RememberAbsoluteDays` | 14 / 30 | 1–365; idle ≤ absolute |
+| `Vessel:Identity:MaxSessionsPerUser` | 20 | 1–200. Issuing a session above the cap atomically revokes the oldest live sessions |
+| `Vessel:Identity:MaxPendingRegistrations` | 10000 | At the cap, the oldest are evicted |
+| `Vessel:Identity:CookieName` | `__Host-vessel-session` | Must start with `__Host-` |
+| `Vessel:Identity:SignInCookieName` | `__Host-vessel-signin` | Must start with `__Host-` |
+| `Vessel:Identity:AllowLegacyDefaultOwner` | false | See `OwnerId` |
+| `Vessel:Identity:Schema` | `identity` | Lower-case `[a-z_][a-z0-9_]{0,62}`. Only tests change it |
+| `Vessel:Monitor:WorkerConcurrency` | 2 | 1–64. Replaces the constant in `MonitorScheduler` (B2) |
+| `Vessel:Monitor:VenueReadConcurrency` | 4 | 1–64, server-wide per venue (B2) |
+| `Vessel:Events:MaxStreams` | 64 | 1–1024 event streams per API process, beside 4 per owner (A1) |
+
+Outside Development, origins must be HTTPS. Origins identify the exact public
+scheme/hostname/port, never a path. Preserve the request's public origin through
+the trusted proxy; do not weaken forwarded-header trust to make authentication
+work. Cookies use `__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/` and
+no Domain. **Every installation needs its own hostname: different ports do not
+isolate cookies.** Only Development with an explicitly allowed HTTP origin drops
+`__Host-`/`Secure` (names `vessel-session` and `vessel-signin`). Never use that
+exception for an internet installation. Wallet startup refuses a nonempty
+`Vessel:Auth:Token`; the Wallet overlay explicitly clears the Token setting.
+
+### Opt in to Wallet mode
+
+Retain the installation's existing owner GUID: credential encryption binds it.
+A new installation must generate a fresh GUID; do not copy the well-known legacy
+default. With a legacy default GUID, migrating to a new GUID is **not** safe;
+use the explicit `AllowLegacyDefaultOwner` override only after reviewing the
+startup warning. The database role needs `CREATE` on the database for identity's
+`CREATE SCHEMA`, in addition to journal migration privileges.
+
+Add to the **private operator** `.env`, not the source checkout or Vite:
+
+```dotenv
+# Use a separate hostname for each installation.
+VESSEL_IDENTITY_ORIGIN=https://diary.example.com
+VESSEL_IDENTITY_REGISTRATION=Closed
+# After completing the acceptance checklist, choose Invitation (the API default),
+# Closed, AllowList or Open. Invitations are not required by AllowList/Open.
+# VESSEL_ALLOW_LEGACY_DEFAULT_OWNER=true
+```
+
+Keep `compose.wallet.yaml` on **every** command, and the TLS/storage/credential
+overlays your installation needs. The example uses the bundled Caddy overlay;
+an existing trusted HTTPS proxy is also valid. Substitute the actual owner GUID
+and public wallet address below. **Never supply a private key or seed phrase.**
+
+```sh
+docker compose -f compose.yaml -f compose.tls.yaml -f compose.wallet.yaml up -d --wait postgres rabbitmq
+docker compose -f compose.yaml -f compose.tls.yaml -f compose.wallet.yaml run --rm migrate
+# migrate runs identity bundle → journal bundle → identity ensure-owner → provision-messaging.
+# Readiness is 503, reason no-operator-wallet, until this explicit binding:
+docker compose -f compose.yaml -f compose.tls.yaml -f compose.wallet.yaml run --rm --no-deps \
+  --entrypoint dotnet migrate /app/Vessel.Api.dll identity bind-wallet \
+  --user <owner-guid> --address <0x-public-address> --label Operator
+docker compose -f compose.yaml -f compose.tls.yaml -f compose.wallet.yaml up -d
+```
+
+`Invitation` admits a new address only with a usable invite; `Closed` admits
+linked wallets only; `AllowList` admits listed normalized addresses; `Open`
+admits any supported EOA. Configure `Vessel__Identity__AllowList__0` etc. on all
+three hosts in an operator overlay for `AllowList`. `ensure-owner` is idempotent
+and seeds no journal facts. `migrate` never binds a wallet automatically.
+
+### Offline identity commands
+
+Use the same overlay set and `run --rm --no-deps --entrypoint dotnet migrate
+/app/Vessel.Api.dll` prefix as above. Commands never start the API. Exit codes:
+**0** success, **1** operational/configuration error, **2** usage error,
+**3** refused precondition. Identity values are write-only where appropriate;
+only `invite` prints a secret, once. Do not capture its output in shared logs.
+
+| `identity` arguments | Effect / safeguard |
+| --- | --- |
+| `ensure-owner` | Wallet: create configured operator if absent. Token: no-op, exit 0. |
+| `bind-wallet --user <guid> --address 0x… [--label <label>]` | Idempotent for the same owner; refuses a foreign address or a 21st wallet, exit 3. |
+| `invite [--note <note>] [--expires 7d] [--max-uses 1]` | Prints a code **once**; expiry is a positive integer number of days, max uses a positive integer. Give it privately to the intended user. |
+| `unbind-wallet --wallet <guid>` | Refuses last wallet; revokes that wallet's sessions. |
+| `suspend --user <guid>` / `restore --user <guid>` | Suspend revokes all user sessions and stops new subscriber/monitor work; restore resumes eligibility. |
+| `promote --user <guid>` / `demote --user <guid>` | Change operator/member role. No application journal access is granted by operator role. |
+| `revoke-sessions --user <guid>` or `--all` | Revoke live sessions; open streams revalidate within 15 s. |
+| `reset-after-restore [--keep-active <guid> …]` | Mandatory reset and review table before any host starts after restore; see below. |
+| `verify` | Read-only report of orphan journal owner IDs and users without wallets. |
+
+Suspending/demoting/removing a wallet from an **active operator with a linked
+wallet** may not leave zero such operators. This guard does not block suspending
+members or wallet-less operators. `reset-after-restore` only warns, so recovery
+can suspend everyone. Wallet removal checks `last-wallet` before step-up. User
+wallet linking/removal requires a fresh, action-bound step-up from a linked
+wallet, with a single-use five-minute grant; at most 20 wallets are linked.
+
+### Shared limits and deployment maps
+
+Both auth modes enforce these **per API process**, in memory: four market
+streams per user (eight total); four event streams per user (`MaxStreams` total,
+64 default); one candle `refresh=true` per user/series/60 s; account discovery
+10/user/minute; credential verification 30/user/minute. Refusal is 429 with
+`Retry-After`. A server-wide venue deadline refusal consumes no user budget.
+Refresh keys are bounded to 256/user with a fair 8,192-key backstop. Cookie auth
+also limits challenge 10/client/minute (300/process), verify/register
+20/client/minute (600/process), invitation attempts 10/client/hour, and separate
+step-up/link buckets of 10/session/10 minutes each. IPv6 clients share a /64.
+
+Monitor and account Refresh share PostgreSQL-backed, server-wide venue capacity
+(`VenueReadConcurrency`, default 4) and venue deadlines across all users and
+processes. This caps leased account runs, not every adapter HTTP request;
+discovery/credential verification honour deadlines but do not occupy those
+leases. Public market data retains its existing cache/backoff, not these
+deadlines. Lighter's adapter semaphore **remains per process**. Manual Check
+queues even at capacity; the claim waits for capacity. `WorkerConcurrency`
+(default 2) bounds the worker process, not a deployment-wide venue total.
+
+`Vessel:Messaging:Deployments` must be **identical on API, worker and provisioning
+hosts**, including any custom module map; the API filters monitor heartbeat
+health by its own map. Heartbeats are per deployment, not per user.
+`retry-event-receipts` requires `--owner <guid>` **or** `--all-owners`; with
+`--all-owners`, `--limit` is **per owner**, not a global work bound. Registration
+and deregistration of a subscriber are server-wide; handling/progress/receipts
+remain owner-scoped. See the [worker reference](../docs/architecture/messaging-and-workers.md).
 
 ## Requirements
 
@@ -159,7 +324,7 @@ volume; notes, markup and ownership stay in PostgreSQL. All image access passes
 through the authenticated Vessel API; do not enable public bucket policies or CORS.
 
 Generate the S3 credentials above, keep `.env` private and retain the same pair
-across restarts/restores. The bundled, dedicated single-owner RustFS uses that
+across restarts/restores. The bundled, installation-dedicated RustFS uses that
 pair for both administration and API access. For a shared object store, use a
 separate private bucket and bucket-scoped runtime credentials with the external
 option below; do not reuse an administrator key from another installation.
@@ -403,15 +568,17 @@ first module), which names its envelope schema (`wolverine_monitor`) and service
 An unknown module stops startup. Replicas of one deployment share its schema.
 Every worker also runs subscription catch-up for the subscriptions it hosts and
 the hourly event retention sweep; both are claimed in PostgreSQL and safe with
-replicas. It scopes every database operation to the configured owner
-(`Vessel__Auth__OwnerId`, the same setting the API authenticates with) and
-dead-letters a command naming another owner, logging only IDs.
+replicas. Journal operations resolve in fresh assigned owner scopes. Token
+mode uses the configured owner; Wallet mode validates each message through the
+identity directory. Unknown owners dead-letter, suspended owners' commands are
+dropped/logged and their events acknowledged for later catch-up; new work starts
+only for active users. Logs contain IDs, never payloads.
 
 `RunAccountMonitor` commands are only a hand-off: the pending request lives in
 PostgreSQL (`monitor_accounts`), the listener acknowledges once it has validated
 it and wakes the scheduler, and a lost command is found on the next 30-second
 tick. After each productive scheduling pass (discovery and claims), the worker
-writes a database heartbeat and a local heartbeat file holding the time and the
+writes its **deployment** database heartbeat and a local heartbeat file holding the time and the
 configured timeout; `/app/worker-health` rejects a missing, malformed or older
 file. If the file cannot be written, the database heartbeat is not recorded
 either, so API monitor responses report the worker offline.
@@ -448,7 +615,10 @@ The defaults are ten minutes, ten minutes and sixty seconds. Interval is
 validated from one through sixty minutes and scheduling adds ten-percent
 jitter. The cooldown may not exceed the interval and gates manual Check and
 Refresh only, never scheduled or confirmation runs; failed checks also start
-it. Check and account Refresh share admission and the two-account read limit.
+it. Account Refresh and claimed Checks share the fixed two-account read limit
+per owner plus the server-wide per-venue capacity (default four). A manual Check
+queues even when full; the claim enforces capacity. The worker process uses
+`WorkerConcurrency` (default two).
 A Refresh never changes check backoff, monitor state or the scheduled check, and
 a refused or abandoned Refresh is never replayed by the worker.
 `Vessel:Monitor:WatchLifetime` (default `7.00:00:00`) bounds how long the linked
@@ -458,9 +628,10 @@ without proof ends as a persistent `unverifiable`, never as resolved.
 discrepancy's subject may stay unobservable before the record becomes
 `unverifiable` and stops holding the account in monitoring. Both accept one hour
 to ninety days.
-Venue HTTP 429 `Retry-After` deadlines are retained in PostgreSQL per owner and
-venue. Check, Refresh and scheduled work respect the longest deadline across
-API and worker instances; a shorter later response cannot shorten it. A missing
+Venue HTTP 429 `Retry-After` deadlines are retained in PostgreSQL **per venue,
+server-wide across owners** (`server_venue_deadlines`). Monitor claims, Refresh,
+discovery and credential verification respect the longest deadline across API
+and worker instances; a shorter later response cannot shorten it. A missing
 or invalid `Retry-After` uses a sixty-second delay, and any deadline is clamped to
 at most one hour. The API exposes the effective
 manual deadline and returns it as `Retry-After` when admission is throttled.
@@ -684,6 +855,26 @@ database and evidence store) before applying it. See
 
 Stop web, API and the workers, back up, then upgrade as usual.
 
+### Multi-user wallet sign-in (this delivery)
+
+**Stop every API and worker process, on every replica, and take a private,
+verified backup first.** This is not a rolling upgrade. B2's
+`20261017193000_ServerMonitorState` copies the maximum venue deadline, creates
+empty per-deployment heartbeats and drops the old per-owner monitor tables.
+Rolling back to an older image requires **restoring the pre-upgrade backup**;
+there is no supported down-migration path. Identity's
+`20261017155708_InitialIdentity` has its own schema and migration history; B1's
+`20261017120000_ServerEventSubscriptions` separates registration from
+per-owner progress. The database role needs database `CREATE` privilege.
+
+Use the explicit `migrate` service: **identity bundle, then journal bundle**, then
+`identity ensure-owner`, then messaging provisioning. No application host
+migrates. Token installs continue unchanged without identity configuration
+(`ensure-owner` is a no-op); the identity schema is still migrated. Wallet opt-in
+also needs the existing owner GUID, allowed HTTPS origin and explicit operator
+wallet binding above. Back up both schemas together with the evidence and key
+ring. This delivery does not itself deploy, publish, or migrate any installation.
+
 ### From v0.1.3 to v0.2.0 (the account monitor)
 
 This upgrade adds two services and new required settings. Its migrations sort
@@ -691,8 +882,8 @@ after v0.1.3's `PlayDirection`, so an older installation applies both in one
 migration run. Before it:
 
 - Add `RABBITMQ_USER` and `RABBITMQ_PASSWORD` (URL-safe) to `.env`, and keep
-  `Vessel__Auth__OwnerId` set: the worker and the provisioning step validate
-  every message against it. Optional: `VESSEL_RABBITMQ_MANAGEMENT_BIND`,
+  `Vessel__Auth__OwnerId` set: Token mode uses it for the fixed journal; Wallet mode validates
+  message owners through the identity directory. Optional: `VESSEL_RABBITMQ_MANAGEMENT_BIND`,
   `VESSEL_MONITOR_*`, `RABBITMQ_APP_USER`/`RABBITMQ_APP_PASSWORD`.
 - Messaging settings are `Vessel__Messaging__*` (for example
   `Vessel__Messaging__RabbitMqUri`, which Compose builds for you).
@@ -850,6 +1041,17 @@ for rootless/user-namespace deployments. Use a regular, non-symlink file. Set
 decrypt the restored credentials.
 
 ```sh
+# Wallet mode only: mandatory BEFORE any API/worker/provisioning host starts.
+# Keep ONLY an independently confirmed reconciliation operator active (optional).
+# All commands need compose.wallet.yaml plus the same TLS/storage overlays.
+docker compose -f compose.yaml -f compose.tls.yaml -f compose.wallet.yaml \
+  -p vessel-restore-check run --rm --no-deps --entrypoint dotnet migrate \
+  /app/Vessel.Api.dll identity reset-after-restore --keep-active <confirmed-operator-guid>
+# Without --keep-active, every user is suspended. Reset revokes all sessions,
+# challenges, pending registrations and usable invitations, and prints a review table.
+# Compare it against trusted POST-backup records; reapply unbind-wallet, suspend,
+# demote, then identity restore --user ONLY for confirmed current users.
+# Users/wallets that cannot be confirmed remain suspended. Never blindly restore all.
 # Mandatory after every restore and before any host starts: browser cursors from
 # before the restore must reset, even once the restored stream reaches their sequence.
 docker compose -p vessel-restore-check run --rm --no-deps --entrypoint dotnet migrate \
@@ -862,7 +1064,18 @@ curl --fail http://127.0.0.1:YOUR_UNUSED_PORT/health/live
 curl --fail http://127.0.0.1:YOUR_UNUSED_PORT/health/ready
 ```
 
-Authenticate through the UI with the restored installation's login token. Check
+For Wallet/TLS, use the restored installation's **own hostname** and HTTPS health
+URLs instead of the default loopback HTTP probes above. Before provision/start,
+compare every reset-table user/role/status/wallet against independently trusted
+post-backup records. Reapply removals (`identity unbind-wallet --wallet <guid>`),
+suspensions and demotions; only then `identity restore --user <guid>` for confirmed
+current users. If a removed address is the last wallet, keep the user suspended
+until a trusted replacement can be bound before removal. `--keep-active` never
+reactivates an already suspended user. Do not restore all users to bypass the
+readiness warning; unconfirmed users stay suspended. Rotate the event epoch
+before any hosts start, even when identity reset has already revoked sessions.
+
+Authenticate through the UI with the restored installation's selected mode (Token or a confirmed EOA). Check
 that portfolios/accounts and saved Plays are visible under the unchanged owner,
 that an original evidence image and its markup open, and that credential metadata
 reports configured storage. Readiness confirms database connectivity/migrations,
@@ -908,6 +1121,43 @@ deregistered at the end. The fixture replaces only the upstream
 for its nginx transport test, not production code. Cleanup runs on success/failure.
 The browser check uses synthetic API data and intercepts chart market reads, with
 no real venue call. Run frontend/.NET checks separately as in `docs/development.md`.
+
+### Wallet acceptance checks
+
+Synthetic packaged HTTPS check (external signer dependencies, never app packages):
+
+```sh
+# In an external tools directory; never use a real key or venue credential.
+pnpm --dir /absolute/tools add playwright@1.58.2 @noble/curves @noble/hashes
+PLAYWRIGHT_SKIP_BROWSER_GC=1 pnpm --dir /absolute/tools exec playwright install chromium firefox
+NOBLE_MODULE_DIR=/absolute/tools/node_modules \
+  python3 scripts/verify-release.py --auth wallet \
+  --browser-module /absolute/tools/node_modules/playwright
+```
+
+`--auth` defaults to `token`. Wallet mode uses its isolated TLS overlay, both EF
+bundles, `ensure-owner`, synthetic EOA binding, readiness, real API sign-in,
+strict host cookies, guarded writes, sign-out and an older-database restore
+whose backup **precedes session revocation**. The reset must prevent that session
+from authenticating again. With `--browser-module`, it seeds an invitation and
+runs `wallet-browser-smoke.cjs` in Chromium and Firefox, using an EIP-6963
+provider bridged to a Node noble signer. `--wallet-browsers chromium` selects a
+partial check explicitly; it never counts Firefox as passed. A browser launch
+failure fails the command and still cleans up the isolated Compose stack.
+The smoke covers invitation registration, shell, POST/PATCH/bodyless DELETE,
+multipart evidence, step-up linking, independent users, server-side stream
+revocation (15 s + 5 s margin) and frontend sign-out. It blocks external calls.
+
+The remaining **human compatibility check** is not replaceable by synthetic
+signatures: on an isolated HTTPS installation, use a real browser-wallet EOA
+with no funds required, switch the wallet to a non-mainnet network, choose it
+in Vessel and inspect the displayed message (correct origin/URI, Chain ID 1,
+nonce and expiry), sign without a network switch, redeem a private invitation
+if needed and reach the shell. Repeat sign-out/sign-in and link a recovery EOA
+through step-up. Confirm there is no transaction, approval, gas or private-key
+request. Record wallet/version, browser/version, connected network, date and
+outcome in the state checklist. Never put the signature, invitation or session
+cookie in that record.
 
 ### Full-stack end-to-end test
 

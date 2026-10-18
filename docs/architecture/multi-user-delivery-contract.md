@@ -798,3 +798,14 @@ Cross-model verification of the first lanes found gaps the contract left open. T
 | D1 review | Stale-generation responses, errors, stream readers and side effects are discarded, as §11 requires; generation-bound streams reopen under the current generation | §11 |
 | D1 review | The "Signed in as someone else in another tab" notice is shown after a successful reload too, and removed only once presented | §11 |
 | D1 review | The remember checkbox is locked from the moment signing starts | §11 |
+| A2 | At most 20 linked wallets per user (`IdentityLimits.MaxWalletsPerUser`); 409 `wallet-limit` at `wallets/challenge` before the step-up grant check and again at completion; `bind-wallet` exits 3 at capacity | §6, §8 |
+| A2 | Step-up and wallet-link use separate per-session buckets, each 10 requests per 10 minutes | §7 |
+| A2 | `suspend`, `demote` and operator wallet removal cannot leave no active operator with a linked wallet, but only when the target currently is such an operator; members and wallet-less operators may always be suspended. `reset-after-restore` only warns | §8 |
+| A2 | Wallet removal checks `last-wallet` before requiring step-up | §6 |
+| A1/A2 | Identity text rejects lone surrogates directly; JSON input already returns 400 `request-invalid` | §6 |
+| B2 | Candidate selection excludes venues under a server-wide deadline; a venue found at capacity is skipped for the rest of the tick; background claims use account `SKIP LOCKED`, while API admission still waits | §9.3–9.4 |
+| B2 | A manual Check queues even when capacity is full; claiming enforces capacity | §9.3 |
+| B2 | Separate per-user budgets: account discovery 10/minute, credential verification 30/minute. Refusal by a server-wide venue deadline consumes no user budget | §9.4 |
+| B2 | Candle refresh admission follows catalogue lookup; keys are capped at 256/user with an 8,192 backstop that never lets one user refuse everyone | §9.4 |
+| D1 | Once the tab's session ends, session calls never settle and streams settle quietly; nothing is retried, reopened, published or reported | §11 |
+| D1 | An oversized `0x` wallet answer is classified unsupported without scanning it | §11 |

@@ -1,6 +1,6 @@
 # Messaging, events and workers
 
-October 16, 2026. Developer and operator reference for the implemented event, messaging, worker and monitor design. It describes what the code does and how to work with it. The owner's decisions and their reasons are in the [monitor plan](play-monitor-plan.md); the browser API is in the [monitor API contract](play-monitor-api-contract.md); deployment commands are in [`deploy/README.md`](../../deploy/README.md). A diagram overview is in [play-monitor-overview.html](play-monitor-overview.html). Update this document with the code.
+October 18, 2026. Developer and operator reference for the implemented event, messaging, worker and monitor design. It describes what the code does and how to work with it. The owner's decisions and their reasons are in the [monitor plan](play-monitor-plan.md); the browser API is in the [monitor API contract](play-monitor-api-contract.md); deployment commands are in [`deploy/README.md`](../../deploy/README.md). A diagram overview is in [play-monitor-overview.html](play-monitor-overview.html). Update this document with the code.
 
 ## Contents
 
@@ -28,7 +28,7 @@ October 16, 2026. Developer and operator reference for the implemented event, me
 - **Domain and Application are free of Wolverine and RabbitMQ.** All broker code is in `Vessel.Messaging`; `ArchitectureTests` enforces it.
 - **Nothing is created at runtime.** The API and workers never migrate, create envelope storage or declare broker topology. The one-shot `migrate` step does, explicitly.
 - **Events come from Vessel's own state changes** inside the unit of work, never from re-read venue rows. A price touch is never a fill. Discrepancies are flagged, never corrected.
-- **Owner scope everywhere.** Every message carries `ownerId`; hosts accept only the configured `Vessel:Auth:OwnerId`.
+- **Owner scope everywhere.** Every message carries `ownerId`; hosts validate Active/Suspended/Unknown through `IJournalOwnerDirectory` and create an assigned `IOwnerScopeFactory` scope. Token mode has one configured owner; Wallet mode has identity-backed users. A message never mutates an HTTP scope.
 
 ```mermaid
 flowchart LR
@@ -42,7 +42,7 @@ flowchart LR
     Worker -->|"read-only checks, outside DB locks"| Venues["Venues<br/>Hyperliquid, Lighter, RISEx"]
     Api -->|"account Refresh"| Venues
     Api -->|"SSE reads committed events"| Pg
-    Migrate["migrate (one-shot)<br/>EF bundle, then provision-messaging"] --> Pg
+    Migrate["migrate (one-shot)<br/>identity + journal bundles,<br/>ensure-owner, then provision-messaging"] --> Pg
     Migrate --> Rmq
 ```
 
@@ -53,6 +53,9 @@ flowchart TD
     Api[Vessel.Api] --> Application
     Api --> Infrastructure
     Api --> Messaging
+    Api --> Identity
+    Worker --> Identity
+    Identity[Vessel.Identity] --> Application
     Api --> Persistence
     Worker[Vessel.Worker] --> Application
     Worker --> Infrastructure
@@ -70,11 +73,12 @@ Arrows point to what a project references. `backend/tests/Vessel.Tests/Architect
 
 | Project | Messaging and monitor parts |
 |---|---|
-| `Vessel.Domain` | `Monitoring/MonitorAccount` (admission, leases, state and `StateRevision`), `MonitorExitWatch`, `MonitorHeartbeat`, `MonitorVenueBudget`, `PlayDiscrepancy`, `DiscrepancyLifecycle` |
+| `Vessel.Domain` | `Monitoring/MonitorAccount` (admission, leases, state and `StateRevision`), `MonitorExitWatch`, `PlayDiscrepancy`, `DiscrepancyLifecycle` |
 | `Vessel.Application` | Ports: `IUnitOfWork`, `IUnitOfWorkParticipant`, `IVesselEventSink`, `IVesselEventReader`, `IMonitorCommandSink`, `IVesselEventSubscriber`, `IVesselCommandHandler<T>`. Contracts: `VesselEvent`, `VesselEventDraft`, `VesselEventCursor`, `VesselEventValues.Types`, `MonitorAccountCommand`. Use cases: `MonitorCoordinator`, `MonitorDiscrepancyService`, `MonitorCommandHandler`, `MonitorOptions`; `Venues/OrderMechanics` |
-| `Vessel.Persistence` | `UnitOfWork`; `Events/`: `VesselEventStore` (sink, cursor, dedup), `VesselEventMutationCapture`, `VesselEventHistory` (reader), `EventRetention`, `EventStreamEpoch`, `IVesselEventOutbox`; `Events/Subscriptions/`: `EventSubscription`, `EventSubscriptionLimits`, `TopicFilter`, `EventDispatcher`, `EventCatchUp`, `EventSubscriptionRegistry`, `EventReceiptAdmin`; `MonitorStore`, `MonitorDiscrepancyStore` (registered by `AddVesselPersistence`) |
+| `Vessel.Persistence` | `UnitOfWork`; `Events/`: `VesselEventStore` (sink, cursor, dedup), `VesselEventMutationCapture`, `VesselEventHistory` (reader), `EventRetention`, `EventStreamEpoch`, `IVesselEventOutbox`; `Events/Subscriptions/`: `EventSubscription`, `EventSubscriptionLimits`, `TopicFilter`, `EventDispatcher`, `EventCatchUp`, `EventSubscriptionRegistry`, `EventReceiptAdmin`; `MonitorStore`, `MonitorDiscrepancyStore`, `OwnerScopeFactory`, `ServerStateStore`, `SystemMonitorStore`, `SystemEventSubscriptionStore` (registered by `AddVesselPersistence`) |
 | `Vessel.Infrastructure` | `ApplicationServices.AddVesselMonitoring` (monitor use cases and `Vessel:Monitor`, shared by the API and the monitor worker), `Monitoring/MonitorRunExecutor` (lease renewal through fresh scopes), `MonitorRunLog` |
 | `Vessel.Messaging` | `MessagingSettings`, `MessagingHosting` (`AddVesselMessaging`), `MessagingTopology`, `MessagingProvisioning`, `MessagingCommands` (offline CLI), `MessagingDeployments`, `EventSubscriptionListener`, `SubscriptionMaintenanceService`, `WolverineVesselEventOutbox`; `Modules/`: `IVesselModule`, `VesselModuleRegistry`, `Monitor/`, `Verification/` |
+| `Vessel.Identity` | `IdentityOwnerDirectory`, cookie-session principal validity and offline administration; its own context/schema, no journal-table access |
 | `Vessel.Worker` | `WorkerHost`, `WorkerSettings`, `WorkerModules`, `MonitorScheduler`, `MonitorWakeup` |
 | `Vessel.Api` | `AddVesselMessaging("api")`, offline command dispatch, `VesselEventEndpoints`, `MonitorEndpoints` |
 
@@ -187,14 +191,16 @@ flowchart LR
 ### Registration
 
 - `EventSubscription(name, module, filters, limits?)`: the name is 1–48 characters (lowercase letter first; lowercase letters, digits, `-`); filters are 1–32 AMQP topic patterns over event types (words split on `.`, `*` one word, `#` zero or more); the owning module must equal the declaring module.
-- `EventSubscriptionRegistry.RegisterAsync` inserts `event_subscriptions` with the filters, a SHA-256 `filter_fingerprint` over the sorted distinct filters, `responsible_from` and `low_water_mark` both at the owner's current committed sequence, and status `active`. It is insert-only: an existing registration keeps its start and progress, and a different module or fingerprint fails provisioning. A changed filter needs a new name. There is no replay option: a subscription is responsible only for events after its registration.
+- `event_subscription_registrations` is the server-wide, insert-only subscription name/module/filter/fingerprint authority. Provisioning inserts a **new** registration and existing owners' initial progress in one statement (their current cursor is the responsibility start). Re-provisioning never backfills existing registrations or changes start/progress. Different module/fingerprint fails provisioning; changed filters need a new name.
+- `event_subscriptions` remains per-owner progress/low-water/gaps and references the server registration; receipts remain per owner/event/subscription. Dispatch/catch-up, not a publisher, initialize missing progress under the owner's shared retention lock and registration `FOR KEY SHARE`. Start responsibility at zero, low-water at the retained floor; a positive floor records an explicit lagging gap. A missing row never means NotResponsible. Registration/fingerprint is rechecked for retry/failure/advance, so removed/incompatible subscriptions produce no effects.
+- Deregistration is server-wide: lock/delete registration, cascade progress/receipts, then remove the queue. Stale catch-up cannot recreate progress without registration. New users need no producer-side subscriber list or provisioning run.
 - Provisioning registers before declaring bindings, so a rejected filter never reaches the broker. The dispatcher also refuses to settle for a host whose compiled filter differs from the registered fingerprint.
 
 ### Dispatcher
 
 `EventDispatcher.DispatchAsync` serves live delivery (`DispatchTrigger.Live`) and catch-up (`DispatchTrigger.CatchUp`). In one unit of work it:
 
-1. rejects an owner other than the scope's owner (`InvalidOwner`);
+1. rejects an owner other than the assigned scope's owner (`InvalidOwner`) and checks directory eligibility before starting a dispatch transaction; already-started work may finish during suspension;
 2. takes the owner's retention advisory lock in shared mode, so no floor is published under it;
 3. looks the event up by owner and ID, never trusting the message's sequence or payload. Absent with an `event_dedup` row: `Historical`; absent with neither: `Unknown`; retained at or below the floor: `Historical`;
 4. checks responsibility: registered, same fingerprint, sequence above `responsible_from`, type matching the filter. Otherwise `NotResponsible`, with no receipt;
@@ -237,7 +243,7 @@ Listeners run inline (`ProcessInline`), not through Wolverine's durable inbox: t
 | `Historical`, `AlreadySettled`, `NotResponsible`, `NotDue`, `Busy` | Unchanged | Ack |
 | Dispatcher threw (database unavailable, shutdown) | Whatever committed | Ack; catch-up finds it later |
 
-Commands have no receipts: `MonitorCommandListener` validates the owner and IDs (otherwise dead-letter), then `MonitorCommandHandler` wakes the scheduler if `monitor_accounts` holds the matching pending request. Duplicates and late commands are acknowledged and do nothing.
+Suspended owners' live events are acknowledged without handling or a receipt; catch-up resumes after restore. Unknown owners dead-letter. Directory failures enter the listener's safe acknowledge/catch-up path. Commands have no receipts: `MonitorCommandListener` validates IDs and directory status (suspended drops/logs, unknown dead-letters), then `MonitorCommandHandler` wakes the scheduler if `monitor_accounts` holds the matching pending request. Duplicates and late commands are acknowledged and do nothing.
 
 ### Retries and catch-up
 
@@ -312,7 +318,7 @@ Every messaging host applies a module's publishing side: a durable-outbox route 
 Example: the `notifications` module (`NotificationsModule`), which follows these steps.
 
 1. **Module class** in `backend/src/Vessel.Messaging/Modules/Notifications/NotificationsModule.cs` implementing `IVesselModule`, with `Name = "notifications"` (1–48 characters, lowercase letter first, letters, digits and `-`; not `api`).
-2. **Commands.** Each `CommandQueue(name, messageType, listenerType)` gets `vessel.commands.<name>`. Write the listener like `MonitorCommandListener`: check `command.OwnerId == host.OwnerId` and required IDs, throw `CommandDeadLetterException` otherwise, then resolve an Application `IVesselCommandHandler<T>`. Keep the durable work in PostgreSQL; the command is a hand-off. Publishing a new command type also needs a staging path: `IVesselEventOutbox` (Persistence) currently stages only `VesselEvent` and `MonitorAccountCommand`, so add an overload there, in `WolverineVesselEventOutbox` and in provisioning's `NoPublication`, plus an Application sink port like `IMonitorCommandSink`.
+2. **Commands.** Each `CommandQueue(name, messageType, listenerType)` gets `vessel.commands.<name>`. Write the listener like `MonitorCommandListener`: check required IDs and `IJournalOwnerDirectory.StatusAsync(command.OwnerId)`: Active gets an owner scope, Suspended drops/logs by ID, Unknown dead-letters with `CommandDeadLetterException`, then resolve an Application `IVesselCommandHandler<T>`. Keep the durable work in PostgreSQL; the command is a hand-off. Publishing a new command type also needs a staging path: `IVesselEventOutbox` (Persistence) currently stages only `VesselEvent` and `MonitorAccountCommand`, so add an overload there, in `WolverineVesselEventOutbox` and in provisioning's `NoPublication`, plus an Application sink port like `IMonitorCommandSink`.
 3. **Subscriptions** as in the previous section.
 4. **Services.** Handlers and scoped services in `AddRunningServices`; worker-only hosted services (schedulers, senders) as a new `case` in `WorkerModules.AddHostedServices` (`backend/src/Vessel.Worker/Program.cs`).
 5. **Registry.** Add the module to `VesselModuleRegistry.From`.
@@ -337,7 +343,7 @@ Example: the `notifications` module (`NotificationsModule`), which follows these
    ```
 
    `/app/worker-health` chooses its heartbeat file by the first module: the notifications module's file for `notifications`, otherwise the monitor scheduler's. Another module must write its own heartbeat (an `IMaintenanceHeartbeat`, which `SubscriptionMaintenanceService` calls after each pass in which every catch-up succeeded) and extend the script, or disable the healthcheck as the release check's `verifier` does. Mount the credential key ring only if the module decrypts venue tokens. The least-privilege broker user's permissions already cover `vessel.` names.
-8. **Tests:** registry consistency; a `WorkerHostTests`-style startup test (unknown module, schema provisioned for another module set); an owner-mismatched command dead-letter test; subscription tests; `docker compose config` for the new service; release verification if the service ships.
+8. **Tests:** registry consistency; a `WorkerHostTests`-style startup test (unknown module, schema provisioned for another module set); an unknown-owner command dead-letter test plus active/suspended-owner cases; subscription tests; `docker compose config` for the new service; release verification if the service ships.
 9. **Document** it in `deploy/README.md`, the Compose comments and here.
 
 ### Add an event type
@@ -351,9 +357,9 @@ Example: the `notifications` module (`NotificationsModule`), which follows these
 
 `backend/src/Vessel.Worker/Program.cs`, entrypoint `/app/worker` in the API image (non-root, no HTTP ingress):
 
-1. Reads `Vessel:Auth:OwnerId` and `WorkerSettings` (`Vessel:Worker:Modules`, default `["monitor"]`; `Vessel:Worker:Deployment`, default the first module, never `api`).
+1. Reads the selected auth/identity directory configuration and `WorkerSettings` (`Vessel:Worker:Modules`, default `["monitor"]`; `Vessel:Worker:Deployment`, default the first module, never `api`).
 2. Resolves the modules from the registry; an unknown name stops startup.
-3. Registers Infrastructure, a fixed `WorkerOwnerContext`, Persistence and each module's worker services, then `AddVesselMessaging(deployment, modules)` and `AddSubscriptionMaintenance()`.
+3. Registers Infrastructure, Identity directory, Persistence and each module's worker services, then `AddVesselMessaging(deployment, modules)` and `AddSubscriptionMaintenance()`. Directory selection is order-independent. Background work uses `IOwnerScopeFactory`; the worker no longer registers a fixed `WorkerOwnerContext`.
 4. At start, `MessagingDeploymentGuard` checks `messaging_deployments` before Wolverine starts: the deployment's schema (`wolverine_{deployment}` with `-` as `_`, or `Vessel:Messaging:StorageSchemas:{deployment}`) must be provisioned for exactly this deployment and sorted module set. Wolverine's service name is `vessel-{deployment}`; `AutoBuildMessageStorageOnStartup` is `None`.
 5. A startup failure prints only the exception type name.
 
@@ -381,12 +387,12 @@ flowchart TB
 
 `MonitorScheduler` (monitor module) ticks every 30 s, or early when `MonitorWakeup` is signalled by an accepted command (coalesced to one extra pass):
 
-1. `MonitorCoordinator.DiscoverAsync` pages candidate accounts by ID (500 per page, set-based reads) and locks only rows whose scheduling changes: it starts, idles or reschedules accounts, reschedules after a credential change, ends expired watches and settles work stranded on disabled or source-less accounts as `superseded`.
-2. `MonitorStore.ClaimDueAsync` selects due rows (`NextRunAtUtc` reached or a pending request), not leased, not behind a venue `Retry-After`, `FOR UPDATE OF accounts SKIP LOCKED`, in account-then-monitor lock order.
-3. Each claim checks the owner's read budget: an advisory lock `vessel-monitor-budget:{owner}` and fewer than two running leases. The limit is two concurrent account reads per owner across all workers and API Refreshes; more replicas add availability, not venue throughput.
+1. System-store candidate discovery pages account/owner IDs and excludes server-wide venue deadlines. Active owners get fresh assigned scopes for `MonitorCoordinator.DiscoverAsync`; one owner's directory, discovery or claim error does not abort later owners. It starts/idles/reschedules accounts, ends expired watches and settles disabled/source-less work as `superseded`.
+2. Background admission takes account locks with `SKIP LOCKED`, in account-then-monitor order, so one blocked account does not stall later owners. API admission still waits. Due rows have reached `NextRunAtUtc` or a pending request and no live lease; a venue found full is skipped for the rest of this tick.
+3. Each claim checks the owner's read budget: an advisory lock `vessel-monitor-budget:{owner}` and fewer than two running leases. The limit remains two concurrent account reads per owner across workers/API Refreshes. A second advisory lock serializes admission per venue and counts live runs across owners/processes against `VenueReadConcurrency` (default 4). The scheduler process uses `WorkerConcurrency` (default 2); adding replicas never bypasses the database budgets. A manual Check queues even at capacity; only claiming consumes a lease.
 4. A claim increments `Generation` and sets a 5-minute lease; `MonitorRunExecutor` renews it every minute and cancels the run if renewal fails.
 5. Every write of results checks `Owns(generation, holder)` under the account lock. A worker that lost its lease cannot apply late results; an expired lease is recovered by the next claim.
-6. After a completed discovery and claim pass, the scheduler writes the heartbeat.
+6. After a productive discovery/claim pass, the scheduler writes its deployment heartbeat; it never depends on a user being present. `MonitorLease.OwnerId` fixes the owner of execution/renewal scopes.
 
 ### Command listener
 
@@ -394,13 +400,13 @@ flowchart TB
 
 ### Maintenance
 
-`SubscriptionMaintenanceService` runs in every worker host, never in the API: catch-up for each subscription the host runs, every `min(CatchUpInterval)` of those subscriptions (1 hour when it runs none), and the owner's retention sweep hourly. Both are replica-safe: receipts are claimed with row locks and `SKIP LOCKED`, low-water marks under the subscription row lock, floor decisions under the owner's retention advisory lock. Failures log the exception type and subscription name only.
+`SubscriptionMaintenanceService` runs in every worker host, never in the API: catch-up for each subscription the host runs, every `min(CatchUpInterval)` of those subscriptions (1 hour when it runs none), and retention for all event-cursor owners (suspended included) hourly. Catch-up scans owners in keyset pages of 100 and dispatches only Active owners; skipped owners do not stall paging, and it wraps at the end. Both are replica-safe: receipts are claimed with row locks and `SKIP LOCKED`, low-water marks under the subscription row lock, floor decisions under the owner's retention advisory lock. Failures log the exception type and subscription name only.
 
 ### Heartbeat and health
 
-- After each productive pass the monitor scheduler writes `<unix seconds> <timeout seconds>` to `Vessel:Monitor:HeartbeatFile` (written to a temporary file, then moved) and upserts the owner's `monitor_heartbeats` row. If either fails, it deletes the file and the pass fails.
+- After each productive pass the monitor scheduler writes `<unix seconds> <timeout seconds>` to `Vessel:Monitor:HeartbeatFile` (written to a temporary file, then moved) and upserts `server_monitor_heartbeats(deployment, seen_at)` through `IServerStateStore`. If either fails, it deletes the file and the pass fails.
 - `/app/worker-health` passes when the file is readable, has two numeric fields and its age is between 0 and the timeout it records.
-- The API reports `workerOnline` when the heartbeat is at most `Vessel:Monitor:HeartbeatTimeout` old.
+- The API reports `workerOnline` when a monitor deployment heartbeat is at most `Vessel:Monitor:HeartbeatTimeout` old. It filters deployments using its own module map, so a non-monitor worker cannot make monitor health green. API, worker and provisioning hosts must have identical `Vessel:Messaging:Deployments`.
 - Logs carry IDs and exception type names, never payloads, venue messages or secrets.
 
 ## Monitor
@@ -458,7 +464,7 @@ The API also projects `stale` when a `live` row's last success is older than twi
 - Owner Check and Refresh are refused with 429 and `Retry-After` while a run is pending or running, during the cooldown (`Vessel:Monitor:ManualCooldown`, from every completion including failures), or behind a venue deadline. Check answers 409 for an account without eligible work. The cooldown never gates scheduled or confirmation claims.
 - Check answers 503 "The monitor is offline; try again later." when the worker heartbeat is older than `HeartbeatTimeout` (the same signal as `workerOnline: false`), after the 409 and 429 checks; nothing is recorded. Refresh runs in the API and does not need the worker.
 - Pending (unclaimed, unleased) check work that has been due for `Lease` (5 minutes) plus `HeartbeatTimeout` no longer gates Check or Refresh admission: admission returns it to idle under the account and monitor locks. Its due time stays in the past, so a returning worker's next scheduled claim still runs it as a scheduled run under a new request. An expired owner Check completes its own request with `monitor.run-completed` `superseded`, appended in the admitting transaction just before the new request replaces it; a refused admission (429 or the offline 503) rolls back and records neither the release nor the event. Running or leased work and the cooldown are unchanged.
-- Venue 429 deadlines are stored per owner and venue in `monitor_venue_budgets` and respected by Check, Refresh and scheduled claims across processes. A missing or invalid `Retry-After` counts as 60 s; every deadline is clamped to at most 1 hour; a shorter later deadline never shortens a longer one.
+- Venue 429 deadlines are server-wide in `server_venue_deadlines(venue_id, retry_after_until)`, through `IServerStateStore`, respected by account Refresh, monitor claims, discovery and credential verification across users/processes. They commit in an independent transaction even if the caller rolls back; public market-data cache/backoff is separate. A missing or invalid `Retry-After` counts as 60 s; every deadline is clamped to at most 1 hour; a shorter later deadline never shortens a longer one.
 - A scheduled run that starts before an accepted Check covers it; duplicate or late commands with the same request ID cannot start another run.
 
 ### Refresh versus check
@@ -608,6 +614,21 @@ sequenceDiagram
 - **Check.** Only the explicit button calls `POST /api/accounts/{id}/monitor/run`. The 202 response shows `pending`; `monitor.run-completed` normally ends it, and while the shown account is not idle `useMonitorRun` reads the stored account monitor every 3 s, at most 40 times. A 429 shows the cooldown until `Retry-After` passes. A 503 (worker offline) shows the browser's own offline-specific text ("The monitor is offline, so the check could not start…"), not the API detail. Opening a Play or a timer never requests a check.
 - **Epoch reset.** After a restore, `rotate-event-epoch` makes every old cursor reset, so the browser reloads stored state instead of trusting sequence numbers from another history.
 
+### System state and upgrades
+
+Only system stores (singleton `NpgsqlDataSource`, no `VesselDbContext`) access
+server subscription registrations, owner discovery/inventory, monitor candidates
+and server heartbeat/venue deadline tables. Owner-specific work always resolves
+inside `IOwnerScopeFactory`. `OwnerScopeArchitectureTests` inventories reviewed
+unfiltered SQL and forbids plain background scope creation/`IgnoreQueryFilters`.
+
+`20261017193000_ServerMonitorState` copies MAX deadlines by venue, creates empty
+per-deployment heartbeats and drops `monitor_heartbeats`/`monitor_venue_budgets`.
+**Stop all API/worker replicas and back up before migration.** Old images require
+a pre-upgrade database restore, not a down migration. After restore, keep hosts
+stopped, run identity reset/reconciliation in Wallet mode and rotate the event
+epoch before provisioning/starting. See the [deployment runbook](../../deploy/README.md).
+
 ## Notification Hub
 
 The `notifications` module (plan: [notification-hub-plan.md](notification-hub-plan.md); browser contract: [notification-hub-api-contract.md](notification-hub-api-contract.md)).
@@ -629,7 +650,7 @@ Settings use `:` in JSON and `__` in environment variables. The API and the work
 | Setting | Used by | Notes |
 |---|---|---|
 | `ConnectionStrings:Vessel` | API, worker, offline commands | |
-| `Vessel:Auth:OwnerId` | API, worker, offline commands | Non-empty GUID; every message and scope is validated against it |
+| `Vessel:Auth:OwnerId` | API, worker, offline commands | Token fixed owner; Wallet legacy owner/user 1. Never substitute it for a message's directory-validated owner. |
 | `Vessel:Messaging:RabbitMqUri` | API, worker, `provision-messaging`, `deregister-event-subscription` | Absolute `amqp://` or `amqps://` URI. Compose builds it from `RABBITMQ_USER`/`RABBITMQ_PASSWORD` (`migrate`) or `RABBITMQ_APP_USER`/`RABBITMQ_APP_PASSWORD` with fallback (API, worker) |
 
 ### `Vessel:Messaging` (`MessagingSettings`)
@@ -639,7 +660,7 @@ Settings use `:` in JSON and `__` in environment variables. The API and the work
 | `Prefix` | `vessel` | 1–48 characters; lowercase letter first; lowercase letters, digits, `-`, `.` | Topology name prefix. The documented least-privilege permissions assume `vessel.` |
 | `DeliveryLimit` | `20` | 1–1000 | Quorum `x-delivery-limit` transport guard; must match the declared queues |
 | `StorageSchemas:{deployment}` | `wolverine_{deployment}` (`-` → `_`) | 1–63 characters; lowercase letter first; lowercase letters, digits, `_` | Explicit envelope schema; every deployment needs its own |
-| `Deployments:{name}:{i}` | `api` (no modules) and one deployment per compiled-in module | Valid names; `api` runs none; others at least one known module | Read by provisioning only |
+| `Deployments:{name}:{i}` | `api` (no modules) and one deployment per compiled-in module | Valid names; `api` runs none; others at least one known module | Identical on API, workers and provisioning; also filters API monitor heartbeat health |
 | `Verification` | `false` | `true`/`false` | Compiles in the `verification` subscription. Release checks and tests only |
 
 ### `Vessel:Events` (`VesselEventSettings`)
@@ -647,6 +668,7 @@ Settings use `:` in JSON and `__` in environment variables. The API and the work
 | Setting | Default | Allowed | Meaning |
 |---|---|---|---|
 | `RetentionDays` | `90` | 1–36500 | Event history window by `detected_at` |
+| `MaxStreams` | `64` | 1–1024 | Event streams per API process, alongside four per user in both auth modes |
 | `StreamPollSeconds` | `2` | 1–60 | API stream pause between empty reads |
 | `StreamMaxLifetime` | `00:30:00` | `00:00:01`–`1.00:00:00` | Longest one browser event stream stays open; the API then ends it cleanly between frames and the browser reconnects from its cursor |
 | `RetentionBatch` | `1000` | 1–10000 | Rows per physical deletion batch |
@@ -657,6 +679,8 @@ Settings use `:` in JSON and `__` in environment variables. The API and the work
 
 | Setting | Default | Allowed | Meaning |
 |---|---|---|---|
+| `WorkerConcurrency` | `2` | 1–64 | Concurrent scheduler runs in this process |
+| `VenueReadConcurrency` | `4` | 1–64 | Database-enforced live account-run capacity per venue across owners/processes |
 | `Interval` | `00:10:00` | 1–60 minutes | Scheduled cadence (±10% jitter); `late` threshold is twice it; API `stale` projection |
 | `ProtectionGrace` | `00:10:00` | 0–24 hours | Grace after the first entry fill before missing protection counts |
 | `ManualCooldown` | `00:01:00` | 0 to `Interval` | Owner Check and Refresh cooldown after any completion |
@@ -838,7 +862,7 @@ Recreate every other service that uses the same user too, for example additional
 | `live` | Last check succeeded within twice the interval | None |
 | `idle` | Nothing to watch (no eligible Plays, watches or discrepancy work) | None |
 | `degraded` | Incomplete coverage: omitted executions, a fill-history gap, partial positions or orders, an order-read failure, or one or two consecutive failed checks | Read the monitor error; check venue status; it clears on the next complete check |
-| `stale` | Three or more consecutive failures, or no success for twice the interval | Check worker logs (types and IDs), venue reachability and `monitor_venue_budgets` deadlines |
+| `stale` | Three or more consecutive failures, or no success for twice the interval | Check worker logs (types and IDs), venue reachability and `server_venue_deadlines` deadlines |
 | `credential-error` | Read-only token missing, refused or expired; scheduling stops | Save a valid token; discovery reschedules the account |
 | Worker offline (`workerOnline: false`) | Heartbeat older than `HeartbeatTimeout` | `docker compose ps worker`, `docker compose logs --tail=100 worker`; check database and broker reachability and provisioning |
 | Container unhealthy | Heartbeat file missing, malformed or too old | Same as offline |
@@ -861,7 +885,7 @@ Backend suites run with `dotnet test backend/tests/Vessel.Tests` against disposa
 | Subscriptions | `EventSubscriptionTests` (registration, dispatcher, retries, races, savepoint, admin retry, low-water mark, retention, maintenance, epoch rotation, account deletion, settings binding) |
 | Browser stream and API | `VesselEventStreamTests`, `VesselEventApiTests` |
 | Broker | `VesselEventTransportTests` (outbox, settlement table through inline listeners, unroutable publish and lost queue recovery, provisioning-only storage), `MonitorEndToEndTests` (scheduler without a browser, HTTP Check through the real broker) |
-| Worker host | `WorkerHostTests` (schema for another module set, owner-mismatched command dead-lettered, productive heartbeat) |
+| Worker host / multi-owner | `WorkerHostTests`, `MultiOwnerWorkerTests`, `MultiOwnerEventTests`, `MultiOwnerMessagingTests`, `MultiOwnerMonitorLimitsTests`, `OwnerScopeArchitectureTests`, `Isolation/BackgroundIsolationTests` (directory status, assigned scopes, cross-owner events/claims, shared budgets and deployment heartbeat) |
 | Monitor | `MonitorAccountTests`, `MonitorPostgresTests`, `MonitorCredentialRaceTests` |
 | Discrepancies | `DiscrepancyLifecycleTests` (table-driven state machine), `MonitorDiscrepancyTests`, `MonitorDiscrepancyReviewTests`, `MonitorDiscrepancyRound2Tests`–`Round7Tests`, `MonitorDiscrepancyPostgresTests`, `MonitorDiscrepancyApiTests` |
 | Contract fixture | `MonitorEndToEndTests.Monitor_http_json_matches_the_browser_contract_fixture` compares real, normalized API JSON with `frontend/src/test/contracts/monitor-api.json` (`VESSEL_UPDATE_CONTRACT_FIXTURES=1` rewrites it); `monitor-contract.test.ts` checks that file with the browser validators |

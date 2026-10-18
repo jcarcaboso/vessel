@@ -1,21 +1,24 @@
 # Vessel today
 
-Vessel is a self-hosted trading diary for one owner. It connects decisions,
+Vessel is a self-hosted trading diary with separate journals per user. It connects decisions,
 execution facts and later reflection. It does not place orders or offer trading
 advice. A chart reaching a price never proves that an order filled.
 
 ## Which version this describes
 
-This is a code snapshot dated October 14, 2026, checked against `d17f56a` on
-`t3/backend-architecture-review`. At this handoff, PR #38 is draft, its first two
-backend cleanup waves are integrated and Sol verification is complete after
-transport corrections. Later cleanup waves remain unfinished. These are checkout
-and review states, not a claim that this branch has merged or any version is deployed.
+This is the October 18, 2026 multi-user stack, based on verified `be9474b`
+(A1 identity core, B1 scopes/events, A2 identity accounts, B2 monitor/limits,
+C1 isolation and D1 frontend) plus P4 operator/developer documentation and
+isolated release/browser verification. See the
+[delivery state and exact evidence](architecture/multi-user-state.md).
+These are checkout/verification states, not a claim that a branch has merged,
+a release has been published or an installation has been deployed/migrated.
+The D1–D12 defaults are adopted recommendations and remain owner-overridable.
+The real-wallet EOA/non-mainnet compatibility check remains owner-pending;
+unavailable browser checks are explicitly incomplete, not passed.
 
-The manual diary and retrospective workflows described below are present here.
-Frontend cleanup, background-monitor W0 and work in other worktrees are not part
-of this snapshot. Older discovery documents contain plans and historical limits;
-they are not a feature inventory.
+The manual diary, retrospective workflows and background monitor are present.
+Older discovery documents retain historical limits, not the current inventory.
 
 Start with the [four diagrams](diagrams/app-status.md). For backend internals,
 continue to the [backend guide](architecture/backend-guide.md). The
@@ -23,8 +26,17 @@ continue to the [backend guide](architecture/backend-guide.md). The
 
 ## Find your way around
 
-Connect with the installation's Vessel API token. This is a private session,
-not a venue login. The token stays in memory and disconnect ends that session.
+Token mode remains the default: connect with the installation's Vessel API
+token, kept in memory until disconnect/reload. An operator may explicitly enable
+Wallet mode over HTTPS: choose an EIP-6963 browser wallet, sign the displayed
+EOA message and use an invitation to create a journal when required. This is
+not a venue login, transaction or approval; the message fixes Chain ID 1 without
+requiring a network switch. WalletConnect/smart-contract wallets are absent.
+Profile & sign-in manages display name, linked recovery wallets and sessions;
+link/removal uses a fresh step-up, and the last wallet cannot be removed.
+Sessions have server expiry/revocation and forced teardown; users never inherit
+another user's journal or preferences. Operators administer identity offline,
+not journals through an authorization bypass. There is no user/journal deletion.
 
 | Screen | What works here |
 | --- | --- |
@@ -149,11 +161,12 @@ See [venue registration](../backend/src/Vessel.Infrastructure/DependencyInjectio
 
 | Location | Contents and lifetime |
 | --- | --- |
-| PostgreSQL | Accounts, portfolios, latest snapshots, retained fills/orders, saved Plays, plan/status/review history, order links, manual executions/corrections, diary retry records and sizing settings. Evidence notes/markup and encrypted venue credentials also live here. |
-| Server evidence directory | Original image bytes for saved Plays, behind the evidence API. The current object-store implementation is local filesystem, not S3. |
-| Server configuration | Installation token and credential-encryption key ring. The key ring is outside the database and never sent to Vite or the browser. |
-| Browser memory | Connection token, unsaved edits/drawings/images, shell filters and scope, and the session candle cache. Navigation retains the draft; reload or disconnect discards unsaved work. |
-| Browser `localStorage` | Appearance and chart-view preferences only, including saved palettes and indicator settings. No token, execution history, candle history or Play draft. |
+| PostgreSQL | Accounts, portfolios, latest snapshots, retained fills/orders, saved Plays, plan/status/review history, order links, manual executions/corrections, diary retry records and sizing settings. Evidence notes/markup and encrypted venue credentials also live here. The separate identity schema stores users, wallets, hashed sessions, challenges and invitations; events, owner progress/receipts and server monitor state live in the journal schema. |
+| Private evidence object store | Original saved-Play image bytes behind the owner-scoped API. Local remains the no-settings default; explicit S3 opts into private S3-compatible storage (bundled RustFS in Compose). |
+| Server configuration | Selected sign-in mode, allowed origins/policy, Token-mode bearer and credential-encryption key ring. The key ring is outside the database and never sent to Vite or the browser. |
+| Browser memory | Token-mode bearer or Wallet user/session metadata (never the HttpOnly cookie value), unsaved edits/drawings/images, shell filters and scope, and the session candle cache. Navigation retains the draft; reload or disconnect discards unsaved work. |
+| Browser `localStorage` | User-scoped appearance/chart preferences and device theme/last-provider convenience keys, including saved palettes and indicator settings. No token, execution history, candle history or Play draft. |
+| Browser cookie jar | Wallet mode only: host-only HttpOnly session/binding cookies, server-bounded expiry and revocation; remembered sessions can persist. No wallet private key. |
 | Server memory | Bounded public catalogue, candle and market-context caches, plus active market-stream subscriptions. These are not a durable candle archive. |
 
 Save writes the Play and then synchronizes its images. These are separate
@@ -204,16 +217,17 @@ or assume RISEx reported PnL excludes funding.
 
 | Not implemented in this checkout | What exists instead |
 | --- | --- |
-| Background Play monitoring and durable notification delivery | Browser execution checks and in-page feedback. W0 work elsewhere is not included. |
+| Durable notification delivery | Background Play monitoring, event outbox/subscriptions and in-page feedback exist; no production notification subscriber yet. |
 | Strategy library, reusable strategy definitions and versions | Free-text strategy notes plus disposable discovery prototypes. |
 | Durable candle archive, backtesting and complete historical backfill | Bounded imports and memory caches. TimescaleDB is a direction, not a running component. |
-| S3-compatible evidence storage | An object-store interface with a local-filesystem implementation. |
-| Multi-user onboarding or order execution | One configured owner and read-only venue access. No venue signing or trading. |
+| Automatic evidence-storage migration | Local and private S3-compatible adapters exist; cutover is explicit and offline. |
+| WalletConnect, smart-contract wallet auth, user deletion or order execution | EOA onboarding, isolated journals and read-only venue access exist. No venue signing or trading. |
 
-October 17, 2026: wallet sign-in for several users is analysed in the
-[multi-user plan](architecture/multi-user-wallet-auth.md), with screens in
-[wallet sign-in design](design/wallet-sign-in/README.md). It is a draft for
-owner decisions, not implemented.
+Wallet sign-in is delivered against the [multi-user contract](architecture/multi-user-delivery-contract.md),
+with [verification/activation evidence](architecture/multi-user-state.md). The
+original [analysis](architecture/multi-user-wallet-auth.md) and
+[design](design/wallet-sign-in/README.md) are historical context; adopted D1–D12
+defaults remain owner-overridable. Human compatibility acceptance is pending.
 
 The [backend review](architecture/backend-review.md) and
 [strategy plan](architecture/strategies-plan.md) describe further work, not
