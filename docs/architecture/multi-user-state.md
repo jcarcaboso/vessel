@@ -17,7 +17,7 @@ The original analysis/prototype is historical, not an implementation gate.
 | B2 monitor/limits | Fair candidate/claim scheduling, account `SKIP LOCKED`, database-backed cross-owner venue capacity/deadlines, per-deployment heartbeats, per-user API budgets; registration constant enabled. | Multi-owner monitor/worker/limits tests, migration tests and full suite; independent Opus fixes verified. |
 | C1 isolation | Positive-control HTTP isolation, exact hidden-resource responses, per-attempt state snapshots, mutation probes, Token and Wallet harnesses. | 66 isolation cases in the inherited verified stack; rerun evidence below. Opus implementation, independent Sol review/fixes. |
 | D1 frontend | Mode discovery, EIP-6963 sign-in/registration/profile/step-up, account menu, generation and terminal-session transport, cross-tab teardown, scoped preferences. | 2,307 Vitest cases, typecheck/lint/build; independent Sol reviews/fixes. |
-| P4 deployment/docs | Explicit Wallet Compose overlay (Token default unchanged), operator settings/CLI/upgrade/restore runbooks, developer references, packaged `--auth wallet` check and external noble-signed browser smoke. | Local verification below; P4 has not received a separate independent review in this worktree. |
+| P4 deployment/docs | Explicit Wallet Compose overlay (Token default unchanged), operator settings/CLI/upgrade/restore runbooks, developer references, packaged `--auth wallet` check and external noble-signed browser smoke. | Claude Opus 5.5 reviewed `0988a1b`: **ready-with-fixes**, no blockers. Scoped follow-up fixes and rerun evidence below; no independent re-review is claimed. |
 
 D1–D12 are **adopted working defaults**, not answers retroactively attributed to
 the owner. They remain owner-overridable through explicit configuration or a
@@ -69,7 +69,7 @@ python3 scripts/verify-release.py --auth wallet \
   --browser-module /tmp/vessel-pw/node_modules/playwright --wallet-browsers chromium
 ```
 
-**Passed: 128 packaged assertions plus 10 Chromium assertions.** Matrix:
+**Initial P4 run passed: 128 packaged assertions plus 10 Chromium assertions.** Matrix:
 TLS 44, image 5, monitor 26, restore 12, security 8, wallet 23, worker 10.
 The check ran both EF bundles via `deploy/migrate`, demonstrated
 `no-operator-wallet`, bound the synthetic operator, inspected both host cookies,
@@ -92,24 +92,65 @@ Transient logs are under `/tmp/vessel-mu/p4-*`; they are not installation
 configuration or a durable backup. Results/counts in this document are the
 repository record, not a promise that those temporary files remain.
 
+### P4 review-fix rerun — October 18, 2026
+
+Claude Opus 5.5's review of `0988a1b` was **ready-with-fixes**, no blockers.
+The scoped follow-up preserves the signer and application code, adds the
+fail-before-migration auth preflight and persistent Compose mode/overlays,
+clarifies activation/recovery and strengthens the smoke/restore assertions.
+
+| Command / check | Result |
+| --- | --- |
+| `python3 -m unittest discover -s scripts -p 'test_*.py'` | **74 passed**, zero failures. Includes preflight/order/negative readiness tests, browser image option/precheck, network/publish/read-only mounts/resource limits/secret exclusion, endpoint stripping and cleanup order/failure cases. |
+| `python3 scripts/verify-release.py` | **152 packaged assertions passed**: HTTP 44, TLS 47, image 5, monitor 26, restore 12, security 8, worker 10. Default Token regression, S3/RustFS. |
+| Exact Wallet command in **Manual Wallet pre-release step** below | **129 packaged + 10 Chromium + 10 Firefox = 149 assertions passed**. Matrix: TLS 44, image 5, monitor 26, restore 12, security 8, wallet 24, worker 10. Chromium **153.0.8010.12** local; Firefox **146.0.1** remote. |
+| Three `docker compose config --format json` resolutions, private temporary synthetic `.env` | **22 assertions passed**: Token default on migrate/API/worker; bare Wallet commands retain TLS+Wallet overlays and default `Closed`; explicit omission of the overlay retains Wallet mode but lacks origins (preflight refuses before migrations), not Token downgrade. |
+| `python3 -m py_compile scripts/verify-release.py scripts/test_release.py`; `node --check scripts/wallet-browser-smoke.cjs`; `sh -n deploy/migrate`; `git diff --check` | Passed. |
+
+The restore rerun now positively proves that the restored operator session is
+live (`revoked_at IS NULL`, count 1) **on the restore project before reset**.
+Reset then revokes it and its old cookie returns 401. Browser checks inspect
+both issuing Set-Cookie headers (no Domain) and stored secure host cookies.
+
+The first remote-server attempt failed with
+`browserType.connect: WebSocket error: socket hang up`: rootless Docker's
+published TCP proxy accepted connections before Playwright's Node server was
+listening. It was a harness readiness race, not a browser/app failure. The
+check now waits for `/json` with its exact random `wsEndpointPath`; a regression
+test covers the initial disconnect. A standalone isolated probe then reported
+`firefox 146.0.1`, and the full command passed in both browsers. The whole-smoke-
+inside-container fallback was **not used**.
+
+Both standalone probe containers/networks, all three packaged run project bases
+(including the failed remote attempt), restore stacks and temporary API/web
+image tags were removed. The final audit found **zero** remaining `vessel-check-*`
+containers, volumes or networks, and no image tags for the three run bases.
+Only the requested reusable Playwright image was retained, digest
+`sha256:6446946a1d9fd62d9ae501312a2d76a43ee688542b21622056a372959b65d63d`.
+Logs are `/tmp/vessel-mu/p4-review-{token,wallet,wallet-final,python-tests}.log`;
+no operator installation, live database, frontend/backend file or `.github`
+workflow changed. Nothing was pushed or published.
+
 ## Contract §10 activation checklist
 
 | Gate | Outcome / evidence |
 | --- | --- |
 | Isolation suite | **PASS:** 66 isolation cases, zero skips, focused Token/Wallet rerun plus full backend run. |
 | Two-owner worker/events | **PASS:** focused 120-case isolation/multi-owner/scope-inventory run and full backend suite; includes `MultiOwnerWorkerTests`, `MultiOwnerEventTests`, `MultiOwnerMessagingTests` and `MultiOwnerMonitorLimitsTests`. |
-| Revocation of already-open streams | **PASS:** real Chromium frontend bodyless session DELETE closed an independent already-open server SSE reader in **14,325 ms** (≤15 s + 5 s margin); backend identity/stream/isolation cases also passed. |
-| HTTPS cookies | **PASS:** packaged HTTPS check and Chromium inspect binding/session `__Host-` names, Secure, HttpOnly, SameSite=Strict, Path=/ and no Domain. |
+| Revocation of already-open streams | **PASS:** latest Chromium **14,172 ms**, Firefox **13,305 ms** (≤15 s + 5 s margin), using frontend bodyless session DELETE and an independent already-open SSE reader. Smoke asserts the reader is still open immediately before revocation and elapsed time is nonnegative; backend identity/stream/isolation cases also passed. |
+| HTTPS cookies | **PASS:** packaged HTTPS check plus Chromium and Firefox inspect both binding/session `__Host-` cookies, Secure, HttpOnly, SameSite=Strict, Path=/ and no Domain. Browser storage is checked before signing (binding) and after authentication (session), and both issuing response headers must omit Domain. |
 | Restore reset | **PASS:** packaged backup had a live operator session; revocation happened after the dump; reset ran offline after restore; the resurrected cookie returned 401, then a new signature authenticated the preserved operator GUID. |
 | Real-wallet compatibility, including non-mainnet EOA | **OWNER-PENDING**; exact acceptance steps below. Synthetic noble signatures are not a real-wallet compatibility test. |
 | Wallet writes in Chromium | **PASS:** ten Chromium browser assertions: EIP-6963/invitation/shell, POST, frontend profile PATCH, bodyless DELETE, multipart evidence, step-up recovery link, two-user isolation, open-stream revocation and sign-out; zero page/CSP errors or external calls. |
-| Wallet writes in Firefox | **HOST-BLOCKED, NOT PASSED.** Playwright 1.58.2 downloaded Firefox 146.0.1 (revision 1509); launch fails with `browserType.launch: Host system is missing dependencies to run browsers.` Missing system libraries include `libXcursor.so.1`, `libgtk-3.so.0`, `libgdk-3.so.0`, `libpangocairo-1.0.so.0`, `libpango-1.0.so.0`, `libcairo-gobject.so.2`, `libcairo.so.2`, `libgdk_pixbuf-2.0.so.0`. No shared-host system packages were installed. |
+| Wallet writes in Firefox | **PASS: Firefox 146.0.1**, remote official `mcr.microsoft.com/playwright:v1.58.2-noble` server, Playwright 1.58.2 client/server. All ten browser assertions passed, including real Wallet-mode POST, frontend PATCH, bodyless DELETE and multipart, both secure cookies, step-up, isolation, revocation and sign-out; zero page/CSP errors or external calls. Exact command below. The local-host dependency failure is superseded, not counted as a pass. |
 
 **Activation outcome:** implementation supports explicit Wallet opt-in, but §10
-acceptance is **not fully signed off** until the real-wallet check and Firefox
-writes pass. Do not silently count either as synthetic/Chromium coverage. The
-operator documentation exposes opt-in with this warning; no installation was
-switched and no application gate/default was changed by P4.
+acceptance is **not fully signed off**: Firefox has passed, while the real-wallet/
+non-mainnet EOA check remains **OWNER-PENDING**. Keep registration **`Closed`**
+until both pass and are recorded here. Synthetic signatures do not satisfy the
+human check. The operator documentation exposes opt-in with this warning; no
+installation was switched. P4 changes the deployment overlay's default
+registration to `Closed`, not the application registration constant/default.
 
 ### Owner-pending compatibility steps
 
@@ -125,12 +166,39 @@ switched and no application gate/default was changed by P4.
    the shell. Sign out/sign in again. Link a second EOA through linked-wallet
    step-up and its own link signature. Never record invitations, signatures or
    cookies in the acceptance record.
-5. Record date and actual outcomes here. Separately run
-   `verify-release.py --auth wallet --browser-module <external-playwright>`
-   with both browser runtimes available (the default engine set is
-   `chromium,firefox`). Revalidate the writes, isolation and revocation checks.
+5. Record date and actual outcomes here. Separately rerun the exact manual
+   pre-release command below. Revalidate both browsers' writes, isolation,
+   cookies and revocation checks; synthetic coverage never replaces steps 1–4.
 
-### Browser prerequisites and exact blocked attempt
+### Manual Wallet pre-release step (not a CI gate)
+
+CI gates Token mode only. Before a release, manually run the packaged Wallet
+check and both browser smokes against the disposable stack. The deployment
+overlay defaults registration to `Closed`; the synthetic check explicitly
+selects `Invitation` only in its private disposable `.env`.
+
+```sh
+# One-time reusable image prerequisite (no host browser libraries installed):
+docker pull mcr.microsoft.com/playwright:v1.58.2-noble
+export NOBLE_MODULE_DIR=/tmp/vessel-pw/node_modules
+export CHROMIUM_PATH=$HOME/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+python3 scripts/verify-release.py --auth wallet \
+  --browser-module /tmp/vessel-pw/node_modules/playwright \
+  --wallet-browsers chromium,firefox \
+  --wallet-browser-image mcr.microsoft.com/playwright:v1.58.2-noble
+```
+
+Client/server Playwright are both 1.58.2. The official browser server runs as
+`pwuser`, with 2 GiB/2 CPU limits, on the disposable Compose project network,
+published only on `127.0.0.1`. Read-only mounts contain `/tmp/vessel-pw` and one
+0644 Node forwarder, never the private `.env`/key-ring directory. The forwarder
+binds `127.0.0.1` and `::1` at the isolated HTTPS port and routes to `tls:443`.
+Firefox keeps the exact `https://localhost:<port>` origin; the isolated internal
+CA uses `ignoreHTTPSErrors`, never weakened cookie assertions. Invitations stay
+in the local smoke's environment, not Docker arguments or browser-server
+environment. Server removal precedes Compose teardown, including failure paths.
+
+### Browser prerequisites and superseded local-host failure
 
 External tools were installed with
 `pnpm --dir /tmp/vessel-pw add @noble/curves @noble/hashes` (both 2.4.0), never
@@ -147,15 +215,21 @@ JS
 ```
 
 Raw error: `browserType.launch: Host system is missing dependencies to run
-browsers.` The missing system sonames are listed in the checklist. Firefox
-writes were **not run** and are not a pass. The smoke supports both engines and
-defaults to both; this run explicitly selected Chromium because of the launch
-failure. Playwright's Firefox installer pruned the older shared Chromium cache;
+browsers.` Missing sonames included `libXcursor.so.1`, `libgtk-3.so.0`,
+`libgdk-3.so.0`, `libpangocairo-1.0.so.0`, `libpango-1.0.so.0`,
+`libcairo-gobject.so.2`, `libcairo.so.2`, `libgdk_pixbuf-2.0.so.0`.
+That original attempt did **not** run Firefox writes and was never a pass.
+The follow-up uses the official container instead; no shared-host system
+packages were installed. Playwright's Firefox installer pruned the older shared Chromium cache;
 the supplied revision-1243 Chromium/headless-shell caches were restored from the
 official download, and the supplied shell launched and ran the smoke successfully.
 
 ## Deliberate limits and remaining work
 
+- Known inherited frontend flake: `frontend/src/features/identity/sign-in-machine.test.ts:31`
+  compares two time-sensitive `new Date()` fixtures. The orchestrator owns its
+  D1 fix; P4 changed no frontend/backend source or tests and did not rerun those
+  suites for the deployment/docs follow-up.
 - The development `pnpm db:migrate` helper remains journal-only plus messaging
   provisioning, not a complete Wallet bootstrap. The packaged `/app/migrate`
   sequence is the verified identity/journal/bootstrap path for this delivery.

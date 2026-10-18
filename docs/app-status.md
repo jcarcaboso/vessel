@@ -14,8 +14,11 @@ isolated release/browser verification. See the
 These are checkout/verification states, not a claim that a branch has merged,
 a release has been published or an installation has been deployed/migrated.
 The D1–D12 defaults are adopted recommendations and remain owner-overridable.
+§10 is **not signed off**: Wallet mode is a documented opt-in, **not activated**.
 The real-wallet EOA/non-mainnet compatibility check remains owner-pending;
-unavailable browser checks are explicitly incomplete, not passed.
+Firefox **146.0.1 Wallet writes PASS** through the official Playwright 1.58.2
+container ([exact command](architecture/multi-user-state.md#manual-wallet-pre-release-step-not-a-ci-gate)).
+Keep registration `Closed` until both pass and are recorded there.
 
 The manual diary, retrospective workflows and background monitor are present.
 Older discovery documents retain historical limits, not the current inventory.
@@ -227,7 +230,10 @@ Wallet sign-in is delivered against the [multi-user contract](architecture/multi
 with [verification/activation evidence](architecture/multi-user-state.md). The
 original [analysis](architecture/multi-user-wallet-auth.md) and
 [design](design/wallet-sign-in/README.md) are historical context; adopted D1–D12
-defaults remain owner-overridable. Human compatibility acceptance is pending.
+defaults remain owner-overridable. Wallet mode is **not activated** and §10 is
+not signed off: Firefox 146.0.1 Wallet writes passed, but the real-wallet/
+non-mainnet EOA check is still owner-pending. Both must pass and be recorded
+in `multi-user-state.md` before registration leaves `Closed`.
 
 The [backend review](architecture/backend-review.md) and
 [strategy plan](architecture/strategies-plan.md) describe further work, not

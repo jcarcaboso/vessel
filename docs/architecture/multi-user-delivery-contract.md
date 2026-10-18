@@ -577,6 +577,12 @@ See §7. The stream endpoints get `IPrincipalValidity` from DI: `AlwaysValidPrin
   - a real-wallet compatibility check, including an EOA connected to a non-mainnet network;
   - Wallet-mode writes (POST, PATCH, bodyless DELETE, multipart upload) in **Chromium and Firefox**.
 
+P4 operator documentation is published under the explicit §16 clarification,
+not activation approval. §10 is not signed off; Wallet is a documented opt-in
+but not activated. Keep registration `Closed` until both-browser writes and the
+owner real-wallet/non-mainnet EOA check pass and are recorded in
+`multi-user-state.md`. Publishing this runbook does not waive either gate.
+
 ## 11. Frontend (D1)
 
 ### Gate
@@ -787,6 +793,7 @@ Cross-model verification of the first lanes found gaps the contract left open. T
 
 | Found in | Clarification | Where |
 | --- | --- | --- |
+| P4 | Operator docs are published before two §10 items passed; they mark Wallet mode as not activated and start registration `Closed` | §10 |
 | A1 review | The request guard treats every method except GET, HEAD, OPTIONS and TRACE as unsafe, compared case-insensitively | §7 |
 | A1 review | A reused binding cookie keeps its value but is re-issued with a fresh lifetime on every challenge | §6, §7 |
 | A1 review | Stream endpoints resolve `IPrincipalValidity` as a required service; there is no "always valid" fallback | §7, §9.5 |
