@@ -361,7 +361,9 @@ public sealed class NotificationStore(VesselDbContext db, TimeProvider time, Not
 
     public Task<int> RetainAsync(DateTimeOffset cutoff, CancellationToken ct) => VesselEventSql.ParticipateAsync(db, async () =>
     {
-        await LockCursorAsync(db, ct);
+        // Retention never creates progress. Source-only owners can still age out handled events.
+        await VesselEventSql.ScalarAsync(db, "SELECT 1 FROM notification_cursors WHERE owner_id=@owner FOR UPDATE",
+            ct, ("owner", Owner));
         var deleted = await DeleteNotificationsAsync(db, "n.created_at < @cutoff", ct, P("cutoff", cutoff));
         await VesselEventSql.ExecuteAsync(db, """
             DELETE FROM notification_sources WHERE owner_id=@owner AND notification_id IS NULL AND event_id IN (

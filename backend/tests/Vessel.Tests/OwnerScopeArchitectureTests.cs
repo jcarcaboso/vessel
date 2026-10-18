@@ -67,6 +67,9 @@ public sealed class OwnerScopeArchitectureTests
             // System-only notification health: configured deployment IDs, no owner rows or owner transaction.
             "Vessel.Persistence/Notifications/NotificationWorkerState.cs|5f9192e9e09f282f927f5e2cc48e654e01ee119cf0a935c10218dff4fc629238",
             "Vessel.Persistence/Notifications/NotificationWorkerState.cs|f75cf6a3ee0394344375a8242df94a8756058aa8f107353fef28663d45c69553",
+            // Retention discovery returns only notification cursor/source owner IDs in bounded index-keyset pages.
+            // No journal facts, owner directory or status filter: suspended owners' derived alerts still expire.
+            "Vessel.Persistence/Notifications/SystemNotificationStore.cs|4cf27d1a1a94c5bc022ecda2a317013fd1e76b1f37682a7ed6550510acd42dc7",
             // Not SQL: server-authored notification title beginning with the word "Update".
             "Vessel.Application/Notifications/NotificationComposer.cs|fb59481d31b3a452f939961f54a0da2ba0ebfb1c04c24b7cd273dcf14f79c639",
             "Vessel.Persistence/PlayStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",

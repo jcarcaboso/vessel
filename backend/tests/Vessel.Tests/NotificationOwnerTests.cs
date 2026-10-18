@@ -11,9 +11,11 @@ using Vessel.Application.Ownership;
 using Vessel.Messaging;
 using Vessel.Messaging.Modules;
 using Vessel.Messaging.Modules.Notifications;
+using Vessel.Domain.Accounts;
 using Vessel.Persistence;
 using Vessel.Persistence.Events;
 using Vessel.Persistence.Events.Subscriptions;
+using Vessel.Persistence.Notifications;
 using Vessel.Worker;
 using Wolverine;
 
@@ -143,13 +145,25 @@ public sealed class NotificationOwnerTests
         await runtime.DeliverAsync(await runtime.RequestAsync(runtime.First));
         await runtime.DeliverAsync(await runtime.RequestAsync(runtime.Second));
         runtime.Directory.Set(runtime.Second, JournalOwnerStatus.Suspended);
-        // A third owner has only notification preferences: inventory must not depend on event cursors or users.
+        // Journal facts and preferences alone do not require notification retention.
         var preferencesOnly = Guid.NewGuid();
-        await using (var scope = runtime.Scopes.Create(preferencesOnly))
-            await scope.Services.GetRequiredService<NotificationService>().SavePreferencesAsync(
-                new(false, "info", [], 0), default);
-        var inventory = runtime.Services.GetRequiredService<IJournalOwnerInventory>();
-        Assert.Contains(preferencesOnly, await inventory.DistinctOwnersAsync(null, 100, default));
+        await using (var seed = runtime.Services.GetRequiredService<NpgsqlDataSource>().CreateCommand("""
+            INSERT INTO notification_preferences(owner_id,channel,enabled,minimum_severity,categories,revision,updated_at)
+            VALUES(@owner,'in-app',false,'info','{}',1,@now)
+            """))
+        {
+            seed.Parameters.AddWithValue("owner", preferencesOnly);
+            seed.Parameters.AddWithValue("now", runtime.Clock.GetUtcNow());
+            await seed.ExecuteNonQueryAsync();
+        }
+        var journalOnly = Guid.NewGuid();
+        await using (var db = runtime.Database.Context(journalOnly))
+        {
+            db.Accounts.Add(new Account(Guid.NewGuid(), journalOnly, "manual", "Journal only"));
+            await db.SaveChangesAsync();
+        }
+        var inventory = runtime.Services.GetRequiredService<SystemNotificationStore>();
+        Assert.Equal(new[] { runtime.First, runtime.Second }, await inventory.RetentionOwnersAsync(null, default));
         runtime.Clock.Advance(TimeSpan.FromDays(91));
         var failing = new FailingScopes(runtime.Scopes, runtime.First);
         var retention = new NotificationRetentionService(failing, inventory, new(), runtime.Clock,
@@ -158,9 +172,74 @@ public sealed class NotificationOwnerTests
         Assert.Single((await runtime.PageAsync(runtime.First)).Items);
         Assert.Empty((await runtime.PageAsync(runtime.Second)).Items);
         Assert.Contains(runtime.Second, failing.Attempted);
+        Assert.DoesNotContain(preferencesOnly, failing.Attempted);
+        Assert.DoesNotContain(journalOnly, failing.Attempted);
+        Assert.Equal(2, await runtime.CountAsync("notification_cursors"));
+        Assert.Equal(1, await runtime.CountAsync("notification_sources"));
+        Assert.Equal(1, await runtime.CountAsync("notification_deliveries"));
         failing.Fail = false;
         await retention.RunRetentionAsync(default);
         Assert.Empty((await runtime.PageAsync(runtime.First)).Items);
+        Assert.Equal(0, await runtime.CountAsync("notification_sources"));
+        Assert.Equal(0, await runtime.CountAsync("notification_deliveries"));
+    }
+
+    [VesselEventPostgresFact]
+    public async Task Retention_prunes_suspended_source_only_owners_without_creating_cursors()
+    {
+        await using var runtime = await Runtime.CreateAsync();
+        runtime.Directory.Set(runtime.First, JournalOwnerStatus.Suspended);
+        await using var scope = runtime.Scopes.Create(runtime.First);
+        var work = scope.Services.GetRequiredService<IUnitOfWork>();
+        var hub = scope.Services.GetRequiredService<INotificationHubStore>();
+        await work.ExecuteAsync(async () =>
+        {
+            await hub.RecordHandledAsync([new(Guid.NewGuid(), "test.requested", null)], default);
+            return true;
+        }, default);
+        runtime.Clock.Advance(TimeSpan.FromDays(91));
+        await work.ExecuteAsync(async () =>
+        {
+            await hub.RecordHandledAsync([new(Guid.NewGuid(), "test.requested", null)], default);
+            return true;
+        }, default);
+        Assert.Equal(0, await runtime.CountAsync("notification_cursors"));
+        var owners = runtime.Services.GetRequiredService<SystemNotificationStore>();
+        Assert.Equal(runtime.First, Assert.Single(await owners.RetentionOwnersAsync(null, default)));
+        var retention = new NotificationRetentionService(runtime.Scopes, owners, new(), runtime.Clock,
+            NullLogger<NotificationRetentionService>.Instance);
+        await retention.RunRetentionAsync(default);
+        Assert.Equal(1, await runtime.CountAsync("notification_sources"));
+        Assert.Equal(0, await runtime.CountAsync("notification_cursors"));
+        // A direct, racing retention call for an owner with no notification rows must also stay read-only.
+        await using var empty = runtime.Scopes.Create(runtime.Second);
+        await empty.Services.GetRequiredService<IUnitOfWork>().ExecuteAsync(
+            () => empty.Services.GetRequiredService<INotificationStore>().RetainAsync(runtime.Clock.GetUtcNow(), default), default);
+        Assert.Equal(0, await runtime.CountAsync("notification_cursors"));
+    }
+
+    [VesselEventPostgresFact]
+    public async Task Notification_retention_discovery_keyset_pages_the_distinct_notification_owner_union()
+    {
+        await using var runtime = await Runtime.CreateAsync();
+        var expected = Enumerable.Range(1, 205).Select(i => Guid.Parse($"00000000-0000-0000-0000-{i:x12}")).ToArray();
+        await using var seed = runtime.Services.GetRequiredService<NpgsqlDataSource>().CreateCommand("""
+            INSERT INTO notification_cursors(owner_id) SELECT unnest(@cursors);
+            INSERT INTO notification_sources(owner_id,event_id,event_type,handled_at)
+            SELECT owner_id,gen_random_uuid(),'test.requested',now()
+            FROM unnest(@sources) AS owner_id CROSS JOIN generate_series(1,2);
+            """);
+        seed.Parameters.AddWithValue("cursors", expected[..150]);
+        seed.Parameters.AddWithValue("sources", expected[100..]);
+        await seed.ExecuteNonQueryAsync();
+        var store = runtime.Services.GetRequiredService<SystemNotificationStore>();
+        var first = await store.RetentionOwnersAsync(null, default);
+        Assert.Equal(expected[..100], first);
+        var second = await store.RetentionOwnersAsync(first[^1], default);
+        Assert.Equal(expected[100..200], second);
+        var last = await store.RetentionOwnersAsync(second[^1], default);
+        Assert.Equal(expected[200..], last);
+        Assert.Empty(await store.RetentionOwnersAsync(last[^1], default));
     }
 
     private static async Task<(bool, string, long)> DefaultsAsync(IOwnerScope scope)

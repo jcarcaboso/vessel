@@ -41,7 +41,7 @@ public sealed class NotificationHeartbeat(NotificationWorkerState state, WorkerS
 }
 
 /// <summary>Hourly: deletes notifications older than <c>RetentionDays</c> with their sources and deliveries.</summary>
-public sealed class NotificationRetentionService(IOwnerScopeFactory scopes, IJournalOwnerInventory owners,
+public sealed class NotificationRetentionService(IOwnerScopeFactory scopes, SystemNotificationStore owners,
     NotificationOptions options, TimeProvider time,
     ILogger<NotificationRetentionService> logger) : BackgroundService
 {
@@ -69,7 +69,7 @@ public sealed class NotificationRetentionService(IOwnerScopeFactory scopes, IJou
         var cutoff = time.GetUtcNow().AddDays(-options.RetentionDays);
         while (true)
         {
-            var page = await owners.DistinctOwnersAsync(after, 100, ct);
+            var page = await owners.RetentionOwnersAsync(after, ct);
             if (page.Count == 0) return;
             foreach (var owner in page)
             {

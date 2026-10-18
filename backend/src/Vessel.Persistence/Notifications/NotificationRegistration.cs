@@ -22,6 +22,7 @@ public static class NotificationRegistration
         services.TryAddSingleton(new NotificationDeployments(deployments.Length == 0 ? ["notifications"] : deployments
             .Where(d => d.GetChildren().Any(m => m.Value == "notifications")).Select(d => d.Key).ToArray()));
         services.TryAddSingleton<NotificationWorkerState>();
+        services.TryAddSingleton<SystemNotificationStore>();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddScoped<NotificationStore>();
         services.TryAddScoped<INotificationHubStore>(sp => sp.GetRequiredService<NotificationStore>());
