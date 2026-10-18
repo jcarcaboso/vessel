@@ -419,6 +419,7 @@ public sealed class MonitorEndToEndTests
             builder.Configuration.AddInMemoryCollection(config);
             builder.Logging.ClearProviders();
             builder.Services.AddSingleton<IJournalOwnerContext>(new CoreOwner(Owner));
+            builder.Services.AddSingleton<IJournalOwnerDirectory>(new ConfiguredOwnerDirectory(Owner));
             builder.Services.AddVesselPersistence(builder.Configuration);
             builder.AddVesselMessaging(VerificationModule.ModuleName, [VerificationModule.ModuleName]);
             return builder.Build();

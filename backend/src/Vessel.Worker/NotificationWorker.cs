@@ -13,7 +13,8 @@ namespace Vessel.Worker;
 /// <c>&lt;unix seconds&gt; &lt;timeout seconds&gt;</c> to its own heartbeat file and its own heartbeat row. It never
 /// touches the monitor's, so a healthy notifications worker cannot make a stopped monitor look online.
 /// </summary>
-public sealed class NotificationHeartbeat(IServiceScopeFactory scopes, NotificationOptions options, TimeProvider time) : IMaintenanceHeartbeat
+public sealed class NotificationHeartbeat(IOwnerScopeFactory scopes, IJournalOwnerDirectory owners,
+    NotificationOptions options, TimeProvider time, ILogger<NotificationHeartbeat> logger) : IMaintenanceHeartbeat
 {
     private readonly string workerId = Guid.NewGuid().ToString("N");
 
@@ -23,17 +24,38 @@ public sealed class NotificationHeartbeat(IServiceScopeFactory scopes, Notificat
         try
         {
             var now = time.GetUtcNow();
+            var failed = false;
+            Guid? after = null;
+            while (true)
+            {
+                var page = await owners.ActiveOwnersAsync(after, 100, cancellationToken);
+                if (page.Count == 0) break;
+                foreach (var owner in page)
+                {
+                    after = owner;
+                    try
+                    {
+                        if (await owners.StatusAsync(owner, cancellationToken) != JournalOwnerStatus.Active) continue;
+                        await using var scope = scopes.Create(owner);
+                        var store = scope.Services.GetRequiredService<INotificationStore>();
+                        await scope.Services.GetRequiredService<IUnitOfWork>().ExecuteAsync(async () =>
+                        {
+                            await store.RecordHeartbeatAsync(workerId, now, cancellationToken);
+                            return true;
+                        }, cancellationToken);
+                    }
+                    catch (Exception error) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        failed = true;
+                        logger.LogWarning("Notification heartbeat for owner {OwnerId} failed with {ErrorType}.", owner, error.GetType().Name);
+                    }
+                }
+            }
+            if (failed) throw new InvalidOperationException("A notification owner heartbeat failed.");
             var temporary = file + "." + workerId + ".new";
             await File.WriteAllTextAsync(temporary, string.Create(CultureInfo.InvariantCulture,
                 $"{now.ToUnixTimeSeconds()} {(long)options.HeartbeatTimeout.TotalSeconds}"), cancellationToken);
             File.Move(temporary, file, overwrite: true);
-            await using var scope = scopes.CreateAsyncScope();
-            var store = scope.ServiceProvider.GetRequiredService<INotificationStore>();
-            await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().ExecuteAsync(async () =>
-            {
-                await store.RecordHeartbeatAsync(workerId, now, cancellationToken);
-                return true;
-            }, cancellationToken);
         }
         catch
         {
@@ -45,7 +67,8 @@ public sealed class NotificationHeartbeat(IServiceScopeFactory scopes, Notificat
 }
 
 /// <summary>Hourly: deletes notifications older than <c>RetentionDays</c> with their sources and deliveries.</summary>
-public sealed class NotificationRetentionService(IServiceScopeFactory scopes, NotificationOptions options, TimeProvider time,
+public sealed class NotificationRetentionService(IOwnerScopeFactory scopes, IJournalOwnerInventory owners,
+    NotificationOptions options, TimeProvider time,
     ILogger<NotificationRetentionService> logger) : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromHours(1);
@@ -57,15 +80,37 @@ public sealed class NotificationRetentionService(IServiceScopeFactory scopes, No
         {
             try
             {
-                await using var scope = scopes.CreateAsyncScope();
-                var store = scope.ServiceProvider.GetRequiredService<INotificationStore>();
-                var cutoff = time.GetUtcNow().AddDays(-options.RetentionDays);
-                await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().ExecuteAsync(() => store.RetainAsync(cutoff, stoppingToken), stoppingToken);
+                await RunRetentionAsync(stoppingToken);
             }
             catch (Exception error) when (!stoppingToken.IsCancellationRequested)
             {
                 logger.LogWarning("Notification retention failed with {ErrorType}.", error.GetType().Name);
             }
         } while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+
+    public async Task RunRetentionAsync(CancellationToken ct)
+    {
+        Guid? after = null;
+        var cutoff = time.GetUtcNow().AddDays(-options.RetentionDays);
+        while (true)
+        {
+            var page = await owners.DistinctOwnersAsync(after, 100, ct);
+            if (page.Count == 0) return;
+            foreach (var owner in page)
+            {
+                after = owner;
+                try
+                {
+                    await using var scope = scopes.Create(owner);
+                    var store = scope.Services.GetRequiredService<INotificationStore>();
+                    await scope.Services.GetRequiredService<IUnitOfWork>().ExecuteAsync(() => store.RetainAsync(cutoff, ct), ct);
+                }
+                catch (Exception error) when (!ct.IsCancellationRequested)
+                {
+                    logger.LogWarning("Notification retention for owner {OwnerId} failed with {ErrorType}.", owner, error.GetType().Name);
+                }
+            }
+        }
     }
 }

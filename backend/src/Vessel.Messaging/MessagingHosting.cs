@@ -4,7 +4,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
-using Vessel.Application.Ownership;
 using Vessel.Messaging.Modules;
 using Vessel.Persistence.Events;
 using Vessel.Persistence.Events.Subscriptions;
@@ -17,8 +16,8 @@ using Vessel.Application.Events;
 
 namespace Vessel.Messaging;
 
-/// <summary>What this process is: its logical deployment, the configured owner and the modules it runs.</summary>
-public sealed record MessagingHost(string Deployment, Guid OwnerId, IReadOnlyList<IVesselModule> RunningModules)
+/// <summary>What this process is: its logical deployment and the modules it runs.</summary>
+public sealed record MessagingHost(string Deployment, IReadOnlyList<IVesselModule> RunningModules)
 {
     public IReadOnlyList<EventSubscription> RunningSubscriptions { get; } = RunningModules.SelectMany(m => m.Subscriptions).ToArray();
 
@@ -59,8 +58,7 @@ public static class MessagingHosting
         var connection = builder.Configuration.GetConnectionString("Vessel");
         if (string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("The event database is not configured.");
         registry ??= VesselModuleRegistry.From(settings);
-        var host = new MessagingHost(deployment, JournalOwner.Parse(builder.Configuration[JournalOwner.ConfigurationKey]),
-            registry.Select(runModules ?? []));
+        var host = new MessagingHost(deployment, registry.Select(runModules ?? []));
         var topology = new MessagingTopology(settings, registry);
         builder.Services.AddSingleton(settings);
         builder.Services.AddSingleton(registry);

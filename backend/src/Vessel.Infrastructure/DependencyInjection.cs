@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -74,6 +75,9 @@ public static class DependencyInjection
         services.AddVesselCredentials(config);
         services.AddHttpContextAccessor();
         services.AddScoped<IJournalOwnerContext, HttpJournalOwnerContext>();
+        services.TryAddScoped<OwnerScopeAssignment>();
+        services.TryAddSingleton<IJournalOwnerDirectory>(
+            new ConfiguredOwnerDirectory(JournalOwner.Parse(config[JournalOwner.ConfigurationKey])));
         services.AddSingleton<AuthFailureLimiter>();
         if (config["Vessel:Auth:Mode"] != "Wallet")
             services.AddAuthentication(BearerTokenHandler.SchemeName)

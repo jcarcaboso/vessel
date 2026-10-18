@@ -1,9 +1,7 @@
 using Vessel.Application.Monitoring;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
-using Vessel.Application.Ownership;
 using Vessel.Infrastructure;
 using Vessel.Messaging;
 using Vessel.Messaging.Modules;
@@ -62,21 +60,18 @@ public static class WorkerHost
 {
     public static void Configure(HostApplicationBuilder builder)
     {
-        var owner = JournalOwner.Parse(builder.Configuration[JournalOwner.ConfigurationKey]);
         var worker = WorkerSettings.From(builder.Configuration);
         // An unknown module name stops startup before anything connects.
         var modules = VesselModuleRegistry.From(builder.Configuration).Select(worker.Modules);
         builder.Services.AddSingleton(worker);
         builder.Services.AddVesselInfrastructure(builder.Configuration);
         Vessel.Identity.DependencyInjection.AddVesselIdentityDirectory(builder.Services, builder.Configuration);
-        builder.Services.RemoveAll<IJournalOwnerContext>();
-        builder.Services.AddSingleton<IJournalOwnerContext>(new WorkerOwnerContext(owner));
         builder.Services.AddVesselPersistence(builder.Configuration);
         // The same use-case registrations as the API; module-specific use cases follow per selected module.
         builder.Services.AddVesselApplication();
         foreach (var module in modules) WorkerModules.AddHostedServices(module.Name, builder.Services, builder.Configuration);
         builder.AddVesselMessaging(worker.Deployment!, modules.Select(m => m.Name));
-        // Every worker runs catch-up for the subscriptions it hosts and the owner's retention sweep. Both are
+        // Every worker runs catch-up for the subscriptions it hosts and retention for all retained owners. Both are
         // replica-safe (claims in PostgreSQL, retention serialized per owner), so replicas and deployments can overlap.
         builder.Services.AddSubscriptionMaintenance();
     }
@@ -102,9 +97,4 @@ public static class WorkerModules
                 break;
         }
     }
-}
-
-public sealed class WorkerOwnerContext(Guid ownerId) : IJournalOwnerContext
-{
-    public Guid OwnerId { get; } = ownerId != Guid.Empty ? ownerId : throw new ArgumentException("Owner ID must be nonempty.");
 }

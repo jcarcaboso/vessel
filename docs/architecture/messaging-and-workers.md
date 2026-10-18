@@ -253,7 +253,7 @@ One event that cannot be dispatched does not stop the pass. Catch-up covers a lo
 
 ### Admin retry
 
-`retry-event-receipts <name> [--limit 1-1000] [--attempts n]` (defaults 100 and 3; `n` from 1 to the subscription's `MaxAdminRetryBudget`) returns up to `limit` retained `failed` receipts above the floor to `pending` with `max_attempts = attempts + n` and `next_attempt_at = now`. Attempt history is kept and the low-water mark is not rewound; catch-up in the hosting worker picks them up. It takes the retention lock shared, like dispatch. It works only for subscriptions compiled into the registry of the command's configuration.
+`retry-event-receipts <name> (--owner <guid> | --all-owners) [--limit 1-1000] [--attempts n]` (defaults 100 and 3; `n` from 1 to the subscription's `MaxAdminRetryBudget`) returns up to `limit` retained `failed` receipts above the floor to `pending` with `max_attempts = attempts + n` and `next_attempt_at = now`. Exactly one owner-selection flag is required. With `--all-owners`, `--limit` applies per owner, not to the command's total. Attempt history is kept and the low-water mark is not rewound; catch-up in the hosting worker picks them up. It takes the retention lock shared, like dispatch. It works only for subscriptions compiled into the registry of the command's configuration.
 
 ### Dead-letter queues
 
@@ -716,7 +716,7 @@ docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dl
 docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll rotate-event-epoch
 # Return failed receipts to pending with a bounded extra budget:
 docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll \
-  retry-event-receipts <name> --limit 100 --attempts 3
+  retry-event-receipts <name> --owner <guid> --limit 100 --attempts 3
 # Remove a subscription's registration, receipts, queue, .dlq and .dlx:
 docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll \
   deregister-event-subscription <name>
@@ -785,7 +785,7 @@ Look at messages through the management page (loopback, SSH tunnel) for diagnosi
 ### Retry failed receipts
 
 1. Find the failures and their `error` (above) and fix the cause (code, data or configuration).
-2. Run `retry-event-receipts <name> --limit <1-1000> --attempts <1-12>`. Only retained receipts above the floor are reopened, oldest first; repeat for more.
+2. Run `retry-event-receipts <name> --owner <guid> --limit <1-1000> --attempts <1-12>` (or replace `--owner <guid>` with `--all-owners`). The limit is per owner, not a command-wide total. Only retained receipts above the floor are reopened, oldest first; repeat for more.
 3. The hosting worker's catch-up retries them within about 30 s. The subscription must be compiled in for the command's configuration (`Vessel__Messaging__Verification=true` for `verification`).
 
 ### Deregister a subscription

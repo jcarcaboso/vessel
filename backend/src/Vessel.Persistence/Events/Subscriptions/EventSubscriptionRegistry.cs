@@ -7,41 +7,14 @@ namespace Vessel.Persistence.Events.Subscriptions;
 public sealed record EventSubscriptionStatus(string Name, string Module, long ResponsibleFrom, long LowWaterMark,
     string Status, long? GapFrom, long? GapTo, int PendingReceipts, int FailedReceipts);
 
-/// <summary>Registrations in PostgreSQL. Provisioning is insert-only; a registration's filter never changes.</summary>
-public sealed class EventSubscriptionRegistry(VesselDbContext db, UnitOfWork work, TimeProvider time)
+/// <summary>Owner progress reads, with server-wide registration operations delegated to the system store.</summary>
+public sealed class EventSubscriptionRegistry(VesselDbContext db, SystemEventSubscriptionStore registrations)
 {
-    /// <summary>
-    /// Registers a subscription for the scope's owner, responsible from the owner's current committed sequence.
-    /// An existing registration keeps its start and progress; a different filter or module is rejected.
-    /// </summary>
-    public Task<bool> RegisterAsync(EventSubscription subscription, CancellationToken cancellationToken) => work.ExecuteAsync(async () =>
-    {
-        // The committed cursor bounds every allocated sequence: an in-flight event commits above it.
-        var created = await VesselEventSql.ScalarAsync(db, """
-            INSERT INTO event_subscriptions(owner_id,name,module,filters,filter_fingerprint,responsible_from,low_water_mark,
-                                            status,registered_at,updated_at)
-            SELECT @owner,@name,@module,@filters,@fingerprint,s.sequence,s.sequence,'active',@now,@now
-            FROM (SELECT COALESCE((SELECT sequence FROM event_cursors WHERE owner_id=@owner),0) AS sequence) s
-            ON CONFLICT (owner_id,name) DO NOTHING RETURNING 1
-            """, cancellationToken, ("owner", db.CurrentOwnerId), ("name", subscription.Name), ("module", subscription.Module),
-            ("filters", subscription.Filters.ToArray()), ("fingerprint", subscription.Fingerprint), ("now", time.GetUtcNow())) is not null;
-        await using var command = VesselEventSql.TransactionCommand(db, """
-            SELECT module,filter_fingerprint FROM event_subscriptions WHERE owner_id=@owner AND name=@name
-            """, ("owner", db.CurrentOwnerId), ("name", subscription.Name));
-        await using (var row = await command.ExecuteReaderAsync(cancellationToken))
-        {
-            await row.ReadAsync(cancellationToken);
-            if (row.GetString(0) != subscription.Module || row.GetString(1) != subscription.Fingerprint)
-                throw new InvalidOperationException(
-                    $"Subscription '{subscription.Name}' is registered with a different module or filter. A changed filter needs a new subscription name.");
-        }
-        return created;
-    }, cancellationToken);
+    public Task<bool> RegisterAsync(EventSubscription subscription, CancellationToken cancellationToken) =>
+        registrations.RegisterAsync(subscription, cancellationToken);
 
-    /// <summary>Removes a registration and its receipts, releasing anything it held.</summary>
-    public Task<bool> DeregisterAsync(string name, CancellationToken cancellationToken) => work.ExecuteAsync(async () =>
-        await VesselEventSql.ExecuteAsync(db, "DELETE FROM event_subscriptions WHERE owner_id=@owner AND name=@name",
-            cancellationToken, ("owner", db.CurrentOwnerId), ("name", name)) == 1, cancellationToken);
+    public Task<bool> DeregisterAsync(string name, CancellationToken cancellationToken) =>
+        registrations.DeregisterAsync(name, cancellationToken);
 
     public async Task<IReadOnlyList<EventSubscriptionStatus>> ListAsync(CancellationToken cancellationToken)
     {

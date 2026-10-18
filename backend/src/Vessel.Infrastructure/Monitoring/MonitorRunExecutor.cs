@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Vessel.Application.Monitoring;
+using Vessel.Application.Ownership;
 
 namespace Vessel.Infrastructure.Monitoring;
 
@@ -12,11 +13,9 @@ public sealed class MonitorRunLog(ILogger<MonitorRunLog> logger) : IMonitorRunLo
             lease.RequestId, lease.Trigger, lease.AccountId, errorType);
 }
 
-/// <summary>
-/// Renew through separate scopes so the read and its DbContext are never used concurrently. It needs the
-/// container's scope factory, so it lives with the host-side adapters rather than in Application.
-/// </summary>
-public sealed class MonitorRunExecutor(IServiceScopeFactory scopes, MonitorCoordinator coordinator, TimeProvider time)
+/// <summary>Renew through separate scopes so the read and its DbContext are never used concurrently.</summary>
+public sealed class MonitorRunExecutor(IOwnerScopeFactory scopes, IJournalOwnerContext owner,
+    MonitorCoordinator coordinator, TimeProvider time)
 {
     /// <summary>
     /// The owner's account Refresh: the same admission gate and two-read budget as checks, then the run on the
@@ -45,8 +44,8 @@ public sealed class MonitorRunExecutor(IServiceScopeFactory scopes, MonitorCoord
             using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1), time);
             while (await timer.WaitForNextTickAsync(cancellation.Token))
             {
-                await using var scope = scopes.CreateAsyncScope();
-                if (!await scope.ServiceProvider.GetRequiredService<IMonitorStore>()
+                await using var scope = scopes.Create(owner.OwnerId);
+                if (!await scope.Services.GetRequiredService<IMonitorStore>()
                     .RenewAsync(lease, time.GetUtcNow(), cancellation.Token))
                 {
                     await cancellation.CancelAsync();

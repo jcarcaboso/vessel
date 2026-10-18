@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Vessel.Application.Ownership;
 
 namespace Vessel.Persistence.Events.Subscriptions;
 
@@ -11,13 +12,21 @@ public sealed record CatchUpResult(int Discovered, int Retried, long LowWaterMar
 /// low-water mark across a settled prefix. Everything goes through the one dispatcher; replicas are safe.
 /// </summary>
 public sealed class EventCatchUp(VesselDbContext db, UnitOfWork work, EventDispatcher dispatcher, TimeProvider time,
-    ILogger<EventCatchUp> logger)
+    ILogger<EventCatchUp> logger, IJournalOwnerDirectory owners)
 {
     /// <summary>Largest sequence span examined by one low-water advance.</summary>
     internal const int AdvanceWindow = 10_000;
 
     public async Task<CatchUpResult> RunAsync(EventSubscription subscription, CancellationToken cancellationToken)
     {
+        if (await owners.StatusAsync(db.CurrentOwnerId, cancellationToken) != JournalOwnerStatus.Active)
+            return new(0, 0, -1);
+        var initialized = await work.ExecuteAsync(async () =>
+        {
+            await LockRetentionAsync(cancellationToken);
+            return await SubscriptionProgress.InitializeAsync(db, subscription, logger, cancellationToken) is not null;
+        }, cancellationToken);
+        if (!initialized) return new(0, 0, -1);
         var types = EventSubscriptionRegistry.MatchingTypes(subscription);
         var now = time.GetUtcNow();
         var discovered = await IdsAsync("""
@@ -62,40 +71,51 @@ public sealed class EventCatchUp(VesselDbContext db, UnitOfWork work, EventDispa
     /// Moves the mark monotonically to just before the first unsettled matching event, bounded by the committed
     /// high-water sequence. A hole below that sequence (a deleted account's events, pruned history) never fills.
     /// </summary>
-    private Task<long> AdvanceAsync(EventSubscription subscription, string[] types, CancellationToken ct) => work.ExecuteAsync(async () =>
+    private async Task<long> AdvanceAsync(EventSubscription subscription, string[] types, CancellationToken ct)
     {
-        await using var locked = VesselEventSql.TransactionCommand(db, """
-            SELECT s.low_water_mark,s.responsible_from,c.sequence,c.retention_floor
-            FROM event_subscriptions s LEFT JOIN event_cursors c ON c.owner_id=s.owner_id
-            WHERE s.owner_id=@owner AND s.name=@name FOR UPDATE OF s
-            """, ("owner", db.CurrentOwnerId), ("name", subscription.Name));
-        long mark, responsible, high, floor;
-        await using (var row = await locked.ExecuteReaderAsync(ct))
+        if (await owners.StatusAsync(db.CurrentOwnerId, ct) != JournalOwnerStatus.Active) return -1;
+        return await work.ExecuteAsync(async () =>
         {
-            if (!await row.ReadAsync(ct)) return -1L;
-            mark = row.GetInt64(0); responsible = row.GetInt64(1);
-            high = row.IsDBNull(2) ? 0 : row.GetInt64(2); floor = row.IsDBNull(3) ? 0 : row.GetInt64(3);
-        }
-        var upper = Math.Min(high, mark + AdvanceWindow);
-        if (upper <= mark) return mark;
-        var first = await VesselEventSql.ScalarAsync(db, """
-            SELECT min(e.sequence) FROM events e
-            WHERE e.owner_id=@owner AND e.sequence>@mark AND e.sequence<=@upper AND e.sequence>@floor
-              AND e.sequence>@responsible AND e.type=ANY(@types)
-              AND NOT EXISTS(SELECT 1 FROM event_receipts r WHERE r.owner_id=e.owner_id AND r.subscription=@name
-                             AND r.event_id=e.event_id AND r.state IN ('delivered','skipped','expired','failed'))
-            """, ct, ("owner", db.CurrentOwnerId), ("name", subscription.Name), ("mark", mark), ("upper", upper),
-            ("floor", floor), ("responsible", responsible), ("types", types));
-        var next = first is long unsettled ? unsettled - 1 : upper;
-        if (next <= mark) return mark;
-        await VesselEventSql.ExecuteAsync(db, """
-            UPDATE event_subscriptions SET low_water_mark=@next,updated_at=@now,
-                   status=CASE WHEN @next>=@floor THEN 'active' ELSE status END
-            WHERE owner_id=@owner AND name=@name AND low_water_mark<@next
-            """, ct, ("owner", db.CurrentOwnerId), ("name", subscription.Name), ("next", next), ("floor", floor),
-            ("now", time.GetUtcNow()));
-        return next;
-    }, ct);
+            await LockRetentionAsync(ct);
+            if (await SubscriptionProgress.LockRegistrationAsync(db, subscription, logger, ct) != SubscriptionRegistration.Compatible)
+                return -1L;
+            await using var locked = VesselEventSql.TransactionCommand(db, """
+                SELECT s.low_water_mark,s.responsible_from,c.sequence,c.retention_floor
+                FROM event_subscriptions s LEFT JOIN event_cursors c ON c.owner_id=s.owner_id
+                WHERE s.owner_id=@owner AND s.name=@name FOR UPDATE OF s
+                """, ("owner", db.CurrentOwnerId), ("name", subscription.Name));
+            long mark, responsible, high, floor;
+            await using (var row = await locked.ExecuteReaderAsync(ct))
+            {
+                if (!await row.ReadAsync(ct)) return -1L;
+                mark = row.GetInt64(0); responsible = row.GetInt64(1);
+                high = row.IsDBNull(2) ? 0 : row.GetInt64(2); floor = row.IsDBNull(3) ? 0 : row.GetInt64(3);
+            }
+            var upper = Math.Min(high, mark + AdvanceWindow);
+            if (upper <= mark) return mark;
+            var first = await VesselEventSql.ScalarAsync(db, """
+                SELECT min(e.sequence) FROM events e
+                WHERE e.owner_id=@owner AND e.sequence>@mark AND e.sequence<=@upper AND e.sequence>@floor
+                  AND e.sequence>@responsible AND e.type=ANY(@types)
+                  AND NOT EXISTS(SELECT 1 FROM event_receipts r WHERE r.owner_id=e.owner_id AND r.subscription=@name
+                                 AND r.event_id=e.event_id AND r.state IN ('delivered','skipped','expired','failed'))
+                """, ct, ("owner", db.CurrentOwnerId), ("name", subscription.Name), ("mark", mark), ("upper", upper),
+                ("floor", floor), ("responsible", responsible), ("types", types));
+            var next = first is long unsettled ? unsettled - 1 : upper;
+            if (next <= mark) return mark;
+            await VesselEventSql.ExecuteAsync(db, """
+                UPDATE event_subscriptions SET low_water_mark=@next,updated_at=@now,
+                       status=CASE WHEN @next>=@floor THEN 'active' ELSE status END
+                WHERE owner_id=@owner AND name=@name AND low_water_mark<@next
+                """, ct, ("owner", db.CurrentOwnerId), ("name", subscription.Name), ("next", next), ("floor", floor),
+                ("now", time.GetUtcNow()));
+            return next;
+        }, ct);
+    }
+
+    private Task<object?> LockRetentionAsync(CancellationToken ct) =>
+        VesselEventSql.ScalarAsync(db, "SELECT pg_advisory_xact_lock_shared(@key)", ct,
+            ("key", VesselEventSql.RetentionLock(db.CurrentOwnerId)));
 
     private async Task<IReadOnlyList<Guid>> IdsAsync(string sql, EventSubscription subscription, CancellationToken ct,
         params (string Name, object? Value)[] parameters)

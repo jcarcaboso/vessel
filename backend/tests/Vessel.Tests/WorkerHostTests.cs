@@ -1,11 +1,19 @@
+using System.Collections.Concurrent;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Vessel.Application.Events;
+using Vessel.Application.Monitoring;
+using Vessel.Application.Ownership;
+using Vessel.Domain.Accounts;
+using Vessel.Domain.Monitoring;
 using Vessel.Messaging;
 using Vessel.Messaging.Modules.Monitor;
 using Vessel.Messaging.Modules.Verification;
+using Vessel.Persistence;
 using Vessel.Worker;
 using Wolverine;
 using Wolverine.Configuration;
@@ -87,24 +95,68 @@ public sealed class WorkerHostTests
     }
 
     [VesselEventRabbitFact]
-    public async Task Owner_mismatched_monitor_command_is_dead_lettered_not_acknowledged()
+    public async Task Unknown_monitor_owner_dead_letters_while_active_owners_run_and_suspended_commands_are_acknowledged()
     {
         await using var broker = await BrokerScope.CreateAsync();
         await broker.ProvisionAsync();
         var api = await broker.StartAsync(MessagingHosting.ApiDeployment);
-        using var worker = Worker(broker, MonitorModule.ModuleName);
+        var owners = new MutableOwnerDirectory();
+        owners.Set(broker.Owner, JournalOwnerStatus.Active);
+        var other = Guid.NewGuid(); var suspended = Guid.NewGuid();
+        owners.Set(other, JournalOwnerStatus.Active);
+        owners.Set(suspended, JournalOwnerStatus.Suspended);
+        var activeCommand = await PendingCommandAsync(broker.Database, other);
+        var suspendedCommand = await PendingCommandAsync(broker.Database, suspended);
+        var logs = new BackgroundWorkLogs();
+        var wakeups = new ConcurrentBag<Guid>();
+        using var worker = Worker(broker, MonitorModule.ModuleName, logs: logs, owners: owners, wakeups: wakeups);
         await worker.StartAsync();
         var bus = api.Services.GetRequiredService<IMessageBus>();
         var queue = broker.Topology.CommandQueue(MonitorModule.ModuleName);
         await bus.SendAsync(new MonitorAccountCommand(Guid.CreateVersion7(), Guid.NewGuid(), Guid.NewGuid(), "manual"));
         await broker.EventuallyAsync(async () => await broker.ReadyAsync(MessagingTopology.DeadLetterQueue(queue)) == 1);
-        // A command for the configured owner without a matching pending request is acknowledged: the record is
-        // monitor_accounts, and the listener never polls a venue.
         await bus.SendAsync(new MonitorAccountCommand(Guid.CreateVersion7(), Guid.NewGuid(), broker.Owner, "manual"));
-        await Task.Delay(1000);
+        await bus.SendAsync(activeCommand);
+        await bus.SendAsync(suspendedCommand);
+        await broker.EventuallyAsync(() => Task.FromResult(wakeups.Contains(other) && logs.Messages.Any(m =>
+            m.Text.Contains(suspendedCommand.RequestId.ToString(), StringComparison.Ordinal) &&
+            m.Text.Contains("was dropped", StringComparison.Ordinal))));
         await worker.StopAsync();
+        Assert.Equal([other], wakeups.ToArray());
+        await using (var db = broker.Database.Context(suspended))
+        {
+            var pending = await db.Set<MonitorAccount>().SingleAsync();
+            Assert.Equal(suspendedCommand.RequestId, pending.RequestId);
+            Assert.Equal("pending", pending.ManualState);
+        }
         Assert.Equal(0u, await broker.ReadyAsync(queue));
         Assert.Equal(1u, await broker.ReadyAsync(MessagingTopology.DeadLetterQueue(queue)));
+    }
+
+    [PostgresFact]
+    public async Task Monitor_command_directory_failure_is_acknowledged_and_pending_work_survives()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var command = await PendingCommandAsync(database, owner);
+        var directory = new MutableOwnerDirectory
+        {
+            Checking = (_, _) => throw new InvalidOperationException("Synthetic private directory failure")
+        };
+        var services = new ServiceCollection();
+        var logs = new BackgroundWorkLogs();
+        services.AddLogging(logging => logging.AddProvider(logs));
+        services.AddVesselPersistence(Configuration(new() { ["ConnectionStrings:Vessel"] = database.ConnectionString }));
+        await using var provider = services.BuildServiceProvider();
+        await MonitorCommandListener.Handle(command, provider.GetRequiredService<IOwnerScopeFactory>(), directory,
+            provider.GetRequiredService<ILogger<MonitorCommandListener>>(), default);
+        await using var db = database.Context(owner);
+        var pending = await db.Set<MonitorAccount>().SingleAsync();
+        Assert.Equal((command.RequestId, "pending"), (pending.RequestId, pending.ManualState));
+        Assert.Contains(logs.Messages, m => m.Level == LogLevel.Warning &&
+            m.Text.Contains("acknowledged after InvalidOperationException", StringComparison.Ordinal) &&
+            m.Text.Contains(command.RequestId.ToString(), StringComparison.Ordinal));
+        Assert.DoesNotContain(logs.Messages, m => m.Text.Contains("Synthetic private", StringComparison.Ordinal));
     }
 
     [VesselEventRabbitFact]
@@ -112,7 +164,7 @@ public sealed class WorkerHostTests
     {
         await using var broker = await BrokerScope.CreateAsync();
         await broker.ProvisionAsync();
-        var logs = new StartupLogs();
+        var logs = new BackgroundWorkLogs();
         var api = broker.Build(MessagingHosting.ApiDeployment, [], logs);
         await api.StartAsync();
         using var worker = Worker(broker, MonitorModule.ModuleName, logs: logs);
@@ -132,9 +184,9 @@ public sealed class WorkerHostTests
         Assert.Equal(EndpointMode.Inline, listened.Mode);
         Assert.DoesNotContain(Routes(worker), route => route == queue);
         // Nothing in the worker may stage the command it consumes: it would bypass the API's durable outbox.
-        await using (var scope = worker.Services.CreateAsyncScope())
+        await using (var scope = worker.Services.GetRequiredService<IOwnerScopeFactory>().Create(broker.Owner))
         {
-            var outbox = scope.ServiceProvider.GetRequiredService<Vessel.Persistence.Events.IVesselEventOutbox>();
+            var outbox = scope.Services.GetRequiredService<Vessel.Persistence.Events.IVesselEventOutbox>();
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 outbox.StageAsync(new MonitorAccountCommand(Guid.CreateVersion7(), Guid.NewGuid(), broker.Owner, "manual"), default));
             Assert.Contains("consumes", error.Message);
@@ -168,7 +220,7 @@ public sealed class WorkerHostTests
             // Discovery cannot run: the pass is not productive, so neither heartbeat advances.
             await File.WriteAllTextAsync(file, "1 90");
             using (var broken = Scheduler("Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused", owner, file, out var scheduler))
-                await Assert.ThrowsAnyAsync<Exception>(() => scheduler.TickAsync(default));
+                await scheduler.TickAsync(default);
             Assert.Equal("1 90", await File.ReadAllTextAsync(file));
             // The heartbeat file cannot be written: the database heartbeat is not recorded either.
             var other = Guid.NewGuid();
@@ -206,7 +258,8 @@ public sealed class WorkerHostTests
     private static Uri[] Routes(IHost host) => host.Services.GetRequiredService<IWolverineRuntime>()
         .RoutingFor(typeof(MonitorAccountCommand)).Routes.OfType<MessageRoute>().Select(r => r.Uri).ToArray();
 
-    private static IHost Worker(BrokerScope broker, string module, string? deployment = null, ILoggerProvider? logs = null)
+    private static IHost Worker(BrokerScope broker, string module, string? deployment = null, ILoggerProvider? logs = null,
+        IJournalOwnerDirectory? owners = null, ConcurrentBag<Guid>? wakeups = null)
     {
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
         builder.Configuration.AddConfiguration(broker.Configuration);
@@ -220,26 +273,32 @@ public sealed class WorkerHostTests
         builder.Logging.ClearProviders();
         if (logs is not null) builder.Logging.AddProvider(logs);
         WorkerHost.Configure(builder);
+        if (owners is not null) builder.Services.Replace(ServiceDescriptor.Singleton(owners));
+        if (wakeups is not null)
+        {
+            // Exercise the real command handler, but never start venue reads for these pending synthetic requests.
+            builder.Services.Remove(builder.Services.Single(d => d.ImplementationType == typeof(MonitorScheduler)));
+            builder.Services.Replace(ServiceDescriptor.Scoped<IMonitorWakeup>(sp =>
+                new RecordingWakeup(sp.GetRequiredService<IJournalOwnerContext>(), wakeups)));
+        }
         return builder.Build();
     }
 
-    private sealed class StartupLogs : ILoggerProvider
+    private static async Task<MonitorAccountCommand> PendingCommandAsync(CoreDatabase database, Guid owner)
     {
-        private readonly List<(string Category, LogLevel Level, string Text)> messages = [];
-        public IReadOnlyList<(string Category, LogLevel Level, string Text)> Messages { get { lock (messages) return messages.ToArray(); } }
-        public ILogger CreateLogger(string categoryName) => new Logger(this, categoryName);
-        public void Dispose() { }
+        await using var db = database.Context(owner);
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic pending command");
+        var command = new MonitorAccountCommand(Guid.CreateVersion7(), account.Id, owner, "manual");
+        var row = new MonitorAccount { OwnerId = owner, AccountId = account.Id };
+        row.Admit(command.RequestId, command.Trigger, DateTimeOffset.UtcNow);
+        db.AddRange(account, row);
+        await db.SaveChangesAsync();
+        return command;
+    }
 
-        private sealed class Logger(StartupLogs logs, string category) : ILogger
-        {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-            public bool IsEnabled(LogLevel logLevel) => true;
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-                Func<TState, Exception?, string> formatter)
-            {
-                lock (logs.messages) logs.messages.Add((category, logLevel, formatter(state, exception)));
-            }
-        }
+    private sealed class RecordingWakeup(IJournalOwnerContext owner, ConcurrentBag<Guid> wakeups) : IMonitorWakeup
+    {
+        public void Wake() => wakeups.Add(owner.OwnerId);
     }
 
     private static IConfiguration Configuration(Dictionary<string, string?> values) =>

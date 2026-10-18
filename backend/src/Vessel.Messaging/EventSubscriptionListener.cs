@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Vessel.Application.Events;
+using Vessel.Application.Ownership;
 using Vessel.Messaging.Modules;
 using Vessel.Persistence.Events.Subscriptions;
 using Wolverine;
@@ -25,7 +26,8 @@ public sealed class CommandDeadLetterException(string reason) : Exception($"Comm
 public sealed class EventSubscriptionListener
 {
     public static async Task Handle(VesselEvent message, Envelope envelope, MessagingHost host, MessagingTopology topology,
-        IServiceScopeFactory scopes, ILogger<EventSubscriptionHandlerLog> logger, CancellationToken cancellationToken)
+        IOwnerScopeFactory scopes, IJournalOwnerDirectory owners, ILogger<EventSubscriptionHandlerLog> logger,
+        CancellationToken cancellationToken)
     {
         var name = topology.SubscriptionAt(envelope.Destination);
         var subscription = host.RunningSubscriptions.SingleOrDefault(s => s.Name == name);
@@ -34,21 +36,22 @@ public sealed class EventSubscriptionListener
             logger.LogWarning("Event {EventId} arrived on a queue this host does not run; dead-lettering.", message.Id);
             throw new EventDeadLetterException(DispatchOutcome.NotResponsible);
         }
-        // Never trust a broker message to establish an owner: it must be the configured journal owner.
-        if (message.OwnerId != host.OwnerId)
-        {
-            logger.LogWarning("Event {EventId} for subscription {Subscription} names owner {OwnerId}, not the configured owner; dead-lettering.",
-                message.Id, subscription.Name, message.OwnerId);
-            throw new EventDeadLetterException(DispatchOutcome.InvalidOwner);
-        }
         DispatchResult result;
         try
         {
-            await using var scope = scopes.CreateAsyncScope();
-            result = await scope.ServiceProvider.GetRequiredService<EventDispatcher>()
+            var status = await owners.StatusAsync(message.OwnerId, cancellationToken);
+            if (status == JournalOwnerStatus.Suspended) return;
+            if (status != JournalOwnerStatus.Active)
+            {
+                logger.LogWarning("Event {EventId} for subscription {Subscription} names unknown owner {OwnerId}; dead-lettering.",
+                    message.Id, subscription.Name, message.OwnerId);
+                throw new EventDeadLetterException(DispatchOutcome.InvalidOwner);
+            }
+            await using var scope = scopes.Create(message.OwnerId);
+            result = await scope.Services.GetRequiredService<EventDispatcher>()
                 .DispatchAsync(subscription, message.OwnerId, message.Id, DispatchTrigger.Live, cancellationToken);
         }
-        catch (Exception error)
+        catch (Exception error) when (error is not EventDeadLetterException)
         {
             // Including shutdown: the receipt (or its absence) is in PostgreSQL, so an ack loses nothing.
             logger.LogWarning("Event {EventId} for subscription {Subscription} was acknowledged after {ErrorType}; catch-up retries it.",

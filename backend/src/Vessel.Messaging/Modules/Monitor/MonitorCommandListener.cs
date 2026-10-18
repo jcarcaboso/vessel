@@ -1,27 +1,44 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Vessel.Application.Events;
+using Vessel.Application.Ownership;
 
 namespace Vessel.Messaging.Modules.Monitor;
 
 /// <summary>
 /// The inline listener behind <c>{prefix}.commands.monitor</c>. It validates the owner before resolving anything
-/// owner-scoped, then hands the command to the module's Application handler. A command naming another owner is
-/// dead-lettered and logged by IDs; it is never silently acknowledged.
+/// owner-scoped, then hands the command to the module's Application handler. Unknown owners dead-letter;
+/// suspended owners are acknowledged without starting work. Infrastructure failures are acknowledged with a
+/// warning: the pending request remains in PostgreSQL for the scheduler.
 /// </summary>
 public sealed class MonitorCommandListener
 {
-    public static async Task Handle(MonitorAccountCommand command, MessagingHost host, IServiceScopeFactory scopes,
+    public static async Task Handle(MonitorAccountCommand command, IOwnerScopeFactory scopes, IJournalOwnerDirectory owners,
         ILogger<MonitorCommandListener> logger, CancellationToken cancellationToken)
     {
-        if (command.OwnerId != host.OwnerId || command.RequestId == Guid.Empty || command.AccountId == Guid.Empty)
+        try
         {
-            logger.LogWarning("Monitor command {RequestId} for account {AccountId} names owner {OwnerId}, not the configured owner; dead-lettering.",
-                command.RequestId, command.AccountId, command.OwnerId);
-            throw new CommandDeadLetterException("invalid owner");
+            var status = await owners.StatusAsync(command.OwnerId, cancellationToken);
+            if (command.OwnerId == Guid.Empty || command.RequestId == Guid.Empty || command.AccountId == Guid.Empty ||
+                status == JournalOwnerStatus.Unknown)
+            {
+                logger.LogWarning("Monitor command {RequestId} for account {AccountId} names unknown owner {OwnerId} or invalid IDs; dead-lettering.",
+                    command.RequestId, command.AccountId, command.OwnerId);
+                throw new CommandDeadLetterException("invalid owner");
+            }
+            if (status != JournalOwnerStatus.Active)
+            {
+                logger.LogInformation("Monitor command {RequestId} for suspended owner {OwnerId} was dropped.", command.RequestId, command.OwnerId);
+                return;
+            }
+            await using var scope = scopes.Create(command.OwnerId);
+            await scope.Services.GetRequiredService<IVesselCommandHandler<MonitorAccountCommand>>()
+                .HandleAsync(command, cancellationToken);
         }
-        await using var scope = scopes.CreateAsyncScope();
-        await scope.ServiceProvider.GetRequiredService<IVesselCommandHandler<MonitorAccountCommand>>()
-            .HandleAsync(command, cancellationToken);
+        catch (Exception error) when (error is not CommandDeadLetterException)
+        {
+            logger.LogWarning("Monitor command {RequestId} for account {AccountId} and owner {OwnerId} was acknowledged after {ErrorType}; the scheduler retries pending work.",
+                command.RequestId, command.AccountId, command.OwnerId, error.GetType().Name);
+        }
     }
 }

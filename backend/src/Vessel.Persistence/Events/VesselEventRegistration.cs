@@ -30,6 +30,7 @@ public static class VesselEventRegistration
         services.TryAddScoped<EventDispatcher>();
         services.TryAddScoped<EventCatchUp>();
         services.TryAddScoped<EventSubscriptionRegistry>();
+        services.TryAddSingleton<SystemEventSubscriptionStore>();
         services.TryAddScoped<EventReceiptAdmin>();
         services.TryAddScoped<EventRetention>();
         // Attaches to the existing context registration. No separate context or EF upgrade.

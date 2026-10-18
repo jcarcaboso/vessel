@@ -272,19 +272,24 @@ public sealed class IdentityPersistenceTests
     public async Task Directory_is_singleton_safe_and_keyset_pages_only_active_owners()
     {
         await using var database = await IdentityDatabase.CreateAsync();
-        var first = await database.SeedAsync(EthECKey.GenerateKey());
-        var second = await database.SeedAsync(EthECKey.GenerateKey(), role: "member");
+        // Insert out of order so the page order cannot accidentally follow insertion order.
+        var second = await database.SeedAsync(EthECKey.GenerateKey(), Guid.Parse("f0000000-0000-0000-0000-000000000002"), role: "member");
+        var first = await database.SeedAsync(EthECKey.GenerateKey(), Guid.Parse("10000000-0000-0000-0000-000000000001"));
         var directory = new IdentityOwnerDirectory(database);
-        var all = await directory.ActiveOwnersAsync(null, 200, default);
-        Assert.Equal(2, all.Count);
-        Assert.Equal(all.Order(), all);
-        Assert.Single(await directory.ActiveOwnersAsync(all[0], 1, default));
+        Assert.Equal([first.User.Id, second.User.Id], await directory.ActiveOwnersAsync(null, 200, default));
+        Assert.Equal([first.User.Id], await directory.ActiveOwnersAsync(null, 1, default));
+        Assert.Equal([second.User.Id], await directory.ActiveOwnersAsync(first.User.Id, 1, default));
+        Assert.Empty(await directory.ActiveOwnersAsync(second.User.Id, 1, default));
+        foreach (var limit in new[] { -1, 0, 201 })
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => directory.ActiveOwnersAsync(null, limit, default));
         await using var db = database.CreateDbContext();
-        await db.Users.Where(x => x.Id == second.User.Id).ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, "suspended"));
-        Assert.Equal(JournalOwnerStatus.Suspended, await directory.StatusAsync(second.User.Id, default));
-        Assert.Equal(JournalOwnerStatus.Active, await directory.StatusAsync(first.User.Id, default));
+        await db.Users.Where(x => x.Id == first.User.Id).ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, "suspended"));
+        Assert.Equal(JournalOwnerStatus.Suspended, await directory.StatusAsync(first.User.Id, default));
+        Assert.Equal(JournalOwnerStatus.Active, await directory.StatusAsync(second.User.Id, default));
         Assert.Equal(JournalOwnerStatus.Unknown, await directory.StatusAsync(Guid.NewGuid(), default));
-        Assert.Single(await directory.ActiveOwnersAsync(null, 200, default));
+        Assert.Equal([second.User.Id], await directory.ActiveOwnersAsync(null, 1, default));
+        Assert.Equal([second.User.Id], await directory.ActiveOwnersAsync(first.User.Id, 200, default));
+        Assert.Empty(await directory.ActiveOwnersAsync(second.User.Id, 200, default));
     }
 
     [PostgresFact]

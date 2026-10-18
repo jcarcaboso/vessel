@@ -121,6 +121,8 @@ public sealed partial class EventSubscriptionTests
     {
         await using var runtime = await Runtime.CreateAsync();
         var raced = await runtime.RegisterNewAsync("raced");
+        var earlier = await runtime.AppendAsync(Draft("earlier"));
+        Assert.Equal(DispatchOutcome.Delivered, (await runtime.DispatchAsync(raced, earlier.Id)).Outcome);
         var slow = await runtime.AppendAsync(Draft("slow"));
         runtime.Clock.Advance(TimeSpan.FromMinutes(1));
         var live = runtime.DispatchAsync(raced, slow.Id);
@@ -131,6 +133,27 @@ public sealed partial class EventSubscriptionTests
         runtime.Subscriber.Release.TrySetResult();
         Assert.Equal(DispatchOutcome.Delivered, (await live).Outcome);
         Assert.Equal(1, (await catchUp).Discovered);
+        Assert.Equal(1, runtime.Subscriber.Calls(earlier.Id));
+        Assert.Equal(1, runtime.Subscriber.Calls(slow.Id));
+        Assert.Equal(("delivered", 1), await runtime.ReceiptAsync(raced, slow.Id));
+    }
+
+    [VesselEventPostgresFact]
+    public async Task New_owner_initialization_waits_for_live_progress_then_observes_the_settled_receipt()
+    {
+        await using var runtime = await Runtime.CreateAsync();
+        var raced = await runtime.RegisterNewAsync("new-owner-raced");
+        Assert.Empty(await runtime.StatusAsync());
+        var slow = await runtime.AppendAsync(Draft("slow"));
+        runtime.Clock.Advance(TimeSpan.FromMinutes(1));
+        var live = runtime.DispatchAsync(raced, slow.Id);
+        await runtime.Subscriber.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var catchUp = runtime.CatchUpAsync(raced);
+        await Task.Delay(300);
+        Assert.False(catchUp.IsCompleted);
+        runtime.Subscriber.Release.TrySetResult();
+        Assert.Equal(DispatchOutcome.Delivered, (await live).Outcome);
+        Assert.Equal(0, (await catchUp).Discovered);
         Assert.Equal(1, runtime.Subscriber.Calls(slow.Id));
         Assert.Equal(("delivered", 1), await runtime.ReceiptAsync(raced, slow.Id));
     }
@@ -308,6 +331,7 @@ public sealed partial class EventSubscriptionTests
         await using var runtime = await Runtime.CreateAsync(new VesselEventSettings { RetentionBatch = 1 });
         var fast = await runtime.RegisterNewAsync("fast");
         var slow = await runtime.RegisterNewAsync("slow");
+        await runtime.CatchUpAsync(slow); // Provisioning no longer manufactures progress without a cursor.
         var old = runtime.Clock.GetUtcNow().AddDays(-100);
         var pendingOld = await runtime.AppendAsync(Draft("retry-old", detected: old));
         var deliveredOld = await runtime.AppendAsync(Draft("delivered-old", detected: old));
@@ -365,12 +389,12 @@ public sealed partial class EventSubscriptionTests
         var pending = await runtime.AppendAsync(Draft("maintained"));
         runtime.Clock.Advance(TimeSpan.FromMinutes(1));
         var heartbeat = new CountingHeartbeat();
-        var service = new SubscriptionMaintenanceService(new MessagingHost("maintained", runtime.Owner, [module]),
-            runtime.Scopes, Microsoft.Extensions.Logging.Abstractions.NullLogger<SubscriptionMaintenanceService>.Instance, [heartbeat]);
+        var service = new SubscriptionMaintenanceService(new MessagingHost("maintained", [module]),
+            runtime.OwnerScopes, runtime.Directory, runtime.Registrations, runtime.Clock, Microsoft.Extensions.Logging.Abstractions.NullLogger<SubscriptionMaintenanceService>.Instance, [heartbeat]);
         await service.StartAsync(default);
         try
         {
-            for (var attempt = 0; attempt < 40 && ((await runtime.StatusAsync()).Single().LowWaterMark == 0 || heartbeat.Beats == 0); attempt++)
+            for (var attempt = 0; attempt < 40 && (((await runtime.StatusAsync()).SingleOrDefault()?.LowWaterMark ?? 0) == 0 || heartbeat.Beats == 0); attempt++)
                 await Task.Delay(250);
         }
         finally { await service.StopAsync(default); }
@@ -609,6 +633,7 @@ public sealed partial class EventSubscriptionTests
             var services = new ServiceCollection();
             services.AddLogging();
             services.AddSingleton<IJournalOwnerContext>(new CoreOwner(Owner));
+            services.AddSingleton<IJournalOwnerDirectory>(new ConfiguredOwnerDirectory(Owner));
             services.AddSingleton<TimeProvider>(Clock);
             services.AddVesselPersistence(Configuration);
             services.AddVesselEvents(Configuration);
@@ -636,7 +661,9 @@ public sealed partial class EventSubscriptionTests
             new(await CoreDatabase.CreateAsync(), settings);
 
         public AsyncServiceScope Scope() => provider.CreateAsyncScope();
-        public IServiceScopeFactory Scopes => provider.GetRequiredService<IServiceScopeFactory>();
+        public IOwnerScopeFactory OwnerScopes => provider.GetRequiredService<IOwnerScopeFactory>();
+        public IJournalOwnerDirectory Directory => provider.GetRequiredService<IJournalOwnerDirectory>();
+        public SystemEventSubscriptionStore Registrations => provider.GetRequiredService<SystemEventSubscriptionStore>();
 
         public async Task<VesselEvent> AppendAsync(VesselEventDraft draft)
         {

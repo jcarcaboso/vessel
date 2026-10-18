@@ -2,7 +2,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Npgsql;
+using Vessel.Application.Ownership;
 
 namespace Vessel.Persistence;
 
@@ -13,6 +16,15 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddVesselPersistence(this IServiceCollection services, IConfiguration config)
     {
+        services.TryAddScoped<OwnerScopeAssignment>();
+        services.TryAddSingleton<IOwnerScopeFactory, OwnerScopeFactory>();
+        services.TryAddSingleton(_ =>
+        {
+            var connection = config.GetConnectionString("Vessel");
+            if (string.IsNullOrWhiteSpace(connection)) throw new MissingDatabaseConfigurationException();
+            return NpgsqlDataSource.Create(connection);
+        });
+        services.TryAddSingleton<IJournalOwnerInventory, JournalOwnerInventory>();
         // Resolve only when persistence is consumed. Metadata and liveness do not open a database.
         services.AddDbContext<VesselDbContext>(options =>
         {
