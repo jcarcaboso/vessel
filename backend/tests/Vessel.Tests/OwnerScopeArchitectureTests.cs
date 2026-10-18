@@ -208,8 +208,7 @@ public sealed class OwnerScopeArchitectureTests
         Assert.Equal(reviewed.Length, reviewed.Distinct().Count());
         var actual = new SortedSet<string>(StringComparer.Ordinal);
         foreach (var path in Sources().Where(p => !p.Contains("/Migrations/", StringComparison.Ordinal)))
-        foreach (Match literal in Regex.Matches(File.ReadAllText(path),
-                     @"\$?""""""[\s\S]*?""""""|\$?@""(?:[^""]|"""")*""|\$?""(?:\\.|[^""\\])*"""))
+        foreach (Match literal in OwnerlessSqlClassifier.SourceLiteral.Matches(File.ReadAllText(path)))
         {
             if (!OwnerlessSqlClassifier.LiteralRequiresReview(literal.Value)) continue;
             var sql = literal.Value.TrimStart('$', '@', '"').TrimEnd('"').Trim();
