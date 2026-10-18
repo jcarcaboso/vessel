@@ -4,14 +4,15 @@
 set -eu
 # Compose permits an empty token for Wallet mode. Refuse unsafe/missing auth
 # settings BEFORE either bundle can apply an irreversible schema migration.
-case "$(printf '%s' "${Vessel__Auth__Mode:-Token}" | tr '[:upper:]' '[:lower:]')" in
-  token)
+# Modes are case-sensitive, exactly as the API and workers parse Vessel:Auth:Mode.
+case "${Vessel__Auth__Mode:-Token}" in
+  Token)
     if [ -z "$(printf '%s' "${Vessel__Auth__Token:-}" | tr -d '[:space:]')" ]; then
       echo "Token mode requires Vessel__Auth__Token before migration." >&2
       exit 1
     fi
     ;;
-  wallet)
+  Wallet)
     if [ -n "${Vessel__Auth__Token:-}" ] || [ -z "${Vessel__Identity__Origins__0:-}" ]; then
       echo "Wallet migration requires an empty token and allowed origin; retain the Wallet overlay." >&2
       exit 1
@@ -23,6 +24,11 @@ case "$(printf '%s' "${Vessel__Auth__Mode:-Token}" | tr '[:upper:]' '[:lower:]')
     ;;
 esac
 cd /app
+# The application's own startup validation, without a database connection (first installs have no identity tables).
+if ! dotnet /app/Vessel.Api.dll check-config; then
+  echo "Configuration rejected; no migration was applied." >&2
+  exit 1
+fi
 /app/migrate-identity-ef
 /app/migrate-ef "$@"
 dotnet /app/Vessel.Api.dll identity ensure-owner

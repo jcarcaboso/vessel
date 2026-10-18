@@ -1,4 +1,5 @@
 import json
+import os
 import importlib.util
 from pathlib import Path
 import shutil
@@ -365,6 +366,9 @@ class MigrationPreflightTests(unittest.TestCase):
             ({'Vessel__Auth__Mode': 'Wallet', 'Vessel__Auth__Token': 'must-be-blank',
               'Vessel__Identity__Origins__0': 'https://localhost'}, 'retain the Wallet overlay'),
             ({'Vessel__Auth__Mode': 'other'}, 'must be Token or Wallet'),
+            # The application parses the mode case-sensitively; so does the preflight.
+            ({'Vessel__Auth__Mode': 'wallet', 'Vessel__Identity__Origins__0': 'https://localhost'}, 'must be Token or Wallet'),
+            ({'Vessel__Auth__Mode': 'token', 'Vessel__Auth__Token': 'synthetic'}, 'must be Token or Wallet'),
         ):
             with self.subTest(settings=settings):
                 result = subprocess.run(['/bin/sh', str(verify_release.ROOT / 'deploy/migrate')],
@@ -410,26 +414,59 @@ class MigrationPreflightTests(unittest.TestCase):
                     if overlay:
                         self.assertFalse(services['web'].get('ports'))
 
+    @staticmethod
+    def stub_bundles(root):
+        # Stub bundles and dotnet log each call; the stub check-config exits CHECK_CONFIG_EXIT, standing in for the
+        # real command (covered by ConfigurationCheckCommandTests) rejecting what the application rejects.
+        for name in ('migrate-identity-ef', 'migrate-ef', 'dotnet'):
+            path = root / name
+            path.write_text('#!/bin/sh\nprintf "%s\\n" "' + name + ' $*" >> "$CALL_LOG"\n' +
+                            ('case "$*" in *check-config) exit "${CHECK_CONFIG_EXIT:-0}" ;; esac\n' if name == 'dotnet' else ''))
+            path.chmod(0o755)
+        return (verify_release.ROOT / 'deploy/migrate').read_text().replace('/app', str(root))
+
+    @staticmethod
+    def run_stubbed(root, script, log, settings):
+        environment = verify_release.verification_environment()
+        # Prepend: replacing PATH hides tr/printf on hosts such as NixOS that keep them outside /usr/bin.
+        return subprocess.run(['/bin/sh'], input=script, capture_output=True, text=True,
+                              env={**environment, 'PATH': str(root) + os.pathsep + environment.get('PATH', os.defpath),
+                                   'CALL_LOG': str(log), **settings})
+
     def test_valid_modes_keep_identity_journal_bootstrap_provision_order(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for name in ('migrate-identity-ef', 'migrate-ef', 'dotnet'):
-                path = root / name
-                path.write_text('#!/bin/sh\nprintf "%s\\n" "' + name + ' $*" >> "$CALL_LOG"\n')
-                path.chmod(0o755)
-            script = (verify_release.ROOT / 'deploy/migrate').read_text().replace('/app', str(root))
+            script = self.stub_bundles(root)
             for mode in ('Token', 'Wallet'):
                 with self.subTest(mode=mode):
                     log = root / mode
-                    result = subprocess.run(['/bin/sh'], input=script, capture_output=True, text=True,
-                                            env={**verify_release.verification_environment(),
-                                                 'PATH': str(root) + ':/usr/bin:/bin', 'CALL_LOG': str(log),
-                                                 'Vessel__Auth__Mode': mode, 'Vessel__Auth__Token': 'synthetic' if mode == 'Token' else '',
-                                                 'Vessel__Identity__Origins__0': 'https://localhost'})
+                    result = self.run_stubbed(root, script, log, {
+                        'Vessel__Auth__Mode': mode, 'Vessel__Auth__Token': 'synthetic' if mode == 'Token' else '',
+                        'Vessel__Identity__Origins__0': 'https://localhost'})
                     self.assertEqual(0, result.returncode, result.stderr)
-                    self.assertEqual(['migrate-identity-ef ', 'migrate-ef ',
+                    self.assertEqual([f'dotnet {root}/Vessel.Api.dll check-config', 'migrate-identity-ef ', 'migrate-ef ',
                                       f'dotnet {root}/Vessel.Api.dll identity ensure-owner',
                                       f'dotnet {root}/Vessel.Api.dll provision-messaging'], log.read_text().splitlines())
+
+    def test_configuration_the_application_rejects_runs_neither_bundle(self):
+        wallet = {'Vessel__Auth__Mode': 'Wallet', 'Vessel__Auth__Token': '', 'Vessel__Identity__Origins__0': 'https://localhost'}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = self.stub_bundles(root)
+            for name, settings, rejected_by_app in (
+                ('lower-case mode', {**wallet, 'Vessel__Auth__Mode': 'wallet'}, False),
+                ('http origin in Production', {**wallet, 'Vessel__Identity__Origins__0': 'http://diary.example.com'}, True),
+                ('misspelt registration', {**wallet, 'Vessel__Identity__Registration': 'Clsoed'}, True),
+            ):
+                with self.subTest(name):
+                    log = root / name.replace(' ', '-')
+                    result = self.run_stubbed(root, script, log,
+                                              {**settings, 'CHECK_CONFIG_EXIT': '1' if rejected_by_app else '0'})
+                    self.assertEqual(1, result.returncode, result.stderr)
+                    calls = log.read_text().splitlines() if log.exists() else []
+                    self.assertEqual([f'dotnet {root}/Vessel.Api.dll check-config'] if rejected_by_app else [], calls)
+                    if rejected_by_app:
+                        self.assertIn('no migration was applied', result.stderr)
 
 
 if __name__ == '__main__':

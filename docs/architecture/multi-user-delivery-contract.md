@@ -794,6 +794,8 @@ Cross-model verification of the first lanes found gaps the contract left open. T
 | Found in | Clarification | Where |
 | --- | --- | --- |
 | P4 | Operator docs are published before two §10 items passed; they mark Wallet mode as not activated and start registration `Closed` | §10 |
+| P4 stack verification | `deploy/migrate` first runs `check-config`: the API's startup validation (production settings and the identity settings the workers also read) without a database connection, so first installs can be checked. Exit 0 valid, 1 invalid, 2 usage; nothing migrates on a non-zero exit. The shell preflight matches `Token`/`Wallet` case-sensitively, as the application does | §10; P4 runbook |
+| P4 stack verification | Operator docs support only `Closed` and `Invitation`. `AllowList` and `Open` stay in code and tests but are unsupported and undocumented until the per-user quotas of §13 exist; `check-config` warns when Wallet mode selects either | §13; P4 runbook |
 | A1 review | The request guard treats every method except GET, HEAD, OPTIONS and TRACE as unsafe, compared case-insensitively | §7 |
 | A1 review | A reused binding cookie keeps its value but is re-issued with a fresh lifetime on every challenge | §6, §7 |
 | A1 review | Stream endpoints resolve `IPrincipalValidity` as a required service; there is no "always valid" fallback | §7, §9.5 |

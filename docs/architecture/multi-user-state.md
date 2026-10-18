@@ -120,6 +120,27 @@ packages were installed. Logs and synthetic browser captures remain only under
 `/tmp/vessel-mu/p4-integration-*`; counts here are the durable repository record,
 not a promise that temporary artifacts remain.
 
+### Stack-verification fixes — October 18, 2026
+
+The final stack review found that the shell migration preflight lowercased the
+mode and only checked that a Wallet origin was present, so settings the API
+rejects (`wallet`, an `http://` origin in Production, a misspelt registration)
+still applied both bundles before `ensure-owner` failed. `deploy/migrate` now runs
+`dotnet /app/Vessel.Api.dll check-config` (`ConfigurationCheckCommand`) before
+either bundle: the API's own startup validation with no database or broker
+connection, exit 0/1/2. The shell mode match is case-sensitive like the
+application. Operator docs now support only `Closed` and `Invitation`;
+`AllowList`/`Open` remain in code but are unsupported until per-user quotas
+(contract §13), and `check-config` warns on them. The README pins the synthetic
+signer to `@noble/curves@2.4.0`/`@noble/hashes@2.4.0`. `scripts/test_release.py`
+prepends its stubs to `PATH` instead of replacing it, which hid `tr` on NixOS.
+
+| Command / check | Result |
+| --- | --- |
+| `python3 -m unittest discover -s scripts -p 'test_*.py'` | **78 passed** on NixOS (previously 2 failures from the replaced `PATH`). Adds lower-case mode rejection and `test_configuration_the_application_rejects_runs_neither_bundle`. |
+| `dotnet test --filter ConfigurationCheckCommandTests` | **26 passed**: valid Token/Wallet/Development, 18 rejected settings with no values echoed, registration warning, legacy owner, binder errors, usage. |
+| `dotnet build backend/Vessel.slnx -c Release` | 0 warnings, 0 errors. |
+
 ## Original P4 verification evidence (before integration with main)
 
 All commands ran only in `/home/ops/.local/share/vessel-mu/worktrees/p4`.
@@ -326,7 +347,7 @@ official download, and the supplied shell launched and ran the smoke successfull
   `frontend/src/features/identity/sign-in-machine.test.ts` (two `new Date()`
   fixtures built a millisecond apart) is fixed on old D1 `08d07e7` (now integrated at `a336bb3`): the unchanged
   signing state is now compared with the same fixture. P4 changed no
-  frontend/backend source or tests.
+  frontend source; its only backend change is the `check-config` command.
 - The development runner from main is retained; use the packaged `/app/migrate`
   sequence for the verified identity/journal/bootstrap path and the explicit
   Wallet overlay for deployment. No automatic installation migration is added.

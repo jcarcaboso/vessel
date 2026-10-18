@@ -58,8 +58,8 @@ does not pass it into a container.
 | `Vessel:Auth:OwnerId` | GUID | Token mode: as today, and the default GUID stays accepted. Wallet mode: required outside Development; used by `ensure-owner` and legacy-preference adoption. In Wallet mode only, the well-known default GUID is refused outside Development unless `Vessel:Identity:AllowLegacyDefaultOwner=true` (logged at startup as a warning) |
 | `Vessel:Auth:OwnerName` | `Owner` | Display name given by `ensure-owner` |
 | `Vessel:Identity:Origins` | list | Wallet mode: required, at least one entry. Each entry is normalized to `scheme://host[:port]` (lower-case host, no path, no default port, no trailing slash). **Outside Development every origin must be `https://`.** In Development `http://` origins are allowed |
-| `Vessel:Identity:Registration` | `Invitation` | `Closed`, `Invitation`, `AllowList`, `Open`. B2 enabled registration; operator opt-in and the §10 acceptance checklist still apply |
-| `Vessel:Identity:AllowList` | empty | `0x` addresses, normalized to lower case |
+| `Vessel:Identity:Registration` | `Invitation` | Supported in this delivery: `Closed` and `Invitation`. B2 enabled registration; operator opt-in and the §10 acceptance checklist still apply. `AllowList` and `Open` are parsed but **unsupported** until per-user account/evidence quotas exist (delivery contract §13); `check-config` warns if either is set |
+| `Vessel:Identity:AllowList` | empty | `0x` addresses, normalized to lower case. Used only by the unsupported `AllowList` policy |
 | `Vessel:Identity:Session:IdleHours` / `AbsoluteHours` | 12 / 24 | 1–720; idle ≤ absolute |
 | `Vessel:Identity:Session:RememberIdleDays` / `RememberAbsoluteDays` | 14 / 30 | 1–365; idle ≤ absolute |
 | `Vessel:Identity:MaxSessionsPerUser` | 20 | 1–200. Issuing a session above the cap atomically revokes the oldest live sessions |
@@ -101,8 +101,8 @@ Vessel__Auth__Token=
 COMPOSE_FILE=compose.yaml:compose.tls.yaml:compose.wallet.yaml
 VESSEL_IDENTITY_ORIGIN=https://diary.example.com
 VESSEL_IDENTITY_REGISTRATION=Closed
-# After completing the acceptance checklist, choose Invitation (the API default),
-# Closed, AllowList or Open. Invitations are not required by AllowList/Open.
+# After completing the acceptance checklist, you may switch to Invitation (the
+# API default). AllowList and Open are unsupported until per-user quotas exist.
 # VESSEL_ALLOW_LEGACY_DEFAULT_OWNER=true
 ```
 
@@ -123,7 +123,7 @@ and public wallet address below. **Never supply a private key or seed phrase.**
 docker compose config --quiet
 docker compose up -d --wait postgres rabbitmq
 docker compose run --rm migrate
-# migrate runs identity bundle → journal bundle → identity ensure-owner → provision-messaging.
+# migrate runs check-config → identity bundle → journal bundle → identity ensure-owner → provision-messaging.
 # Readiness is 503, reason no-operator-wallet, until this explicit binding:
 docker compose run --rm --no-deps \
   --entrypoint dotnet migrate /app/Vessel.Api.dll identity bind-wallet \
@@ -132,10 +132,31 @@ docker compose up -d
 ```
 
 `Invitation` admits a new address only with a usable invite; `Closed` admits
-linked wallets only; `AllowList` admits listed normalized addresses; `Open`
-admits any supported EOA. Configure `Vessel__Identity__AllowList__0` etc. on all
-three hosts in an operator overlay for `AllowList`. `ensure-owner` is idempotent
-and seeds no journal facts. `migrate` never binds a wallet automatically.
+linked wallets only. These are the only supported policies in this delivery:
+`AllowList` (listed addresses) and `Open` (any supported EOA) admit users without
+an invite, which requires per-user account and evidence quotas that do not exist
+yet, so do not configure them. `ensure-owner` is idempotent and seeds no journal
+facts. `migrate` never binds a wallet automatically.
+
+### Configuration check
+
+`deploy/migrate` first runs `dotnet /app/Vessel.Api.dll check-config`, which
+applies the API's startup validation (mode, Token length outside Development,
+owner GUID, connection string present, and the identity settings both workers
+also read: case-sensitive `Token`/`Wallet`, empty token and owner rules in Wallet
+mode, origins including the HTTPS-only rule outside Development, registration
+policy, allow-list addresses, session/stream limits, cookie names, schema and the
+legacy-owner flag) **without opening a database or broker connection**, so it
+works on a first install before the identity schema exists. A rejected setting
+stops `migrate` before either bundle. Run it alone with the same overlay set:
+
+```sh
+docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll check-config
+```
+
+Exit codes: **0** valid (warnings, such as an unsupported registration policy or
+`AllowLegacyDefaultOwner`, are printed but do not fail), **1** invalid
+configuration, **2** usage error. Messages name the setting, never its value.
 
 ### Offline identity commands
 
@@ -898,8 +919,10 @@ Sign-in mode; verify with `docker compose config --quiet` before migrating.
 The Token interpolation changed from `:?` to `:-` to permit Wallet installs.
 Without a preflight, a token-less Token install could migrate (including
 irreversible `ServerMonitorState`) before the API refuses to start.
-The packaged `deploy/migrate` now refuses an empty/whitespace Token, invalid
-mode, or Wallet mode with a token or missing origin **before either EF bundle**.
+The packaged `deploy/migrate` now refuses an empty/whitespace Token, a mode
+other than exactly `Token` or `Wallet`, Wallet mode with a token or missing
+origin, and anything else the API rejects at startup ([`check-config`](#configuration-check))
+**before either EF bundle**.
 Do not bypass that wrapper when upgrading.
 
 **Stop every API and worker process on every host/replica, including
@@ -923,7 +946,7 @@ Recreate disposable databases that applied the old development IDs. Rolling back
 to an older image requires **restoring the pre-upgrade backup**, not down
 migrations. The database role needs database `CREATE` privilege.
 
-Use the explicit `migrate` service: **identity bundle, then journal bundle**, then
+Use the explicit `migrate` service: `check-config`, then **identity bundle, then journal bundle**, then
 `identity ensure-owner`, then messaging provisioning. No application host
 migrates. Token installs continue unchanged without identity configuration
 (`ensure-owner` is a no-op); the identity schema is still migrated. Wallet opt-in
@@ -1207,7 +1230,7 @@ Synthetic packaged HTTPS check (external signer dependencies, never app packages
 
 ```sh
 # In an external tools directory; never use a real key or venue credential.
-pnpm --dir /absolute/tools add playwright@1.58.2 @noble/curves @noble/hashes
+pnpm --dir /absolute/tools add playwright@1.58.2 @noble/curves@2.4.0 @noble/hashes@2.4.0
 PLAYWRIGHT_SKIP_BROWSER_GC=1 pnpm --dir /absolute/tools exec playwright install chromium firefox
 NOBLE_MODULE_DIR=/absolute/tools/node_modules \
   python3 scripts/verify-release.py --auth wallet \
