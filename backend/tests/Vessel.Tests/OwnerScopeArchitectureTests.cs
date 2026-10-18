@@ -30,10 +30,13 @@ public sealed class OwnerScopeArchitectureTests
         // SQL text hashes make an added statement (even in an approved file) require an inventory review.
         // Schema migrations are separately reviewed DDL, not runtime owner-scope bypasses.
         // Advisory locks on owner-derived or previously owner-validated entity keys are inventoried too.
-        // To add an entry, review the statement's scope, then copy its path|hash from this assertion's diff.
+        // OwnerlessSqlClassifier decides which literals are SQL and which carry an owner predicate or owner insert.
+        // To add an entry, review the statement's scope, then copy its path|hash from this assertion's message.
         string[] reviewed =
         [
             "Vessel.Api/EvidenceCopyCommand.cs|c9b34ee7f02a2f083c971b5bcfd2b6dfb239af4970d91d8e56dc616d55a3d9c4",
+            // Offline evidence copy: read-only transaction mode for its metadata read; touches no rows.
+            "Vessel.Api/EvidenceCopyCommand.cs|6c20e5345ee8028f61cc0541aeb60699e5cffa99c8f79ff7f8c62b0a8dad1837",
             // Server-wide identity invitations: atomic use consumption by code hash, expiry and remaining uses.
             "Vessel.Identity/IdentityService.cs|c26ffac165c6420b5dab892b98bdc6fffed4d9b01eb5f98c3e15838abdc753aa",
             // Identity-schema advisory lock only; the raw literal keeps its quoted suffix inside the SQL hash.
@@ -90,13 +93,13 @@ public sealed class OwnerScopeArchitectureTests
         foreach (Match literal in Regex.Matches(File.ReadAllText(path),
                      @"\$?""""""[\s\S]*?""""""|\$?@""(?:[^""]|"""")*""|\$?""(?:\\.|[^""\\])*"""))
         {
+            if (!OwnerlessSqlClassifier.RequiresReview(OwnerlessSqlClassifier.Text(literal.Value))) continue;
             var sql = literal.Value.TrimStart('$', '@', '"').TrimEnd('"').Trim();
-            if (!Regex.IsMatch(sql, @"^(SELECT|INSERT|UPDATE|DELETE|WITH)\b", RegexOptions.IgnoreCase) ||
-                Regex.IsMatch(sql, @"@owner\b|@ownerId\b|\{[^}]*OwnerId|\{owner\}", RegexOptions.IgnoreCase)) continue;
             var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Regex.Replace(sql, @"\s+", " "))));
             actual.Add(Path.GetRelativePath(SourceRoot(), path).Replace('\\', '/') + "|" + hash);
         }
-        Assert.Equal(reviewed.Order(), actual.Order());
+        Assert.True(actual.Order().SequenceEqual(reviewed.Order()),
+            "Unreviewed: " + string.Join(", ", actual.Except(reviewed)) + "; stale: " + string.Join(", ", reviewed.Except(actual)));
     }
 
     private static IEnumerable<string> Sources() => Directory.EnumerateFiles(SourceRoot(), "*.cs", SearchOption.AllDirectories)
