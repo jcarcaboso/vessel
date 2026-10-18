@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Vessel.Application.Notifications;
 using Vessel.Application.Ownership;
 using Vessel.Messaging;
+using Vessel.Persistence.Notifications;
 
 namespace Vessel.Worker;
 
@@ -13,8 +14,8 @@ namespace Vessel.Worker;
 /// <c>&lt;unix seconds&gt; &lt;timeout seconds&gt;</c> to its own heartbeat file and its own heartbeat row. It never
 /// touches the monitor's, so a healthy notifications worker cannot make a stopped monitor look online.
 /// </summary>
-public sealed class NotificationHeartbeat(IOwnerScopeFactory scopes, IJournalOwnerDirectory owners,
-    NotificationOptions options, TimeProvider time, ILogger<NotificationHeartbeat> logger) : IMaintenanceHeartbeat
+public sealed class NotificationHeartbeat(NotificationWorkerState state, WorkerSettings worker,
+    NotificationOptions options, TimeProvider time) : IMaintenanceHeartbeat
 {
     private readonly string workerId = Guid.NewGuid().ToString("N");
 
@@ -24,38 +25,11 @@ public sealed class NotificationHeartbeat(IOwnerScopeFactory scopes, IJournalOwn
         try
         {
             var now = time.GetUtcNow();
-            var failed = false;
-            Guid? after = null;
-            while (true)
-            {
-                var page = await owners.ActiveOwnersAsync(after, 100, cancellationToken);
-                if (page.Count == 0) break;
-                foreach (var owner in page)
-                {
-                    after = owner;
-                    try
-                    {
-                        if (await owners.StatusAsync(owner, cancellationToken) != JournalOwnerStatus.Active) continue;
-                        await using var scope = scopes.Create(owner);
-                        var store = scope.Services.GetRequiredService<INotificationStore>();
-                        await scope.Services.GetRequiredService<IUnitOfWork>().ExecuteAsync(async () =>
-                        {
-                            await store.RecordHeartbeatAsync(workerId, now, cancellationToken);
-                            return true;
-                        }, cancellationToken);
-                    }
-                    catch (Exception error) when (!cancellationToken.IsCancellationRequested)
-                    {
-                        failed = true;
-                        logger.LogWarning("Notification heartbeat for owner {OwnerId} failed with {ErrorType}.", owner, error.GetType().Name);
-                    }
-                }
-            }
-            if (failed) throw new InvalidOperationException("A notification owner heartbeat failed.");
             var temporary = file + "." + workerId + ".new";
             await File.WriteAllTextAsync(temporary, string.Create(CultureInfo.InvariantCulture,
                 $"{now.ToUnixTimeSeconds()} {(long)options.HeartbeatTimeout.TotalSeconds}"), cancellationToken);
             File.Move(temporary, file, overwrite: true);
+            await state.RecordAsync(worker.Deployment!, now, cancellationToken);
         }
         catch
         {

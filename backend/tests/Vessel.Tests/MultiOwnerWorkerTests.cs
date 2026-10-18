@@ -311,6 +311,9 @@ public sealed class MultiOwnerWorkerTests
             await db.SaveChangesAsync();
             Assert.Equal(ownerCapacity ? 2 : 1, busyAccounts.Count);
         }
+        // Queue saturation does not replace main's separate requirement that a check worker is online.
+        await fixture.Host.Services.GetRequiredService<IServerStateStore>()
+            .RecordHeartbeatAsync("monitor", fixture.Clock.GetUtcNow(), default);
         await using var scope = fixture.Host.Services.GetRequiredService<IOwnerScopeFactory>().Create(fixture.First);
         var coordinator = scope.Services.GetRequiredService<MonitorCoordinator>();
         var accepted = await coordinator.RequestAsync(target, default);

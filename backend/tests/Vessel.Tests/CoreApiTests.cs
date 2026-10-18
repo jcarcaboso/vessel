@@ -30,9 +30,9 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
                 ["Vessel:Auth:OwnerId"] = owner.ToString(),
                 ["ConnectionStrings:Vessel"] = connection
             }));
-        // Mode selects schemes before ConfigureAppConfiguration runs on a minimal test host.
-        // Explicit settings must also override the synthetic production Token defaults.
-        if (settings?.ContainsKey("Vessel:Auth:Mode") == true)
+        // Startup-bound settings (auth schemes, deployment maps, notification cooldown) are read before
+        // ConfigureAppConfiguration runs on a minimal host. Explicit settings override synthetic defaults.
+        if (settings is not null)
             builder.ConfigureHostConfiguration(config => config.AddInMemoryCollection(settings));
         return base.CreateHost(builder);
     }

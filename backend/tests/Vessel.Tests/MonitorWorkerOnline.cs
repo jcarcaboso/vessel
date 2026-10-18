@@ -37,6 +37,7 @@ internal sealed class MonitorWorkerOnline(IMonitorStore inner, TimeProvider cloc
         inner.UpdateWatchesAsync(accountId, orders, now, ct);
     public Task<IReadOnlyList<MonitorWatchDto>> WatchesAsync(Guid playId, DateTimeOffset now, CancellationToken ct) =>
         inner.WatchesAsync(playId, now, ct);
+    public Task<bool> VenueAtCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct) => inner.VenueAtCapacityAsync(venueId, now, ct);
     public Task<bool> OwnerAtCapacityAsync(DateTimeOffset now, CancellationToken ct) => inner.OwnerAtCapacityAsync(now, ct);
     public Task<bool> ReadCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct) => inner.ReadCapacityAsync(venueId, now, ct);
 }

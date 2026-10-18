@@ -8,7 +8,7 @@ namespace Vessel.Persistence.Migrations;
 /// pre-upgrade backup; a down migration cannot reconstruct the discarded per-owner heartbeat/deadline facts.
 /// </summary>
 [DbContext(typeof(VesselDbContext))]
-[Migration("20261017193000_ServerMonitorState")]
+[Migration("20261018110000_ServerMonitorState")]
 public sealed class ServerMonitorState : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder) => migrationBuilder.Sql("""

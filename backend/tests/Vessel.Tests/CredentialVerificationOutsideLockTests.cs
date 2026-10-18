@@ -145,7 +145,7 @@ public sealed class CredentialVerificationOutsideLockTests
         var work = TestUnitOfWork.None;
         var store = new MemoryWorkspaceStore(owner); store.Accounts.Add(account);
         var service = new AccountCredentialService(store, new SecurityCredentialStore(), new CoreOwner(owner),
-            SecurityFixture.Registry(verifier), vault, SecurityFixture.Clock, work);
+            SecurityFixture.Registry(verifier), vault, SecurityFixture.Clock, work, MonitorServerState.Reads());
         await Assert.ThrowsAsync<InvalidOperationException>(() => work.ExecuteAsync(
             () => service.PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default), default));
         Assert.False(verifier.Entered.Task.IsCompleted);
@@ -162,7 +162,7 @@ public sealed class CredentialVerificationOutsideLockTests
     private static AccountCredentialService Service(VesselDbContext db, Guid owner, ICredentialVault vault, GatedVerifier verifier,
         TimeProvider? clock = null) =>
         new(new WorkspaceStore(db, TestUnitOfWork.For(db)), new AccountCredentialStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner),
-            SecurityFixture.Registry(verifier), vault, clock ?? SecurityFixture.Clock, TestUnitOfWork.For(db));
+            SecurityFixture.Registry(verifier), vault, clock ?? SecurityFixture.Clock, TestUnitOfWork.For(db), MonitorServerState.Reads(db, clock ?? SecurityFixture.Clock));
 
     private static WorkspaceService Management(VesselDbContext db, Guid owner) =>
         new(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), SecurityFixture.Registry(), TestUnitOfWork.For(db));

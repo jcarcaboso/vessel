@@ -98,7 +98,7 @@ public sealed class MonitorDiscrepancyRound6Tests
     [PostgresFact]
     public async Task Migration_backfills_confirmed_records_without_revealing_hidden_history()
     {
-        await using var database = await DiscrepancyDatabase.Create("20261017120000_ServerEventSubscriptions");
+        await using var database = await DiscrepancyDatabase.Create("20261018100000_ServerEventSubscriptions");
         var f = Untracked(); await database.Seed(f);
         await using var scope = database.Scope(f);
         var shapes = new[] { ("open", true), ("resolved", true), ("dismissed", true), ("candidate", false), ("resolved", false) };

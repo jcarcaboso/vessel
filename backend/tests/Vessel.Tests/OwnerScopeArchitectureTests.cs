@@ -57,20 +57,21 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/EvidenceStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             "Vessel.Persistence/ExecutionStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             // System discovery returns owner IDs only, including every notification table and suspended owners.
-            "Vessel.Persistence/JournalOwnerInventory.cs|d3c50a4eb37bd63d3c1d6f6c83a77bfc5c8368ea3ad3bcfc4c5c045e373c1b9d",
+            "Vessel.Persistence/JournalOwnerInventory.cs|bb06887355cced7bbc1fff79100360708d49bf80f3cc431f57d1891bb7aa623b",
             // Notification paging assembles both statements with the constant `visible` fragment, which
             // includes n.owner_id=@owner; parameters always bind the current scope's owner.
             "Vessel.Persistence/Notifications/NotificationStore.cs|d03c88d4e53ec73a5f089f774c05085e0223717c18d88d256fe7b673ca4ec6c7",
             "Vessel.Persistence/Notifications/NotificationStore.cs|d30491db273f29ecb15d7b278b9db3d849a3e75af4d2d5cbad9aef0e1a5807c8",
             // Advisory key is prefixed with the scope's owner GUID; it accesses no owner rows.
             "Vessel.Persistence/Notifications/NotificationStore.cs|24e428e35918edb014abb289e0a62af4270d36e3b2494a023e892e5068fb1ed2",
+            // System-only notification health: configured deployment IDs, no owner rows or owner transaction.
+            "Vessel.Persistence/Notifications/NotificationWorkerState.cs|5f9192e9e09f282f927f5e2cc48e654e01ee119cf0a935c10218dff4fc629238",
+            "Vessel.Persistence/Notifications/NotificationWorkerState.cs|f75cf6a3ee0394344375a8242df94a8756058aa8f107353fef28663d45c69553",
             // Not SQL: server-authored notification title beginning with the word "Update".
             "Vessel.Application/Notifications/NotificationComposer.cs|fb59481d31b3a452f939961f54a0da2ba0ebfb1c04c24b7cd273dcf14f79c639",
-            "Vessel.Persistence/MonitorStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             "Vessel.Persistence/PlayStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             "Vessel.Persistence/WorkspaceStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             // B2: reviewed system discovery/state, transactional venue count and budget-lock statements.
-            "Vessel.Persistence/JournalOwnerInventory.cs|224d4132892dc7a2d9f090925029b0bafa3c3636d763383faf76b9f6e4f7f430",
             "Vessel.Persistence/MonitorStore.cs|11fb326c24d434a2b59624a7e4a796561d98ef3e2291f2682033d47b113996e3",
             "Vessel.Persistence/MonitorStore.cs|5d0a1ed4c9cf1315a1cb064478718b843e28efcb64c8bb63578411302ca9e1be",
             "Vessel.Persistence/MonitorStore.cs|2b6dd27282cdf69a0bfa64cbc1a4de96621d46d16d63d39f96373947271daf1d",

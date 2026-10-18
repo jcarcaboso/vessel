@@ -47,8 +47,8 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         return rows.Select(r => (r.Row, r.VenueId)).ToArray();
     }
 
-    public Task<MonitorAccount?> FindAsync(Guid id, CancellationToken ct) =>
-        Rows.AsNoTracking().SingleOrDefaultAsync(m => m.AccountId == id, ct);
+    public Task<MonitorAccount?> FindAsync(Guid accountId, CancellationToken ct) =>
+        Rows.AsNoTracking().SingleOrDefaultAsync(m => m.AccountId == accountId, ct);
     public Task<DateTimeOffset?> VenueRetryAtAsync(string venueId, CancellationToken ct) => server.VenueRetryAtAsync(venueId, ct);
     public Task<IReadOnlyDictionary<string, DateTimeOffset>> VenueRetriesAsync(CancellationToken ct) => server.VenueRetriesAsync(ct);
     public Task DeferVenueAsync(string venueId, DateTimeOffset retryAtUtc, DateTimeOffset now, CancellationToken ct) =>
@@ -164,7 +164,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
     }
 
     // Owner-scoped convenience for callers that already have an owner; never hold several account/venue locks.
-    public async Task<IReadOnlyList<MonitorLease>> ClaimDueAsync(string worker, DateTimeOffset now, int limit, CancellationToken ct)
+    public async Task<IReadOnlyList<MonitorLease>> ClaimDueAsync(string workerId, DateTimeOffset now, int limit, CancellationToken ct)
     {
         if (unitOfWork.IsActive) throw new InvalidOperationException("Due claims require independent account transactions.");
         var ids = await Rows.AsNoTracking().Where(m => (m.NextRunAtUtc <= now || m.ManualState != "idle") &&
@@ -173,17 +173,17 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
             .Take(Math.Clamp(limit, 1, 64)).ToListAsync(ct);
         var leases = new List<MonitorLease>();
         foreach (var id in ids)
-            if (await ClaimAsync(id, null, worker, now, ct) is { } lease) leases.Add(lease);
+            if (await ClaimAsync(id, null, workerId, now, ct) is { } lease) leases.Add(lease);
         return leases;
     }
 
-    public Task<MonitorLease?> ClaimAsync(Guid id, Guid? requestId, string worker, DateTimeOffset now, CancellationToken ct) =>
+    public Task<MonitorLease?> ClaimAsync(Guid accountId, Guid? requestId, string workerId, DateTimeOffset now, CancellationToken ct) =>
         unitOfWork.ExecuteAsync(async () =>
         {
             // Background claims must not wait behind an owner's credential verification or settings update.
             // API admission still uses the blocking account lock in LockedAsync.
             var account = (await db.Accounts.FromSqlInterpolated($"""
-                SELECT * FROM accounts WHERE "Id" = {id} AND "OwnerId" = {db.CurrentOwnerId} FOR UPDATE SKIP LOCKED
+                SELECT * FROM accounts WHERE "Id" = {accountId} AND "OwnerId" = {db.CurrentOwnerId} FOR UPDATE SKIP LOCKED
                 """).ToListAsync(ct)).SingleOrDefault();
             if (account is null) return null;
             return await MonitorLockedAsync<MonitorLease?>(account, async (account, row) =>
@@ -203,8 +203,8 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
                 }
                 if (row.Trigger == "refresh") return null;
                 var request = requestId ?? row.RequestId;
-                return request is { } pending && row.Claim(pending, worker, now, MonitorOptions.Lease)
-                    ? new MonitorLease(db.CurrentOwnerId, id, pending, row.Generation, worker, row.Trigger) : null;
+                return request is { } pending && row.Claim(pending, workerId, now, MonitorOptions.Lease)
+                    ? new MonitorLease(db.CurrentOwnerId, accountId, pending, row.Generation, workerId, row.Trigger) : null;
             }, ct);
         }, ct);
 

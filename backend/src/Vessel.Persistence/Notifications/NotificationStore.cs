@@ -19,7 +19,7 @@ namespace Vessel.Persistence.Notifications;
 /// the owner's <c>notification_cursors</c> row first (held to commit), so the feed sequence, unread count and reset
 /// version change together and in commit order. Popup claims change only <c>shown_at</c> and need no cursor.
 /// </summary>
-public sealed class NotificationStore(VesselDbContext db, TimeProvider time) : INotificationHubStore, INotificationStore
+public sealed class NotificationStore(VesselDbContext db, TimeProvider time, NotificationWorkerState workerState) : INotificationHubStore, INotificationStore
 {
     private Guid Owner => db.CurrentOwnerId;
     private const string Delivery = """
@@ -370,18 +370,7 @@ public sealed class NotificationStore(VesselDbContext db, TimeProvider time) : I
         return deleted;
     }, ct);
 
-    public Task RecordHeartbeatAsync(string workerId, DateTimeOffset now, CancellationToken ct) => VesselEventSql.ParticipateAsync(db, () =>
-        VesselEventSql.ExecuteAsync(db, """
-            INSERT INTO notification_heartbeats(owner_id,worker_id,heartbeat_at) VALUES(@owner,@worker,@now)
-            ON CONFLICT (owner_id) DO UPDATE SET worker_id=EXCLUDED.worker_id,heartbeat_at=EXCLUDED.heartbeat_at
-            WHERE notification_heartbeats.heartbeat_at<EXCLUDED.heartbeat_at
-            """, ct, ("owner", Owner), ("worker", workerId), ("now", now)), ct);
-
-    public async Task<DateTimeOffset?> HeartbeatAsync(CancellationToken ct)
-    {
-        await using var reader = await ReaderAsync("SELECT heartbeat_at FROM notification_heartbeats WHERE owner_id=@owner", ct, P("owner", Owner));
-        return await reader.Rows.ReadAsync(ct) ? reader.Rows.GetFieldValue<DateTimeOffset>(0) : null;
-    }
+    public Task<DateTimeOffset?> HeartbeatAsync(CancellationToken ct) => workerState.HeartbeatAsync(ct);
 
     public async Task<NotificationSubscriptionHealth> SubscriptionHealthAsync(CancellationToken ct)
     {

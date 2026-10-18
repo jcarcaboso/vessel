@@ -18,6 +18,10 @@ public static class NotificationRegistration
         options.MonitorInterval = configuration.GetValue<TimeSpan?>("Vessel:Monitor:Interval") ?? options.MonitorInterval;
         options.Validate();
         services.TryAddSingleton(options);
+        var deployments = configuration.GetSection("Vessel:Messaging:Deployments").GetChildren().ToArray();
+        services.TryAddSingleton(new NotificationDeployments(deployments.Length == 0 ? ["notifications"] : deployments
+            .Where(d => d.GetChildren().Any(m => m.Value == "notifications")).Select(d => d.Key).ToArray()));
+        services.TryAddSingleton<NotificationWorkerState>();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddScoped<NotificationStore>();
         services.TryAddScoped<INotificationHubStore>(sp => sp.GetRequiredService<NotificationStore>());

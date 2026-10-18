@@ -25,6 +25,8 @@ public static class ApplicationServices
 {
     public static IServiceCollection AddVesselApplication(this IServiceCollection services)
     {
+        services.TryAddSingleton<UserReadLimits>();
+        services.TryAddScoped<AccountReadPolicy>();
         services.AddScoped<WorkspaceService>();
         services.AddScoped<ActivityService>();
         services.AddScoped<OverviewSummaryService>();
@@ -59,10 +61,10 @@ public static class ApplicationServices
         services.AddSingleton(options);
         services.TryAddSingleton(TimeProvider.System);
         var deployments = configuration.GetSection("Vessel:Messaging:Deployments").GetChildren().ToArray();
-        services.AddSingleton(new MonitorDeployments(deployments.Length == 0 ? ["monitor"] : deployments
+        services.TryAddSingleton(new MonitorDeployments(deployments.Length == 0 ? ["monitor"] : deployments
             .Where(d => d.GetChildren().Any(m => m.Value == "monitor")).Select(d => d.Key).ToArray()));
         services.TryAddSingleton<UserReadLimits>();
-        services.AddScoped<AccountReadPolicy>();
+        services.TryAddScoped<AccountReadPolicy>();
         services.AddScoped<MonitorDiscrepancyService>();
         services.AddScoped<IMonitorEvaluator>(sp => sp.GetRequiredService<MonitorDiscrepancyService>());
         services.AddScoped<IMonitorImporter>(sp => sp.GetRequiredService<PlayExecutionService>());

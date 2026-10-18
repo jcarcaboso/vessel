@@ -170,7 +170,7 @@ public sealed class NotificationOwnerTests
         public Task BeatAsync(CancellationToken cancellationToken) { Beats++; return Task.CompletedTask; }
     }
 
-    private sealed class Runtime : IAsyncDisposable
+    internal sealed class Runtime : IAsyncDisposable
     {
         private readonly NotificationsModule module = new();
         private Runtime(CoreDatabase database)

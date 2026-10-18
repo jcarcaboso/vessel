@@ -1,3 +1,4 @@
+using Vessel.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
@@ -20,7 +21,7 @@ public sealed class MultiOwnerMonitorLimitsTests
     [PostgresFact]
     public async Task Offline_migration_keeps_maximum_deadline_per_venue_and_starts_deployment_health_empty()
     {
-        await using var database = await CoreDatabase.CreateAsync("20261017120000_ServerEventSubscriptions");
+        await using var database = await CoreDatabase.CreateAsync("20261018100000_ServerEventSubscriptions");
         await using var db = database.Context(Guid.NewGuid());
         var now = DateTimeOffset.UtcNow;
         var foreign = Guid.NewGuid();
