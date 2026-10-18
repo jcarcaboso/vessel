@@ -2,6 +2,26 @@
 # One-shot: EF migrations, then explicit messaging provisioning (envelope storage, broker topology and
 # insert-only subscription registrations). The API and workers never migrate or provision at startup.
 set -eu
+# Compose permits an empty token for Wallet mode. Refuse unsafe/missing auth
+# settings BEFORE either bundle can apply an irreversible schema migration.
+case "$(printf '%s' "${Vessel__Auth__Mode:-Token}" | tr '[:upper:]' '[:lower:]')" in
+  token)
+    if [ -z "$(printf '%s' "${Vessel__Auth__Token:-}" | tr -d '[:space:]')" ]; then
+      echo "Token mode requires Vessel__Auth__Token before migration." >&2
+      exit 1
+    fi
+    ;;
+  wallet)
+    if [ -n "${Vessel__Auth__Token:-}" ] || [ -z "${Vessel__Identity__Origins__0:-}" ]; then
+      echo "Wallet migration requires an empty token and allowed origin; retain the Wallet overlay." >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "Vessel__Auth__Mode must be Token or Wallet." >&2
+    exit 1
+    ;;
+esac
 cd /app
 /app/migrate-identity-ef
 /app/migrate-ef "$@"

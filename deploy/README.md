@@ -94,6 +94,10 @@ Add to the **private operator** `.env`, not the source checkout or Vite:
 
 ```dotenv
 # Use a separate hostname for each installation.
+VESSEL_AUTH_MODE=Wallet
+Vessel__Auth__Token=
+# Keep the complete overlay list here, including any storage/credential overlays:
+COMPOSE_FILE=compose.yaml:compose.tls.yaml:compose.wallet.yaml
 VESSEL_IDENTITY_ORIGIN=https://diary.example.com
 VESSEL_IDENTITY_REGISTRATION=Closed
 # After completing the acceptance checklist, choose Invitation (the API default),
@@ -101,20 +105,29 @@ VESSEL_IDENTITY_REGISTRATION=Closed
 # VESSEL_ALLOW_LEGACY_DEFAULT_OWNER=true
 ```
 
-Keep `compose.wallet.yaml` on **every** command, and the TLS/storage/credential
-overlays your installation needs. The example uses the bundled Caddy overlay;
+Wallet installs must blank `Vessel__Auth__Token`. Persist both `VESSEL_AUTH_MODE`
+and `COMPOSE_FILE` in the mode-600 private `.env` so bare `docker compose`
+commands (including backup/upgrade/recovery) keep the mode and overlays.
+Append e.g. `:compose.credentials.yaml` and the selected storage overlay to
+`COMPOSE_FILE` when needed. Explicit `-f` flags **replace** that file list:
+include every required overlay if using them. Omitting the Wallet overlay with
+`VESSEL_AUTH_MODE=Wallet` fails closed for missing origins, never as Token.
+With Caddy, `VESSEL_IDENTITY_ORIGIN` must equal `https://$VESSEL_TLS_HOST`,
+including the public HTTPS port if it is not 443 (e.g. `:8443`); do not use
+the proxy's internal port. The example uses the bundled Caddy overlay;
 an existing trusted HTTPS proxy is also valid. Substitute the actual owner GUID
 and public wallet address below. **Never supply a private key or seed phrase.**
 
 ```sh
-docker compose -f compose.yaml -f compose.tls.yaml -f compose.wallet.yaml up -d --wait postgres rabbitmq
-docker compose -f compose.yaml -f compose.tls.yaml -f compose.wallet.yaml run --rm migrate
+docker compose config --quiet
+docker compose up -d --wait postgres rabbitmq
+docker compose run --rm migrate
 # migrate runs identity bundle → journal bundle → identity ensure-owner → provision-messaging.
 # Readiness is 503, reason no-operator-wallet, until this explicit binding:
-docker compose -f compose.yaml -f compose.tls.yaml -f compose.wallet.yaml run --rm --no-deps \
+docker compose run --rm --no-deps \
   --entrypoint dotnet migrate /app/Vessel.Api.dll identity bind-wallet \
   --user <owner-guid> --address <0x-public-address> --label Operator
-docker compose -f compose.yaml -f compose.tls.yaml -f compose.wallet.yaml up -d
+docker compose up -d
 ```
 
 `Invitation` admits a new address only with a usable invite; `Closed` admits
@@ -130,17 +143,21 @@ Use the same overlay set and `run --rm --no-deps --entrypoint dotnet migrate
 **0** success, **1** operational/configuration error, **2** usage error,
 **3** refused precondition. Identity values are write-only where appropriate;
 only `invite` prints a secret, once. Do not capture its output in shared logs.
+Keep a private, access-restricted operator log of **every** `identity` command
+and its output, with date, actor and target; protect invitation output as a
+secret and never include it in shared logs or acceptance evidence.
+Every command except `ensure-owner` refuses Token mode with exit **3**.
 
 | `identity` arguments | Effect / safeguard |
 | --- | --- |
 | `ensure-owner` | Wallet: create configured operator if absent. Token: no-op, exit 0. |
-| `bind-wallet --user <guid> --address 0x… [--label <label>]` | Idempotent for the same owner; refuses a foreign address or a 21st wallet, exit 3. |
+| `bind-wallet --user <guid> --address 0x… [--label <label>]` | Idempotent for the same owner; refuses an unknown user, foreign address or a 21st wallet, exit 3. |
 | `invite [--note <note>] [--expires 7d] [--max-uses 1]` | Prints a code **once**; expiry is a positive integer number of days, max uses a positive integer. Give it privately to the intended user. |
 | `unbind-wallet --wallet <guid>` | Refuses last wallet; revokes that wallet's sessions. |
 | `suspend --user <guid>` / `restore --user <guid>` | Suspend revokes all user sessions and stops new subscriber/monitor work; restore resumes eligibility. |
 | `promote --user <guid>` / `demote --user <guid>` | Change operator/member role. No application journal access is granted by operator role. |
 | `revoke-sessions --user <guid>` or `--all` | Revoke live sessions; open streams revalidate within 15 s. |
-| `reset-after-restore [--keep-active <guid> …]` | Mandatory reset and review table before any host starts after restore; see below. |
+| `reset-after-restore [--keep-active <guid> …]` | Mandatory reset and review table before any host starts after restore; unknown `--keep-active` user exits 3 with no change; see below. |
 | `verify` | Read-only report of orphan journal owner IDs and users without wallets. |
 
 Suspending/demoting/removing a wallet from an **active operator with a linked
@@ -857,6 +874,15 @@ Stop web, API and the workers, back up, then upgrade as usual.
 
 ### Multi-user wallet sign-in (this delivery)
 
+Keep the private `.env` mode and complete `COMPOSE_FILE` overlay list from
+Sign-in mode; verify with `docker compose config --quiet` before migrating.
+The Token interpolation changed from `:?` to `:-` to permit Wallet installs.
+Without a preflight, a token-less Token install could migrate (including
+irreversible `ServerMonitorState`) before the API refuses to start.
+The packaged `deploy/migrate` now refuses an empty/whitespace Token, invalid
+mode, or Wallet mode with a token or missing origin **before either EF bundle**.
+Do not bypass that wrapper when upgrading.
+
 **Stop every API and worker process, on every replica, and take a private,
 verified backup first.** This is not a rolling upgrade. B2's
 `20261017193000_ServerMonitorState` copies the maximum venue deadline, creates
@@ -937,6 +963,9 @@ totals use nominal 1:1 values, with no FX or depeg valuation.
 ### Upgrade procedure
 
 Back up first, read the changelog, and set `VESSEL_VERSION` to the chosen release:
+Wallet installs must retain `VESSEL_AUTH_MODE=Wallet`, a blank token and their
+complete `COMPOSE_FILE` in the private `.env`. This applies to every bare
+command below; explicit `-f` lists must include all those overlays.
 
 ```sh
 docker compose pull
@@ -961,6 +990,10 @@ new schema is incompatible with the old image.
 Keep backups private and test restores in an isolated installation. Stop web, API
 and both workers to keep database references and evidence consistent, then (the RabbitMQ
 volume is excluded: subscribers recover unsettled events from PostgreSQL):
+
+Wallet installs retain `VESSEL_AUTH_MODE=Wallet`, a blank token and the complete
+`COMPOSE_FILE` in the private `.env` for **all** commands below, including the
+final `up`. Never omit the Wallet/TLS/storage/credential overlays on restart.
 
 ```sh
 umask 077
@@ -1044,7 +1077,7 @@ decrypt the restored credentials.
 # Wallet mode only: mandatory BEFORE any API/worker/provisioning host starts.
 # Keep ONLY an independently confirmed reconciliation operator active (optional).
 # All commands need compose.wallet.yaml plus the same TLS/storage overlays.
-docker compose -f compose.yaml -f compose.tls.yaml -f compose.wallet.yaml \
+docker compose \
   -p vessel-restore-check run --rm --no-deps --entrypoint dotnet migrate \
   /app/Vessel.Api.dll identity reset-after-restore --keep-active <confirmed-operator-guid>
 # Without --keep-active, every user is suspended. Reset revokes all sessions,
@@ -1074,6 +1107,16 @@ until a trusted replacement can be bound before removal. `--keep-active` never
 reactivates an already suspended user. Do not restore all users to bypass the
 readiness warning; unconfirmed users stay suspended. Rotate the event epoch
 before any hosts start, even when identity reset has already revoked sessions.
+
+**Trusted post-backup records** are independently retained, dated evidence of
+changes after the backup, not facts recovered from that same old database:
+the private operator command/output log, plus out-of-band confirmation of
+self-service wallet links/removals and other identity changes from the affected
+person through a previously trusted channel. Do not trust a restored session
+or an unverified message from the wallet being checked. The operator using
+`--keep-active` must check **their own wallets and role first**, before relying
+on that exception. Wallets linked after the backup are absent from the restore
+and must be re-linked after confirmed recovery. Keep uncertain users suspended.
 
 Authenticate through the UI with the restored installation's selected mode (Token or a confirmed EOA). Check
 that portfolios/accounts and saved Plays are visible under the unchanged owner,
@@ -1124,6 +1167,12 @@ no real venue call. Run frontend/.NET checks separately as in `docs/development.
 
 ### Wallet acceptance checks
 
+Wallet mode is a documented opt-in, **not activated**: §10 is not signed off.
+Keep registration `Closed` until both-browser writes and the owner real-wallet/
+non-mainnet EOA check pass and are recorded in `multi-user-state.md`.
+CI currently gates Token mode only. The packaged Wallet and browser check is
+a **manual pre-release step**, not a CI guarantee.
+
 Synthetic packaged HTTPS check (external signer dependencies, never app packages):
 
 ```sh
@@ -1134,6 +1183,32 @@ NOBLE_MODULE_DIR=/absolute/tools/node_modules \
   python3 scripts/verify-release.py --auth wallet \
   --browser-module /absolute/tools/node_modules/playwright
 ```
+
+On this rootless host, Firefox runs through the official matching Playwright
+server image on the disposable project's network; only its server port is
+published on loopback. Pull once, then run this exact manual pre-release check:
+
+```sh
+docker pull mcr.microsoft.com/playwright:v1.58.2-noble
+export NOBLE_MODULE_DIR=/tmp/vessel-pw/node_modules
+export CHROMIUM_PATH=$HOME/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+python3 scripts/verify-release.py --auth wallet \
+  --browser-module /tmp/vessel-pw/node_modules/playwright \
+  --wallet-browsers chromium,firefox \
+  --wallet-browser-image mcr.microsoft.com/playwright:v1.58.2-noble
+```
+
+`--wallet-browser-image` requires `--auth wallet --browser-module` and a
+pre-pulled image (`docker image inspect` runs before builds). The external
+client and image must both use Playwright 1.58.2. The read-only tools mount and
+single public forwarder file never expose `.env` or credential keys.
+Firefox connects to `https://localhost:<isolated-port>` via the in-container
+loopback forwarder to `tls:443`, preserving the Origin and `__Host-` cookie
+host. Only Firefox receives the random-path loopback `ws:` endpoint; caller
+endpoints are stripped. `ignoreHTTPSErrors` permits Caddy's isolated internal
+CA, but Secure/host-only binding and session cookie assertions stay mandatory.
+The browser server is removed even on failure and before Compose teardown;
+the pre-pulled image is retained for reuse.
 
 `--auth` defaults to `token`. Wallet mode uses its isolated TLS overlay, both EF
 bundles, `ensure-owner`, synthetic EOA binding, readiness, real API sign-in,
